@@ -4,6 +4,11 @@ export interface HostedExecutionDispatchEnvironment {
   signingSecret: string | null;
 }
 
+export interface HostedExecutionControlEnvironment {
+  baseUrl: string | null;
+  controlToken: string | null;
+}
+
 export interface HostedExecutionWorkerEnvironment {
   allowedUserEnvKeys: string | null;
   allowedUserEnvPrefixes: string | null;
@@ -38,6 +43,20 @@ export function readHostedExecutionDispatchEnvironment(
     ),
     dispatchUrl: dispatchUrl ?? legacyDispatchUrl,
     signingSecret: signingSecret ?? legacySigningSecret,
+  };
+}
+
+export function readHostedExecutionControlEnvironment(
+  source: EnvSource = process.env,
+): HostedExecutionControlEnvironment {
+  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
+  const legacyDispatchUrl = normalizeHostedExecutionBaseUrl(
+    source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL,
+  );
+
+  return {
+    baseUrl: dispatchUrl ?? legacyDispatchUrl,
+    controlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
   };
 }
 

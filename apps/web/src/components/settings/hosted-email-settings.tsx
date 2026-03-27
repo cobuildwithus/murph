@@ -6,7 +6,10 @@ import { useEffect, useState } from "react";
 
 import {
   extractHostedPrivyEmailAccount,
+  extractHostedPrivyVerifiedEmailAccount,
+  isHostedPrivyEmailAccountVerified,
   resolveHostedPrivyLinkedAccounts,
+  type HostedPrivyEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { HostedPrivyProvider } from "../hosted-onboarding/privy-provider";
@@ -14,6 +17,12 @@ import { HostedPrivyProvider } from "../hosted-onboarding/privy-provider";
 interface HostedEmailSettingsProps {
   expectedPrivyUserId: string;
   privyAppId: string;
+}
+
+interface HostedEmailSyncResult {
+  emailAddress: string;
+  runTriggered: boolean;
+  verifiedAt: string;
 }
 
 export function HostedEmailSettings({ privyAppId, ...props }: HostedEmailSettingsProps) {
@@ -32,24 +41,28 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
   const [dialogOpen, setDialogOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
 
   const linkedAccounts = resolveHostedPrivyLinkedAccounts(user);
   const currentEmail = extractHostedPrivyEmailAccount(linkedAccounts);
-  const normalizedCurrentEmail = normalizeComparableEmail(currentEmail?.address ?? null);
+  const effectiveCurrentEmail = verifiedEmailOverride ?? currentEmail;
+  const normalizedCurrentEmail = normalizeComparableEmail(effectiveCurrentEmail?.address ?? null);
   const canManageEmail = ready && authenticated && user?.id === expectedPrivyUserId;
   const isLoadingAuthenticatedUser = ready && authenticated && !user;
   const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
+  const isBusy = isSendingCode || isSubmittingCode || isSyncingEmailRoute;
 
   useEffect(() => {
-    if (!emailAddress && currentEmail?.address) {
-      setEmailAddress(currentEmail.address);
+    if (!emailAddress && effectiveCurrentEmail?.address) {
+      setEmailAddress(effectiveCurrentEmail.address);
     }
-  }, [currentEmail?.address, emailAddress]);
+  }, [effectiveCurrentEmail?.address, emailAddress]);
 
   useEffect(() => {
     if (isAwaitingCode || isSubmittingCode) {
@@ -86,7 +99,10 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       return;
     }
 
-    if (normalizeComparableEmail(nextEmailAddress) === normalizedCurrentEmail) {
+    if (
+      normalizeComparableEmail(nextEmailAddress) === normalizedCurrentEmail
+      && isHostedPrivyEmailAccountVerified(effectiveCurrentEmail)
+    ) {
       setErrorMessage("That email address is already linked to this account.");
       return;
     }
@@ -125,6 +141,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
 
   async function handleVerifyCode() {
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     const normalizedCode = code.trim();
 
@@ -133,25 +150,54 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       return;
     }
 
+    let verifiedEmailAddress: string | null = null;
+
     try {
       const result = await verifyCode({ code: normalizedCode });
       const nextUser = result?.user ?? user;
-      const nextEmail = extractHostedPrivyEmailAccount(resolveHostedPrivyLinkedAccounts(nextUser));
+      const nextEmail = extractHostedPrivyVerifiedEmailAccount(
+        resolveHostedPrivyLinkedAccounts(nextUser),
+      );
+
+      verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
 
       setCode("");
       setDialogOpen(false);
       setPendingEmailAddress(null);
-      setSuccessMessage(
-        nextEmail?.address
-          ? `Email verified: ${nextEmail.address}`
-          : pendingEmailAddress
-            ? `Email verified: ${pendingEmailAddress}`
-            : "Email verified.",
-      );
-      setEmailAddress(nextEmail?.address ?? pendingEmailAddress ?? emailAddress);
-      void refreshUser().catch(() => null);
+      setEmailAddress(verifiedEmailAddress ?? emailAddress);
+
+      if (verifiedEmailAddress) {
+        setVerifiedEmailOverride({
+          address: verifiedEmailAddress,
+          verifiedAt: nextEmail?.verifiedAt ?? Math.trunc(Date.now() / 1000),
+        });
+      }
+
+      await refreshUser().catch(() => null);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
+      return;
+    }
+
+    if (!verifiedEmailAddress) {
+      setSuccessMessage("Email verified.");
+      return;
+    }
+
+    setIsSyncingEmailRoute(true);
+
+    try {
+      const syncResult = await syncHostedEmailConnectionWithRetry(verifiedEmailAddress);
+      setSuccessMessage(
+        syncResult.runTriggered
+          ? `Email verified and connected: ${syncResult.emailAddress}`
+          : `Email verified and saved: ${syncResult.emailAddress}. Your hosted assistant will finish syncing it on the next hosted run.`,
+      );
+    } catch (error) {
+      setSuccessMessage(`Email verified: ${verifiedEmailAddress}`);
+      setErrorMessage(toHostedEmailSyncErrorMessage(error));
+    } finally {
+      setIsSyncingEmailRoute(false);
     }
   }
 
@@ -182,6 +228,12 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
         </div>
       ) : null}
 
+      {isSyncingEmailRoute ? (
+        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
+          Finishing the hosted email connection and updating your assistant.
+        </div>
+      ) : null}
+
       {!ready || isLoadingAuthenticatedUser ? (
         <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
           Checking your Privy session before we show email settings.
@@ -209,9 +261,16 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       ) : (
         <>
           <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-            <strong className="text-stone-900">{currentEmail ? "Current verified email" : "No email linked yet"}</strong>
+            <strong className="text-stone-900">
+              {!effectiveCurrentEmail
+                ? "No email linked yet"
+                : isHostedPrivyEmailAccountVerified(effectiveCurrentEmail)
+                  ? "Current verified email"
+                  : "Current email"}
+            </strong>
             <p className="mt-1">
-              {currentEmail?.address ?? "Add an email address and we will verify it with a one-time code before saving it."}
+              {effectiveCurrentEmail?.address
+                ?? "Add an email address and we will verify it with a one-time code before saving it."}
             </p>
           </div>
 
@@ -238,10 +297,16 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
             <button
               type="button"
               onClick={handleSendCode}
-              disabled={isSendingCode || isSubmittingCode}
+              disabled={isBusy}
               className={primaryButtonClasses}
             >
-              {isSendingCode ? "Sending code..." : currentEmail ? "Send new code" : "Send code"}
+              {isSyncingEmailRoute
+                ? "Syncing..."
+                : isSendingCode
+                  ? "Sending code..."
+                  : effectiveCurrentEmail
+                    ? "Send new code"
+                    : "Send code"}
             </button>
           </div>
 
@@ -253,7 +318,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={() => setDialogOpen(true)}
-                disabled={isSubmittingCode}
+                disabled={isBusy}
                 className={secondaryButtonClasses}
               >
                 Enter code
@@ -261,7 +326,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={handleResendCode}
-                disabled={isSendingCode || isSubmittingCode}
+                disabled={isBusy}
                 className={secondaryButtonClasses}
               >
                 {isSendingCode ? "Sending code..." : "Resend code"}
@@ -328,7 +393,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={handleVerifyCode}
-                disabled={isSendingCode || isSubmittingCode}
+                disabled={isBusy}
                 className={primaryButtonClasses}
               >
                 {isSubmittingCode ? "Verifying..." : "Verify email"}
@@ -336,7 +401,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={handleResendCode}
-                disabled={isSendingCode || isSubmittingCode}
+                disabled={isBusy}
                 className={secondaryButtonClasses}
               >
                 {isSendingCode ? "Sending code..." : "Resend code"}
@@ -367,6 +432,103 @@ function isValidEmailAddress(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
 }
 
+async function syncHostedEmailConnectionWithRetry(
+  expectedEmailAddress: string,
+): Promise<HostedEmailSyncResult> {
+  const retryDelaysMs = [0, 250, 500, 1_000];
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+    if (retryDelaysMs[attempt] > 0) {
+      await sleep(retryDelaysMs[attempt]);
+    }
+
+    try {
+      return await syncHostedEmailConnection(expectedEmailAddress);
+    } catch (error) {
+      lastError = error;
+
+      if (!(error instanceof HostedEmailSyncError) || error.code !== "PRIVY_EMAIL_NOT_READY") {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new HostedEmailSyncError(
+        null,
+        "We verified your email, but the hosted assistant could not confirm it yet. Refresh and try again.",
+      );
+}
+
+async function syncHostedEmailConnection(expectedEmailAddress: string): Promise<HostedEmailSyncResult> {
+  const response = await fetch("/api/settings/email/sync", {
+    body: JSON.stringify({
+      expectedEmailAddress,
+    }),
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+  const payload = await readOptionalJsonObject(response);
+
+  if (!response.ok) {
+    const errorPayload = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
+
+    throw new HostedEmailSyncError(
+      typeof errorPayload?.code === "string" ? errorPayload.code : null,
+      typeof errorPayload?.message === "string"
+        ? errorPayload.message
+        : "We could not sync your verified email to the hosted assistant yet.",
+    );
+  }
+
+  if (
+    !isRecord(payload)
+    || payload.ok !== true
+    || typeof payload.emailAddress !== "string"
+    || typeof payload.verifiedAt !== "string"
+  ) {
+    throw new HostedEmailSyncError(
+      null,
+      "We verified your email, but the hosted assistant returned an unexpected sync response.",
+    );
+  }
+
+  return {
+    emailAddress: payload.emailAddress,
+    runTriggered: payload.runTriggered !== false,
+    verifiedAt: payload.verifiedAt,
+  };
+}
+
+async function readOptionalJsonObject(response: Response): Promise<Record<string, unknown> | null> {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(text) as unknown;
+    return isRecord(payload) ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -377,6 +539,27 @@ function toErrorMessage(error: unknown, fallback: string): string {
   }
 
   return fallback;
+}
+
+function toHostedEmailSyncErrorMessage(error: unknown): string {
+  if (error instanceof HostedEmailSyncError) {
+    return error.message;
+  }
+
+  return toErrorMessage(
+    error,
+    "We verified your email, but we could not sync it to the hosted assistant yet. Refresh and try again.",
+  );
+}
+
+class HostedEmailSyncError extends Error {
+  readonly code: string | null;
+
+  constructor(code: string | null, message: string) {
+    super(message);
+    this.name = "HostedEmailSyncError";
+    this.code = code;
+  }
 }
 
 const inputClasses =

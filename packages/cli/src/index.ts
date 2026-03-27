@@ -52,3 +52,8 @@ export * from './assistant/memory.js'
 export * from './agentmail-runtime.js'
 export * from './research-runtime.js'
 export * from './research-cli-contracts.js'
+
+export {
+  resolveAssistantSelfDeliveryTarget,
+  saveAssistantSelfDeliveryTarget,
+} from './operator-config.js'

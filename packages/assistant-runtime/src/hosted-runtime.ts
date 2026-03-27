@@ -5,32 +5,32 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { importSharePackIntoVault } from "@healthybob/core";
+import { importSharePackIntoVault } from "@murph/core";
 import {
   createDeviceSyncRegistry,
   createDeviceSyncService,
   createOuraDeviceSyncProvider,
   createWhoopDeviceSyncProvider,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 import {
   createInboxPipeline,
   normalizeLinqWebhookEvent,
   openInboxRuntime,
   parseLinqWebhookEvent,
   rebuildRuntimeFromVault,
-} from "@healthybob/inboxd";
-import { normalizeParsedEmailMessage } from "@healthybob/inboxd/connectors/email/normalize-parsed";
-import { parseRawEmailMessage } from "@healthybob/inboxd/connectors/email/parsed";
+} from "@murph/inboxd";
+import { normalizeParsedEmailMessage } from "@murph/inboxd/connectors/email/normalize-parsed";
+import { parseRawEmailMessage } from "@murph/inboxd/connectors/email/parsed";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
-} from "@healthybob/parsers";
+} from "@murph/parsers";
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 import {
   buildHostedAssistantDeliverySideEffect,
   parseHostedExecutionSideEffects,
@@ -40,7 +40,7 @@ import {
   type HostedExecutionRunnerResult,
   type HostedExecutionSideEffect,
   type HostedExecutionSideEffectRecord,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 import {
   createIntegratedInboxCliServices,
   createIntegratedVaultCliServices,
@@ -54,12 +54,13 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "@healthybob/assistant-services";
+} from "@murph/assistant-services";
 import {
   buildHostedRunnerEmailMessageUrl,
   createHostedEmailChannelDependencies,
   normalizeHostedEmailBaseUrl,
 } from "./hosted-email.ts";
+import { reconcileHostedVerifiedEmailSelfTarget } from "./hosted-email-route.ts";
 
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
@@ -146,7 +147,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
   input: HostedAssistantRuntimeJobInput,
 ): Promise<HostedExecutionRunnerResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime);
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-runner-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-runner-"));
 
   try {
     const restored = await restoreHostedExecutionContext({
@@ -430,7 +431,7 @@ async function completeHostedExecutionAfterCommit(input: {
   dispatch: HostedExecutionDispatchRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl"
+    "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -442,6 +443,11 @@ async function completeHostedExecutionAfterCommit(input: {
     emailBaseUrl: input.runtime.emailBaseUrl,
     sideEffectsBaseUrl: input.runtime.sideEffectsBaseUrl,
     sideEffects: input.committedExecution.committedSideEffects,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  await reconcileHostedVerifiedEmailSelfTarget({
+    operatorHomeRoot: input.restored.operatorHomeRoot,
+    source: input.runtime.userEnv,
     vaultRoot: input.restored.vaultRoot,
   });
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot);

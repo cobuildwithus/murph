@@ -11,13 +11,14 @@ import {
   HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  readHostedExecutionControlEnvironment,
   readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
   readHostedExecutionWorkerEnvironment,
   verifyHostedExecutionSignature,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
-describe("@healthybob/hosted-execution", () => {
+describe("@murph/hosted-execution", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -126,6 +127,30 @@ describe("@healthybob/hosted-execution", () => {
       dispatchTimeoutMs: 45_000,
       dispatchUrl: "https://compat.example.test",
       signingSecret: "compat-secret",
+    });
+  });
+
+  it("reads hosted control env from the shared dispatch base and control token", () => {
+    expect(
+      readHostedExecutionControlEnvironment({
+        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
+        HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    ).toEqual({
+      baseUrl: "https://dispatch.example.test",
+      controlToken: "control-token",
+    });
+
+    expect(
+      readHostedExecutionControlEnvironment({
+        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
+        HOSTED_EXECUTION_DISPATCH_URL: "   ",
+        HOSTED_EXECUTION_CONTROL_TOKEN: "   ",
+      }),
+    ).toEqual({
+      baseUrl: "https://compat.example.test",
+      controlToken: null,
     });
   });
 
@@ -461,7 +486,7 @@ describe("@healthybob/hosted-execution", () => {
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
-      "Hosted execution status returned a non-object JSON payload.",
+      "Hosted execution user status must be an object.",
     );
   });
 
@@ -473,7 +498,7 @@ describe("@healthybob/hosted-execution", () => {
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
-      "Hosted execution status returned a non-object JSON payload.",
+      "Hosted execution user status must be an object.",
     );
   });
 
@@ -485,7 +510,7 @@ describe("@healthybob/hosted-execution", () => {
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
-      "Hosted execution status returned a non-object JSON payload.",
+      "Hosted execution user status must be an object.",
     );
   });
 });

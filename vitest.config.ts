@@ -3,17 +3,20 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@healthybob/contracts": path.resolve("packages/contracts/src/index.ts"),
-      "@healthybob/hosted-execution": path.resolve("packages/hosted-execution/src/index.ts"),
-      "@healthybob/runtime-state": path.resolve("packages/runtime-state/src/index.ts"),
-      "@healthybob/core": path.resolve("packages/core/src/index.ts"),
-      "@healthybob/importers": path.resolve("packages/importers/src/index.ts"),
-      "@healthybob/device-syncd": path.resolve("packages/device-syncd/src/index.ts"),
-      "@healthybob/inboxd": path.resolve("packages/inboxd/src/index.ts"),
-      "@healthybob/parsers": path.resolve("packages/parsers/src/index.ts"),
-      "@healthybob/query": path.resolve("packages/query/src/index.ts"),
-    },
+    alias: [
+      { find: "@murph/contracts", replacement: path.resolve("packages/contracts/src/index.ts") },
+      { find: "@murph/hosted-execution", replacement: path.resolve("packages/hosted-execution/src/index.ts") },
+      { find: "@murph/runtime-state", replacement: path.resolve("packages/runtime-state/src/index.ts") },
+      { find: "@murph/core", replacement: path.resolve("packages/core/src/index.ts") },
+      { find: "@murph/importers", replacement: path.resolve("packages/importers/src/index.ts") },
+      { find: "@murph/device-syncd", replacement: path.resolve("packages/device-syncd/src/index.ts") },
+      { find: "@murph/inboxd", replacement: path.resolve("packages/inboxd/src/index.ts") },
+      { find: "@murph/parsers", replacement: path.resolve("packages/parsers/src/index.ts") },
+      { find: "@murph/query", replacement: path.resolve("packages/query/src/index.ts") },
+      { find: /^murph\/assistant\/store$/, replacement: path.resolve("packages/cli/src/assistant/store.ts") },
+      { find: /^murph\/operator-config$/, replacement: path.resolve("packages/cli/src/operator-config.ts") },
+      { find: /^murph$/, replacement: path.resolve("packages/cli/src/index.ts") },
+    ],
   },
   test: {
     environment: "node",
@@ -33,6 +36,7 @@ export default defineConfig({
       "packages/hosted-execution/test/hosted-execution.test.ts",
       "packages/runtime-state/test/hosted-bundle.test.ts",
       "packages/runtime-state/test/hosted-execution-reexport.test.ts",
+      "packages/runtime-state/test/hosted-user-env.test.ts",
       "packages/runtime-state/test/ulid.test.ts",
       "packages/device-syncd/test/config.test.ts",
       "packages/device-syncd/test/http.test.ts",
@@ -85,6 +89,7 @@ export default defineConfig({
       "packages/cli/test/vault-usecase-helpers.test.ts",
       "packages/cli/test/release-script-coverage-audit.test.ts",
       "packages/cli/test/release-workflow-guards.test.ts",
+      "packages/assistant-runtime/test/hosted-email-route.test.ts",
     ],
     coverage: {
       enabled: true,

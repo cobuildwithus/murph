@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyPhoneAccount,
+  extractHostedPrivyVerifiedEmailAccount,
   extractHostedPrivyWalletAccount,
+  isHostedPrivyEmailAccountVerified,
   resolveHostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
@@ -130,6 +132,58 @@ describe("hosted Privy identity helpers", () => {
     });
   });
 
+  it("detects whether a linked email account is actually verified", () => {
+    expect(isHostedPrivyEmailAccountVerified({
+      address: "user@example.com",
+      verifiedAt: 1741194420,
+    })).toBe(true);
+    expect(isHostedPrivyEmailAccountVerified({
+      address: "user@example.com",
+      verifiedAt: null,
+    })).toBe(false);
+    expect(
+      extractHostedPrivyVerifiedEmailAccount([
+        {
+          address: "stale@example.com",
+          type: "email",
+        },
+        {
+          address: "user@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "user@example.com",
+      verifiedAt: 1741194420,
+    });
+    expect(
+      extractHostedPrivyVerifiedEmailAccount([
+        {
+          address: "older@example.com",
+          latest_verified_at: 1741194300,
+          type: "email",
+        },
+        {
+          address: "newer@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "newer@example.com",
+      verifiedAt: 1741194420,
+    });
+    expect(
+      extractHostedPrivyVerifiedEmailAccount([
+        {
+          address: "user@example.com",
+          type: "email",
+        },
+      ]),
+    ).toBeNull();
+  });
+
   it("accepts the compact Privy identity-token verification timestamp field", () => {
     expect(
       extractHostedPrivyPhoneAccount([
@@ -141,6 +195,19 @@ describe("hosted Privy identity helpers", () => {
       ]),
     ).toEqual({
       number: "+14155552671",
+      verifiedAt: 1741194420,
+    });
+
+    expect(
+      extractHostedPrivyVerifiedEmailAccount([
+        {
+          address: "user@example.com",
+          lv: 1741194420,
+          type: "email",
+        },
+      ]),
+    ).toEqual({
+      address: "user@example.com",
       verifiedAt: 1741194420,
     });
   });

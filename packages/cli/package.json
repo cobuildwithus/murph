@@ -1,11 +1,11 @@
 {
-  "name": "healthybob",
+  "name": "murph",
   "version": "0.0.0",
   "private": false,
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -42,6 +42,10 @@
     "./assistant/store": {
       "types": "./dist/assistant/store.d.ts",
       "default": "./dist/assistant/store.js"
+    },
+    "./operator-config": {
+      "types": "./dist/operator-config.d.ts",
+      "default": "./dist/operator-config.js"
     }
   },
   "files": [
@@ -51,6 +55,7 @@
   ],
   "bin": {
     "vault-cli": "dist/bin.js",
+    "murph": "dist/bin.js",
     "healthybob": "dist/bin.js"
   },
   "engines": {
@@ -64,14 +69,14 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.35",
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/core": "workspace:*",
-    "@healthybob/device-syncd": "workspace:*",
-    "@healthybob/importers": "workspace:*",
-    "@healthybob/inboxd": "workspace:*",
-    "@healthybob/parsers": "workspace:*",
-    "@healthybob/query": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*",
+    "@murph/contracts": "workspace:*",
+    "@murph/core": "workspace:*",
+    "@murph/device-syncd": "workspace:*",
+    "@murph/importers": "workspace:*",
+    "@murph/inboxd": "workspace:*",
+    "@murph/parsers": "workspace:*",
+    "@murph/query": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
     "@photon-ai/imessage-kit": "2.1.2",
     "ai": "^6.0.116",
     "ink": "^6.8.0",
