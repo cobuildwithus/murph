@@ -272,7 +272,7 @@ test("high-level core experiment mutation ports keep legacy create coercion dist
         status: "not-a-real-status",
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "HB_EXPERIMENT_STATUS_INVALID",
+      error instanceof VaultError && error.code === "EXPERIMENT_STATUS_INVALID",
   );
 });
 
@@ -331,7 +331,7 @@ test("helper-backed experiment mutation readers preserve exact invalid-frontmatt
       action,
       (error: unknown) =>
         error instanceof VaultError &&
-        error.code === "HB_EXPERIMENT_FRONTMATTER_INVALID" &&
+        error.code === "EXPERIMENT_FRONTMATTER_INVALID" &&
         error.message === `Experiment frontmatter for "${relativePath}" is invalid.`,
     );
   }
@@ -441,7 +441,7 @@ test("helper-backed journal mutation readers preserve exact invalid-frontmatter 
       action,
       (error: unknown) =>
         error instanceof VaultError &&
-        error.code === "HB_JOURNAL_FRONTMATTER_INVALID" &&
+        error.code === "JOURNAL_FRONTMATTER_INVALID" &&
         error.message === `Journal frontmatter for "${appended.relativePath}" is invalid.`,
     );
   }

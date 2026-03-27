@@ -650,7 +650,7 @@ test("importDeviceBatch validates canonical payloads before raw artifact errors"
         ],
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "HB_EVENT_INVALID",
+      error instanceof VaultError && error.code === "EVENT_INVALID",
   );
 
   await assert.rejects(
@@ -676,7 +676,7 @@ test("importDeviceBatch validates canonical payloads before raw artifact errors"
         ],
       }),
     (error: unknown) =>
-      error instanceof VaultError && error.code === "HB_SAMPLE_INVALID",
+      error instanceof VaultError && error.code === "SAMPLE_INVALID",
   );
 });
 

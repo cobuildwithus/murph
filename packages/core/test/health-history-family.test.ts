@@ -285,7 +285,7 @@ test("history writes reject provider ids and raw refs that violate the canonical
         encounterType: "office_visit",
         providerId: "dr-smith",
       }),
-    (error: unknown) => error instanceof VaultError && error.code === "HB_EVENT_INVALID",
+    (error: unknown) => error instanceof VaultError && error.code === "EVENT_INVALID",
   );
 
   await assert.rejects(
@@ -299,7 +299,7 @@ test("history writes reject provider ids and raw refs that violate the canonical
         effect: "rash",
         rawRefs: ["bank/goals/sleep.md"],
       }),
-    (error: unknown) => error instanceof VaultError && error.code === "HB_EVENT_INVALID",
+    (error: unknown) => error instanceof VaultError && error.code === "EVENT_INVALID",
   );
 });
 

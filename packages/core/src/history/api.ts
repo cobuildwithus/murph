@@ -453,7 +453,7 @@ function buildHistoryEventRecord(
   const result = safeParseContract(eventRecordSchema, record);
 
   if (!result.success) {
-    throw new VaultError("HB_EVENT_INVALID", "History event failed contract validation before write.", {
+    throw new VaultError("EVENT_INVALID", "History event failed contract validation before write.", {
       errors: result.errors,
     });
   }

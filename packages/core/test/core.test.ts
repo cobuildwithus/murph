@@ -268,6 +268,25 @@ test("upsertEvent rejects specialized event kinds on the generic public boundary
   );
 });
 
+test("upsertEvent rejects malformed specialized event kinds on the generic public boundary before contract validation", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-event-kind-guard-malformed");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertEvent({
+        vaultRoot,
+        payload: {
+          kind: "meal",
+          occurredAt: "2026-03-12T12:32:00.000Z",
+          title: "Lunch bowl",
+        },
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_KIND_INVALID",
+  );
+});
+
 test("upsertEvent appends new events without parsing unrelated invalid shards", async () => {
   const vaultRoot = await makeTempDirectory("healthybob-event-fast-path");
   await initializeVault({ vaultRoot });

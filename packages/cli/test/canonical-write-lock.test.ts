@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { once } from "node:events";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   acquireCanonicalWriteLock,
@@ -72,6 +72,45 @@ async function holdCanonicalWriteLock(vaultRoot: string) {
   };
 }
 
+async function withCliUsecaseMocks<TResult>(options: {
+  coreRuntime: unknown;
+  queryRuntime?: unknown;
+  run: () => Promise<TResult>;
+}): Promise<TResult> {
+  vi.resetModules();
+  vi.doMock("../src/runtime-import.js", () => ({
+    loadRuntimeModule: async () => options.coreRuntime,
+  }));
+
+  if (options.queryRuntime) {
+    vi.doMock("../src/query-runtime.js", () => ({
+      loadQueryRuntime: async () => options.queryRuntime,
+    }));
+  }
+
+  try {
+    return await options.run();
+  } finally {
+    vi.doUnmock("../src/runtime-import.js");
+    vi.doUnmock("../src/query-runtime.js");
+    vi.resetModules();
+  }
+}
+
+function isVaultCliErrorLike(error: unknown, code: string, vaultCode: string): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      error instanceof Error &&
+      "code" in error &&
+      (error as { code?: unknown }).code === code &&
+      "name" in error &&
+      (error as { name?: unknown }).name === "VaultCliError" &&
+      "context" in error &&
+      (error as { context?: { vaultCode?: unknown } }).context?.vaultCode === vaultCode,
+  );
+}
+
 test.sequential("acquireCanonicalWriteLock writes diagnostics and cleans up on release", async () => {
   const vaultRoot = await makeVaultRoot();
 
@@ -133,7 +172,7 @@ test.sequential("validateVault reports stale canonical write locks", async () =>
     const validation = await validateVault({ vaultRoot });
     assert.equal(validation.valid, false);
     assert.equal(
-      validation.issues.some((issue) => issue.code === "HB_CANONICAL_WRITE_LOCK_STALE" && issue.path === CANONICAL_WRITE_LOCK_DIRECTORY),
+      validation.issues.some((issue) => issue.code === "CANONICAL_WRITE_LOCK_STALE" && issue.path === CANONICAL_WRITE_LOCK_DIRECTORY),
       true,
     );
   } finally {
@@ -155,7 +194,7 @@ test.sequential("public core mutators reject concurrent writers while another pr
             vaultRoot,
             date: "2026-03-13",
           }),
-        (error: unknown) => error instanceof VaultError && error.code === "HB_CANONICAL_WRITE_LOCKED",
+        (error: unknown) => error instanceof VaultError && error.code === "CANONICAL_WRITE_LOCKED",
       );
     } finally {
       await heldLock.release();
@@ -163,4 +202,158 @@ test.sequential("public core mutators reject concurrent writers while another pr
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
+});
+
+test.sequential("provider and event CLI usecases map renamed core error codes to CLI errors", async () => {
+  const providerConflict = new VaultError("PROVIDER_CONFLICT", "Provider already exists.");
+  const providerFrontmatter = new VaultError("PROVIDER_FRONTMATTER_INVALID", "Provider frontmatter is invalid.");
+  const eventFailures = [
+    {
+      vaultCode: "EVENT_KIND_INVALID",
+      cliCode: "contract_invalid",
+    },
+    {
+      vaultCode: "EVENT_OCCURRED_AT_MISSING",
+      cliCode: "invalid_timestamp",
+    },
+    {
+      vaultCode: "EVENT_CONTRACT_INVALID",
+      cliCode: "contract_invalid",
+    },
+    {
+      vaultCode: "INVALID_TIMESTAMP",
+      cliCode: "invalid_timestamp",
+    },
+    {
+      vaultCode: "INVALID_INPUT",
+      cliCode: "contract_invalid",
+    },
+  ] as const;
+
+  await withCliUsecaseMocks({
+    coreRuntime: {
+      upsertProvider: async () => {
+        throw providerConflict;
+      },
+      listProviders: async () => {
+        throw providerFrontmatter;
+      },
+      upsertEvent: async () => {
+        throw new VaultError("EVENT_KIND_INVALID", "Event payload requires a supported kind.");
+      },
+    },
+    run: async () => {
+      const { listProviderRecords, upsertEventRecord, upsertProviderRecord } = await import(
+        "../src/usecases/provider-event.js"
+      );
+
+      await assert.rejects(
+        () =>
+          upsertProviderRecord({
+            vault: "/tmp/mock-vault",
+            payload: {
+              title: "Labcorp",
+              status: "active",
+            },
+          }),
+        (error: unknown) => isVaultCliErrorLike(error, "conflict", "PROVIDER_CONFLICT"),
+      );
+
+      await assert.rejects(
+        () =>
+          listProviderRecords({
+            vault: "/tmp/mock-vault",
+            limit: 10,
+          }),
+        (error: unknown) =>
+          isVaultCliErrorLike(error, "contract_invalid", "PROVIDER_FRONTMATTER_INVALID"),
+      );
+
+      for (const failure of eventFailures) {
+        const eventRuntime = {
+          upsertProvider: async () => {
+            throw providerConflict;
+          },
+          listProviders: async () => {
+            return [];
+          },
+          upsertEvent: async () => {
+            throw new VaultError(failure.vaultCode, `${failure.vaultCode} failure`);
+          },
+        };
+
+        await withCliUsecaseMocks({
+          coreRuntime: eventRuntime,
+          run: async () => {
+            const { upsertEventRecord: upsertEventRecordWithRuntime } = await import(
+              "../src/usecases/provider-event.js"
+            );
+
+            await assert.rejects(
+              () =>
+                upsertEventRecordWithRuntime({
+                  vault: "/tmp/mock-vault",
+                  payload: {
+                    kind: "note",
+                    occurredAt: "2026-03-12T12:00:00.000Z",
+                    title: "Mock note",
+                  },
+                }),
+              (error: unknown) =>
+                isVaultCliErrorLike(error, failure.cliCode, failure.vaultCode),
+            );
+          },
+        });
+      }
+    },
+  });
+});
+
+test.sequential("experiment and journal CLI usecases map renamed core error codes to CLI errors", async () => {
+  const journalFailure = new VaultError("JOURNAL_DAY_MISSING", "Journal day is missing.");
+  const timestampFailure = new VaultError("INVALID_TIMESTAMP", "Invalid timestamp.");
+
+  await withCliUsecaseMocks({
+    coreRuntime: {
+      appendJournal: async () => {
+        throw journalFailure;
+      },
+      checkpointExperiment: async () => {
+        throw timestampFailure;
+      },
+    },
+    queryRuntime: {
+      readVault: async () => ({}),
+      lookupEntityById: () => ({
+        family: "experiment",
+        path: "experiments/focus-sprint.md",
+      }),
+    },
+    run: async () => {
+      const { appendJournalText, checkpointExperimentRecord } = await import(
+        "../src/usecases/experiment-journal-vault.js"
+      );
+
+      await assert.rejects(
+        () =>
+          appendJournalText({
+            vault: "/tmp/mock-vault",
+            date: "2026-03-13",
+            text: "Checkpoint note",
+          }),
+        (error: unknown) => isVaultCliErrorLike(error, "not_found", "JOURNAL_DAY_MISSING"),
+      );
+
+      await assert.rejects(
+        () =>
+          checkpointExperimentRecord({
+            vault: "/tmp/mock-vault",
+            lookup: "exp_01JNV422Y2M5ZBV64ZP4N1DRB1",
+            occurredAt: "not-a-timestamp",
+          }),
+        (error: unknown) =>
+          isVaultCliErrorLike(error, "invalid_timestamp", "INVALID_TIMESTAMP"),
+      );
+    },
+  });
 });

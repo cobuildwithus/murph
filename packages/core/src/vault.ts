@@ -519,7 +519,7 @@ async function validateAssessmentRecordReferences(
   const issues = await validateExistingVaultFile(
     vaultRoot,
     record.rawPath,
-    "HB_RAW_REFERENCE_MISSING",
+    "RAW_REFERENCE_MISSING",
     `Assessment raw payload "${record.rawPath}" is missing.`,
   );
 
@@ -527,7 +527,7 @@ async function validateAssessmentRecordReferences(
     ...(await validateExistingVaultFile(
       vaultRoot,
       rawManifestPathForArtifact(record.rawPath),
-      "HB_RAW_MANIFEST_INVALID",
+      "RAW_MANIFEST_INVALID",
       `Raw import manifest is missing for "${record.rawPath}".`,
     )),
   );
@@ -577,7 +577,7 @@ async function validateEventRecordReferences(
       ...(await validateExistingVaultFile(
         vaultRoot,
         referencedPath,
-        "HB_RAW_REFERENCE_MISSING",
+        "RAW_REFERENCE_MISSING",
         `Referenced raw artifact "${referencedPath}" is missing.`,
       )),
     );
@@ -595,7 +595,7 @@ async function validateEventRecordReferences(
       ...(await validateExistingVaultFile(
         vaultRoot,
         manifestPath,
-        "HB_RAW_MANIFEST_INVALID",
+        "RAW_MANIFEST_INVALID",
         `Raw import manifest is missing for "${manifestPath}".`,
       )),
     );
@@ -615,7 +615,7 @@ async function validateRawManifestFile(
   } catch (error) {
     return [
       validationIssue(
-        error instanceof VaultError ? error.code : "HB_RAW_MANIFEST_INVALID",
+        error instanceof VaultError ? error.code : "RAW_MANIFEST_INVALID",
         error instanceof Error ? error.message : String(error),
         relativePath,
       ),
@@ -623,7 +623,7 @@ async function validateRawManifestFile(
   }
 
   if (!isPlainRecord(manifest)) {
-    return [validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest must be a JSON object.", relativePath)];
+    return [validationIssue("RAW_MANIFEST_INVALID", "Raw import manifest must be a JSON object.", relativePath)];
   }
 
   const issues: ValidationIssue[] = [];
@@ -634,7 +634,7 @@ async function validateRawManifestFile(
     issues.push(
       ...contractResult.errors.map((error: string) =>
         validationIssue(
-          "HB_RAW_MANIFEST_INVALID",
+          "RAW_MANIFEST_INVALID",
           `Raw import manifest ${error}.`,
           relativePath,
         ),
@@ -643,13 +643,13 @@ async function validateRawManifestFile(
   }
 
   if (typeof manifest.schemaVersion !== "string" || manifest.schemaVersion.trim().length === 0) {
-    issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest is missing schemaVersion.", relativePath));
+    issues.push(validationIssue("RAW_MANIFEST_INVALID", "Raw import manifest is missing schemaVersion.", relativePath));
   }
 
   if (manifest.rawDirectory !== expectedRawDirectory) {
     issues.push(
       validationIssue(
-        "HB_RAW_MANIFEST_INVALID",
+        "RAW_MANIFEST_INVALID",
         `Raw import manifest rawDirectory must equal "${expectedRawDirectory}".`,
         relativePath,
       ),
@@ -657,7 +657,7 @@ async function validateRawManifestFile(
   }
 
   if (!Array.isArray(manifest.artifacts)) {
-    issues.push(validationIssue("HB_RAW_MANIFEST_INVALID", "Raw import manifest must provide an artifacts array.", relativePath));
+    issues.push(validationIssue("RAW_MANIFEST_INVALID", "Raw import manifest must provide an artifacts array.", relativePath));
     return issues;
   }
 
@@ -665,7 +665,7 @@ async function validateRawManifestFile(
     if (!isPlainRecord(artifact) || typeof artifact.relativePath !== "string") {
       issues.push(
         validationIssue(
-          "HB_RAW_MANIFEST_INVALID",
+          "RAW_MANIFEST_INVALID",
           `artifact ${index + 1} is missing a valid relativePath.`,
           relativePath,
         ),
@@ -676,7 +676,7 @@ async function validateRawManifestFile(
     if (path.posix.dirname(artifact.relativePath) !== expectedRawDirectory) {
       issues.push(
         validationIssue(
-          "HB_RAW_MANIFEST_INVALID",
+          "RAW_MANIFEST_INVALID",
           `artifact ${index + 1} must remain inside "${expectedRawDirectory}".`,
           relativePath,
         ),
@@ -687,7 +687,7 @@ async function validateRawManifestFile(
       ...(await validateExistingVaultFile(
         vaultRoot,
         artifact.relativePath,
-        "HB_RAW_REFERENCE_MISSING",
+        "RAW_REFERENCE_MISSING",
         `Manifest artifact "${artifact.relativePath}" is missing.`,
       )),
     );
@@ -746,7 +746,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
     if (!hasEnvelope && !hasAttachmentManifest) {
       issues.push(
         validationIssue(
-          "HB_RAW_REFERENCE_MISSING",
+          "RAW_REFERENCE_MISSING",
           `Inbox capture directory "${captureDirectory}" is missing envelope.json and has no attachment recovery manifest.`,
           envelopePath,
         ),
@@ -760,7 +760,7 @@ async function validateRawImportManifests(vaultRoot: string): Promise<Validation
     if (!(await pathExists(resolveVaultPath(vaultRoot, manifestPath).absolutePath))) {
       issues.push(
         validationIssue(
-          "HB_RAW_MANIFEST_INVALID",
+          "RAW_MANIFEST_INVALID",
           `Raw import directory "${directory}" is missing manifest.json.`,
           manifestPath,
         ),
@@ -796,7 +796,7 @@ async function validateCurrentProfileConsistency(vaultRoot: string): Promise<Val
     return exists
       ? [
           validationIssue(
-            "HB_PROFILE_CURRENT_STALE",
+            "PROFILE_CURRENT_STALE",
             "Current profile exists even though no profile snapshots are present.",
             VAULT_LAYOUT.profileCurrentDocument,
           ),
@@ -807,7 +807,7 @@ async function validateCurrentProfileConsistency(vaultRoot: string): Promise<Val
   if (!exists) {
     return [
       validationIssue(
-        "HB_PROFILE_CURRENT_STALE",
+        "PROFILE_CURRENT_STALE",
         "Current profile is missing for the latest profile snapshot.",
         VAULT_LAYOUT.profileCurrentDocument,
       ),
@@ -821,7 +821,7 @@ async function validateCurrentProfileConsistency(vaultRoot: string): Promise<Val
     if (currentMarkdown !== expectedMarkdown) {
       return [
         validationIssue(
-          "HB_PROFILE_CURRENT_STALE",
+          "PROFILE_CURRENT_STALE",
           "Current profile markdown does not match the latest profile snapshot.",
           VAULT_LAYOUT.profileCurrentDocument,
         ),
@@ -830,7 +830,7 @@ async function validateCurrentProfileConsistency(vaultRoot: string): Promise<Val
   } catch (error) {
     return [
       validationIssue(
-        error instanceof VaultError ? error.code : "HB_PROFILE_CURRENT_STALE",
+        error instanceof VaultError ? error.code : "PROFILE_CURRENT_STALE",
         error instanceof Error ? error.message : String(error),
         VAULT_LAYOUT.profileCurrentDocument,
       ),
@@ -855,7 +855,7 @@ async function validateWriteOperations(vaultRoot: string): Promise<ValidationIss
       const errorSuffix = operation.error?.message ? ` Last error: ${operation.error.message}` : "";
       issues.push(
         validationIssue(
-          "HB_OPERATION_UNRESOLVED",
+          "OPERATION_UNRESOLVED",
           `Write operation "${operation.operationId}" is ${operation.status}.${errorSuffix}`,
           relativePath,
         ),
@@ -863,7 +863,7 @@ async function validateWriteOperations(vaultRoot: string): Promise<ValidationIss
     } catch (error) {
       issues.push(
         validationIssue(
-          error instanceof VaultError ? error.code : "HB_OPERATION_INVALID",
+          error instanceof VaultError ? error.code : "OPERATION_INVALID",
           error instanceof Error ? error.message : String(error),
           relativePath,
         ),
@@ -927,7 +927,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativePath: VAULT_LAYOUT.coreDocument,
       schema: coreFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
 
@@ -940,7 +940,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
         vaultRoot: absoluteRoot,
         relativePath,
         schema: experimentFrontmatterSchema,
-        code: "HB_FRONTMATTER_INVALID",
+        code: "FRONTMATTER_INVALID",
       })),
     );
   }
@@ -954,7 +954,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
         vaultRoot: absoluteRoot,
         relativePath,
         schema: journalDayFrontmatterSchema,
-        code: "HB_FRONTMATTER_INVALID",
+        code: "FRONTMATTER_INVALID",
       })),
     );
   }
@@ -964,7 +964,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.goalsDirectory,
       schema: goalFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -972,7 +972,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.conditionsDirectory,
       schema: conditionFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -980,7 +980,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.allergiesDirectory,
       schema: allergyFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -988,7 +988,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.protocolsDirectory,
       schema: protocolFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -996,7 +996,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.foodsDirectory,
       schema: foodFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -1004,7 +1004,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.recipesDirectory,
       schema: recipeFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -1012,7 +1012,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.workoutFormatsDirectory,
       schema: workoutFormatFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -1020,7 +1020,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.familyDirectory,
       schema: familyMemberFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
   issues.push(
@@ -1028,7 +1028,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.geneticsDirectory,
       schema: geneticVariantFrontmatterSchema,
-      code: "HB_FRONTMATTER_INVALID",
+      code: "FRONTMATTER_INVALID",
     })),
   );
 
@@ -1039,7 +1039,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
         vaultRoot: absoluteRoot,
         relativePath: VAULT_LAYOUT.profileCurrentDocument,
         schema: profileCurrentFrontmatterSchema,
-        code: "HB_FRONTMATTER_INVALID",
+        code: "FRONTMATTER_INVALID",
       })),
     );
   }
@@ -1049,7 +1049,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.assessmentLedgerDirectory,
       schema: assessmentResponseSchema,
-      code: "HB_CONTRACT_INVALID",
+      code: "CONTRACT_INVALID",
       postValidateRecord: async (record) =>
         validateAssessmentRecordReferences(
           absoluteRoot,
@@ -1062,7 +1062,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.eventLedgerDirectory,
       schema: eventRecordSchema,
-      code: "HB_EVENT_INVALID",
+      code: "EVENT_INVALID",
       postValidateRecord: async (record) => validateEventRecordReferences(absoluteRoot, record),
     })),
   );
@@ -1071,7 +1071,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.profileSnapshotsDirectory,
       schema: profileSnapshotSchema,
-      code: "HB_CONTRACT_INVALID",
+      code: "CONTRACT_INVALID",
     })),
   );
   issues.push(
@@ -1079,7 +1079,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.sampleLedgerDirectory,
       schema: sampleRecordSchema,
-      code: "HB_SAMPLE_INVALID",
+      code: "SAMPLE_INVALID",
     })),
   );
   issues.push(
@@ -1087,7 +1087,7 @@ export async function validateVault({ vaultRoot }: LoadVaultInput = {}): Promise
       vaultRoot: absoluteRoot,
       relativeDirectory: VAULT_LAYOUT.auditDirectory,
       schema: auditRecordSchema,
-      code: "HB_AUDIT_INVALID",
+      code: "AUDIT_INVALID",
     })),
   );
   issues.push(...(await validateRawImportManifests(absoluteRoot)));

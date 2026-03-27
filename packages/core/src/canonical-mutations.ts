@@ -119,7 +119,7 @@ function validateJournalFrontmatter(
   const result = safeParseContract(journalDayFrontmatterSchema, value);
   if (!result.success) {
     throw new VaultError(
-      "HB_JOURNAL_FRONTMATTER_INVALID",
+      "JOURNAL_FRONTMATTER_INVALID",
       `Journal frontmatter for "${relativePath}" is invalid.`,
       {
         relativePath,

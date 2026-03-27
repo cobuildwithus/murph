@@ -199,7 +199,7 @@ export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<Cano
             },
       );
 
-      throw new VaultError("HB_CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
+      throw new VaultError("CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
         relativePath: inspection.relativePath,
         metadata: inspection.metadata
           ? {
@@ -215,7 +215,7 @@ export async function acquireCanonicalWriteLock(vaultRoot: string): Promise<Cano
     if (isErrnoException(error) && error.code === "EEXIST") {
       const inspection = await inspectCanonicalWriteLock(absoluteRoot);
       if (inspection.state !== "unlocked") {
-        throw new VaultError("HB_CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
+        throw new VaultError("CANONICAL_WRITE_LOCKED", toLockFailureMessage(inspection), {
           relativePath: inspection.relativePath,
           metadata: inspection.metadata
             ? {

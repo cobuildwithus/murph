@@ -399,7 +399,7 @@ export async function appendJournalText(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_JOURNAL_DAY_MISSING: {
+      JOURNAL_DAY_MISSING: {
         code: 'not_found',
       },
     })
@@ -626,7 +626,7 @@ async function appendExperimentLifecycleEvent(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_INVALID_TIMESTAMP: {
+      INVALID_TIMESTAMP: {
         code: 'invalid_timestamp',
       },
     })
@@ -661,7 +661,7 @@ async function mutateJournalLinks(input: {
     }
   } catch (error) {
     throw toVaultCliError(error, {
-      HB_JOURNAL_DAY_MISSING: {
+      JOURNAL_DAY_MISSING: {
         code: 'not_found',
       },
     })

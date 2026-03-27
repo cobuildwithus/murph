@@ -639,7 +639,7 @@ function buildNormalizedEventSeed<K extends EventKind>({
   assertContractShape(
     eventRecordSchema,
     materializeEventRecord({ seed, recordId: EVENT_VALIDATION_PLACEHOLDER_ID }),
-    "HB_EVENT_INVALID",
+    "EVENT_INVALID",
     "Event record failed contract validation before write.",
   );
 
@@ -684,7 +684,7 @@ function finalizeEventRecord<K extends EventKind>({
   assertContractShape(
     eventRecordSchema,
     record,
-    "HB_EVENT_INVALID",
+    "EVENT_INVALID",
     "Event record failed contract validation before write.",
   );
 
@@ -784,7 +784,7 @@ function buildNormalizedSampleSeed({
   assertContractShape<SampleRecord>(
     sampleRecordSchema,
     materializeSampleRecord({ seed, recordId: SAMPLE_VALIDATION_PLACEHOLDER_ID }),
-    "HB_SAMPLE_INVALID",
+    "SAMPLE_INVALID",
     "Sample record failed contract validation before write.",
   );
 
@@ -837,7 +837,7 @@ function finalizeSampleRecord({
   assertContractShape<SampleRecord>(
     sampleRecordSchema,
     record,
-    "HB_SAMPLE_INVALID",
+    "SAMPLE_INVALID",
     "Sample record failed contract validation before write.",
   );
 

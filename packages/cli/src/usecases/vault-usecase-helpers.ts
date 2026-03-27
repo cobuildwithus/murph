@@ -1,5 +1,7 @@
-import { lstat } from 'node:fs/promises'
-import path from 'node:path'
+import {
+  isVaultError,
+  resolveVaultPathOnDisk,
+} from '@healthybob/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   inferEntityKind,
@@ -78,7 +80,8 @@ export async function resolveVaultRelativePath(
   relativePath: string,
 ) {
   try {
-    return await resolveVaultPathOnDisk(vaultRoot, relativePath)
+    const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath)
+    return resolved.absolutePath
   } catch (error) {
     throw toVaultRelativePathError(relativePath, error)
   }
@@ -153,76 +156,14 @@ interface VaultLikeError extends Error {
 
 function isVaultLikeError(error: unknown): error is VaultLikeError {
   return Boolean(
-    error &&
-      typeof error === 'object' &&
-      error instanceof Error &&
-      'code' in error &&
-      typeof error.code === 'string' &&
-      (error.name === 'VaultError' ||
-        error.code.startsWith('VAULT_')),
-  )
-}
-
-async function resolveVaultPathOnDisk(
-  vaultRoot: string,
-  relativePath: string,
-): Promise<string> {
-  if (relativePath.includes('\0') || path.isAbsolute(relativePath)) {
-    throw createVaultError('VAULT_INVALID_PATH', 'Vault-relative path is invalid.')
-  }
-
-  const absoluteVaultRoot = path.resolve(vaultRoot)
-  const absolutePath = path.resolve(absoluteVaultRoot, relativePath)
-  const relativeToRoot = path.relative(absoluteVaultRoot, absolutePath)
-
-  if (
-    relativeToRoot === '' ||
-    relativeToRoot === '.' ||
-    relativeToRoot.startsWith(`..${path.sep}`) ||
-    relativeToRoot === '..' ||
-    path.isAbsolute(relativeToRoot)
-  ) {
-    throw createVaultError(
-      'VAULT_INVALID_PATH',
-      'Vault-relative path may not escape the vault root.',
-    )
-  }
-
-  let currentPath = absoluteVaultRoot
-  for (const segment of relativeToRoot.split(path.sep)) {
-    currentPath = path.join(currentPath, segment)
-    try {
-      const stats = await lstat(currentPath)
-      if (stats.isSymbolicLink()) {
-        throw createVaultError(
-          'VAULT_PATH_SYMLINK',
-          'Vault-relative path may not traverse symlinks inside the vault root.',
-        )
-      }
-    } catch (error) {
-      if (
+    isVaultError(error) ||
+      (
         error &&
         typeof error === 'object' &&
+        error instanceof Error &&
         'code' in error &&
-        error.code === 'ENOENT'
-      ) {
-        break
-      }
-      throw error
-    }
-  }
-
-  return absolutePath
-}
-
-function createVaultError(
-  code: string,
-  message: string,
-  details?: Record<string, unknown>,
-): VaultLikeError {
-  const error = new Error(message) as VaultLikeError
-  error.name = 'VaultError'
-  error.code = code
-  error.details = details
-  return error
+        typeof error.code === 'string' &&
+        error.name === 'VaultError'
+      ),
+  )
 }

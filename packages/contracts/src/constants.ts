@@ -204,57 +204,57 @@ export const EXPERIMENT_STATUSES = Object.freeze([
 
 export const ERROR_CODES = Object.freeze([
   {
-    code: "HB_CONTRACT_INVALID",
+    code: "CONTRACT_INVALID",
     retryable: false,
     summary: "A payload failed the frozen contract shape.",
   },
   {
-    code: "HB_ID_INVALID",
+    code: "ID_INVALID",
     retryable: false,
     summary: "An identifier did not match the frozen prefix plus ULID policy.",
   },
   {
-    code: "HB_PATH_INVALID",
+    code: "PATH_INVALID",
     retryable: false,
     summary: "A stored path was absolute, escaped the vault root, or missed its path family.",
   },
   {
-    code: "HB_VAULT_INVALID",
+    code: "VAULT_INVALID",
     retryable: false,
     summary: "The vault metadata contract failed validation.",
   },
   {
-    code: "HB_EVENT_INVALID",
+    code: "EVENT_INVALID",
     retryable: false,
     summary: "An event record failed validation.",
   },
   {
-    code: "HB_SAMPLE_INVALID",
+    code: "SAMPLE_INVALID",
     retryable: false,
     summary: "A sample record failed validation.",
   },
   {
-    code: "HB_AUDIT_INVALID",
+    code: "AUDIT_INVALID",
     retryable: false,
     summary: "An audit record failed validation.",
   },
   {
-    code: "HB_FRONTMATTER_INVALID",
+    code: "FRONTMATTER_INVALID",
     retryable: false,
     summary: "A Markdown frontmatter block failed validation.",
   },
   {
-    code: "HB_ENUM_UNSUPPORTED",
+    code: "ENUM_UNSUPPORTED",
     retryable: false,
     summary: "A value was outside the frozen baseline enums.",
   },
   {
-    code: "HB_SHARD_KEY_INVALID",
+    code: "SHARD_KEY_INVALID",
     retryable: false,
     summary: "A monthly shard key or day key failed the required format.",
   },
   {
-    code: "HB_SCHEMA_ARTIFACT_STALE",
+    code: "SCHEMA_ARTIFACT_STALE",
     retryable: false,
     summary: "Generated JSON Schema artifacts are missing or do not match source contracts.",
   },

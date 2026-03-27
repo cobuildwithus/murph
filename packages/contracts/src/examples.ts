@@ -469,7 +469,7 @@ export const exampleAuditRecords: readonly Readonly<AuditRecord>[] = Object.free
     actor: "core",
     commandName: "vault-cli validate",
     summary: "Rejected a sample shard with an unsupported stream name.",
-    errorCode: "HB_ENUM_UNSUPPORTED",
+    errorCode: "ENUM_UNSUPPORTED",
     changes: [],
   },
 ]);

@@ -36,7 +36,7 @@ function validateVaultMetadata(value: unknown): VaultMetadata {
   return validateContract(
     vaultMetadataSchema,
     value,
-    "HB_VAULT_METADATA_INVALID",
+    "VAULT_METADATA_INVALID",
     "Vault metadata is invalid.",
   );
 }
@@ -48,7 +48,7 @@ function validateCoreFrontmatter(
   return validateContract(
     coreFrontmatterSchema,
     value,
-    "HB_CORE_FRONTMATTER_INVALID",
+    "CORE_FRONTMATTER_INVALID",
     `CORE frontmatter for "${relativePath}" is invalid.`,
     {
       relativePath,
@@ -64,7 +64,7 @@ export async function updateVaultSummary(
     input.vaultRoot,
     VAULT_LAYOUT.coreDocument,
     coreFrontmatterSchema,
-    "HB_CORE_FRONTMATTER_INVALID",
+    "CORE_FRONTMATTER_INVALID",
     `CORE frontmatter for "${VAULT_LAYOUT.coreDocument}" is invalid.`,
   );
   const nextTitle = normalizeOptionalText(input.title) ?? metadata.title;

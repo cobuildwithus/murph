@@ -69,7 +69,7 @@ function validateJournalFrontmatter(
   return validateContract(
     journalDayFrontmatterSchema,
     value,
-    "HB_JOURNAL_FRONTMATTER_INVALID",
+    "JOURNAL_FRONTMATTER_INVALID",
     `Journal frontmatter for "${relativePath}" is invalid.`,
     {
       relativePath,
@@ -91,7 +91,7 @@ export async function readJournalDayFrontmatterDocument(
     vaultRoot,
     relativePath,
     journalDayFrontmatterSchema,
-    "HB_JOURNAL_FRONTMATTER_INVALID",
+    "JOURNAL_FRONTMATTER_INVALID",
     `Journal frontmatter for "${relativePath}" is invalid.`,
   );
 }
@@ -113,7 +113,7 @@ export async function ensureJournalDay({
       eventIds: [],
       sampleStreams: [],
     },
-    "HB_FRONTMATTER_INVALID",
+    "FRONTMATTER_INVALID",
     "Journal frontmatter failed contract validation before write.",
   );
 
@@ -208,7 +208,7 @@ async function mutateJournalLinks(
     ({ document } = await readJournalDayFrontmatterDocument(input.vaultRoot, relativePath));
   } catch (error) {
     if (error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
-      throw new VaultError("HB_JOURNAL_DAY_MISSING", `No journal day found for "${input.date}".`);
+      throw new VaultError("JOURNAL_DAY_MISSING", `No journal day found for "${input.date}".`);
     }
 
     throw error;

@@ -104,7 +104,7 @@ function coerceExperimentStatus(value: unknown): ExperimentStatus {
 
 function requireExperimentStatus(value: unknown): ExperimentStatus {
   if (typeof value !== "string" || !EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)) {
-    throw new VaultError("HB_EXPERIMENT_STATUS_INVALID", "Experiment status is invalid.");
+    throw new VaultError("EXPERIMENT_STATUS_INVALID", "Experiment status is invalid.");
   }
 
   return value as ExperimentStatus;
@@ -136,7 +136,7 @@ function validateExperimentFrontmatter(
   return validateContract(
     experimentFrontmatterSchema,
     value,
-    "HB_EXPERIMENT_FRONTMATTER_INVALID",
+    "EXPERIMENT_FRONTMATTER_INVALID",
     `Experiment frontmatter for "${relativePath}" is invalid.`,
     {
       relativePath,
@@ -158,7 +158,7 @@ export async function readExperimentFrontmatterDocument(
     vaultRoot,
     relativePath,
     experimentFrontmatterSchema,
-    "HB_EXPERIMENT_FRONTMATTER_INVALID",
+    "EXPERIMENT_FRONTMATTER_INVALID",
     `Experiment frontmatter for "${relativePath}" is invalid.`,
   );
 }
@@ -224,7 +224,7 @@ export async function createExperiment({
 
     if (!existingResult.success) {
       throw new VaultError(
-        "HB_FRONTMATTER_INVALID",
+        "FRONTMATTER_INVALID",
         `Existing experiment "${safeSlug}" failed contract validation.`,
         {
           relativePath,
@@ -277,7 +277,7 @@ export async function createExperiment({
       startedOn: startedDay,
       hypothesis: normalizedHypothesis,
     }),
-    "HB_FRONTMATTER_INVALID",
+    "FRONTMATTER_INVALID",
     "Experiment frontmatter failed contract validation before write.",
   );
   const markdown = stringifyFrontmatterDocument({
@@ -393,7 +393,7 @@ async function appendExperimentLifecycleEvent(
   );
   const occurredAt = normalizeTimestampInput(input.occurredAt ?? new Date());
   if (!occurredAt) {
-    throw new VaultError("HB_INVALID_TIMESTAMP", "Experiment lifecycle event requires occurredAt.");
+    throw new VaultError("INVALID_TIMESTAMP", "Experiment lifecycle event requires occurredAt.");
   }
 
   const nextAttributes = validateExperimentFrontmatter(
@@ -471,7 +471,7 @@ export async function stopExperiment(
 ): Promise<AppendExperimentLifecycleEventResult> {
   const occurredAt = normalizeTimestampInput(input.occurredAt ?? new Date());
   if (!occurredAt) {
-    throw new VaultError("HB_INVALID_TIMESTAMP", "Experiment lifecycle event requires occurredAt.");
+    throw new VaultError("INVALID_TIMESTAMP", "Experiment lifecycle event requires occurredAt.");
   }
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
 

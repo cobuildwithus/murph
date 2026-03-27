@@ -83,17 +83,17 @@
     "errorCode": {
       "type": "string",
       "enum": [
-        "HB_CONTRACT_INVALID",
-        "HB_ID_INVALID",
-        "HB_PATH_INVALID",
-        "HB_VAULT_INVALID",
-        "HB_EVENT_INVALID",
-        "HB_SAMPLE_INVALID",
-        "HB_AUDIT_INVALID",
-        "HB_FRONTMATTER_INVALID",
-        "HB_ENUM_UNSUPPORTED",
-        "HB_SHARD_KEY_INVALID",
-        "HB_SCHEMA_ARTIFACT_STALE"
+        "CONTRACT_INVALID",
+        "ID_INVALID",
+        "PATH_INVALID",
+        "VAULT_INVALID",
+        "EVENT_INVALID",
+        "SAMPLE_INVALID",
+        "AUDIT_INVALID",
+        "FRONTMATTER_INVALID",
+        "ENUM_UNSUPPORTED",
+        "SHARD_KEY_INVALID",
+        "SCHEMA_ARTIFACT_STALE"
       ]
     },
     "changes": {

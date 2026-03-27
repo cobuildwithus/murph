@@ -69,6 +69,18 @@ test('path resolution preserves current invalid_path errors and rejects symlink 
       message: 'Vault-relative path "../escape.md" escapes the selected vault root.',
     })
 
+    await assert.rejects(() => resolveVaultRelativePath(vaultRoot, ''), {
+      name: 'VaultCliError',
+      code: 'invalid_path',
+      message: 'Vault-relative path "" is invalid.',
+    })
+
+    await assert.rejects(() => resolveVaultRelativePath(vaultRoot, 'C:/outside.txt'), {
+      name: 'VaultCliError',
+      code: 'invalid_path',
+      message: 'Vault-relative path "C:/outside.txt" is invalid.',
+    })
+
     await assert.rejects(() => resolveVaultRelativePath(vaultRoot, 'bank/providers/labcorp.md'), {
       name: 'VaultCliError',
       code: 'invalid_path',
@@ -79,4 +91,21 @@ test('path resolution preserves current invalid_path errors and rejects symlink 
     await rm(vaultRoot, { recursive: true, force: true })
     await rm(outsideRoot, { recursive: true, force: true })
   }
+})
+
+test('path resolution fails fast when the selected vault root does not exist', async () => {
+  const missingVaultRoot = path.join(tmpdir(), `healthybob-vault-helper-missing-${Date.now()}`)
+
+  await assert.rejects(
+    () => resolveVaultRelativePath(missingVaultRoot, 'journal/2026-03-17.md'),
+    (error: unknown) =>
+      Boolean(
+        error &&
+          typeof error === 'object' &&
+          error instanceof Error &&
+          'code' in error &&
+          (error as { code?: unknown }).code === 'VAULT_INVALID_ROOT' &&
+          error.message === 'Vault root does not exist on disk.',
+      ),
+  )
 })
