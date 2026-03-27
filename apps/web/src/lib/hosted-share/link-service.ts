@@ -110,7 +110,7 @@ export async function buildHostedSharePageData(input: {
     };
   }
 
-  const preview = readHostedSharePreview(record.previewJson, readHostedSharePack(record).pack);
+  const preview = readHostedSharePreview(record.previewJson, () => readHostedSharePack(record).pack);
   const now = new Date();
   const consumed = Boolean(record.consumedAt);
   const acceptedByCurrentMember = record.consumedByMemberId === input.sessionRecord?.member.id

@@ -59,30 +59,6 @@ export async function enqueueHostedExecutionOutbox(
   });
 }
 
-export async function findHostedExecutionOutboxByEventId(
-  eventId: string,
-  prisma: HostedExecutionOutboxClient = getPrisma(),
-): Promise<ExecutionOutbox | null> {
-  return prisma.executionOutbox.findUnique({
-    where: {
-      eventId,
-    },
-  });
-}
-
-export function readHostedExecutionOutboxOutcome(
-  record: ExecutionOutbox | null,
-): "completed" | "failed" | "pending" {
-  switch (record?.status) {
-    case ExecutionOutboxStatus.completed:
-      return "completed";
-    case ExecutionOutboxStatus.failed:
-      return "failed";
-    default:
-      return "pending";
-  }
-}
-
 export async function drainHostedExecutionOutbox(input: {
   eventIds?: readonly string[];
   limit?: number;
@@ -118,25 +94,6 @@ export async function drainHostedExecutionOutbox(input: {
   }
 
   return drained;
-}
-
-export async function drainHostedExecutionOutboxBestEffort(input: {
-  context?: string;
-  eventIds?: readonly string[];
-  limit?: number;
-  now?: string;
-  prisma?: PrismaClient;
-} = {}): Promise<void> {
-  try {
-    await drainHostedExecutionOutbox(input);
-  } catch (error) {
-    console.error(
-      input.context
-        ? `Hosted execution outbox drain failed (${input.context}).`
-        : "Hosted execution outbox drain failed.",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 }
 
 function buildDueOutboxWhere(

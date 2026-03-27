@@ -87,6 +87,34 @@ export class HostedUserRunner {
 
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     await this.queueStore.bootstrapUser(input.event.userId);
+    return this.dispatchBootstrapped(input);
+  }
+
+  async dispatchWithOutcome(
+    input: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionDispatchResult> {
+    await this.queueStore.bootstrapUser(input.event.userId);
+    const initialState = await this.queueStore.readEventState(input.eventId);
+    const status = await this.dispatchBootstrapped(input);
+    const nextState = await this.queueStore.readEventState(input.eventId);
+
+    return {
+      event: {
+        eventId: input.eventId,
+        lastError: nextState.lastError ?? status.lastError,
+        state: resolveDispatchOutcomeState({
+          initialState,
+          nextState,
+        }),
+        userId: input.event.userId,
+      },
+      status,
+    };
+  }
+
+  private async dispatchBootstrapped(
+    input: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionUserStatus> {
     const committed = await this.commitRecovery.readCommittedDispatch(input.event.userId, input.eventId);
     if (committed) {
       const presence = await this.queueStore.readEventPresence(input.eventId);
@@ -122,29 +150,6 @@ export class HostedUserRunner {
     }
 
     return this.runQueuedEvents(record.userId);
-  }
-
-  async dispatchWithOutcome(
-    input: HostedExecutionDispatchRequest,
-  ): Promise<HostedExecutionDispatchResult> {
-    await this.queueStore.bootstrapUser(input.event.userId);
-    const initialState = await this.queueStore.readEventState(input.eventId);
-    const status = await this.dispatch(input);
-    const nextState = await this.queueStore.readEventState(input.eventId);
-
-    return {
-      event: {
-        eventId: input.eventId,
-        lastError: nextState.lastError ?? status.lastError,
-        state: resolveDispatchOutcomeState({
-          eventId: input.eventId,
-          initialState,
-          nextState,
-        }),
-        userId: input.event.userId,
-      },
-      status,
-    };
   }
 
   async alarm(): Promise<void> {
@@ -509,7 +514,6 @@ export class HostedUserRunner {
 }
 
 function resolveDispatchOutcomeState(input: {
-  eventId: string;
   initialState: {
     backpressured: boolean;
     consumed: boolean;

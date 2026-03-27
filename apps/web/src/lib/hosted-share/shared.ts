@@ -77,17 +77,19 @@ export function readHostedSharePack(record: {
 
 export function readHostedSharePreview(
   previewJson: unknown,
-  fallbackPack: SharePack,
+  fallbackPack: SharePack | (() => SharePack),
 ): HostedSharePreview {
   if (previewJson && typeof previewJson === "object" && !Array.isArray(previewJson)) {
     try {
       return JSON.parse(JSON.stringify(previewJson)) as HostedSharePreview;
     } catch {
-      return buildHostedSharePreview(fallbackPack);
+      return buildHostedSharePreview(
+        typeof fallbackPack === "function" ? fallbackPack() : fallbackPack,
+      );
     }
   }
 
-  return buildHostedSharePreview(fallbackPack);
+  return buildHostedSharePreview(typeof fallbackPack === "function" ? fallbackPack() : fallbackPack);
 }
 
 export async function readHostedSharePackByReference(input: {

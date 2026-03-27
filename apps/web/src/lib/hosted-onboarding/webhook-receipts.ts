@@ -106,12 +106,6 @@ export type HostedWebhookDispatchEnqueueInput = {
 };
 
 type HostedWebhookReceiptHandlers = {
-  afterDispatchEffectQueued?: (input: {
-    dispatchEffect: HostedWebhookDispatchSideEffect;
-    eventId: string;
-    prisma: PrismaClient;
-    source: string;
-  }) => Promise<void>;
   afterSideEffectSent?: (input: {
     effect: HostedWebhookSideEffect;
     prisma: PrismaClient;
@@ -486,7 +480,6 @@ async function drainHostedWebhookReceiptSideEffects(input: {
     try {
       if (effect.kind === "hosted_execution_dispatch") {
         currentClaim = await markHostedWebhookDispatchEffectQueued({
-          afterDispatchEffectQueued: input.handlers.afterDispatchEffectQueued,
           claimedReceipt: currentClaim,
           dispatchEffect: effect,
           enqueueDispatchEffect: input.handlers.enqueueDispatchEffect,
@@ -546,7 +539,6 @@ async function drainHostedWebhookReceiptSideEffects(input: {
 }
 
 async function markHostedWebhookDispatchEffectQueued(input: {
-  afterDispatchEffectQueued?: HostedWebhookReceiptHandlers["afterDispatchEffectQueued"];
   claimedReceipt: HostedWebhookReceiptClaim;
   dispatchEffect: HostedWebhookDispatchSideEffect;
   enqueueDispatchEffect: HostedWebhookReceiptHandlers["enqueueDispatchEffect"];
@@ -579,15 +571,6 @@ async function markHostedWebhookDispatchEffectQueued(input: {
     });
 
     if (updatedCount === 1) {
-      if (input.afterDispatchEffectQueued) {
-        await input.afterDispatchEffectQueued({
-          dispatchEffect: input.dispatchEffect,
-          eventId: input.eventId,
-          prisma: input.prisma,
-          source: input.source,
-        });
-      }
-
       return nextClaim;
     }
 

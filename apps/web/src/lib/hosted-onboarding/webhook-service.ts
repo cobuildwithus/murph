@@ -759,14 +759,6 @@ async function patchHostedRevnetIssuanceStripeReferences(input: {
 
 function hostedWebhookReceiptHandlers() {
   return {
-    afterDispatchEffectQueued: async (
-      _input: {
-        dispatchEffect: HostedWebhookDispatchSideEffect;
-        eventId: string;
-        prisma: PrismaClient;
-        source: string;
-      },
-    ) => {},
     afterSideEffectSent: async ({
       effect,
       prisma,
