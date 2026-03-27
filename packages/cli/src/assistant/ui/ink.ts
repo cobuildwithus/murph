@@ -33,6 +33,7 @@ import { resolveCodexDisplayOptions } from '../../assistant-codex.js'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantOperatorDefaults,
+  resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../../operator-config.js'
 import {
@@ -2756,6 +2757,10 @@ export async function runAssistantChatWithInk(
   const defaults = await resolveAssistantOperatorDefaults()
   const themeBaseline = captureAssistantInkThemeBaseline()
   const resolved = await openAssistantConversation(input)
+  const selectedProviderDefaults = resolveAssistantProviderDefaults(
+    defaults,
+    resolved.session.provider,
+  )
   const transcriptEntries = await listAssistantTranscriptEntries(
     input.vault,
     resolved.session.sessionId,
@@ -2764,11 +2769,11 @@ export async function runAssistantChatWithInk(
   const codexDisplay = await resolveCodexDisplayOptions({
     model:
       input.model ??
-      defaults?.model ??
+      selectedProviderDefaults?.model ??
       resolved.session.providerOptions.model,
     profile:
       input.profile ??
-      defaults?.profile ??
+      selectedProviderDefaults?.profile ??
       resolved.session.providerOptions.profile,
   })
   const inkInput = resolveAssistantInkInputAdapter()
@@ -2825,12 +2830,12 @@ export async function runAssistantChatWithInk(
       const [composerValue, setComposerValue] = React.useState('')
       const initialActiveModel =
         normalizeNullableString(input.model) ??
-        normalizeNullableString(defaults?.model) ??
+        normalizeNullableString(selectedProviderDefaults?.model) ??
         normalizeNullableString(resolved.session.providerOptions.model) ??
         normalizeNullableString(codexDisplay.model)
       const initialActiveReasoningEffort =
         normalizeNullableString(input.reasoningEffort) ??
-        normalizeNullableString(defaults?.reasoningEffort) ??
+        normalizeNullableString(selectedProviderDefaults?.reasoningEffort) ??
         normalizeNullableString(resolved.session.providerOptions.reasoningEffort) ??
         normalizeNullableString(codexDisplay.reasoningEffort)
       const [activeModel, setActiveModel] = React.useState<string | null>(
@@ -3075,9 +3080,11 @@ export async function runAssistantChatWithInk(
               buildAssistantProviderDefaultsPatch({
                 defaults,
                 provider: updatedSession.provider,
-                providerOptions: updatedSession.providerOptions,
-                model: nextModel,
-                reasoningEffort: nextReasoningEffort,
+                providerConfig: {
+                  ...updatedSession.providerOptions,
+                  model: nextModel,
+                  reasoningEffort: nextReasoningEffort,
+                },
               }),
             )
           } catch (error) {

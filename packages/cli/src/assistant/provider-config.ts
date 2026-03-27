@@ -5,7 +5,6 @@ import type {
   AssistantSandbox,
 } from '../assistant-cli-contracts.js'
 import type { AssistantModelSpec } from '../model-harness.js'
-import type { AssistantOperatorDefaults } from '../operator-config.js'
 import { normalizeNullableString } from './shared.js'
 
 export interface AssistantCodexProviderConfig {
@@ -233,20 +232,7 @@ export function serializeAssistantProviderSessionOptions(
 
 export function serializeAssistantProviderOperatorDefaults(
   input: AssistantProviderConfigInput | null | undefined,
-): Pick<
-  AssistantOperatorDefaults,
-  | 'approvalPolicy'
-  | 'apiKeyEnv'
-  | 'baseUrl'
-  | 'codexCommand'
-  | 'headers'
-  | 'model'
-  | 'oss'
-  | 'profile'
-  | 'providerName'
-  | 'reasoningEffort'
-  | 'sandbox'
-> {
+): Omit<AssistantProviderConfig, 'provider'> {
   const normalized = normalizeAssistantProviderConfig(input)
   return {
     codexCommand: normalized.codexCommand,

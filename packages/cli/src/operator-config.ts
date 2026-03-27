@@ -9,7 +9,6 @@ import {
   assistantProviderFailoverRouteSchema,
   assistantSelfDeliveryTargetSchema,
   assistantSandboxValues,
-  type AssistantProviderSessionOptions,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
 import {
@@ -18,8 +17,7 @@ import {
 } from './command-helpers.js'
 import { readEnvValue } from './env-values.js'
 import {
-  inferAssistantProviderFromConfigInput,
-  mergeAssistantProviderConfigsForProvider,
+  type AssistantProviderConfigInput,
   serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
 export {
@@ -59,18 +57,7 @@ const assistantDefaultsByProviderSchema = z
 const assistantOperatorDefaultsSchema = z.object({
   provider: z.enum(assistantChatProviderValues).nullable().default(null),
   defaultsByProvider: assistantDefaultsByProviderSchema,
-  codexCommand: z.string().min(1).nullable().default(null),
-  model: z.string().min(1).nullable().default(null),
-  reasoningEffort: z.string().min(1).nullable().default(null),
   identityId: z.string().min(1).nullable().default(null),
-  sandbox: z.enum(assistantSandboxValues).nullable().default(null),
-  approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable().default(null),
-  profile: z.string().min(1).nullable().default(null),
-  oss: z.boolean().nullable().default(null),
-  baseUrl: z.string().min(1).nullable().default(null),
-  apiKeyEnv: z.string().min(1).nullable().default(null),
-  providerName: z.string().min(1).nullable().default(null),
-  headers: assistantHeadersSchema.nullable().default(null),
   failoverRoutes: z.array(assistantProviderFailoverRouteSchema).nullable().optional(),
   account: z
     .object({
@@ -124,7 +111,7 @@ export type OperatorConfig = z.infer<typeof operatorConfigSchema>
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
-type AssistantProviderDefaultsEntry = z.infer<
+export type AssistantProviderDefaultsEntry = z.infer<
   typeof assistantProviderDefaultsEntrySchema
 >
 type AssistantChatProviderValue = (typeof assistantChatProviderValues)[number]
@@ -424,34 +411,38 @@ export function resolveAssistantProviderDefaults(
   defaults: AssistantOperatorDefaults | null | undefined,
   provider: AssistantChatProviderValue,
 ): AssistantProviderDefaultsEntry | null {
-  return materializeAssistantProviderDefaults(defaults, provider)
+  if (!defaults) {
+    return null
+  }
+
+  return normalizeAssistantProviderDefaultsEntry(
+    provider,
+    defaults.defaultsByProvider?.[provider] ?? null,
+  )
 }
 
 export function buildAssistantProviderDefaultsPatch(input: {
   defaults: AssistantOperatorDefaults | null | undefined
-  model: string | null
   provider: AssistantChatProviderValue
-  providerOptions: AssistantProviderSessionOptions
-  reasoningEffort: string | null
+  providerConfig: AssistantProviderConfigInput
 }): Partial<AssistantOperatorDefaults> {
   const savedProviderDefaults = resolveAssistantProviderDefaults(
     input.defaults,
     input.provider,
   )
+  const nextProviderDefaults = assistantProviderDefaultsEntrySchema.parse(
+    serializeAssistantProviderOperatorDefaults({
+      provider: input.provider,
+      ...(savedProviderDefaults ? savedProviderDefaults : {}),
+      ...input.providerConfig,
+    }),
+  )
 
   return {
     provider: input.provider,
-    ...serializeAssistantProviderOperatorDefaults({
-      provider: input.provider,
-      ...(savedProviderDefaults
-        ? {
-            ...savedProviderDefaults,
-          }
-        : {}),
-      ...input.providerOptions,
-      model: input.model,
-      reasoningEffort: input.reasoningEffort,
-    }),
+    defaultsByProvider: {
+      [input.provider]: nextProviderDefaults,
+    },
   }
 }
 
@@ -584,43 +575,22 @@ function mergeAssistantOperatorDefaults(
   existing: AssistantOperatorDefaults | null,
   patch: Partial<AssistantOperatorDefaults>,
 ): AssistantOperatorDefaults {
-  const inferredProvider = inferAssistantProviderFromConfigInput(patch)
   const selectedProvider =
     'provider' in patch
       ? patch.provider ??
-        inferredProvider ??
         existing?.provider ??
-        (hasAssistantProviderConfigPatch(patch) ? 'codex-cli' : null) ??
+        inferAssistantProviderFromDefaultsByProvider(patch.defaultsByProvider) ??
         null
       : existing?.provider ??
-        inferredProvider ??
-        (hasAssistantProviderConfigPatch(patch) ? 'codex-cli' : null) ??
+        inferAssistantProviderFromDefaultsByProvider(patch.defaultsByProvider) ??
         null
-  const nextDefaultsByProvider = buildAssistantDefaultsByProvider({
-    existing,
-    patch,
-    selectedProvider,
-  })
-  const activeProviderDefaults = selectedProvider
-    ? nextDefaultsByProvider?.[selectedProvider] ?? null
-    : null
+  const nextDefaultsByProvider = buildAssistantDefaultsByProvider(existing, patch)
 
   return assistantOperatorDefaultsSchema.parse({
     provider: selectedProvider,
     defaultsByProvider: nextDefaultsByProvider,
-    codexCommand: activeProviderDefaults?.codexCommand ?? null,
-    model: activeProviderDefaults?.model ?? null,
-    reasoningEffort: activeProviderDefaults?.reasoningEffort ?? null,
     identityId:
       'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
-    sandbox: activeProviderDefaults?.sandbox ?? null,
-    approvalPolicy: activeProviderDefaults?.approvalPolicy ?? null,
-    profile: activeProviderDefaults?.profile ?? null,
-    oss: activeProviderDefaults?.oss ?? null,
-    baseUrl: activeProviderDefaults?.baseUrl ?? null,
-    apiKeyEnv: activeProviderDefaults?.apiKeyEnv ?? null,
-    providerName: activeProviderDefaults?.providerName ?? null,
-    headers: activeProviderDefaults?.headers ?? null,
     failoverRoutes:
       'failoverRoutes' in patch
         ? patch.failoverRoutes
@@ -640,163 +610,120 @@ function normalizeAssistantOperatorDefaults(
     return null
   }
 
-  const selectedProvider = defaults.provider ?? null
-  const defaultsByProvider = materializeAssistantDefaultsByProvider(defaults)
-  const activeProviderDefaults = selectedProvider
-    ? defaultsByProvider?.[selectedProvider] ?? null
-    : null
-
   return assistantOperatorDefaultsSchema.parse({
-    ...defaults,
-    provider: selectedProvider,
-    defaultsByProvider,
-    codexCommand: activeProviderDefaults?.codexCommand ?? null,
-    model: activeProviderDefaults?.model ?? null,
-    reasoningEffort: activeProviderDefaults?.reasoningEffort ?? null,
-    sandbox: activeProviderDefaults?.sandbox ?? null,
-    approvalPolicy: activeProviderDefaults?.approvalPolicy ?? null,
-    profile: activeProviderDefaults?.profile ?? null,
-    oss: activeProviderDefaults?.oss ?? null,
-    baseUrl: activeProviderDefaults?.baseUrl ?? null,
-    apiKeyEnv: activeProviderDefaults?.apiKeyEnv ?? null,
-    providerName: activeProviderDefaults?.providerName ?? null,
-    headers: activeProviderDefaults?.headers ?? null,
+    provider: defaults.provider ?? null,
+    defaultsByProvider: normalizeAssistantDefaultsByProvider(
+      defaults.defaultsByProvider,
+    ),
+    identityId: defaults.identityId ?? null,
+    failoverRoutes: defaults.failoverRoutes ?? null,
+    account: defaults.account ?? null,
+    selfDeliveryTargets: normalizeAssistantSelfDeliveryTargetMap(
+      defaults.selfDeliveryTargets ?? null,
+    ),
   })
 }
 
-function buildAssistantDefaultsByProvider(input: {
-  existing: AssistantOperatorDefaults | null | undefined
-  patch: Partial<AssistantOperatorDefaults>
-  selectedProvider: AssistantChatProviderValue | null
-}): AssistantOperatorDefaults['defaultsByProvider'] {
-  const nextDefaultsByProvider: NonNullable<AssistantOperatorDefaults['defaultsByProvider']> = {}
+function buildAssistantDefaultsByProvider(
+  existing: AssistantOperatorDefaults | null | undefined,
+  patch: Partial<AssistantOperatorDefaults>,
+): AssistantOperatorDefaults['defaultsByProvider'] {
+  const existingDefaultsByProvider = normalizeAssistantDefaultsByProvider(
+    existing?.defaultsByProvider,
+  )
 
-  for (const provider of assistantChatProviderValues) {
-    const existingDefaults = resolveAssistantProviderDefaults(input.existing, provider)
-    if (existingDefaults) {
-      nextDefaultsByProvider[provider] = existingDefaults
-    }
+  if (!('defaultsByProvider' in patch)) {
+    return existingDefaultsByProvider
   }
 
-  if (input.selectedProvider && hasAssistantProviderConfigPatch(input.patch)) {
-    const existingSelectedDefaults =
-      nextDefaultsByProvider[input.selectedProvider] ?? null
-    nextDefaultsByProvider[input.selectedProvider] =
-      assistantProviderDefaultsEntrySchema.parse(
-        serializeAssistantProviderOperatorDefaults(
-          mergeAssistantProviderConfigsForProvider(
-            input.selectedProvider,
-            existingSelectedDefaults
-              ? {
-                  provider: input.selectedProvider,
-                  ...existingSelectedDefaults,
-                }
-              : null,
-            {
-              provider: input.selectedProvider,
-              codexCommand:
-                'codexCommand' in input.patch
-                  ? input.patch.codexCommand
-                  : undefined,
-              model: 'model' in input.patch ? input.patch.model : undefined,
-              reasoningEffort:
-                'reasoningEffort' in input.patch
-                  ? input.patch.reasoningEffort
-                  : undefined,
-              sandbox:
-                'sandbox' in input.patch ? input.patch.sandbox : undefined,
-              approvalPolicy:
-                'approvalPolicy' in input.patch
-                  ? input.patch.approvalPolicy
-                  : undefined,
-              profile:
-                'profile' in input.patch ? input.patch.profile : undefined,
-              oss: 'oss' in input.patch ? input.patch.oss : undefined,
-              baseUrl:
-                'baseUrl' in input.patch ? input.patch.baseUrl : undefined,
-              apiKeyEnv:
-                'apiKeyEnv' in input.patch ? input.patch.apiKeyEnv : undefined,
-              providerName:
-                'providerName' in input.patch
-                  ? input.patch.providerName
-                  : undefined,
-              headers:
-                'headers' in input.patch ? input.patch.headers ?? null : undefined,
-            },
-          ),
-        ),
-      )
-  }
-
-  return Object.keys(nextDefaultsByProvider).length > 0
-    ? assistantDefaultsByProviderSchema.parse(nextDefaultsByProvider)
-    : null
+  return mergeAssistantDefaultsByProvider(
+    existingDefaultsByProvider,
+    patch.defaultsByProvider,
+  )
 }
 
-function materializeAssistantProviderDefaults(
-  defaults: AssistantOperatorDefaults | null | undefined,
+function normalizeAssistantProviderDefaultsEntry(
   provider: AssistantChatProviderValue,
+  defaults: AssistantProviderDefaultsEntry | null | undefined,
 ): AssistantProviderDefaultsEntry | null {
   if (!defaults) {
     return null
   }
 
-  const nestedDefaults = defaults.defaultsByProvider?.[provider] ?? null
-  if (nestedDefaults) {
-    return assistantProviderDefaultsEntrySchema.parse(
-      serializeAssistantProviderOperatorDefaults({
-        provider,
-        ...nestedDefaults,
-      }),
-    )
-  }
-
-  if (defaults.provider !== provider) {
-    return null
-  }
-
-  const legacyProjection = assistantProviderDefaultsEntrySchema.parse(
+  const normalized = assistantProviderDefaultsEntrySchema.parse(
     serializeAssistantProviderOperatorDefaults({
       provider,
-      codexCommand: defaults.codexCommand,
-      model: defaults.model,
-      reasoningEffort: defaults.reasoningEffort,
-      sandbox: defaults.sandbox,
-      approvalPolicy: defaults.approvalPolicy,
-      profile: defaults.profile,
-      oss: defaults.oss,
-      baseUrl: defaults.baseUrl,
-      apiKeyEnv: defaults.apiKeyEnv,
-      providerName: defaults.providerName,
-      headers: defaults.headers,
+      ...defaults,
     }),
   )
 
-  return hasAssistantProviderDefaultsValues(legacyProjection)
-    ? legacyProjection
-    : null
+  return hasAssistantProviderDefaultsValues(normalized) ? normalized : null
 }
 
-function materializeAssistantDefaultsByProvider(
-  defaults: AssistantOperatorDefaults | null | undefined,
+function normalizeAssistantDefaultsByProvider(
+  defaultsByProvider: AssistantOperatorDefaults['defaultsByProvider'],
 ): AssistantOperatorDefaults['defaultsByProvider'] {
-  if (!defaults) {
+  if (!defaultsByProvider) {
     return null
   }
 
   const normalized: NonNullable<AssistantOperatorDefaults['defaultsByProvider']> = {}
 
   for (const provider of assistantChatProviderValues) {
-    const entry = materializeAssistantProviderDefaults(defaults, provider)
-    if (!entry) {
+    const normalizedEntry = normalizeAssistantProviderDefaultsEntry(
+      provider,
+      defaultsByProvider[provider] ?? null,
+    )
+    if (!normalizedEntry) {
       continue
     }
 
-    normalized[provider] = entry
+    normalized[provider] = normalizedEntry
   }
 
   return Object.keys(normalized).length > 0
     ? assistantDefaultsByProviderSchema.parse(normalized)
+    : null
+}
+
+function mergeAssistantDefaultsByProvider(
+  existing: AssistantOperatorDefaults['defaultsByProvider'],
+  patch: AssistantOperatorDefaults['defaultsByProvider'],
+): AssistantOperatorDefaults['defaultsByProvider'] {
+  if (!patch) {
+    return null
+  }
+
+  const nextDefaultsByProvider = {
+    ...(normalizeAssistantDefaultsByProvider(existing) ?? {}),
+  } as NonNullable<AssistantOperatorDefaults['defaultsByProvider']>
+
+  for (const provider of assistantChatProviderValues) {
+    if (!(provider in patch)) {
+      continue
+    }
+
+    const nextEntry = patch[provider] ?? null
+    if (!nextEntry) {
+      delete nextDefaultsByProvider[provider]
+      continue
+    }
+
+    const normalizedEntry = normalizeAssistantProviderDefaultsEntry(
+      provider,
+      nextEntry,
+    )
+
+    if (normalizedEntry) {
+      nextDefaultsByProvider[provider] = normalizedEntry
+      continue
+    }
+
+    delete nextDefaultsByProvider[provider]
+  }
+
+  return Object.keys(nextDefaultsByProvider).length > 0
+    ? assistantDefaultsByProviderSchema.parse(nextDefaultsByProvider)
     : null
 }
 
@@ -828,7 +755,9 @@ function serializeAssistantOperatorDefaultsForWrite(
 
   return {
     provider: defaults.provider,
-    defaultsByProvider: materializeAssistantDefaultsByProvider(defaults),
+    defaultsByProvider: normalizeAssistantDefaultsByProvider(
+      defaults.defaultsByProvider,
+    ),
     identityId: defaults.identityId,
     failoverRoutes: defaults.failoverRoutes ?? null,
     account: defaults.account ?? null,
@@ -836,22 +765,20 @@ function serializeAssistantOperatorDefaultsForWrite(
   }
 }
 
-function hasAssistantProviderConfigPatch(
-  patch: Partial<AssistantOperatorDefaults>,
-): boolean {
-  return [
-    'codexCommand',
-    'model',
-    'reasoningEffort',
-    'sandbox',
-    'approvalPolicy',
-    'profile',
-    'oss',
-    'baseUrl',
-    'apiKeyEnv',
-    'providerName',
-    'headers',
-  ].some((field) => field in patch)
+function inferAssistantProviderFromDefaultsByProvider(
+  defaultsByProvider: AssistantOperatorDefaults['defaultsByProvider'] | undefined,
+): AssistantChatProviderValue | null {
+  if (!defaultsByProvider) {
+    return null
+  }
+
+  for (const provider of assistantChatProviderValues) {
+    if (defaultsByProvider[provider]) {
+      return provider
+    }
+  }
+
+  return null
 }
 
 function normalizeAssistantSelfDeliveryTargetMap(

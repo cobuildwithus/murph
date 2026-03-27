@@ -1104,7 +1104,6 @@ async function executeProviderTurnWithRecovery(input: {
             codexCommand:
               route.codexCommand ??
               input.input.codexCommand ??
-              input.defaults?.codexCommand ??
               undefined,
             model: route.providerOptions.model,
             reasoningEffort: route.providerOptions.reasoningEffort,

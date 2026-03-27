@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { getEventListeners } from 'node:events'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -67,6 +68,8 @@ import {
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
+const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =
+  'MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR'
 
 afterEach(async () => {
   await Promise.all(
@@ -94,6 +97,70 @@ async function findNewOperationMetadataPath(
   ).find((relativePath) => !existingPaths.has(relativePath))
   assert.ok(operationRelativePath)
   return operationRelativePath
+}
+
+async function findGuardReceiptRoot(): Promise<string> {
+  const receiptRoot = process.env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV]
+  assert.equal(typeof receiptRoot, 'string')
+  assert.ok(receiptRoot)
+  return receiptRoot
+}
+
+async function writeGuardReceipt(input: {
+  operationId: string
+  createdAt: string
+  updatedAt: string
+  actions: Array<
+    | {
+        kind: 'delete'
+        targetRelativePath: string
+      }
+    | {
+        kind: 'jsonl_append' | 'text_write'
+        targetRelativePath: string
+        payload: string
+      }
+  >
+}): Promise<void> {
+  const receiptRoot = await findGuardReceiptRoot()
+  const payloadDirectory = path.join(receiptRoot, input.operationId)
+  await mkdir(payloadDirectory, { recursive: true })
+
+  const actions = await Promise.all(
+    input.actions.map(async (action, index) => {
+      if (action.kind === 'delete') {
+        return action
+      }
+
+      const payloadFileName = `${String(index).padStart(4, '0')}.${action.kind === 'text_write' ? 'txt' : 'jsonl'}`
+      const payloadRelativePath = `${input.operationId}/${payloadFileName}`
+      await writeFile(path.join(receiptRoot, payloadRelativePath), action.payload, 'utf8')
+      return {
+        kind: action.kind,
+        targetRelativePath: action.targetRelativePath,
+        payloadRelativePath,
+        committedPayloadReceipt: {
+          sha256: createHash('sha256').update(action.payload).digest('hex'),
+          byteLength: Buffer.byteLength(action.payload),
+        },
+      }
+    }),
+  )
+
+  await writeFile(
+    path.join(receiptRoot, `${input.operationId}.json`),
+    `${JSON.stringify(
+      {
+        schemaVersion: 'murph.write-operation-guard-receipt.v1',
+        operationId: input.operationId,
+        createdAt: input.createdAt,
+        updatedAt: input.updatedAt,
+        actions,
+      },
+      null,
+      2,
+    )}\n`,
+  )
 }
 
 async function waitForPredicate(
@@ -175,18 +242,9 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
         headers: null,
       },
     },
-    codexCommand: '/opt/bin/codex',
-    model: 'gpt-5.4-mini',
-    reasoningEffort: 'high',
     identityId: 'assistant:primary',
-    sandbox: 'workspace-write' as const,
-    approvalPolicy: 'on-request' as const,
-    profile: 'ops',
-    oss: true,
-    baseUrl: null,
-    apiKeyEnv: null,
-    providerName: null,
-    headers: null,
+    failoverRoutes: null,
+    account: null,
     selfDeliveryTargets: null,
   }
 
@@ -293,10 +351,21 @@ test('sendAssistantMessage treats null provider-option inputs as fallbacks to sa
   try {
     await saveAssistantOperatorDefaultsPatch({
       provider: 'openai-compatible',
-      model: 'gpt-oss:20b',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
+      defaultsByProvider: {
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'gpt-oss:20b',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: null,
+        },
+      },
     })
 
     await sendAssistantMessage({
@@ -2390,7 +2459,10 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
               overwrite: true,
               allowExistingMatch: false,
               allowRaw: false,
-              committedPayloadBase64: Buffer.from(committedContent).toString('base64'),
+              committedPayloadReceipt: {
+                sha256: createHash('sha256').update(committedContent).digest('hex'),
+                byteLength: Buffer.byteLength(committedContent),
+              },
             },
           ],
         },
@@ -2398,6 +2470,18 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
         2,
       )}\n`,
     )
+    await writeGuardReceipt({
+      operationId,
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:01.000Z',
+      actions: [
+        {
+          kind: 'text_write',
+          targetRelativePath,
+          payload: committedContent,
+        },
+      ],
+    })
 
     return {
       provider: 'codex-cli',
@@ -2536,7 +2620,7 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
     paths: [targetRelativePath],
   })
 
-  assert.equal(await readFile(targetPath, 'utf8'), committedContent)
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
@@ -2546,7 +2630,7 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
   assert.equal(session.session.providerSessionId, null)
 })
 
-test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead of being treated like no payload', async () => {
+test('sendAssistantMessage blocks when committed payload receipt metadata is missing', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-service-canonical-missing-committed-payload-'),
   )
@@ -2586,7 +2670,7 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
     assert.ok(Array.isArray(operation.actions))
     operation.actions?.forEach((action) => {
       if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
-        delete action.committedPayloadBase64
+        delete action.committedPayloadReceipt
       }
     })
     await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
@@ -2608,9 +2692,9 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
   })
 
   assertBlockedAssistantResult(result, {
-    actionKind: 'text_write',
-    guardFailureReason: 'invalid_committed_payload',
-    guardFailureTargetPath: targetRelativePath,
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailureTargetPath: null,
     guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
     paths: [targetRelativePath],
   })
@@ -2625,9 +2709,9 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
   assert.equal(session.session.providerSessionId, null)
 })
 
-test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and still rolls back later direct tampering', async () => {
+test('sendAssistantMessage blocks when the trusted guard payload copy is missing', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'murph-assistant-service-canonical-noncanonical-payload-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-missing-guard-receipt-payload-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2658,28 +2742,29 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
       vaultRoot,
       existingOperationPaths,
     )
-    const operationPath = path.join(vaultRoot, operationRelativePath)
-    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+    const operation = JSON.parse(
+      await readFile(path.join(vaultRoot, operationRelativePath), 'utf8'),
+    ) as {
+      operationId: string
+    }
+    const receiptRoot = await findGuardReceiptRoot()
+    const receiptPath = path.join(receiptRoot, `${operation.operationId}.json`)
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as {
       actions?: Array<Record<string, unknown>>
     }
-    assert.ok(Array.isArray(operation.actions))
-    operation.actions?.forEach((action) => {
-      if (
+    const payloadRelativePath = receipt.actions?.find(
+      (action) =>
         action.kind === 'text_write' &&
         action.targetRelativePath === targetRelativePath &&
-        typeof action.committedPayloadBase64 === 'string'
-      ) {
-        action.committedPayloadBase64 = action.committedPayloadBase64.endsWith('=')
-          ? action.committedPayloadBase64.replace(/=+$/u, '')
-          : `${action.committedPayloadBase64}\n`
-      }
-    })
-    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+        typeof action.payloadRelativePath === 'string',
+    )?.payloadRelativePath
+    assert.equal(typeof payloadRelativePath, 'string')
+    await rm(path.join(receiptRoot, payloadRelativePath as string), { force: true })
     await writeFile(targetPath, 'tampered-after-noncanonical-payload\n')
 
     return {
       provider: 'codex-cli',
-      providerSessionId: 'thread-noncanonical-committed-payload',
+      providerSessionId: 'thread-missing-guard-receipt-payload',
       response: 'assistant reply',
       stderr: '',
       stdout: '',
@@ -2689,7 +2774,7 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:canonical-noncanonical-committed-payload',
+    alias: 'chat:canonical-missing-guard-receipt-payload',
     prompt: 'Update the vault title.',
   })
 
@@ -2705,15 +2790,15 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'chat:canonical-noncanonical-committed-payload',
+    alias: 'chat:canonical-missing-guard-receipt-payload',
   })
   assert.equal(session.session.turnCount, 0)
   assert.equal(session.session.providerSessionId, null)
 })
 
-test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossible non-UTF-8 write bytes', async () => {
+test('sendAssistantMessage blocks when the trusted guard payload copy no longer matches its receipt digest', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'murph-assistant-service-canonical-binary-payload-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-mismatched-guard-receipt-payload-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2744,21 +2829,32 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
       vaultRoot,
       existingOperationPaths,
     )
-    const operationPath = path.join(vaultRoot, operationRelativePath)
-    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+    const operation = JSON.parse(
+      await readFile(path.join(vaultRoot, operationRelativePath), 'utf8'),
+    ) as {
+      operationId: string
+    }
+    const receiptRoot = await findGuardReceiptRoot()
+    const receiptPath = path.join(receiptRoot, `${operation.operationId}.json`)
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as {
       actions?: Array<Record<string, unknown>>
     }
-    assert.ok(Array.isArray(operation.actions))
-    operation.actions?.forEach((action) => {
-      if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
-        action.committedPayloadBase64 = '/w=='
-      }
-    })
-    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+    const payloadRelativePath = receipt.actions?.find(
+      (action) =>
+        action.kind === 'text_write' &&
+        action.targetRelativePath === targetRelativePath &&
+        typeof action.payloadRelativePath === 'string',
+    )?.payloadRelativePath
+    assert.equal(typeof payloadRelativePath, 'string')
+    await writeFile(
+      path.join(receiptRoot, payloadRelativePath as string),
+      'tampered-receipt-copy\n',
+      'utf8',
+    )
 
     return {
       provider: 'codex-cli',
-      providerSessionId: 'thread-binary-committed-payload',
+      providerSessionId: 'thread-mismatched-guard-receipt-payload',
       response: 'assistant reply',
       stderr: '',
       stdout: '',
@@ -2768,7 +2864,7 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:canonical-binary-committed-payload',
+    alias: 'chat:canonical-mismatched-guard-receipt-payload',
     prompt: 'Update the vault title.',
   })
 
@@ -2784,10 +2880,235 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'chat:canonical-binary-committed-payload',
+    alias: 'chat:canonical-mismatched-guard-receipt-payload',
   })
   assert.equal(session.session.turnCount, 0)
   assert.equal(session.session.providerSessionId, null)
+})
+
+test('sendAssistantMessage blocks brand-new fake committed metadata from authorizing direct bank writes', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-fake-committed-metadata-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/fake-provider-write.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const operationId = 'op_fake_provider_write'
+  const metadataPath = path.join(vaultRoot, `.runtime/operations/${operationId}.json`)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(metadataPath), { recursive: true })
+    await writeFile(targetPath, 'provider direct write\n')
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'murph.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_fake_metadata_test',
+          summary: 'Synthetic committed metadata should not authorize writes.',
+          status: 'committed',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:01.000Z',
+          occurredAt: '2026-03-28T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath,
+              stageRelativePath: `.runtime/operations/${operationId}/payloads/0000.txt`,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+              committedPayloadReceipt: {
+                sha256: createHash('sha256').update('provider direct write\n').digest('hex'),
+                byteLength: Buffer.byteLength('provider direct write\n'),
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-fake-committed-metadata',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:fake-committed-metadata',
+    prompt: 'Write directly to the bank file.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailureTargetPath: null,
+    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_provider_write\.json$/u,
+    paths: [targetRelativePath],
+  })
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+})
+
+test('sendAssistantMessage does not create raw files from smuggled protected target paths in fake metadata', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-smuggled-target-path-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const smuggledTargetPath = 'bank/../raw/evil.md'
+  const rawTargetPath = path.join(vaultRoot, 'raw', 'evil.md')
+  const operationId = 'op_fake_smuggled_target'
+  const metadataPath = path.join(vaultRoot, `.runtime/operations/${operationId}.json`)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(metadataPath), { recursive: true })
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'murph.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_smuggled_target_test',
+          summary: 'Smuggled target paths must not be normalized into raw writes.',
+          status: 'committed',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:01.000Z',
+          occurredAt: '2026-03-28T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath: smuggledTargetPath,
+              stageRelativePath: `.runtime/operations/${operationId}/payloads/0000.txt`,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+              committedPayloadReceipt: {
+                sha256: createHash('sha256').update('smuggled\n').digest('hex'),
+                byteLength: Buffer.byteLength('smuggled\n'),
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-smuggled-target-path',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:smuggled-target-path',
+    prompt: 'Use fake metadata to smuggle a raw write.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_smuggled_target\.json$/u,
+    paths: [],
+  })
+  await assert.rejects(readFile(rawTargetPath, 'utf8'), /ENOENT/u)
+})
+
+test('sendAssistantMessage ignores attacker-controlled stage paths when committed payload receipts are absent', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-stage-path-without-receipt-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/stage-path-should-not-authorize.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const attackerPayloadRelativePath = 'raw/inbox/captures/cap_fake/attachments/1/evil.txt'
+  const attackerPayloadPath = path.join(vaultRoot, attackerPayloadRelativePath)
+  const operationId = 'op_fake_stage_path_without_receipt'
+  const metadataPath = path.join(vaultRoot, `.runtime/operations/${operationId}.json`)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(attackerPayloadPath), { recursive: true })
+    await mkdir(path.dirname(metadataPath), { recursive: true })
+    await writeFile(attackerPayloadPath, 'attacker-controlled payload\n', 'utf8')
+    await writeFile(targetPath, 'provider direct write\n', 'utf8')
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'murph.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_stage_path_without_receipt_test',
+          summary: 'Missing receipts must not fall back to stageRelativePath.',
+          status: 'committed',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:01.000Z',
+          occurredAt: '2026-03-28T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath,
+              stageRelativePath: attackerPayloadRelativePath,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-stage-path-without-receipt',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:stage-path-without-receipt',
+    prompt: 'Try to preserve a direct write with fake stage metadata.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_stage_path_without_receipt\.json$/u,
+    paths: [targetRelativePath],
+  })
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+  assert.equal(await readFile(attackerPayloadPath, 'utf8'), 'attacker-controlled payload\n')
 })
 
 test('sendAssistantMessage prefers the canonical write guard error when the provider both writes directly and throws', async () => {

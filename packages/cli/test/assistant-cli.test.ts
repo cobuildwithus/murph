@@ -1484,8 +1484,22 @@ test.sequential(
     await saveDefaultVaultConfig(vaultRoot, homeRoot)
     await saveAssistantOperatorDefaultsPatch(
       {
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'xhigh',
+        provider: 'codex-cli',
+        defaultsByProvider: {
+          'codex-cli': {
+            codexCommand: null,
+            model: 'gpt-5.4-mini',
+            reasoningEffort: 'xhigh',
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: null,
+            apiKeyEnv: null,
+            providerName: null,
+            headers: null,
+          },
+        },
       },
       homeRoot,
     )
@@ -1493,8 +1507,11 @@ test.sequential(
     const config = await readOperatorConfig(homeRoot)
     assert.ok(config)
     assert.equal(config.defaultVault, path.join('~', 'default-vault'))
-    assert.equal(config.assistant?.model, 'gpt-5.4-mini')
-    assert.equal(config.assistant?.reasoningEffort, 'xhigh')
+    assert.equal(config.assistant?.defaultsByProvider?.['codex-cli']?.model, 'gpt-5.4-mini')
+    assert.equal(
+      config.assistant?.defaultsByProvider?.['codex-cli']?.reasoningEffort,
+      'xhigh',
+    )
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

@@ -46,7 +46,10 @@ import {
   type AssistantModelDiscoveryResult,
   resolveAssistantModelCatalog,
 } from '../src/assistant/provider-catalog.js'
-import { buildAssistantProviderDefaultsPatch } from '../src/operator-config.js'
+import {
+  buildAssistantProviderDefaultsPatch,
+  resolveAssistantProviderDefaults,
+} from '../src/operator-config.js'
 import { serializeAssistantProviderSessionOptions } from '../src/assistant/provider-config.js'
 import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
@@ -117,28 +120,14 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth 
             },
           },
         },
-        codexCommand: null,
-        model: 'llama3.2:latest',
-        reasoningEffort: null,
         identityId: null,
-        sandbox: null,
-        approvalPolicy: null,
-        profile: null,
-        oss: false,
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiKeyEnv: 'OLLAMA_API_KEY',
-        providerName: 'ollama',
-        headers: {
-          Authorization: 'Bearer override-token',
-          'X-Foo': 'bar',
-        },
         failoverRoutes: null,
         account: null,
         selfDeliveryTargets: null,
       },
       provider: 'openai-compatible',
-      providerOptions: {
-        model: 'llama3.2:latest',
+      providerConfig: {
+        model: 'gpt-oss:20b',
         reasoningEffort: null,
         sandbox: null,
         approvalPolicy: null,
@@ -152,27 +141,88 @@ test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth 
           'X-Foo': 'bar',
         },
       },
-      model: 'gpt-oss:20b',
-      reasoningEffort: null,
     }),
     {
       provider: 'openai-compatible',
-      codexCommand: null,
-      model: 'gpt-oss:20b',
-      reasoningEffort: null,
-      sandbox: null,
-      approvalPolicy: null,
-      profile: null,
-      oss: false,
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
-      headers: {
-        Authorization: 'Bearer override-token',
-        'X-Foo': 'bar',
+      defaultsByProvider: {
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'gpt-oss:20b',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+            'X-Foo': 'bar',
+          },
+        },
       },
     },
   )
+})
+
+test('resolveAssistantProviderDefaults can read inactive saved provider entries', () => {
+  const openAiDefaults = resolveAssistantProviderDefaults(
+    {
+      provider: 'codex-cli',
+      defaultsByProvider: {
+        'codex-cli': {
+          codexCommand: '/opt/bin/codex',
+          model: 'gpt-5.4',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: 'ops',
+          oss: true,
+          baseUrl: null,
+          apiKeyEnv: null,
+          providerName: null,
+          headers: null,
+        },
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'llama3.2:latest',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+          },
+        },
+      },
+      identityId: null,
+      failoverRoutes: null,
+      account: null,
+      selfDeliveryTargets: null,
+    },
+    'openai-compatible',
+  )
+
+  assert.deepEqual(openAiDefaults, {
+    codexCommand: null,
+    model: 'llama3.2:latest',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      Authorization: 'Bearer override-token',
+    },
+  })
 })
 
 test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {

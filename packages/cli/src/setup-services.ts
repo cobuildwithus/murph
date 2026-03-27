@@ -13,8 +13,10 @@ import {
 import { VaultCliError } from './vault-cli-errors.js'
 import { resolveEffectiveTopLevelToken } from './command-helpers.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
   readOperatorConfig,
+  resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
   type AssistantOperatorDefaults,
@@ -57,7 +59,6 @@ import {
 } from './setup-services/shell.js'
 import {
   assistantProviderConfigsEqual,
-  serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
 import {
   buildBaseFormulaSpecs,
@@ -1249,9 +1250,30 @@ async function ensureAssistantDefaultSelection(input: {
 function assistantSelectionToOperatorDefaults(
   assistant: SetupConfiguredAssistant,
 ): Partial<AssistantOperatorDefaults> {
+  if (!assistant.provider) {
+    return {
+      provider: null,
+      account: assistant.account ?? null,
+    }
+  }
+
   return {
-    provider: assistant.provider,
-    ...serializeAssistantProviderOperatorDefaults(assistant),
+    ...buildAssistantProviderDefaultsPatch({
+      defaults: null,
+      provider: assistant.provider,
+      providerConfig: {
+        model: assistant.model,
+        reasoningEffort: assistant.reasoningEffort,
+        sandbox: assistant.sandbox,
+        approvalPolicy: assistant.approvalPolicy,
+        profile: assistant.profile,
+        oss: assistant.oss === true,
+        baseUrl: assistant.baseUrl,
+        apiKeyEnv: assistant.apiKeyEnv,
+        providerName: assistant.providerName,
+        headers: null,
+      },
+    }),
     account: assistant.account ?? null,
   }
 }
@@ -1260,10 +1282,29 @@ function assistantOperatorDefaultsMatch(
   existing: AssistantOperatorDefaults | null,
   next: Partial<AssistantOperatorDefaults>,
 ): boolean {
+  const nextProvider = next.provider ?? null
+  const nextProviderDefaults =
+    nextProvider && next.defaultsByProvider
+      ? next.defaultsByProvider[nextProvider] ?? null
+      : null
+
   return (
     normalizeNullableConfigField(existing?.provider) ===
-      normalizeNullableConfigField(next.provider) &&
-    assistantProviderConfigsEqual(existing, next) &&
+      normalizeNullableConfigField(nextProvider) &&
+    assistantProviderConfigsEqual(
+      existing?.provider
+        ? {
+            provider: existing.provider,
+            ...(resolveAssistantProviderDefaults(existing, existing.provider) ?? {}),
+          }
+        : null,
+      nextProvider
+        ? {
+            provider: nextProvider,
+            ...(nextProviderDefaults ?? {}),
+          }
+        : null,
+    ) &&
     JSON.stringify(existing?.account ?? null) ===
       JSON.stringify(next.account ?? null)
   )

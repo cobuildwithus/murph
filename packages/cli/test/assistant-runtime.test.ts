@@ -6,15 +6,17 @@ import { Box, Static, type Key } from 'ink'
 import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
-  getAssistantSession,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
 } from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
+import { readAssistantSession } from '../src/assistant/store/persistence.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   resolveOperatorConfigPath,
   resolveAssistantOperatorDefaults,
+  resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../src/operator-config.js'
 import {
@@ -441,8 +443,22 @@ test('sendAssistantMessage reuses saved assistant model defaults and persists re
   try {
     await saveAssistantOperatorDefaultsPatch(
       {
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'high',
+        provider: 'codex-cli',
+        defaultsByProvider: {
+          'codex-cli': {
+            codexCommand: null,
+            model: 'gpt-5.4-mini',
+            reasoningEffort: 'high',
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: null,
+            apiKeyEnv: null,
+            providerName: null,
+            headers: null,
+          },
+        },
       },
       homeRoot,
     )
@@ -488,12 +504,22 @@ test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', a
     await saveAssistantOperatorDefaultsPatch(
       {
         provider: 'openai-compatible',
-        model: 'gpt-oss:20b',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiKeyEnv: 'OLLAMA_API_KEY',
-        providerName: 'ollama',
-        headers: {
-          'X-Test': 'hello',
+        defaultsByProvider: {
+          'openai-compatible': {
+            codexCommand: null,
+            model: 'gpt-oss:20b',
+            reasoningEffort: null,
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            apiKeyEnv: 'OLLAMA_API_KEY',
+            providerName: 'ollama',
+            headers: {
+              'X-Test': 'hello',
+            },
+          },
         },
       },
       homeRoot,
@@ -669,9 +695,6 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
                 headers: null,
               },
             },
-            codexCommand: '/opt/bin/codex',
-            model: 'gpt-oss:20b',
-            reasoningEffort: null,
             identityId: 'assistant:primary',
             account: {
               source: 'codex-rpc+codex-auth-json',
@@ -911,8 +934,8 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
   ])
 })
 
-test('legacy flat assistant operator config survives unrelated writes and rewrites to nested provider defaults', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-legacy-config-'))
+test('assistant operator config keeps nested provider defaults across unrelated writes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-config-'))
   const homeRoot = path.join(parent, 'home')
   cleanupPaths.push(parent)
 
@@ -927,20 +950,25 @@ test('legacy flat assistant operator config survives unrelated writes and rewrit
         defaultVault: null,
         assistant: {
           provider: 'openai-compatible',
-          model: 'llama3.2:latest',
-          reasoningEffort: null,
-          identityId: 'assistant:primary',
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          providerName: 'ollama',
-          headers: {
-            Authorization: 'Bearer override-token',
-            'X-Foo': 'bar',
+          defaultsByProvider: {
+            'openai-compatible': {
+              codexCommand: null,
+              model: 'llama3.2:latest',
+              reasoningEffort: null,
+              sandbox: null,
+              approvalPolicy: null,
+              profile: null,
+              oss: false,
+              baseUrl: 'http://127.0.0.1:11434/v1',
+              apiKeyEnv: 'OLLAMA_API_KEY',
+              providerName: 'ollama',
+              headers: {
+                Authorization: 'Bearer override-token',
+                'X-Foo': 'bar',
+              },
+            },
           },
+          identityId: 'assistant:primary',
           failoverRoutes: null,
           account: null,
           selfDeliveryTargets: null,
@@ -969,12 +997,16 @@ test('legacy flat assistant operator config survives unrelated writes and rewrit
   )
 
   const defaults = await resolveAssistantOperatorDefaults(homeRoot)
+  const providerDefaults = resolveAssistantProviderDefaults(
+    defaults,
+    'openai-compatible',
+  )
   assert.equal(defaults?.provider, 'openai-compatible')
-  assert.equal(defaults?.model, 'llama3.2:latest')
-  assert.equal(defaults?.baseUrl, 'http://127.0.0.1:11434/v1')
-  assert.equal(defaults?.apiKeyEnv, 'OLLAMA_API_KEY')
-  assert.equal(defaults?.providerName, 'ollama')
-  assert.deepEqual(defaults?.headers, {
+  assert.equal(providerDefaults?.model, 'llama3.2:latest')
+  assert.equal(providerDefaults?.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(providerDefaults?.apiKeyEnv, 'OLLAMA_API_KEY')
+  assert.equal(providerDefaults?.providerName, 'ollama')
+  assert.deepEqual(providerDefaults?.headers, {
     Authorization: 'Bearer override-token',
     'X-Foo': 'bar',
   })
@@ -1008,7 +1040,104 @@ test('legacy flat assistant operator config survives unrelated writes and rewrit
   })
 })
 
-test('legacy session codexPromptVersion migrates into providerState on read', async () => {
+test('updating one provider defaults entry preserves other saved provider entries', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-provider-map-'))
+  const homeRoot = path.join(parent, 'home')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      provider: 'codex-cli',
+      defaultsByProvider: {
+        'codex-cli': {
+          codexCommand: '/opt/bin/codex',
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: 'ops',
+          oss: true,
+          baseUrl: null,
+          apiKeyEnv: null,
+          providerName: null,
+          headers: null,
+        },
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'llama3.2:latest',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+          },
+        },
+      },
+    },
+    homeRoot,
+  )
+
+  const existing = await resolveAssistantOperatorDefaults(homeRoot)
+  await saveAssistantOperatorDefaultsPatch(
+    buildAssistantProviderDefaultsPatch({
+      defaults: existing,
+      provider: 'openai-compatible',
+      providerConfig: {
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+        },
+      },
+    }),
+    homeRoot,
+  )
+
+  const updated = await resolveAssistantOperatorDefaults(homeRoot)
+  assert.deepEqual(updated?.defaultsByProvider?.['codex-cli'], {
+    codexCommand: '/opt/bin/codex',
+    model: 'gpt-5.4-mini',
+    reasoningEffort: 'high',
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    profile: 'ops',
+    oss: true,
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    headers: null,
+  })
+  assert.deepEqual(updated?.defaultsByProvider?.['openai-compatible'], {
+    codexCommand: null,
+    model: 'gpt-oss:20b',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      Authorization: 'Bearer override-token',
+    },
+  })
+})
+
+test('readAssistantSession rejects legacy codexPromptVersion session records', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-legacy-session-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -1048,8 +1177,12 @@ test('legacy session codexPromptVersion migrates into providerState on read', as
     'utf8',
   )
 
-  const migrated = await getAssistantSession(vaultRoot, resolved.session.sessionId)
-  assert.equal(migrated.providerState?.codexCli?.promptVersion, '2026-03-20.1')
+  await assert.rejects(
+    readAssistantSession({
+      paths,
+      sessionId: resolved.session.sessionId,
+    }),
+  )
 })
 
 
