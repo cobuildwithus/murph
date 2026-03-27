@@ -7,7 +7,10 @@ import { promisify } from "node:util";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = ["packages", "apps", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
-const allowedSourceArtifacts = new Set(["packages/web/postcss.config.mjs"]);
+const allowedSourceArtifacts = new Set([
+  "packages/web/postcss.config.mjs",
+  "apps/web/postcss.config.mjs",
+]);
 const blockedTrackedArtifactDirectoryNames = new Set(["dist", ".next", ".test-dist"]);
 const execFileAsync = promisify(execFile);
 const nextEnvCommonLines = [
