@@ -558,6 +558,54 @@ test('sendAssistantMessage reuses the same isolated provider workspace across re
   assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
 })
 
+test('sendAssistantMessage preserves nested in-vault working directories inside the isolated workspace', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nested-working-dir-'))
+  const vaultRoot = path.join(parent, 'vault')
+  const nestedWorkingDirectory = path.join(vaultRoot, 'notes', 'daily')
+  cleanupPaths.push(parent)
+
+  await mkdir(nestedWorkingDirectory, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-nested-working-dir',
+    response: 'assistant reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:nested-working-dir',
+    prompt: 'Use the nested working directory.',
+    workingDirectory: nestedWorkingDirectory,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  const expectedWorkspaceRoot = path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    'workspaces',
+    result.session.sessionId,
+  )
+  const expectedWorkspaceDirectory = path.join(
+    expectedWorkspaceRoot,
+    'notes',
+    'daily',
+  )
+
+  assert.equal(firstCall?.workingDirectory, expectedWorkspaceDirectory)
+  assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
+  assert.equal(
+    path.relative(expectedWorkspaceRoot, firstCall?.workingDirectory ?? ''),
+    path.join('notes', 'daily'),
+  )
+  assert.match(
+    await readFile(path.join(expectedWorkspaceRoot, 'README.md'), 'utf8'),
+    /isolated assistant workspace/u,
+  )
+})
+
 test('sendAssistantMessage keeps the requested working directory for non-shell providers', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nonshell-working-dir-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -2754,6 +2802,60 @@ test('sendAssistantMessage prefers the canonical write guard error when the prov
   })
 
   assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
+})
+
+test('sendAssistantMessage preserves a recovered provider session on blocked canonical-write turns', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-recoverable-error-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const metadataPath = path.join(vaultRoot, 'vault.json')
+  const beforeMetadata = await readFile(metadataPath, 'utf8')
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'broken-after-recoverable-provider-error',
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    throw new VaultCliError(
+      'ASSISTANT_CODEX_CONNECTION_LOST',
+      'Codex CLI lost its connection after mutating the vault.',
+      {
+        connectionLost: true,
+        providerSessionId: 'thread-recover-blocked-1',
+        retryable: true,
+      },
+    )
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-recoverable-error',
+    prompt: 'Inspect the vault.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    paths: ['vault.json'],
+    providerErrorCode: 'ASSISTANT_CODEX_CONNECTION_LOST',
+  })
+  assert.equal(result.session.providerSessionId, 'thread-recover-blocked-1')
+  assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-recoverable-error',
+  })
+  assert.equal(session.session.providerSessionId, 'thread-recover-blocked-1')
+  assert.equal(session.session.turnCount, 0)
 })
 
 test('sendAssistantMessage reconstructs audited ledger appends and rolls back later shard tampering', async () => {

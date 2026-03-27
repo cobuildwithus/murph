@@ -659,6 +659,7 @@ function buildCanonicalWriteGuardError(input: {
   providerError: unknown
 }): VaultCliError {
   const details: Record<string, unknown> = {
+    ...readAssistantProviderErrorContext(input.providerError),
     pathCount: input.paths.length,
     paths: input.paths,
   }
@@ -703,6 +704,21 @@ function buildCanonicalWriteGuardError(input: {
     formatCanonicalWriteGuardMessage(input),
     details,
   )
+}
+
+function readAssistantProviderErrorContext(
+  error: unknown,
+): Record<string, unknown> {
+  if (!error || typeof error !== 'object' || !('context' in error)) {
+    return {}
+  }
+
+  const context = (error as { context?: unknown }).context
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return {}
+  }
+
+  return { ...(context as Record<string, unknown>) }
 }
 
 function formatCanonicalWriteGuardMessage(input: {

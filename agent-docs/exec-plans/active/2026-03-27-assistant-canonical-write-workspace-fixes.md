@@ -62,7 +62,7 @@ Updated: 2026-03-27
 
 - Focused commands:
   - `pnpm exec tsc -p packages/cli/tsconfig.typecheck.json --pretty false --noEmit` -> passed
-  - `pnpm exec vitest run packages/cli/test/assistant-service.test.ts packages/cli/test/assistant-runtime.test.ts --no-coverage --maxWorkers 1` -> passed (`123` tests)
+  - `pnpm exec vitest run packages/cli/test/assistant-service.test.ts packages/cli/test/assistant-runtime.test.ts --no-coverage --maxWorkers 1` -> passed (`127` tests)
 - Required commands:
   - `pnpm typecheck` -> failed outside this lane in existing workspace build/type wiring (`packages/core/src/ids.ts`, `packages/core/src/operations/canonical-write-lock.ts`) while building against `packages/runtime-state/dist`
   - `pnpm test` -> failed outside this lane with pre-existing CLI/runtime-state/build drift and unrelated CLI expectation failures (`packages/cli/test/{cli-expansion-workout,incur-smoke,list-cursor-compat,runtime,search-runtime,setup-cli,stdin-input}.test.ts`)
@@ -77,9 +77,10 @@ Updated: 2026-03-27
 - The canonical-write guard now snapshots operation status and preserves writes that were staged before the snapshot but committed during the provider turn.
 - Ink now treats `ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED` as informational status UI and skips transcript error persistence for that guardrail.
 - Focused regressions cover workspace reuse, non-shell/outside-vault cwd preservation, same-process and external lock wait/abort behavior, staged-before-snapshot committed writes, and the Ink canonical-write presentation helper.
+- Follow-up regressions also cover nested in-vault workspace path preservation and blocked-turn recovery when the underlying provider failure is resumable.
 
 ## Audit passes
 
 - `simplify` audit: completed; one actionable finding about over-eager workspace resolution for non-shell providers was fixed in this lane.
 - `test-coverage-audit`: completed; gaps around outside-vault direct-CLI cwd, external lock behavior, and Ink canonical-write UX were covered in this lane.
-- `task-finish-review`: attempted via spawned subagent, but the agent pool returned a usage-limit error before producing review output. This remains an environment/tooling block rather than an unattempted audit pass.
+- `task-finish-review`: completed on retry after follow-up fixes; final review reported no high or medium findings, with only a documentation-freshness note addressed in this close-out.

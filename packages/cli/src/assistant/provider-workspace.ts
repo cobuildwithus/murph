@@ -23,15 +23,24 @@ export async function resolveAssistantProviderWorkingDirectory(input: {
     ASSISTANT_PROVIDER_WORKSPACE_DIRECTORY,
     input.sessionId,
   )
+  const workspaceRelativeDirectory = path.relative(
+    absoluteVaultRoot,
+    requestedWorkingDirectory,
+  )
+  const workspaceDirectory =
+    workspaceRelativeDirectory.length > 0
+      ? path.join(workspaceRoot, workspaceRelativeDirectory)
+      : workspaceRoot
   const readmePath = path.join(workspaceRoot, ASSISTANT_PROVIDER_WORKSPACE_README)
   const readme = buildAssistantProviderWorkspaceReadme()
 
   await mkdir(workspaceRoot, { recursive: true })
+  await mkdir(workspaceDirectory, { recursive: true })
   if ((await readExistingWorkspaceReadme(readmePath)) !== readme) {
     await writeFile(readmePath, readme, 'utf8')
   }
 
-  return workspaceRoot
+  return workspaceDirectory
 }
 
 function buildAssistantProviderWorkspaceReadme(): string {
