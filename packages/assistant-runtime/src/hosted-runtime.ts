@@ -196,10 +196,12 @@ export async function runHostedAssistantRuntimeJobInProcess(
           case "device-sync.wake":
             break;
           case "vault.share.accepted":
-            shareImportResult = await importSharePackIntoVault({
-              vaultRoot: restored.vaultRoot,
-              pack: input.request.dispatch.event.pack,
-            });
+            if (input.request.dispatch.event.pack) {
+              shareImportResult = await importSharePackIntoVault({
+                vaultRoot: restored.vaultRoot,
+                pack: input.request.dispatch.event.pack,
+              });
+            }
             break;
           default:
             assertNever(input.request.dispatch.event);
@@ -993,7 +995,8 @@ function summarizeDispatch(
       const importedProtocols = metrics.shareImportResult?.protocols.length ?? 0;
       const importedRecipes = metrics.shareImportResult?.recipes.length ?? 0;
       const loggedMeal = metrics.shareImportResult?.meal ? " Logged one meal entry from the shared food." : "";
-      return `Imported share pack "${dispatch.event.pack.title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
+      const packTitle = dispatch.event.pack?.title ?? dispatch.event.previewTitle ?? "shared bundle";
+      return `Imported share pack "${packTitle}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
     }
     default:
       return assertNever(dispatch.event);

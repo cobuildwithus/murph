@@ -7,6 +7,7 @@ import {
   redactAssistantDisplayPath,
   resolveAssistantStatePaths,
 } from './store.js'
+import type { AssistantStateDocumentListEntry } from '../assistant-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   isMissingFileError,
@@ -25,11 +26,6 @@ export interface AssistantStateDocumentSnapshot {
   value: JsonObject | null
 }
 
-export interface AssistantStateDocumentListEntry {
-  docId: string
-  documentPath: string
-  updatedAt: string
-}
 
 export interface AssistantStateGetDocumentInput {
   docId: string

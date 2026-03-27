@@ -48,6 +48,7 @@ export interface HostedExecutionSharePackReference {
 export interface HostedExecutionVaultShareAcceptedEvent
   extends HostedExecutionBaseEvent, HostedExecutionSharePackReference {
   kind: "vault.share.accepted";
+  pack?: SharePack | null;
   previewTitle: string | null;
 }
 
