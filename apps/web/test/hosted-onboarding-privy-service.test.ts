@@ -1,13 +1,9 @@
 import { HostedBillingStatus, HostedInviteStatus, HostedMemberStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
 const mocks = vi.hoisted(() => ({
   createHostedSession: vi.fn(),
-  requireHostedPrivyIdentity: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  requireHostedPrivyIdentity: mocks.requireHostedPrivyIdentity,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -49,7 +45,7 @@ import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/ser
 
 const NOW = new Date("2026-03-26T12:00:00.000Z");
 
-function makeIdentity(overrides: Partial<ReturnType<typeof baseIdentity>> = {}) {
+function makeIdentity(overrides: Partial<HostedPrivyIdentity> = {}) {
   return {
     ...baseIdentity(),
     ...overrides,
@@ -64,9 +60,8 @@ function makeIdentity(overrides: Partial<ReturnType<typeof baseIdentity>> = {}) 
   };
 }
 
-function baseIdentity() {
+function baseIdentity(): HostedPrivyIdentity {
   return {
-    linkedAccounts: [],
     phone: {
       number: "+15551234567",
       verifiedAt: 1742990400,
@@ -133,7 +128,6 @@ function makeInvite(member: ReturnType<typeof makeMember>, overrides: Record<str
 describe("completeHostedPrivyVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireHostedPrivyIdentity.mockResolvedValue(makeIdentity());
     mocks.createHostedSession.mockResolvedValue({
       expiresAt: new Date("2026-04-25T12:00:00.000Z"),
       sessionId: "session_123",
@@ -158,14 +152,13 @@ describe("completeHostedPrivyVerification", () => {
     };
 
     const result = await completeHostedPrivyVerification({
-      identityToken: "identity-token",
+      identity: makeIdentity(),
       inviteCode: "invite-code",
       now: NOW,
       prisma,
       userAgent: "test-agent",
     });
 
-    expect(mocks.requireHostedPrivyIdentity).toHaveBeenCalledWith("identity-token");
     expect(prisma.hostedMember.update).toHaveBeenCalledWith({
       where: {
         id: "member_123",
@@ -238,7 +231,7 @@ describe("completeHostedPrivyVerification", () => {
     };
 
     const result = await completeHostedPrivyVerification({
-      identityToken: "identity-token",
+      identity: makeIdentity(),
       now: NOW,
       prisma,
       userAgent: "public-agent",
@@ -319,7 +312,7 @@ describe("completeHostedPrivyVerification", () => {
     };
 
     const result = await completeHostedPrivyVerification({
-      identityToken: "identity-token",
+      identity: makeIdentity(),
       inviteCode: "invite-code",
       now: NOW,
       prisma,
@@ -375,7 +368,7 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        identityToken: "identity-token",
+        identity: makeIdentity(),
         now: NOW,
         prisma,
       }),
@@ -390,15 +383,6 @@ describe("completeHostedPrivyVerification", () => {
   });
 
   it("rejects invite verification when the Privy phone number does not match the invited number", async () => {
-    mocks.requireHostedPrivyIdentity.mockResolvedValue(
-      makeIdentity({
-        phone: {
-          number: "+15550000000",
-          verifiedAt: 1742990400,
-        },
-      }),
-    );
-
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
     const prisma: any = {
@@ -412,7 +396,12 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        identityToken: "identity-token",
+        identity: makeIdentity({
+          phone: {
+            number: "+15550000000",
+            verifiedAt: 1742990400,
+          },
+        }),
         inviteCode: "invite-code",
         now: NOW,
         prisma,
@@ -427,17 +416,6 @@ describe("completeHostedPrivyVerification", () => {
   });
 
   it("rejects invite verification when the existing member wallet conflicts with the verified Privy wallet", async () => {
-    mocks.requireHostedPrivyIdentity.mockResolvedValue(
-      makeIdentity({
-        wallet: {
-          address: "0x1111111111111111111111111111111111111111",
-          chainType: "ethereum",
-          id: "wallet_conflict",
-          type: "wallet",
-        },
-      }),
-    );
-
     const inviteMember = makeMember({
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
       walletChainType: "ethereum",
@@ -456,7 +434,14 @@ describe("completeHostedPrivyVerification", () => {
 
     await expect(
       completeHostedPrivyVerification({
-        identityToken: "identity-token",
+        identity: makeIdentity({
+          wallet: {
+            address: "0x1111111111111111111111111111111111111111",
+            chainType: "ethereum",
+            id: "wallet_conflict",
+            type: "wallet",
+          },
+        }),
         inviteCode: "invite-code",
         now: NOW,
         prisma,

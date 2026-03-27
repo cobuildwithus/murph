@@ -1,24 +1,26 @@
 import { verifyIdentityToken } from "@privy-io/node";
+import { cookies } from "next/headers";
 
 import { hostedOnboardingError } from "./errors";
 import {
-  extractHostedPrivyPhoneAccount,
-  extractHostedPrivyWalletAccount,
+  type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
   type HostedPrivyWalletAccount,
-  type PrivyLinkedAccountLike,
+  resolveHostedPrivyLinkedAccountState,
 } from "./privy-shared";
 import { getHostedOnboardingEnvironment } from "./runtime";
 
-interface HostedPrivyUser {
+interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
   id: string;
-  linked_accounts?: unknown;
+}
+
+interface HostedPrivyCookieStore {
+  get(name: string): { value?: string } | undefined;
 }
 
 const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
 export interface HostedPrivyIdentity {
-  linkedAccounts: PrivyLinkedAccountLike[];
   phone: HostedPrivyPhoneAccount;
   userId: string;
   wallet: HostedPrivyWalletAccount;
@@ -26,9 +28,7 @@ export interface HostedPrivyIdentity {
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
   const user = await verifyHostedPrivyIdentityToken(identityToken);
-  const linkedAccounts = coerceLinkedAccounts(user.linked_accounts);
-  const phone = extractHostedPrivyPhoneAccount(linkedAccounts);
-  const wallet = extractHostedPrivyWalletAccount(linkedAccounts, "ethereum");
+  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, "ethereum");
 
   if (!phone) {
     throw hostedOnboardingError({
@@ -47,11 +47,25 @@ export async function requireHostedPrivyIdentity(identityToken: string): Promise
   }
 
   return {
-    linkedAccounts,
     phone,
     userId: user.id,
     wallet,
   };
+}
+
+export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPrivyIdentity> {
+  const cookieStore = await cookies();
+  const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
+
+  if (!identityToken) {
+    throw hostedOnboardingError({
+      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+      message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+      httpStatus: 401,
+    });
+  }
+
+  return requireHostedPrivyIdentity(identityToken);
 }
 
 export async function verifyHostedPrivyIdentityToken(identityToken: string): Promise<HostedPrivyUser> {
@@ -91,22 +105,13 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
   }
 }
 
-export function readHostedPrivyIdentityTokenFromCookieHeader(cookieHeader: string | null): string | null {
-  if (!cookieHeader) {
-    return null;
-  }
+export function readHostedPrivyIdentityTokenFromCookieStore(cookieStore: HostedPrivyCookieStore): string | null {
+  const value = cookieStore.get(HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME)?.value;
+  return normalizeEnvValue(value);
+}
 
-  const entries = cookieHeader.split(/;\s*/u);
-
-  for (const entry of entries) {
-    const [name, ...valueParts] = entry.split("=");
-
-    if (name === HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME) {
-      return valueParts.join("=") || null;
-    }
-  }
-
-  return null;
+export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID) && normalizeEnvValue(source.PRIVY_VERIFICATION_KEY));
 }
 
 function requireHostedPrivyVerificationConfig(): { appId: string; verificationKey: string } {
@@ -126,10 +131,13 @@ function requireHostedPrivyVerificationConfig(): { appId: string; verificationKe
   };
 }
 
-function coerceLinkedAccounts(input: unknown): PrivyLinkedAccountLike[] {
-  if (Array.isArray(input)) {
-    return input.filter((value): value is PrivyLinkedAccountLike => Boolean(value) && typeof value === "object");
+function normalizeEnvValue(value: string | null | undefined): string | null {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    if (normalized) {
+      return normalized;
+    }
   }
 
-  return [];
+  return null;
 }

@@ -12,38 +12,41 @@ export interface HostedPrivyWalletAccount {
   type: string;
 }
 
-export interface HostedPrivyIdentityPayload {
-  custom_metadata?: unknown;
-  linked_accounts?: string | unknown[];
-  sub?: unknown;
+export interface HostedPrivyLinkedAccountContainer {
+  linkedAccounts?: unknown;
+  linked_accounts?: unknown;
 }
 
-export interface HostedPrivyIdentityTokenData {
+export interface HostedPrivyLinkedAccountState {
   linkedAccounts: PrivyLinkedAccountLike[];
-  payload: HostedPrivyIdentityPayload;
-  subject: string | null;
+  phone: HostedPrivyPhoneAccount | null;
+  wallet: HostedPrivyWalletAccount | null;
 }
 
 export interface PrivyLinkedAccountLike extends Record<string, unknown> {
   type?: unknown;
 }
 
-export function parseHostedPrivyIdentityToken(identityToken: string): HostedPrivyIdentityTokenData {
-  const trimmed = identityToken.trim();
-  const parts = trimmed.split(".");
-
-  if (parts.length !== 3) {
-    throw new TypeError("Privy identity token must be a JWT.");
+export function resolveHostedPrivyLinkedAccounts(
+  input: HostedPrivyLinkedAccountContainer | null | undefined,
+): PrivyLinkedAccountLike[] {
+  if (!input || typeof input !== "object") {
+    return [];
   }
 
-  const payload = decodeJwtPayload(parts[1]);
-  const linkedAccounts = parseLinkedAccounts(payload.linked_accounts);
-  const subject = typeof payload.sub === "string" && payload.sub.trim() ? payload.sub.trim() : null;
+  return parseLinkedAccounts(input.linkedAccounts ?? input.linked_accounts);
+}
+
+export function resolveHostedPrivyLinkedAccountState(
+  input: HostedPrivyLinkedAccountContainer | null | undefined,
+  preferredChainType: string | null = "ethereum",
+): HostedPrivyLinkedAccountState {
+  const linkedAccounts = resolveHostedPrivyLinkedAccounts(input);
 
   return {
     linkedAccounts,
-    payload,
-    subject,
+    phone: extractHostedPrivyPhoneAccount(linkedAccounts),
+    wallet: extractHostedPrivyWalletAccount(linkedAccounts, preferredChainType),
   };
 }
 
@@ -57,7 +60,15 @@ export function extractHostedPrivyPhoneAccount(
 
     const rawNumber = firstString(account, ["phone_number", "number", "phoneNumber", "address"]);
     const normalizedNumber = normalizePhoneNumber(rawNumber);
-    const verifiedAt = firstNumber(account, ["latest_verified_at", "verified_at", "first_verified_at", "lv"]);
+    const verifiedAt = firstTimestamp(account, [
+      "latest_verified_at",
+      "verified_at",
+      "first_verified_at",
+      "latestVerifiedAt",
+      "verifiedAt",
+      "firstVerifiedAt",
+      "lv",
+    ]);
 
     if (!normalizedNumber || verifiedAt === null) {
       continue;
@@ -139,36 +150,16 @@ function parseLinkedAccounts(input: unknown): PrivyLinkedAccountLike[] {
   }
 }
 
-function decodeJwtPayload(segment: string): HostedPrivyIdentityPayload {
-  const decoded = decodeBase64UrlUtf8(segment);
-  const parsed = JSON.parse(decoded);
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new TypeError("Privy identity token payload must be a JSON object.");
-  }
-
-  return parsed as HostedPrivyIdentityPayload;
-}
-
-function decodeBase64UrlUtf8(value: string): string {
-  const normalizedValue = value.replace(/-/gu, "+").replace(/_/gu, "/");
-  const paddedValue = normalizedValue.padEnd(Math.ceil(normalizedValue.length / 4) * 4, "=");
-
-  if (typeof window !== "undefined" && typeof window.atob === "function") {
-    const binary = window.atob(paddedValue);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  }
-
-  return Buffer.from(paddedValue, "base64").toString("utf8");
-}
-
-function firstNumber(record: Record<string, unknown>, keys: readonly string[]): number | null {
+function firstTimestamp(record: Record<string, unknown>, keys: readonly string[]): number | null {
   for (const key of keys) {
     const value = record[key];
 
     if (typeof value === "number" && Number.isFinite(value)) {
       return value;
+    }
+
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+      return Math.trunc(value.getTime() / 1000);
     }
   }
 

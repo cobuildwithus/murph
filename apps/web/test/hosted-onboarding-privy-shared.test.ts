@@ -3,43 +3,74 @@ import { describe, expect, it } from "vitest";
 import {
   extractHostedPrivyPhoneAccount,
   extractHostedPrivyWalletAccount,
-  parseHostedPrivyIdentityToken,
+  resolveHostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 describe("hosted Privy identity helpers", () => {
-  it("parses linked accounts out of an identity token payload", () => {
-    const token = buildIdentityToken({
-      linked_accounts: JSON.stringify([
+  it("normalizes SDK-style linked accounts into hosted phone and wallet state", () => {
+    const state = resolveHostedPrivyLinkedAccountState({
+      linkedAccounts: [
         {
+          latestVerifiedAt: new Date(1741194420 * 1000),
+          phoneNumber: "+1 415 555 2671",
           type: "phone",
-          phone_number: "+1 415 555 2671",
-          latest_verified_at: 1741194420,
         },
         {
-          type: "wallet",
           address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
           chain_type: "ethereum",
           connector_type: "embedded",
           delegated: false,
           id: "wallet_123",
           imported: false,
+          type: "wallet",
           wallet_client: "privy",
           wallet_client_type: "privy",
           wallet_index: 0,
         },
-      ]),
-      sub: "did:privy:member_123",
+      ],
     });
 
-    const parsed = parseHostedPrivyIdentityToken(token);
-
-    expect(parsed.subject).toBe("did:privy:member_123");
-    expect(parsed.linkedAccounts).toHaveLength(2);
-    expect(extractHostedPrivyPhoneAccount(parsed.linkedAccounts)).toEqual({
+    expect(state.linkedAccounts).toHaveLength(2);
+    expect(state.phone).toEqual({
       number: "+14155552671",
       verifiedAt: 1741194420,
     });
-    expect(extractHostedPrivyWalletAccount(parsed.linkedAccounts, "ethereum")).toEqual({
+    expect(state.wallet).toEqual({
+      address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+      chainType: "ethereum",
+      id: "wallet_123",
+      type: "wallet",
+    });
+  });
+
+  it("normalizes verified token-style linked accounts into hosted phone and wallet state", () => {
+    const state = resolveHostedPrivyLinkedAccountState({
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+        {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+    });
+
+    expect(state.phone).toEqual({
+      number: "+14155552671",
+      verifiedAt: 1741194420,
+    });
+    expect(state.wallet).toEqual({
       address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
       chainType: "ethereum",
       id: "wallet_123",
@@ -140,11 +171,3 @@ describe("hosted Privy identity helpers", () => {
     ).toBeNull();
   });
 });
-
-function buildIdentityToken(payload: Record<string, unknown>): string {
-  return `${encodeJwtSegment({ alg: "none", typ: "JWT" })}.${encodeJwtSegment(payload)}.`;
-}
-
-function encodeJwtSegment(value: Record<string, unknown>): string {
-  return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
-}

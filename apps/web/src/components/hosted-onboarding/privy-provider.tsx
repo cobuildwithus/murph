@@ -14,6 +14,9 @@ export function HostedPrivyProvider(input: { children: ReactNode }) {
     <PrivyProvider
       appId={PRIVY_APP_ID}
       config={{
+        appearance: {
+          walletChainType: "ethereum-only",
+        },
         embeddedWallets: {
           ethereum: {
             createOnLogin: "users-without-wallets",

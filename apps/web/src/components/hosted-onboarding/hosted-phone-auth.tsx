@@ -1,17 +1,16 @@
 "use client";
 
 import {
-  getIdentityToken,
   useLoginWithSms,
   usePrivy,
+  useUser,
 } from "@privy-io/react-auth";
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
 
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
-  extractHostedPrivyPhoneAccount,
-  extractHostedPrivyWalletAccount,
-  parseHostedPrivyIdentityToken,
+  type HostedPrivyLinkedAccountState,
+  resolveHostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
@@ -41,6 +40,7 @@ export function HostedPhoneAuth(props: HostedPhoneAuthProps) {
 function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onCompleted, phoneHint }: HostedPhoneAuthProps) {
   const { authenticated, logout, ready } = usePrivy();
   const { loginWithCode, sendCode } = useLoginWithSms();
+  const { refreshUser, user } = useUser();
   const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<string | null>(null);
   const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
   const [code, setCode] = useState("");
@@ -65,41 +65,12 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
 
       setCheckingAuthenticatedSession(true);
 
-      try {
-        const identityToken = await requireHostedPrivyIdentityToken();
-        const linkedAccounts = parseHostedPrivyIdentityToken(identityToken).linkedAccounts;
-
-        if (!extractHostedPrivyPhoneAccount(linkedAccounts)) {
-          if (!cancelled) {
-            setAuthenticatedSessionIssue(
-              "Your current Privy session is missing a verified phone number. Sign out and continue with SMS.",
-            );
-          }
-          return;
-        }
-
-        if (!extractHostedPrivyWalletAccount(linkedAccounts, "ethereum")) {
-          if (!cancelled) {
-            setAuthenticatedSessionIssue(
-              "Your current Privy session does not have a rewards wallet yet. Sign out and continue with SMS to finish setup.",
-            );
-          }
-          return;
-        }
-
-        if (!cancelled) {
-          setAuthenticatedSessionIssue(null);
-        }
-      } catch {
-        if (!cancelled) {
-          setAuthenticatedSessionIssue(
-            "Your current Privy session is missing a verified phone number. Sign out and continue with SMS.",
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setCheckingAuthenticatedSession(false);
-        }
+      const sessionState = await readHostedPrivyClientSessionState({ refreshUser, user });
+      if (!cancelled) {
+        setAuthenticatedSessionIssue(describeHostedPrivySessionIssue(sessionState));
+      }
+      if (!cancelled) {
+        setCheckingAuthenticatedSession(false);
       }
     }
 
@@ -108,7 +79,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
     return () => {
       cancelled = true;
     };
-  }, [authenticated, ready]);
+  }, [authenticated, ready, refreshUser, user]);
 
   async function handleSendCode() {
     setErrorMessage(null);
@@ -145,6 +116,8 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
       await finalizeHostedPrivyVerification({
         inviteCode,
         onCompleted,
+        refreshUser,
+        user,
       });
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
@@ -161,6 +134,8 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
       await finalizeHostedPrivyVerification({
         inviteCode,
         onCompleted,
+        refreshUser,
+        user,
       });
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not continue with your Privy session."));
@@ -195,7 +170,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
           <strong style={{ color: "rgb(15 23 42)" }}>Verified Privy session found.</strong>
           <div style={{ paddingTop: "0.35rem" }}>
             {checkingAuthenticatedSession
-              ? "Checking the current Privy session for a verified phone number."
+              ? "Checking the current Privy session for a verified phone number and rewards wallet."
               : authenticatedSessionIssue ??
                 "Continue with your current verified phone session, or sign out and use a different number."}
           </div>
@@ -316,8 +291,10 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
 async function finalizeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
+  user: { linkedAccounts?: unknown } | null;
 }) {
-  await requireHostedPrivyPhoneAndWalletReady();
+  await requireHostedPrivyPhoneAndWalletReady(input);
   const payload = await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
     payload: input.inviteCode ? { inviteCode: input.inviteCode } : {},
     url: "/api/hosted-onboarding/privy/complete",
@@ -345,68 +322,52 @@ async function finalizeHostedPrivyVerification(input: {
   window.location.assign(payload.joinUrl);
 }
 
-async function requireHostedPrivyPhoneAndWalletReady(): Promise<void> {
-  let sawPhoneAccount = false;
+async function requireHostedPrivyPhoneAndWalletReady(input: {
+  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
+  user: { linkedAccounts?: unknown } | null;
+}): Promise<void> {
+  const sessionState = await readHostedPrivyClientSessionState(input);
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const identityToken = await readHostedPrivyIdentityTokenOnce();
-
-    if (!identityToken) {
-      await sleep(150 * (attempt + 1));
-      continue;
-    }
-
-    const linkedAccounts = parseHostedPrivyIdentityToken(identityToken).linkedAccounts;
-    const phoneAccount = extractHostedPrivyPhoneAccount(linkedAccounts);
-    const walletAccount = extractHostedPrivyWalletAccount(linkedAccounts, "ethereum");
-
-    if (!phoneAccount) {
-      await sleep(150 * (attempt + 1));
-      continue;
-    }
-
-    sawPhoneAccount = true;
-
-    if (walletAccount) {
-      return;
-    }
-
-    await sleep(250 * (attempt + 1));
-  }
-
-  if (!sawPhoneAccount) {
+  if (!sessionState.phone) {
     throw new Error("This Privy session is missing a verified phone number.");
   }
 
-  throw new Error("We could not finish preparing your rewards wallet. Sign out and try the SMS flow again.");
+  if (!sessionState.wallet) {
+    throw new Error("We could not finish preparing your rewards wallet. Sign out and try the SMS flow again.");
+  }
 }
 
-async function requireHostedPrivyIdentityToken(): Promise<string> {
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const identityToken = await readHostedPrivyIdentityTokenOnce();
+async function readHostedPrivyClientSessionState(input: {
+  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
+  user: { linkedAccounts?: unknown } | null;
+}): Promise<HostedPrivyLinkedAccountState> {
+  const currentState = resolveHostedPrivyLinkedAccountState(input.user);
 
-    if (identityToken) {
-      return identityToken;
-    }
-
-    await sleep(150 * (attempt + 1));
+  if (currentState.phone && currentState.wallet) {
+    return currentState;
   }
 
-  throw new Error("Your Privy session is missing an identity token. Refresh and try again.");
-}
-
-async function readHostedPrivyIdentityTokenOnce(): Promise<string | null> {
-  return (await getIdentityToken()) ?? null;
+  try {
+    return resolveHostedPrivyLinkedAccountState(await input.refreshUser());
+  } catch {
+    return currentState;
+  }
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
+function describeHostedPrivySessionIssue(sessionState: HostedPrivyLinkedAccountState): string | null {
+  if (!sessionState.phone) {
+    return "Your current Privy session is missing a verified phone number. Sign out and continue with SMS.";
+  }
+
+  if (!sessionState.wallet) {
+    return "Your current Privy session does not have a rewards wallet yet. Sign out and continue with SMS to finish setup.";
+  }
+
+  return null;
 }
 
 const fieldLabelStyle = {

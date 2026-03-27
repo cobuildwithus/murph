@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  hasHostedPrivyPhoneAuthConfig,
+  hasHostedPrivyClientConfig,
   parseHostedSignupPhoneNumber,
   resolveHostedPrivyClientAppId,
   resolveHostedSignupPhoneNumber,
@@ -26,15 +26,10 @@ describe("hosted onboarding landing helpers", () => {
     expect(parseHostedSignupPhoneNumber("1234")).toBeNull();
   });
 
-  it("derives phone-auth readiness from the public app id plus the verification key", () => {
+  it("derives Privy client readiness from the public app id only", () => {
     expect(resolveHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toBeNull();
-    expect(hasHostedPrivyPhoneAuthConfig(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" }))).toBe(false);
-    expect(
-      hasHostedPrivyPhoneAuthConfig(createProcessEnv({
-        NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
-        PRIVY_VERIFICATION_KEY: "privy-verification-key",
-      })),
-    ).toBe(true);
+    expect(hasHostedPrivyClientConfig(createProcessEnv({}))).toBe(false);
+    expect(hasHostedPrivyClientConfig(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" }))).toBe(true);
   });
 });
 

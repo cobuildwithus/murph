@@ -28,6 +28,9 @@ describe("HostedPrivyProvider", () => {
       expect.objectContaining({
         appId: "cm_app_123",
         config: {
+          appearance: {
+            walletChainType: "ethereum-only",
+          },
           embeddedWallets: {
             ethereum: {
               createOnLogin: "users-without-wallets",
