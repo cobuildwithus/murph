@@ -515,7 +515,7 @@ function assertContractShape<T>(
   const result = safeParseContract(schema, value);
 
   if (!result.success) {
-    throw new VaultError(code, message, { errors: result.errors });
+    throw new VaultError(code, `${message} ${JSON.stringify(result.errors)}`, { errors: result.errors });
   }
 }
 

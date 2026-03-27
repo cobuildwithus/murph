@@ -331,6 +331,30 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     };
   }
 
+  const HEARTRATE_CHUNK_MS = 30 * 24 * 60 * 60_000;
+
+  async function fetchOuraHeartRateInChunks(
+    api: { fetchPagedCollection(path: string, parameters: Record<string, string | null | undefined>): Promise<Record<string, unknown>[]> },
+    windowStart: string,
+    windowEnd: string,
+  ): Promise<Record<string, unknown>[]> {
+    const records: Record<string, unknown>[] = [];
+    let chunkStart = new Date(windowStart).getTime();
+    const end = new Date(windowEnd).getTime();
+
+    while (chunkStart < end) {
+      const chunkEnd = Math.min(chunkStart + HEARTRATE_CHUNK_MS, end);
+      const chunk = await api.fetchPagedCollection("/v2/usercollection/heartrate", {
+        start_datetime: new Date(chunkStart).toISOString(),
+        end_datetime: new Date(chunkEnd).toISOString(),
+      });
+      records.push(...chunk);
+      chunkStart = chunkEnd;
+    }
+
+    return records;
+  }
+
   async function executeWindowImport(
     context: ProviderJobContext,
     payload: Record<string, unknown>,
@@ -393,10 +417,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     }
 
     if (hasOuraScope(api.account, "heartrate")) {
-      snapshot.heartrate = await api.fetchPagedCollection("/v2/usercollection/heartrate", {
-        start_datetime: windowStart,
-        end_datetime: windowEnd,
-      });
+      snapshot.heartrate = await fetchOuraHeartRateInChunks(api, windowStart, windowEnd);
     }
 
     await context.importSnapshot(snapshot);
@@ -443,7 +464,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           }),
       });
 
-      const grantedScopesFromToken = splitScopes(tokenPayload.scope);
+      const grantedScopesFromToken = splitScopes(tokenPayload.scope)
+        .map((scope) => scope.replace(/^extapi:/u, ""));
       const grantedScopes =
         grantedScopesFromToken.length > 0
           ? grantedScopesFromToken

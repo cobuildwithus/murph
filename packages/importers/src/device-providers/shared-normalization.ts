@@ -265,9 +265,12 @@ export function pushSample(
     return;
   }
 
+  const INTEGER_STREAMS = new Set(["heart_rate", "steps"]);
+  const resolvedValue = INTEGER_STREAMS.has(options.stream) ? Math.round(numeric) : numeric;
+
   const sample: DeviceSampleValuePayload = {
     recordedAt: options.recordedAt,
-    value: numeric,
+    value: resolvedValue,
   };
 
   samples.push(
