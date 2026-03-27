@@ -121,14 +121,12 @@ export async function persistHostedExecutionCommit(input: {
         bundleStore,
         currentRef: input.currentBundleRefs.agentState,
         kind: "agent-state",
-        userId: input.userId,
         value: input.payload.bundles.agentState,
       }),
       vault: await writeCommittedBundle({
         bundleStore,
         currentRef: input.currentBundleRefs.vault,
         kind: "vault",
-        userId: input.userId,
         value: input.payload.bundles.vault,
       }),
     },
@@ -179,14 +177,12 @@ export async function persistHostedExecutionFinalBundles(input: {
       bundleStore,
       currentRef: existing.bundleRefs.agentState,
       kind: "agent-state",
-      userId: input.userId,
       value: input.payload.bundles.agentState,
     }),
     vault: await writeCommittedBundle({
       bundleStore,
       currentRef: existing.bundleRefs.vault,
       kind: "vault",
-      userId: input.userId,
       value: input.payload.bundles.vault,
     }),
   };
@@ -212,7 +208,6 @@ async function writeCommittedBundle(input: {
   bundleStore: ReturnType<typeof createHostedBundleStore>;
   currentRef: HostedExecutionBundleRef | null;
   kind: "agent-state" | "vault";
-  userId: string;
   value: string | null;
 }): Promise<HostedExecutionBundleRef | null> {
   if (input.value === null) {
@@ -230,7 +225,7 @@ async function writeCommittedBundle(input: {
     return input.currentRef;
   }
 
-  const ref = await input.bundleStore.writeBundle(input.userId, input.kind, plaintext);
+  const ref = await input.bundleStore.writeBundle(input.kind, plaintext);
 
   return {
     ...ref,

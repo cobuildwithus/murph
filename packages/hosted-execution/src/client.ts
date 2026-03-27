@@ -1,5 +1,6 @@
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserEnvUpdate,
@@ -7,6 +8,7 @@ import type {
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
+  parseHostedExecutionDispatchResult,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionUserEnvStatus,
   parseHostedExecutionUserEnvUpdate,
@@ -20,7 +22,7 @@ import {
 } from "./routes.ts";
 
 export interface HostedExecutionDispatchClient {
-  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
+  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
 }
 
 export interface HostedExecutionDispatchClientOptions {
@@ -69,7 +71,7 @@ export function createHostedExecutionDispatchClient(
         baseUrl,
         fetchImpl,
         label: "dispatch",
-        parse: parseHostedExecutionUserStatus,
+        parse: parseHostedExecutionDispatchResult,
         path: HOSTED_EXECUTION_DISPATCH_PATH,
         request: {
           body: payload,

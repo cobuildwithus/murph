@@ -8,6 +8,7 @@ import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
 
 import type {
   HostedExecutionBundleRef,
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionUserStatus,
 } from "@murph/runtime-state";
@@ -39,6 +40,10 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     return this.runner.dispatch(input);
   }
 
+  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchWithOutcome(input);
+  }
+
   async commit(input: {
     eventId: string;
     payload: {
@@ -56,11 +61,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
         summary: string;
       };
     };
-    userId?: string;
   }) {
-    if (input.userId) {
-      await this.runner.bootstrapUser(input.userId);
-    }
     return this.runner.commit(input);
   }
 
@@ -72,48 +73,25 @@ export class VitestUserRunnerDurableObject extends DurableObject {
         vault: string | null;
       };
     };
-    userId?: string;
   }) {
-    if (input.userId) {
-      await this.runner.bootstrapUser(input.userId);
-    }
     return this.runner.finalizeCommit(input);
   }
 
-  async status(userId?: string): Promise<HostedExecutionUserStatus> {
-    if (userId) {
-      await this.runner.bootstrapUser(userId);
-    }
+  async status(): Promise<HostedExecutionUserStatus> {
     return this.runner.status();
   }
 
-  async getUserEnvStatus(
-    userId?: string,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    if (userId) {
-      await this.runner.bootstrapUser(userId);
-    }
+  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
     return this.runner.getUserEnvStatus();
   }
 
   async updateUserEnv(
-    userIdOrUpdate: string | Record<string, unknown>,
-    update?: Record<string, unknown>,
+    update: Record<string, unknown>,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    if (typeof userIdOrUpdate === "string") {
-      await this.runner.bootstrapUser(userIdOrUpdate);
-      return this.runner.updateUserEnv(parseHostedUserEnvUpdate(update ?? {}));
-    }
-
-    return this.runner.updateUserEnv(parseHostedUserEnvUpdate(userIdOrUpdate));
+    return this.runner.updateUserEnv(parseHostedUserEnvUpdate(update));
   }
 
-  async clearUserEnv(
-    userId?: string,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    if (userId) {
-      await this.runner.bootstrapUser(userId);
-    }
+  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
     return this.runner.clearUserEnv();
   }
 

@@ -125,13 +125,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
     );
     const receiptWrites = (
-      prisma as {
+      prisma as unknown as {
         hostedWebhookReceipt: {
           updateMany: ReturnType<typeof vi.fn>;
         };
       }
     ).hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
+      (call) => call[0] as Record<string, unknown>,
     );
     expect(receiptWrites.at(-1)).toEqual(
       expect.objectContaining({

@@ -16,7 +16,6 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import {
-  drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox,
 } from "../hosted-execution/outbox";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -760,23 +759,14 @@ async function patchHostedRevnetIssuanceStripeReferences(input: {
 
 function hostedWebhookReceiptHandlers() {
   return {
-    afterDispatchEffectQueued: async ({
-      dispatchEffect,
-      eventId,
-      prisma,
-      source,
-    }: {
-      dispatchEffect: HostedWebhookDispatchSideEffect;
-      eventId: string;
-      prisma: PrismaClient;
-      source: string;
-    }) => {
-      await drainHostedExecutionOutboxBestEffort({
-        context: `hosted-onboarding ${source} event=${eventId}`,
-        eventIds: [dispatchEffect.payload.dispatch.eventId],
-        prisma,
-      });
-    },
+    afterDispatchEffectQueued: async (
+      _input: {
+        dispatchEffect: HostedWebhookDispatchSideEffect;
+        eventId: string;
+        prisma: PrismaClient;
+        source: string;
+      },
+    ) => {},
     afterSideEffectSent: async ({
       effect,
       prisma,

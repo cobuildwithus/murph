@@ -3,13 +3,17 @@ import type { SharePack } from "@murph/contracts";
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 
+export const HOSTED_EXECUTION_EVENT_KINDS = [
+  "member.activated",
+  "linq.message.received",
+  "email.message.received",
+  "assistant.cron.tick",
+  "device-sync.wake",
+  "vault.share.accepted",
+] as const;
+
 export type HostedExecutionEventKind =
-  | "member.activated"
-  | "linq.message.received"
-  | "email.message.received"
-  | "assistant.cron.tick"
-  | "device-sync.wake"
-  | "vault.share.accepted";
+  (typeof HOSTED_EXECUTION_EVENT_KINDS)[number];
 
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
@@ -44,9 +48,15 @@ export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseE
   kind: "device-sync.wake";
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
 }
+
+export interface HostedExecutionShareReference {
+  shareCode: string;
+  shareId: string;
+}
+
 export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionBaseEvent {
   kind: "vault.share.accepted";
-  pack: SharePack;
+  share: HostedExecutionShareReference;
 }
 
 export type HostedExecutionEvent =
@@ -109,6 +119,30 @@ export interface HostedExecutionUserStatus {
   userId: string;
 }
 
+export const HOSTED_EXECUTION_EVENT_DISPATCH_STATES = [
+  "queued",
+  "duplicate_pending",
+  "duplicate_consumed",
+  "backpressured",
+  "completed",
+  "poisoned",
+] as const;
+
+export type HostedExecutionEventDispatchState =
+  (typeof HOSTED_EXECUTION_EVENT_DISPATCH_STATES)[number];
+
+export interface HostedExecutionEventDispatchStatus {
+  eventId: string;
+  lastError: string | null;
+  state: HostedExecutionEventDispatchState;
+  userId: string;
+}
+
+export interface HostedExecutionDispatchResult {
+  event: HostedExecutionEventDispatchStatus;
+  status: HostedExecutionUserStatus;
+}
+
 export interface HostedExecutionUserEnvStatus {
   configuredUserEnvKeys: string[];
   userId: string;
@@ -121,6 +155,5 @@ export interface HostedExecutionUserEnvUpdate {
 
 export interface HostedExecutionSharePackResponse {
   pack: SharePack;
-  shareCode: string;
   shareId: string;
 }

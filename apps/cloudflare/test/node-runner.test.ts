@@ -22,16 +22,25 @@ const hostedCliMocks = vi.hoisted(() => ({
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("murph", async () => {
-  const actual = await vi.importActual<typeof import("murph")>("murph");
+vi.mock("murph/assistant/automation", async () => {
+  const actual = await vi.importActual<typeof import("murph/assistant/automation")>(
+    "murph/assistant/automation",
+  );
+  return {
+    ...actual,
+    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
+      hostedCliMocks.runAssistantAutomation(...args),
+  };
+});
+
+vi.mock("murph/assistant/outbox", async () => {
+  const actual = await vi.importActual<typeof import("murph/assistant/outbox")>(
+    "murph/assistant/outbox",
+  );
   return {
     ...actual,
     dispatchAssistantOutboxIntent: (...args: Parameters<typeof actual.dispatchAssistantOutboxIntent>) =>
       hostedCliMocks.dispatchAssistantOutboxIntent(...args),
-    drainAssistantOutbox: (...args: Parameters<typeof actual.drainAssistantOutbox>) =>
-      hostedCliMocks.drainAssistantOutbox(...args),
-    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
-      hostedCliMocks.runAssistantAutomation(...args),
   };
 });
 
@@ -49,11 +58,16 @@ describe("runHostedExecutionJob", () => {
     vi.restoreAllMocks();
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actual = await vi.importActual<typeof import("murph")>("murph");
+    const actualAutomation = await vi.importActual<typeof import("murph/assistant/automation")>(
+      "murph/assistant/automation",
+    );
+    const actualOutbox = await vi.importActual<typeof import("murph/assistant/outbox")>(
+      "murph/assistant/outbox",
+    );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
-      actual.dispatchAssistantOutboxIntent(input));
-    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actual.runAssistantAutomation(input));
-    hostedCliMocks.drainAssistantOutbox.mockImplementation((input) => actual.drainAssistantOutbox(input));
+      actualOutbox.dispatchAssistantOutboxIntent(input));
+    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actualAutomation.runAssistantAutomation(input));
+    hostedCliMocks.drainAssistantOutbox.mockReset();
   });
 
   afterEach(async () => {
@@ -548,6 +562,27 @@ describe("runHostedExecutionJob", () => {
         food: { id: smoothie.record.foodId },
       },
     });
+    const sharePayloadServer = createServer((request, response) => {
+      if (
+        request.url
+        === "/api/hosted-share/internal/share_123/payload?shareCode=share_code_123"
+        && request.headers.authorization === "Bearer share-pack-token"
+      ) {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({
+          pack,
+          shareId: "share_123",
+        }));
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      sharePayloadServer.listen(0, () => resolve());
+    });
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -563,33 +598,52 @@ describe("runHostedExecutionJob", () => {
       },
     });
 
-    const result = await runHostedExecutionJob({
-      bundles: activation.bundles,
-      dispatch: {
-        event: {
-          kind: "vault.share.accepted",
-          pack,
-          userId: "member_456",
-        },
-        eventId: "evt_share_123",
-        occurredAt: "2026-03-26T12:30:00.000Z",
-      },
-    });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-"));
-    cleanupPaths.push(workspaceRoot);
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
-      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
-      workspaceRoot,
-    });
-    const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
+    try {
+      const address = sharePayloadServer.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted share payload test server to expose a TCP port.");
+      }
 
-    expect(result.result.summary).toBe(
-      `Imported share pack "${pack.title}" (1 foods, 1 protocols, 0 recipes). Logged one meal entry from the shared food. Parser jobs: 0. Device sync jobs: 0 (skipped: providers not configured).`,
-    );
-    expect(importedFood).toBeDefined();
-    expect(importedFood.attachedProtocolIds?.length).toBe(1);
-    expect(importedFood.autoLogDaily?.time).toBe("08:00");
+      setHostedExecutionCallbackBaseUrlsForTests({
+        sharePackBaseUrl: `http://127.0.0.1:${address.port}`,
+        sharePackToken: "share-pack-token",
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            kind: "vault.share.accepted",
+            share: {
+              shareCode: "share_code_123",
+              shareId: "share_123",
+            },
+            userId: "member_456",
+          },
+          eventId: "evt_share_123",
+          occurredAt: "2026-03-26T12:30:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
+
+      expect(result.result.summary).toBe(
+        `Imported share pack "${pack.title}" (1 foods, 1 protocols, 0 recipes). Logged one meal entry from the shared food. Parser jobs: 0. Device sync jobs: 0 (skipped: providers not configured).`,
+      );
+      expect(importedFood).toBeDefined();
+      expect(importedFood.attachedProtocolIds?.length).toBe(1);
+      expect(importedFood.autoLogDaily?.time).toBe("08:00");
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      sharePayloadServer.close();
+      await once(sharePayloadServer, "close");
+    }
   });
 
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {

@@ -188,21 +188,7 @@ describe("dispatchHostedExecutionBestEffort", () => {
     vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
     global.fetch = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_legacy",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
+        JSON.stringify(buildDispatchResultFixture("evt_legacy")),
         { status: 200 },
       ),
     );
@@ -219,8 +205,10 @@ describe("dispatchHostedExecutionBestEffort", () => {
         occurredAt: "2026-03-20T12:00:00.000Z",
       }),
     ).resolves.toMatchObject({
-      lastEventId: "evt_legacy",
-      userId: "user-123",
+      status: {
+        lastEventId: "evt_legacy",
+        userId: "user-123",
+      },
     });
 
     expect(timeoutSpy).toHaveBeenCalledWith(47_000);
@@ -256,21 +244,7 @@ describe("dispatchHostedExecutionBestEffort", () => {
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     global.fetch = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
+        JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
     );
@@ -312,21 +286,7 @@ describe("dispatchHostedExecutionBestEffort", () => {
     vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
     global.fetch = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
+        JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
     );
@@ -363,3 +323,29 @@ describe("dispatchHostedExecutionBestEffort", () => {
     ).resolves.toBe(true);
   });
 });
+
+function buildDispatchResultFixture(eventId: string) {
+  return {
+    event: {
+      eventId,
+      lastError: null,
+      state: "completed",
+      userId: "user-123",
+    },
+    status: {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId: "user-123",
+    },
+  };
+}

@@ -1,5 +1,6 @@
 import type {
   HostedExecutionBundleRef,
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
@@ -121,6 +122,29 @@ export class HostedUserRunner {
     }
 
     return this.runQueuedEvents(record.userId);
+  }
+
+  async dispatchWithOutcome(
+    input: HostedExecutionDispatchRequest,
+  ): Promise<HostedExecutionDispatchResult> {
+    await this.queueStore.bootstrapUser(input.event.userId);
+    const initialState = await this.queueStore.readEventState(input.eventId);
+    const status = await this.dispatch(input);
+    const nextState = await this.queueStore.readEventState(input.eventId);
+
+    return {
+      event: {
+        eventId: input.eventId,
+        lastError: nextState.lastError ?? status.lastError,
+        state: resolveDispatchOutcomeState({
+          eventId: input.eventId,
+          initialState,
+          nextState,
+        }),
+        userId: input.event.userId,
+      },
+      status,
+    };
   }
 
   async alarm(): Promise<void> {
@@ -482,4 +506,44 @@ export class HostedUserRunner {
       }
     }
   }
+}
+
+function resolveDispatchOutcomeState(input: {
+  eventId: string;
+  initialState: {
+    backpressured: boolean;
+    consumed: boolean;
+    lastError: string | null;
+    pending: boolean;
+    poisoned: boolean;
+  };
+  nextState: {
+    backpressured: boolean;
+    consumed: boolean;
+    lastError: string | null;
+    pending: boolean;
+    poisoned: boolean;
+  };
+}): HostedExecutionDispatchResult["event"]["state"] {
+  if (input.nextState.poisoned) {
+    return "poisoned";
+  }
+
+  if (input.nextState.backpressured) {
+    return "backpressured";
+  }
+
+  if (input.initialState.consumed) {
+    return "duplicate_consumed";
+  }
+
+  if (input.initialState.pending) {
+    return "duplicate_pending";
+  }
+
+  if (input.nextState.consumed) {
+    return "completed";
+  }
+
+  return "queued";
 }

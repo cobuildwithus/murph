@@ -29,9 +29,6 @@
       "path": "../parsers"
     },
     {
-      "path": "../assistant-services"
-    },
-    {
       "path": "../cli"
     }
   ],

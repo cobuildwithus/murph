@@ -247,11 +247,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       },
     );
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-        context: "device-sync connection-established user=user-123 provider=oura connection=dsc_123",
-        eventIds: ["device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z"],
-        prisma: mocks.prisma,
-      });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
   it("uses the webhook trace id for a stable wake event id when one is available", async () => {
@@ -322,11 +318,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
         sourceId: "8",
       }),
     );
-    expect(mocks.drainHostedExecutionOutboxBestEffort).toHaveBeenCalledWith({
-        context: "device-sync disconnect user=user-123 provider=oura connection=dsc_123",
-        eventIds: ["device-sync:disconnect:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z"],
-        prisma: mocks.prisma,
-      });
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
   it("queues a disconnected signal and wake together inside the disconnect flow", async () => {

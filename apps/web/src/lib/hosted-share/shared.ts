@@ -107,7 +107,6 @@ export async function readHostedSharePackByReference(input: {
 
   return {
     pack: readHostedSharePack(record).pack,
-    shareCode: input.shareCode,
     shareId: input.shareId,
   };
 }
@@ -192,13 +191,17 @@ export function buildHostedShareAcceptanceDispatch(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
-  pack: SharePack;
+  shareCode: string;
+  shareId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionVaultShareAcceptedDispatch({
     eventId: input.eventId,
     memberId: input.memberId,
     occurredAt: input.acceptedAt,
-    pack: input.pack,
+    share: {
+      shareCode: input.shareCode,
+      shareId: input.shareId,
+    },
   });
 }
 

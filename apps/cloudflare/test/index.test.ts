@@ -575,7 +575,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(clearResponse.status).toBe(200);
-    expect(stub.clearUserEnv).toHaveBeenCalledWith("member_123");
+    expect(stub.clearUserEnv).toHaveBeenCalledWith();
 
     const statusResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/status", {
@@ -587,7 +587,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(statusResponse.status).toBe(200);
-    expect(stub.status).toHaveBeenCalledWith("member_123");
+    expect(stub.status).toHaveBeenCalledWith();
   });
 
   it("fails closed on control routes when the worker control token is missing", async () => {

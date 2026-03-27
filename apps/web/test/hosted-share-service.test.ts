@@ -34,6 +34,7 @@ vi.mock("@/src/lib/hosted-onboarding/service", () => ({
 }));
 
 import { acceptHostedShareLink, buildHostedSharePageData, createHostedShareLink } from "@/src/lib/hosted-share/service";
+import { finalizeHostedShareAcceptance } from "@/src/lib/hosted-share/shared";
 
 function buildPack(): SharePack {
   return {
@@ -140,10 +141,35 @@ describe("hosted share service", () => {
       } as never,
     });
 
-    expect(result.imported).toBe(true);
+    expect(result.imported).toBe(false);
     expect(result.alreadyImported).toBe(false);
-    expect(pageData.stage).toBe("consumed");
+    expect(result.pending).toBe(true);
+    expect(pageData.stage).toBe("processing");
     expect(pageData.share?.acceptedByCurrentMember).toBe(true);
+    expect(prisma.rows[0]?.consumedByMemberId).toBeNull();
+
+    await finalizeHostedShareAcceptance({
+      eventId: prisma.rows[0]?.lastEventId ?? "",
+      memberId: "member_123",
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+    const finalizedPageData = await buildHostedSharePageData({
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      sessionRecord: {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+        },
+        session: {
+          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      } as never,
+    });
+
+    expect(finalizedPageData.stage).toBe("consumed");
+    expect(finalizedPageData.share?.acceptedByCurrentMember).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
 
@@ -156,30 +182,26 @@ describe("hosted share service", () => {
     });
     const dispatchEventIds: string[] = [];
 
-    mocks.readHostedExecutionOutboxOutcome
-      .mockReturnValueOnce("pending")
-      .mockReturnValueOnce("completed");
     mocks.enqueueHostedExecutionOutbox.mockImplementation(async ({ dispatch }: { dispatch: { eventId: string } }) => {
       dispatchEventIds.push(dispatch.eventId);
       return undefined;
     });
 
-    await expect(() =>
-      acceptHostedShareLink({
-        prisma: prisma as never,
-        shareCode: created.shareCode,
-        sessionRecord: {
-          member: {
-            billingStatus: HostedBillingStatus.active,
-            id: "member_123",
-          },
-          session: {
-            expiresAt: new Date("2026-04-01T00:00:00.000Z"),
-          },
-        } as never,
-      })
-    ).rejects.toMatchObject({
-      code: "HOSTED_SHARE_IMPORT_PENDING",
+    await expect(acceptHostedShareLink({
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      sessionRecord: {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+        },
+        session: {
+          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      } as never,
+    })).resolves.toMatchObject({
+      imported: false,
+      pending: true,
     });
     expect(prisma.rows[0]?.acceptedByMemberId).toBe("member_123");
     expect(prisma.rows[0]?.consumedAt).toBeNull();
@@ -198,9 +220,34 @@ describe("hosted share service", () => {
       } as never,
     });
 
-    expect(retried.imported).toBe(true);
+    expect(retried.imported).toBe(false);
+    expect(retried.pending).toBe(true);
     expect(dispatchEventIds).toHaveLength(2);
     expect(dispatchEventIds[0]).toBe(dispatchEventIds[1]);
+
+    await finalizeHostedShareAcceptance({
+      eventId: dispatchEventIds[1] ?? "",
+      memberId: "member_123",
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+    });
+
+    const finalized = await acceptHostedShareLink({
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      sessionRecord: {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+        },
+        session: {
+          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      } as never,
+    });
+
+    expect(finalized.alreadyImported).toBe(true);
+    expect(finalized.imported).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
 });

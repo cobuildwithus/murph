@@ -8,7 +8,6 @@ import type {
 } from "@murph/device-syncd";
 import { getPrisma } from "../prisma";
 import {
-  drainHostedExecutionOutboxBestEffort,
   enqueueHostedExecutionOutbox,
 } from "../hosted-execution/outbox";
 import {
@@ -98,11 +97,6 @@ export async function disconnectHostedDeviceSyncConnection(input: {
     });
     return disconnected;
   });
-  await drainHostedExecutionOutboxBestEffort({
-    context: `device-sync disconnect user=${input.userId} provider=${connection.provider} connection=${input.connectionId}`,
-    eventIds: [dispatch.eventId],
-    prisma: input.store.prisma,
-  });
 
   return {
     connection,
@@ -154,11 +148,6 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       tx,
     });
   });
-  await drainHostedExecutionOutboxBestEffort({
-    context: `device-sync connection-established user=${ownerId} provider=${input.account.provider} connection=${input.account.id}`,
-    eventIds: [dispatch.eventId],
-    prisma: input.store.prisma,
-  });
 }
 
 export async function handleHostedDeviceSyncWebhookAccepted(input: {
@@ -209,11 +198,6 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
       await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId, tx);
     }
   });
-  await drainHostedExecutionOutboxBestEffort({
-    context: `device-sync webhook-accepted user=${ownerId} provider=${input.account.provider} connection=${input.account.id}`,
-    eventIds: [dispatch.eventId],
-    prisma: input.store.prisma,
-  });
 }
 
 export async function dispatchHostedDeviceSyncWake(input: {
@@ -244,11 +228,6 @@ export async function dispatchHostedDeviceSyncWake(input: {
       sourceType: "device_sync_signal",
       tx,
     });
-  });
-  await drainHostedExecutionOutboxBestEffort({
-    context: `device-sync ${input.source} user=${input.userId} provider=${input.provider} connection=${input.connectionId}`,
-    eventIds: [dispatch.eventId],
-    prisma,
   });
 
   return {

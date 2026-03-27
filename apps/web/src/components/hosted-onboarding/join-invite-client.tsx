@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
-import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
+import type {
+  AcceptHostedShareResult,
+  HostedSharePageData,
+  HostedSharePreview,
+} from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedOnboardingJson } from "./client-api";
@@ -16,6 +20,8 @@ interface JoinInviteClientProps {
   sharePreview: HostedSharePreview | null;
 }
 
+type JoinInviteShareImportState = "idle" | "processing" | "completed";
+
 export function JoinInviteClient({
   initialStatus,
   inviteCode,
@@ -26,19 +32,58 @@ export function JoinInviteClient({
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
-  const [shareImported, setShareImported] = useState(false);
+  const [shareImportState, setShareImportState] = useState<JoinInviteShareImportState>("idle");
   const phoneAuthReady = status.capabilities.phoneAuthReady && Boolean(privyAppId);
 
   const title = resolveTitle(status);
   const subtitle = resolveSubtitle(status);
 
   useEffect(() => {
-    if (!shareCode || shareImported || status.stage !== "active") {
+    if (!shareCode || shareImportState !== "idle" || status.stage !== "active") {
       return;
     }
 
     void handleAcceptShare();
-  }, [shareCode, shareImported, status.stage]);
+  }, [shareCode, shareImportState, status.stage]);
+
+  useEffect(() => {
+    if (!shareCode || shareImportState !== "processing") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const payload = await requestHostedOnboardingJson<HostedSharePageData>({
+          url: buildHostedShareStatusUrl({
+            inviteCode,
+            shareCode,
+          }),
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setShareImportState(resolveJoinInviteShareStateFromStatus(payload));
+        });
+      } catch {
+        // Keep polling; transient status failures should not reset the pending state.
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 3_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [inviteCode, shareCode, shareImportState]);
 
   async function refreshStatus(): Promise<HostedInviteStatusPayload> {
     const payload = await requestHostedOnboardingJson<HostedInviteStatusPayload>({
@@ -80,7 +125,7 @@ export function JoinInviteClient({
   }
 
   async function handleAcceptShare() {
-    if (!shareCode || shareImported) {
+    if (!shareCode || shareImportState === "completed") {
       return;
     }
 
@@ -88,11 +133,14 @@ export function JoinInviteClient({
     setPendingAction("share");
 
     try {
-      await requestHostedOnboardingJson<{ imported: boolean; alreadyImported?: boolean }>({
+      const payload = await requestHostedOnboardingJson<Pick<
+        AcceptHostedShareResult,
+        "alreadyImported" | "imported" | "pending"
+      >>({
         payload: {},
         url: `/api/hosted-share/${encodeURIComponent(shareCode)}/accept`,
       });
-      setShareImported(true);
+      setShareImportState(resolveJoinInviteShareStateFromAccept(payload));
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -231,8 +279,10 @@ export function JoinInviteClient({
                 Manage email settings
               </a>
               {sharePreview ? (
-                shareImported ? (
+                shareImportState === "completed" ? (
                   <p>{sharePreview.title} has been added to this hosted vault.</p>
+                ) : shareImportState === "processing" ? (
+                  <p>{sharePreview.title} is being added to this hosted vault.</p>
                 ) : (
                   <button
                     type="button"
@@ -296,4 +346,37 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
     default:
       return "Murph hosted onboarding";
   }
+}
+
+export function resolveJoinInviteShareStateFromAccept(
+  payload: Pick<AcceptHostedShareResult, "alreadyImported" | "imported" | "pending">,
+): JoinInviteShareImportState {
+  if (payload.imported || payload.alreadyImported) {
+    return "completed";
+  }
+
+  return payload.pending ? "processing" : "idle";
+}
+
+export function resolveJoinInviteShareStateFromStatus(
+  data: HostedSharePageData,
+): JoinInviteShareImportState {
+  if (data.stage === "consumed" && data.share?.acceptedByCurrentMember) {
+    return "completed";
+  }
+
+  if (data.stage === "processing" && data.share?.acceptedByCurrentMember) {
+    return "processing";
+  }
+
+  return "idle";
+}
+
+function buildHostedShareStatusUrl(input: {
+  inviteCode: string;
+  shareCode: string;
+}): string {
+  const url = new URL(`/api/hosted-share/${encodeURIComponent(input.shareCode)}/status`, "https://join.example.test");
+  url.searchParams.set("invite", input.inviteCode);
+  return `${url.pathname}${url.search}`;
 }

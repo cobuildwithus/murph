@@ -29,12 +29,10 @@ interface RunnerOutboundUserRunnerStubLike {
         vault: HostedExecutionBundleRef | null;
       };
     };
-    userId: string;
   }): Promise<HostedExecutionCommittedResult>;
   finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId: string;
   }): Promise<HostedExecutionCommittedResult>;
 }
 
@@ -236,7 +234,6 @@ async function forwardRunnerCommit(
     committed: await stub.commit({
       eventId,
       payload: parseHostedExecutionCommitRequest(payload),
-      userId,
     }),
     ok: true,
   });
@@ -253,7 +250,6 @@ async function forwardRunnerFinalize(
     finalized: await stub.finalizeCommit({
       eventId,
       payload: parseHostedExecutionFinalizeRequest(payload),
-      userId,
     }),
     ok: true,
   });

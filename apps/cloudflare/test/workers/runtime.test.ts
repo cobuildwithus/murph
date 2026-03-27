@@ -9,19 +9,23 @@ import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 
 import type {
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionBundleRef,
   HostedExecutionUserStatus,
 } from "@murph/runtime-state";
 
 interface UserRunnerRpcStub {
-  clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  bootstrapUser(userId: string): Promise<{ userId: string }>;
+  clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
-  getUserEnvStatus(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  status(userId: string): Promise<HostedExecutionUserStatus>;
-  updateUserEnv(
-    userId: string,
-    update: { env: Record<string, string | null>; mode: "merge" | "replace" },
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+  getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  status(): Promise<HostedExecutionUserStatus>;
+  updateUserEnv(update: { env: Record<string, string | null>; mode: "merge" | "replace" }): Promise<{
+    configuredUserEnvKeys: string[];
+    userId: string;
+  }>;
 }
 
 describe("cloudflare worker runtime suite", () => {
@@ -41,7 +45,11 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(response.status).toBe(401);
-    await expect(getUserRunnerStub("member_invalid").status("member_invalid")).resolves.toMatchObject({
+    const stub = getUserRunnerStub("member_invalid");
+    await expect(stub.bootstrapUser("member_invalid")).resolves.toEqual({
+      userId: "member_invalid",
+    });
+    await expect(stub.status()).resolves.toMatchObject({
       lastEventId: null,
       pendingEventCount: 0,
       userId: "member_invalid",
@@ -58,25 +66,32 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      bundleRefs: {
-        agentState: expect.objectContaining({
-          key: `users/${dispatch.event.userId}/agent-state.bundle.json`,
-        }),
-        vault: expect.objectContaining({
-          key: `users/${dispatch.event.userId}/vault.bundle.json`,
-        }),
+    const payload = await response.json() as HostedExecutionDispatchResult;
+    expect(payload).toMatchObject({
+      event: {
+        eventId: "evt_signed_runtime",
+        state: "completed",
       },
-      lastEventId: "evt_signed_runtime",
-      nextWakeAt: "2026-03-26T12:01:00.000Z",
-      pendingEventCount: 0,
-      retryingEventId: null,
-      userId: dispatch.event.userId,
+      status: {
+        bundleRefs: {
+          agentState: expect.objectContaining({
+            key: expect.stringMatching(/^bundles\/agent-state\/[0-9a-f]+\.bundle\.json$/u),
+          }),
+          vault: expect.objectContaining({
+            key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+          }),
+        },
+        lastEventId: "evt_signed_runtime",
+        nextWakeAt: "2026-03-26T12:01:00.000Z",
+        pendingEventCount: 0,
+        retryingEventId: null,
+        userId: dispatch.event.userId,
+      },
     });
-    await expect(readBundleText(dispatch.event.userId, "agent-state")).resolves.toBe(
+    await expect(readBundleText(payload.status.bundleRefs.agentState)).resolves.toBe(
       `agent-state:${dispatch.eventId}`,
     );
-    await expect(readBundleText(dispatch.event.userId, "vault")).resolves.toBe(
+    await expect(readBundleText(payload.status.bundleRefs.vault)).resolves.toBe(
       `vault:${dispatch.eventId}`,
     );
   });
@@ -92,7 +107,7 @@ describe("cloudflare worker runtime suite", () => {
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
     await expect(runDurableObjectAlarm(stub as never)).resolves.toBeTypeOf("boolean");
     await vi.waitFor(async () => {
-      await expect(stub.status(userId)).resolves.toMatchObject({
+      await expect(stub.status()).resolves.toMatchObject({
         lastEventId: expect.stringMatching(/^alarm:/u),
         pendingEventCount: 0,
         retryingEventId: null,
@@ -143,11 +158,11 @@ describe("cloudflare worker runtime suite", () => {
       pendingEventCount: 0,
       userId,
     });
-    await expect(getUserRunnerStub(userId).getUserEnvStatus(userId)).resolves.toEqual({
+    await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
-    await expect(getUserRunnerStub(userId).clearUserEnv(userId)).resolves.toEqual({
+    await expect(getUserRunnerStub(userId).clearUserEnv()).resolves.toEqual({
       configuredUserEnvKeys: [],
       userId,
     });
@@ -272,8 +287,8 @@ function createBundleStore() {
   });
 }
 
-async function readBundleText(userId: string, kind: "agent-state" | "vault"): Promise<string | null> {
-  const bundle = await createBundleStore().readBundle(userId, kind);
+async function readBundleText(bundleRef: HostedExecutionBundleRef | null): Promise<string | null> {
+  const bundle = await createBundleStore().readBundle(bundleRef);
 
   if (!bundle) {
     return null;

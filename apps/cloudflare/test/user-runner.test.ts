@@ -44,10 +44,36 @@ describe("HostedUserRunner", () => {
     });
     const plaintext = new TextEncoder().encode("vault bundle");
 
-    const ref = await bundleStore.writeBundle("member_123", "vault", plaintext);
+    const ref = await bundleStore.writeBundle("vault", plaintext);
 
-    expect(ref.key).toBe("users/member_123/vault.bundle.json");
-    await expect(bundleStore.readBundle("member_123", "vault")).resolves.toEqual(plaintext);
+    expect(ref).toMatchObject({
+      key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+      size: plaintext.byteLength,
+    });
+    await expect(bundleStore.readBundle(ref)).resolves.toEqual(plaintext);
+  });
+
+  it("reads legacy hosted bundle envelopes through object storage", async () => {
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    });
+    const plaintext = new TextEncoder().encode("legacy vault bundle");
+    const legacyEnvelope = await encryptHostedBundle({
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      plaintext,
+    });
+
+    legacyEnvelope.schema = "healthybob.hosted-cipher.v1";
+    await bucket.api.put("bundles/vault/legacy.bundle.json", JSON.stringify(legacyEnvelope));
+
+    await expect(bundleStore.readBundle({
+      key: "bundles/vault/legacy.bundle.json",
+      sha256: "legacy",
+      size: plaintext.byteLength,
+    })).resolves.toEqual(plaintext);
   });
 
   it("roundtrips committed execution journal records through object storage", async () => {
@@ -168,10 +194,7 @@ describe("HostedUserRunner", () => {
     expect(status.poisonedEventIds).toEqual([]);
     expect(status.retryingEventId).toBeNull();
     expect(storage.lastAlarm).not.toBeNull();
-    expect(bucket.keys()).toEqual([
-      "users/member_123/agent-state.bundle.json",
-      "users/member_123/vault.bundle.json",
-    ]);
+    expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
     await expect(createHostedExecutionJournalStore({
       bucket: bucket.api,
       key: environment.bundleEncryptionKey,
@@ -223,7 +246,7 @@ describe("HostedUserRunner", () => {
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(0);
     expect(status.lastEventId).toBe("evt_native_container");
     expect(status.nextWakeAt).toBe("2026-03-27T18:00:00.000Z");
-    expect(bucket.keys()).toContain("users/member_123/vault.bundle.json");
+    expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
   });
 
   it("does not reuse stale past nextWakeAt values after an alarm run returns no next wake", async () => {
@@ -365,14 +388,15 @@ describe("HostedUserRunner", () => {
       bucket.api,
     );
 
-    await runner.updateUserEnv("member_123", {
+    await runner.bootstrapUser("member_123");
+    await runner.updateUserEnv({
       env: {
         OPENAI_API_KEY: "sk-user",
       },
       mode: "replace",
     });
     await runner.dispatch(createDispatch("evt_user_env_set"));
-    await runner.clearUserEnv("member_123");
+    await runner.clearUserEnv();
     await runner.dispatch(createDispatch("evt_user_env_cleared"));
 
     const invokePayloads = await Promise.all(
@@ -1399,20 +1423,25 @@ describe("HostedUserRunner", () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
     await runner.status("member_123");
-    const migrated = await storage.state.storage.get<{
-      consumedEventExpirations?: Record<string, string>;
-    }>("state");
-    const firstExpiry = migrated?.consumedEventExpirations?.evt_legacy ?? null;
+    const firstExpiry = (
+      storage.state.storage.sql?.exec<{ expires_at: string | null }>(
+        "SELECT expires_at FROM consumed_events WHERE event_id = ?",
+        "evt_legacy",
+      ).toArray()[0]?.expires_at ?? null
+    );
 
     expect(firstExpiry).not.toBeNull();
 
     vi.setSystemTime(new Date("2026-03-26T12:10:00.000Z"));
     await runner.status("member_123");
-    const reread = await storage.state.storage.get<{
-      consumedEventExpirations?: Record<string, string>;
-    }>("state");
+    const rereadExpiry = (
+      storage.state.storage.sql?.exec<{ expires_at: string | null }>(
+        "SELECT expires_at FROM consumed_events WHERE event_id = ?",
+        "evt_legacy",
+      ).toArray()[0]?.expires_at ?? null
+    );
 
-    expect(reread?.consumedEventExpirations?.evt_legacy).toBe(firstExpiry);
+    expect(rereadExpiry).toBe(firstExpiry);
 
     await runner.dispatch({
       event: {
@@ -1478,7 +1507,8 @@ describe("HostedUserRunner", () => {
   it("stores encrypted per-user env config in a dedicated hosted object", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
-    const saved = await runner.updateUserEnv("member_123", {
+    await runner.bootstrapUser("member_123");
+    const saved = await runner.updateUserEnv({
       env: {
         OPENAI_API_KEY: "sk-user",
         TELEGRAM_BOT_TOKEN: "bot-token",
@@ -1542,26 +1572,20 @@ describe("HostedUserRunner", () => {
     });
     const writesAfterBootstrap = bucket.putCount();
 
-    await runner.updateUserEnv("member_123", {
+    await runner.updateUserEnv({
       env: {
         OPENAI_API_KEY: "sk-user",
       },
       mode: "replace",
     });
     expect(bucket.putCount()).toBe(writesAfterBootstrap + 1);
-    expect(bucket.keys()).toEqual([
-      "users/member_123/agent-state.bundle.json",
-      "users/member_123/user-env.json",
-      "users/member_123/vault.bundle.json",
-    ]);
+    expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
+    expect(bucket.keys()).toContain("users/member_123/user-env.json");
 
-    const cleared = await runner.clearUserEnv("member_123");
+    const cleared = await runner.clearUserEnv();
 
     expect(cleared.configuredUserEnvKeys).toEqual([]);
-    expect(bucket.keys()).toEqual([
-      "users/member_123/agent-state.bundle.json",
-      "users/member_123/vault.bundle.json",
-    ]);
+    expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
   });
 
   it("supports extension-only keys across update and status reads", async () => {
@@ -1574,7 +1598,8 @@ describe("HostedUserRunner", () => {
       bucket.api,
     );
 
-    await expect(runner.updateUserEnv("member_123", {
+    await runner.bootstrapUser("member_123");
+    await expect(runner.updateUserEnv({
       env: {
         CUSTOM_API_KEY: "custom-secret",
       },
@@ -1753,6 +1778,17 @@ function countRunnerContainerCalls(
     const request = input instanceof Request ? input : new Request(String(input));
     return new URL(request.url).pathname === pathname;
   }).length;
+}
+
+function expectHostedBundleKeys(
+  keys: string[],
+  kinds: Array<"agent-state" | "vault">,
+): void {
+  for (const kind of kinds) {
+    expect(keys).toContainEqual(expect.stringMatching(
+      new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
+    ));
+  }
 }
 
 function createDispatch(eventId: string) {

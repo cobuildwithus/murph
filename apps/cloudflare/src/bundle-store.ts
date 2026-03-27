@@ -13,12 +13,8 @@ export interface R2BucketLike extends EncryptedR2BucketLike {
 }
 
 export interface HostedBundleStore {
-  readBundle(userId: string, kind: HostedExecutionBundleKind): Promise<Uint8Array | null>;
-  writeBundle(
-    userId: string,
-    kind: HostedExecutionBundleKind,
-    plaintext: Uint8Array,
-  ): Promise<HostedExecutionBundleRef>;
+  readBundle(ref: HostedExecutionBundleRef | null): Promise<Uint8Array | null>;
+  writeBundle(kind: HostedExecutionBundleKind, plaintext: Uint8Array): Promise<HostedExecutionBundleRef>;
 }
 
 export interface HostedUserEnvStore {
@@ -33,16 +29,21 @@ export function createHostedBundleStore(input: {
   keyId: string;
 }): HostedBundleStore {
   return {
-    async readBundle(userId, kind) {
+    async readBundle(ref) {
+      if (!ref) {
+        return null;
+      }
+
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: bundleObjectKey(userId, kind),
+        key: ref.key,
       });
     },
 
-    async writeBundle(userId, kind, plaintext) {
-      const key = bundleObjectKey(userId, kind);
+    async writeBundle(kind, plaintext) {
+      const hash = sha256Hex(plaintext);
+      const key = bundleObjectKey(kind, hash);
       await writeEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
@@ -52,7 +53,7 @@ export function createHostedBundleStore(input: {
       });
 
       return {
-        hash: sha256Hex(plaintext),
+        hash,
         key,
         size: plaintext.byteLength,
         updatedAt: new Date().toISOString(),
@@ -91,8 +92,8 @@ export function createHostedUserEnvStore(input: {
   };
 }
 
-function bundleObjectKey(userId: string, kind: HostedExecutionBundleKind): string {
-  return `users/${encodeURIComponent(userId)}/${kind}.bundle.json`;
+function bundleObjectKey(kind: HostedExecutionBundleKind, hash: string): string {
+  return `bundles/${kind}/${hash}.bundle.json`;
 }
 
 function userEnvObjectKey(userId: string): string {

@@ -1,5 +1,6 @@
 import {
   createHostedExecutionDispatchClient,
+  type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchEnvironment,
   readHostedExecutionDispatchEnvironment,
@@ -8,11 +9,11 @@ import {
 
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
-): Promise<HostedExecutionUserStatus> {
+): Promise<HostedExecutionDispatchResult> {
   const environment = readHostedExecutionDispatchEnvironment();
 
   if (!isHostedExecutionConfigured(environment)) {
-    return buildHostedExecutionNotConfiguredStatus(input.event.userId);
+    return buildHostedExecutionNotConfiguredStatus(input);
   }
 
   return postHostedExecutionDispatch(input, environment);
@@ -58,8 +59,10 @@ export async function dispatchHostedExecutionBestEffort(
   }
 }
 
-function buildHostedExecutionNotConfiguredStatus(userId: string): HostedExecutionUserStatus {
-  return {
+function buildHostedExecutionNotConfiguredStatus(
+  input: HostedExecutionDispatchRequest,
+): HostedExecutionDispatchResult {
+  const status: HostedExecutionUserStatus = {
     bundleRefs: {
       agentState: null,
       vault: null,
@@ -72,7 +75,17 @@ function buildHostedExecutionNotConfiguredStatus(userId: string): HostedExecutio
     pendingEventCount: 0,
     poisonedEventIds: [],
     retryingEventId: null,
-    userId,
+    userId: input.event.userId,
+  };
+
+  return {
+    event: {
+      eventId: input.eventId,
+      lastError: status.lastError,
+      state: "queued",
+      userId: input.event.userId,
+    },
+    status,
   };
 }
 
@@ -91,7 +104,7 @@ async function postHostedExecutionDispatch(
     dispatchUrl: string;
     signingSecret: string;
   },
-): Promise<HostedExecutionUserStatus> {
+): Promise<HostedExecutionDispatchResult> {
   return createHostedExecutionDispatchClient({
     baseUrl: environment.dispatchUrl,
     signingSecret: environment.signingSecret,

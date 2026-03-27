@@ -43,8 +43,8 @@ export class RunnerBundleSync {
     const store = this.createBundleStore();
     const bundleState = await this.queueStore.readBundleState();
     return {
-      agentState: encodeHostedBundleBase64(await store.readBundle(userId, "agent-state")),
-      vault: encodeHostedBundleBase64(await store.readBundle(userId, "vault")),
+      agentState: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.agentState)),
+      vault: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.vault)),
     };
   }
 
@@ -172,7 +172,6 @@ export class RunnerBundleSync {
     }
 
     return this.writeBundleBytes(
-      userId,
       kind,
       decodedBundle ?? new Uint8Array(),
       currentRef,
@@ -180,7 +179,6 @@ export class RunnerBundleSync {
   }
 
   private async writeBundleBytes(
-    userId: string,
     kind: HostedExecutionBundleKind,
     plaintext: Uint8Array,
     currentRef: HostedExecutionBundleRef | null,
@@ -190,7 +188,7 @@ export class RunnerBundleSync {
       return currentRef;
     }
 
-    const ref = await this.createBundleStore().writeBundle(userId, kind, plaintext);
+    const ref = await this.createBundleStore().writeBundle(kind, plaintext);
     return {
       ...ref,
       size: ref.size ?? plaintext.byteLength,
