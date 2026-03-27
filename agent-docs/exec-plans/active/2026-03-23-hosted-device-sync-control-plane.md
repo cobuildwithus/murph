@@ -33,7 +33,7 @@ Implemented in this branch. The hosted control plane now has a dedicated `apps/w
 ## Verification Notes
 
 - `pnpm --dir apps/web typecheck` passed after installing the workspace dependencies and generating the Prisma client.
-- `pnpm --dir apps/web test` passed, including the hosted app vitest suite and `next build --webpack`.
+- `pnpm --dir apps/web test` passed, including the hosted app vitest suite and a production Next build.
 - `pnpm typecheck` passed at the repo root.
 - `pnpm test` currently fails outside this lane in `packages/web` because `packages/query` expects several `@healthybob/contracts` exports that are not present in the current worktree build.
 - `pnpm test:coverage` currently fails outside this lane because the smoke harness is missing documented supplement command scenarios.

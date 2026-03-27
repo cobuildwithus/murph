@@ -23,6 +23,12 @@
       "@healthybob/contracts/*": [
         "packages/contracts/src/*"
       ],
+      "@healthybob/hosted-execution": [
+        "packages/hosted-execution/src/index.ts"
+      ],
+      "@healthybob/hosted-execution/*": [
+        "packages/hosted-execution/src/*"
+      ],
       "@healthybob/query": [
         "packages/query/src/index.ts"
       ],

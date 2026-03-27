@@ -10,18 +10,6 @@ const fsPromises = require("node:fs/promises") as typeof import("node:fs/promise
 
 let dotEnvGuardsInstalled = false;
 
-export function buildNextCliArgs(argv: readonly string[]): string[] {
-  const [command = "dev", ...rest] = argv;
-  const args = [command];
-
-  if ((command === "dev" || command === "build") && !hasBundlerFlag(rest)) {
-    args.push("--webpack");
-  }
-
-  args.push(...rest);
-  return args;
-}
-
 export function isBlockedDotEnvPath(value: unknown): boolean {
   const candidatePath = coercePath(value);
   if (!candidatePath) {
@@ -117,15 +105,9 @@ async function main(): Promise<void> {
   rememberLaunchCwd();
   process.chdir(packageDir);
   installDotEnvGuards();
-  process.argv = [process.execPath, nextBinPath, ...buildNextCliArgs(process.argv.slice(2))];
+  process.argv = [process.execPath, nextBinPath, ...process.argv.slice(2)];
 
   await import(pathToFileURL(nextBinPath).href);
-}
-
-function hasBundlerFlag(args: readonly string[]): boolean {
-  return args.some(
-    (value) => value === "--webpack" || value === "--turbopack" || value === "--rspack",
-  );
 }
 
 function throwIfBlocked(filePath: unknown): void {

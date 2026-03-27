@@ -8,8 +8,8 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "dev": "next dev --webpack",
-    "build": "rimraf .next && prisma generate && next build --webpack",
+    "dev": "next dev",
+    "build": "rimraf .next && prisma generate && next build",
     "start": "next start",
     "typecheck": "prisma generate && tsc -p tsconfig.json --pretty false",
     "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/web/vitest.config.ts --no-coverage --maxWorkers 1 && pnpm build",
@@ -22,6 +22,7 @@
     "@healthybob/contracts": "workspace:*",
     "@healthybob/core": "workspace:*",
     "@healthybob/device-syncd": "workspace:*",
+    "@healthybob/hosted-execution": "workspace:*",
     "@healthybob/importers": "workspace:*",
     "@healthybob/inboxd": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",
@@ -29,7 +30,7 @@
     "@prisma/client": "^7.5.0",
     "@privy-io/node": "^0.11.0",
     "@privy-io/react-auth": "^3.18.0",
-    "next": "^16.1.6",
+    "next": "^16.2.1",
     "pg": "^8.16.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -37,9 +38,11 @@
     "viem": "^2.38.5"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "dotenv": "^16.6.1",
-    "prisma": "^7.5.0"
+    "prisma": "^7.5.0",
+    "tailwindcss": "^4.2.1"
   }
 }

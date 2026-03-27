@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
 import {
+  createTurbopackSourceResolutionOptions,
   createWorkspaceSourcePackageNames,
   installSourceExtensionAliases,
   resolveWorkspaceSourceEntries as resolveWorkspaceSourceEntriesFromMap,
@@ -31,6 +32,10 @@ const PRIVY_REQUIRED_CONNECT_SOURCES = [
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
+const sourceImportRewriteLoaderPath = path.resolve(
+  appDir,
+  "../../config/turbopack-rewrite-relative-js-imports-loader.cjs",
+);
 const require = createRequire(import.meta.url);
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@healthybob/contracts": "../../packages/contracts/src/index.ts",
@@ -173,6 +178,10 @@ function installOptionalModuleFallbacks(config: Parameters<NonNullable<NextConfi
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(appDir, "../.."),
   transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
+  turbopack: {
+    root: path.resolve(appDir, "../.."),
+    ...createTurbopackSourceResolutionOptions(sourceImportRewriteLoaderPath),
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

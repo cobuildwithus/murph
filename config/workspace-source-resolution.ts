@@ -7,6 +7,36 @@ const SOURCE_EXTENSION_ALIAS: Record<string, string[]> = {
   ".mjs": [".mts", ".mjs"],
   ".cjs": [".cts", ".cjs"],
 };
+const TURBOPACK_SOURCE_RESOLVE_EXTENSIONS = [
+  ".tsx",
+  ".ts",
+  ".jsx",
+  ".js",
+  ".mts",
+  ".mjs",
+  ".cts",
+  ".cjs",
+  ".json",
+] as const;
+const TURBOPACK_SOURCE_REWRITE_GLOBS = [
+  "*.ts",
+  "*.tsx",
+  "*.mts",
+  "*.cts",
+] as const;
+const TURBOPACK_SOURCE_REWRITE_CONDITION: {
+  all: [
+    { not: "foreign" },
+    {
+      path: RegExp;
+    },
+  ];
+} = {
+  all: [
+    { not: "foreign" },
+    { path: /^packages\/[^/]+\/src\// },
+  ],
+};
 
 export function createWorkspaceSourcePackageNames(
   relativePaths: WorkspaceSourceEntryRelativePaths,
@@ -57,6 +87,12 @@ interface WebpackConfigLike {
   resolve?: ResolveConfigLike;
 }
 
+interface TurbopackRuleLike {
+  as: (typeof TURBOPACK_SOURCE_REWRITE_GLOBS)[number];
+  condition: typeof TURBOPACK_SOURCE_REWRITE_CONDITION;
+  loaders: string[];
+}
+
 export function installSourceExtensionAliases<T extends WebpackConfigLike>(config: T): T {
   config.resolve = {
     ...config.resolve,
@@ -67,6 +103,27 @@ export function installSourceExtensionAliases<T extends WebpackConfigLike>(confi
   };
 
   return config;
+}
+
+export function createTurbopackSourceResolutionOptions(
+  sourceImportRewriteLoaderPath: string,
+): {
+  resolveExtensions: string[];
+  rules: Record<(typeof TURBOPACK_SOURCE_REWRITE_GLOBS)[number], TurbopackRuleLike>;
+} {
+  return {
+    resolveExtensions: [...TURBOPACK_SOURCE_RESOLVE_EXTENSIONS],
+    rules: Object.fromEntries(
+      TURBOPACK_SOURCE_REWRITE_GLOBS.map((as) => [
+        as,
+        {
+          as,
+          condition: TURBOPACK_SOURCE_REWRITE_CONDITION,
+          loaders: [sourceImportRewriteLoaderPath],
+        } satisfies TurbopackRuleLike,
+      ]),
+    ) as Record<(typeof TURBOPACK_SOURCE_REWRITE_GLOBS)[number], TurbopackRuleLike>,
+  };
 }
 
 function escapeRegex(value: string): string {
