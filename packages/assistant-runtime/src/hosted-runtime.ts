@@ -19,6 +19,8 @@ import {
   parseLinqWebhookEvent,
   rebuildRuntimeFromVault,
 } from "@healthybob/inboxd";
+import { normalizeParsedEmailMessage } from "@healthybob/inboxd/connectors/email/normalize-parsed";
+import { parseRawEmailMessage } from "@healthybob/inboxd/connectors/email/parsed";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
@@ -28,11 +30,17 @@ import {
   encodeHostedBundleBase64,
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
+} from "@healthybob/runtime-state";
+import {
+  buildHostedAssistantDeliverySideEffect,
+  parseHostedExecutionSideEffects,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunnerRequest,
   type HostedExecutionRunnerResult,
-} from "@healthybob/runtime-state";
+  type HostedExecutionSideEffect,
+  type HostedExecutionSideEffectRecord,
+} from "@healthybob/hosted-execution";
 import {
   createIntegratedInboxCliServices,
   createIntegratedVaultCliServices,
@@ -46,13 +54,12 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "healthybob";
+} from "@healthybob/assistant-services";
 import {
-  buildHostedAssistantDeliverySideEffect,
-  parseHostedExecutionSideEffects,
-  type HostedExecutionSideEffect,
-  type HostedExecutionSideEffectRecord,
-} from "./contracts.js";
+  buildHostedRunnerEmailMessageUrl,
+  createHostedEmailChannelDependencies,
+  normalizeHostedEmailBaseUrl,
+} from "./hosted-email.ts";
 
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
@@ -71,8 +78,11 @@ export interface HostedExecutionCommitCallback {
 export interface HostedAssistantRuntimeConfig {
   commitBaseUrl?: string | null;
   commitTimeoutMs?: number | null;
+  emailBaseUrl?: string | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   outboxBaseUrl?: string | null;
+  sharePackBaseUrl?: string | null;
+  sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
   userEnv?: Readonly<Record<string, string>>;
 }
@@ -102,9 +112,35 @@ interface HostedAssistantRuntimeChildResult {
 }
 
 interface HostedBootstrapResult {
+  emailAutoReplyEnabled: boolean;
   linqAutoReplyEnabled: boolean;
   vaultCreated: boolean;
 }
+
+interface NormalizedHostedAssistantRuntimeConfig {
+  commitBaseUrl: string;
+  commitTimeoutMs: number | null;
+  emailBaseUrl: string;
+  forwardedEnv: Record<string, string>;
+  sharePackBaseUrl: string | null;
+  sharePackToken: string | null;
+  sideEffectsBaseUrl: string;
+  userEnv: Record<string, string>;
+}
+
+interface HostedCommittedExecutionState {
+  committedResult: HostedExecutionRunnerResult;
+  committedSideEffects: HostedExecutionSideEffect[];
+}
+
+interface HostedDispatchExecutionMetrics {
+  bootstrapResult: HostedBootstrapResult | null;
+  shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null;
+  shareImportTitle: string | null;
+}
+
+type HostedDispatchEvent = HostedExecutionDispatchRequest["event"];
+type HostedRestoredExecutionContext = Awaited<ReturnType<typeof restoreHostedExecutionContext>>;
 
 export async function runHostedAssistantRuntimeJobInProcess(
   input: HostedAssistantRuntimeJobInput,
@@ -118,7 +154,6 @@ export async function runHostedAssistantRuntimeJobInProcess(
       vaultBundle: decodeHostedBundleBase64(input.request.bundles.vault),
       workspaceRoot,
     });
-    const requestId = input.request.dispatch.eventId;
     const runtimeEnv = {
       ...runtime.forwardedEnv,
       ...runtime.userEnv,
@@ -132,148 +167,32 @@ export async function runHostedAssistantRuntimeJobInProcess(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        if (input.request.resume?.committedResult) {
-          const committedResult: HostedExecutionRunnerResult = {
-            bundles: {
-              agentState: input.request.bundles.agentState,
-              vault: input.request.bundles.vault,
-            },
-            result: input.request.resume.committedResult.result,
-          };
-          const committedSideEffects = parseHostedExecutionSideEffects(
-            input.request.resume.committedResult.sideEffects,
-          );
+        const committedExecution = input.request.resume?.committedResult
+          ? resumeHostedCommittedExecution(input.request)
+          : await executeHostedDispatchForCommit({
+              request: input.request,
+              restored,
+              runtime,
+              runtimeEnv,
+            });
 
-          await drainHostedCommittedSideEffectsAfterCommit({
+        if (!input.request.resume?.committedResult) {
+          await commitHostedExecutionResult({
             commit: input.request.commit ?? null,
-            commitTimeoutMs: runtime.commitTimeoutMs,
             dispatch: input.request.dispatch,
-            sideEffectsBaseUrl: runtime.sideEffectsBaseUrl,
-            sideEffects: committedSideEffects,
-            vaultRoot: restored.vaultRoot,
-          });
-          await refreshAssistantStatusSnapshot(restored.vaultRoot);
-
-          const finalSnapshot = await snapshotHostedExecutionContext({
-            operatorHomeRoot: restored.operatorHomeRoot,
-            vaultRoot: restored.vaultRoot,
-          });
-          const finalResult: HostedExecutionRunnerResult = {
-            bundles: {
-              agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
-              vault: encodeHostedBundleBase64(finalSnapshot.vaultBundle),
-            },
-            result: committedResult.result,
-          };
-
-          await finalizeHostedExecutionResult({
-            commit: input.request.commit ?? null,
-            committedResult,
-            dispatch: input.request.dispatch,
-            finalResult,
+            result: committedExecution.committedResult,
+            sideEffects: committedExecution.committedSideEffects,
             runtime,
           });
-
-          return finalResult;
         }
 
-        const bootstrapResult = await prepareHostedDispatchContext(
-          restored.vaultRoot,
-          input.request.dispatch,
-        );
-        let shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null = null;
-
-        switch (input.request.dispatch.event.kind) {
-          case "member.activated":
-            break;
-          case "linq.message.received":
-            await ingestHostedLinqMessage(restored.vaultRoot, {
-              ...input.request.dispatch,
-              event: input.request.dispatch.event,
-            });
-            break;
-          case "assistant.cron.tick":
-          case "device-sync.wake":
-            break;
-          case "vault.share.accepted":
-            shareImportResult = await importSharePackIntoVault({
-              vaultRoot: restored.vaultRoot,
-              pack: input.request.dispatch.event.pack,
-            });
-            break;
-          default:
-            assertNever(input.request.dispatch.event);
-        }
-
-        const parserResult = await drainHostedParserQueue(restored.vaultRoot);
-        await runHostedAssistantAutomation(restored.vaultRoot, requestId);
-        const assistantCronStatus = await getAssistantCronStatus(restored.vaultRoot);
-        const deviceSyncResult = await runHostedDeviceSyncPass(restored.vaultRoot, runtimeEnv);
-        const committedSnapshot = await snapshotHostedExecutionContext({
-          operatorHomeRoot: restored.operatorHomeRoot,
-          vaultRoot: restored.vaultRoot,
-        });
-        const committedSideEffects = await collectHostedExecutionSideEffects(
-          restored.vaultRoot,
-        );
-
-        const committedResult: HostedExecutionRunnerResult = {
-          bundles: {
-            agentState: encodeHostedBundleBase64(committedSnapshot.agentStateBundle),
-            vault: encodeHostedBundleBase64(committedSnapshot.vaultBundle),
-          },
-          result: {
-            eventsHandled: 1,
-            nextWakeAt: assistantCronStatus.nextRunAt,
-            summary: summarizeDispatch(input.request.dispatch, {
-              bootstrapResult,
-              deviceSyncProcessed: deviceSyncResult.processedJobs,
-              deviceSyncSkipped: deviceSyncResult.skipped,
-              parserProcessed: parserResult.processedJobs,
-              shareImportResult,
-            }),
-          },
-        };
-
-        await commitHostedExecutionResult({
+        return await completeHostedExecutionAfterCommit({
           commit: input.request.commit ?? null,
           dispatch: input.request.dispatch,
-          result: committedResult,
-          sideEffects: committedSideEffects,
           runtime,
+          restored,
+          committedExecution,
         });
-
-        await drainHostedCommittedSideEffectsAfterCommit({
-          commit: input.request.commit ?? null,
-          commitTimeoutMs: runtime.commitTimeoutMs,
-          dispatch: input.request.dispatch,
-          sideEffectsBaseUrl: runtime.sideEffectsBaseUrl,
-          sideEffects: committedSideEffects,
-          vaultRoot: restored.vaultRoot,
-        });
-        await refreshAssistantStatusSnapshot(restored.vaultRoot);
-
-        const finalSnapshot = await snapshotHostedExecutionContext({
-          operatorHomeRoot: restored.operatorHomeRoot,
-          vaultRoot: restored.vaultRoot,
-        });
-        const finalResult: HostedExecutionRunnerResult = {
-          bundles: {
-            agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
-            vault: encodeHostedBundleBase64(finalSnapshot.vaultBundle),
-          },
-          result: committedResult.result,
-        };
-
-        await finalizeHostedExecutionResult({
-          commit: input.request.commit ?? null,
-          committedResult,
-          dispatch: input.request.dispatch,
-          finalResult,
-          runtime,
-        });
-
-        return finalResult;
       },
     );
   } finally {
@@ -402,18 +321,25 @@ export function parseHostedRuntimeChildResult(output: string): HostedAssistantRu
 
 function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
-): Required<Pick<HostedAssistantRuntimeConfig, "forwardedEnv" | "userEnv">> & {
-  commitBaseUrl: string;
-  commitTimeoutMs: number | null;
-  sideEffectsBaseUrl: string;
-} {
+): NormalizedHostedAssistantRuntimeConfig {
   return {
     commitBaseUrl: normalizeCallbackBaseUrl(
       input?.commitBaseUrl,
       HOSTED_RUNNER_COMMIT_BASE_URL,
     ),
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
+    emailBaseUrl: normalizeHostedEmailBaseUrl(input?.emailBaseUrl),
     forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
+    sharePackBaseUrl: normalizeOptionalCallbackBaseUrl(
+      input?.sharePackBaseUrl
+        ?? input?.forwardedEnv?.HOSTED_ONBOARDING_PUBLIC_BASE_URL
+        ?? null,
+    ),
+    sharePackToken: normalizeOptionalString(
+      input?.sharePackToken
+        ?? input?.forwardedEnv?.HOSTED_SHARE_INTERNAL_TOKEN
+        ?? null,
+    ),
     sideEffectsBaseUrl: normalizeCallbackBaseUrl(
       input?.sideEffectsBaseUrl ?? input?.outboxBaseUrl,
       HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL,
@@ -434,6 +360,113 @@ function resolveHostedRuntimeChildEntry(): string {
 
 function resolveHostedRuntimeTsconfigPath(): string {
   return fileURLToPath(new URL("../../../tsconfig.base.json", import.meta.url));
+}
+
+function resumeHostedCommittedExecution(
+  request: HostedAssistantRuntimeJobRequest,
+): HostedCommittedExecutionState {
+  return {
+    committedResult: {
+      bundles: {
+        agentState: request.bundles.agentState,
+        vault: request.bundles.vault,
+      },
+      result: request.resume!.committedResult.result,
+    },
+    committedSideEffects: parseHostedExecutionSideEffects(
+      request.resume!.committedResult.sideEffects,
+    ),
+  };
+}
+
+async function executeHostedDispatchForCommit(input: {
+  request: HostedAssistantRuntimeJobRequest;
+  restored: HostedRestoredExecutionContext;
+  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "emailBaseUrl">;
+  runtimeEnv: Readonly<Record<string, string>>;
+}): Promise<HostedCommittedExecutionState> {
+  const requestId = input.request.dispatch.eventId;
+  const dispatchMetrics = await executeHostedDispatchEvent({
+    dispatch: input.request.dispatch,
+    emailBaseUrl: input.runtime.emailBaseUrl,
+    runtimeEnv: input.runtimeEnv,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  const parserResult = await drainHostedParserQueue(input.restored.vaultRoot);
+  await runHostedAssistantAutomation(input.restored.vaultRoot, requestId);
+  const assistantCronStatus = await getAssistantCronStatus(input.restored.vaultRoot);
+  const deviceSyncResult = await runHostedDeviceSyncPass(input.restored.vaultRoot, input.runtimeEnv);
+  const committedSnapshot = await snapshotHostedExecutionContext({
+    operatorHomeRoot: input.restored.operatorHomeRoot,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  const committedSideEffects = await collectHostedExecutionSideEffects(input.restored.vaultRoot);
+
+  return {
+    committedResult: {
+      bundles: {
+        agentState: encodeHostedBundleBase64(committedSnapshot.agentStateBundle),
+        vault: encodeHostedBundleBase64(committedSnapshot.vaultBundle),
+      },
+      result: {
+        eventsHandled: 1,
+        nextWakeAt: assistantCronStatus.nextRunAt,
+        summary: summarizeDispatch(input.request.dispatch, {
+          bootstrapResult: dispatchMetrics.bootstrapResult,
+          deviceSyncProcessed: deviceSyncResult.processedJobs,
+          deviceSyncSkipped: deviceSyncResult.skipped,
+          parserProcessed: parserResult.processedJobs,
+          shareImportResult: dispatchMetrics.shareImportResult,
+          shareImportTitle: dispatchMetrics.shareImportTitle,
+        }),
+      },
+    },
+    committedSideEffects,
+  };
+}
+
+async function completeHostedExecutionAfterCommit(input: {
+  commit: HostedExecutionCommitCallback | null;
+  dispatch: HostedExecutionDispatchRequest;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl"
+  >;
+  restored: HostedRestoredExecutionContext;
+  committedExecution: HostedCommittedExecutionState;
+}): Promise<HostedExecutionRunnerResult> {
+  await drainHostedCommittedSideEffectsAfterCommit({
+    commit: input.commit,
+    commitTimeoutMs: input.runtime.commitTimeoutMs,
+    dispatch: input.dispatch,
+    emailBaseUrl: input.runtime.emailBaseUrl,
+    sideEffectsBaseUrl: input.runtime.sideEffectsBaseUrl,
+    sideEffects: input.committedExecution.committedSideEffects,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  await refreshAssistantStatusSnapshot(input.restored.vaultRoot);
+
+  const finalSnapshot = await snapshotHostedExecutionContext({
+    operatorHomeRoot: input.restored.operatorHomeRoot,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  const finalResult: HostedExecutionRunnerResult = {
+    bundles: {
+      agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
+      vault: encodeHostedBundleBase64(finalSnapshot.vaultBundle),
+    },
+    result: input.committedExecution.committedResult.result,
+  };
+
+  await finalizeHostedExecutionResult({
+    commit: input.commit,
+    committedResult: input.committedExecution.committedResult,
+    dispatch: input.dispatch,
+    finalResult,
+    runtime: input.runtime,
+  });
+
+  return finalResult;
 }
 
 async function commitHostedExecutionResult(input: {
@@ -519,9 +552,10 @@ async function finalizeHostedExecutionResult(input: {
 async function prepareHostedDispatchContext(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
+  runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<HostedBootstrapResult | null> {
   const bootstrapResult = dispatch.event.kind === "member.activated"
-    ? await bootstrapHostedMemberContext(vaultRoot, dispatch)
+    ? await bootstrapHostedMemberContext(vaultRoot, dispatch, runtimeEnv)
     : null;
 
   await requireHostedBootstrapForDispatch(vaultRoot, dispatch);
@@ -529,9 +563,143 @@ async function prepareHostedDispatchContext(
   return bootstrapResult;
 }
 
+async function executeHostedDispatchEvent(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  emailBaseUrl: string;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+}): Promise<HostedDispatchExecutionMetrics> {
+  const bootstrapResult = await prepareHostedDispatchContext(
+    input.vaultRoot,
+    input.dispatch,
+    input.runtimeEnv,
+  );
+  const dispatchEffect = await handleHostedDispatchEvent({
+    dispatch: input.dispatch,
+    emailBaseUrl: input.emailBaseUrl,
+    vaultRoot: input.vaultRoot,
+  });
+
+  return {
+    bootstrapResult,
+    shareImportResult: dispatchEffect.shareImportResult,
+    shareImportTitle: dispatchEffect.shareImportTitle,
+  };
+}
+
+async function handleHostedDispatchEvent(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  emailBaseUrl: string;
+  vaultRoot: string;
+}): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
+  const dispatch = input.dispatch;
+
+  switch (dispatch.event.kind) {
+    case "member.activated":
+      return await handleHostedMemberActivatedDispatch();
+    case "linq.message.received":
+      return await handleHostedLinqDispatch(input.vaultRoot, {
+        ...dispatch,
+        event: dispatch.event,
+      });
+    case "email.message.received":
+      return await handleHostedEmailDispatch(
+        input.vaultRoot,
+        {
+          ...dispatch,
+          event: dispatch.event,
+        },
+        input.emailBaseUrl,
+      );
+    case "assistant.cron.tick":
+    case "device-sync.wake":
+      return await handleHostedMaintenanceDispatch();
+    case "vault.share.accepted":
+      return await handleHostedShareAcceptedDispatch(input.vaultRoot, {
+        ...dispatch,
+        event: dispatch.event,
+      });
+    default:
+      return assertNever(dispatch.event);
+  }
+}
+
+async function handleHostedMemberActivatedDispatch(): Promise<Pick<
+  HostedDispatchExecutionMetrics,
+  "shareImportResult" | "shareImportTitle"
+>> {
+  return {
+    shareImportResult: null,
+    shareImportTitle: null,
+  };
+}
+
+async function handleHostedLinqDispatch(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest & {
+    event: Extract<HostedDispatchEvent, { kind: "linq.message.received" }>;
+  },
+): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
+  await ingestHostedLinqMessage(vaultRoot, {
+    ...dispatch,
+    event: dispatch.event,
+  });
+  return {
+    shareImportResult: null,
+    shareImportTitle: null,
+  };
+}
+
+async function handleHostedEmailDispatch(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest & {
+    event: Extract<HostedDispatchEvent, { kind: "email.message.received" }>;
+  },
+  emailBaseUrl: string,
+): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
+  await ingestHostedEmailMessage(
+    vaultRoot,
+    {
+      ...dispatch,
+      event: dispatch.event,
+    },
+    emailBaseUrl,
+  );
+  return {
+    shareImportResult: null,
+    shareImportTitle: null,
+  };
+}
+
+async function handleHostedMaintenanceDispatch(): Promise<Pick<
+  HostedDispatchExecutionMetrics,
+  "shareImportResult" | "shareImportTitle"
+>> {
+  return {
+    shareImportResult: null,
+    shareImportTitle: null,
+  };
+}
+
+async function handleHostedShareAcceptedDispatch(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest & {
+    event: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>;
+  },
+): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
+  return {
+    shareImportResult: await importSharePackIntoVault({
+      vaultRoot,
+      pack: dispatch.event.pack,
+    }),
+    shareImportTitle: dispatch.event.pack.title,
+  };
+}
+
 async function bootstrapHostedMemberContext(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
+  runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<HostedBootstrapResult> {
   const requestId = dispatch.eventId;
   const vaultServices = createIntegratedVaultCliServices();
@@ -546,22 +714,52 @@ async function bootstrapHostedMemberContext(
   }
 
   const automationState = await readAssistantAutomationState(vaultRoot);
-  const linqAutoReplyEnabled = !automationState.autoReplyChannels.includes("linq");
-
+  const nextAutoReplyChannels = [...automationState.autoReplyChannels];
+  const linqAutoReplyEnabled = !nextAutoReplyChannels.includes("linq");
   if (linqAutoReplyEnabled) {
+    nextAutoReplyChannels.push("linq");
+  }
+
+  const emailAutoReplyEnabled = isHostedEmailConfigured(runtimeEnv)
+    && !nextAutoReplyChannels.includes("email");
+  if (emailAutoReplyEnabled) {
+    nextAutoReplyChannels.push("email");
+  }
+
+  if (linqAutoReplyEnabled || emailAutoReplyEnabled) {
     await saveAssistantAutomationState(vaultRoot, {
       ...automationState,
-      autoReplyChannels: [...automationState.autoReplyChannels, "linq"],
+      autoReplyChannels: nextAutoReplyChannels,
       updatedAt: new Date().toISOString(),
     });
   }
 
   return {
+    emailAutoReplyEnabled,
     linqAutoReplyEnabled,
     vaultCreated,
   };
 }
 
+
+function isHostedEmailConfigured(env: Readonly<Record<string, string>>): boolean {
+  return resolveHostedEmailSenderIdentity(env) !== null;
+}
+
+function resolveHostedEmailSenderIdentity(env: Readonly<Record<string, string>>): string | null {
+  const explicit = env.HOSTED_EMAIL_FROM_ADDRESS?.trim() ?? "";
+  if (explicit) {
+    return explicit;
+  }
+
+  const domain = env.HOSTED_EMAIL_DOMAIN?.trim() ?? "";
+  if (!domain) {
+    return null;
+  }
+
+  const localPart = env.HOSTED_EMAIL_LOCAL_PART?.trim() || "assistant";
+  return `${localPart}@${domain}`;
+}
 async function requireHostedBootstrapForDispatch(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
@@ -610,6 +808,54 @@ async function ingestHostedLinqMessage(
     const capture = await normalizeLinqWebhookEvent({
       defaultAccountId: dispatch.event.normalizedPhoneNumber,
       event,
+    });
+    const pipeline = await createInboxPipeline({
+      runtime,
+      vaultRoot,
+    });
+
+    try {
+      await pipeline.processCapture(capture);
+    } finally {
+      pipeline.close();
+    }
+  } finally {
+    runtime.close();
+  }
+}
+
+async function ingestHostedEmailMessage(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest & {
+    event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
+  },
+  emailBaseUrl: string,
+): Promise<void> {
+  const response = await fetch(
+    buildHostedRunnerEmailMessageUrl(emailBaseUrl, dispatch.event.rawMessageKey).toString(),
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Hosted email message fetch failed for ${dispatch.event.userId}/${dispatch.event.rawMessageKey} with HTTP ${response.status}.`,
+    );
+  }
+
+  const runtime = await openInboxRuntime({
+    vaultRoot,
+  });
+
+  try {
+    await rebuildRuntimeFromVault({
+      runtime,
+      vaultRoot,
+    });
+    const capture = await normalizeParsedEmailMessage({
+      accountAddress: dispatch.event.identityId,
+      accountId: dispatch.event.identityId,
+      message: parseRawEmailMessage(new Uint8Array(await response.arrayBuffer())),
+      source: "email",
+      threadTarget: dispatch.event.threadTarget,
     });
     const pipeline = await createInboxPipeline({
       runtime,
@@ -679,6 +925,7 @@ async function drainHostedCommittedSideEffectsAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   commitTimeoutMs: number | null;
   dispatch: HostedExecutionDispatchRequest;
+  emailBaseUrl: string;
   sideEffectsBaseUrl: string;
   sideEffects: HostedExecutionSideEffect[];
   vaultRoot: string;
@@ -687,6 +934,7 @@ async function drainHostedCommittedSideEffectsAfterCommit(input: {
     await dispatchHostedCommittedSideEffect({
       commit: input.commit,
       commitTimeoutMs: input.commitTimeoutMs,
+      emailBaseUrl: input.emailBaseUrl,
       sideEffect,
       sideEffectsBaseUrl: input.sideEffectsBaseUrl,
       userId: input.dispatch.event.userId,
@@ -698,6 +946,7 @@ async function drainHostedCommittedSideEffectsAfterCommit(input: {
 async function dispatchHostedCommittedSideEffect(input: {
   commit: HostedExecutionCommitCallback;
   commitTimeoutMs: number | null;
+  emailBaseUrl: string;
   sideEffect: HostedExecutionSideEffect;
   sideEffectsBaseUrl: string;
   userId: string;
@@ -705,12 +954,16 @@ async function dispatchHostedCommittedSideEffect(input: {
 } | {
   commit: null;
   commitTimeoutMs: number | null;
+  emailBaseUrl: string;
   sideEffect: HostedExecutionSideEffect;
   sideEffectsBaseUrl: string;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
   await dispatchAssistantOutboxIntent({
+    dependencies: createHostedEmailChannelDependencies({
+      emailBaseUrl: input.emailBaseUrl,
+    }),
     dispatchHooks: input.commit
       ? createHostedAssistantDeliveryDispatchHooks({
           commit: input.commit,
@@ -834,6 +1087,20 @@ async function callHostedRunnerSideEffectJournal(input:
   };
 
   return payload.record;
+}
+
+function normalizeOptionalCallbackBaseUrl(value: string | null | undefined): string | null {
+  const normalized = normalizeOptionalString(value);
+  return normalized ? new URL(normalized).toString() : null;
+}
+
+function normalizeOptionalString(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function normalizeCallbackBaseUrl(value: string | null | undefined, fallback: string): string {
@@ -964,6 +1231,7 @@ function summarizeDispatch(
     deviceSyncSkipped: boolean;
     parserProcessed: number;
     shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null;
+    shareImportTitle: string | null;
   },
 ): string {
   const suffix = ` Parser jobs: ${metrics.parserProcessed}. Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
@@ -978,12 +1246,17 @@ function summarizeDispatch(
             metrics.bootstrapResult.linqAutoReplyEnabled
               ? "enabled Linq auto-reply"
               : "kept Linq auto-reply enabled",
+            metrics.bootstrapResult.emailAutoReplyEnabled
+              ? "enabled hosted email auto-reply"
+              : "kept hosted email auto-reply unchanged",
           ].join("; ")
         : "bootstrap state unavailable";
       return `Processed member activation (${bootstrapDetail}) and ran the hosted maintenance loop.${suffix}`;
     }
     case "linq.message.received":
       return `Persisted Linq capture and ran the hosted maintenance loop.${suffix}`;
+    case "email.message.received":
+      return `Persisted hosted email capture and ran the hosted maintenance loop.${suffix}`;
     case "assistant.cron.tick":
       return `Processed assistant cron tick (${dispatch.event.reason}) and ran the hosted maintenance loop.${suffix}`;
     case "device-sync.wake":
@@ -993,7 +1266,8 @@ function summarizeDispatch(
       const importedProtocols = metrics.shareImportResult?.protocols.length ?? 0;
       const importedRecipes = metrics.shareImportResult?.recipes.length ?? 0;
       const loggedMeal = metrics.shareImportResult?.meal ? " Logged one meal entry from the shared food." : "";
-      return `Imported share pack "${dispatch.event.pack.title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
+      const title = metrics.shareImportTitle ?? dispatch.event.pack.title;
+      return `Imported share pack "${title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
     }
     default:
       return assertNever(dispatch.event);

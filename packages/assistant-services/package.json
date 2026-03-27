@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/assistant-runtime",
+  "name": "@healthybob/assistant-services",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -29,13 +29,7 @@
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
   },
   "dependencies": {
-    "@healthybob/assistant-services": "workspace:*",
-    "@healthybob/core": "workspace:*",
-    "@healthybob/device-syncd": "workspace:*",
-    "@healthybob/hosted-execution": "workspace:*",
-    "@healthybob/inboxd": "workspace:*",
-    "@healthybob/parsers": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*"
+    "healthybob": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

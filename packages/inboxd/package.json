@@ -18,6 +18,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./connectors/email/normalize-parsed": {
+      "types": "./dist/connectors/email/normalize-parsed.d.ts",
+      "default": "./dist/connectors/email/normalize-parsed.js"
+    },
+    "./connectors/email/parsed": {
+      "types": "./dist/connectors/email/parsed.d.ts",
+      "default": "./dist/connectors/email/parsed.js"
     }
   },
   "files": [
@@ -28,7 +36,7 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.json",
+    "build": "rimraf dist && tsc -b tsconfig.json --force",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config packages/inboxd/vitest.config.ts --no-coverage"
   },

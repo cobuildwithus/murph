@@ -58,6 +58,12 @@
       "@healthybob/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
+      "@healthybob/inboxd/connectors/email/normalize-parsed": [
+        "packages/inboxd/src/connectors/email/normalize-parsed.ts"
+      ],
+      "@healthybob/inboxd/connectors/email/parsed": [
+        "packages/inboxd/src/connectors/email/parsed.ts"
+      ],
       "@healthybob/inboxd/*": [
         "packages/inboxd/src/*"
       ],
@@ -76,6 +82,30 @@
       "healthybob": [
         "packages/cli/src/index.ts"
       ],
+      "healthybob/inbox-services": [
+        "packages/cli/src/inbox-services.ts"
+      ],
+      "healthybob/vault-cli-services": [
+        "packages/cli/src/vault-cli-services.ts"
+      ],
+      "healthybob/assistant/automation": [
+        "packages/cli/src/assistant/automation.ts"
+      ],
+      "healthybob/assistant/cron": [
+        "packages/cli/src/assistant/cron.ts"
+      ],
+      "healthybob/assistant/outbox": [
+        "packages/cli/src/assistant/outbox.ts"
+      ],
+      "healthybob/assistant/status": [
+        "packages/cli/src/assistant/status.ts"
+      ],
+      "healthybob/assistant/store": [
+        "packages/cli/src/assistant/store.ts"
+      ],
+      "healthybob/*": [
+        "packages/cli/src/*"
+      ],
       "@healthybob/cli": [
         "packages/cli/src/index.ts"
       ],
@@ -87,6 +117,12 @@
       ],
       "@healthybob/device-syncd/*": [
         "packages/device-syncd/src/*"
+      ],
+      "@healthybob/assistant-services": [
+        "packages/assistant-services/src/index.ts"
+      ],
+      "@healthybob/assistant-services/*": [
+        "packages/assistant-services/src/*"
       ]
     },
     "types": [

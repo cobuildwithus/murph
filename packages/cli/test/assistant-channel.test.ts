@@ -4,21 +4,57 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test, vi } from 'vitest'
 import {
-  deliverAssistantMessage,
-  resolveImessageDeliveryCandidates,
+  createHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from '@healthybob/runtime-state'
+import {
   sendEmailMessage,
   sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
-} from '../src/outbound-channel.js'
-import {
-  getAssistantSession,
-  resolveAssistantSession,
-  resolveAssistantStatePaths,
-} from '../src/assistant-state.js'
-import { VaultCliError } from '../src/vault-cli-errors.js'
+} from '../src/assistant/channel-adapters.ts'
+import { VaultCliError } from '../src/vault-cli-errors.ts'
+
+type OutboundChannelModule = Awaited<typeof import('../src/outbound-channel.ts')>
+type AssistantStateModule = Awaited<typeof import('../src/assistant-state.ts')>
 
 const cleanupPaths: string[] = []
+
+async function deliverAssistantMessage(
+  input: Parameters<OutboundChannelModule['deliverAssistantMessage']>[0],
+  dependencies?: Parameters<OutboundChannelModule['deliverAssistantMessage']>[1],
+) {
+  const module: OutboundChannelModule = await import('../src/outbound-channel.ts')
+  return module.deliverAssistantMessage(input, dependencies)
+}
+
+async function resolveImessageDeliveryCandidates(
+  input: Parameters<
+    Awaited<typeof import('../src/outbound-channel.ts')>['resolveImessageDeliveryCandidates']
+  >[0],
+) {
+  return (await import('../src/outbound-channel.ts')).resolveImessageDeliveryCandidates(input)
+}
+
+async function getAssistantSession(
+  vault: Parameters<AssistantStateModule['getAssistantSession']>[0],
+  sessionId: Parameters<AssistantStateModule['getAssistantSession']>[1],
+) {
+  const module: AssistantStateModule = await import('../src/assistant-state.ts')
+  return module.getAssistantSession(vault, sessionId)
+}
+
+async function resolveAssistantSession(
+  input: Parameters<
+    AssistantStateModule['resolveAssistantSession']
+  >[0],
+) {
+  return (await import('../src/assistant-state.ts')).resolveAssistantSession(input)
+}
+
+async function resolveAssistantStatePaths(vaultRoot: string) {
+  return (await import('../src/assistant-state.ts')).resolveAssistantStatePaths(vaultRoot)
+}
 
 afterEach(async () => {
   await Promise.all(
@@ -31,53 +67,56 @@ afterEach(async () => {
   )
 })
 
-test('resolveImessageDeliveryCandidates prefers explicit targets and otherwise uses the stored binding delivery', () => {
-  assert.deepEqual(
-    resolveImessageDeliveryCandidates({
-      explicitTarget: 'chat-override',
-      bindingDelivery: {
-        kind: 'thread',
-        target: 'chat-123',
-      },
-    }),
-    [
-      {
-        kind: 'explicit',
-        target: 'chat-override',
-      },
-    ],
-  )
+test(
+  'resolveImessageDeliveryCandidates prefers explicit targets and otherwise uses the stored binding delivery',
+  async () => {
+    assert.deepEqual(
+      await resolveImessageDeliveryCandidates({
+        explicitTarget: 'chat-override',
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'chat-123',
+        },
+      }),
+      [
+        {
+          kind: 'explicit',
+          target: 'chat-override',
+        },
+      ],
+    )
 
-  assert.deepEqual(
-    resolveImessageDeliveryCandidates({
-      bindingDelivery: {
-        kind: 'participant',
-        target: '+15551234567',
-      },
-    }),
-    [
-      {
-        kind: 'participant',
-        target: '+15551234567',
-      },
-    ],
-  )
+    assert.deepEqual(
+      await resolveImessageDeliveryCandidates({
+        bindingDelivery: {
+          kind: 'participant',
+          target: '+15551234567',
+        },
+      }),
+      [
+        {
+          kind: 'participant',
+          target: '+15551234567',
+        },
+      ],
+    )
 
-  assert.deepEqual(
-    resolveImessageDeliveryCandidates({
-      bindingDelivery: {
-        kind: 'thread',
-        target: 'chat45e2b868',
-      },
-    }),
-    [
-      {
-        kind: 'thread',
-        target: 'chat45e2b868',
-      },
-    ],
-  )
-})
+    assert.deepEqual(
+      await resolveImessageDeliveryCandidates({
+        bindingDelivery: {
+          kind: 'thread',
+          target: 'chat45e2b868',
+        },
+      }),
+      [
+        {
+          kind: 'thread',
+          target: 'chat45e2b868',
+        },
+      ],
+    )
+  },
+)
 
 test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps assistant state metadata-only', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-'))
@@ -133,7 +172,7 @@ test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbo
     },
   )
 
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const statePaths = await resolveAssistantStatePaths(vaultRoot)
   const receiptFiles = await readdir(statePaths.turnsDirectory)
   assert.equal(receiptFiles.length, 1)
   const receipt = JSON.parse(
@@ -210,7 +249,7 @@ test('deliverAssistantMessage preserves a deferred receipt when outbound deliver
     },
   )
 
-  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const statePaths = await resolveAssistantStatePaths(vaultRoot)
   const receiptFiles = await readdir(statePaths.turnsDirectory)
   assert.equal(receiptFiles.length, 1)
   const receipt = JSON.parse(
@@ -500,7 +539,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
   cleanupPaths.push(parent)
 
   const sent: Array<{
-    identityId: string
+    identityId: string | null
     message: string
     target: string
     targetKind: 'explicit' | 'participant' | 'thread'
@@ -537,6 +576,62 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
   assert.equal(result.session.binding.threadId, 'thread_123')
   assert.equal(result.session.binding.delivery?.kind, 'thread')
   assert.equal(result.session.binding.delivery?.target, 'thread_123')
+})
+
+
+test('deliverAssistantMessage persists canonical email thread targets returned by hosted senders', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-channel-email-canonical-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const canonicalTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
+    cc: ['coach@example.com'],
+    lastMessageId: '<msg_9@example.test>',
+    references: ['<msg_1@example.test>', '<msg_9@example.test>'],
+    replyAliasAddress: 'assistant+reply@example.test',
+    replyKey: 'reply_123',
+    subject: 'Check-in',
+    to: ['user@example.com'],
+  }))
+  const sent: Array<{
+    identityId: string | null
+    message: string
+    target: string
+    targetKind: 'explicit' | 'participant' | 'thread'
+  }> = []
+
+  const result = await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'email',
+      identityId: 'assistant@example.test',
+      participantId: 'user@example.com',
+      sourceThreadId: 'thread_123',
+      threadIsDirect: true,
+      message: 'Canonical email thread reply.',
+    },
+    {
+      sendEmail: async (input) => {
+        sent.push(input)
+        return {
+          target: canonicalTarget,
+        }
+      },
+    },
+  )
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(sent[0], {
+    identityId: 'assistant@example.test',
+    message: 'Canonical email thread reply.',
+    target: 'thread_123',
+    targetKind: 'thread',
+  })
+  assert.equal(result.delivery.target, canonicalTarget)
+  assert.equal(result.delivery.targetKind, 'thread')
+  assert.equal(result.session.binding.threadId, canonicalTarget)
+  assert.equal(result.session.binding.delivery?.target, canonicalTarget)
 })
 
 test('sendEmailMessage sends new outbound email through the configured AgentMail inbox', async () => {
@@ -705,6 +800,47 @@ test('sendEmailMessage honors AgentMail Retry-After headers on 429 responses', a
   } finally {
     vi.useRealTimers()
   }
+})
+
+test('sendEmailMessage falls back to raw AgentMail error text when the error body is not JSON', async () => {
+  await assert.rejects(
+    () =>
+      sendEmailMessage(
+        {
+          identityId: 'inbox_123',
+          message: 'Daily summary',
+          target: 'user@example.com',
+          targetKind: 'participant',
+        },
+        {
+          env: {
+            AGENTMAIL_API_KEY: 'agentmail-key',
+            AGENTMAIL_BASE_URL: 'https://mail.example.test/v0',
+          },
+          fetchImplementation: async () => ({
+            ok: false,
+            status: 500,
+            json: async () => {
+              throw new Error('invalid json')
+            },
+            text: async () => 'Plain AgentMail failure',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }),
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'AGENTMAIL_REQUEST_FAILED')
+      assert.equal((error as VaultCliError).message, 'Plain AgentMail failure')
+      assert.deepEqual((error as VaultCliError).context, {
+        method: 'POST',
+        path: '/inboxes/inbox_123/messages/send',
+        retryable: false,
+        status: 500,
+      })
+      return true
+    },
+  )
 })
 
 test('sendEmailMessage resolves a thread and replies to the latest AgentMail message', async () => {
@@ -955,6 +1091,45 @@ test('sendLinqMessage honors Linq Retry-After headers on 429 responses', async (
   } finally {
     vi.useRealTimers()
   }
+})
+
+test('sendLinqMessage falls back to raw Linq error text when the error body is not JSON', async () => {
+  await assert.rejects(
+    () =>
+      sendLinqMessage(
+        {
+          message: 'Queued the Linq reply.',
+          target: 'chat_123',
+        },
+        {
+          env: {
+            LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+            LINQ_API_TOKEN: 'linq-token',
+          },
+          fetchImplementation: async () => ({
+            ok: false,
+            status: 400,
+            json: async () => {
+              throw new Error('invalid json')
+            },
+            text: async () => 'Plain Linq failure',
+            arrayBuffer: async () => new ArrayBuffer(0),
+          }),
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(error instanceof VaultCliError, true)
+      assert.equal((error as VaultCliError).code, 'LINQ_API_REQUEST_FAILED')
+      assert.equal((error as VaultCliError).message, 'Plain Linq failure')
+      assert.deepEqual((error as VaultCliError).context, {
+        method: 'POST',
+        path: '/chats/chat_123/messages',
+        retryable: false,
+        status: 400,
+      })
+      return true
+    },
+  )
 })
 
 test('sendTelegramMessage posts Telegram Bot API sendMessage payloads, including topic targets', async () => {

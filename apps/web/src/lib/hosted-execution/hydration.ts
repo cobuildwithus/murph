@@ -3,7 +3,6 @@ import { type HostedExecutionDispatchRequest } from "@healthybob/hosted-executio
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
-import { readHostedSharePack } from "../hosted-share/shared";
 import {
   readHostedExecutionDispatchRef,
   readLegacyHostedExecutionDispatch,
@@ -111,37 +110,14 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
 
 async function hydrateHostedExecutionDispatchFromHostedShareLink(
   record: ExecutionOutbox,
-  prisma: HostedExecutionHydrationClient,
-  occurredAt: string,
+  _prisma: HostedExecutionHydrationClient,
+  _occurredAt: string,
 ): Promise<HostedExecutionDispatchRequest> {
   if (!record.sourceId) {
     throw new Error(`Hosted share outbox record ${record.eventId} is missing sourceId.`);
   }
-
-  const shareLink = await prisma.hostedShareLink.findUnique({
-    where: {
-      id: record.sourceId,
-    },
-    select: {
-      encryptedPayload: true,
-    },
-  });
-
-  if (!shareLink) {
-    throw new Error(`Hosted share source ${record.sourceId} was not found for ${record.eventId}.`);
-  }
-
-  return validateHydratedHostedExecutionDispatch(
-    {
-      event: {
-        kind: "vault.share.accepted",
-        pack: readHostedSharePack(shareLink).pack,
-        userId: record.userId,
-      },
-      eventId: record.eventId,
-      occurredAt,
-    },
-    record,
+  throw new Error(
+    `Hosted share outbox record ${record.eventId} requires the full dispatch payload; minimized legacy share rows cannot reconstruct shareCode/shareId from sourceId ${record.sourceId}.`,
   );
 }
 
@@ -155,8 +131,10 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
       id: signalId,
     },
     select: {
+      connectionId: true,
       createdAt: true,
       kind: true,
+      provider: true,
       userId: true,
     },
   });

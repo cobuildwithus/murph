@@ -1,6 +1,7 @@
-import { randomBytes } from "node:crypto";
-
-import type { HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
+import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  type HostedExecutionDispatchRequest,
+} from "@healthybob/hosted-execution";
 import { Prisma, type HostedMember, type HostedRevnetIssuance, type PrismaClient } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
@@ -44,6 +45,17 @@ import {
   shouldStartHostedOnboarding,
 } from "./shared";
 import {
+  createHostedWebhookDispatchSideEffect,
+  createHostedWebhookLinqMessageSideEffect,
+  runHostedWebhookWithReceipt,
+  type HostedWebhookDispatchEnqueueInput,
+  type HostedWebhookDispatchSideEffect,
+  type HostedWebhookLinqMessageSideEffect,
+  type HostedWebhookReceiptClaim,
+  type HostedWebhookSideEffect,
+  type HostedWebhookSideEffectResult,
+} from "./webhook-receipts";
+import {
   coerceStripeObjectId,
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
@@ -77,91 +89,6 @@ type HostedRevnetIssuanceRecord = Pick<
   | "terminalAddress"
   | "updatedAt"
 >;
-
-type HostedWebhookEventPayload = Prisma.InputJsonObject;
-
-type HostedWebhookReceiptErrorState = {
-  message: string;
-  name: string;
-};
-
-type HostedWebhookSideEffectErrorState = {
-  code: string | null;
-  message: string;
-  name: string;
-  retryable: boolean | null;
-};
-
-type HostedWebhookSideEffectStatus = "pending" | "sent";
-
-type HostedWebhookDispatchSideEffect = {
-  attemptCount: number;
-  effectId: string;
-  kind: "hosted_execution_dispatch";
-  lastAttemptAt: string | null;
-  lastError: HostedWebhookSideEffectErrorState | null;
-  payload: {
-    dispatch: HostedExecutionDispatchRequest;
-  };
-  result: {
-    dispatched: true;
-  } | null;
-  sentAt: string | null;
-  status: HostedWebhookSideEffectStatus;
-};
-
-type HostedWebhookLinqMessageSideEffect = {
-  attemptCount: number;
-  effectId: string;
-  kind: "linq_message_send";
-  lastAttemptAt: string | null;
-  lastError: HostedWebhookSideEffectErrorState | null;
-  payload: {
-    chatId: string;
-    inviteId: string | null;
-    message: string;
-  };
-  result: {
-    chatId: string | null;
-    messageId: string | null;
-  } | null;
-  sentAt: string | null;
-  status: HostedWebhookSideEffectStatus;
-};
-
-type HostedWebhookSideEffect =
-  | HostedWebhookDispatchSideEffect
-  | HostedWebhookLinqMessageSideEffect;
-
-type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
-
-type HostedWebhookReceiptState = {
-  attemptCount: number;
-  attemptId: string | null;
-  completedAt: string | null;
-  eventPayload: HostedWebhookEventPayload;
-  lastError: HostedWebhookReceiptErrorState | null;
-  lastReceivedAt: string | null;
-  sideEffects: HostedWebhookSideEffect[];
-  status: HostedWebhookReceiptStatus | null;
-};
-
-type HostedWebhookReceiptClaim = {
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null;
-  state: HostedWebhookReceiptState;
-};
-
-class HostedWebhookReceiptSideEffectDrainError extends Error {
-  readonly claimedReceipt: HostedWebhookReceiptClaim;
-  readonly cause: unknown;
-
-  constructor(claimedReceipt: HostedWebhookReceiptClaim, cause: unknown) {
-    super("Hosted webhook side-effect drain failed.");
-    this.name = "HostedWebhookReceiptSideEffectDrainError";
-    this.claimedReceipt = claimedReceipt;
-    this.cause = cause;
-  }
-}
 
 const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
 
@@ -207,70 +134,25 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 
   const event = parseHostedLinqWebhookEvent(input.rawBody);
-  let claimedReceipt = await recordHostedWebhookReceipt({
+  return runHostedWebhookWithReceipt({
+    duplicateResponse: {
+      ok: true,
+      duplicate: true,
+    },
     eventId: event.event_id,
     eventPayload: {
       eventType: event.event_type,
     },
+    handlers: hostedWebhookReceiptHandlers(input.signal),
+    plan: () =>
+      planHostedOnboardingLinqWebhook({
+        event,
+        prisma,
+      }),
     prisma,
+    signal: input.signal,
     source: "linq",
   });
-
-  if (!claimedReceipt) {
-    return {
-      ok: true,
-      duplicate: true,
-    };
-  }
-
-  try {
-    const plan = await planHostedOnboardingLinqWebhook({
-      event,
-      prisma,
-    });
-
-    claimedReceipt = await queueHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      desiredSideEffects: plan.desiredSideEffects,
-      eventId: event.event_id,
-      prisma,
-      source: "linq",
-    });
-    claimedReceipt = await drainHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      eventId: event.event_id,
-      prisma,
-      signal: input.signal,
-      source: "linq",
-    });
-
-    await markHostedWebhookReceiptCompleted({
-      claimedReceipt,
-      eventId: event.event_id,
-      eventPayload: {
-        eventType: event.event_type,
-      },
-      prisma,
-      source: "linq",
-    });
-
-    return plan.response;
-  } catch (error) {
-    const drainFailure = readHostedWebhookReceiptDrainError(error);
-    const failure = drainFailure?.cause ?? error;
-    claimedReceipt = drainFailure?.claimedReceipt ?? claimedReceipt;
-    await markHostedWebhookReceiptFailed({
-      claimedReceipt,
-      error: failure,
-      eventId: event.event_id,
-      eventPayload: {
-        eventType: event.event_type,
-      },
-      prisma,
-      source: "linq",
-    });
-    throw failure;
-  }
 }
 
 async function planHostedOnboardingLinqWebhook(input: {
@@ -333,16 +215,13 @@ async function planHostedOnboardingLinqWebhook(input: {
     return {
       desiredSideEffects: [
         createHostedWebhookDispatchSideEffect({
-          dispatch: {
-            event: {
-              kind: "linq.message.received",
-              linqEvent: input.event as unknown as Record<string, unknown>,
-              normalizedPhoneNumber,
-              userId: existingMember.id,
-            },
+          dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
             eventId: input.event.event_id,
+            linqEvent: input.event as unknown as Record<string, unknown>,
+            normalizedPhoneNumber,
             occurredAt: input.event.created_at,
-          },
+            userId: existingMember.id,
+          }),
         }),
       ],
       response: {
@@ -436,126 +315,96 @@ export async function handleHostedStripeWebhook(input: {
     });
   }
 
-  let claimedReceipt = await recordHostedWebhookReceipt({
+  return runHostedWebhookWithReceipt({
+    duplicateResponse: {
+      ok: true,
+      duplicate: true,
+      type: event.type,
+    },
     eventId: event.id,
     eventPayload: {
       type: event.type,
     },
+    handlers: hostedWebhookReceiptHandlers(),
+    plan: () =>
+      planHostedStripeWebhook({
+        event,
+        prisma,
+      }),
     prisma,
     source: "stripe",
   });
+}
 
-  if (!claimedReceipt) {
-    return {
-      ok: true,
-      duplicate: true,
-      type: event.type,
-    };
+async function planHostedStripeWebhook(input: {
+  event: Stripe.Event;
+  prisma: PrismaClient;
+}): Promise<{ desiredSideEffects: HostedWebhookSideEffect[]; response: { ok: true; type: string } }> {
+  const occurredAt = Number.isFinite(input.event.created)
+    ? new Date(input.event.created * 1000).toISOString()
+    : new Date().toISOString();
+  let desiredSideEffects: HostedWebhookSideEffect[] = [];
+
+  switch (input.event.type) {
+    case "checkout.session.completed":
+      desiredSideEffects = await applyStripeCheckoutCompleted(
+        input.event.data.object as Stripe.Checkout.Session,
+        {
+          occurredAt,
+          sourceEventId: input.event.id,
+        },
+        input.prisma,
+      );
+      break;
+    case "checkout.session.expired":
+      await applyStripeCheckoutExpired(input.event.data.object as Stripe.Checkout.Session, input.prisma);
+      break;
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      desiredSideEffects = await applyStripeSubscriptionUpdated(
+        input.event.data.object as Stripe.Subscription,
+        {
+          occurredAt,
+          sourceEventId: input.event.id,
+          sourceType: input.event.type,
+        },
+        input.prisma,
+      );
+      break;
+    case "invoice.paid":
+      desiredSideEffects = await applyStripeInvoicePaid(
+        input.event.data.object as Stripe.Invoice,
+        {
+          occurredAt,
+          sourceEventId: input.event.id,
+        },
+        input.prisma,
+      );
+      break;
+    case "invoice.payment_failed":
+      await applyStripeInvoicePaymentFailed(input.event.data.object as Stripe.Invoice, input.prisma);
+      break;
+    case "refund.created":
+      await applyStripeRefundCreated(input.event.data.object as Stripe.Refund, input.event.type, input.prisma);
+      break;
+    case "charge.dispute.created":
+    case "charge.dispute.closed":
+    case "charge.dispute.funds_reinstated":
+    case "charge.dispute.funds_withdrawn":
+      await applyStripeDisputeUpdated(input.event.data.object as Stripe.Dispute, input.event.type, input.prisma);
+      break;
+    default:
+      break;
   }
 
-  try {
-    const occurredAt = Number.isFinite(event.created)
-      ? new Date(event.created * 1000).toISOString()
-      : new Date().toISOString();
-    let desiredSideEffects: HostedWebhookSideEffect[] = [];
-
-    switch (event.type) {
-      case "checkout.session.completed":
-        desiredSideEffects = await applyStripeCheckoutCompleted(
-          event.data.object as Stripe.Checkout.Session,
-          {
-            occurredAt,
-            sourceEventId: event.id,
-          },
-          prisma,
-        );
-        break;
-      case "checkout.session.expired":
-        await applyStripeCheckoutExpired(event.data.object as Stripe.Checkout.Session, prisma);
-        break;
-      case "customer.subscription.created":
-      case "customer.subscription.updated":
-      case "customer.subscription.deleted":
-        desiredSideEffects = await applyStripeSubscriptionUpdated(
-          event.data.object as Stripe.Subscription,
-          {
-            occurredAt,
-            sourceEventId: event.id,
-            sourceType: event.type,
-          },
-          prisma,
-        );
-        break;
-      case "invoice.paid":
-        desiredSideEffects = await applyStripeInvoicePaid(
-          event.data.object as Stripe.Invoice,
-          {
-            occurredAt,
-            sourceEventId: event.id,
-          },
-          prisma,
-        );
-        break;
-      case "invoice.payment_failed":
-        await applyStripeInvoicePaymentFailed(event.data.object as Stripe.Invoice, prisma);
-        break;
-      case "refund.created":
-        await applyStripeRefundCreated(event.data.object as Stripe.Refund, event.type, prisma);
-        break;
-      case "charge.dispute.created":
-      case "charge.dispute.closed":
-      case "charge.dispute.funds_reinstated":
-      case "charge.dispute.funds_withdrawn":
-        await applyStripeDisputeUpdated(event.data.object as Stripe.Dispute, event.type, prisma);
-        break;
-      default:
-        break;
-    }
-
-    claimedReceipt = await queueHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      desiredSideEffects,
-      eventId: event.id,
-      prisma,
-      source: "stripe",
-    });
-    claimedReceipt = await drainHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      eventId: event.id,
-      prisma,
-      source: "stripe",
-    });
-
-    await markHostedWebhookReceiptCompleted({
-      claimedReceipt,
-      eventId: event.id,
-      eventPayload: {
-        type: event.type,
-      },
-      prisma,
-      source: "stripe",
-    });
-
-    return {
+  return {
+    desiredSideEffects,
+    response: {
       ok: true,
-      type: event.type,
-    };
-  } catch (error) {
-    const drainFailure = readHostedWebhookReceiptDrainError(error);
-    const failure = drainFailure?.cause ?? error;
-    claimedReceipt = drainFailure?.claimedReceipt ?? claimedReceipt;
-    await markHostedWebhookReceiptFailed({
-      claimedReceipt,
-      error: failure,
-      eventId: event.id,
-      eventPayload: {
-        type: event.type,
-      },
-      prisma,
-      source: "stripe",
-    });
-    throw failure;
-  }
+      type: input.event.type,
+    },
+  };
 }
 
 async function maybeIssueHostedRevnetForStripeInvoice(input: {

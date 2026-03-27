@@ -11,6 +11,9 @@
   ],
   "references": [
     {
+      "path": "../hosted-execution"
+    },
+    {
       "path": "../runtime-state"
     },
     {
@@ -24,6 +27,9 @@
     },
     {
       "path": "../parsers"
+    },
+    {
+      "path": "../assistant-services"
     },
     {
       "path": "../cli"

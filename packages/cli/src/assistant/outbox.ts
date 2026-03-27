@@ -24,6 +24,8 @@ const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'healthybob.assistant-outbox-intent.v1'
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
 const STALE_SENDING_AFTER_MS = 10 * 60 * 1000
 
+export type { AssistantChannelDelivery }
+
 export interface DispatchAssistantOutboxIntentResult {
   deliveryError: AssistantDeliveryError | null
   intent: AssistantOutboxIntent
