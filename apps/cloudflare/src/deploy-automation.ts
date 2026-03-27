@@ -76,44 +76,44 @@ export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
   return {
-    allowedUserEnvKeys: normalizeString(source.HB_CF_ALLOWED_USER_ENV_KEYS),
-    allowedUserEnvPrefixes: normalizeString(source.HB_CF_ALLOWED_USER_ENV_PREFIXES),
-    bundlesBucketName: requireString(source.HB_CF_BUNDLES_BUCKET, "HB_CF_BUNDLES_BUCKET"),
+    allowedUserEnvKeys: normalizeString(source.CF_ALLOWED_USER_ENV_KEYS),
+    allowedUserEnvPrefixes: normalizeString(source.CF_ALLOWED_USER_ENV_PREFIXES),
+    bundlesBucketName: requireString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET"),
     bundlesPreviewBucketName: requireString(
-      source.HB_CF_BUNDLES_PREVIEW_BUCKET,
-      "HB_CF_BUNDLES_PREVIEW_BUCKET",
+      source.CF_BUNDLES_PREVIEW_BUCKET,
+      "CF_BUNDLES_PREVIEW_BUCKET",
     ),
-    bundleEncryptionKeyId: normalizeString(source.HB_CF_BUNDLE_KEY_ID) ?? "v1",
+    bundleEncryptionKeyId: normalizeString(source.CF_BUNDLE_KEY_ID) ?? "v1",
     cloudflareBaseUrl: normalizeBaseUrl(
-      requireString(source.HB_CF_PUBLIC_BASE_URL, "HB_CF_PUBLIC_BASE_URL"),
-      "HB_CF_PUBLIC_BASE_URL",
+      requireString(source.CF_PUBLIC_BASE_URL, "CF_PUBLIC_BASE_URL"),
+      "CF_PUBLIC_BASE_URL",
     ),
-    compatibilityDate: normalizeString(source.HB_CF_COMPATIBILITY_DATE) ?? "2026-03-26",
+    compatibilityDate: normalizeString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-26",
     defaultAlarmDelayMs: normalizePositiveIntegerString(
-      source.HB_CF_DEFAULT_ALARM_DELAY_MS,
+      source.CF_DEFAULT_ALARM_DELAY_MS,
       "900000",
-      "HB_CF_DEFAULT_ALARM_DELAY_MS",
+      "CF_DEFAULT_ALARM_DELAY_MS",
     ),
     maxEventAttempts: normalizePositiveIntegerString(
-      source.HB_CF_MAX_EVENT_ATTEMPTS,
+      source.CF_MAX_EVENT_ATTEMPTS,
       "3",
-      "HB_CF_MAX_EVENT_ATTEMPTS",
+      "CF_MAX_EVENT_ATTEMPTS",
     ),
     retryDelayMs: normalizePositiveIntegerString(
-      source.HB_CF_RETRY_DELAY_MS,
+      source.CF_RETRY_DELAY_MS,
       "30000",
-      "HB_CF_RETRY_DELAY_MS",
+      "CF_RETRY_DELAY_MS",
     ),
     runnerBaseUrl: normalizeBaseUrl(
-      requireString(source.HB_CF_RUNNER_BASE_URL, "HB_CF_RUNNER_BASE_URL"),
-      "HB_CF_RUNNER_BASE_URL",
+      requireString(source.CF_RUNNER_BASE_URL, "CF_RUNNER_BASE_URL"),
+      "CF_RUNNER_BASE_URL",
     ),
     runnerTimeoutMs: normalizePositiveIntegerString(
-      source.HB_CF_RUNNER_TIMEOUT_MS,
+      source.CF_RUNNER_TIMEOUT_MS,
       "60000",
-      "HB_CF_RUNNER_TIMEOUT_MS",
+      "CF_RUNNER_TIMEOUT_MS",
     ),
-    workerName: requireString(source.HB_CF_WORKER_NAME, "HB_CF_WORKER_NAME"),
+    workerName: requireString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
   };
 }
 
@@ -181,6 +181,12 @@ export function buildHostedWorkerSecretsPayload(
 export function buildHostedRunnerEnvironment(
   source: EnvSource = process.env,
 ): Record<string, string> {
+  const allowedUserEnvKeys = normalizeString(source.CF_ALLOWED_USER_ENV_KEYS);
+  const allowedUserEnvPrefixes = normalizeString(source.CF_ALLOWED_USER_ENV_PREFIXES);
+  const runnerCommitTimeoutMs =
+    normalizeString(source.CF_RUNNER_COMMIT_TIMEOUT_MS) ??
+    normalizeString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS) ??
+    undefined;
   const base = {
     ...RUNNER_DEFAULT_ENV,
     ...readRequiredStringMap(source, RUNNER_REQUIRED_ENV_NAMES),
@@ -208,17 +214,17 @@ export function buildHostedRunnerEnvironment(
   }
 
   next.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = normalizePositiveIntegerString(
-    source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? source.HB_CF_RUNNER_COMMIT_TIMEOUT_MS,
+    runnerCommitTimeoutMs,
     RUNNER_DEFAULT_ENV.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS,
-    "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+    "CF_RUNNER_COMMIT_TIMEOUT_MS or HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
   );
 
-  if (normalizeString(source.HB_CF_ALLOWED_USER_ENV_KEYS)) {
-    next.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = source.HB_CF_ALLOWED_USER_ENV_KEYS!.trim();
+  if (allowedUserEnvKeys) {
+    next.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = allowedUserEnvKeys;
   }
 
-  if (normalizeString(source.HB_CF_ALLOWED_USER_ENV_PREFIXES)) {
-    next.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES = source.HB_CF_ALLOWED_USER_ENV_PREFIXES!.trim();
+  if (allowedUserEnvPrefixes) {
+    next.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES = allowedUserEnvPrefixes;
   }
 
   return sortRecord(next);

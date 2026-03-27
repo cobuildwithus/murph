@@ -50,24 +50,24 @@ The workflow is parameterized by `workflow_dispatch.environment`, and the deploy
 
 Set these in the selected GitHub environment as variables:
 
-- `HB_CF_WORKER_NAME`
-- `HB_CF_BUNDLES_BUCKET`
-- `HB_CF_BUNDLES_PREVIEW_BUCKET`
-- `HB_CF_PUBLIC_BASE_URL`
-- `HB_CF_RUNNER_BASE_URL`
+- `CF_WORKER_NAME`
+- `CF_BUNDLES_BUCKET`
+- `CF_BUNDLES_PREVIEW_BUCKET`
+- `CF_PUBLIC_BASE_URL`
+- `CF_RUNNER_BASE_URL`
 
 Optional tuning variables:
 
-- `HB_CF_BUNDLE_KEY_ID` (default `v1`)
-- `HB_CF_COMPATIBILITY_DATE` (default `2026-03-26`)
-- `HB_CF_DEFAULT_ALARM_DELAY_MS` (default `900000`)
-- `HB_CF_MAX_EVENT_ATTEMPTS` (default `3`)
-- `HB_CF_RETRY_DELAY_MS` (default `30000`)
-- `HB_CF_RUNNER_TIMEOUT_MS` (default `60000`)
-- `HB_CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
-- `HB_CF_ALLOWED_USER_ENV_KEYS`
-- `HB_CF_ALLOWED_USER_ENV_PREFIXES`
-- `HB_INSTALL_PADDLEOCR` (`0` or `1`)
+- `CF_BUNDLE_KEY_ID` (default `v1`)
+- `CF_COMPATIBILITY_DATE` (default `2026-03-26`)
+- `CF_DEFAULT_ALARM_DELAY_MS` (default `900000`)
+- `CF_MAX_EVENT_ATTEMPTS` (default `3`)
+- `CF_RETRY_DELAY_MS` (default `30000`)
+- `CF_RUNNER_TIMEOUT_MS` (default `60000`)
+- `CF_RUNNER_COMMIT_TIMEOUT_MS` (default `30000`)
+- `CF_ALLOWED_USER_ENV_KEYS`
+- `CF_ALLOWED_USER_ENV_PREFIXES`
+- `INSTALL_PADDLEOCR` (`0` or `1`)
 - `WHISPER_MODEL`
 - `WHISPER_MODEL_DIR`
 - `PADDLEOCR_MODEL_DIR`
@@ -132,11 +132,11 @@ pnpm --dir apps/cloudflare test
 Render the generated deploy artifacts from your shell environment:
 
 ```bash
-export HB_CF_WORKER_NAME=healthybob-hosted-staging
-export HB_CF_BUNDLES_BUCKET=healthybob-hosted-bundles-staging
-export HB_CF_BUNDLES_PREVIEW_BUCKET=healthybob-hosted-bundles-staging-preview
-export HB_CF_PUBLIC_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
-export HB_CF_RUNNER_BASE_URL=https://healthybob-runner-staging.internal.example.com
+export CF_WORKER_NAME=healthybob-hosted-staging
+export CF_BUNDLES_BUCKET=healthybob-hosted-bundles-staging
+export CF_BUNDLES_PREVIEW_BUCKET=healthybob-hosted-bundles-staging-preview
+export CF_PUBLIC_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
+export CF_RUNNER_BASE_URL=https://healthybob-runner-staging.internal.example.com
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
@@ -177,8 +177,8 @@ pnpm --dir apps/cloudflare worker:deploy -- --config ./.deploy/wrangler.generate
 Then smoke test the Worker and the runner:
 
 ```bash
-export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL="$HB_CF_PUBLIC_BASE_URL"
-export HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL="$HB_CF_RUNNER_BASE_URL"
+export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL="$CF_PUBLIC_BASE_URL"
+export HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL="$CF_RUNNER_BASE_URL"
 export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
 pnpm --dir apps/cloudflare deploy:smoke
 ```
@@ -231,7 +231,7 @@ If your runner platform cannot pull private GHCR images, either:
 Before the first real production deploy, confirm all of these are true:
 
 - the Worker and runner each answer `GET /health`
-- `HB_CF_PUBLIC_BASE_URL` is the exact URL the runner can call back to
+- `CF_PUBLIC_BASE_URL` is the exact URL the runner can call back to
 - the runner is reachable from Cloudflare over HTTPS
 - `HOSTED_EXECUTION_CONTROL_TOKEN` is set
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` is set and matches both sides

@@ -48,23 +48,22 @@ jobs:
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      HB_CF_ALLOWED_USER_ENV_KEYS: ${{ vars.HB_CF_ALLOWED_USER_ENV_KEYS }}
-      HB_CF_ALLOWED_USER_ENV_PREFIXES: ${{ vars.HB_CF_ALLOWED_USER_ENV_PREFIXES }}
-      HB_CF_BUNDLES_BUCKET: ${{ vars.HB_CF_BUNDLES_BUCKET }}
-      HB_CF_BUNDLES_PREVIEW_BUCKET: ${{ vars.HB_CF_BUNDLES_PREVIEW_BUCKET }}
-      HB_CF_BUNDLE_KEY_ID: ${{ vars.HB_CF_BUNDLE_KEY_ID }}
-      HB_CF_COMPATIBILITY_DATE: ${{ vars.HB_CF_COMPATIBILITY_DATE }}
-      HB_CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.HB_CF_DEFAULT_ALARM_DELAY_MS }}
-      HB_CF_MAX_EVENT_ATTEMPTS: ${{ vars.HB_CF_MAX_EVENT_ATTEMPTS }}
-      HB_CF_PUBLIC_BASE_URL: ${{ vars.HB_CF_PUBLIC_BASE_URL }}
-      HB_CF_RETRY_DELAY_MS: ${{ vars.HB_CF_RETRY_DELAY_MS }}
-      HB_CF_RUNNER_BASE_URL: ${{ vars.HB_CF_RUNNER_BASE_URL }}
-      HB_CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.HB_CF_RUNNER_COMMIT_TIMEOUT_MS }}
-      HB_CF_RUNNER_TIMEOUT_MS: ${{ vars.HB_CF_RUNNER_TIMEOUT_MS }}
-      HB_CF_WORKER_NAME: ${{ vars.HB_CF_WORKER_NAME }}
+      CF_ALLOWED_USER_ENV_KEYS: ${{ vars.CF_ALLOWED_USER_ENV_KEYS }}
+      CF_ALLOWED_USER_ENV_PREFIXES: ${{ vars.CF_ALLOWED_USER_ENV_PREFIXES }}
+      CF_BUNDLES_BUCKET: ${{ vars.CF_BUNDLES_BUCKET }}
+      CF_BUNDLES_PREVIEW_BUCKET: ${{ vars.CF_BUNDLES_PREVIEW_BUCKET }}
+      CF_BUNDLE_KEY_ID: ${{ vars.CF_BUNDLE_KEY_ID }}
+      CF_COMPATIBILITY_DATE: ${{ vars.CF_COMPATIBILITY_DATE }}
+      CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.CF_DEFAULT_ALARM_DELAY_MS }}
+      CF_MAX_EVENT_ATTEMPTS: ${{ vars.CF_MAX_EVENT_ATTEMPTS }}
+      CF_PUBLIC_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
+      CF_RETRY_DELAY_MS: ${{ vars.CF_RETRY_DELAY_MS }}
+      CF_RUNNER_BASE_URL: ${{ vars.CF_RUNNER_BASE_URL }}
+      CF_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.CF_RUNNER_COMMIT_TIMEOUT_MS }}
+      CF_RUNNER_TIMEOUT_MS: ${{ vars.CF_RUNNER_TIMEOUT_MS }}
+      CF_WORKER_NAME: ${{ vars.CF_WORKER_NAME }}
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: ${{ secrets.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY }}
       HOSTED_EXECUTION_CONTROL_TOKEN: ${{ secrets.HOSTED_EXECUTION_CONTROL_TOKEN }}
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: ${{ vars.HB_CF_RUNNER_COMMIT_TIMEOUT_MS }}
       HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: ${{ secrets.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN }}
       HOSTED_EXECUTION_SIGNING_SECRET: ${{ secrets.HOSTED_EXECUTION_SIGNING_SECRET }}
       DEVICE_SYNC_PUBLIC_BASE_URL: ${{ vars.DEVICE_SYNC_PUBLIC_BASE_URL }}
@@ -97,9 +96,9 @@ jobs:
       WHISPER_MODEL_DIR: ${{ vars.WHISPER_MODEL_DIR }}
       PADDLEOCR_MODEL_DIR: ${{ vars.PADDLEOCR_MODEL_DIR }}
       PARSER_FFMPEG_PATH: ${{ vars.PARSER_FFMPEG_PATH }}
-      HB_INSTALL_PADDLEOCR: ${{ vars.HB_INSTALL_PADDLEOCR || '0' }}
-      HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.HB_CF_PUBLIC_BASE_URL }}
-      HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL: ${{ vars.HB_CF_RUNNER_BASE_URL }}
+      INSTALL_PADDLEOCR: ${{ vars.INSTALL_PADDLEOCR || '0' }}
+      HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: ${{ vars.CF_PUBLIC_BASE_URL }}
+      HOSTED_EXECUTION_SMOKE_RUNNER_BASE_URL: ${{ vars.CF_RUNNER_BASE_URL }}
       HOSTED_EXECUTION_SMOKE_USER_ID: ${{ inputs.smoke_user_id }}
     steps:
       - uses: actions/checkout@v6
@@ -155,7 +154,7 @@ jobs:
           file: ./Dockerfile.cloudflare-hosted-runner
           push: true
           build-args: |
-            HB_INSTALL_PADDLEOCR=${{ env.HB_INSTALL_PADDLEOCR || '0' }}
+            INSTALL_PADDLEOCR=${{ env.INSTALL_PADDLEOCR || '0' }}
           tags: |
             ${{ steps.image.outputs.repo }}:${{ steps.image.outputs.sha_tag }}
             ${{ steps.image.outputs.repo }}:${{ steps.image.outputs.env_tag }}
@@ -179,9 +178,9 @@ jobs:
             echo "## Cloudflare hosted execution deploy"
             echo
             echo "- Environment: \`${{ inputs.environment }}\`"
-            echo "- Worker name: \`${HB_CF_WORKER_NAME}\`"
-            echo "- Worker URL: \`${HB_CF_PUBLIC_BASE_URL}\`"
-            echo "- Runner URL: \`${HB_CF_RUNNER_BASE_URL}\`"
+            echo "- Worker name: \`${CF_WORKER_NAME}\`"
+            echo "- Worker URL: \`${CF_PUBLIC_BASE_URL}\`"
+            echo "- Runner URL: \`${CF_RUNNER_BASE_URL}\`"
             echo "- Runner image: \`${{ steps.image.outputs.repo }}:${{ steps.image.outputs.env_tag }}\`"
             echo "- Smoke user id: \`${{ inputs.smoke_user_id || 'not-set' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
