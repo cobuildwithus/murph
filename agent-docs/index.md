@@ -11,7 +11,7 @@ This index is the table of contents for durable, repository-local context that a
 | Path | Purpose | Source of truth | Owner | Review cadence | Criticality | Last verified |
 | --- | --- | --- | --- | --- | --- | --- |
 | `README.md` | Repo bootstrap summary, hosted/local runtime-package status, and verification entrypoint for humans. | Repository bootstrap decisions | Healthy Bob Maintainer | Per bootstrap/process change | Medium | 2026-03-26 |
-| `ARCHITECTURE.md` | Top-level module map and trust-boundary summary. | Product/runtime code plus repo decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-26 |
+| `ARCHITECTURE.md` | Top-level module map and trust-boundary summary. | Product/runtime code plus repo decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-27 |
 | `docs/architecture.md` | One-page architecture summary and target repo shape for the baseline vault plus adjunct device-sync, inbox, parser, and web layers. | Baseline vault architecture decisions | Healthy Bob Maintainer | Per architecture change | High | 2026-03-17 |
 | `docs/cloudflare-hosted-idempotency-followup.md` | Migration guide for eliminating duplicate externally visible side effects in hosted execution via a future outbox step instead of overstating the current durable bundle-commit path. | Hosted execution reliability follow-up | Healthy Bob Maintainer | Per hosted execution reliability change | Medium | 2026-03-27 |
 | `docs/device-sync-hosted-control-plane.md` | Proposed hosted control-plane split for device sync, including the shared public-ingress seam and hosted/local responsibility boundary. | Device-sync architecture direction | Healthy Bob Maintainer | Per device-sync architecture change | Medium | 2026-03-26 |

@@ -183,6 +183,7 @@ The onboarding lane is intentionally thin:
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
 - hosted share links can now store an encrypted one-time share pack for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation
 - once a member is active, hosted onboarding and hosted share acceptance dispatch signed internal execution events to `apps/cloudflare` for member activation, shared-bundle imports, direct Linq messages, and later scheduled assistant ticks instead of trying to run the inbox/assistant loop inside Next.js
+- hosted onboarding webhook receipts now keep receipt-local side-effect markers for Cloudflare dispatches and Linq invite replies so a retried webhook only redrains still-pending effects instead of replaying an already-sent outbound action
 
 Current RevNet MVP assumptions:
 

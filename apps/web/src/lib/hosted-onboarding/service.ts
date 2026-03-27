@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import { Prisma, type HostedInvite, type HostedMember, type PrismaClient } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import {
@@ -15,7 +16,6 @@ import type Stripe from "stripe";
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecution } from "../hosted-execution/dispatch";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
-import { hasHostedPrivyPhoneAuthConfig } from "./landing";
 import {
   buildHostedInviteReply,
   parseHostedLinqWebhookEvent,
@@ -24,7 +24,7 @@ import {
   summarizeHostedLinqMessage,
   assertHostedLinqWebhookSignature,
 } from "./linq";
-import { requireHostedPrivyIdentity, type HostedPrivyIdentity } from "./privy";
+import { hasHostedPrivyPhoneAuthConfig, type HostedPrivyIdentity } from "./privy";
 import {
   getHostedOnboardingEnvironment,
   getHostedOnboardingSecretCodec,
@@ -79,6 +79,54 @@ type HostedWebhookReceiptErrorState = {
   name: string;
 };
 
+type HostedWebhookSideEffectErrorState = {
+  code: string | null;
+  message: string;
+  name: string;
+  retryable: boolean | null;
+};
+
+type HostedWebhookSideEffectStatus = "pending" | "sent";
+
+type HostedWebhookDispatchSideEffect = {
+  attemptCount: number;
+  effectId: string;
+  kind: "hosted_execution_dispatch";
+  lastAttemptAt: string | null;
+  lastError: HostedWebhookSideEffectErrorState | null;
+  payload: {
+    dispatch: HostedExecutionDispatchRequest;
+  };
+  result: {
+    dispatched: true;
+  } | null;
+  sentAt: string | null;
+  status: HostedWebhookSideEffectStatus;
+};
+
+type HostedWebhookLinqMessageSideEffect = {
+  attemptCount: number;
+  effectId: string;
+  kind: "linq_message_send";
+  lastAttemptAt: string | null;
+  lastError: HostedWebhookSideEffectErrorState | null;
+  payload: {
+    chatId: string;
+    inviteId: string | null;
+    message: string;
+  };
+  result: {
+    chatId: string | null;
+    messageId: string | null;
+  } | null;
+  sentAt: string | null;
+  status: HostedWebhookSideEffectStatus;
+};
+
+type HostedWebhookSideEffect =
+  | HostedWebhookDispatchSideEffect
+  | HostedWebhookLinqMessageSideEffect;
+
 type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
 
 type HostedWebhookReceiptState = {
@@ -88,11 +136,12 @@ type HostedWebhookReceiptState = {
   eventPayload: HostedWebhookEventPayload;
   lastError: HostedWebhookReceiptErrorState | null;
   lastReceivedAt: string | null;
+  sideEffects: HostedWebhookSideEffect[];
   status: HostedWebhookReceiptStatus | null;
 };
 
 type HostedWebhookReceiptClaim = {
-  payloadJson: Prisma.InputJsonValue;
+  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null;
   state: HostedWebhookReceiptState;
 };
 
@@ -226,7 +275,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 
   const event = parseHostedLinqWebhookEvent(input.rawBody);
-  const claimedReceipt = await recordHostedWebhookReceipt({
+  let claimedReceipt = await recordHostedWebhookReceipt({
     eventId: event.event_id,
     eventPayload: {
       eventType: event.event_type,
@@ -243,6 +292,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 
   try {
+    const desiredSideEffects: HostedWebhookSideEffect[] = [];
     let response:
       | {
         duplicate?: boolean;
@@ -294,17 +344,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           });
 
           if (existingMember?.billingStatus === HostedBillingStatus.active) {
-            await dispatchHostedExecutionSafely({
-              event: {
-                kind: "linq.message.received",
-                linqChatId: summary.chatId,
-                linqEvent: event as unknown as Record<string, unknown>,
-                normalizedPhoneNumber,
-                userId: existingMember.id,
-              },
-              eventId: event.event_id,
-              occurredAt: new Date().toISOString(),
-            });
+            desiredSideEffects.push(
+              createHostedWebhookDispatchSideEffect({
+                dispatch: {
+                  event: {
+                    kind: "linq.message.received",
+                    linqChatId: summary.chatId,
+                    linqEvent: event as unknown as Record<string, unknown>,
+                    normalizedPhoneNumber,
+                    userId: existingMember.id,
+                  },
+                  eventId: event.event_id,
+                  occurredAt: event.created_at,
+                },
+              }),
+            );
 
             response = {
               ok: true,
@@ -336,22 +390,17 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 triggerText: summary.text,
               });
               const joinUrl = buildHostedInviteUrl(invite.inviteCode);
-              await sendHostedLinqChatMessage({
-                chatId: summary.chatId,
-                message: buildHostedInviteReply({
-                  activeSubscription: member.billingStatus === HostedBillingStatus.active,
-                  joinUrl,
+              desiredSideEffects.push(
+                createHostedWebhookLinqMessageSideEffect({
+                  chatId: summary.chatId,
+                  inviteId: invite.id,
+                  message: buildHostedInviteReply({
+                    activeSubscription: member.billingStatus === HostedBillingStatus.active,
+                    joinUrl,
+                  }),
+                  sourceEventId: event.event_id,
                 }),
-                signal: input.signal,
-              });
-              await prisma.hostedInvite.update({
-                where: {
-                  id: invite.id,
-                },
-                data: {
-                  sentAt: new Date(),
-                },
-              });
+              );
 
               response = {
                 ok: true,
@@ -363,6 +412,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         }
       }
     }
+
+    claimedReceipt = await queueHostedWebhookReceiptSideEffects({
+      claimedReceipt,
+      desiredSideEffects,
+      eventId: event.event_id,
+      prisma,
+      source: "linq",
+    });
+    claimedReceipt = await drainHostedWebhookReceiptSideEffects({
+      claimedReceipt,
+      eventId: event.event_id,
+      prisma,
+      signal: input.signal,
+      source: "linq",
+    });
 
     await markHostedWebhookReceiptCompleted({
       claimedReceipt,
@@ -376,6 +440,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
     return response;
   } catch (error) {
+    claimedReceipt = readHostedWebhookReceiptClaimFromError(error) ?? claimedReceipt;
     await markHostedWebhookReceiptFailed({
       claimedReceipt,
       error,
@@ -391,7 +456,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 }
 
 export async function completeHostedPrivyVerification(input: {
-  identityToken: string;
+  identity: HostedPrivyIdentity;
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
@@ -399,20 +464,19 @@ export async function completeHostedPrivyVerification(input: {
 }) {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const identity = await requireHostedPrivyIdentity(input.identityToken);
   const invite = input.inviteCode
     ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
     : null;
   const member = invite
     ? await reconcileHostedPrivyIdentityOnMember({
         expectedPhoneNumber: invite.member.normalizedPhoneNumber,
-        identity,
+        identity: input.identity,
         member: invite.member,
         prisma,
         now,
       })
     : await ensureHostedMemberForPrivyIdentity({
-        identity,
+        identity: input.identity,
         prisma,
         now,
       });
@@ -613,7 +677,7 @@ export async function handleHostedStripeWebhook(input: {
     });
   }
 
-  const claimedReceipt = await recordHostedWebhookReceipt({
+  let claimedReceipt = await recordHostedWebhookReceipt({
     eventId: event.id,
     eventPayload: {
       type: event.type,
@@ -631,9 +695,21 @@ export async function handleHostedStripeWebhook(input: {
   }
 
   try {
+    const occurredAt = Number.isFinite(event.created)
+      ? new Date(event.created * 1000).toISOString()
+      : new Date().toISOString();
+    let desiredSideEffects: HostedWebhookSideEffect[] = [];
+
     switch (event.type) {
       case "checkout.session.completed":
-        await applyStripeCheckoutCompleted(event.data.object as Stripe.Checkout.Session, prisma);
+        desiredSideEffects = await applyStripeCheckoutCompleted(
+          event.data.object as Stripe.Checkout.Session,
+          {
+            occurredAt,
+            sourceEventId: event.id,
+          },
+          prisma,
+        );
         break;
       case "checkout.session.expired":
         await applyStripeCheckoutExpired(event.data.object as Stripe.Checkout.Session, prisma);
@@ -641,10 +717,25 @@ export async function handleHostedStripeWebhook(input: {
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
-        await applyStripeSubscriptionUpdated(event.data.object as Stripe.Subscription, prisma);
+        desiredSideEffects = await applyStripeSubscriptionUpdated(
+          event.data.object as Stripe.Subscription,
+          {
+            occurredAt,
+            sourceEventId: event.id,
+            sourceType: event.type,
+          },
+          prisma,
+        );
         break;
       case "invoice.paid":
-        await applyStripeInvoicePaid(event.data.object as Stripe.Invoice, prisma);
+        desiredSideEffects = await applyStripeInvoicePaid(
+          event.data.object as Stripe.Invoice,
+          {
+            occurredAt,
+            sourceEventId: event.id,
+          },
+          prisma,
+        );
         break;
       case "invoice.payment_failed":
         await applyStripeInvoicePaymentFailed(event.data.object as Stripe.Invoice, prisma);
@@ -652,6 +743,20 @@ export async function handleHostedStripeWebhook(input: {
       default:
         break;
     }
+
+    claimedReceipt = await queueHostedWebhookReceiptSideEffects({
+      claimedReceipt,
+      desiredSideEffects,
+      eventId: event.id,
+      prisma,
+      source: "stripe",
+    });
+    claimedReceipt = await drainHostedWebhookReceiptSideEffects({
+      claimedReceipt,
+      eventId: event.id,
+      prisma,
+      source: "stripe",
+    });
 
     await markHostedWebhookReceiptCompleted({
       claimedReceipt,
@@ -668,6 +773,7 @@ export async function handleHostedStripeWebhook(input: {
       type: event.type,
     };
   } catch (error) {
+    claimedReceipt = readHostedWebhookReceiptClaimFromError(error) ?? claimedReceipt;
     await markHostedWebhookReceiptFailed({
       claimedReceipt,
       error,
@@ -1449,7 +1555,7 @@ async function recordHostedWebhookReceipt(input: {
         source: input.source,
         eventId: input.eventId,
         firstReceivedAt: now,
-        payloadJson: receipt.payloadJson,
+        payloadJson: toHostedWebhookReceiptJsonInput(receipt.payloadJson),
       },
     });
     return receipt;
@@ -1495,7 +1601,7 @@ async function reclaimHostedWebhookReceipt(
             source: input.source,
             eventId: input.eventId,
             firstReceivedAt: receivedAt,
-            payloadJson: receipt.payloadJson,
+            payloadJson: toHostedWebhookReceiptJsonInput(receipt.payloadJson),
           },
         });
         return receipt;
@@ -1528,7 +1634,7 @@ async function reclaimHostedWebhookReceipt(
         },
       },
       data: {
-        payloadJson: nextReceipt.payloadJson,
+        payloadJson: toHostedWebhookReceiptJsonInput(nextReceipt.payloadJson),
       },
     });
 
@@ -1581,6 +1687,109 @@ async function markHostedWebhookReceiptFailed(input: {
   });
 }
 
+async function queueHostedWebhookReceiptSideEffects(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  desiredSideEffects: HostedWebhookSideEffect[];
+  eventId: string;
+  prisma: PrismaClient;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim> {
+  if (input.desiredSideEffects.length === 0) {
+    return input.claimedReceipt;
+  }
+
+  return updateHostedWebhookReceiptClaim({
+    claimedReceipt: input.claimedReceipt,
+    eventId: input.eventId,
+    mutate(currentState) {
+      return replaceHostedWebhookReceiptState(currentState, {
+        sideEffects: mergeHostedWebhookSideEffects(currentState.sideEffects, input.desiredSideEffects),
+      });
+    },
+    prisma: input.prisma,
+    source: input.source,
+  });
+}
+
+async function drainHostedWebhookReceiptSideEffects(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  eventId: string;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim> {
+  let currentClaim = input.claimedReceipt;
+
+  for (const queuedEffect of currentClaim.state.sideEffects) {
+    if (queuedEffect.status === "sent") {
+      continue;
+    }
+
+    const startedAt = new Date().toISOString();
+    currentClaim = await updateHostedWebhookReceiptClaim({
+      claimedReceipt: currentClaim,
+      eventId: input.eventId,
+      mutate(currentState) {
+        return replaceHostedWebhookReceiptState(currentState, {
+          sideEffects: replaceHostedWebhookSideEffects(currentState.sideEffects, queuedEffect.effectId, (effect) => ({
+            ...effect,
+            attemptCount: effect.attemptCount + 1,
+            lastAttemptAt: startedAt,
+            lastError: null,
+          })),
+        });
+      },
+      prisma: input.prisma,
+      source: input.source,
+    });
+
+    const effect = getHostedWebhookSideEffect(currentClaim.state, queuedEffect.effectId);
+
+    try {
+      const result = await performHostedWebhookSideEffect(effect, {
+        signal: input.signal,
+      });
+      const sentAt = new Date().toISOString();
+      currentClaim = await updateHostedWebhookReceiptClaim({
+        claimedReceipt: currentClaim,
+        eventId: input.eventId,
+        mutate(currentState) {
+          return replaceHostedWebhookReceiptState(currentState, {
+            sideEffects: replaceHostedWebhookSideEffects(currentState.sideEffects, effect.effectId, (currentEffect) =>
+              markHostedWebhookSideEffectSent(currentEffect, result, sentAt),
+            ),
+          });
+        },
+        prisma: input.prisma,
+        source: input.source,
+      });
+
+      if (effect.kind === "linq_message_send" && effect.payload.inviteId) {
+        await markHostedInviteSentBestEffort(effect.payload.inviteId, input.prisma);
+      }
+    } catch (error) {
+      currentClaim = await updateHostedWebhookReceiptClaim({
+        claimedReceipt: currentClaim,
+        eventId: input.eventId,
+        mutate(currentState) {
+          return replaceHostedWebhookReceiptState(currentState, {
+            sideEffects: replaceHostedWebhookSideEffects(currentState.sideEffects, effect.effectId, (currentEffect) => ({
+              ...currentEffect,
+              lastError: serializeHostedWebhookSideEffectError(error),
+              status: "pending",
+            })),
+          });
+        },
+        prisma: input.prisma,
+        source: input.source,
+      });
+      throw attachHostedWebhookReceiptClaim(error, currentClaim);
+    }
+  }
+
+  return currentClaim;
+}
+
 async function updateHostedWebhookReceiptStatus(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   error?: unknown;
@@ -1591,33 +1800,26 @@ async function updateHostedWebhookReceiptStatus(input: {
   status: "completed" | "failed";
 }): Promise<void> {
   const receivedAt = new Date().toISOString();
-  const nextState = buildHostedWebhookReceiptState({
-    attemptCount: input.claimedReceipt.state.attemptCount,
-    attemptId: input.claimedReceipt.state.attemptId,
-    completedAt: input.status === "completed" ? receivedAt : null,
-    eventPayload: mergeHostedWebhookEventPayload(
-      input.eventPayload,
-      input.claimedReceipt.state.eventPayload,
-    ),
-    lastError:
-      input.status === "failed"
-        ? serializeHostedWebhookReceiptError(input.error)
-        : null,
-    lastReceivedAt: receivedAt,
-    status: input.status,
-  });
-
-  await input.prisma.hostedWebhookReceipt.updateMany({
-    where: {
-      source: input.source,
-      eventId: input.eventId,
-      payloadJson: {
-        equals: input.claimedReceipt.payloadJson,
-      },
+  await updateHostedWebhookReceiptClaim({
+    claimedReceipt: input.claimedReceipt,
+    eventId: input.eventId,
+    mutate(currentState) {
+      return replaceHostedWebhookReceiptState(currentState, {
+        completedAt: input.status === "completed" ? receivedAt : null,
+        eventPayload: mergeHostedWebhookEventPayload(
+          input.eventPayload,
+          currentState.eventPayload,
+        ),
+        lastError:
+          input.status === "failed"
+            ? serializeHostedWebhookReceiptError(input.error)
+            : null,
+        lastReceivedAt: receivedAt,
+        status: input.status,
+      });
     },
-    data: {
-      payloadJson: serializeHostedWebhookReceiptState(nextState),
-    },
+    prisma: input.prisma,
+    source: input.source,
   });
 }
 
@@ -1636,6 +1838,7 @@ function buildHostedWebhookProcessingReceipt(input: {
     ),
     lastError: null,
     lastReceivedAt: input.receivedAt.toISOString(),
+    sideEffects: input.previousState?.sideEffects ?? [],
     status: "processing",
   });
 
@@ -1652,7 +1855,8 @@ function buildHostedWebhookReceiptState(input: {
   eventPayload: HostedWebhookEventPayload;
   lastError: HostedWebhookReceiptErrorState | null;
   lastReceivedAt: string | null;
-  status: HostedWebhookReceiptStatus;
+  sideEffects: HostedWebhookSideEffect[];
+  status: HostedWebhookReceiptStatus | null;
 }): HostedWebhookReceiptState {
   return {
     attemptCount: Math.max(Math.trunc(input.attemptCount), 1),
@@ -1661,6 +1865,7 @@ function buildHostedWebhookReceiptState(input: {
     eventPayload: input.eventPayload,
     lastError: input.status === "failed" ? input.lastError : null,
     lastReceivedAt: input.lastReceivedAt,
+    sideEffects: input.sideEffects,
     status: input.status,
   };
 }
@@ -1676,6 +1881,7 @@ function serializeHostedWebhookReceiptState(
       completedAt: receiptState.status === "completed" ? receiptState.completedAt : null,
       lastError: receiptState.status === "failed" ? receiptState.lastError : null,
       lastReceivedAt: receiptState.lastReceivedAt,
+      sideEffects: receiptState.sideEffects.map((effect) => serializeHostedWebhookSideEffect(effect)),
       status: receiptState.status,
     },
   } satisfies Prisma.InputJsonObject;
@@ -1709,6 +1915,9 @@ function readHostedWebhookReceiptState(
     lastReceivedAt: readHostedWebhookReceiptString(
       nestedState.lastReceivedAt ?? payloadObject.receiptLastReceivedAt,
     ),
+    sideEffects: readHostedWebhookReceiptSideEffects(
+      nestedState.sideEffects ?? payloadObject.receiptSideEffects,
+    ),
     status,
   };
 }
@@ -1730,6 +1939,7 @@ function readHostedWebhookReceiptEventPayload(
     delete legacyEventPayload.receiptCompletedAt;
     delete legacyEventPayload.receiptLastError;
     delete legacyEventPayload.receiptLastReceivedAt;
+    delete legacyEventPayload.receiptSideEffects;
     delete legacyEventPayload.receiptState;
     delete legacyEventPayload.receiptStatus;
 
@@ -1764,6 +1974,25 @@ function mergeHostedWebhookEventPayload(
   };
 }
 
+function readHostedWebhookReceiptSideEffects(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookSideEffect[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const sideEffects: HostedWebhookSideEffect[] = [];
+
+  for (const candidate of value) {
+    const parsed = readHostedWebhookSideEffect(candidate);
+    if (parsed) {
+      sideEffects.push(parsed);
+    }
+  }
+
+  return sideEffects;
+}
+
 function readHostedWebhookReceiptNumber(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): number {
@@ -1784,6 +2013,14 @@ function readHostedWebhookReceiptStatusValue(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): HostedWebhookReceiptStatus | null {
   return value === "completed" || value === "failed" || value === "processing"
+    ? value
+    : null;
+}
+
+function readHostedWebhookSideEffectStatusValue(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookSideEffectStatus | null {
+  return value === "pending" || value === "sent"
     ? value
     : null;
 }
@@ -1809,8 +2046,431 @@ function serializeHostedWebhookReceiptError(error: unknown): HostedWebhookReceip
   };
 }
 
+function serializeHostedWebhookSideEffectError(error: unknown): HostedWebhookSideEffectErrorState {
+  if (isHostedOnboardingError(error)) {
+    return {
+      code: error.code,
+      message: error.message,
+      name: error.name,
+      retryable: error.retryable ?? null,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      code: null,
+      message: error.message,
+      name: error.name,
+      retryable: readHostedWebhookSideEffectRetryable(error),
+    };
+  }
+
+  if (typeof error === "string") {
+    return {
+      code: null,
+      message: error,
+      name: "Error",
+      retryable: null,
+    };
+  }
+
+  return {
+    code: null,
+    message: "Unknown hosted side-effect failure.",
+    name: "UnknownError",
+    retryable: null,
+  };
+}
+
+function readHostedWebhookSideEffectError(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookSideEffectErrorState | null {
+  const errorObject = toHostedWebhookReceiptObject(value);
+  const message = readHostedWebhookReceiptString(errorObject.message);
+  const name = readHostedWebhookReceiptString(errorObject.name);
+
+  return message && name
+    ? {
+      code: readHostedWebhookReceiptString(errorObject.code),
+      message,
+      name,
+      retryable:
+        typeof errorObject.retryable === "boolean"
+          ? errorObject.retryable
+          : null,
+    }
+    : null;
+}
+
+function serializeHostedWebhookSideEffect(
+  effect: HostedWebhookSideEffect,
+): Prisma.InputJsonObject {
+  return {
+    attemptCount: effect.attemptCount,
+    effectId: effect.effectId,
+    kind: effect.kind,
+    lastAttemptAt: effect.lastAttemptAt,
+    lastError: effect.lastError,
+    payload: effect.payload as unknown as Prisma.InputJsonValue,
+    result: effect.result as unknown as Prisma.InputJsonValue,
+    sentAt: effect.sentAt,
+    status: effect.status,
+  } satisfies Prisma.InputJsonObject;
+}
+
+function readHostedWebhookSideEffect(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null,
+): HostedWebhookSideEffect | null {
+  const effectObject = toHostedWebhookReceiptObject(value);
+  const effectId = readHostedWebhookReceiptString(effectObject.effectId);
+  const kind = readHostedWebhookReceiptString(effectObject.kind);
+  const status = readHostedWebhookSideEffectStatusValue(effectObject.status);
+
+  if (!effectId || !kind || !status) {
+    return null;
+  }
+
+  const attemptCount = readHostedWebhookReceiptNumber(effectObject.attemptCount);
+  const lastAttemptAt = readHostedWebhookReceiptString(effectObject.lastAttemptAt);
+  const lastError = readHostedWebhookSideEffectError(effectObject.lastError);
+  const sentAt = readHostedWebhookReceiptString(effectObject.sentAt);
+  const payload = toHostedWebhookReceiptObject(effectObject.payload);
+  const result = toHostedWebhookReceiptObject(effectObject.result);
+
+  switch (kind) {
+    case "hosted_execution_dispatch": {
+      const dispatchPayload = payload.dispatch;
+
+      if (!dispatchPayload || typeof dispatchPayload !== "object" || Array.isArray(dispatchPayload)) {
+        return null;
+      }
+
+      return {
+        attemptCount,
+        effectId,
+        kind,
+        lastAttemptAt,
+        lastError,
+        payload: {
+          dispatch: dispatchPayload as unknown as HostedExecutionDispatchRequest,
+        },
+        result: result.dispatched === true ? { dispatched: true } : null,
+        sentAt,
+        status,
+      };
+    }
+    case "linq_message_send": {
+      const chatId = readHostedWebhookReceiptString(payload.chatId);
+      const message = readHostedWebhookReceiptString(payload.message);
+
+      if (!chatId || !message) {
+        return null;
+      }
+
+      return {
+        attemptCount,
+        effectId,
+        kind,
+        lastAttemptAt,
+        lastError,
+        payload: {
+          chatId,
+          inviteId: readHostedWebhookReceiptString(payload.inviteId),
+          message,
+        },
+        result:
+          Object.keys(result).length === 0
+            ? null
+            : {
+              chatId: readHostedWebhookReceiptString(result.chatId),
+              messageId: readHostedWebhookReceiptString(result.messageId),
+            },
+        sentAt,
+        status,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+function readHostedWebhookSideEffectRetryable(error: Error): boolean | null {
+  return "retryable" in error && typeof error.retryable === "boolean"
+    ? error.retryable
+    : null;
+}
+
+function attachHostedWebhookReceiptClaim(
+  error: unknown,
+  claimedReceipt: HostedWebhookReceiptClaim,
+): Error {
+  const enrichedError = error instanceof Error ? error : new Error(String(error));
+  Object.defineProperty(enrichedError, "claimedReceipt", {
+    configurable: true,
+    enumerable: false,
+    value: claimedReceipt,
+    writable: true,
+  });
+  return enrichedError;
+}
+
+function readHostedWebhookReceiptClaimFromError(error: unknown): HostedWebhookReceiptClaim | null {
+  if (!error || typeof error !== "object" || !("claimedReceipt" in error)) {
+    return null;
+  }
+
+  const candidate = (error as { claimedReceipt?: unknown }).claimedReceipt;
+
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    !("payloadJson" in candidate) ||
+    !("state" in candidate)
+  ) {
+    return null;
+  }
+
+  return candidate as HostedWebhookReceiptClaim;
+}
+
 function generateHostedWebhookReceiptAttemptId(): string {
   return randomBytes(16).toString("hex");
+}
+
+function replaceHostedWebhookReceiptState(
+  currentState: HostedWebhookReceiptState,
+  overrides: Partial<HostedWebhookReceiptState>,
+): HostedWebhookReceiptState {
+  return buildHostedWebhookReceiptState({
+    attemptCount: "attemptCount" in overrides ? overrides.attemptCount ?? 0 : currentState.attemptCount,
+    attemptId: "attemptId" in overrides ? overrides.attemptId ?? null : currentState.attemptId,
+    completedAt: "completedAt" in overrides ? overrides.completedAt ?? null : currentState.completedAt,
+    eventPayload: "eventPayload" in overrides ? overrides.eventPayload ?? {} : currentState.eventPayload,
+    lastError: "lastError" in overrides ? overrides.lastError ?? null : currentState.lastError,
+    lastReceivedAt: "lastReceivedAt" in overrides ? overrides.lastReceivedAt ?? null : currentState.lastReceivedAt,
+    sideEffects: "sideEffects" in overrides ? overrides.sideEffects ?? [] : currentState.sideEffects,
+    status: "status" in overrides ? overrides.status ?? null : currentState.status,
+  });
+}
+
+function mergeHostedWebhookSideEffects(
+  currentSideEffects: readonly HostedWebhookSideEffect[],
+  desiredSideEffects: readonly HostedWebhookSideEffect[],
+): HostedWebhookSideEffect[] {
+  const remainingEffects = new Map(
+    currentSideEffects.map((effect) => [effect.effectId, effect] as const),
+  );
+  const mergedEffects: HostedWebhookSideEffect[] = [];
+
+  for (const desiredEffect of desiredSideEffects) {
+    const currentEffect = remainingEffects.get(desiredEffect.effectId);
+    remainingEffects.delete(desiredEffect.effectId);
+    mergedEffects.push(
+      currentEffect
+        ? mergeHostedWebhookSideEffect(currentEffect, desiredEffect)
+        : desiredEffect,
+    );
+  }
+
+  for (const currentEffect of currentSideEffects) {
+    if (remainingEffects.has(currentEffect.effectId)) {
+      mergedEffects.push(currentEffect);
+    }
+  }
+
+  return mergedEffects;
+}
+
+function mergeHostedWebhookSideEffect(
+  currentEffect: HostedWebhookSideEffect,
+  desiredEffect: HostedWebhookSideEffect,
+): HostedWebhookSideEffect {
+  if (currentEffect.kind !== desiredEffect.kind) {
+    return desiredEffect;
+  }
+
+  switch (desiredEffect.kind) {
+    case "hosted_execution_dispatch": {
+      const currentDispatchEffect = currentEffect as HostedWebhookDispatchSideEffect;
+      return {
+        ...desiredEffect,
+        attemptCount: currentDispatchEffect.attemptCount,
+        lastAttemptAt: currentDispatchEffect.lastAttemptAt,
+        lastError: currentDispatchEffect.status === "sent" ? null : currentDispatchEffect.lastError,
+        result: currentDispatchEffect.status === "sent" ? currentDispatchEffect.result : null,
+        sentAt: currentDispatchEffect.status === "sent" ? currentDispatchEffect.sentAt : null,
+        status: currentDispatchEffect.status === "sent" ? "sent" : "pending",
+      };
+    }
+    case "linq_message_send": {
+      const currentLinqEffect = currentEffect as HostedWebhookLinqMessageSideEffect;
+      return {
+        ...desiredEffect,
+        attemptCount: currentLinqEffect.attemptCount,
+        lastAttemptAt: currentLinqEffect.lastAttemptAt,
+        lastError: currentLinqEffect.status === "sent" ? null : currentLinqEffect.lastError,
+        result: currentLinqEffect.status === "sent" ? currentLinqEffect.result : null,
+        sentAt: currentLinqEffect.status === "sent" ? currentLinqEffect.sentAt : null,
+        status: currentLinqEffect.status === "sent" ? "sent" : "pending",
+      };
+    }
+    default:
+      return desiredEffect;
+  }
+}
+
+function replaceHostedWebhookSideEffects(
+  currentSideEffects: readonly HostedWebhookSideEffect[],
+  effectId: string,
+  mutate: (effect: HostedWebhookSideEffect) => HostedWebhookSideEffect,
+): HostedWebhookSideEffect[] {
+  return currentSideEffects.map((effect) => effect.effectId === effectId ? mutate(effect) : effect);
+}
+
+function getHostedWebhookSideEffect(
+  state: HostedWebhookReceiptState,
+  effectId: string,
+): HostedWebhookSideEffect {
+  const effect = state.sideEffects.find((candidate) => candidate.effectId === effectId);
+
+  if (!effect) {
+    throw new Error(`Hosted webhook side effect ${effectId} was not found.`);
+  }
+
+  return effect;
+}
+
+function markHostedWebhookSideEffectSent(
+  effect: HostedWebhookSideEffect,
+  result: { dispatched: true } | { chatId: string | null; messageId: string | null },
+  sentAt: string,
+): HostedWebhookSideEffect {
+  switch (effect.kind) {
+    case "hosted_execution_dispatch":
+      return {
+        ...effect,
+        lastError: null,
+        result: result as HostedWebhookDispatchSideEffect["result"],
+        sentAt,
+        status: "sent",
+      };
+    case "linq_message_send":
+      return {
+        ...effect,
+        lastError: null,
+        result: result as HostedWebhookLinqMessageSideEffect["result"],
+        sentAt,
+        status: "sent",
+      };
+    default:
+      return effect;
+  }
+}
+
+async function updateHostedWebhookReceiptClaim(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  eventId: string;
+  mutate: (currentState: HostedWebhookReceiptState) => HostedWebhookReceiptState;
+  prisma: PrismaClient;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim> {
+  let currentClaim = input.claimedReceipt;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const nextState = input.mutate(currentClaim.state);
+    const nextClaim: HostedWebhookReceiptClaim = {
+      payloadJson: serializeHostedWebhookReceiptState(nextState),
+      state: nextState,
+    };
+    const updatedReceipt = await input.prisma.hostedWebhookReceipt.updateMany({
+      where: {
+        source: input.source,
+        eventId: input.eventId,
+        payloadJson: {
+          equals: currentClaim.payloadJson ?? Prisma.JsonNull,
+        },
+      },
+      data: {
+        payloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+      },
+    });
+
+    if (updatedReceipt.count === 1) {
+      return nextClaim;
+    }
+
+    const latestReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
+      where: {
+        source_eventId: {
+          eventId: input.eventId,
+          source: input.source,
+        },
+      },
+      select: {
+        payloadJson: true,
+      },
+    });
+
+    if (!latestReceipt) {
+      break;
+    }
+
+    currentClaim = {
+      payloadJson: latestReceipt.payloadJson,
+      state: readHostedWebhookReceiptState(latestReceipt.payloadJson),
+    };
+  }
+
+  throw hostedOnboardingError({
+    code: "WEBHOOK_RECEIPT_UPDATE_FAILED",
+    message: "Hosted webhook receipt could not be updated safely.",
+    httpStatus: 503,
+    retryable: true,
+  });
+}
+
+async function performHostedWebhookSideEffect(
+  effect: HostedWebhookSideEffect,
+  options: {
+    signal?: AbortSignal;
+  } = {},
+): Promise<{ dispatched: true } | { chatId: string | null; messageId: string | null }> {
+  switch (effect.kind) {
+    case "hosted_execution_dispatch":
+      await dispatchHostedExecutionSafely(effect.payload.dispatch);
+      return {
+        dispatched: true,
+      };
+    case "linq_message_send":
+      return sendHostedLinqChatMessage({
+        chatId: effect.payload.chatId,
+        message: effect.payload.message,
+        signal: options.signal,
+      });
+    default:
+      throw new Error(`Unsupported hosted webhook side effect kind: ${JSON.stringify(effect)}`);
+  }
+}
+
+async function markHostedInviteSentBestEffort(
+  inviteId: string,
+  prisma: PrismaClient,
+): Promise<void> {
+  try {
+    await prisma.hostedInvite.update({
+      where: {
+        id: inviteId,
+      },
+      data: {
+        sentAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Hosted invite sentAt update failed.",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function toHostedWebhookReceiptObject(
@@ -1829,7 +2489,23 @@ function toHostedWebhookReceiptObject(
   };
 }
 
-async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, prisma: PrismaClient): Promise<void> {
+function toHostedWebhookReceiptJsonInput(
+  value: HostedWebhookReceiptClaim["payloadJson"],
+): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
+  return value === null
+    ? Prisma.JsonNull
+    : value as Prisma.InputJsonValue;
+}
+
+async function applyStripeCheckoutCompleted(
+  session: Stripe.Checkout.Session,
+  dispatchContext: {
+    occurredAt: string;
+    sourceEventId: string;
+  },
+  prisma: PrismaClient,
+): Promise<HostedWebhookSideEffect[]> {
+  const desiredSideEffects: HostedWebhookSideEffect[] = [];
   const member = await findMemberForStripeObject({
     clientReferenceId: normalizeNullableString(session.client_reference_id),
     customerId: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
@@ -1849,7 +2525,7 @@ async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, pr
         : HostedBillingStatus.checkout_open;
 
   if (member) {
-    await prisma.hostedMember.update({
+    const updatedMember = await prisma.hostedMember.update({
       where: { id: member.id },
       data: {
         billingMode: session.mode === "subscription" ? HostedBillingMode.subscription : HostedBillingMode.payment,
@@ -1865,7 +2541,18 @@ async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, pr
       billingStatus === HostedBillingStatus.active &&
       !(isHostedOnboardingRevnetEnabled() && session.mode === "subscription")
     ) {
-      await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
+      desiredSideEffects.push(
+        createHostedWebhookDispatchSideEffect({
+          dispatch: buildHostedMemberActivationDispatch({
+            linqChatId: updatedMember.linqChatId,
+            memberId: updatedMember.id,
+            normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
+            occurredAt: dispatchContext.occurredAt,
+            sourceEventId: dispatchContext.sourceEventId,
+            sourceType: "stripe.checkout.session.completed",
+          }),
+        }),
+      );
     }
   }
 
@@ -1892,6 +2579,8 @@ async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, pr
       },
     });
   }
+
+  return desiredSideEffects;
 }
 
 async function applyStripeCheckoutExpired(session: Stripe.Checkout.Session, prisma: PrismaClient): Promise<void> {
@@ -1925,7 +2614,16 @@ async function applyStripeCheckoutExpired(session: Stripe.Checkout.Session, pris
   }
 }
 
-async function applyStripeSubscriptionUpdated(subscription: Stripe.Subscription, prisma: PrismaClient): Promise<void> {
+async function applyStripeSubscriptionUpdated(
+  subscription: Stripe.Subscription,
+  dispatchContext: {
+    occurredAt: string;
+    sourceEventId: string;
+    sourceType: string;
+  },
+  prisma: PrismaClient,
+): Promise<HostedWebhookSideEffect[]> {
+  const desiredSideEffects: HostedWebhookSideEffect[] = [];
   const billingStatus = mapStripeSubscriptionStatusToHostedBillingStatus(subscription.status);
   const member = await findMemberForStripeObject({
     clientReferenceId: null,
@@ -1936,10 +2634,10 @@ async function applyStripeSubscriptionUpdated(subscription: Stripe.Subscription,
   });
 
   if (!member) {
-    return;
+    return desiredSideEffects;
   }
 
-  await prisma.hostedMember.update({
+  const updatedMember = await prisma.hostedMember.update({
     where: {
       id: member.id,
     },
@@ -1953,7 +2651,18 @@ async function applyStripeSubscriptionUpdated(subscription: Stripe.Subscription,
     },
   });
   if (billingStatus === HostedBillingStatus.active && !isHostedOnboardingRevnetEnabled()) {
-    await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
+    desiredSideEffects.push(
+      createHostedWebhookDispatchSideEffect({
+        dispatch: buildHostedMemberActivationDispatch({
+          linqChatId: updatedMember.linqChatId,
+          memberId: updatedMember.id,
+          normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
+          occurredAt: dispatchContext.occurredAt,
+          sourceEventId: dispatchContext.sourceEventId,
+          sourceType: dispatchContext.sourceType,
+        }),
+      }),
+    );
   }
   await prisma.hostedBillingCheckout.updateMany({
     where: {
@@ -1964,9 +2673,19 @@ async function applyStripeSubscriptionUpdated(subscription: Stripe.Subscription,
       stripeSubscriptionId: subscription.id,
     },
   });
+
+  return desiredSideEffects;
 }
 
-async function applyStripeInvoicePaid(invoice: Stripe.Invoice, prisma: PrismaClient): Promise<void> {
+async function applyStripeInvoicePaid(
+  invoice: Stripe.Invoice,
+  dispatchContext: {
+    occurredAt: string;
+    sourceEventId: string;
+  },
+  prisma: PrismaClient,
+): Promise<HostedWebhookSideEffect[]> {
+  const desiredSideEffects: HostedWebhookSideEffect[] = [];
   const subscriptionId = coerceStripeSubscriptionId(
     invoice.parent?.subscription_details?.subscription,
   );
@@ -1980,7 +2699,7 @@ async function applyStripeInvoicePaid(invoice: Stripe.Invoice, prisma: PrismaCli
   });
 
   if (!member) {
-    return;
+    return desiredSideEffects;
   }
 
   const updatedMember = await prisma.hostedMember.update({
@@ -2001,11 +2720,20 @@ async function applyStripeInvoicePaid(invoice: Stripe.Invoice, prisma: PrismaCli
     member: updatedMember,
     prisma,
   });
-  await dispatchHostedMemberActivationSafely(
-    updatedMember.id,
-    updatedMember.normalizedPhoneNumber,
-    updatedMember.linqChatId,
+  desiredSideEffects.push(
+    createHostedWebhookDispatchSideEffect({
+      dispatch: buildHostedMemberActivationDispatch({
+        linqChatId: updatedMember.linqChatId,
+        memberId: updatedMember.id,
+        normalizedPhoneNumber: updatedMember.normalizedPhoneNumber,
+        occurredAt: dispatchContext.occurredAt,
+        sourceEventId: dispatchContext.sourceEventId,
+        sourceType: "stripe.invoice.paid",
+      }),
+    }),
   );
+
+  return desiredSideEffects;
 }
 
 async function applyStripeInvoicePaymentFailed(invoice: Stripe.Invoice, prisma: PrismaClient): Promise<void> {
@@ -2097,25 +2825,77 @@ async function findMemberForStripeObject(input: {
   return null;
 }
 
-async function dispatchHostedMemberActivationSafely(
-  memberId: string,
-  normalizedPhoneNumber: string,
-  linqChatId: string | null,
-): Promise<void> {
-  await dispatchHostedExecutionSafely({
+function createHostedWebhookDispatchSideEffect(input: {
+  dispatch: HostedExecutionDispatchRequest;
+}): HostedWebhookDispatchSideEffect {
+  return {
+    attemptCount: 0,
+    effectId: `dispatch:${input.dispatch.eventId}`,
+    kind: "hosted_execution_dispatch",
+    lastAttemptAt: null,
+    lastError: null,
+    payload: {
+      dispatch: input.dispatch,
+    },
+    result: null,
+    sentAt: null,
+    status: "pending",
+  };
+}
+
+function createHostedWebhookLinqMessageSideEffect(input: {
+  chatId: string;
+  inviteId: string | null;
+  message: string;
+  sourceEventId: string;
+}): HostedWebhookLinqMessageSideEffect {
+  return {
+    attemptCount: 0,
+    effectId: `linq-message:${input.sourceEventId}`,
+    kind: "linq_message_send",
+    lastAttemptAt: null,
+    lastError: null,
+    payload: {
+      chatId: input.chatId,
+      inviteId: input.inviteId,
+      message: input.message,
+    },
+    result: null,
+    sentAt: null,
+    status: "pending",
+  };
+}
+
+function buildHostedMemberActivationDispatch(input: {
+  linqChatId: string | null;
+  memberId: string;
+  normalizedPhoneNumber: string;
+  occurredAt: string;
+  sourceEventId: string;
+  sourceType: string;
+}): HostedExecutionDispatchRequest {
+  return {
     event: {
       kind: "member.activated",
-      linqChatId,
-      normalizedPhoneNumber,
-      userId: memberId,
+      linqChatId: input.linqChatId,
+      normalizedPhoneNumber: input.normalizedPhoneNumber,
+      userId: input.memberId,
     },
-    eventId: `member.activated:${memberId}:${Date.now()}`,
-    occurredAt: new Date().toISOString(),
-  });
+    eventId: buildHostedMemberActivationEventId(input),
+    occurredAt: input.occurredAt,
+  };
+}
+
+function buildHostedMemberActivationEventId(input: {
+  memberId: string;
+  sourceEventId: string;
+  sourceType: string;
+}): string {
+  return `member.activated:${input.sourceType}:${input.memberId}:${input.sourceEventId}`;
 }
 
 async function dispatchHostedExecutionSafely(
-  input: import("@healthybob/runtime-state").HostedExecutionDispatchRequest,
+  input: HostedExecutionDispatchRequest,
 ): Promise<void> {
   try {
     await dispatchHostedExecution(input);
