@@ -425,6 +425,20 @@ test('assistant state schemas expose document ids and JSON input payload flags',
   assert.deepEqual(putSchema.options.required, ['vault', 'input'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
+test('assistant cron help explains when to opt into assistant state', async () => {
+  const addHelp = await runRawCli(['assistant', 'cron', 'add', '--help'])
+  const presetInstallHelp = await runRawCli(['assistant', 'cron', 'preset', 'install', '--help'])
+
+  assert.match(
+    addHelp,
+    /Add --state or --stateDoc only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless jobs that can recompute everything each run\./u,
+  )
+  assert.match(
+    presetInstallHelp,
+    /Add --state only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless digest\/report jobs\./u,
+  )
+}, INCUR_HELP_TIMEOUT_MS)
+
 test('food schedule schema exposes the recurring food options', async () => {
   const schema = JSON.parse(
     await runRawCli(['food', 'schedule', '--schema', '--format', 'json']),

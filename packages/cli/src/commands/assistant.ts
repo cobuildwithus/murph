@@ -244,14 +244,14 @@ const assistantCronStateOptionFields = {
     .boolean()
     .optional()
     .describe(
-      'Bind this cron job to a default assistant state document under assistant-state/state/cron/<jobId>.json.',
+      'Bind this cron job to a default assistant state document under assistant-state/state/cron/<jobId>.json. Use this only when the cron needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy.',
     ),
   stateDoc: z
     .string()
     .min(1)
     .optional()
     .describe(
-      'Optional explicit assistant state document id to bind to this cron job, such as cron/weekly-health-snapshot.',
+      'Optional explicit assistant state document id to bind to this cron job, such as cron/weekly-health-snapshot. Prefer this only when the cron needs stable cross-run scratch state or must share one state doc across related jobs.',
     ),
 }
 
@@ -1549,7 +1549,7 @@ export function registerAssistantCommands(
       }),
       description: 'Create one assistant cron job from a built-in preset template.',
       hint:
-        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule. Cron jobs now require an explicit outbound channel route and always deliver their response.',
+        'Repeat --var key=value to fill preset slots. If you omit --at, --every, and --cron, Healthy Bob uses the preset’s suggested schedule. Cron jobs require an explicit outbound channel route and always deliver their response. Add --state only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless digest/report jobs.',
       examples: [
         {
           args: {
@@ -1716,7 +1716,7 @@ export function registerAssistantCommands(
       }),
       description: 'Create one assistant cron job backed by the local assistant runtime.',
       hint:
-        'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun. Cron jobs require an explicit outbound channel route and always deliver their response.',
+        'Provide exactly one of --at, --every, or --cron. One-shot jobs are deleted after they succeed unless you pass --keepAfterRun. Cron jobs require an explicit outbound channel route and always deliver their response. Add --state or --stateDoc only when the job needs run-to-run scratch state such as cooldowns, dedupe, unresolved follow-ups, or delivery policy; leave it off for stateless jobs that can recompute everything each run.',
       examples: [
         {
           args: {
