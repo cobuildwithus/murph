@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { HostedSharePreview } from "@/src/lib/hosted-share/service";
 import type { HostedInviteStatusPayload, HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
@@ -11,15 +11,23 @@ import { HostedPhoneAuth } from "./hosted-phone-auth";
 interface JoinInviteClientProps {
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
+  privyAppId: string | null;
   shareCode: string | null;
   sharePreview: HostedSharePreview | null;
 }
 
-export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePreview }: JoinInviteClientProps) {
+export function JoinInviteClient({
+  initialStatus,
+  inviteCode,
+  privyAppId,
+  shareCode,
+  sharePreview,
+}: JoinInviteClientProps) {
   const [status, setStatus] = useState(initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"checkout" | "logout" | "share" | null>(null);
   const [shareImported, setShareImported] = useState(false);
+  const phoneAuthReady = status.capabilities.phoneAuthReady && Boolean(privyAppId);
 
   const title = useMemo(() => {
     switch (status.stage) {
@@ -34,7 +42,7 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
       case "checkout":
         return "Finish checkout";
       case "active":
-        return "You're in";
+        return "You\u2019re in";
       default:
         return "Healthy Bob";
     }
@@ -43,11 +51,11 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
   const subtitle = useMemo(() => {
     switch (status.stage) {
       case "invalid":
-        return "Text the Healthy Bob number again and we'll send you a fresh hosted link.";
+        return "Text the Healthy Bob number again and we\u2019ll send you a fresh hosted link.";
       case "expired":
-        return "Text the Healthy Bob number again and we'll send you a fresh link.";
+        return "Text the Healthy Bob number again and we\u2019ll send you a fresh link.";
       case "register":
-        return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we'll create your rewards wallet and hand you off to Apple Pay.`;
+        return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll create your rewards wallet and hand you off to Apple Pay.`;
       case "authenticate":
         return `Continue with the verified phone already linked to ${status.invite?.phoneHint ?? "this number"}.`;
       case "checkout":
@@ -155,129 +163,57 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
   }
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: "1.25rem",
-      }}
-    >
-      <section
-        style={{
-          borderRadius: "1.5rem",
-          background: "rgba(255,255,255,0.92)",
-          boxShadow: "0 20px 50px rgba(15, 23, 42, 0.12)",
-          padding: "clamp(1.25rem, 4vw, 2rem)",
-        }}
-      >
-        <div style={{ display: "grid", gap: "0.75rem" }}>
-          <span
-            style={{
-              display: "inline-flex",
-              width: "fit-content",
-              borderRadius: "999px",
-              background: "rgba(15, 23, 42, 0.08)",
-              padding: "0.35rem 0.75rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-            }}
-          >
+    <div className="space-y-5">
+      <section className="rounded-3xl bg-white p-6 shadow-sm md:p-8">
+        <div className="space-y-3">
+          <span className="inline-block rounded-full bg-green-50 px-3.5 py-1.5 text-sm font-semibold text-green-700">
             Hosted access for {status.invite?.phoneHint ?? "your number"}
           </span>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "clamp(2rem, 6vw, 3.25rem)",
-              lineHeight: 1,
-              letterSpacing: "-0.04em",
-            }}
-          >
+          <h1 className="text-4xl font-bold leading-none tracking-tight text-stone-900 md:text-5xl">
             {title}
           </h1>
-          <p
-            style={{
-              margin: 0,
-              maxWidth: "34rem",
-              color: "rgb(51 65 85)",
-              fontSize: "1.05rem",
-              lineHeight: 1.6,
-            }}
-          >
+          <p className="max-w-lg text-lg leading-relaxed text-stone-500">
             {subtitle}
           </p>
         </div>
 
-        <div
-          style={{
-            marginTop: "1.5rem",
-            display: "grid",
-            gap: "0.85rem",
-          }}
-        >
+        <div className="mt-6 space-y-4">
           {errorMessage ? (
-            <div
-              style={{
-                borderRadius: "1rem",
-                border: "1px solid rgba(220, 38, 38, 0.16)",
-                background: "rgba(254, 242, 242, 0.95)",
-                color: "rgb(153 27 27)",
-                padding: "0.9rem 1rem",
-                lineHeight: 1.5,
-              }}
-            >
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
               {errorMessage}
             </div>
           ) : null}
 
           {sharePreview ? (
-            <div
-              style={{
-                borderRadius: "1rem",
-                border: "1px solid rgba(59, 130, 246, 0.18)",
-                background: "rgba(239, 246, 255, 0.9)",
-                padding: "0.95rem 1rem",
-                display: "grid",
-                gap: "0.4rem",
-                lineHeight: 1.5,
-              }}
-            >
-              <strong>Add after signup: {sharePreview.title}</strong>
-              <span>
+            <div className="space-y-1.5 rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-snug">
+              <strong className="text-green-800">Add after signup: {sharePreview.title}</strong>
+              <p className="text-green-700">
                 {[
                   sharePreview.counts.foods ? `${sharePreview.counts.foods} foods` : null,
                   sharePreview.counts.protocols ? `${sharePreview.counts.protocols} protocols` : null,
                   sharePreview.counts.recipes ? `${sharePreview.counts.recipes} recipes` : null,
-                ].filter(Boolean).join(" · ")}
-              </span>
+                ].filter(Boolean).join(" \u00B7 ")}
+              </p>
               {sharePreview.protocolTitles.length > 0 ? (
-                <span>Protocols: {sharePreview.protocolTitles.join(", ")}</span>
+                <p className="text-green-700">Protocols: {sharePreview.protocolTitles.join(", ")}</p>
               ) : null}
               {sharePreview.logMealAfterImport ? (
-                <span style={{ color: "rgb(2 132 199)" }}>Healthy Bob will also log the smoothie after import.</span>
+                <p className="text-green-600">Healthy Bob will also log the smoothie after import.</p>
               ) : null}
             </div>
           ) : null}
 
           {status.session.authenticated && !status.session.matchesInvite ? (
-            <div
-              style={{
-                borderRadius: "1rem",
-                border: "1px solid rgba(249, 115, 22, 0.18)",
-                background: "rgba(255, 247, 237, 0.98)",
-                color: "rgb(154 52 18)",
-                padding: "0.95rem 1rem",
-                display: "grid",
-                gap: "0.75rem",
-              }}
-            >
-              <span>
+            <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              <p>
                 This browser is currently signed in to a different hosted member. Continuing below will switch the
                 browser session to {status.invite?.phoneHint ?? "this invite"}.
-              </span>
+              </p>
               <button
                 type="button"
                 onClick={handleClearHostedSession}
                 disabled={pendingAction !== null}
-                style={secondaryButtonStyle}
+                className="rounded-full border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pendingAction === "logout" ? "Signing out..." : "Sign out current browser session"}
               </button>
@@ -285,25 +221,21 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
           ) : null}
 
           {(status.stage === "register" || status.stage === "authenticate") ? (
-            status.capabilities.phoneAuthReady ? (
-              <div
-                style={{
-                  borderRadius: "1.25rem",
-                  border: "1px solid rgba(148, 163, 184, 0.22)",
-                  background: "rgba(248,250,252,0.82)",
-                  padding: "1rem 1.05rem",
-                }}
-              >
+            phoneAuthReady && privyAppId ? (
+              <div className="rounded-2xl border border-stone-200/60 bg-stone-50/60 p-5">
                 <HostedPhoneAuth
                   inviteCode={inviteCode}
                   mode="invite"
                   onClearHostedSession={handleClearHostedSession}
                   onCompleted={handlePhoneVerified}
                   phoneHint={status.invite?.phoneHint ?? status.member?.phoneHint ?? null}
+                  privyAppId={privyAppId}
                 />
               </div>
             ) : (
-              <div style={noticeStyle}>Phone signup is not configured for this environment yet.</div>
+              <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
+                Phone signup is not configured for this environment yet.
+              </div>
             )
           ) : null}
 
@@ -312,7 +244,7 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
               type="button"
               onClick={handleCheckout}
               disabled={pendingAction !== null || !status.capabilities.billingReady}
-              style={primaryButtonStyle}
+              className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pendingAction === "checkout"
                 ? "Opening checkout..."
@@ -323,30 +255,19 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
           ) : null}
 
           {status.stage === "active" ? (
-            <div
-              style={{
-                borderRadius: "1rem",
-                border: "1px solid rgba(34, 197, 94, 0.18)",
-                background: "rgba(240, 253, 244, 0.98)",
-                color: "rgb(21 128 61)",
-                padding: "1rem 1.05rem",
-                lineHeight: 1.6,
-                display: "grid",
-                gap: "0.75rem",
-              }}
-            >
-              <span>
+            <div className="space-y-3 rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
+              <p>
                 Your hosted identity is active. Your phone-verified account, rewards wallet, and hosted session are all ready.
-              </span>
+              </p>
               {sharePreview ? (
                 shareImported ? (
-                  <span>{sharePreview.title} has been added to this hosted vault.</span>
+                  <p>{sharePreview.title} has been added to this hosted vault.</p>
                 ) : (
                   <button
                     type="button"
                     onClick={handleAcceptShare}
                     disabled={pendingAction !== null}
-                    style={primaryButtonStyle}
+                    className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {pendingAction === "share" ? "Adding shared bundle..." : `Add ${sharePreview.title}`}
                   </button>
@@ -357,57 +278,13 @@ export function JoinInviteClient({ initialStatus, inviteCode, shareCode, sharePr
         </div>
       </section>
 
-      <section
-        style={{
-          borderRadius: "1.25rem",
-          border: "1px solid rgba(148, 163, 184, 0.22)",
-          background: "rgba(248,250,252,0.8)",
-          padding: "1rem 1.1rem",
-          display: "grid",
-          gap: "0.6rem",
-          color: "rgb(71 85 105)",
-          lineHeight: 1.6,
-        }}
-      >
-        <strong style={{ color: "rgb(15 23 42)" }}>What happens here</strong>
-        <span>1. We verify the phone number that received this invite.</span>
-        <span>2. We create or reconnect your Healthy Bob account in Postgres.</span>
-        <span>3. We provision or reuse your self-custodial rewards wallet and set a hosted session cookie.</span>
-        <span>4. We hand you off to checkout, then your hosted access turns active.</span>
+      <section className="space-y-2.5 rounded-2xl border border-stone-200/60 bg-white/80 p-5 text-sm leading-relaxed text-stone-500">
+        <strong className="text-stone-800">What happens here</strong>
+        <p>1. We verify the phone number that received this invite.</p>
+        <p>2. We create or reconnect your Healthy Bob account in Postgres.</p>
+        <p>3. We provision or reuse your self-custodial rewards wallet and set a hosted session cookie.</p>
+        <p>4. We hand you off to checkout, then your hosted access turns active.</p>
       </section>
     </div>
   );
 }
-
-const primaryButtonStyle: CSSProperties = {
-  appearance: "none",
-  border: 0,
-  borderRadius: "999px",
-  background: "linear-gradient(135deg, rgb(15 23 42), rgb(30 41 59))",
-  color: "white",
-  cursor: "pointer",
-  fontSize: "1rem",
-  fontWeight: 700,
-  padding: "0.95rem 1.2rem",
-};
-
-const secondaryButtonStyle: CSSProperties = {
-  appearance: "none",
-  border: "1px solid rgba(148, 163, 184, 0.45)",
-  borderRadius: "999px",
-  background: "white",
-  color: "rgb(15 23 42)",
-  cursor: "pointer",
-  fontSize: "0.95rem",
-  fontWeight: 600,
-  padding: "0.8rem 1rem",
-};
-
-const noticeStyle: CSSProperties = {
-  borderRadius: "1rem",
-  border: "1px solid rgba(148, 163, 184, 0.22)",
-  background: "rgba(248,250,252,0.82)",
-  color: "rgb(51 65 85)",
-  lineHeight: 1.6,
-  padding: "0.95rem 1rem",
-};

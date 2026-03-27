@@ -8,11 +8,6 @@ vi.mock("@privy-io/react-auth", () => ({
   PrivyProvider: mocks.privyProvider,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
-  hasHostedPrivyClientConfig: () => true,
-  resolveHostedPrivyClientAppId: () => "cm_app_123",
-}));
-
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 
 describe("HostedPrivyProvider", () => {
@@ -21,7 +16,7 @@ describe("HostedPrivyProvider", () => {
   });
 
   it("configures automatic embedded wallet creation for users without wallets", () => {
-    const element = HostedPrivyProvider({ children: null });
+    const element = HostedPrivyProvider({ appId: "cm_app_123", children: null });
 
     expect(element.type).toBe(mocks.privyProvider);
     expect(element.props).toEqual(

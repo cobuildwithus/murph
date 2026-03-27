@@ -5,7 +5,7 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
@@ -15,7 +15,7 @@ import {
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import { requestHostedOnboardingJson } from "./client-api";
-import { hasHostedPrivyClientConfig, HostedPrivyProvider } from "./privy-provider";
+import { HostedPrivyProvider } from "./privy-provider";
 
 interface HostedPhoneAuthProps {
   inviteCode?: string | null;
@@ -23,21 +23,24 @@ interface HostedPhoneAuthProps {
   onClearHostedSession?: () => Promise<void> | void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   phoneHint?: string | null;
+  privyAppId: string;
 }
 
-export function HostedPhoneAuth(props: HostedPhoneAuthProps) {
-  if (!hasHostedPrivyClientConfig()) {
-    return <div style={noticeStyle}>Phone signup is not configured for this environment yet.</div>;
-  }
-
+export function HostedPhoneAuth({ privyAppId, ...props }: HostedPhoneAuthProps) {
   return (
-    <HostedPrivyProvider>
+    <HostedPrivyProvider appId={privyAppId}>
       <HostedPhoneAuthInner {...props} />
     </HostedPrivyProvider>
   );
 }
 
-function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onCompleted, phoneHint }: HostedPhoneAuthProps) {
+function HostedPhoneAuthInner({
+  inviteCode,
+  mode,
+  onClearHostedSession,
+  onCompleted,
+  phoneHint,
+}: Omit<HostedPhoneAuthProps, "privyAppId">) {
   const { authenticated, logout, ready } = usePrivy();
   const { loginWithCode, sendCode } = useLoginWithSms();
   const { refreshUser, user } = useUser();
@@ -162,22 +165,26 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
   }
 
   return (
-    <div style={{ display: "grid", gap: "0.9rem" }}>
-      {errorMessage ? <div style={errorStyle}>{errorMessage}</div> : null}
+    <div className="space-y-4">
+      {errorMessage ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
+          {errorMessage}
+        </div>
+      ) : null}
 
       {authenticated ? (
-        <div style={noticeStyle}>
-          <strong style={{ color: "rgb(15 23 42)" }}>Verified Privy session found.</strong>
-          <div style={{ paddingTop: "0.35rem" }}>
+        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
+          <strong className="text-stone-900">Verified Privy session found.</strong>
+          <p className="mt-1">
             {checkingAuthenticatedSession
               ? "Checking the current Privy session for a verified phone number and rewards wallet."
               : authenticatedSessionIssue ??
                 "Continue with your current verified phone session, or sign out and use a different number."}
-          </div>
+          </p>
         </div>
       ) : (
-        <div style={{ display: "grid", gap: "0.75rem" }}>
-          <label style={fieldLabelStyle} htmlFor={`hosted-phone-${mode}`}>
+        <div className="space-y-3">
+          <label className="text-sm font-semibold text-stone-900" htmlFor={`hosted-phone-${mode}`}>
             {mode === "invite" ? "Phone number that received this invite" : "Your phone number"}
           </label>
           <input
@@ -187,19 +194,19 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
             placeholder="+1 415 555 2671"
             value={phoneNumber}
             onChange={(event) => setPhoneNumber(event.currentTarget.value)}
-            style={inputStyle}
+            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-100"
           />
-          <div style={captionStyle}>
+          <p className="text-sm text-stone-500">
             {mode === "invite"
               ? `Use the same number we texted${phoneHint ? ` (${phoneHint})` : ""}.`
               : "We verify your number with SMS, then create your rewards wallet automatically."}
-          </div>
+          </p>
         </div>
       )}
 
       {!authenticated && step === "code" ? (
-        <div style={{ display: "grid", gap: "0.75rem" }}>
-          <label style={fieldLabelStyle} htmlFor={`hosted-code-${mode}`}>
+        <div className="space-y-3">
+          <label className="text-sm font-semibold text-stone-900" htmlFor={`hosted-code-${mode}`}>
             Verification code
           </label>
           <input
@@ -209,13 +216,13 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
             placeholder="123456"
             value={code}
             onChange={(event) => setCode(event.currentTarget.value)}
-            style={inputStyle}
+            className="w-full rounded-xl border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-green-400 focus:outline-none focus:ring-2 focus:ring-green-100"
           />
-          <div style={captionStyle}>Enter the code we just texted you.</div>
+          <p className="text-sm text-stone-500">Enter the code we just texted you.</p>
         </div>
       ) : null}
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+      <div className="flex flex-wrap gap-3">
         {authenticated ? (
           <>
             {!checkingAuthenticatedSession && !authenticatedSessionIssue ? (
@@ -223,7 +230,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
                 type="button"
                 onClick={handleContinueAuthenticated}
                 disabled={!ready || pendingAction !== null}
-                style={primaryButtonStyle}
+                className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pendingAction === "continue"
                   ? mode === "invite"
@@ -236,7 +243,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
               type="button"
               onClick={handleLogout}
               disabled={pendingAction !== null}
-              style={secondaryButtonStyle}
+              className="rounded-full border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
             </button>
@@ -246,7 +253,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
             type="button"
             onClick={handleSendCode}
             disabled={!ready || pendingAction !== null}
-            style={primaryButtonStyle}
+            className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
           </button>
@@ -256,7 +263,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
               type="button"
               onClick={handleVerifyCode}
               disabled={!ready || pendingAction !== null}
-              style={primaryButtonStyle}
+              className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pendingAction === "verify-code"
                 ? mode === "invite"
@@ -273,7 +280,7 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
                 setStep("phone");
               }}
               disabled={pendingAction !== null}
-              style={secondaryButtonStyle}
+              className="rounded-full border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Change number
             </button>
@@ -281,9 +288,9 @@ function HostedPhoneAuthInner({ inviteCode, mode, onClearHostedSession, onComple
         )}
       </div>
 
-      <div style={captionStyle}>
+      <p className="text-sm leading-relaxed text-stone-500">
         Healthy Bob uses your verified phone number for sign-in and provisions a self-custodial rewards wallet before checkout.
-      </div>
+      </p>
     </div>
   );
 }
@@ -369,67 +376,3 @@ function describeHostedPrivySessionIssue(sessionState: HostedPrivyLinkedAccountS
 
   return null;
 }
-
-const fieldLabelStyle = {
-  color: "rgb(15 23 42)",
-  fontSize: "0.95rem",
-  fontWeight: 600,
-} satisfies CSSProperties;
-
-const inputStyle = {
-  appearance: "none",
-  border: "1px solid rgba(148, 163, 184, 0.38)",
-  borderRadius: "1rem",
-  background: "white",
-  color: "rgb(15 23 42)",
-  fontSize: "1rem",
-  padding: "0.9rem 1rem",
-} satisfies CSSProperties;
-
-const captionStyle = {
-  color: "rgb(71 85 105)",
-  fontSize: "0.92rem",
-  lineHeight: 1.6,
-} satisfies CSSProperties;
-
-const errorStyle = {
-  borderRadius: "1rem",
-  border: "1px solid rgba(220, 38, 38, 0.16)",
-  background: "rgba(254, 242, 242, 0.95)",
-  color: "rgb(153 27 27)",
-  padding: "0.9rem 1rem",
-  lineHeight: 1.5,
-} satisfies CSSProperties;
-
-const noticeStyle = {
-  borderRadius: "1rem",
-  border: "1px solid rgba(148, 163, 184, 0.22)",
-  background: "rgba(248,250,252,0.82)",
-  color: "rgb(51 65 85)",
-  lineHeight: 1.6,
-  padding: "0.95rem 1rem",
-} satisfies CSSProperties;
-
-const primaryButtonStyle = {
-  appearance: "none",
-  border: 0,
-  borderRadius: "999px",
-  background: "linear-gradient(135deg, rgb(15 23 42), rgb(30 41 59))",
-  color: "white",
-  cursor: "pointer",
-  fontSize: "1rem",
-  fontWeight: 700,
-  padding: "0.95rem 1.2rem",
-} satisfies CSSProperties;
-
-const secondaryButtonStyle = {
-  appearance: "none",
-  border: "1px solid rgba(148, 163, 184, 0.45)",
-  borderRadius: "999px",
-  background: "white",
-  color: "rgb(15 23 42)",
-  cursor: "pointer",
-  fontSize: "0.95rem",
-  fontWeight: 600,
-  padding: "0.8rem 1rem",
-} satisfies CSSProperties;

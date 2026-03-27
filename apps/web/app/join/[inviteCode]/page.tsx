@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
+import { resolveHostedPrivyClientAppId } from "@/src/lib/hosted-onboarding/landing";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/service";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 
@@ -35,6 +36,7 @@ export default async function JoinInvitePage(input: {
     sessionRecord,
   });
   const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
+  const privyAppId = resolveHostedPrivyClientAppId();
   const shareData = shareCode
     ? await buildHostedSharePageData({
         inviteCode: decodeURIComponent(inviteCode),
@@ -44,19 +46,12 @@ export default async function JoinInvitePage(input: {
     : null;
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "clamp(1.25rem, 4vw, 2.5rem)",
-        background:
-          "radial-gradient(circle at top, rgba(191, 219, 254, 0.55) 0%, rgba(248, 250, 252, 1) 38%, rgba(226, 232, 240, 0.96) 100%)",
-        color: "rgb(15 23 42)",
-      }}
-    >
-      <div style={{ width: "100%", maxWidth: "48rem", margin: "0 auto" }}>
+    <main className="min-h-screen px-5 py-12 md:px-8">
+      <div className="mx-auto max-w-3xl">
         <JoinInviteClient
           inviteCode={decodeURIComponent(inviteCode)}
           initialStatus={initialStatus}
+          privyAppId={privyAppId}
           shareCode={shareCode}
           sharePreview={shareData?.share?.preview ?? null}
         />
