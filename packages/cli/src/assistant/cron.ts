@@ -51,6 +51,7 @@ import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
 } from './store.js'
+import type { AssistantOutboxDispatchMode } from './outbox.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 
 const ASSISTANT_CRON_JOB_SCHEMA = 'healthybob.assistant-cron-job.v1'
@@ -115,6 +116,7 @@ export interface RunAssistantCronJobInput {
 }
 
 export interface ProcessDueAssistantCronJobsInput {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
   limit?: number
   signal?: AbortSignal
   vault: string
@@ -472,6 +474,7 @@ export async function processDueAssistantCronJobs(
     }
 
     const result = await executeClaimedAssistantCronJob({
+      deliveryDispatchMode: input.deliveryDispatchMode,
       paths,
       signal: input.signal,
       trigger: 'scheduled',
@@ -591,6 +594,7 @@ async function claimNextDueAssistantCronJob(
 }
 
 async function executeClaimedAssistantCronJob(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
   job: AssistantCronJob
   paths: AssistantStatePaths
   signal?: AbortSignal
@@ -628,6 +632,7 @@ async function executeClaimedAssistantCronJob(input: {
         participantId: input.job.target.participantId ?? undefined,
         sourceThreadId: input.job.target.sourceThreadId ?? undefined,
         deliverResponse: input.job.target.deliverResponse,
+        deliveryDispatchMode: input.deliveryDispatchMode,
         deliveryTarget: input.job.target.deliveryTarget ?? undefined,
         turnTrigger: 'automation-cron',
         workingDirectory: input.vault,

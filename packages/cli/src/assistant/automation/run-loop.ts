@@ -10,7 +10,10 @@ import type { VaultCliServices } from '../../vault-cli-services.js'
 import { processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
-import { drainAssistantOutbox } from '../outbox.js'
+import {
+  drainAssistantOutbox,
+  type AssistantOutboxDispatchMode,
+} from '../outbox.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
   readAssistantAutomationState,
@@ -38,6 +41,8 @@ import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 
 export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
+  drainOutbox?: boolean
   inboxServices: InboxCliServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
@@ -122,11 +127,14 @@ export async function runAssistantAutomation(
           automationScans: 1,
         },
       })
-      await drainAssistantOutbox({
-        vault: input.vault,
-        limit: input.maxPerScan,
-      })
+      if (input.drainOutbox ?? true) {
+        await drainAssistantOutbox({
+          vault: input.vault,
+          limit: input.maxPerScan,
+        })
+      }
       await processDueAssistantCronJobs({
+        deliveryDispatchMode: input.deliveryDispatchMode,
         vault: input.vault,
         signal: controller.signal,
         limit: input.maxPerScan,
@@ -174,6 +182,7 @@ export async function runAssistantAutomation(
             requestId: input.requestId,
             signal: controller.signal,
             allowSelfAuthored: input.allowSelfAuthored ?? false,
+            deliveryDispatchMode: input.deliveryDispatchMode,
             sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
             vault: input.vault,
             async onStateProgress(next) {
@@ -217,6 +226,7 @@ export async function runAssistantAutomation(
           requestId: input.requestId,
           signal: controller.signal,
           allowSelfAuthored: input.allowSelfAuthored ?? false,
+          deliveryDispatchMode: input.deliveryDispatchMode,
           sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
           vault: input.vault,
           async onStateProgress(next) {

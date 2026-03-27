@@ -59,6 +59,7 @@ vi.mock('../src/inbox-model-harness.js', () => ({
 }))
 
 import {
+  readAssistantStatusSnapshot,
   runAssistantAutomation,
   runAssistantChat,
   scanAssistantAutoReplyOnce,
@@ -1500,6 +1501,109 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
   assert.equal(second.skipped, 1)
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+})
+
+test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending before commit', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-queue-only-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-queue-only-auto-reply',
+    response: 'queued auto reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-old',
+    },
+    autoReplyPrimed: true,
+    deliveryDispatchMode: 'queue-only',
+    enabledChannels: ['imessage'],
+    inboxServices: {
+      async list() {
+        return {
+          items: [
+            {
+              captureId: 'cap-new',
+              source: 'imessage',
+              accountId: 'self',
+              externalId: 'ext-2',
+              threadId: 'chat-2',
+              threadTitle: null,
+              actorId: '+15551234567',
+              actorName: 'Bob',
+              actorIsSelf: false,
+              occurredAt: '2026-03-18T09:05:00Z',
+              receivedAt: null,
+              text: 'How are my macros today?',
+              attachmentCount: 0,
+              envelopePath: 'raw/inbox/2.json',
+              eventId: 'evt-2',
+              promotions: [],
+            },
+          ],
+        }
+      },
+      async show() {
+        return {
+          capture: {
+            captureId: 'cap-new',
+            source: 'imessage',
+            threadTitle: null,
+            threadId: 'chat-2',
+            threadIsDirect: true,
+            actorId: '+15551234567',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:05:00Z',
+            text: 'How are my macros today?',
+            attachments: [],
+          },
+        }
+      },
+    } as any,
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
+
+  const artifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-new',
+        'assistant',
+        'chat-deferred.json',
+      ),
+      'utf8',
+    ),
+  ) as {
+    deliveryIntentId: string | null
+    schema: string
+  }
+  assert.equal(artifact.schema, 'healthybob.assistant-chat-deferred.v1')
+  assert.equal(typeof artifact.deliveryIntentId, 'string')
+
+  const snapshot = await readAssistantStatusSnapshot(vaultRoot)
+  assert.equal(snapshot?.outbox.pending, 1)
+  assert.equal(snapshot?.outbox.sent, 0)
+  assert.equal(snapshot?.recentTurns[0]?.status, 'deferred')
+  assert.equal(snapshot?.recentTurns[0]?.deliveryDisposition, 'queued')
 })
 
 test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks only for missing items', async () => {

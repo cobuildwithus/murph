@@ -75,6 +75,14 @@ export {
   scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
 } from './assistant/automation.js'
+export type {
+  AssistantOutboxDispatchHooks,
+  AssistantOutboxDispatchMode,
+} from './assistant/outbox.js'
+export {
+  drainAssistantOutbox,
+  listAssistantOutboxIntents,
+} from './assistant/outbox.js'
 
 export async function runAssistantChat(
   input: import('./assistant/service.js').AssistantChatInput,

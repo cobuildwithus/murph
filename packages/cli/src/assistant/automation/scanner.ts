@@ -27,6 +27,7 @@ import {
   writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts,
 } from './artifacts.js'
+import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
   collectAssistantAutoReplyGroup,
   type AssistantAutoReplyGroupItem,
@@ -255,6 +256,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   allowSelfAuthored?: boolean
   autoReplyPrimed?: boolean
   backlogChannels?: readonly string[]
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
   inboxServices: InboxCliServices
   maxPerScan?: number
@@ -403,6 +405,7 @@ export async function scanAssistantAutoReplyOnce(input: {
         details: 'assistant provider turn started',
       })
       const result = await executeAssistantAutoReply({
+        deliveryDispatchMode: input.deliveryDispatchMode,
         providerHeartbeatMs: input.providerHeartbeatMs,
         providerLongRunningCommandStallTimeoutMs:
           input.providerLongRunningCommandStallTimeoutMs,
@@ -584,6 +587,7 @@ async function loadAssistantAutoReplyCaptures(input: {
 }
 
 async function executeAssistantAutoReply(input: {
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -606,6 +610,7 @@ async function executeAssistantAutoReply(input: {
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
       deliverResponse: true,
+      deliveryDispatchMode: input.deliveryDispatchMode,
       turnTrigger: 'automation-auto-reply',
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: watchdog.onProviderEvent,

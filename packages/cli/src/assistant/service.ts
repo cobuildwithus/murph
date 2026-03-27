@@ -30,6 +30,7 @@ import {
 } from '../operator-config.js'
 import {
   deliverAssistantOutboxMessage,
+  type AssistantOutboxDispatchMode,
   normalizeAssistantDeliveryError,
 } from './outbox.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -109,6 +110,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   abortSignal?: AbortSignal
   codexCommand?: string
   deliverResponse?: boolean
+  deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryTarget?: string | null
   enableFirstTurnOnboarding?: boolean
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
@@ -1121,6 +1123,7 @@ async function deliverAssistantReply(input: {
     bindingDelivery: input.session.binding.delivery,
     explicitTarget: input.input.deliveryTarget ?? null,
     dependencies: undefined,
+    dispatchMode: input.input.deliveryDispatchMode,
   })
   const session = outcome.session ?? input.session
 
@@ -1256,7 +1259,7 @@ function buildAssistantTurnDeliveryFinalizationPlan(input: {
           vault: input.vault,
           turnId: input.turnId,
           status: 'deferred',
-          deliveryDisposition: 'retryable',
+          deliveryDisposition: input.outcome.error ? 'retryable' : 'queued',
           deliveryIntentId: input.outcome.intentId,
           error: input.outcome.error,
           response: input.response,
@@ -1266,10 +1269,10 @@ function buildAssistantTurnDeliveryFinalizationPlan(input: {
           vault: input.vault,
           component: 'assistant',
           kind: 'turn.deferred',
-          level: 'warn',
+          level: input.outcome.error ? 'warn' : 'info',
           message:
             input.outcome.error?.message ??
-            'Assistant turn deferred with a queued outbound delivery retry.',
+            'Assistant turn deferred with a queued outbound delivery.',
           code: input.outcome.error?.code ?? null,
           sessionId: input.outcome.session.sessionId,
           turnId: input.turnId,
