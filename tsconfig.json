@@ -5,6 +5,9 @@
       "path": "./packages/contracts/tsconfig.build.json"
     },
     {
+      "path": "./packages/hosted-execution"
+    },
+    {
       "path": "./packages/runtime-state"
     },
     {
@@ -27,6 +30,9 @@
     },
     {
       "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/assistant-runtime"
     }
   ]
 }

@@ -1,12 +1,15 @@
-import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
 import {
   assistantChannelDeliverySchema,
   type AssistantChannelDelivery,
-} from "healthybob";
+} from "@healthybob/assistant-runtime";
 
-import { decryptHostedBundle, encryptHostedBundle } from "./crypto.js";
+import {
+  readEncryptedR2Json,
+  writeEncryptedR2Json,
+  type EncryptedR2BucketLike,
+} from "./crypto.js";
 
 export interface HostedAssistantOutboxDeliveryRecord {
   dedupeKey: string;
@@ -29,13 +32,8 @@ export interface HostedAssistantOutboxDeliveryJournalStore {
   }): Promise<HostedAssistantOutboxDeliveryRecord>;
 }
 
-interface R2BucketLike {
-  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer> } | null>;
-  put(key: string, value: string): Promise<void>;
-}
-
 export function createHostedAssistantOutboxDeliveryJournalStore(input: {
-  bucket: R2BucketLike;
+  bucket: EncryptedR2BucketLike;
   key: Uint8Array;
   keyId: string;
 }): HostedAssistantOutboxDeliveryJournalStore {
@@ -66,47 +64,41 @@ export function createHostedAssistantOutboxDeliveryJournalStore(input: {
 
 async function readRecordAtKey(
   input: {
-    bucket: R2BucketLike;
+    bucket: EncryptedR2BucketLike;
     key: Uint8Array;
-    keyId: string;
   },
   key: string,
 ): Promise<HostedAssistantOutboxDeliveryRecord | null> {
-  const object = await input.bucket.get(key);
-
-  if (!object) {
-    return null;
-  }
-
-  const plaintext = await decryptHostedBundle({
-    envelope: JSON.parse(Buffer.from(await object.arrayBuffer()).toString("utf8")),
-    key: input.key,
+  return readEncryptedR2Json({
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    key,
+    parse(value) {
+      const parsed = value as HostedAssistantOutboxDeliveryRecord;
+      return {
+        ...parsed,
+        delivery: assistantChannelDeliverySchema.parse(parsed.delivery),
+      };
+    },
   });
-  const parsed = JSON.parse(Buffer.from(plaintext).toString("utf8")) as HostedAssistantOutboxDeliveryRecord;
-
-  return {
-    ...parsed,
-    delivery: assistantChannelDeliverySchema.parse(parsed.delivery),
-  };
 }
 
 async function writeRecordAtKey(
   input: {
-    bucket: R2BucketLike;
+    bucket: EncryptedR2BucketLike;
     key: Uint8Array;
     keyId: string;
   },
   key: string,
   value: HostedAssistantOutboxDeliveryRecord,
 ): Promise<void> {
-  const plaintext = Buffer.from(JSON.stringify(value), "utf8");
-  const envelope = await encryptHostedBundle({
-    key: input.key,
+  await writeEncryptedR2Json({
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    key,
     keyId: input.keyId,
-    plaintext,
+    value,
   });
-
-  await input.bucket.put(key, JSON.stringify(envelope));
 }
 
 function intentRecordObjectKey(userId: string, intentId: string): string {

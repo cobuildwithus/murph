@@ -37,6 +37,7 @@ readonly node_syntax_check_scripts=(
 
 readonly typecheck_package_dirs=(
   "packages/contracts"
+  "packages/hosted-execution"
   "packages/runtime-state"
   "packages/core"
   "packages/importers"
@@ -45,6 +46,7 @@ readonly typecheck_package_dirs=(
   "packages/inboxd"
   "packages/parsers"
   "packages/cli"
+  "packages/assistant-runtime"
   "packages/web"
   "apps/web"
   "apps/cloudflare"

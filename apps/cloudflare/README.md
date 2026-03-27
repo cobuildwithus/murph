@@ -5,7 +5,7 @@ Cloudflare-hosted execution plane for the hosted Healthy Bob path.
 This app is intentionally separate from `apps/web`:
 
 - `apps/web` stays the public onboarding, billing, OAuth, and webhook control plane.
-- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution against the existing Healthy Bob inbox and assistant runtime seams.
+- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@healthybob/assistant-runtime`.
 
 ## Core responsibilities
 
@@ -14,7 +14,7 @@ This app is intentionally separate from `apps/web`:
 - store encrypted hosted `vault` and broader `agent-state` bundle snapshots in the `BUNDLES` R2 bucket
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
-- run the existing Healthy Bob inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks
+- run the existing Healthy Bob inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@healthybob/assistant-runtime` package
 
 ## Non-goals
 
@@ -67,16 +67,17 @@ Current worker routes:
 
 ## Native container contract
 
-The primary production path uses Cloudflare's native container support for the same `UserRunnerDurableObject` class configured in `wrangler.jsonc`.
+The primary production path uses Cloudflare's native container support through a companion `RunnerContainer` class configured alongside `UserRunnerDurableObject` in `wrangler.jsonc`.
 
 That means:
 
 - the Worker receives signed internal dispatch
 - the per-user Durable Object serializes queue/state mutations
-- the same Durable Object starts its associated container instance on demand
-- the Durable Object sends the encrypted bundle payloads and dispatch to the container over `ctx.container.getTcpPort(...).fetch(...)`
+- the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
+- the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, and per-run env injection before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
 - the runner process calls back to the worker's internal commit/finalize/outbox routes so the existing durable hosted assistant outbox and bundle-journal flow remains intact
-- the Durable Object destroys the container after each drained batch instead of keeping its own lease manager
+- the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
+- the queue Durable Object still destroys the companion container after each drained batch instead of keeping its own lease manager
 
 The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section and points at `../../Dockerfile.cloudflare-hosted-runner`.
 
@@ -97,7 +98,7 @@ Current expectations for the container image:
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, AgentMail, Telegram, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
 - optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when encrypted per-user env overrides need to cover additional key names
-- encrypted per-user overrides are loaded from `.healthybob/hosted/user-env.json` inside the user's `agent-state` bundle, applied only for the duration of that user's one-shot run, and then removed from process env again before the container goes idle
+- encrypted per-user overrides are loaded from `.healthybob/hosted/user-env.json` inside the user's `agent-state` bundle, forwarded into the one-shot runtime context, and the default hosted execution path runs each job in an isolated child process so per-user env overrides no longer force container-wide request serialization
 
 ## Deployment status
 
@@ -121,13 +122,13 @@ For the end-to-end deployment path, including the GitHub Actions workflow and ge
 ## Operational notes
 
 - The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
-- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state`, hosted `.runtime/**`, the minimal operator-home config needed for bootstrap, and the encrypted per-user runner env file when one is configured.
+- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state`, the minimal operator-home config needed for bootstrap, and the encrypted per-user runner env file when one is configured. Vault `.runtime/**` stays local-only and is not bundled into hosted `agent-state`.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
 - Hosted assistant replies still queue during the one-shot run, the committed hosted bundles are durably recorded first, and only then does the runner drain the assistant outbox with the hosted delivery journal for reconciliation.
 
-## Typecheck note
+## Runtime boundary
 
-The app-local no-emit typecheck excludes the Node runner bridge files that import the current `healthybob` runtime directly. Those files are still exercised by the app Vitest suite; the exclusion keeps this app's typecheck scoped to its own source while unrelated in-flight CLI typing issues remain elsewhere in the workspace.
+`apps/cloudflare` should treat `@healthybob/assistant-runtime` as its hosted execution surface. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
 
 ## Known follow-ups
 

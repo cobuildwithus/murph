@@ -1,0 +1,42 @@
+{
+  "name": "@healthybob/assistant-runtime",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/healthybob"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+  },
+  "dependencies": {
+    "@healthybob/core": "workspace:*",
+    "@healthybob/device-syncd": "workspace:*",
+    "@healthybob/inboxd": "workspace:*",
+    "@healthybob/parsers": "workspace:*",
+    "@healthybob/runtime-state": "workspace:*",
+    "healthybob": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

@@ -19,8 +19,10 @@
     "worker:secret:bulk": "pnpm exec wrangler secret bulk"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.2.0",
+    "@healthybob/assistant-runtime": "workspace:*",
     "@healthybob/device-syncd": "workspace:*",
-    "healthybob": "workspace:*",
+    "@healthybob/hosted-execution": "workspace:*",
     "@healthybob/inboxd": "workspace:*",
     "@healthybob/parsers": "workspace:*",
     "@healthybob/runtime-state": "workspace:*",

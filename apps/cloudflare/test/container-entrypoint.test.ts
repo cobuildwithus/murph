@@ -36,7 +36,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("serializes concurrent hosted jobs inside one container process", async () => {
+  it("allows concurrent hosted jobs inside one container process", async () => {
     const started: string[] = [];
     const finished: string[] = [];
     let inFlight = 0;
@@ -97,15 +97,16 @@ describe("startHostedContainerEntrypoint", () => {
         }),
       ]);
 
-      expect(sawOverlap).toBe(false);
+      expect(sawOverlap).toBe(true);
       expect(started).toEqual(["evt_a", "evt_b"]);
-      expect(finished).toEqual(["evt_a", "evt_b"]);
+      expect(finished).toHaveLength(2);
+      expect(new Set(finished)).toEqual(new Set(["evt_a", "evt_b"]));
     } finally {
       spy.mockRestore();
     }
   });
 
-  it("continues with queued jobs after a prior hosted job fails", async () => {
+  it("does not block another hosted job when a concurrent job fails", async () => {
     const started: string[] = [];
     const finished: string[] = [];
     let rejectFirstJob: ((error: Error) => void) | null = null;
@@ -168,7 +169,7 @@ describe("startHostedContainerEntrypoint", () => {
       });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(started).toEqual(["evt_a"]);
+      expect(started).toEqual(["evt_a", "evt_b"]);
       rejectFirstJob?.(new Error("boom"));
 
       const [firstResponse, secondResponse] = await Promise.all([
@@ -177,7 +178,7 @@ describe("startHostedContainerEntrypoint", () => {
       ]);
 
       expect(started).toEqual(["evt_a", "evt_b"]);
-      expect(finished).toEqual(["evt_a", "evt_b"]);
+      expect(new Set(finished)).toEqual(new Set(["evt_a", "evt_b"]));
       expect(firstResponse.status).toBe(500);
       await expect(firstResponse.json()).resolves.toEqual({
         error: "boom",

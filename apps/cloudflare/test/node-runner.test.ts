@@ -1,40 +1,40 @@
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildSharePackFromVault, initializeVault, listFoods, readFood, upsertFood, upsertProtocolItem } from "@healthybob/core";
+import {
+  assistantOutboxIntentSchema,
+  resolveAssistantStatePaths,
+} from "@healthybob/assistant-runtime";
+import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@healthybob/core";
 import { restoreHostedExecutionContext, snapshotHostedExecutionContext } from "@healthybob/runtime-state";
-import { assistantOutboxIntentSchema, resolveAssistantStatePaths } from "healthybob";
 
 const hostedCliMocks = vi.hoisted(() => ({
   drainAssistantOutbox: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("../src/runtime-adapter.js", async () => {
-  const actual = await vi.importActual<typeof import("../src/runtime-adapter.js")>(
-    "../src/runtime-adapter.js",
-  );
-
+vi.mock("healthybob", async () => {
+  const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
   return {
     ...actual,
-    createHostedCliRuntime: () => {
-      const runtime = actual.createHostedCliRuntime();
-
-      return {
-        ...runtime,
-        drainAssistantOutbox: (...args: Parameters<typeof runtime.drainAssistantOutbox>) =>
-          hostedCliMocks.drainAssistantOutbox(...args),
-        runAssistantAutomation: (...args: Parameters<typeof runtime.runAssistantAutomation>) =>
-          hostedCliMocks.runAssistantAutomation(...args),
-      };
-    },
+    drainAssistantOutbox: (...args: Parameters<typeof actual.drainAssistantOutbox>) =>
+      hostedCliMocks.drainAssistantOutbox(...args),
+    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
+      hostedCliMocks.runAssistantAutomation(...args),
   };
 });
 
-import { runHostedExecutionJob, setHostedExecutionRunStartHookForTests } from "../src/node-runner.js";
+import {
+  runHostedExecutionJob,
+  setHostedExecutionCallbackBaseUrlsForTests,
+  setHostedExecutionRunModeForTests,
+  setHostedExecutionRunStartHookForTests,
+} from "../src/node-runner.js";
 import { writeHostedUserEnvToAgentStateBundle } from "../src/user-env.js";
 
 describe("runHostedExecutionJob", () => {
@@ -42,15 +42,17 @@ describe("runHostedExecutionJob", () => {
 
   beforeEach(async () => {
     vi.restoreAllMocks();
-    const actual = await vi.importActual<typeof import("../src/runtime-adapter.js")>(
-      "../src/runtime-adapter.js",
-    );
-    const runtime = actual.createHostedCliRuntime();
-    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => runtime.runAssistantAutomation(input));
-    hostedCliMocks.drainAssistantOutbox.mockImplementation((input) => runtime.drainAssistantOutbox(input));
+    setHostedExecutionCallbackBaseUrlsForTests(null);
+    setHostedExecutionRunModeForTests("in-process");
+    const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
+    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actual.runAssistantAutomation(input));
+    hostedCliMocks.drainAssistantOutbox.mockImplementation((input) => actual.drainAssistantOutbox(input));
   });
 
   afterEach(async () => {
+    setHostedExecutionCallbackBaseUrlsForTests(null);
+    setHostedExecutionRunModeForTests(null);
+    setHostedExecutionRunStartHookForTests(null);
     await Promise.all(cleanupPaths.splice(0).map((target) => rm(target, { force: true, recursive: true })));
   });
 
@@ -243,7 +245,8 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("serializes concurrent hosted runs so per-user env overrides do not overlap", async () => {
+  it("allows concurrent hosted runs because each job uses isolated process env", async () => {
+    setHostedExecutionRunModeForTests("isolated");
     const firstAgentState = writeHostedUserEnvToAgentStateBundle({
       agentStateBundle: null,
       env: {
@@ -263,27 +266,14 @@ describe("runHostedExecutionJob", () => {
 
     const firstRunStarted = createDeferred<void>();
     const secondRunStarted = createDeferred<void>();
-    let startedRunCount = 0;
+    const firstCommitSeen = createDeferred<void>();
+    const secondCommitSeen = createDeferred<void>();
     const releaseFirstCommit = createDeferred<void>();
-    const seenValues: string[] = [];
-    let commitCallCount = 0;
-    const commitFetch = vi.fn(async (url: string | URL) => {
-      if (String(url).includes("/commit")) {
-        commitCallCount += 1;
-        seenValues.push(process.env.CUSTOM_API_KEY ?? "missing");
-        if (commitCallCount === 1) {
-          await releaseFirstCommit.promise;
-        }
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
+    let startedRunCount = 0;
+    let commitCount = 0;
+    let commitsInFlight = 0;
+    let maxCommitsInFlight = 0;
 
-      if (String(url).includes("/finalize")) {
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }
-
-      throw new Error(`Unexpected fetch URL: ${String(url)}`);
-    });
-    vi.stubGlobal("fetch", commitFetch);
     setHostedExecutionRunStartHookForTests(() => {
       startedRunCount += 1;
       if (startedRunCount === 1) {
@@ -293,7 +283,46 @@ describe("runHostedExecutionJob", () => {
       }
     });
 
+    const server = createServer(async (request, response) => {
+      if (request.url?.includes("/commit")) {
+        commitCount += 1;
+        commitsInFlight += 1;
+        maxCommitsInFlight = Math.max(maxCommitsInFlight, commitsInFlight);
+
+        if (commitCount === 1) {
+          firstCommitSeen.resolve();
+          await releaseFirstCommit.promise;
+        } else if (commitCount === 2) {
+          secondCommitSeen.resolve();
+        }
+
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: true }));
+        commitsInFlight -= 1;
+        return;
+      }
+
+      if (request.url?.includes("/finalize")) {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
     try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted test server to expose a TCP port.");
+      }
+
       const firstRun = runHostedExecutionJob({
         bundles: {
           agentState: Buffer.from(firstAgentState).toString("base64"),
@@ -302,7 +331,7 @@ describe("runHostedExecutionJob", () => {
         commit: {
           bundleRefs: { agentState: null, vault: null },
           token: "runner-token",
-          url: "https://worker.example.test/internal/runner-events/member_1/evt_one/commit",
+          url: `http://127.0.0.1:${address.port}/internal/runner-events/member_1/evt_one/commit`,
         },
         dispatch: {
           event: {
@@ -316,11 +345,6 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      await firstRunStarted.promise;
-      await vi.waitFor(() => {
-        expect(commitFetch).toHaveBeenCalledTimes(1);
-      });
-
       const secondRun = runHostedExecutionJob({
         bundles: {
           agentState: Buffer.from(secondAgentState).toString("base64"),
@@ -329,7 +353,7 @@ describe("runHostedExecutionJob", () => {
         commit: {
           bundleRefs: { agentState: null, vault: null },
           token: "runner-token",
-          url: "https://worker.example.test/internal/runner-events/member_2/evt_two/commit",
+          url: `http://127.0.0.1:${address.port}/internal/runner-events/member_2/evt_two/commit`,
         },
         dispatch: {
           event: {
@@ -343,20 +367,22 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      await Promise.resolve();
-      expect(startedRunCount).toBe(1);
-      expect(commitFetch).toHaveBeenCalledTimes(1);
+      await Promise.all([
+        firstRunStarted.promise,
+        secondRunStarted.promise,
+        firstCommitSeen.promise,
+      ]);
+      await secondCommitSeen.promise;
 
       releaseFirstCommit.resolve();
-      await firstRun;
-      await secondRunStarted.promise;
-      await secondRun;
+      await Promise.all([firstRun, secondRun]);
 
       expect(startedRunCount).toBe(2);
-      expect(commitCallCount).toBe(2);
-      expect(seenValues).toEqual(["user-one-key", "user-two-key"]);
+      expect(commitCount).toBe(2);
+      expect(maxCommitsInFlight).toBe(2);
     } finally {
-      setHostedExecutionRunStartHookForTests(null);
+      server.close();
+      await once(server, "close");
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
     }
   });
@@ -742,7 +768,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("releases the runner queue after a failed hosted run", async () => {
+  it("does not block a concurrent hosted run when another hosted commit fails", async () => {
     const firstRunStarted = createDeferred<void>();
     const secondRunStarted = createDeferred<void>();
     const firstCommitEntered = createDeferred<void>();
@@ -812,15 +838,14 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      await Promise.resolve();
-      expect(startedRunCount).toBe(1);
+      await secondRunStarted.promise;
+      expect(startedRunCount).toBe(2);
 
       releaseFirstCommit.resolve();
       await expect(firstRun).rejects.toThrow(
         "Hosted runner durable commit failed for member_123/evt_commit with HTTP 500.",
       );
 
-      await secondRunStarted.promise;
       const secondResult = await secondRun;
 
       expect(startedRunCount).toBe(2);

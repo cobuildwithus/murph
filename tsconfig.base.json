@@ -25,6 +25,12 @@
       "@healthybob/contracts/*": [
         "packages/contracts/src/*"
       ],
+      "@healthybob/hosted-execution": [
+        "packages/hosted-execution/src/index.ts"
+      ],
+      "@healthybob/hosted-execution/*": [
+        "packages/hosted-execution/src/*"
+      ],
       "@healthybob/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
@@ -60,6 +66,12 @@
       ],
       "@healthybob/parsers/*": [
         "packages/parsers/src/*"
+      ],
+      "@healthybob/assistant-runtime": [
+        "packages/assistant-runtime/src/index.ts"
+      ],
+      "@healthybob/assistant-runtime/*": [
+        "packages/assistant-runtime/src/*"
       ],
       "healthybob": [
         "packages/cli/src/index.ts"

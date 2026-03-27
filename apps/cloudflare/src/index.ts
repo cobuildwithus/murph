@@ -2,26 +2,55 @@ import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerResult,
+  HostedExecutionUserStatus,
 } from "@healthybob/runtime-state";
 import { assistantChannelDeliverySchema } from "@healthybob/assistant-runtime";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.js";
 import { readHostedExecutionEnvironment } from "./env.js";
+import type {
+  HostedExecutionCommittedResult,
+  HostedExecutionCommitPayload,
+  HostedExecutionFinalizePayload,
+} from "./execution-journal.js";
 import { json, readJsonObject } from "./json.js";
 import { createHostedAssistantOutboxDeliveryJournalStore } from "./outbox-delivery-journal.js";
+export { RunnerContainer } from "./runner-container.js";
 import { buildHostedRunnerContainerEnv } from "./runner-env.js";
-import { parseHostedUserEnvUpdate } from "./user-env.js";
+import { parseHostedUserEnvUpdate, type HostedUserEnvUpdate } from "./user-env.js";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
 } from "./user-runner.js";
 
-interface DurableObjectStubLike {
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+interface UserRunnerDurableObjectStubLike {
+  clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  commit(input: {
+    eventId: string;
+    payload: HostedExecutionCommitPayload & {
+      currentBundleRefs: {
+        agentState: HostedExecutionBundleRef | null;
+        vault: HostedExecutionBundleRef | null;
+      };
+    };
+    userId: string;
+  }): Promise<HostedExecutionCommittedResult>;
+  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
+  finalizeCommit(input: {
+    eventId: string;
+    payload: HostedExecutionFinalizePayload;
+    userId: string;
+  }): Promise<HostedExecutionCommittedResult>;
+  getUserEnvStatus(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  status(userId: string): Promise<HostedExecutionUserStatus>;
+  updateUserEnv(
+    userId: string,
+    update: HostedUserEnvUpdate,
+  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
 }
 
 interface DurableObjectNamespaceLike {
-  getByName(name: string): DurableObjectStubLike;
+  getByName(name: string): UserRunnerDurableObjectStubLike;
 }
 
 interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
@@ -30,7 +59,6 @@ interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
-  HOSTED_EXECUTION_CLOUDFLARE_BASE_URL?: string;
   HOSTED_EXECUTION_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
   HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
@@ -39,6 +67,7 @@ interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
   HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET?: string;
+  RUNNER_CONTAINER: import("./runner-container.js").HostedExecutionContainerNamespaceLike;
   USER_RUNNER: DurableObjectNamespaceLike;
 }
 
@@ -46,8 +75,12 @@ type HostedExecutionBundles = HostedExecutionRunnerResult["bundles"];
 type RouteParams = Readonly<Record<string, string>>;
 type RouteMatcher = (pathname: string) => RouteParams | null;
 type WorkerRouteAuthorization = "control" | "runner" | "signed-dispatch" | null;
-type DurableObjectControlAction = "env" | "run" | "status";
 type WrongMethodResponse = "method-not-allowed" | "not-found";
+type HostedRunnerOutboundContext = {
+  props?: {
+    userId?: unknown;
+  };
+};
 
 interface DeclarativeRoute<Context> {
   authorizeBeforeMethod?: boolean;
@@ -67,12 +100,6 @@ interface WorkerRouteContext {
   url: URL;
 }
 
-interface DurableObjectRouteContext {
-  request: Request;
-  runner: HostedUserRunner;
-  url: URL;
-}
-
 const workerPublicRoutes: readonly DeclarativeRoute<{
   request: Request;
   url: URL;
@@ -88,36 +115,6 @@ const workerPublicRoutes: readonly DeclarativeRoute<{
 
 const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
-    authorizeBeforeMethod: true,
-    authorization: "runner",
-    async handle(context, params) {
-      return handleRunnerOutboxRoute(context, params);
-    },
-    match: matchNamedPath(/^\/internal\/runner-outbox\/(?<userId>[^/]+)\/(?<intentId>[^/]+)$/u),
-    methods: ["GET", "PUT"],
-    wrongMethodResponse: "method-not-allowed",
-  },
-  {
-    authorization: "runner",
-    async handle(context, params) {
-      return forwardRunnerEventCallback(context, params, "commit");
-    },
-    match: matchNamedPath(
-      /^\/internal\/runner-events\/(?<userId>[^/]+)\/(?<eventId>[^/]+)\/commit$/u,
-    ),
-    methods: ["POST"],
-  },
-  {
-    authorization: "runner",
-    async handle(context, params) {
-      return forwardRunnerEventCallback(context, params, "finalize");
-    },
-    match: matchNamedPath(
-      /^\/internal\/runner-events\/(?<userId>[^/]+)\/(?<eventId>[^/]+)\/finalize$/u,
-    ),
-    methods: ["POST"],
-  },
-  {
     authorization: "signed-dispatch",
     async handle(context) {
       return handleSignedDispatchRoute(context);
@@ -126,10 +123,52 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     methods: ["POST"],
   },
   {
+    authorization: "runner",
+    async handle(context, params) {
+      return forwardRunnerCommit(
+        decodeRouteParam(params.userId),
+        decodeRouteParam(params.eventId),
+        await readJsonObject(context.request),
+        context.env,
+      );
+    },
+    match: matchNamedPath(/^\/internal\/runner-events\/(?<userId>[^/]+)\/(?<eventId>[^/]+)\/commit$/u),
+    methods: ["POST"],
+  },
+  {
+    authorization: "runner",
+    async handle(context, params) {
+      return forwardRunnerFinalize(
+        decodeRouteParam(params.userId),
+        decodeRouteParam(params.eventId),
+        await readJsonObject(context.request),
+        context.env,
+      );
+    },
+    match: matchNamedPath(/^\/internal\/runner-events\/(?<userId>[^/]+)\/(?<eventId>[^/]+)\/finalize$/u),
+    methods: ["POST"],
+  },
+  {
+    authorization: "runner",
+    async handle(context, params) {
+      return handleRunnerOutboxRequest({
+        bucket: context.env.BUNDLES,
+        environment: context.environment,
+        intentId: decodeRouteParam(params.intentId),
+        request: context.request,
+        url: context.url,
+        userId: decodeRouteParam(params.userId),
+      });
+    },
+    match: matchNamedPath(/^\/internal\/runner-outbox\/(?<userId>[^/]+)\/(?<intentId>[^/]+)$/u),
+    methods: ["GET", "PUT"],
+    wrongMethodResponse: "method-not-allowed",
+  },
+  {
     authorizeBeforeMethod: true,
     authorization: "control",
     async handle(context, params) {
-      return forwardDurableObjectControlRoute(context, params.userId, "run");
+      return handleManualRunRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/run$/u),
     methods: ["POST"],
@@ -139,7 +178,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "control",
     async handle(context, params) {
-      return forwardDurableObjectControlRoute(context, params.userId, "status");
+      return handleStatusRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/status$/u),
     methods: ["GET"],
@@ -149,128 +188,11 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     authorizeBeforeMethod: true,
     authorization: "control",
     async handle(context, params) {
-      return forwardDurableObjectControlRoute(context, params.userId, "env");
+      return handleUserEnvRoute(context, params.userId);
     },
     match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/env$/u),
     methods: ["GET", "PUT", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
-  },
-];
-
-const durableObjectRoutes: readonly DeclarativeRoute<DurableObjectRouteContext>[] = [
-  {
-    async handle(context) {
-      const dispatch = JSON.parse(await context.request.text()) as HostedExecutionDispatchRequest;
-      const status = await context.runner.dispatch(dispatch);
-
-      return isBackpressuredStatus(status, dispatch.eventId)
-        ? json(status, 429)
-        : json(status);
-    },
-    match: matchExactPath("/dispatch"),
-    methods: ["POST"],
-  },
-  {
-    async handle(context) {
-      const required = requireSearchParams(context.url, "userId", "eventId");
-      if (required instanceof Response) {
-        return required;
-      }
-
-      return json({
-        committed: await context.runner.commit({
-          eventId: required.eventId,
-          payload: parseHostedExecutionCommitRequest(await readJsonObject(context.request)),
-          userId: required.userId,
-        }),
-        ok: true,
-      });
-    },
-    match: matchExactPath("/commit"),
-    methods: ["POST"],
-  },
-  {
-    async handle(context) {
-      const required = requireSearchParams(context.url, "userId", "eventId");
-      if (required instanceof Response) {
-        return required;
-      }
-
-      return json({
-        finalized: await context.runner.finalizeCommit({
-          eventId: required.eventId,
-          payload: parseHostedExecutionFinalizeRequest(await readJsonObject(context.request)),
-          userId: required.userId,
-        }),
-        ok: true,
-      });
-    },
-    match: matchExactPath("/finalize"),
-    methods: ["POST"],
-  },
-  {
-    async handle(context) {
-      const body = await readJsonObject(context.request);
-      const userId = typeof body.userId === "string" ? body.userId : null;
-
-      if (!userId) {
-        return json({ error: "userId is required." }, 400);
-      }
-
-      const dispatch: HostedExecutionDispatchRequest = {
-        event: {
-          kind: "assistant.cron.tick",
-          reason: "manual",
-          userId,
-        },
-        eventId: `manual:${Date.now()}`,
-        occurredAt: new Date().toISOString(),
-      };
-      const status = await context.runner.run(dispatch);
-
-      return isBackpressuredStatus(status, dispatch.eventId)
-        ? json(status, 429)
-        : json(status);
-    },
-    match: matchExactPath("/run"),
-    methods: ["POST"],
-  },
-  {
-    async handle(context) {
-      const userId = context.url.searchParams.get("userId") ?? "unknown";
-      return json(await context.runner.status(userId));
-    },
-    match: matchExactPath("/status"),
-    methods: ["GET"],
-  },
-  {
-    beforeMethod(context) {
-      const userId = resolveRequiredUserId(context.url);
-      return userId instanceof Response ? userId : null;
-    },
-    async handle(context) {
-      const userId = resolveRequiredUserId(context.url);
-      if (userId instanceof Response) {
-        return userId;
-      }
-
-      if (context.request.method === "GET") {
-        return json(await context.runner.getUserEnvStatus(userId));
-      }
-
-      if (context.request.method === "PUT") {
-        return json(
-          await context.runner.updateUserEnv(
-            userId,
-            parseHostedUserEnvUpdate(await readJsonObject(context.request)),
-          ),
-        );
-      }
-
-      return json(await context.runner.clearUserEnv(userId));
-    },
-    match: matchExactPath("/env"),
-    methods: ["GET", "PUT", "DELETE"],
   },
 ];
 
@@ -308,12 +230,68 @@ export default {
   },
 };
 
-export class UserRunnerDurableObject {
+export const HostedRunnerOutbound = {
+  async fetch(
+    request: Request,
+    env: WorkerEnvironmentSource,
+    ctx: HostedRunnerOutboundContext,
+  ): Promise<Response> {
+    const environment = readHostedExecutionEnvironment(
+      env as unknown as Readonly<Record<string, string | undefined>>,
+    );
+    const url = new URL(request.url);
+    const userId = requireString(ctx.props?.userId, "ctx.props.userId");
+
+    if (url.hostname === "commit.worker") {
+      const match = /^\/events\/(?<eventId>[^/]+)\/(?<action>commit|finalize)$/u.exec(url.pathname);
+      if (!match?.groups) {
+        return notFound();
+      }
+
+      if (request.method !== "POST") {
+        return methodNotAllowed();
+      }
+
+      const eventId = decodeRouteParam(match.groups.eventId);
+      return match.groups.action === "commit"
+        ? forwardRunnerCommit(userId, eventId, await readJsonObject(request), env)
+        : forwardRunnerFinalize(userId, eventId, await readJsonObject(request), env);
+    }
+
+    if (url.hostname === "outbox.worker") {
+      const match = /^\/intents\/(?<intentId>[^/]+)$/u.exec(url.pathname);
+      if (!match?.groups) {
+        return notFound();
+      }
+
+      if (request.method !== "GET" && request.method !== "PUT") {
+        return methodNotAllowed();
+      }
+
+      return handleRunnerOutboxRequest({
+        bucket: env.BUNDLES,
+        environment,
+        intentId: decodeRouteParam(match.groups.intentId),
+        request,
+        url,
+        userId,
+      });
+    }
+
+    return fetch(request);
+  },
+};
+
+export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike {
   private readonly runner: HostedUserRunner;
 
   constructor(state: DurableObjectStateLike, env: WorkerEnvironmentSource) {
+    const runnerState = Object.assign(state, {
+      runnerContainerNamespace: env.RUNNER_CONTAINER,
+    });
+
     this.runner = new HostedUserRunner(
-      state,
+      runnerState,
       readHostedExecutionEnvironment(
         env as unknown as Readonly<Record<string, string | undefined>>,
       ),
@@ -322,60 +300,60 @@ export class UserRunnerDurableObject {
     );
   }
 
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    return (
-      await dispatchDeclarativeRoute(
-        durableObjectRoutes,
-        {
-          request,
-          runner: this.runner,
-          url,
-        },
-      )
-    ) ?? notFound();
+  async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
+    return this.runner.dispatch(input);
+  }
+
+  async commit(input: {
+    eventId: string;
+    payload: HostedExecutionCommitPayload & {
+      currentBundleRefs: {
+        agentState: HostedExecutionBundleRef | null;
+        vault: HostedExecutionBundleRef | null;
+      };
+    };
+    userId: string;
+  }): Promise<HostedExecutionCommittedResult> {
+    return this.runner.commit(input);
+  }
+
+  async finalizeCommit(input: {
+    eventId: string;
+    payload: HostedExecutionFinalizePayload;
+    userId: string;
+  }): Promise<HostedExecutionCommittedResult> {
+    return this.runner.finalizeCommit(input);
+  }
+
+  async status(userId: string): Promise<HostedExecutionUserStatus> {
+    return this.runner.status(userId);
+  }
+
+  async getUserEnvStatus(
+    userId: string,
+  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.runner.getUserEnvStatus(userId);
+  }
+
+  async updateUserEnv(
+    userId: string,
+    update: HostedUserEnvUpdate,
+  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.runner.updateUserEnv(userId, update);
+  }
+
+  async clearUserEnv(
+    userId: string,
+  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.runner.clearUserEnv(userId);
+  }
+
+  async fetch(): Promise<Response> {
+    return notFound();
   }
 
   async alarm(): Promise<void> {
     await this.runner.alarm();
-  }
-}
-
-async function buildDurableObjectControlRequest(input: {
-  action: DurableObjectControlAction;
-  request: Request;
-  userId: string;
-}): Promise<Request> {
-  switch (input.action) {
-    case "status":
-      return new Request(`https://runner.internal/status?userId=${encodeURIComponent(input.userId)}`, {
-        method: "GET",
-      });
-    case "run": {
-      const body = {
-        ...(await readOptionalJsonObject(input.request)),
-        userId: input.userId,
-      };
-
-      return new Request("https://runner.internal/run", {
-        body: JSON.stringify(body),
-        method: "POST",
-      });
-    }
-    case "env": {
-      const url = `https://runner.internal/env?userId=${encodeURIComponent(input.userId)}`;
-
-      if (input.request.method === "GET" || input.request.method === "DELETE") {
-        return new Request(url, {
-          method: input.request.method,
-        });
-      }
-
-      return new Request(url, {
-        body: JSON.stringify(await readOptionalJsonObject(input.request)),
-        method: "PUT",
-      });
-    }
   }
 }
 
@@ -455,78 +433,117 @@ async function authorizeRoute(
   }
 }
 
-async function forwardDurableObjectControlRoute(
-  context: WorkerRouteContext,
+async function forwardRunnerCommit(
   userId: string,
-  action: DurableObjectControlAction,
+  eventId: string,
+  payload: Record<string, unknown>,
+  env: WorkerEnvironmentSource,
 ): Promise<Response> {
-  const decodedUserId = decodeRouteParam(userId);
-
-  return context.env.USER_RUNNER.getByName(decodedUserId).fetch(
-    await buildDurableObjectControlRequest({
-      action,
-      request: context.request,
-      userId: decodedUserId,
+  return json({
+    committed: await getUserRunnerStub(env, userId).commit({
+      eventId,
+      payload: parseHostedExecutionCommitRequest(payload),
+      userId,
     }),
-  );
-}
-
-async function forwardRunnerEventCallback(
-  context: WorkerRouteContext,
-  params: RouteParams,
-  action: "commit" | "finalize",
-): Promise<Response> {
-  const userId = decodeRouteParam(params.userId);
-  const eventId = decodeRouteParam(params.eventId);
-  const payload = action === "commit"
-    ? parseHostedExecutionCommitRequest(await readJsonObject(context.request))
-    : parseHostedExecutionFinalizeRequest(await readJsonObject(context.request));
-
-  return context.env.USER_RUNNER.getByName(userId).fetch(
-    new Request(
-      `https://runner.internal/${action}?eventId=${encodeURIComponent(eventId)}&userId=${encodeURIComponent(userId)}`,
-      {
-        body: JSON.stringify(payload),
-        method: "POST",
-      },
-    ),
-  );
-}
-
-async function handleRunnerOutboxRoute(
-  context: WorkerRouteContext,
-  params: RouteParams,
-): Promise<Response> {
-  const userId = decodeRouteParam(params.userId);
-  const intentId = decodeRouteParam(params.intentId);
-  const journalStore = createHostedAssistantOutboxDeliveryJournalStore({
-    bucket: context.env.BUNDLES,
-    key: context.environment.bundleEncryptionKey,
-    keyId: context.environment.bundleEncryptionKeyId,
+    ok: true,
   });
+}
+
+async function forwardRunnerFinalize(
+  userId: string,
+  eventId: string,
+  payload: Record<string, unknown>,
+  env: WorkerEnvironmentSource,
+): Promise<Response> {
+  return json({
+    finalized: await getUserRunnerStub(env, userId).finalizeCommit({
+      eventId,
+      payload: parseHostedExecutionFinalizeRequest(payload),
+      userId,
+    }),
+    ok: true,
+  });
+}
+
+async function handleManualRunRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  await readOptionalJsonObject(context.request);
+  const userId = decodeRouteParam(encodedUserId);
+  const dispatch = createManualRunDispatch(userId);
+  const status = await getUserRunnerStub(context.env, userId).dispatch(dispatch);
+
+  return isBackpressuredStatus(status, dispatch.eventId)
+    ? json(status, 429)
+    : json(status);
+}
+
+async function handleStatusRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  return json(await getUserRunnerStub(context.env, userId).status(userId));
+}
+
+async function handleUserEnvRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = getUserRunnerStub(context.env, userId);
 
   if (context.request.method === "GET") {
-    const dedupeKey = context.url.searchParams.get("dedupeKey") ?? "";
+    return json(await stub.getUserEnvStatus(userId));
+  }
+
+  if (context.request.method === "PUT") {
+    return json(await stub.updateUserEnv(
+      userId,
+      parseHostedUserEnvUpdate(await readJsonObject(context.request)),
+    ));
+  }
+
+  return json(await stub.clearUserEnv(userId));
+}
+
+async function handleRunnerOutboxRequest(input: {
+  bucket: WorkerEnvironmentSource["BUNDLES"];
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  intentId: string;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  const journalStore = createHostedAssistantOutboxDeliveryJournalStore({
+    bucket: input.bucket,
+    key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
+  });
+
+  if (input.request.method === "GET") {
+    const dedupeKey = input.url.searchParams.get("dedupeKey") ?? "";
     const record = await journalStore.read({
       dedupeKey,
-      intentId,
-      userId,
+      intentId: input.intentId,
+      userId: input.userId,
     });
 
     return json({
       delivery: record?.delivery ?? null,
-      intentId: record?.intentId ?? intentId,
+      intentId: record?.intentId ?? input.intentId,
     });
   }
 
-  const payload = await readJsonObject(context.request);
+  const payload = await readJsonObject(input.request);
   const dedupeKey = requireString(payload.dedupeKey, "dedupeKey");
   const delivery = assistantChannelDeliverySchema.parse(payload.delivery);
   const record = await journalStore.write({
     dedupeKey,
     delivery,
-    intentId,
-    userId,
+    intentId: input.intentId,
+    userId: input.userId,
   });
 
   return json({
@@ -538,13 +555,30 @@ async function handleRunnerOutboxRoute(
 async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
   const dispatch = JSON.parse(payload) as HostedExecutionDispatchRequest;
+  const status = await getUserRunnerStub(context.env, dispatch.event.userId).dispatch(dispatch);
 
-  return context.env.USER_RUNNER
-    .getByName(dispatch.event.userId)
-    .fetch(new Request("https://runner.internal/dispatch", {
-      body: payload,
-      method: "POST",
-    }));
+  return isBackpressuredStatus(status, dispatch.eventId)
+    ? json(status, 429)
+    : json(status);
+}
+
+function createManualRunDispatch(userId: string): HostedExecutionDispatchRequest {
+  return {
+    event: {
+      kind: "assistant.cron.tick",
+      reason: "manual",
+      userId,
+    },
+    eventId: `manual:${Date.now()}`,
+    occurredAt: new Date().toISOString(),
+  };
+}
+
+function getUserRunnerStub(
+  env: WorkerEnvironmentSource,
+  userId: string,
+): UserRunnerDurableObjectStubLike {
+  return env.USER_RUNNER.getByName(userId);
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {
@@ -579,11 +613,6 @@ function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
 }
 
-function resolveRequiredUserId(url: URL): string | Response {
-  const userId = url.searchParams.get("userId");
-  return userId ? userId : json({ error: "userId is required." }, 400);
-}
-
 function unauthorized(): Response {
   return json({ error: "Unauthorized" }, 401);
 }
@@ -595,24 +624,7 @@ async function readCachedRequestText(
   return context.requestText;
 }
 
-function requireSearchParams(
-  url: URL,
-  ...keys: readonly string[]
-): Record<string, string> | Response {
-  const params: Record<string, string> = {};
-
-  for (const key of keys) {
-    const value = url.searchParams.get(key);
-    if (!value) {
-      return json({ error: `${keys.join(" and ")} are required.` }, 400);
-    }
-    params[key] = value;
-  }
-
-  return params;
-}
-
-function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionRunnerResult & {
+function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
   currentBundleRefs: {
     agentState: HostedExecutionBundleRef | null;
     vault: HostedExecutionBundleRef | null;
@@ -637,7 +649,7 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
 
 function parseHostedExecutionFinalizeRequest(
   payload: Record<string, unknown>,
-): { bundles: HostedExecutionBundles } {
+): HostedExecutionFinalizePayload {
   const bundles = requireRecord(payload.bundles, "bundles");
 
   return {
