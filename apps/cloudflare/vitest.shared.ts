@@ -18,6 +18,7 @@ export const cloudflareVitestAliases = [
   },
   ...createVitestWorkspaceRuntimeAliases(
     resolveWorkspaceSourceEntries(repoRoot, {
+      "@healthybob/assistant-services": "packages/assistant-services/src/index.ts",
       "@healthybob/assistant-runtime": "packages/assistant-runtime/src/index.ts",
       healthybob: "packages/cli/src/index.ts",
       "@healthybob/contracts": "packages/contracts/src/index.ts",

@@ -37,7 +37,7 @@ import {
   setHostedExecutionCallbackBaseUrlsForTests,
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
-} from "../src/node-runner.js";
+} from "../src/node-runner.ts";
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
@@ -131,6 +131,133 @@ describe("runHostedExecutionJob", () => {
     expect(secondActivation.result.summary).toContain("Processed member activation");
     expect(secondActivation.result.summary).toContain("reused the canonical vault");
     expect(secondActivation.result.summary).toContain("kept Linq auto-reply enabled");
+  });
+
+
+  it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            linqChatId: "chat_email",
+            normalizedPhoneNumber: "+15551230000",
+            userId: "member_email",
+          },
+          eventId: "evt_activation_email",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-email-bootstrap-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("enabled hosted email auto-reply");
+      expect(automationState.autoReplyChannels).toContain("email");
+      expect(automationState.autoReplyChannels).toContain("linq");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+    }
+  });
+
+  it("fetches raw hosted email through the email worker bridge when processing inbound email events", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_email_fetch",
+          normalizedPhoneNumber: "+15551230001",
+          userId: "member_email_fetch",
+        },
+        eventId: "evt_activation_email_fetch",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const raw = [
+      'From: Alice Example <alice@example.test>',
+      'To: assistant@mail.example.test',
+      'Subject: Hosted inbox hello',
+      'Message-ID: <msg_email_fetch@example.test>',
+      'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+      '',
+      'Hello from a hosted inbound email.',
+      '',
+    ].join('\r\n');
+    const requests: string[] = [];
+    const server = createServer((request, response) => {
+      requests.push(`${request.method ?? "GET"} ${request.url ?? ""}`);
+
+      if (request.url === "/messages/raw_email_123") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "message/rfc822");
+        response.end(raw);
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted email test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        emailBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            envelopeFrom: "alice@example.test",
+            envelopeTo: "assistant+u-member@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_email_123",
+            threadTarget: null,
+            userId: "member_email_fetch",
+          },
+          eventId: "evt_email_fetch",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+
+      expect(result.result.summary).toContain("Persisted hosted email capture");
+      expect(requests).toEqual(["GET /messages/raw_email_123"]);
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      server.close();
+      await once(server, "close");
+    }
   });
 
   it("rejects non-activation hosted events until member activation bootstrap has run", async () => {

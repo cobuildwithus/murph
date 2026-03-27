@@ -55,16 +55,17 @@ Updated: 2026-03-27
 
 - New hosted outbox rows now serialize only a durable dispatch ref, and the drain path hydrates dispatches from durable source records or legacy full-payload rows as needed.
 - Device-sync direct wake dispatches now create a real `device_sync_signal` row and enqueue the outbox against that durable signal id instead of the connection id.
-- Hosted execution event payloads were slimmed for the affected event kinds, with matching `apps/web` and `apps/cloudflare` test updates.
+- Hosted execution event payloads were slimmed for the affected event kinds, the shared hosted-execution builders/parsers were updated to match, and hosted share acceptance now carries the full share pack directly in the execution event.
+- The simplify audit found one actionable cleanup in the outbox drain path, and that follow-up replaced exception-driven legacy detection with an explicit legacy payload check before hydration.
 - Focused verification passed:
+  - `pnpm --dir packages/hosted-execution typecheck`
   - `pnpm --dir apps/web typecheck`
   - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage --maxWorkers 1 apps/web/test/device-sync-hosted-wake-dispatch.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`
-  - `pnpm --dir apps/cloudflare typecheck`
-  - `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1 apps/cloudflare/test/node-runner.test.ts apps/cloudflare/test/user-runner.test.ts`
-  - `pnpm exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage --maxWorkers 1 apps/cloudflare/test/workers/runtime.test.ts`
-  - `pnpm typecheck`
 - Direct scenario proof outside the test harness passed via `pnpm exec tsx /tmp/execution_outbox_direct_scenario.ts`, showing that the minimized ref payload shape round-trips through source-backed hydration for `device_sync_signal` and `hosted_webhook_receipt`.
-- Repo-wide wrappers remain blocked by unrelated dirty-tree `packages/cli` issues:
-  - `pnpm test` fails during `apps/cloudflare verify` because `packages/cli/src/assistant/{failover,provider-catalog,service,store/paths}.ts` cannot resolve or type-check the in-flight provider-config work.
-  - `pnpm test:coverage` fails during `packages/cli build` in the same active assistant provider-config/provider-catalog lane.
-- Mandatory audit-pass tooling was attempted through both the built-in spawn path and local Codex worker runs, but those workers did not return a usable final audit result in this environment because they recursed into additional delegation or stalled while streaming their own context reads.
+- Repo-wide wrappers remain blocked by unrelated dirty-tree work outside this lane:
+  - `pnpm typecheck` fails in `packages/core/src/{history/api.ts,operations/write-batch.ts}` because of active history/write-batch typing drift.
+  - `pnpm test` and `pnpm test:coverage` fail at the same `packages/core` build step before they reach this hosted-execution lane.
+  - Focused Cloudflare node/workers suites currently fail in unrelated dirty-tree hosted runner/bootstrap paths (`Hosted runner user is not initialized`, missing `bootstrapUser`, sqlite/email helper issues) after the test harness loads the current `assistant-runtime` source.
+- Mandatory audit-pass tooling was only partially usable in this environment:
+  - the simplify pass returned one actionable finding that was applied;
+  - repeated attempts to obtain clean coverage-audit and final-review subagent output did not return usable final reviews because the spawned workers either recursed into extra delegation or stalled without producing a review result.

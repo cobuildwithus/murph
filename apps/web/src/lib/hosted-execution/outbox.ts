@@ -7,7 +7,6 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  parseHostedExecutionDispatchRequest,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
 } from "@healthybob/hosted-execution";
@@ -15,7 +14,10 @@ import {
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";
 import { hydrateHostedExecutionDispatch } from "./hydration";
-import { serializeHostedExecutionOutboxPayload } from "./outbox-payload";
+import {
+  readLegacyHostedExecutionDispatch,
+  serializeHostedExecutionOutboxPayload,
+} from "./outbox-payload";
 
 const CLAIM_LEASE_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 5_000;
@@ -357,11 +359,13 @@ function readHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: PrismaClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  try {
-    return Promise.resolve(parseHostedExecutionDispatchRequest(record.payloadJson));
-  } catch {
-    return hydrateHostedExecutionDispatch(record, prisma);
+  const legacyDispatch = readLegacyHostedExecutionDispatch(record.payloadJson);
+
+  if (legacyDispatch) {
+    return Promise.resolve(legacyDispatch);
   }
+
+  return hydrateHostedExecutionDispatch(record, prisma);
 }
 
 function resolveHostedExecutionLifecycle(input: {

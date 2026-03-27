@@ -1,13 +1,17 @@
 import {
   createDeviceSyncPublicIngress,
+  createOuraWebhookSubscriptionClient,
   deviceSyncError,
+  OURA_DEFAULT_WEBHOOK_TARGETS,
   resolveOuraWebhookVerificationChallenge,
 } from "@healthybob/device-syncd";
 
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
+  DeviceSyncProvider,
   HandleWebhookResult,
+  OuraWebhookSubscriptionClient,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
 } from "@healthybob/device-syncd";
@@ -56,6 +60,7 @@ export class HostedDeviceSyncControlPlane {
   readonly allowedReturnOrigins: string[];
   readonly agentSessions: HostedDeviceSyncAgentSessionService;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
+  private ouraWebhookSubscriptionClient: OuraWebhookSubscriptionClient | null | undefined;
 
   constructor(request: Request) {
     this.request = request;
@@ -246,6 +251,66 @@ export class HostedDeviceSyncControlPlane {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
 
+  private getOuraWebhookSubscriptionClient(): OuraWebhookSubscriptionClient | null {
+    if (this.ouraWebhookSubscriptionClient !== undefined) {
+      return this.ouraWebhookSubscriptionClient;
+    }
+
+    const provider = this.env.providers.oura;
+
+    if (!provider) {
+      this.ouraWebhookSubscriptionClient = null;
+      return null;
+    }
+
+    this.ouraWebhookSubscriptionClient = createOuraWebhookSubscriptionClient({
+      clientId: provider.clientId,
+      clientSecret: provider.clientSecret,
+    });
+
+    return this.ouraWebhookSubscriptionClient;
+  }
+
+  private resolveProviderWebhookUrl(provider: Pick<DeviceSyncProvider, "webhookPath">): string | null {
+    if (!provider.webhookPath) {
+      return null;
+    }
+
+    return new URL(provider.webhookPath.replace(/^\/+/u, ""), `${this.publicBaseUrl}/`).toString();
+  }
+
+  private async ensureHostedOuraWebhookSubscriptions(input: {
+    account: PublicDeviceSyncAccount;
+    provider: DeviceSyncProvider;
+  }): Promise<void> {
+    if (input.provider.provider !== "oura") {
+      return;
+    }
+
+    const client = this.getOuraWebhookSubscriptionClient();
+    const verificationToken = this.env.ouraWebhookVerificationToken;
+    const webhookUrl = this.resolveProviderWebhookUrl(input.provider);
+
+    if (!client || !verificationToken || !webhookUrl) {
+      return;
+    }
+
+    try {
+      await client.ensure({
+        callbackUrl: webhookUrl,
+        verificationToken,
+        desired: OURA_DEFAULT_WEBHOOK_TARGETS,
+        renewIfExpiringWithinMs: 7 * 24 * 60 * 60_000,
+        pruneDuplicates: true,
+      });
+    } catch (error) {
+      console.warn("Failed to ensure hosted Oura webhook subscriptions.", {
+        accountId: input.account.id,
+        error,
+      });
+    }
+  }
+
   private createIngress() {
     return createDeviceSyncPublicIngress({
       publicBaseUrl: this.publicBaseUrl,
@@ -253,12 +318,17 @@ export class HostedDeviceSyncControlPlane {
       registry: this.registry,
       store: this.store,
       hooks: {
-        onConnectionEstablished: async ({ account, connection, now }) => {
+        onConnectionEstablished: async ({ account, connection, now, provider }) => {
           await handleHostedDeviceSyncConnectionEstablished({
             account,
             connection,
             now,
             store: this.store,
+          });
+
+          await this.ensureHostedOuraWebhookSubscriptions({
+            account,
+            provider,
           });
         },
         onWebhookAccepted: async ({ account, webhook, now }) => {
