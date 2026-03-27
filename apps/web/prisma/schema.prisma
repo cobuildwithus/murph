@@ -145,11 +145,6 @@ enum HostedInviteStatus {
   expired
 }
 
-enum HostedPasskeyChallengeType {
-  registration
-  authentication
-}
-
 enum HostedBillingStatus {
   not_started
   checkout_open
@@ -178,7 +173,11 @@ model HostedMember {
   phoneNumber                  String              @map("phone_number")
   normalizedPhoneNumber        String              @unique @map("normalized_phone_number")
   phoneNumberVerifiedAt        DateTime?           @map("phone_number_verified_at")
-  webauthnUserId               String              @unique @map("webauthn_user_id")
+  privyUserId                  String?             @unique @map("privy_user_id")
+  walletAddress                String?             @unique @map("wallet_address")
+  walletChainType              String?             @map("wallet_chain_type")
+  walletProvider               String?             @map("wallet_provider")
+  walletCreatedAt              DateTime?           @map("wallet_created_at")
   status                       HostedMemberStatus  @default(invited)
   billingStatus                HostedBillingStatus @default(not_started) @map("billing_status")
   billingMode                  HostedBillingMode?  @map("billing_mode")
@@ -191,9 +190,7 @@ model HostedMember {
   createdAt                    DateTime            @default(now()) @map("created_at")
   updatedAt                    DateTime            @updatedAt @map("updated_at")
   invites                      HostedInvite[]
-  passkeys                     HostedPasskey[]
   sessions                     HostedSession[]
-  challenges                   HostedPasskeyChallenge[]
   checkouts                    HostedBillingCheckout[]
 
   @@index([status])
@@ -218,30 +215,12 @@ model HostedInvite {
   createdAt       DateTime           @default(now()) @map("created_at")
   updatedAt       DateTime           @updatedAt @map("updated_at")
   member          HostedMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  challenges      HostedPasskeyChallenge[]
   checkouts       HostedBillingCheckout[]
   sessions        HostedSession[]
 
   @@index([memberId, createdAt])
   @@index([expiresAt])
   @@map("hosted_invite")
-}
-
-model HostedPasskey {
-  id           String       @id
-  memberId     String       @map("member_id")
-  credentialId String       @unique @map("credential_id")
-  publicKey    Bytes        @map("public_key")
-  counter      Int          @default(0)
-  transports   String[]     @default([])
-  deviceType   String?      @map("device_type")
-  backedUp     Boolean      @default(false) @map("backed_up")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  lastUsedAt   DateTime?    @map("last_used_at")
-  member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-
-  @@index([memberId])
-  @@map("hosted_passkey")
 }
 
 model HostedSession {
@@ -264,24 +243,6 @@ model HostedSession {
   @@index([expiresAt])
   @@index([revokedAt])
   @@map("hosted_session")
-}
-
-model HostedPasskeyChallenge {
-  id        String                     @id
-  memberId  String                     @map("member_id")
-  inviteId  String?                    @map("invite_id")
-  type      HostedPasskeyChallengeType
-  challenge String
-  expiresAt DateTime                   @map("expires_at")
-  createdAt DateTime                   @default(now()) @map("created_at")
-  member    HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  invite    HostedInvite?              @relation(fields: [inviteId], references: [id], onDelete: SetNull)
-
-  @@unique([type, challenge])
-  @@index([memberId, type, expiresAt])
-  @@index([inviteId, type, expiresAt])
-  @@index([expiresAt])
-  @@map("hosted_passkey_challenge")
 }
 
 model HostedBillingCheckout {
@@ -345,7 +306,6 @@ model HostedWebhookReceipt {
   @@index([firstReceivedAt])
   @@map("hosted_webhook_receipt")
 }
-
 
 model LinqRecipientBinding {
   id             String             @id

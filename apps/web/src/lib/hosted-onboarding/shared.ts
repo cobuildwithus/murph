@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { normalizeString, sha256Hex } from "../device-sync/shared";
+import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
 const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
   /\bi\s*want\s*to\s*get\s*healthy\b/iu,
@@ -10,37 +11,7 @@ const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
   /\bstart\s+(healthy\s*bob|get\s*healthy)\b/iu,
 ] as const;
 
-export function normalizePhoneNumber(value: string | null | undefined): string | null {
-  const normalized = normalizeString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const compact = normalized.replace(/[\s().-]+/gu, "");
-  const prefixed = compact.startsWith("00") ? `+${compact.slice(2)}` : compact;
-
-  if (/^\+[1-9]\d{6,14}$/u.test(prefixed)) {
-    return prefixed;
-  }
-
-  if (/^[1-9]\d{6,14}$/u.test(prefixed)) {
-    return `+${prefixed}`;
-  }
-
-  return null;
-}
-
-export function maskPhoneNumber(value: string | null | undefined): string {
-  const normalized = normalizePhoneNumber(value);
-
-  if (!normalized) {
-    return "your number";
-  }
-
-  const visible = normalized.slice(-4);
-  return `*** ${visible}`;
-}
+export { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {
@@ -91,20 +62,8 @@ export function generateHostedInviteCode(): string {
   return randomBytes(15).toString("base64url");
 }
 
-export function generateHostedPasskeyId(): string {
-  return `hbp_${randomBytes(12).toString("base64url")}`;
-}
-
-export function generateHostedPasskeyUserId(): string {
-  return randomBytes(18).toString("base64url");
-}
-
 export function generateHostedSessionId(): string {
   return `hbs_${randomBytes(12).toString("base64url")}`;
-}
-
-export function generateHostedChallengeId(): string {
-  return `hbc_${randomBytes(12).toString("base64url")}`;
 }
 
 export function generateHostedCheckoutId(): string {
@@ -129,10 +88,6 @@ export function inviteExpiresAt(now: Date, ttlHours: number): Date {
 
 export function sessionExpiresAt(now: Date, ttlDays: number): Date {
   return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
-}
-
-export function challengeExpiresAt(now: Date): Date {
-  return new Date(now.getTime() + 10 * 60 * 1000);
 }
 
 export function normalizeNullableString(value: unknown): string | null {

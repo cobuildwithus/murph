@@ -1,7 +1,7 @@
 export interface HostedInviteStatusPayload {
   capabilities: {
     billingReady: boolean;
-    passkeyReady: boolean;
+    phoneAuthReady: boolean;
   };
   invite: {
     code: string;
@@ -11,9 +11,12 @@ export interface HostedInviteStatusPayload {
   } | null;
   member: {
     billingStatus: string;
-    hasPasskeys: boolean;
+    hasWallet: boolean;
     phoneHint: string;
+    phoneVerified: boolean;
     status: string;
+    walletAddress: string | null;
+    walletChainType: string | null;
   } | null;
   session: {
     authenticated: boolean;
@@ -21,4 +24,10 @@ export interface HostedInviteStatusPayload {
     matchesInvite: boolean;
   };
   stage: "invalid" | "expired" | "register" | "authenticate" | "checkout" | "active";
+}
+
+export interface HostedPrivyCompletionPayload {
+  inviteCode: string;
+  joinUrl: string;
+  stage: "checkout" | "active";
 }

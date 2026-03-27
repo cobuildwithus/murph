@@ -10,15 +10,15 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Healthy Bob hosted invite",
-  description: "Create your passkey and finish hosted Healthy Bob checkout.",
+  description: "Verify your phone and finish hosted Healthy Bob checkout.",
   openGraph: {
     title: "Healthy Bob hosted invite",
-    description: "Create your passkey and finish hosted Healthy Bob checkout.",
+    description: "Verify your phone and finish hosted Healthy Bob checkout.",
   },
   twitter: {
     card: "summary_large_image",
     title: "Healthy Bob hosted invite",
-    description: "Create your passkey and finish hosted Healthy Bob checkout.",
+    description: "Verify your phone and finish hosted Healthy Bob checkout.",
   },
 };
 

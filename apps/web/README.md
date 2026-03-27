@@ -59,10 +59,10 @@ Optional but recommended:
 Hosted onboarding extras:
 
 - `HOSTED_ONBOARDING_PUBLIC_BASE_URL`
-- `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/` that uses the current verified SMS signup entrypoint
-- `HOSTED_ONBOARDING_PASSKEY_ORIGIN`
-- `HOSTED_ONBOARDING_PASSKEY_RP_ID`
-- `HOSTED_ONBOARDING_PASSKEY_RP_NAME`
+- `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER` to show a public `Text to start` CTA on `/`
+- `NEXT_PUBLIC_PRIVY_APP_ID`
+- `PRIVY_APP_SECRET`
+- enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_SESSION_TTL_DAYS`
 - `HOSTED_ONBOARDING_SESSION_COOKIE_NAME`
@@ -155,16 +155,14 @@ Local-agent routes:
 
 ## Hosted onboarding routes
 
-This repo now also includes a first hosted onboarding lane for phone-bound invites:
+This repo now also includes a hosted onboarding lane for phone-bound invites and public signup:
 
+- `GET /`
 - `GET /join/:inviteCode`
 - `GET /join/:inviteCode/success`
 - `GET /join/:inviteCode/cancel`
 - `GET /api/hosted-onboarding/invites/:inviteCode/status`
-- `POST /api/hosted-onboarding/passkeys/register/options`
-- `POST /api/hosted-onboarding/passkeys/register/verify`
-- `POST /api/hosted-onboarding/passkeys/authenticate/options`
-- `POST /api/hosted-onboarding/passkeys/authenticate/verify`
+- `POST /api/hosted-onboarding/privy/complete`
 - `POST /api/hosted-onboarding/billing/checkout`
 - `POST /api/hosted-onboarding/session/logout`
 - `GET|POST /api/hosted-onboarding/linq/webhook`
@@ -176,8 +174,9 @@ This repo now also includes a first hosted onboarding lane for phone-bound invit
 The onboarding lane is intentionally thin:
 
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
-- the invite page binds the phone number to a hosted member row in Postgres
-- passkeys create/authenticate that hosted member through a `webauthx`-backed server/client ceremony wrapper with short-lived single-use challenges stored server-side
+- the public landing page can start the same flow with Privy SMS verification
+- the invite page binds the verified phone number to a hosted member row in Postgres
+- Privy handles phone OTP, the frontend manually creates an embedded wallet for whitelabel flows, and the backend verifies a Privy identity token before creating the hosted session cookie
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
 - hosted share links can now store an encrypted one-time share pack for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation

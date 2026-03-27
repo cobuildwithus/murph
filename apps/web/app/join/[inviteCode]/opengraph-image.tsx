@@ -38,7 +38,7 @@ export default async function OpenGraphImage() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <div style={{ fontSize: 88, fontWeight: 800, lineHeight: 1, letterSpacing: -4 }}>
-            Create your passkey.
+            Verify your phone.
           </div>
           <div style={{ fontSize: 44, lineHeight: 1.35, color: "rgba(226,232,240,1)" }}>
             Finish Apple Pay. Start hosted Healthy Bob.

@@ -206,11 +206,11 @@ export function buildHostedInviteReply(input: {
   return input.activeSubscription
     ? `Healthy Bob hosted access is already active for this number.
 
-Use your passkey here:
+Sign in with your verified phone here:
 ${input.joinUrl}`
     : `Healthy Bob hosted invite
 
-Create your passkey and finish Apple Pay here:
+Verify your phone and finish Apple Pay here:
 ${input.joinUrl}`;
 }
 

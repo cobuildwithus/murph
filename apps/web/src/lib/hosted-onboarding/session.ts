@@ -99,7 +99,7 @@ export async function requireHostedSessionFromRequest(
   if (!session) {
     throw hostedOnboardingError({
       code: "AUTH_REQUIRED",
-      message: "Sign in with your passkey to continue.",
+      message: "Verify your phone to continue.",
       httpStatus: 401,
     });
   }

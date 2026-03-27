@@ -7,13 +7,13 @@ import {
   HostedBillingStatus,
   HostedInviteStatus,
   HostedMemberStatus,
-  HostedPasskeyChallengeType,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecution } from "../hosted-execution/dispatch";
 import { hostedOnboardingError } from "./errors";
+import { hasHostedPrivyPhoneAuthConfig } from "./landing";
 import {
   buildHostedInviteReply,
   parseHostedLinqWebhookEvent,
@@ -22,25 +22,20 @@ import {
   summarizeHostedLinqMessage,
   assertHostedLinqWebhookSignature,
 } from "./linq";
+import { requireHostedPrivyIdentity, type HostedPrivyIdentity } from "./privy";
 import {
-  createHostedAuthenticationOptions,
-  createHostedRegistrationOptions,
-  decodeHostedPasskeyPublicKey,
-  verifyHostedAuthentication,
-  verifyHostedRegistration,
-} from "./passkeys";
-import { getHostedOnboardingEnvironment, getHostedOnboardingSecretCodec, requireHostedOnboardingPasskeyConfig, requireHostedOnboardingPublicBaseUrl, requireHostedOnboardingStripeConfig } from "./runtime";
+  getHostedOnboardingEnvironment,
+  getHostedOnboardingSecretCodec,
+  requireHostedOnboardingPublicBaseUrl,
+  requireHostedOnboardingStripeConfig,
+} from "./runtime";
 import { applyHostedSessionCookie, createHostedSession, type HostedSessionRecord } from "./session";
 import {
-  challengeExpiresAt,
   generateHostedBootstrapSecret,
-  generateHostedChallengeId,
   generateHostedCheckoutId,
   generateHostedInviteCode,
   generateHostedInviteId,
   generateHostedMemberId,
-  generateHostedPasskeyId,
-  generateHostedPasskeyUserId,
   inviteExpiresAt,
   maskPhoneNumber,
   normalizeNullableString,
@@ -66,12 +61,14 @@ export async function getHostedInviteStatus(input: {
   const environment = getHostedOnboardingEnvironment();
   const now = input.now ?? new Date();
   const invite = await findHostedInviteByCode(input.inviteCode, prisma);
+  const billingReady = Boolean(environment.stripeSecretKey && environment.stripePriceId);
+  const phoneAuthReady = hasHostedPrivyPhoneAuthConfig();
 
   if (!invite) {
     return {
       capabilities: {
-        billingReady: Boolean(environment.stripeSecretKey && environment.stripePriceId),
-        passkeyReady: Boolean(environment.passkeyOrigin && environment.passkeyRpId),
+        billingReady,
+        phoneAuthReady,
       },
       invite: null,
       member: null,
@@ -113,7 +110,8 @@ export async function getHostedInviteStatus(input: {
   }
 
   const sessionMatchesInvite = input.sessionRecord?.member.id === invite.memberId;
-  const hasPasskeys = invite.member.passkeys.length > 0;
+  const hasWallet = Boolean(invite.member.walletAddress);
+  const hasPrivyIdentity = Boolean(invite.member.privyUserId && invite.member.walletAddress);
   const isActive = invite.member.billingStatus === HostedBillingStatus.active;
   const stage =
     invite.expiresAt <= now || inviteStatus === HostedInviteStatus.expired
@@ -122,14 +120,14 @@ export async function getHostedInviteStatus(input: {
         ? isActive
           ? "active"
           : "checkout"
-        : hasPasskeys
+        : hasPrivyIdentity
           ? "authenticate"
           : "register";
 
   return {
     capabilities: {
-      billingReady: Boolean(environment.stripeSecretKey && environment.stripePriceId),
-      passkeyReady: Boolean(environment.passkeyOrigin && environment.passkeyRpId),
+      billingReady,
+      phoneAuthReady,
     },
     invite: {
       code: invite.inviteCode,
@@ -139,9 +137,12 @@ export async function getHostedInviteStatus(input: {
     },
     member: {
       billingStatus: invite.member.billingStatus,
-      hasPasskeys,
+      hasWallet,
       phoneHint: maskPhoneNumber(invite.member.normalizedPhoneNumber),
+      phoneVerified: Boolean(invite.member.phoneNumberVerifiedAt),
       status: invite.member.status,
+      walletAddress: invite.member.walletAddress,
+      walletChainType: invite.member.walletChainType,
     },
     session: {
       authenticated: Boolean(input.sessionRecord),
@@ -280,6 +281,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
               });
               const invite = await issueHostedInvite({
+                channel: "linq",
                 linqChatId: summary.chatId,
                 linqEventId: event.event_id,
                 memberId: member.id,
@@ -341,137 +343,58 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   }
 }
 
-export async function beginHostedPasskeyRegistration(input: {
-  inviteCode: string;
+export async function completeHostedPrivyVerification(input: {
+  identityToken: string;
+  inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
-}) {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const passkeyConfig = requireHostedOnboardingPasskeyConfig();
-  const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
-  const challenge = createRandomChallenge();
-
-  await prisma.hostedPasskeyChallenge.deleteMany({
-    where: {
-      memberId: invite.memberId,
-      inviteId: invite.id,
-      type: HostedPasskeyChallengeType.registration,
-    },
-  });
-
-  await prisma.hostedPasskeyChallenge.create({
-    data: {
-      id: generateHostedChallengeId(),
-      memberId: invite.memberId,
-      inviteId: invite.id,
-      type: HostedPasskeyChallengeType.registration,
-      challenge,
-      expiresAt: challengeExpiresAt(now),
-    },
-  });
-
-  return {
-    options: createHostedRegistrationOptions({
-      challenge,
-      memberLabel: invite.member.phoneNumber,
-      passkeys: invite.member.passkeys.map((passkey) => ({
-        counter: passkey.counter,
-        credentialId: passkey.credentialId,
-        publicKey: passkey.publicKey,
-        transports: passkey.transports,
-      })),
-      rpId: passkeyConfig.rpId,
-      rpName: passkeyConfig.rpName,
-      userId: invite.member.webauthnUserId,
-    }),
-  };
-}
-
-export async function finishHostedPasskeyRegistration(input: {
-  inviteCode: string;
-  now?: Date;
-  prisma?: PrismaClient;
-  response: unknown;
   userAgent?: string | null;
 }) {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const passkeyConfig = requireHostedOnboardingPasskeyConfig();
-  const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
-  const challenge = await consumeHostedPasskeyChallenge({
-    inviteId: invite.id,
-    memberId: invite.memberId,
-    now,
+  const identity = await requireHostedPrivyIdentity(input.identityToken);
+  const invite = input.inviteCode
+    ? await requireHostedInviteForAuthentication(input.inviteCode, prisma, now)
+    : null;
+  const member = invite
+    ? await reconcileHostedPrivyIdentityOnMember({
+        expectedPhoneNumber: invite.member.normalizedPhoneNumber,
+        identity,
+        member: invite.member,
+        prisma,
+        now,
+      })
+    : await ensureHostedMemberForPrivyIdentity({
+        identity,
+        prisma,
+        now,
+      });
+  const activeInvite = invite ?? await issueHostedInvite({
+    channel: "web",
+    linqChatId: null,
+    linqEventId: null,
+    memberId: member.id,
     prisma,
-    type: HostedPasskeyChallengeType.registration,
+    triggerText: null,
   });
-  const verification = await verifyHostedRegistration({
-    credential: input.response,
-    expectedChallenge: challenge.challenge,
-    expectedOrigin: passkeyConfig.expectedOrigin,
-    expectedRpId: passkeyConfig.rpId,
-  });
-  const credential = verification.credential;
-  const existingPasskey = await prisma.hostedPasskey.findUnique({
-    where: {
-      credentialId: credential.id,
-    },
-  });
+  const stage = member.billingStatus === HostedBillingStatus.active ? "active" : "checkout";
 
-  if (existingPasskey && existingPasskey.memberId !== invite.memberId) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_ALREADY_BOUND",
-      message: "That passkey is already linked to a different hosted member.",
-      httpStatus: 409,
-    });
-  }
-
-  if (existingPasskey) {
-    await prisma.hostedPasskey.update({
-      where: {
-        id: existingPasskey.id,
-      },
-      data: {
-        publicKey: decodeHostedPasskeyPublicKey(credential.publicKey),
-      },
-    });
-  } else {
-    await prisma.hostedPasskey.create({
-      data: {
-        id: generateHostedPasskeyId(),
-        memberId: invite.memberId,
-        credentialId: credential.id,
-        publicKey: decodeHostedPasskeyPublicKey(credential.publicKey),
-      },
-    });
-  }
-
-  await prisma.hostedMember.update({
-    where: {
-      id: invite.memberId,
-    },
-    data: {
-      status: invite.member.billingStatus === HostedBillingStatus.active
-        ? HostedMemberStatus.active
-        : HostedMemberStatus.registered,
-    },
-  });
   await prisma.hostedInvite.update({
     where: {
-      id: invite.id,
+      id: activeInvite.id,
     },
     data: {
       authenticatedAt: now,
-      status: invite.member.billingStatus === HostedBillingStatus.active
+      status: stage === "active"
         ? HostedInviteStatus.paid
         : HostedInviteStatus.authenticated,
+      ...(stage === "active" ? { paidAt: activeInvite.paidAt ?? now } : {}),
     },
   });
 
   const session = await createHostedSession({
-    inviteId: invite.id,
-    memberId: invite.memberId,
+    inviteId: activeInvite.id,
+    memberId: member.id,
     now,
     prisma,
     userAgent: input.userAgent ?? null,
@@ -479,174 +402,15 @@ export async function finishHostedPasskeyRegistration(input: {
 
   return {
     expiresAt: session.expiresAt,
-    stage: invite.member.billingStatus === HostedBillingStatus.active ? "active" : "checkout",
-    token: session.token,
-  };
-}
-
-export async function beginHostedPasskeyAuthentication(input: {
-  inviteCode: string;
-  now?: Date;
-  prisma?: PrismaClient;
-}) {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const passkeyConfig = requireHostedOnboardingPasskeyConfig();
-  const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
-
-  if (invite.member.passkeys.length === 0) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_NOT_FOUND",
-      message: "No passkey is registered for this hosted member yet.",
-      httpStatus: 404,
-    });
-  }
-
-  const challenge = createRandomChallenge();
-
-  await prisma.hostedPasskeyChallenge.deleteMany({
-    where: {
-      memberId: invite.memberId,
-      inviteId: invite.id,
-      type: HostedPasskeyChallengeType.authentication,
-    },
-  });
-  await prisma.hostedPasskeyChallenge.create({
-    data: {
-      id: generateHostedChallengeId(),
-      memberId: invite.memberId,
-      inviteId: invite.id,
-      type: HostedPasskeyChallengeType.authentication,
-      challenge,
-      expiresAt: challengeExpiresAt(now),
-    },
-  });
-
-  return {
-    options: createHostedAuthenticationOptions({
-      challenge,
-      passkeys: invite.member.passkeys.map((passkey) => ({
-        counter: passkey.counter,
-        credentialId: passkey.credentialId,
-        publicKey: passkey.publicKey,
-        transports: passkey.transports,
-      })),
-      rpId: passkeyConfig.rpId,
-    }),
-  };
-}
-
-export async function finishHostedPasskeyAuthentication(input: {
-  inviteCode: string;
-  now?: Date;
-  prisma?: PrismaClient;
-  response: unknown;
-  userAgent?: string | null;
-}) {
-  const prisma = input.prisma ?? getPrisma();
-  const now = input.now ?? new Date();
-  const passkeyConfig = requireHostedOnboardingPasskeyConfig();
-  const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
-  const challenge = await consumeHostedPasskeyChallenge({
-    inviteId: invite.id,
-    memberId: invite.memberId,
-    now,
-    prisma,
-    type: HostedPasskeyChallengeType.authentication,
-  });
-  const credentialId = normalizeNullableString(
-    input.response && typeof input.response === "object" && "id" in (input.response as Record<string, unknown>)
-      ? (input.response as Record<string, unknown>).id
-      : null,
-  );
-
-  if (!credentialId) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_CREDENTIAL_REQUIRED",
-      message: "Authentication response did not include a credential id.",
-      httpStatus: 400,
-    });
-  }
-
-  const passkey = await prisma.hostedPasskey.findUnique({
-    where: {
-      credentialId,
-    },
-  });
-
-  if (!passkey || passkey.memberId !== invite.memberId) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_NOT_FOUND",
-      message: "That passkey is not linked to this invite.",
-      httpStatus: 404,
-    });
-  }
-
-  const verification = await verifyHostedAuthentication({
-    expectedChallenge: challenge.challenge,
-    expectedOrigin: passkeyConfig.expectedOrigin,
-    expectedRpId: passkeyConfig.rpId,
-    passkey: {
-      credentialId: passkey.credentialId,
-      publicKey: passkey.publicKey,
-    },
-    response: input.response,
-  });
-
-  if (!verification) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_AUTH_FAILED",
-      message: "Passkey authentication could not be verified.",
-      httpStatus: 401,
-    });
-  }
-
-  await prisma.hostedPasskey.update({
-    where: {
-      id: passkey.id,
-    },
-    data: {
-      lastUsedAt: now,
-    },
-  });
-  await prisma.hostedMember.update({
-    where: {
-      id: invite.memberId,
-    },
-    data: {
-      status: invite.member.billingStatus === HostedBillingStatus.active
-        ? HostedMemberStatus.active
-        : HostedMemberStatus.registered,
-    },
-  });
-  await prisma.hostedInvite.update({
-    where: {
-      id: invite.id,
-    },
-    data: {
-      authenticatedAt: now,
-      status: invite.member.billingStatus === HostedBillingStatus.active
-        ? HostedInviteStatus.paid
-        : HostedInviteStatus.authenticated,
-    },
-  });
-
-  const session = await createHostedSession({
-    inviteId: invite.id,
-    memberId: invite.memberId,
-    now,
-    prisma,
-    userAgent: input.userAgent ?? null,
-  });
-
-  return {
-    expiresAt: session.expiresAt,
-    stage: invite.member.billingStatus === HostedBillingStatus.active ? "active" : "checkout",
+    inviteCode: activeInvite.inviteCode,
+    joinUrl: buildHostedInviteUrl(activeInvite.inviteCode),
+    stage,
     token: session.token,
   };
 }
 
 export async function createHostedBillingCheckout(input: {
+
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -866,15 +630,7 @@ async function findHostedInviteByCode(inviteCode: string, prisma: PrismaClient) 
       inviteCode,
     },
     include: {
-      member: {
-        include: {
-          passkeys: {
-            orderBy: {
-              createdAt: "asc",
-            },
-          },
-        },
-      },
+      member: true,
       checkouts: {
         orderBy: {
           createdAt: "desc",
@@ -924,7 +680,6 @@ async function ensureHostedMemberForPhone(input: {
       phoneNumber: input.originalPhoneNumber,
       normalizedPhoneNumber: input.normalizedPhoneNumber,
       phoneNumberVerifiedAt: new Date(),
-      webauthnUserId: generateHostedPasskeyUserId(),
       status: HostedMemberStatus.invited,
       billingStatus: HostedBillingStatus.not_started,
       linqChatId: input.linqChatId,
@@ -934,7 +689,179 @@ async function ensureHostedMemberForPhone(input: {
   });
 }
 
+async function findHostedMemberForPrivyIdentity(input: {
+  identity: HostedPrivyIdentity;
+  prisma: PrismaClient;
+}): Promise<HostedMember | null> {
+  const matches = new Map<string, HostedMember>();
+  const normalizedWalletAddress = normalizeHostedWalletAddress(input.identity.wallet.address);
+
+  if (input.identity.userId) {
+    const memberByPrivyUserId = await input.prisma.hostedMember.findUnique({
+      where: {
+        privyUserId: input.identity.userId,
+      },
+    });
+
+    if (memberByPrivyUserId) {
+      matches.set(memberByPrivyUserId.id, memberByPrivyUserId);
+    }
+  }
+
+  const memberByPhoneNumber = await input.prisma.hostedMember.findUnique({
+    where: {
+      normalizedPhoneNumber: input.identity.phone.number,
+    },
+  });
+
+  if (memberByPhoneNumber) {
+    matches.set(memberByPhoneNumber.id, memberByPhoneNumber);
+  }
+
+  if (normalizedWalletAddress) {
+    const memberByWalletAddress = await input.prisma.hostedMember.findUnique({
+      where: {
+        walletAddress: normalizedWalletAddress,
+      },
+    });
+
+    if (memberByWalletAddress) {
+      matches.set(memberByWalletAddress.id, memberByWalletAddress);
+    }
+  }
+
+  if (matches.size > 1) {
+    throw hostedOnboardingError({
+      code: "PRIVY_IDENTITY_CONFLICT",
+      message: "This verified phone session conflicts with an existing Healthy Bob account. Contact support so we can merge it safely.",
+      httpStatus: 409,
+    });
+  }
+
+  return matches.values().next().value ?? null;
+}
+
+async function ensureHostedMemberForPrivyIdentity(input: {
+  identity: HostedPrivyIdentity;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<HostedMember> {
+  const existingMember = await findHostedMemberForPrivyIdentity({
+    identity: input.identity,
+    prisma: input.prisma,
+  });
+
+  if (!existingMember) {
+    return input.prisma.hostedMember.create({
+      data: {
+        id: generateHostedMemberId(),
+        phoneNumber: input.identity.phone.number,
+        normalizedPhoneNumber: input.identity.phone.number,
+        phoneNumberVerifiedAt: input.now,
+        privyUserId: input.identity.userId,
+        status: HostedMemberStatus.registered,
+        billingStatus: HostedBillingStatus.not_started,
+        walletAddress: normalizeHostedWalletAddress(input.identity.wallet.address),
+        walletChainType: input.identity.wallet.chainType,
+        walletProvider: "privy",
+        walletCreatedAt: input.now,
+        encryptedBootstrapSecret: encryptHostedBootstrapSecret(),
+        encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
+      },
+    });
+  }
+
+  return reconcileHostedPrivyIdentityOnMember({
+    identity: input.identity,
+    member: existingMember,
+    prisma: input.prisma,
+    now: input.now,
+  });
+}
+
+async function reconcileHostedPrivyIdentityOnMember(input: {
+  expectedPhoneNumber?: string;
+  identity: HostedPrivyIdentity;
+  member: HostedMember;
+  prisma: PrismaClient;
+  now: Date;
+}): Promise<HostedMember> {
+  if (input.expectedPhoneNumber && input.identity.phone.number !== input.expectedPhoneNumber) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_MISMATCH",
+      message: `Enter the same phone number that received this invite (${maskPhoneNumber(input.expectedPhoneNumber)}).`,
+      httpStatus: 403,
+    });
+  }
+
+  if (input.member.privyUserId && input.member.privyUserId !== input.identity.userId) {
+    throw hostedOnboardingError({
+      code: "PRIVY_USER_MISMATCH",
+      message: "This phone number is already linked to a different Privy account.",
+      httpStatus: 409,
+    });
+  }
+
+  const normalizedWalletAddress = normalizeHostedWalletAddress(input.identity.wallet.address);
+
+  if (
+    input.member.walletAddress
+    && normalizeHostedWalletAddress(input.member.walletAddress) !== normalizedWalletAddress
+  ) {
+    throw hostedOnboardingError({
+      code: "PRIVY_WALLET_MISMATCH",
+      message: "This phone number is already linked to a different rewards wallet.",
+      httpStatus: 409,
+    });
+  }
+
+  try {
+    return await input.prisma.hostedMember.update({
+      where: {
+        id: input.member.id,
+      },
+      data: {
+        phoneNumber: input.identity.phone.number,
+        normalizedPhoneNumber: input.identity.phone.number,
+        phoneNumberVerifiedAt: input.now,
+        privyUserId: input.identity.userId,
+        status: input.member.billingStatus === HostedBillingStatus.active
+          ? HostedMemberStatus.active
+          : HostedMemberStatus.registered,
+        walletAddress: normalizedWalletAddress,
+        walletChainType: input.identity.wallet.chainType,
+        walletProvider: "privy",
+        walletCreatedAt: input.member.walletCreatedAt ?? input.now,
+        encryptedBootstrapSecret:
+          input.member.encryptedBootstrapSecret
+            ? undefined
+            : encryptHostedBootstrapSecret(),
+        encryptionKeyVersion:
+          input.member.encryptionKeyVersion
+            ? undefined
+            : getHostedOnboardingEnvironment().encryptionKeyVersion,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw hostedOnboardingError({
+        code: "PRIVY_IDENTITY_CONFLICT",
+        message: "This verified phone session conflicts with an existing Healthy Bob account. Contact support so we can merge it safely.",
+        httpStatus: 409,
+      });
+    }
+
+    throw error;
+  }
+}
+
+function normalizeHostedWalletAddress(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value);
+  return normalized ? normalized.toLowerCase() : null;
+}
+
 async function issueHostedInvite(input: {
+  channel: "linq" | "share" | "web";
   linqChatId: string | null;
   linqEventId: string | null;
   memberId: string;
@@ -968,7 +895,7 @@ async function issueHostedInvite(input: {
         id: existingInvite.id,
       },
       data: {
-        channel: input.linqChatId ? "linq" : "share",
+        channel: input.channel,
         linqChatId: input.linqChatId,
         linqEventId: input.linqEventId,
         triggerText: input.triggerText,
@@ -982,7 +909,7 @@ async function issueHostedInvite(input: {
       memberId: input.memberId,
       inviteCode: generateHostedInviteCode(),
       status: HostedInviteStatus.pending,
-      channel: input.linqChatId ? "linq" : "share",
+      channel: input.channel,
       triggerText: input.triggerText,
       linqChatId: input.linqChatId,
       linqEventId: input.linqEventId,
@@ -992,6 +919,7 @@ async function issueHostedInvite(input: {
 }
 
 export async function issueHostedInviteForPhone(input: {
+  channel?: "share" | "web";
   phoneNumber: string;
   prisma?: PrismaClient;
 }): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMember }> {
@@ -1013,6 +941,7 @@ export async function issueHostedInviteForPhone(input: {
     prisma,
   });
   const invite = await issueHostedInvite({
+    channel: input.channel ?? "share",
     linqChatId: member.linqChatId,
     linqEventId: null,
     memberId: member.id,
@@ -1059,64 +988,6 @@ async function requireHostedInviteForAuthentication(
   }
 
   return invite;
-}
-
-async function consumeHostedPasskeyChallenge(input: {
-  inviteId: string;
-  memberId: string;
-  now: Date;
-  prisma: PrismaClient;
-  type: HostedPasskeyChallengeType;
-}) {
-  await input.prisma.hostedPasskeyChallenge.deleteMany({
-    where: {
-      expiresAt: {
-        lte: input.now,
-      },
-    },
-  });
-
-  const challenge = await input.prisma.hostedPasskeyChallenge.findFirst({
-    where: {
-      memberId: input.memberId,
-      inviteId: input.inviteId,
-      type: input.type,
-      expiresAt: {
-        gt: input.now,
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-
-  if (!challenge) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_CHALLENGE_EXPIRED",
-      message: "That passkey challenge expired. Reload the link and try again.",
-      httpStatus: 410,
-    });
-  }
-
-  const deleted = await input.prisma.hostedPasskeyChallenge.deleteMany({
-    where: {
-      id: challenge.id,
-    },
-  });
-
-  if (deleted.count !== 1) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_CHALLENGE_EXPIRED",
-      message: "That passkey challenge expired. Reload the link and try again.",
-      httpStatus: 410,
-    });
-  }
-
-  return challenge;
-}
-
-function createRandomChallenge(): string {
-  return `0x${randomBytes(32).toString("hex")}`;
 }
 
 async function ensureHostedStripeCustomer(input: {

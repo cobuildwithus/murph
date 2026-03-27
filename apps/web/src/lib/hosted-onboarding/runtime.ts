@@ -60,29 +60,6 @@ export function requireHostedOnboardingPublicBaseUrl(): string {
   return publicBaseUrl;
 }
 
-export function requireHostedOnboardingPasskeyConfig(): {
-  expectedOrigin: string;
-  rpId: string;
-  rpName: string;
-} {
-  const environment = getHostedOnboardingEnvironment();
-
-  if (!environment.passkeyOrigin || !environment.passkeyRpId) {
-    throw hostedOnboardingError({
-      code: "PASSKEY_CONFIG_REQUIRED",
-      message:
-        "HOSTED_ONBOARDING_PUBLIC_BASE_URL or explicit HOSTED_ONBOARDING_PASSKEY_ORIGIN/HOSTED_ONBOARDING_PASSKEY_RP_ID must be configured for passkeys.",
-      httpStatus: 500,
-    });
-  }
-
-  return {
-    expectedOrigin: environment.passkeyOrigin,
-    rpId: environment.passkeyRpId,
-    rpName: environment.passkeyRpName,
-  };
-}
-
 export function requireHostedOnboardingStripeConfig(): {
   billingMode: "payment" | "subscription";
   priceId: string;

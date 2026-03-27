@@ -34,9 +34,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiBaseUrl: "https://linq.example.test",
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
-    passkeyOrigin: "https://join.example.test",
-    passkeyRpId: "join.example.test",
-    passkeyRpName: "Healthy Bob",
     publicBaseUrl: "https://join.example.test",
     sessionCookieName: "hb_hosted_session",
     sessionTtlDays: 30,
@@ -47,11 +44,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
   getHostedOnboardingSecretCodec: () => ({
     encrypt: (value: string) => `enc:${value}`,
-  }),
-  requireHostedOnboardingPasskeyConfig: () => ({
-    expectedOrigin: "https://join.example.test",
-    rpId: "join.example.test",
-    rpName: "Healthy Bob",
   }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   requireHostedOnboardingStripeConfig: () => ({

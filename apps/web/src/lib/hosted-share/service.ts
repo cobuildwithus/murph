@@ -85,6 +85,7 @@ export async function createHostedShareLink(input: {
 
   if (!inviteCode && normalizeOptionalString(input.recipientPhoneNumber)) {
     const invite = await issueHostedInviteForPhone({
+      channel: "share",
       phoneNumber: input.recipientPhoneNumber as string,
       prisma,
     });

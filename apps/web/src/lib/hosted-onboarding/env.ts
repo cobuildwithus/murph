@@ -9,9 +9,8 @@ export interface HostedOnboardingEnvironment {
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqWebhookSecret: string | null;
-  passkeyOrigin: string | null;
-  passkeyRpId: string | null;
-  passkeyRpName: string;
+  privyAppId: string | null;
+  privyAppSecret: string | null;
   publicBaseUrl: string | null;
   sessionCookieName: string;
   sessionTtlDays: number;
@@ -37,12 +36,6 @@ export function readHostedOnboardingEnvironment(
   const publicBaseUrl = normalizeBaseUrl(
     readEnv(source, ["HOSTED_ONBOARDING_PUBLIC_BASE_URL", "NEXT_PUBLIC_SITE_URL"]),
   );
-  const passkeyOrigin = normalizeBaseUrl(
-    readEnv(source, ["HOSTED_ONBOARDING_PASSKEY_ORIGIN"]),
-  ) ?? publicBaseUrl;
-  const passkeyRpId =
-    readEnv(source, ["HOSTED_ONBOARDING_PASSKEY_RP_ID"])
-      ?? (passkeyOrigin ? new URL(passkeyOrigin).hostname : null);
   const stripeBillingMode = readBillingMode(
     readEnv(source, ["HOSTED_ONBOARDING_STRIPE_BILLING_MODE"]),
   );
@@ -61,9 +54,8 @@ export function readHostedOnboardingEnvironment(
     ) ?? DEFAULT_LINQ_API_BASE_URL,
     linqApiToken: readEnv(source, ["LINQ_API_TOKEN", "HEALTHYBOB_LINQ_API_TOKEN"]),
     linqWebhookSecret: readEnv(source, ["LINQ_WEBHOOK_SECRET", "HEALTHYBOB_LINQ_WEBHOOK_SECRET"]),
-    passkeyOrigin,
-    passkeyRpId,
-    passkeyRpName: readEnv(source, ["HOSTED_ONBOARDING_PASSKEY_RP_NAME"]) ?? "Healthy Bob",
+    privyAppId: readEnv(source, ["NEXT_PUBLIC_PRIVY_APP_ID"]),
+    privyAppSecret: readEnv(source, ["PRIVY_APP_SECRET"]),
     publicBaseUrl,
     sessionCookieName: readEnv(source, ["HOSTED_ONBOARDING_SESSION_COOKIE_NAME"]) ?? "hb_hosted_session",
     sessionTtlDays: readPositiveInteger(

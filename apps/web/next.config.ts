@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
@@ -9,6 +10,7 @@ import {
 } from "../../config/workspace-source-resolution";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@healthybob/contracts": "../../packages/contracts/src/index.ts",
   "@healthybob/runtime-state": "../../packages/runtime-state/src/index.ts",
@@ -31,13 +33,26 @@ export function resolveWorkspaceSourceEntries(appDir: string): Record<string, st
 
 export { installSourceExtensionAliases };
 
+function installOptionalModuleFallbacks(config: Parameters<NonNullable<NextConfig["webpack"]>>[0]) {
+  config.resolve ??= {};
+  config.resolve.alias ??= {};
+
+  try {
+    require.resolve("@farcaster/mini-app-solana");
+  } catch {
+    config.resolve.alias["@farcaster/mini-app-solana"] = false;
+  }
+
+  return config;
+}
+
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(appDir, "../.."),
   transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
   typescript: {
     ignoreBuildErrors: true,
   },
-  webpack: (config) => installSourceExtensionAliases(config),
+  webpack: (config) => installOptionalModuleFallbacks(installSourceExtensionAliases(config)),
 };
 
 export default nextConfig;

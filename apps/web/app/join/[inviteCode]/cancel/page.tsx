@@ -35,7 +35,7 @@ export default async function JoinInviteCancelPage(input: {
           Checkout paused
         </h1>
         <p style={{ margin: 0, color: "rgb(71 85 105)", lineHeight: 1.6 }}>
-          Your passkey is still ready. Jump back to the invite page whenever you want to finish checkout.
+          Your verified phone session is still ready. Jump back to the invite page whenever you want to finish checkout.
         </p>
         <a
           href={href}

@@ -151,7 +151,7 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       {data.stage === "signin" ? (
         data.inviteCode ? (
           <a href={`/join/${encodeURIComponent(data.inviteCode)}?share=${encodeURIComponent(shareCode)}`} style={primaryLinkStyle}>
-            Continue with passkey and checkout
+            Verify your phone and checkout
           </a>
         ) : (
           <div style={noticeStyle}>
