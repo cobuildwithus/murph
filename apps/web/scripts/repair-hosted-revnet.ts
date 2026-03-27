@@ -25,7 +25,7 @@ async function main() {
         [
           "Hosted RevNet repair candidates:",
           `- stale submitting threshold: ${HOSTED_REVNET_REPAIR_SUBMITTING_STALE_MS / 1000}s`,
-          "- rows in `broadcast_unknown_stale` are listed for investigation first; do not replay them blindly.",
+          "- rows in `broadcast_unknown_stale` or `repair_in_progress_stale` are listed for investigation first; do not replay them blindly.",
         ].join("\n"),
       );
 
@@ -64,7 +64,7 @@ async function main() {
 
       if (allowUnknownBroadcastReplay) {
         console.warn(
-          "Warning: forcing replay for a stale broadcast-unknown issuance. Use this only after verifying no broadcast happened.",
+          "Warning: forcing replay for a stale submitting issuance. Use this only after verifying no broadcast happened.",
         );
       }
 
@@ -78,6 +78,7 @@ async function main() {
         JSON.stringify(
           {
             id: candidate.id,
+            payTxHash: candidate.payTxHash,
             repairCategory: candidate.repairCategory,
             replayAllowedWithoutForce: candidate.replayAllowedWithoutForce,
             status: candidate.status,
