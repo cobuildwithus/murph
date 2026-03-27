@@ -13,15 +13,15 @@ import type {
   CompleteAttachmentParseJobInput,
   FailAttachmentParseJobInput,
   RequeueAttachmentParseJobsInput,
-} from "../contracts/derived.js";
-import type { InboxCaptureRecord, InboxListFilters, InboxSearchFilters, InboxSearchHit } from "../contracts/search.js";
+} from "../contracts/derived.ts";
+import type { InboxCaptureRecord, InboxListFilters, InboxSearchFilters, InboxSearchHit } from "../contracts/search.ts";
 import type {
   IndexedAttachment,
   InboundCapture,
   PersistedCapture,
   StoredAttachment,
   StoredCapture,
-} from "../contracts/capture.js";
+} from "../contracts/capture.ts";
 import {
   buildFtsQuery,
   buildSnippet,
@@ -29,7 +29,7 @@ import {
   normalizeAccountKey,
   normalizeStoredAttachments,
   sanitizeRawMetadata,
-} from "../shared.js";
+} from "../shared.ts";
 
 const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
 const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([

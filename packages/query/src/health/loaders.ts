@@ -5,7 +5,7 @@ import path from "node:path";
 import {
   parseFrontmatterDocument,
   type MarkdownDocumentRecord,
-} from "./shared.js";
+} from "./shared.ts";
 
 export interface ParseFailure {
   ok: false;

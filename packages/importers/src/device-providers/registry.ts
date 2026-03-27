@@ -1,6 +1,6 @@
-import { normalizeOptionalString } from "../shared.js";
+import { normalizeOptionalString } from "../shared.ts";
 
-import type { DeviceProviderAdapter } from "./types.js";
+import type { DeviceProviderAdapter } from "./types.ts";
 
 export interface DeviceProviderRegistry {
   register<TSnapshot>(adapter: DeviceProviderAdapter<TSnapshot>): void;

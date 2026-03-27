@@ -2,7 +2,7 @@ import {
   familyRecordFromEntity,
   familyRegistryDefinition,
   createProjectedRegistryQueries,
-} from "./registries.js";
+} from "./registries.ts";
 
 const familyQueries = createProjectedRegistryQueries(
   familyRegistryDefinition,

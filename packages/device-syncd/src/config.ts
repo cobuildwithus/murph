@@ -3,17 +3,17 @@ import {
   DEVICE_SYNC_SECRET_ENV_KEYS,
 } from "@healthybob/runtime-state";
 
-import { createOuraDeviceSyncProvider } from "./providers/oura.js";
-import { createWhoopDeviceSyncProvider } from "./providers/whoop.js";
-import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.js";
+import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
+import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
+import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.ts";
 
-import type { CreateDeviceSyncServiceInput } from "./service.js";
+import type { CreateDeviceSyncServiceInput } from "./service.ts";
 import type {
   DeviceSyncHttpConfig,
   DeviceSyncLogger,
   DeviceSyncProvider,
   DeviceSyncServiceConfig,
-} from "./types.js";
+} from "./types.ts";
 
 export interface LoadedDeviceSyncEnvironment {
   service: CreateDeviceSyncServiceInput;

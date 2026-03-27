@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { loadDeviceSyncEnvironment } from "../src/config.js";
-import { computeRetryDelayMs } from "../src/shared.js";
+import { loadDeviceSyncEnvironment } from "../src/config.ts";
+import { computeRetryDelayMs } from "../src/shared.ts";
 
 test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
   assert.equal(computeRetryDelayMs(1), 15_000);

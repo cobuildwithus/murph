@@ -1,18 +1,19 @@
 import { z } from "zod";
 
-import { assertCanonicalWritePort } from "../core-port.js";
-import type { DeviceBatchImportPayload } from "../core-port.js";
+import { assertCanonicalWritePort } from "../core-port.ts";
+import type { DeviceBatchImportPayload } from "../core-port.ts";
 import {
-  optionalTrimmedStringSchema,
   parseInputObject,
   requiredTrimmedStringSchema,
+  resolveVaultRootAlias,
   stripUndefined,
-} from "../shared.js";
+  vaultRootAliasSchemaFields,
+} from "../shared.ts";
 
-import { defaultDeviceProviderAdapters } from "./defaults.js";
-import { createDeviceProviderRegistry } from "./registry.js";
+import { defaultDeviceProviderAdapters } from "./defaults.ts";
+import { createDeviceProviderRegistry } from "./registry.ts";
 
-import type { DeviceProviderRegistry } from "./registry.js";
+import type { DeviceProviderRegistry } from "./registry.ts";
 
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
@@ -30,8 +31,7 @@ const deviceProviderSnapshotImportSchema = z
   .object({
     provider: requiredTrimmedStringSchema("provider"),
     snapshot: z.unknown(),
-    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
-    vault: optionalTrimmedStringSchema("vault"),
+    ...vaultRootAliasSchemaFields,
   })
   .passthrough();
 
@@ -58,7 +58,7 @@ export async function prepareDeviceProviderSnapshotImport(
   const normalized = await adapter.normalizeSnapshot(request.snapshot);
 
   return stripUndefined({
-    vaultRoot: request.vaultRoot ?? request.vault,
+    vaultRoot: resolveVaultRootAlias(request),
     ...normalized,
   });
 }

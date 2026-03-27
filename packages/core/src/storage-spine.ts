@@ -1,3 +1,3 @@
-export { addMeal, importDocument, importSamples } from "./mutations.js";
-export { importAssessmentResponse } from "./assessment/storage.js";
-export { addMeal as importMeal } from "./mutations.js";
+export { addMeal, importDocument, importSamples } from "./mutations.ts";
+export { importAssessmentResponse } from "./assessment/storage.ts";
+export { addMeal as importMeal } from "./mutations.ts";

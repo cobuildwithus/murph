@@ -21,11 +21,11 @@ import {
   workoutFormatFrontmatterSchema as workoutFormatFrontmatterContract,
   sampleRecordSchema as sampleRecordContract,
   vaultMetadataSchema as vaultMetadataContract,
-} from "./zod.js";
+} from "./zod.ts";
 
-import type { JsonSchema } from "./types.js";
+import type { JsonSchema } from "./types.ts";
 
-export type { JsonSchema } from "./types.js";
+export type { JsonSchema } from "./types.ts";
 
 function toJsonSchema(schema: z.ZodTypeAny): JsonSchema {
   return z.toJSONSchema(schema) as JsonSchema;

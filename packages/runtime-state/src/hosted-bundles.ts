@@ -1,11 +1,11 @@
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
-import { resolveAssistantStatePaths } from "./assistant-state.js";
+import { resolveAssistantStatePaths } from "./assistant-state.ts";
 import {
   restoreHostedBundleRoots,
   snapshotHostedBundleRoots,
-} from "./hosted-bundle.js";
+} from "./hosted-bundle.ts";
 
 const AGENT_STATE_ASSISTANT_ROOT = "assistant-state";
 const AGENT_STATE_OPERATOR_HOME_ROOT = "operator-home";

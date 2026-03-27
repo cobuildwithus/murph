@@ -14,14 +14,14 @@ import {
   FILE_CHANGE_OPERATIONS,
   ID_PREFIXES,
   VAULT_LAYOUT,
-} from "./constants.js";
-import { generateRecordId } from "./ids.js";
-import { appendJsonlRecord, toMonthlyShardRelativePath } from "./jsonl.js";
-import type { WriteBatch } from "./operations/write-batch.js";
-import { normalizeRelativeVaultPath } from "./path-safety.js";
-import { toIsoTimestamp } from "./time.js";
+} from "./constants.ts";
+import { generateRecordId } from "./ids.ts";
+import { appendJsonlRecord, toMonthlyShardRelativePath } from "./jsonl.ts";
+import type { WriteBatch } from "./operations/write-batch.ts";
+import { normalizeRelativeVaultPath } from "./path-safety.ts";
+import { toIsoTimestamp } from "./time.ts";
 
-import type { DateInput, FileChange } from "./types.js";
+import type { DateInput, FileChange } from "./types.ts";
 
 type AuditChange = AuditRecord["changes"][number];
 

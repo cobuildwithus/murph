@@ -1,7 +1,7 @@
-import type { InboundCapture } from "../../contracts/capture.js";
-import { createCaptureCheckpoint } from "../../shared.js";
-import type { Cursor, EmitCapture, PollConnector } from "../types.js";
-import { compareInboundCaptures } from "./message.js";
+import type { InboundCapture } from "../../contracts/capture.ts";
+import { createCaptureCheckpoint } from "../../shared.ts";
+import type { Cursor, EmitCapture, PollConnector } from "../types.ts";
+import { compareInboundCaptures } from "./message.ts";
 
 export interface ChatPollWatcherHandle {
   close?(): Promise<void> | void;

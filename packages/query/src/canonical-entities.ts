@@ -6,10 +6,10 @@ import {
   firstString,
   firstStringArray,
   maybeString,
-} from "./health/shared.js";
+} from "./health/shared.ts";
 
-import type { MarkdownDocumentRecord } from "./health/shared.js";
-import type { RegistryMarkdownRecord } from "./health/registries.js";
+import type { MarkdownDocumentRecord } from "./health/shared.ts";
+import type { RegistryMarkdownRecord } from "./health/registries.ts";
 
 export type CanonicalEntityFamily =
   | "allergy"

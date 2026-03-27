@@ -1,9 +1,9 @@
-import { stripUndefined } from "../shared.js";
+import { stripUndefined } from "../shared.ts";
 import {
   minutesBetween,
   pushObservationEvent,
   pushSample,
-} from "./shared-normalization.js";
+} from "./shared-normalization.ts";
 import {
   asObjectArray,
   firstIdentifierFromPaths,
@@ -16,14 +16,14 @@ import {
   normalizeSleepStage,
   pushGarminArtifact,
   secondsToMinutes,
-} from "./garmin-helpers.js";
+} from "./garmin-helpers.ts";
 
 import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
-} from "../core-port.js";
-import type { PlainObject } from "./shared-normalization.js";
+} from "../core-port.ts";
+import type { PlainObject } from "./shared-normalization.ts";
 
 export interface GarminHealthNormalizationContext {
   importedAt: string;

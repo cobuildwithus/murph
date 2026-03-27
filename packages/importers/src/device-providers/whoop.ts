@@ -1,4 +1,4 @@
-import { stripEmptyObject, stripUndefined } from "../shared.js";
+import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
@@ -6,6 +6,8 @@ import {
   emitObservationMetrics,
   emitSampleMetrics,
   finiteNumber,
+  makeNormalizedDeviceBatch,
+  makeProviderExternalRef,
   minutesBetween,
   pushDeletionObservation as pushSharedDeletionObservation,
   pushRawArtifact,
@@ -13,20 +15,20 @@ import {
   stringId,
   toIso,
   trimToLength,
-} from "./shared-normalization.js";
+} from "./shared-normalization.ts";
 
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
-} from "../core-port.js";
+} from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
   PlainObject,
   SampleMetricDescriptor,
-} from "./shared-normalization.js";
-import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
+} from "./shared-normalization.ts";
+import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 
 export interface WhoopSnapshotInput {
   accountId?: string;
@@ -47,13 +49,7 @@ function makeExternalRef(
   version?: string,
   facet?: string,
 ): DeviceExternalRefPayload {
-  return stripUndefined({
-    system: "whoop",
-    resourceType,
-    resourceId,
-    version,
-    facet,
-  });
+  return makeProviderExternalRef("whoop", resourceType, resourceId, version, facet);
 }
 
 function cycleOrFallbackTimestamp(...candidates: Array<string | undefined>): string | undefined {
@@ -529,11 +525,10 @@ export function normalizeWhoopSnapshot(snapshot: WhoopSnapshotInput): Normalized
     },
   });
 
-  return stripUndefined({
+  return makeNormalizedDeviceBatch({
     provider: "whoop",
     accountId,
     importedAt,
-    source: "device",
     events,
     samples,
     rawArtifacts,

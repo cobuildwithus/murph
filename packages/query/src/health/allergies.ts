@@ -2,7 +2,7 @@ import {
   allergyRecordFromEntity,
   allergyRegistryDefinition,
   createProjectedRegistryQueries,
-} from "./registries.js";
+} from "./registries.ts";
 
 const allergyQueries = createProjectedRegistryQueries(
   allergyRegistryDefinition,

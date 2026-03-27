@@ -1,13 +1,13 @@
 import type { ContractSchema } from "@healthybob/contracts";
 import { safeParseContract } from "@healthybob/contracts";
 
-import { VaultError } from "../errors.js";
-import { parseFrontmatterDocument } from "../frontmatter.js";
-import { readUtf8File } from "../fs.js";
-import { runCanonicalWrite, type WriteBatch } from "../operations/write-batch.js";
-import { loadVault } from "../vault.js";
+import { VaultError } from "../errors.ts";
+import { parseFrontmatterDocument } from "../frontmatter.ts";
+import { readUtf8File } from "../fs.ts";
+import { runCanonicalWrite, type WriteBatch } from "../operations/write-batch.ts";
+import { loadVault } from "../vault.ts";
 
-import type { DateInput } from "../types.js";
+import type { DateInput } from "../types.ts";
 
 const LOCAL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 

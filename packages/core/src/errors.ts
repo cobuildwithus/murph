@@ -1,4 +1,4 @@
-import type { UnknownRecord } from "./types.js";
+import type { UnknownRecord } from "./types.ts";
 
 export class VaultError extends Error {
   code: string;

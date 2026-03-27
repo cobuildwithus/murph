@@ -2,16 +2,16 @@ import { extractIsoDatePrefix } from "@healthybob/contracts";
 
 import {
   type CanonicalEntity,
-} from "./canonical-entities.js";
-import type { ParseFailure } from "./health/loaders.js";
-import { collectCanonicalEntities } from "./health/canonical-collector.js";
+} from "./canonical-entities.ts";
+import type { ParseFailure } from "./health/loaders.ts";
+import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import {
   compareByOccurredAtDescThenId,
   compareByRecordedOrImportedAtDescThenId,
-} from "./health/comparators.js";
-import { firstObject, firstString, firstStringArray } from "./health/shared.js";
+} from "./health/comparators.ts";
+import { firstObject, firstString, firstStringArray } from "./health/shared.ts";
 
-import type { FrontmatterObject } from "./health/shared.js";
+import type { FrontmatterObject } from "./health/shared.ts";
 import type {
   ExportPackAssessmentRecord,
   ExportPackBankPage,
@@ -20,7 +20,7 @@ import type {
   ExportPackHealthContext,
   ExportPackHistoryRecord,
   ExportPackProfileSnapshotRecord,
-} from "./export-pack.js";
+} from "./export-pack.ts";
 
 export interface ExportPackHealthReadResult {
   health: ExportPackHealthContext;

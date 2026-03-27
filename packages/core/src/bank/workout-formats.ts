@@ -1,15 +1,15 @@
 import type { ActivityStrengthExercise } from "@healthybob/contracts";
 
-import { VaultError } from "../errors.js";
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import { VaultError } from "../errors.ts";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   WORKOUT_FORMAT_DOC_TYPE,
   WORKOUT_FORMAT_SCHEMA_VERSION,
   WORKOUT_FORMAT_STATUSES,
   WORKOUT_FORMATS_DIRECTORY,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
@@ -30,16 +30,16 @@ import {
   resolveRequiredUpsertValue,
   section,
   stripUndefined,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   ReadWorkoutFormatInput,
   UpsertWorkoutFormatInput,
   UpsertWorkoutFormatResult,
   WorkoutFormatRecord,
   WorkoutFormatStatus,
-} from "./types.js";
+} from "./types.ts";
 
 const LOAD_UNITS = ["lb", "kg"] as const;
 

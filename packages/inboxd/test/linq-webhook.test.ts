@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 
 import { test } from "vitest";
 
-import { verifyAndParseLinqWebhookRequest } from "../src/index.js";
+import { verifyAndParseLinqWebhookRequest } from "../src/index.ts";
 
 test("verifyAndParseLinqWebhookRequest validates the Linq signature envelope", () => {
   const payload = JSON.stringify({

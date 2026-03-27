@@ -1,4 +1,4 @@
-import { CONTRACT_ID_FORMAT, ID_PREFIXES } from "./constants.js";
+import { CONTRACT_ID_FORMAT, ID_PREFIXES } from "./constants.ts";
 
 export const ULID_BODY_LENGTH = 26 as const;
 export const ULID_BODY_PATTERN = "[0-9A-HJKMNP-TV-Z]{26}" as const;

@@ -9,7 +9,7 @@ import {
   withImmediateTransaction,
 } from "@healthybob/runtime-state";
 
-import { readVault } from "./model.js";
+import { readVault } from "./model.ts";
 import {
   filterSearchDocuments,
   materializeSearchDocuments,
@@ -19,7 +19,7 @@ import {
   type SearchDocument,
   type SearchFilters,
   type SearchResult,
-} from "./search-shared.js";
+} from "./search-shared.ts";
 
 const SEARCH_SCHEMA_VERSION = "hb.search.v1";
 const DEFAULT_CANDIDATE_MULTIPLIER = 25;

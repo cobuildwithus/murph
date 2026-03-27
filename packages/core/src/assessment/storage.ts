@@ -7,24 +7,24 @@ import {
   safeParseContract,
 } from "@healthybob/contracts";
 
-import { buildAuditRecord, resolveAuditShardPath } from "../audit.js";
-import { generateRecordId } from "../ids.js";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
-import { walkVaultFiles } from "../fs.js";
-import { stageRawImportManifest } from "../operations/raw-manifests.js";
-import { WriteBatch } from "../operations/write-batch.js";
-import { prepareRawArtifact } from "../raw.js";
-import { toIsoTimestamp } from "../time.js";
-import { VaultError } from "../errors.js";
-import { isPlainRecord } from "../types.js";
+import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
+import { generateRecordId } from "../ids.ts";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
+import { walkVaultFiles } from "../fs.ts";
+import { stageRawImportManifest } from "../operations/raw-manifests.ts";
+import { WriteBatch } from "../operations/write-batch.ts";
+import { prepareRawArtifact } from "../raw.ts";
+import { toIsoTimestamp } from "../time.ts";
+import { VaultError } from "../errors.ts";
+import { isPlainRecord } from "../types.ts";
 
-import type { UnknownRecord } from "../types.js";
+import type { UnknownRecord } from "../types.ts";
 import type {
   AssessmentResponseRecord,
   ImportAssessmentResponseInput,
   ImportAssessmentResponseResult,
-} from "./types.js";
-import { ASSESSMENT_LEDGER_DIRECTORY, ASSESSMENT_RESPONSE_SCHEMA_VERSION } from "./types.js";
+} from "./types.ts";
+import { ASSESSMENT_LEDGER_DIRECTORY, ASSESSMENT_RESPONSE_SCHEMA_VERSION } from "./types.ts";
 
 interface ReadAssessmentResponseInput {
   vaultRoot: string;

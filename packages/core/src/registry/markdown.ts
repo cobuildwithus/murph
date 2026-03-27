@@ -1,12 +1,12 @@
-import { VaultError } from "../errors.js";
-import { parseFrontmatterDocument } from "../frontmatter.js";
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { readUtf8File, walkVaultFiles } from "../fs.js";
-import { emitAuditRecord } from "../audit.js";
-import { runCanonicalWrite } from "../operations/index.js";
-import { resolveRecordByIdOrSlug } from "./id-or-slug.js";
+import { VaultError } from "../errors.ts";
+import { parseFrontmatterDocument } from "../frontmatter.ts";
+import { stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { readUtf8File, walkVaultFiles } from "../fs.ts";
+import { emitAuditRecord } from "../audit.ts";
+import { runCanonicalWrite } from "../operations/index.ts";
+import { resolveRecordByIdOrSlug } from "./id-or-slug.ts";
 
-import type { FrontmatterObject, DateInput } from "../types.js";
+import type { FrontmatterObject, DateInput } from "../types.ts";
 
 interface MarkdownRegistryLoadOptions<TRecord> {
   vaultRoot: string;

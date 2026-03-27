@@ -13,7 +13,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-import { generateRecordId, generateVaultId } from "../src/ids.js";
+import { generateRecordId, generateVaultId } from "../src/ids.ts";
 
 test("generateRecordId preserves alias mapping and local underscore normalization", () => {
   assert.equal(generateRecordId("event", 0), "evt_00000000000123456789ABCDEF");

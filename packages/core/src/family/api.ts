@@ -4,8 +4,8 @@ import {
   ID_PREFIXES,
 } from "@healthybob/contracts";
 
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   bulletList,
@@ -16,16 +16,16 @@ import {
   optionalString,
   requireString,
   validateSortedStringList,
-} from "../history/shared.js";
+} from "../history/shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   FamilyMemberRecord,
   ReadFamilyMemberInput,
   UpsertFamilyMemberInput,
   UpsertFamilyMemberResult,
-} from "./types.js";
-import { FAMILY_MEMBER_DOC_TYPE, FAMILY_MEMBER_SCHEMA_VERSION } from "./types.js";
+} from "./types.ts";
+import { FAMILY_MEMBER_DOC_TYPE, FAMILY_MEMBER_SCHEMA_VERSION } from "./types.ts";
 
 const FAMILY_DIRECTORY = "bank/family";
 const FAMILY_TITLE_MAX_LENGTH = FAMILY_MEMBER_LIMITS.title;

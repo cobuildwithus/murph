@@ -1,9 +1,9 @@
 import { createImporters } from "@healthybob/importers";
 
-import { createSecretCodec } from "./crypto.js";
-import { deviceSyncError, isDeviceSyncError } from "./errors.js";
-import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.js";
-import { createDeviceSyncRegistry } from "./registry.js";
+import { createSecretCodec } from "./crypto.ts";
+import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
+import { createDeviceSyncRegistry } from "./registry.ts";
 import {
   addMilliseconds,
   computeRetryDelayMs,
@@ -14,8 +14,8 @@ import {
   sha256Text,
   stringifyJson,
   toIsoTimestamp,
-} from "./shared.js";
-import { SqliteDeviceSyncStore } from "./store.js";
+} from "./shared.ts";
+import { SqliteDeviceSyncStore } from "./store.ts";
 
 import type {
   BeginConnectionResult,
@@ -38,7 +38,7 @@ import type {
   QueueManualReconcileResult,
   StartConnectionInput,
   StoredDeviceSyncAccount,
-} from "./types.js";
+} from "./types.ts";
 
 class DeviceSyncJobExecutionCancelledError extends Error {
   constructor(readonly accountId: string, readonly jobId: string) {

@@ -1,4 +1,4 @@
-import type { BaseConnector, PollConnector, WebhookConnector } from "../connectors/types.js";
+import type { BaseConnector, PollConnector, WebhookConnector } from "../connectors/types.ts";
 
 export interface ConnectorRegistry {
   add(connector: BaseConnector): void;

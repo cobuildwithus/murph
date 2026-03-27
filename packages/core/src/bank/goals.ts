@@ -1,6 +1,6 @@
-import { VaultError } from "../errors.js";
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import { VaultError } from "../errors.ts";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   GOAL_DOC_TYPE,
@@ -8,7 +8,7 @@ import {
   GOALS_DIRECTORY,
   GOAL_SCHEMA_VERSION,
   GOAL_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
@@ -30,10 +30,10 @@ import {
   section,
   stripUndefined,
   normalizeId,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
-import type { GoalRecord, GoalWindow, ReadGoalInput, UpsertGoalInput, UpsertGoalResult } from "./types.js";
+import type { FrontmatterObject } from "../types.ts";
+import type { GoalRecord, GoalWindow, ReadGoalInput, UpsertGoalInput, UpsertGoalResult } from "./types.ts";
 
 function normalizeGoalWindow(value: unknown, fieldName: string): GoalWindow {
   const candidate = requireObject(value, fieldName);

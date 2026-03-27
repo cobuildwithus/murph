@@ -1,13 +1,15 @@
-import { VaultError } from "../errors.js";
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import type { RecipeUpsertPayload } from "@healthybob/contracts";
+
+import { VaultError } from "../errors.ts";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   RECIPE_DOC_TYPE,
   RECIPES_DIRECTORY,
   RECIPE_SCHEMA_VERSION,
   RECIPE_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
@@ -28,9 +30,9 @@ import {
   section,
   stripUndefined,
   normalizeId,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   DeleteRecipeInput,
   DeleteRecipeResult,
@@ -39,7 +41,7 @@ import type {
   RecipeStatus,
   UpsertRecipeInput,
   UpsertRecipeResult,
-} from "./types.js";
+} from "./types.ts";
 
 function normalizeRecipeTextList(
   value: unknown,
@@ -153,11 +155,10 @@ function parseRecipeRecord(
   });
 }
 
-function buildAttributes(record: RecipeRecord): FrontmatterObject {
+export function recipeRecordToUpsertPayload(
+  record: RecipeRecord,
+): Omit<RecipeUpsertPayload, "recipeId"> {
   return stripUndefined({
-    schemaVersion: RECIPE_SCHEMA_VERSION,
-    docType: RECIPE_DOC_TYPE,
-    recipeId: record.recipeId,
     slug: record.slug,
     title: record.title,
     status: record.status,
@@ -174,6 +175,15 @@ function buildAttributes(record: RecipeRecord): FrontmatterObject {
     steps: record.steps,
     relatedGoalIds: record.relatedGoalIds,
     relatedConditionIds: record.relatedConditionIds,
+  }) as Omit<RecipeUpsertPayload, "recipeId">;
+}
+
+function buildAttributes(record: RecipeRecord): FrontmatterObject {
+  return stripUndefined({
+    schemaVersion: RECIPE_SCHEMA_VERSION,
+    docType: RECIPE_DOC_TYPE,
+    recipeId: record.recipeId,
+    ...recipeRecordToUpsertPayload(record),
   }) as FrontmatterObject;
 }
 

@@ -1,10 +1,10 @@
 import { extractIsoDatePrefix } from "@healthybob/contracts";
 
-import { listRecords, type VaultReadModel, type VaultRecord } from "./model.js";
+import { listRecords, type VaultReadModel, type VaultRecord } from "./model.ts";
 import {
   summarizeDailySamples,
   type DailySampleSummary,
-} from "./summaries.js";
+} from "./summaries.ts";
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;

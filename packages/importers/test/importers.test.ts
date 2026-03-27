@@ -9,7 +9,7 @@ import type {
   DocumentImportPayload,
   MealImportPayload,
   SampleImportPayload,
-} from "../src/index.js";
+} from "../src/index.ts";
 import {
   createSamplePresetRegistry,
   importCsvSamples,
@@ -18,7 +18,7 @@ import {
   parseDelimitedRows,
   prepareCsvSampleImport,
   prepareMealImport,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "healthybob-importers-"));
@@ -227,6 +227,7 @@ test("importMeal accepts vault aliases and rejects directory photo paths", async
   await importMeal(
     {
       photoPath,
+      vaultRoot: "canonical-vault",
       vault: "fixture-vault",
       note: "  oatmeal  ",
     },
@@ -235,7 +236,7 @@ test("importMeal accepts vault aliases and rejects directory photo paths", async
 
   const [mealPayload] = calls.meals;
   assert.ok(mealPayload);
-  assert.equal(mealPayload.vaultRoot, "fixture-vault");
+  assert.equal(mealPayload.vaultRoot, "canonical-vault");
   assert.equal(mealPayload.audioPath, undefined);
   assert.equal(mealPayload.note, "oatmeal");
 
@@ -398,6 +399,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
 
   const payload = await prepareCsvSampleImport({
     filePath,
+    vaultRoot: "/tmp/canonical-vault",
     vault: "/tmp/example-vault",
     stream: "glucose",
     tsColumn: "recorded",
@@ -406,7 +408,7 @@ test("prepareCsvSampleImport skips blank rows and omits empty metadata columns",
     delimiter: ",",
   });
 
-  assert.equal(payload.vaultRoot, "/tmp/example-vault");
+  assert.equal(payload.vaultRoot, "/tmp/canonical-vault");
   assert.equal(payload.importConfig.metadataColumns, undefined);
   assert.equal(payload.samples.length, 2);
   assert.equal(payload.batchProvenance?.sourceFileName, "glucose.csv");

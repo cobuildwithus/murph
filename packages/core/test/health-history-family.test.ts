@@ -12,16 +12,16 @@ import {
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
   VaultError,
-} from "../src/index.js";
+} from "../src/index.ts";
 import {
   appendBloodTest,
   appendHistoryEvent,
   listHistoryEvents,
   readHistoryEvent,
-} from "../src/history/index.js";
-import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.js";
-import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.js";
-import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
+} from "../src/history/index.ts";
+import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.ts";
+import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.ts";
+import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));

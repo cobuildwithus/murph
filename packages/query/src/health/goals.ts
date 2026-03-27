@@ -2,7 +2,7 @@ import {
   createProjectedRegistryQueries,
   goalRecordFromEntity,
   goalRegistryDefinition,
-} from "./registries.js";
+} from "./registries.ts";
 
 const goalQueries = createProjectedRegistryQueries(
   goalRegistryDefinition,

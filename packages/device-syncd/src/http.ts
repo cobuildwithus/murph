@@ -2,14 +2,14 @@ import { Buffer } from "node:buffer";
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
-import { deviceSyncError, isDeviceSyncError } from "./errors.js";
-import { resolveOuraWebhookVerificationChallenge } from "./providers/oura.js";
-import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.js";
+import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
+import { resolveOuraWebhookVerificationChallenge } from "./providers/oura.ts";
+import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
-import type { DeviceSyncError } from "./errors.js";
-import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.js";
-import type { DeviceSyncService } from "./service.js";
+import type { DeviceSyncError } from "./errors.ts";
+import type { DeviceSyncHttpConfig, NodeServerHandle } from "./types.ts";
+import type { DeviceSyncService } from "./service.ts";
 
 const DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
 const CONTROL_PLANE_WWW_AUTHENTICATE = 'Bearer realm="device-syncd-control-plane"';

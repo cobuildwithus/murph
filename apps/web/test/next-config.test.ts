@@ -5,9 +5,9 @@ import { test } from "vitest";
 
 import nextConfig, {
   WORKSPACE_SOURCE_PACKAGE_NAMES,
+  buildHostedWebTurbopackConfig,
   buildHostedWebContentSecurityPolicy,
   buildHostedWebSecurityHeaders,
-  installSourceExtensionAliases,
   resolvePrivyBaseDomainOrigin,
   resolveWorkspaceSourceEntries,
 } from "../next.config";
@@ -31,42 +31,17 @@ test("next.config transpiles hosted workspace source packages instead of pinning
   assert.deepEqual(nextConfig.transpilePackages, [...WORKSPACE_SOURCE_PACKAGE_NAMES]);
 });
 
-test("next.config configures Turbopack to resolve hosted workspace .js specifiers to TS sources", () => {
-  assert.equal(nextConfig.turbopack?.root, process.cwd());
-  assert.deepEqual(nextConfig.turbopack?.rules?.["*.ts"], {
-    as: "*.ts",
-    condition: {
-      all: [{ not: "foreign" }, { path: /^packages\/[^/]+\/src\// }],
-    },
-    loaders: [path.resolve(process.cwd(), "config/turbopack-rewrite-relative-js-imports-loader.cjs")],
+test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
+  assert.deepEqual(nextConfig.turbopack, {
+    root: process.cwd(),
   });
-  assert.deepEqual(nextConfig.turbopack?.resolveExtensions, [
-    ".tsx",
-    ".ts",
-    ".jsx",
-    ".js",
-    ".mts",
-    ".mjs",
-    ".cts",
-    ".cjs",
-    ".json",
-  ]);
 });
 
-test("installSourceExtensionAliases lets Next resolve hosted workspace .js specifiers to TS sources", () => {
-  const config = installSourceExtensionAliases({
-    resolve: {
-      extensionAlias: {
-        ".jsx": [".tsx", ".jsx"],
-      },
-    },
-  });
+test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", () => {
+  const turbopackConfig = buildHostedWebTurbopackConfig();
 
-  assert.deepEqual(config.resolve?.extensionAlias, {
-    ".jsx": [".tsx", ".jsx"],
-    ".js": [".ts", ".tsx", ".js"],
-    ".mjs": [".mts", ".mjs"],
-    ".cjs": [".cts", ".cjs"],
+  assert.deepEqual(turbopackConfig, {
+    root: process.cwd(),
   });
 });
 

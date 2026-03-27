@@ -6,13 +6,13 @@ export type {
   PersistedCapture,
   StoredAttachment,
   StoredCapture,
-} from "./contracts/capture.js";
+} from "./contracts/capture.ts";
 export type {
   InboxCaptureRecord,
   InboxListFilters,
   InboxSearchFilters,
   InboxSearchHit,
-} from "./contracts/search.js";
+} from "./contracts/search.ts";
 export type {
   AttachmentParseJobClaimFilters,
   AttachmentParseJobFilters,
@@ -22,41 +22,41 @@ export type {
   CompleteAttachmentParseJobInput,
   FailAttachmentParseJobInput,
   RequeueAttachmentParseJobsInput,
-} from "./contracts/derived.js";
+} from "./contracts/derived.ts";
 export type {
   BaseConnector,
   Cursor,
   EmitCapture,
   PollConnector,
   WebhookConnector,
-} from "./connectors/types.js";
+} from "./connectors/types.ts";
 export type {
   ChatAttachment,
   ChatMessage,
   CreateInboundCaptureFromChatMessageInput,
-} from "./connectors/chat/message.js";
+} from "./connectors/chat/message.ts";
 export {
   compareInboundCaptures,
   createInboundCaptureFromChatMessage,
-} from "./connectors/chat/message.js";
+} from "./connectors/chat/message.ts";
 export type {
   ChatPollDriver,
   ChatPollWatcherHandle,
   CreateNormalizedChatPollConnectorInput,
-} from "./connectors/chat/poll.js";
+} from "./connectors/chat/poll.ts";
 export {
   createNormalizedChatPollConnector,
-} from "./connectors/chat/poll.js";
+} from "./connectors/chat/poll.ts";
 export {
   createAgentmailApiPollDriver,
   createEmailPollConnector,
-} from "./connectors/email/connector.js";
+} from "./connectors/email/connector.ts";
 export type {
   AgentmailFetch,
   AgentmailPollDriver,
   CreateAgentmailApiPollDriverInput,
   EmailConnectorOptions,
-} from "./connectors/email/connector.js";
+} from "./connectors/email/connector.ts";
 export {
   buildAgentmailMessageText,
   inferDirectEmailThread,
@@ -64,21 +64,21 @@ export {
   resolveAgentmailAddress,
   resolveAgentmailDisplayName,
   toAgentmailChatMessage,
-} from "./connectors/email/normalize.js";
+} from "./connectors/email/normalize.ts";
 export type {
   AgentmailAttachmentDownloadDriver,
   NormalizeAgentmailMessageInput,
-} from "./connectors/email/normalize.js";
+} from "./connectors/email/normalize.ts";
 export type {
   AgentmailAttachmentDownload,
   AgentmailListMessagesResponse,
   AgentmailMessageAttachment,
   AgentmailMessageLike,
   AgentmailThreadLike,
-} from "./connectors/email/types.js";
+} from "./connectors/email/types.ts";
 export {
   createLinqWebhookConnector,
-} from "./connectors/linq/connector.js";
+} from "./connectors/linq/connector.ts";
 export {
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
@@ -88,19 +88,19 @@ export {
   verifyLinqWebhookSignature,
   LinqWebhookPayloadError,
   LinqWebhookVerificationError,
-} from "./connectors/linq/webhook.js";
+} from "./connectors/linq/webhook.ts";
 export type {
   LinqWebhookConnectorOptions,
-} from "./connectors/linq/connector.js";
+} from "./connectors/linq/connector.ts";
 export {
   normalizeLinqWebhookEvent,
   requireLinqMessageReceivedEvent,
   toLinqChatMessage,
-} from "./connectors/linq/normalize.js";
+} from "./connectors/linq/normalize.ts";
 export type {
   LinqAttachmentDownloadDriver,
   NormalizeLinqWebhookEventInput,
-} from "./connectors/linq/normalize.js";
+} from "./connectors/linq/normalize.ts";
 export type {
   LinqIncomingMessage,
   LinqListPhoneNumbersResponse,
@@ -111,26 +111,26 @@ export type {
   LinqSendMessageResponse,
   LinqTextPart,
   LinqWebhookEvent,
-} from "./connectors/linq/types.js";
+} from "./connectors/linq/types.ts";
 export {
   createImessageConnector,
   loadImessageKitDriver,
-} from "./connectors/imessage/connector.js";
+} from "./connectors/imessage/connector.ts";
 export type {
   ImessageConnectorOptions,
   ImessageGetMessagesInput,
   ImessagePollDriver,
   ImessageWatchOptions,
-} from "./connectors/imessage/connector.js";
+} from "./connectors/imessage/connector.ts";
 export {
   normalizeImessageAttachment,
   normalizeImessageMessage,
-} from "./connectors/imessage/normalize.js";
+} from "./connectors/imessage/normalize.ts";
 export type {
   ImessageKitAttachmentLike,
   ImessageKitChatLike,
   ImessageKitMessageLike,
-} from "./connectors/imessage/normalize.js";
+} from "./connectors/imessage/normalize.ts";
 export {
   DEFAULT_TELEGRAM_ALLOWED_UPDATES,
   createTelegramApiPollDriver,
@@ -138,33 +138,33 @@ export {
   createTelegramPollConnector,
   createTelegramUpdateCheckpoint,
   readTelegramUpdateCheckpoint,
-} from "./connectors/telegram/connector.js";
+} from "./connectors/telegram/connector.ts";
 export type {
   CreateTelegramApiPollDriverInput,
   CreateTelegramBotApiPollDriverInput,
   TelegramApiClient,
   TelegramConnectorOptions,
   TelegramPollDriver,
-} from "./connectors/telegram/connector.js";
+} from "./connectors/telegram/connector.ts";
 export {
   buildTelegramThreadId,
   extractTelegramMessage,
   normalizeTelegramMessage,
   normalizeTelegramUpdate,
   toTelegramChatMessage,
-} from "./connectors/telegram/normalize.js";
+} from "./connectors/telegram/normalize.ts";
 export type {
   NormalizeTelegramMessageInput,
   NormalizeTelegramUpdateInput,
   TelegramAttachmentDownloadDriver,
-} from "./connectors/telegram/normalize.js";
+} from "./connectors/telegram/normalize.ts";
 export {
   parseTelegramThreadTarget,
   serializeTelegramThreadTarget,
-} from "./connectors/telegram/target.js";
+} from "./connectors/telegram/target.ts";
 export type {
   TelegramThreadTarget,
-} from "./connectors/telegram/target.js";
+} from "./connectors/telegram/target.ts";
 export type {
   TelegramChat,
   TelegramFile,
@@ -174,40 +174,40 @@ export type {
   TelegramUpdateLike,
   TelegramUser,
   TelegramWebhookInfo,
-} from "./connectors/telegram/types.js";
+} from "./connectors/telegram/types.ts";
 export {
   createConnectorRegistry,
-} from "./kernel/registry.js";
+} from "./kernel/registry.ts";
 export type {
   ConnectorRegistry,
-} from "./kernel/registry.js";
+} from "./kernel/registry.ts";
 export {
   runInboxDaemon,
   runPollConnector,
-} from "./kernel/daemon.js";
+} from "./kernel/daemon.ts";
 export type {
   ConnectorRestartPolicy,
-} from "./kernel/daemon.js";
+} from "./kernel/daemon.ts";
 export {
   createInboxPipeline,
   processCapture,
-} from "./kernel/pipeline.js";
+} from "./kernel/pipeline.ts";
 export type {
   CreateInboxPipelineInput,
   InboxPipeline,
   PipelineContext,
-} from "./kernel/pipeline.js";
+} from "./kernel/pipeline.ts";
 export {
   openInboxRuntime,
-} from "./kernel/sqlite.js";
+} from "./kernel/sqlite.ts";
 export type {
   InboxRuntimeStore,
   OpenInboxRuntimeInput,
-} from "./kernel/sqlite.js";
+} from "./kernel/sqlite.ts";
 export {
   appendImportAudit,
   appendInboxCaptureEvent,
   ensureInboxVault,
   persistRawCapture,
   rebuildRuntimeFromVault,
-} from "./indexing/persist.js";
+} from "./indexing/persist.ts";

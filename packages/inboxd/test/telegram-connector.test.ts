@@ -9,14 +9,14 @@ import {
   createTelegramApiPollDriver,
   createTelegramPollConnector,
   normalizeTelegramUpdate,
-} from "../src/index.js";
+} from "../src/index.ts";
 import type {
   InboundCapture,
   PersistedCapture,
   TelegramApiClient,
   TelegramPollDriver,
   TelegramUpdateLike,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 function createPersistedCapture(capture: InboundCapture): PersistedCapture {
   return {

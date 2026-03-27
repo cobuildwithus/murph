@@ -8,7 +8,7 @@ import {
   projectRegistryEntity,
   type CanonicalEntity,
   type CanonicalEntityFamily,
-} from "../canonical-entities.js";
+} from "../canonical-entities.ts";
 import {
   readJsonlRecordOutcomes,
   readJsonlRecordOutcomesSync,
@@ -24,7 +24,7 @@ import {
   type JsonlRecordOutcome,
   type MarkdownDocumentOutcome,
   type ParseFailure,
-} from "./loaders.js";
+} from "./loaders.ts";
 import {
   allergyRegistryDefinition,
   conditionRegistryDefinition,
@@ -35,15 +35,15 @@ import {
   toRegistryRecord,
   type RegistryDefinition,
   type RegistryMarkdownRecord,
-} from "./registries.js";
+} from "./registries.ts";
 import {
   resolveCurrentProfileDocument,
   resolveCurrentProfileSnapshot,
   type CurrentProfileDocumentOutcome,
   type CurrentProfileSnapshotSortFields,
-} from "./current-profile-resolution.js";
-import { firstString } from "./shared.js";
-import type { MarkdownDocumentRecord } from "./shared.js";
+} from "./current-profile-resolution.ts";
+import { firstString } from "./shared.ts";
+import type { MarkdownDocumentRecord } from "./shared.ts";
 
 type RegistryFamily = Extract<
   CanonicalEntityFamily,

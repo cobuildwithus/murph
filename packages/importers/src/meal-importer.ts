@@ -1,14 +1,16 @@
 import { z } from "zod";
 
-import { assertCanonicalWritePort } from "./core-port.js";
-import type { MealImportPayload } from "./core-port.js";
+import { assertCanonicalWritePort } from "./core-port.ts";
+import type { MealImportPayload } from "./core-port.ts";
 import {
   inspectFileAsset,
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
   parseInputObject,
+  resolveVaultRootAlias,
   stripUndefined,
-} from "./shared.js";
+  vaultRootAliasSchemaFields,
+} from "./shared.ts";
 
 export interface MealImportInput {
   photoPath?: string;
@@ -28,8 +30,7 @@ const mealImportInputSchema = z
   .object({
     photoPath: optionalTrimmedStringSchema("photoPath"),
     audioPath: optionalTrimmedStringSchema("audioPath"),
-    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
-    vault: optionalTrimmedStringSchema("vault"),
+    ...vaultRootAliasSchemaFields,
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
     source: optionalTrimmedStringSchema("source"),
@@ -56,7 +57,7 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     : undefined;
 
   return stripUndefined({
-    vaultRoot: request.vaultRoot ?? request.vault,
+    vaultRoot: resolveVaultRootAlias(request),
     photoPath: photo?.sourcePath,
     audioPath: audio?.sourcePath,
     occurredAt: request.occurredAt,

@@ -4,9 +4,9 @@ import {
   vaultMetadataSchema,
 } from "@healthybob/contracts";
 
-import { VAULT_LAYOUT } from "../constants.js";
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { loadVault } from "../vault.js";
+import { VAULT_LAYOUT } from "../constants.ts";
+import { stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { loadVault } from "../vault.ts";
 
 import {
   compactObject,
@@ -15,7 +15,7 @@ import {
   replaceMarkdownTitle,
   runLoadedCanonicalWrite,
   validateContract,
-} from "./shared.js";
+} from "./shared.ts";
 
 export interface UpdateVaultSummaryInput {
   vaultRoot: string;

@@ -1,9 +1,9 @@
-import { VaultError } from "./errors.js";
-import { appendVaultTextFile, readUtf8File } from "./fs.js";
-import { normalizeRelativeVaultPath } from "./path-safety.js";
-import { toIsoTimestamp } from "./time.js";
+import { VaultError } from "./errors.ts";
+import { appendVaultTextFile, readUtf8File } from "./fs.ts";
+import { normalizeRelativeVaultPath } from "./path-safety.ts";
+import { toIsoTimestamp } from "./time.ts";
 
-import type { DateInput, UnknownRecord } from "./types.js";
+import type { DateInput, UnknownRecord } from "./types.ts";
 
 export function toMonthlyShardRelativePath(
   baseDirectory: string,

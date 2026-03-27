@@ -1,5 +1,5 @@
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   ALLERGIES_DIRECTORY,
@@ -7,7 +7,7 @@ import {
   ALLERGY_DOC_TYPE,
   ALLERGY_SCHEMA_VERSION,
   ALLERGY_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
@@ -26,10 +26,10 @@ import {
   section,
   stripUndefined,
   normalizeId,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
-import type { AllergyRecord, ReadAllergyInput, UpsertAllergyInput, UpsertAllergyResult } from "./types.js";
+import type { FrontmatterObject } from "../types.ts";
+import type { AllergyRecord, ReadAllergyInput, UpsertAllergyInput, UpsertAllergyResult } from "./types.ts";
 
 function buildBody(record: AllergyRecord): string {
   return buildMarkdownBody(

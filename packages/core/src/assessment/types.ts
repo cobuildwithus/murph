@@ -1,6 +1,6 @@
-import type { RawArtifact } from "../raw.js";
-import type { UnknownRecord } from "../types.js";
-import type { ProfileSnapshotSource } from "../profile/types.js";
+import type { RawArtifact } from "../raw.ts";
+import type { UnknownRecord } from "../types.ts";
+import type { ProfileSnapshotSource } from "../profile/types.ts";
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = "hb.assessment-response.v1";
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments";

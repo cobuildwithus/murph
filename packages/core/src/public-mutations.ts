@@ -1,44 +1,44 @@
-import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.js";
+import { appendJsonlRecord as appendJsonlRecordInternal } from "./jsonl.ts";
 import {
   addMeal as addMealInternal,
   importDeviceBatch as importDeviceBatchInternal,
   importDocument as importDocumentInternal,
   importSamples as importSamplesInternal,
-} from "./mutations.js";
+} from "./mutations.ts";
 import {
   promoteInboxExperimentNote as promoteInboxExperimentNoteInternal,
   promoteInboxJournal as promoteInboxJournalInternal,
-} from "./canonical-mutations.js";
+} from "./canonical-mutations.ts";
 import {
   acquireCanonicalWriteLock,
   inspectCanonicalWriteLock,
-} from "./operations/canonical-write-lock.js";
-import { runCanonicalWrite } from "./operations/write-batch.js";
-import { copyRawArtifact as copyRawArtifactInternal } from "./raw.js";
-import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.js";
-import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.js";
-import { upsertCondition as upsertConditionInternal } from "./bank/conditions.js";
-import { deleteFood as deleteFoodInternal, upsertFood as upsertFoodInternal } from "./bank/foods.js";
-import { upsertGoal as upsertGoalInternal } from "./bank/goals.js";
-import { deleteProvider as deleteProviderInternal, upsertProvider as upsertProviderInternal } from "./bank/providers.js";
-import { deleteRecipe as deleteRecipeInternal, upsertRecipe as upsertRecipeInternal } from "./bank/recipes.js";
-import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.js";
+} from "./operations/canonical-write-lock.ts";
+import { runCanonicalWrite } from "./operations/write-batch.ts";
+import { copyRawArtifact as copyRawArtifactInternal } from "./raw.ts";
+import { importAssessmentResponse as importAssessmentResponseInternal } from "./assessment/storage.ts";
+import { upsertAllergy as upsertAllergyInternal } from "./bank/allergies.ts";
+import { upsertCondition as upsertConditionInternal } from "./bank/conditions.ts";
+import { deleteFood as deleteFoodInternal, upsertFood as upsertFoodInternal } from "./bank/foods.ts";
+import { upsertGoal as upsertGoalInternal } from "./bank/goals.ts";
+import { deleteProvider as deleteProviderInternal, upsertProvider as upsertProviderInternal } from "./bank/providers.ts";
+import { deleteRecipe as deleteRecipeInternal, upsertRecipe as upsertRecipeInternal } from "./bank/recipes.ts";
+import { upsertWorkoutFormat as upsertWorkoutFormatInternal } from "./bank/workout-formats.ts";
 import {
   stopProtocolItem as stopProtocolItemInternal,
   upsertProtocolItem as upsertProtocolItemInternal,
-} from "./bank/protocols.js";
-import { upsertFamilyMember as upsertFamilyMemberInternal } from "./family/api.js";
-import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics/api.js";
+} from "./bank/protocols.ts";
+import { upsertFamilyMember as upsertFamilyMemberInternal } from "./family/api.ts";
+import { upsertGeneticVariant as upsertGeneticVariantInternal } from "./genetics/api.ts";
 import {
   appendBloodTest as appendBloodTestInternal,
   appendHistoryEvent as appendHistoryEventInternal,
-} from "./history/api.js";
+} from "./history/api.ts";
 import {
   checkpointExperiment as checkpointExperimentInternal,
   createExperiment as createExperimentInternal,
   stopExperiment as stopExperimentInternal,
   updateExperiment as updateExperimentInternal,
-} from "./domains/experiments.js";
+} from "./domains/experiments.ts";
 import {
   appendJournal as appendJournalInternal,
   ensureJournalDay as ensureJournalDayInternal,
@@ -46,22 +46,22 @@ import {
   linkJournalStreams as linkJournalStreamsInternal,
   unlinkJournalEventIds as unlinkJournalEventIdsInternal,
   unlinkJournalStreams as unlinkJournalStreamsInternal,
-} from "./domains/journal.js";
-import { deleteEvent as deleteEventInternal, upsertEvent as upsertEventInternal } from "./domains/events.js";
-import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.js";
+} from "./domains/journal.ts";
+import { deleteEvent as deleteEventInternal, upsertEvent as upsertEventInternal } from "./domains/events.ts";
+import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
 import {
   appendProfileSnapshot as appendProfileSnapshotInternal,
   rebuildCurrentProfile as rebuildCurrentProfileInternal,
-} from "./profile/storage.js";
-import { VaultError } from "./errors.js";
+} from "./profile/storage.ts";
+import { VaultError } from "./errors.ts";
 import {
   initializeVault as initializeVaultInternal,
   loadVault as loadVaultInternal,
   repairVault as repairVaultInternal,
   validateVault as validateVaultInternal,
-} from "./vault.js";
+} from "./vault.ts";
 
-import type { DateInput, ValidationIssue } from "./types.js";
+import type { DateInput, ValidationIssue } from "./types.ts";
 
 export interface CanonicalTextWriteInput {
   relativePath: string;

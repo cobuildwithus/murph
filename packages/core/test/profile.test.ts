@@ -10,7 +10,7 @@ import {
   readCurrentProfile,
   readJsonlRecords,
   rebuildCurrentProfile,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 type AuditRecordShape = {
   action?: string;

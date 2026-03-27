@@ -3,7 +3,7 @@ import path from "node:path";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
 
-import type { HostedExecutionBundleKind } from "./hosted-execution.js";
+import type { HostedExecutionBundleKind } from "./hosted-execution.ts";
 
 export const HOSTED_BUNDLE_SCHEMA = "healthybob.hosted-bundle.v1";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;

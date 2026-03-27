@@ -8,11 +8,71 @@ import {
   prepareDeviceProviderSnapshotImport,
   type DeviceBatchImportPayload,
   type DeviceProviderAdapter,
-} from "../src/index.js";
+  type DeviceProviderSnapshotImportPayload,
+  type NormalizedDeviceBatch,
+} from "../src/index.ts";
+import {
+  makeNormalizedDeviceBatch,
+  type NormalizedDeviceBatchOptions,
+} from "../src/device-providers/shared-normalization.ts";
+
+type AssertTrue<T extends true> = T;
+type IsMutuallyAssignable<A, B> =
+  [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+type _normalizedDeviceBatchMatchesCorePayload = AssertTrue<
+  IsMutuallyAssignable<NormalizedDeviceBatch, Omit<DeviceBatchImportPayload, "vaultRoot">>
+>;
+type _normalizedDeviceBatchOptionsOmitSource = AssertTrue<
+  IsMutuallyAssignable<NormalizedDeviceBatchOptions, Omit<NormalizedDeviceBatch, "source">>
+>;
+type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertTrue<
+  IsMutuallyAssignable<
+    DeviceProviderSnapshotImportPayload,
+    DeviceBatchImportPayload & { snapshot: unknown }
+  >
+>;
+
+test("makeNormalizedDeviceBatch preserves the canonical device payload shape and hardcodes device source", () => {
+  const options: NormalizedDeviceBatchOptions = {
+    provider: "polar",
+    accountId: "polar-user-1",
+    importedAt: "2026-03-16T12:00:00.000Z",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-03-16T12:00:00.000Z",
+        title: "Polar daily steps",
+        fields: {
+          metric: "daily-steps",
+          value: 12345,
+          unit: "count",
+        },
+      },
+    ],
+    provenance: {
+      importedSections: {
+        dailySummaries: 1,
+      },
+    },
+  };
+
+  const payload: DeviceBatchImportPayload = {
+    vaultRoot: "fixture-vault",
+    ...makeNormalizedDeviceBatch(options),
+  };
+
+  assert.deepEqual(payload, {
+    vaultRoot: "fixture-vault",
+    ...options,
+    source: "device",
+  });
+});
 
 test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canonical device payloads", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "whoop",
+    vaultRoot: "canonical-vault",
     vault: "fixture-vault",
     snapshot: {
       accountId: "whoop-user-1",
@@ -88,7 +148,7 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
     },
   });
 
-  assert.equal(payload.vaultRoot, "fixture-vault");
+  assert.equal(payload.vaultRoot, "canonical-vault");
   assert.equal(payload.provider, "whoop");
   assert.equal(payload.accountId, "whoop-user-1");
   assert.equal(payload.source, "device");
@@ -910,6 +970,74 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
   assert.equal(calls[0]?.provider, "whoop");
   assert.ok(calls[0]?.events?.some((event) => event.kind === "observation"));
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "recovery:sleep-2"));
+});
+
+test("importDeviceProviderSnapshot strips snapshot input fields before delegating to core and falls back from blank vaultRoot", async () => {
+  const registry = createDeviceProviderRegistry();
+  const calls: DeviceBatchImportPayload[] = [];
+
+  registry.register({
+    provider: "polar",
+    normalizeSnapshot() {
+      return makeNormalizedDeviceBatch({
+        provider: "polar",
+        accountId: "polar-user-2",
+        events: [
+          {
+            kind: "observation",
+            occurredAt: "2026-03-16T12:00:00.000Z",
+            title: "Polar daily steps",
+            fields: {
+              metric: "daily-steps",
+              value: 4321,
+              unit: "count",
+            },
+          },
+        ],
+      });
+    },
+  });
+
+  await importDeviceProviderSnapshot(
+    {
+      provider: "polar",
+      vaultRoot: "   ",
+      vault: "fixture-vault",
+      snapshot: {
+        importedAt: "2026-03-16T12:05:00.000Z",
+      },
+    },
+    {
+      corePort: {
+        async importDeviceBatch(payload: DeviceBatchImportPayload) {
+          calls.push(payload);
+          return { ok: true };
+        },
+      },
+      providerRegistry: registry,
+    },
+  );
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    vaultRoot: "fixture-vault",
+    provider: "polar",
+    accountId: "polar-user-2",
+    source: "device",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-03-16T12:00:00.000Z",
+        title: "Polar daily steps",
+        fields: {
+          metric: "daily-steps",
+          value: 4321,
+          unit: "count",
+        },
+      },
+    ],
+  });
+  assert.equal("snapshot" in (calls[0] as Record<string, unknown>), false);
 });
 
 test("createImporters composes custom device providers behind the same core seam", async () => {

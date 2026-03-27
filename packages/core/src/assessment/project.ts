@@ -1,9 +1,9 @@
-import { emitAuditRecord } from "../audit.js";
-import { toIsoTimestamp } from "../time.js";
-import { isPlainRecord } from "../types.js";
-import { VaultError } from "../errors.js";
+import { emitAuditRecord } from "../audit.ts";
+import { toIsoTimestamp } from "../time.ts";
+import { isPlainRecord } from "../types.ts";
+import { VaultError } from "../errors.ts";
 
-import type { UnknownRecord } from "../types.js";
+import type { UnknownRecord } from "../types.ts";
 import type {
   AllergyProposal,
   AssessmentProposalSource,
@@ -16,8 +16,8 @@ import type {
   HistoryEventProposal,
   ProfileSnapshotProposal,
   ProtocolProposal,
-} from "./types.js";
-import { readAssessmentResponse } from "./storage.js";
+} from "./types.ts";
+import { readAssessmentResponse } from "./storage.ts";
 
 interface ProjectAssessmentResponseInput {
   vaultRoot?: string;

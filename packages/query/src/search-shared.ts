@@ -1,6 +1,6 @@
 import { extractIsoDatePrefix } from "@healthybob/contracts";
 
-import type { VaultRecord, VaultRecordType } from "./model.js";
+import type { VaultRecord, VaultRecordType } from "./model.ts";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;

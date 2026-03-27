@@ -2,22 +2,22 @@ import path from "node:path";
 import { constants as fsConstants } from "node:fs";
 import { promises as fs } from "node:fs";
 
-import { VaultError } from "./errors.js";
+import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
   normalizeVaultRoot,
   normalizeRelativeVaultPath,
   resolveVaultPath,
-} from "./path-safety.js";
+} from "./path-safety.ts";
 import {
   applyImmutableWriteTarget,
   applyJsonlAppendTarget,
   applyTextWriteTarget,
   fileContentsEqual,
   prepareVerifiedWriteTarget,
-} from "./write-policy.js";
+} from "./write-policy.ts";
 
-import { isErrnoException } from "./types.js";
+import { isErrnoException } from "./types.ts";
 
 interface WriteVaultTextFileOptions {
   overwrite?: boolean;

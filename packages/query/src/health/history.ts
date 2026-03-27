@@ -6,15 +6,15 @@ import {
   matchesLookup,
   matchesStatus,
   matchesText,
-} from "./shared.js";
-import { compareByOccurredAtDescThenId } from "./comparators.js";
-import { readJsonlRecords } from "./loaders.js";
+} from "./shared.ts";
+import { compareByOccurredAtDescThenId } from "./comparators.ts";
+import { readJsonlRecords } from "./loaders.ts";
 import {
   HEALTH_HISTORY_KINDS,
   projectHistoryEntity,
-} from "../canonical-entities.js";
+} from "../canonical-entities.ts";
 
-import type { CanonicalEntity } from "../canonical-entities.js";
+import type { CanonicalEntity } from "../canonical-entities.ts";
 
 export type HealthHistoryKind =
   | "encounter"

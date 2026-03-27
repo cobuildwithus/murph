@@ -31,8 +31,8 @@ import {
   FRONTMATTER_SCHEMA_VERSIONS,
   REQUIRED_DIRECTORIES,
   VAULT_LAYOUT,
-} from "./constants.js";
-import { emitAuditRecord } from "./audit.js";
+} from "./constants.ts";
+import { emitAuditRecord } from "./audit.ts";
 import {
   ensureDirectory,
   ensureVaultDirectory,
@@ -40,24 +40,24 @@ import {
   readJsonFile,
   readUtf8File,
   walkVaultFiles,
-} from "./fs.js";
-import { VaultError } from "./errors.js";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
-import { generateVaultId } from "./ids.js";
-import { readJsonlRecords } from "./jsonl.js";
-import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.js";
+} from "./fs.ts";
+import { VaultError } from "./errors.ts";
+import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
+import { generateVaultId } from "./ids.ts";
+import { readJsonlRecords } from "./jsonl.ts";
+import { normalizeVaultRoot, resolveVaultPath } from "./path-safety.ts";
 import {
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
   runCanonicalWrite,
-} from "./operations/write-batch.js";
-import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.js";
-import { toIsoTimestamp } from "./time.js";
-import { buildVaultMetadata, loadVaultMetadata } from "./vault-metadata.js";
+} from "./operations/write-batch.ts";
+import { buildCurrentProfileMarkdown, listProfileSnapshots } from "./profile/storage.ts";
+import { toIsoTimestamp } from "./time.ts";
+import { buildVaultMetadata, loadVaultMetadata } from "./vault-metadata.ts";
 
-import type { DateInput, UnknownRecord, ValidationIssue } from "./types.js";
-import { isPlainRecord } from "./types.js";
+import type { DateInput, UnknownRecord, ValidationIssue } from "./types.ts";
+import { isPlainRecord } from "./types.ts";
 
 interface BuildCoreDocumentInput {
   vaultId: string;

@@ -8,7 +8,7 @@ import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
 } from "@healthybob/contracts";
-import type { DateInput } from "../types.js";
+import type { DateInput } from "../types.ts";
 
 export type {
   BloodTestReferenceRange,

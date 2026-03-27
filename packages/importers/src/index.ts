@@ -3,13 +3,13 @@ export {
   prepareAssessmentResponseImport,
   type AssessmentImporterExecutionOptions,
   type AssessmentResponseImportInput,
-} from "./assessment/index.js";
-export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.js";
+} from "./assessment/index.ts";
+export type { AssessmentImportPort, AssessmentResponseImportPayload } from "./assessment/core-port.ts";
 export {
   importCsvSamples,
   parseDelimitedRows,
   prepareCsvSampleImport,
-} from "./csv-sample-importer.js";
+} from "./csv-sample-importer.ts";
 export {
   assertCanonicalWritePort,
   type CanonicalWriteMethod,
@@ -27,11 +27,11 @@ export {
   type SampleImportPayload,
   type SampleImportRecord,
   type SampleImportRowProvenance,
-} from "./core-port.js";
-export { createImporters } from "./create-importers.js";
-export { importDocument, prepareDocumentImport } from "./document-importer.js";
-export * from "./device-providers/index.js";
-export { importMeal, prepareMealImport } from "./meal-importer.js";
+} from "./core-port.ts";
+export { createImporters } from "./create-importers.ts";
+export { importDocument, prepareDocumentImport } from "./document-importer.ts";
+export * from "./device-providers/index.ts";
+export { importMeal, prepareMealImport } from "./meal-importer.ts";
 export {
   createSamplePresetRegistry,
   defineSampleImportPreset,
@@ -39,4 +39,4 @@ export {
   type ResolvedSampleImportConfig,
   type SampleImportPreset,
   type SamplePresetRegistry,
-} from "./preset-registry.js";
+} from "./preset-registry.ts";

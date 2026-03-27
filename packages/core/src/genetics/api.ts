@@ -4,8 +4,8 @@ import {
   ID_PREFIXES,
 } from "@healthybob/contracts";
 
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   bulletList,
@@ -16,21 +16,21 @@ import {
   optionalString,
   requireString,
   validateSortedStringList,
-} from "../history/shared.js";
+} from "../history/shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   GeneticVariantRecord,
   ReadGeneticVariantInput,
   UpsertGeneticVariantInput,
   UpsertGeneticVariantResult,
-} from "./types.js";
+} from "./types.ts";
 import {
   GENETIC_VARIANT_DOC_TYPE,
   GENETIC_VARIANT_SCHEMA_VERSION,
   VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES,
-} from "./types.js";
+} from "./types.ts";
 
 const GENETICS_DIRECTORY = "bank/genetics";
 const GENETIC_TITLE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.title;

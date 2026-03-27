@@ -1,13 +1,13 @@
-import type { InboundCapture, PersistedCapture } from "../../contracts/capture.js";
-import { createCaptureCheckpoint, waitForAbortOrTimeout } from "../../shared.js";
-import type { Cursor, EmitCapture, PollConnector } from "../types.js";
-import { normalizeAgentmailMessage } from "./normalize.js";
+import type { InboundCapture, PersistedCapture } from "../../contracts/capture.ts";
+import { createCaptureCheckpoint, waitForAbortOrTimeout } from "../../shared.ts";
+import type { Cursor, EmitCapture, PollConnector } from "../types.ts";
+import { normalizeAgentmailMessage } from "./normalize.ts";
 import type {
   AgentmailAttachmentDownload,
   AgentmailListMessagesResponse,
   AgentmailMessageLike,
   AgentmailThreadLike,
-} from "./types.js";
+} from "./types.ts";
 
 const DEFAULT_AGENTMAIL_BASE_URL = "https://api.agentmail.to/v0";
 const DEFAULT_EMAIL_POLL_INTERVAL_MS = 15_000;

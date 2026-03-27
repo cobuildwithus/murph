@@ -1,12 +1,12 @@
 import {
   readMarkdownDocument,
   walkRelativeFiles,
-} from "./health/loaders.js";
+} from "./health/loaders.ts";
 import {
   asObject,
   firstString,
   type FrontmatterObject,
-} from "./health/shared.js";
+} from "./health/shared.ts";
 
 export type HealthLibraryEntityType =
   | "mission"

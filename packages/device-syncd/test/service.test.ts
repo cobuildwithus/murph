@@ -5,9 +5,9 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.js";
-import { createDeviceSyncService } from "../src/service.js";
-import { SqliteDeviceSyncStore } from "../src/store.js";
+import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { createDeviceSyncService } from "../src/service.ts";
+import { SqliteDeviceSyncStore } from "../src/store.ts";
 
 import type {
   DeviceSyncAccount,
@@ -15,7 +15,7 @@ import type {
   DeviceSyncJobRecord,
   DeviceSyncProvider,
   ProviderAuthTokens,
-} from "../src/types.js";
+} from "../src/types.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));

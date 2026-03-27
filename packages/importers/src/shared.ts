@@ -75,6 +75,18 @@ export function optionalTrimmedStringSchema(
     });
 }
 
+export const vaultRootAliasSchemaFields = {
+  vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
+  vault: optionalTrimmedStringSchema("vault"),
+} satisfies z.ZodRawShape;
+
+export function resolveVaultRootAlias<T>(value: {
+  vaultRoot?: T;
+  vault?: T;
+}): T | undefined {
+  return value.vaultRoot ?? value.vault;
+}
+
 export function optionalStringListSchema(label: string): z.ZodType<string[]> {
   return z
     .custom<readonly string[] | undefined | null>(

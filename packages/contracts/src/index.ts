@@ -1,21 +1,21 @@
-export * from "./command-capabilities.js";
-export * from "./constants.js";
-export * from "./examples.js";
-export * from "./frontmatter.js";
-export * from "./health-entities.js";
-export * from "./ids.js";
-export * from "./shares.js";
-export * from "./time.js";
-export * from "./types.js";
-export * from "./validate.js";
-export * from "./zod.js";
+export * from "./command-capabilities.ts";
+export * from "./constants.ts";
+export * from "./examples.ts";
+export * from "./frontmatter.ts";
+export * from "./health-entities.ts";
+export * from "./ids.ts";
+export * from "./shares.ts";
+export * from "./time.ts";
+export * from "./types.ts";
+export * from "./validate.ts";
+export * from "./zod.ts";
 
 export {
   parseFrontmatterDocument,
   parseFrontmatterScalar,
-} from "./frontmatter.js";
+} from "./frontmatter.ts";
 export {
   deriveProtocolGroupFromRelativePath,
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
-} from "./health-entities.js";
+} from "./health-entities.ts";

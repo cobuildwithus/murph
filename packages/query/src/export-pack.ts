@@ -1,9 +1,9 @@
-import { readHealthContextTolerant } from "./export-pack-health.js";
-import type { FrontmatterObject } from "./health/shared.js";
-import { getExperiment, listJournalEntries, listRecords } from "./model.js";
-import type { VaultReadModel, VaultRecord } from "./model.js";
-import { summarizeDailySamples } from "./summaries.js";
-import type { DailySampleSummary } from "./summaries.js";
+import { readHealthContextTolerant } from "./export-pack-health.ts";
+import type { FrontmatterObject } from "./health/shared.ts";
+import { getExperiment, listJournalEntries, listRecords } from "./model.ts";
+import type { VaultReadModel, VaultRecord } from "./model.ts";
+import { summarizeDailySamples } from "./summaries.ts";
+import type { DailySampleSummary } from "./summaries.ts";
 
 export interface ExportPackFile {
   path: string;

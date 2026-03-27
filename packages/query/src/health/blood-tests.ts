@@ -10,9 +10,9 @@ import {
   matchesLookup,
   matchesStatus,
   matchesText,
-} from "./shared.js";
-import { compareByOccurredAtDescThenId } from "./comparators.js";
-import { listHistoryEvents, toHistoryRecord, type HistoryQueryRecord } from "./history.js";
+} from "./shared.ts";
+import { compareByOccurredAtDescThenId } from "./comparators.ts";
+import { listHistoryEvents, toHistoryRecord, type HistoryQueryRecord } from "./history.ts";
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
 

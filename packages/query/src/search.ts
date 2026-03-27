@@ -1,4 +1,4 @@
-import type { VaultReadModel } from "./model.js";
+import type { VaultReadModel } from "./model.ts";
 import {
   materializeSearchDocuments,
   scoreSearchDocuments,
@@ -8,9 +8,9 @@ import {
   type SearchFilters,
   type SearchHit,
   type SearchResult,
-} from "./search-shared.js";
+} from "./search-shared.ts";
 
-export { scoreSearchDocuments } from "./search-shared.js";
+export { scoreSearchDocuments } from "./search-shared.ts";
 export type {
   SearchCitation,
   SearchDocument,
@@ -18,7 +18,7 @@ export type {
   SearchFilters,
   SearchHit,
   SearchResult,
-} from "./search-shared.js";
+} from "./search-shared.ts";
 
 export function searchVault(
   vault: VaultReadModel,

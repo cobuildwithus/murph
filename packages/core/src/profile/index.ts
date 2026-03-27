@@ -3,7 +3,7 @@ export {
   listProfileSnapshots,
   readCurrentProfile,
   rebuildCurrentProfile,
-} from "./storage.js";
+} from "./storage.ts";
 
 export type {
   AppendProfileSnapshotInput,
@@ -11,10 +11,10 @@ export type {
   ProfileSnapshotRecord,
   ProfileSnapshotSource,
   RebuiltCurrentProfile,
-} from "./types.js";
+} from "./types.ts";
 
 export {
   PROFILE_CURRENT_DOCUMENT_PATH,
   PROFILE_SNAPSHOT_LEDGER_DIRECTORY,
   PROFILE_SNAPSHOT_SCHEMA_VERSION,
-} from "./types.js";
+} from "./types.ts";

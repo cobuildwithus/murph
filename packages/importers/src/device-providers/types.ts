@@ -1,20 +1,6 @@
-import type {
-  DeviceBatchImportPayload,
-  DeviceEventPayload,
-  DeviceRawArtifactPayload,
-  DeviceSamplePayload,
-} from "../core-port.js";
+import type { DeviceBatchImportPayload } from "../core-port.ts";
 
-export interface NormalizedDeviceBatch {
-  provider: string;
-  accountId?: string;
-  importedAt?: string;
-  source?: string;
-  events?: DeviceEventPayload[];
-  samples?: DeviceSamplePayload[];
-  rawArtifacts?: DeviceRawArtifactPayload[];
-  provenance?: Record<string, unknown>;
-}
+export interface NormalizedDeviceBatch extends Omit<DeviceBatchImportPayload, "vaultRoot"> {}
 
 export interface DeviceProviderAdapter<TSnapshot = unknown> {
   provider: string;

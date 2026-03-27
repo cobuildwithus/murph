@@ -4,10 +4,10 @@ import {
   toLocalDayKey as toLocalDayKeyShared,
 } from "@healthybob/contracts";
 
-import { DEFAULT_TIMEZONE } from "./constants.js";
-import { VaultError } from "./errors.js";
+import { DEFAULT_TIMEZONE } from "./constants.ts";
+import { VaultError } from "./errors.ts";
 
-import type { DateInput } from "./types.js";
+import type { DateInput } from "./types.ts";
 
 export function coerceDate(value: DateInput | undefined, fieldName = "date"): Date {
   const candidate = value === undefined ? new Date() : value;

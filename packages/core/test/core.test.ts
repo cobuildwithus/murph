@@ -61,19 +61,19 @@ import {
   upsertProvider,
   validateVault,
   VaultError,
-} from "../src/index.js";
+} from "../src/index.ts";
 import {
   appendVaultTextFile,
   copyImmutableFileIntoVaultRaw,
   writeImmutableJsonFileIntoVaultRaw,
   writeVaultTextFile,
-} from "../src/fs.js";
+} from "../src/fs.ts";
 import {
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
   WriteBatch,
   WRITE_OPERATION_SCHEMA_VERSION,
-} from "../src/operations/index.js";
+} from "../src/operations/index.ts";
 import {
   ASSESSMENT_RESPONSE_SCHEMA_VERSION as CORE_ASSESSMENT_RESPONSE_SCHEMA_VERSION,
   AUDIT_ACTORS as CORE_AUDIT_ACTORS,
@@ -92,7 +92,7 @@ import {
   SAMPLE_SCHEMA_VERSION as CORE_SAMPLE_SCHEMA_VERSION,
   SAMPLE_SOURCES as CORE_SAMPLE_SOURCES,
   VAULT_SCHEMA_VERSION as CORE_VAULT_SCHEMA_VERSION,
-} from "../src/constants.js";
+} from "../src/constants.ts";
 
 function expectRecord<T>(value: unknown): T {
   return value as T;

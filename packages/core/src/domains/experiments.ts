@@ -8,18 +8,18 @@ import {
   safeParseContract,
 } from "@healthybob/contracts";
 
-import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
-import { emitAuditRecord } from "../audit.js";
-import { VaultError } from "../errors.js";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.js";
-import { readUtf8File } from "../fs.js";
-import { generateRecordId } from "../ids.js";
-import { toMonthlyShardRelativePath } from "../jsonl.js";
-import { sanitizePathSegment } from "../path-safety.js";
-import { defaultTimeZone, toIsoTimestamp, toLocalDayKey } from "../time.js";
-import { loadVault } from "../vault.js";
+import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
+import { emitAuditRecord } from "../audit.ts";
+import { VaultError } from "../errors.ts";
+import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { readUtf8File } from "../fs.ts";
+import { generateRecordId } from "../ids.ts";
+import { toMonthlyShardRelativePath } from "../jsonl.ts";
+import { sanitizePathSegment } from "../path-safety.ts";
+import { defaultTimeZone, toIsoTimestamp, toLocalDayKey } from "../time.ts";
+import { loadVault } from "../vault.ts";
 
-import { buildExperimentEventRecord } from "./events.js";
+import { buildExperimentEventRecord } from "./events.ts";
 import {
   compactObject,
   normalizeOptionalText,
@@ -28,10 +28,10 @@ import {
   runLoadedCanonicalWrite,
   uniqueTrimmedStringList,
   validateContract,
-} from "./shared.js";
+} from "./shared.ts";
 
 import type { ExperimentEventRecord } from "@healthybob/contracts";
-import type { DateInput, FrontmatterObject, UnknownRecord } from "../types.js";
+import type { DateInput, FrontmatterObject, UnknownRecord } from "../types.ts";
 
 export interface CreateExperimentInput {
   vaultRoot: string;

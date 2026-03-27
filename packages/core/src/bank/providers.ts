@@ -1,25 +1,25 @@
 import type { ProviderFrontmatter } from "@healthybob/contracts";
 import { CONTRACT_SCHEMA_VERSION, providerFrontmatterSchema } from "@healthybob/contracts";
 
-import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
-import { VaultError } from "../errors.js";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.js";
-import { generateRecordId } from "../ids.js";
+import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
+import { VaultError } from "../errors.ts";
+import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { generateRecordId } from "../ids.ts";
 import {
   compactObject,
   ensureMarkdownHeading,
   normalizeOptionalText,
   uniqueTrimmedStringList,
   validateContract,
-} from "../domains/shared.js";
-import { runCanonicalWrite } from "../operations/write-batch.js";
+} from "../domains/shared.ts";
+import { runCanonicalWrite } from "../operations/write-batch.ts";
 import {
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
-} from "../registry/markdown.js";
-import { loadVault } from "../vault.js";
+} from "../registry/markdown.ts";
+import { loadVault } from "../vault.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 
 export interface ProviderRecord extends ProviderFrontmatter {
   relativePath: string;

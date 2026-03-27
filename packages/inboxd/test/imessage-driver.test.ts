@@ -47,7 +47,7 @@ vi.mock("@photon-ai/imessage-kit", () => ({
   },
 }));
 
-import { loadImessageKitDriver } from "../src/connectors/imessage/connector.js";
+import { loadImessageKitDriver } from "../src/connectors/imessage/connector.ts";
 
 afterEach(() => {
   imessageMocks.closeCalls = 0;

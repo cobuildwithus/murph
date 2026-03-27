@@ -1,9 +1,9 @@
-import { VAULT_LAYOUT } from "./constants.js";
-import { copyImmutableFileIntoVaultRaw } from "./fs.js";
-import { basenameFromFilePath, sanitizeFileName, sanitizePathSegment } from "./path-safety.js";
-import { toIsoTimestamp } from "./time.js";
+import { VAULT_LAYOUT } from "./constants.ts";
+import { copyImmutableFileIntoVaultRaw } from "./fs.ts";
+import { basenameFromFilePath, sanitizeFileName, sanitizePathSegment } from "./path-safety.ts";
+import { toIsoTimestamp } from "./time.ts";
 
-import type { DateInput } from "./types.js";
+import type { DateInput } from "./types.ts";
 
 interface CopyRawArtifactInput {
   vaultRoot: string;

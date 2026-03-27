@@ -3,15 +3,15 @@ import {
   type FrontmatterParseProblem,
 } from "@healthybob/contracts";
 
-import { VaultError } from "./errors.js";
+import { VaultError } from "./errors.ts";
 
-import { isPlainRecord } from "./types.js";
+import { isPlainRecord } from "./types.ts";
 
 import type {
   FrontmatterDocument,
   FrontmatterObject,
   FrontmatterValue,
-} from "./types.js";
+} from "./types.ts";
 
 function isFrontmatterObject(value: unknown): value is FrontmatterObject {
   return isPlainRecord(value);

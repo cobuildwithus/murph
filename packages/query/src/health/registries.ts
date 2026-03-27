@@ -20,21 +20,21 @@ import {
   matchesStatus,
   matchesText,
   pathSlug,
-} from "./shared.js";
+} from "./shared.ts";
 import {
   projectRegistryEntity,
   type CanonicalEntityFamily,
-} from "../canonical-entities.js";
+} from "../canonical-entities.ts";
 import {
   readMarkdownDocument,
   walkRelativeFiles,
-} from "./loaders.js";
+} from "./loaders.ts";
 
 import type {
   FrontmatterObject,
   MarkdownDocumentRecord,
-} from "./shared.js";
-import type { CanonicalEntity } from "../canonical-entities.js";
+} from "./shared.ts";
+import type { CanonicalEntity } from "../canonical-entities.ts";
 
 export interface RegistryMarkdownRecord {
   id: string;

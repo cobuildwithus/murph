@@ -6,7 +6,7 @@ import { test, vi } from "vitest";
 
 import type { EventRecord, ExperimentEventRecord } from "@healthybob/contracts";
 
-vi.mock("../src/operations/canonical-write-lock.js", () => ({
+vi.mock("../src/operations/canonical-write-lock.ts", () => ({
   acquireCanonicalWriteLock: async () => ({
     metadata: {
       pid: process.pid,
@@ -42,7 +42,7 @@ import {
   upsertEvent,
   upsertProvider,
   VaultError,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));

@@ -1,12 +1,14 @@
-import { VaultError } from "../errors.js";
-import { generateRecordId } from "../ids.js";
-import { defaultTimeZone, toLocalDayKey } from "../time.js";
-import { loadVault } from "../vault.js";
+import type { ProtocolUpsertPayload } from "@healthybob/contracts";
+
+import { VaultError } from "../errors.ts";
+import { generateRecordId } from "../ids.ts";
+import { defaultTimeZone, toLocalDayKey } from "../time.ts";
+import { loadVault } from "../vault.ts";
 import {
   loadMarkdownRegistryDocuments,
   resolveMarkdownRegistryUpsertTarget,
   writeMarkdownRegistryRecord,
-} from "../registry/markdown.js";
+} from "../registry/markdown.ts";
 
 import {
   PROTOCOL_DOC_TYPE,
@@ -14,7 +16,7 @@ import {
   PROTOCOLS_DIRECTORY,
   PROTOCOL_SCHEMA_VERSION,
   PROTOCOL_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildMarkdownBody,
   detailList,
@@ -36,9 +38,9 @@ import {
   section,
   stripUndefined,
   normalizeId,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   ReadProtocolItemInput,
   ProtocolItemRecord,
@@ -47,7 +49,7 @@ import type {
   StopProtocolItemResult,
   UpsertProtocolItemInput,
   UpsertProtocolItemResult,
-} from "./types.js";
+} from "./types.ts";
 
 function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
   if (value === undefined || value === null) {
@@ -205,11 +207,10 @@ function parseProtocolItemRecord(
   });
 }
 
-function buildAttributes(record: ProtocolItemRecord): FrontmatterObject {
+export function protocolRecordToUpsertPayload(
+  record: ProtocolItemRecord,
+): Omit<ProtocolUpsertPayload, "protocolId"> {
   return stripUndefined({
-    schemaVersion: PROTOCOL_SCHEMA_VERSION,
-    docType: PROTOCOL_DOC_TYPE,
-    protocolId: record.protocolId,
     slug: record.slug,
     title: record.title,
     kind: record.kind,
@@ -235,6 +236,18 @@ function buildAttributes(record: ProtocolItemRecord): FrontmatterObject {
     ),
     relatedGoalIds: record.relatedGoalIds,
     relatedConditionIds: record.relatedConditionIds,
+    group: record.group,
+  }) as Omit<ProtocolUpsertPayload, "protocolId">;
+}
+
+function buildAttributes(record: ProtocolItemRecord): FrontmatterObject {
+  const { group: _group, ...payload } = protocolRecordToUpsertPayload(record);
+
+  return stripUndefined({
+    schemaVersion: PROTOCOL_SCHEMA_VERSION,
+    docType: PROTOCOL_DOC_TYPE,
+    protocolId: record.protocolId,
+    ...payload,
   }) as FrontmatterObject;
 }
 

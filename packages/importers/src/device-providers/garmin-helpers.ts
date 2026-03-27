@@ -1,20 +1,21 @@
-import { stripEmptyObject, stripUndefined } from "../shared.js";
+import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
   createRawArtifact,
   finiteNumber,
+  makeProviderExternalRef,
   pushRawArtifact,
   slugify,
   stringId,
   toIso,
-} from "./shared-normalization.js";
+} from "./shared-normalization.ts";
 
 import type {
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
-} from "../core-port.js";
-import type { PlainObject } from "./shared-normalization.js";
+} from "../core-port.ts";
+import type { PlainObject } from "./shared-normalization.ts";
 
 export function asObjectArray(value: unknown): PlainObject[] {
   return asArray(value)
@@ -214,13 +215,7 @@ export function makeGarminExternalRef(
   version?: string,
   facet?: string,
 ): DeviceExternalRefPayload {
-  return stripUndefined({
-    system: "garmin",
-    resourceType,
-    resourceId,
-    version,
-    facet,
-  });
+  return makeProviderExternalRef("garmin", resourceType, resourceId, version, facet);
 }
 
 export interface GarminArtifactOptions {

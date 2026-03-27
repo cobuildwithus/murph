@@ -7,7 +7,7 @@ import {
   parseInputObject,
   requiredTrimmedStringSchema,
   stripUndefined,
-} from "./shared.js";
+} from "./shared.ts";
 
 export interface SampleImportPreset {
   id: string;

@@ -9,12 +9,12 @@ import {
   createNormalizedChatPollConnector,
   type ChatPollDriver,
   type ChatPollMessagePage,
-} from "../chat/poll.js";
+} from "../chat/poll.ts";
 import {
   type ImessageKitChatLike,
   type ImessageKitMessageLike,
   normalizeImessageMessage,
-} from "./normalize.js";
+} from "./normalize.ts";
 
 const MAX_EAGER_IMESSAGE_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 

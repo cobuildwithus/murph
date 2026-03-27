@@ -1,6 +1,6 @@
-import type { PollConnector } from "../connectors/types.js";
-import type { InboxPipeline } from "./pipeline.js";
-import { createCaptureCheckpoint, relayAbort, waitForAbortOrTimeout } from "../shared.js";
+import type { PollConnector } from "../connectors/types.ts";
+import type { InboxPipeline } from "./pipeline.ts";
+import { createCaptureCheckpoint, relayAbort, waitForAbortOrTimeout } from "../shared.ts";
 
 const DEFAULT_CONNECTOR_RESTART_BACKOFF_MS = Object.freeze([1_000, 5_000, 15_000, 30_000]);
 const DEFAULT_CONNECTOR_RESTART_DELAY_MS = 1_000;

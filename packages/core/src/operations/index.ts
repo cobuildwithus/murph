@@ -3,12 +3,12 @@ export {
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   inspectCanonicalWriteLock,
-} from "./canonical-write-lock.js";
+} from "./canonical-write-lock.ts";
 export type {
   CanonicalWriteLockHandle,
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,
-} from "./canonical-write-lock.js";
+} from "./canonical-write-lock.ts";
 export {
   isTerminalWriteOperationStatus,
   listWriteOperationMetadataPaths,
@@ -17,4 +17,4 @@ export {
   WriteBatch,
   WRITE_OPERATION_DIRECTORY,
   WRITE_OPERATION_SCHEMA_VERSION,
-} from "./write-batch.js";
+} from "./write-batch.ts";

@@ -1,11 +1,12 @@
-import { stripEmptyObject, stripUndefined } from "../shared.js";
+import { stripEmptyObject } from "../shared.ts";
 import {
   asPlainObject,
+  makeNormalizedDeviceBatch,
   pushDeletionObservation as pushSharedDeletionObservation,
   slugify,
   stringId,
   toIso,
-} from "./shared-normalization.js";
+} from "./shared-normalization.ts";
 import {
   asObjectArray,
   firstIdentifierFromPaths,
@@ -13,25 +14,25 @@ import {
   firstString,
   makeGarminExternalRef,
   pushGarminArtifact,
-} from "./garmin-helpers.js";
+} from "./garmin-helpers.ts";
 import {
   normalizeGarminActivities,
   normalizeGarminActivityFiles,
-} from "./garmin-activity-normalizers.js";
+} from "./garmin-activity-normalizers.ts";
 import {
   normalizeGarminDailySummaries,
   normalizeGarminEpochSummaries,
   normalizeGarminSleeps,
   normalizeGarminWomenHealth,
-} from "./garmin-health-normalizers.js";
+} from "./garmin-health-normalizers.ts";
 
 import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
-} from "../core-port.js";
-import type { PlainObject } from "./shared-normalization.js";
-import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
+} from "../core-port.ts";
+import type { PlainObject } from "./shared-normalization.ts";
+import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 
 export interface GarminSnapshotInput {
   accountId?: string | number;
@@ -144,11 +145,10 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
     },
   });
 
-  return stripUndefined({
+  return makeNormalizedDeviceBatch({
     provider: "garmin",
     accountId,
     importedAt,
-    source: "device",
     events,
     samples,
     rawArtifacts,

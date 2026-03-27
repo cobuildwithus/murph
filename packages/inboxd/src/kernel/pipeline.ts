@@ -1,5 +1,5 @@
-import type { InboundCapture, PersistedCapture } from "../contracts/capture.js";
-import type { InboxRuntimeStore } from "./sqlite.js";
+import type { InboundCapture, PersistedCapture } from "../contracts/capture.ts";
+import type { InboxRuntimeStore } from "./sqlite.ts";
 import {
   appendImportAudit,
   appendInboxCaptureEvent,
@@ -7,8 +7,8 @@ import {
   ensureInboxVault,
   findStoredCaptureEnvelope,
   persistRawCapture,
-} from "../indexing/persist.js";
-import { createDeterministicInboxCaptureId, generatePrefixedId } from "../shared.js";
+} from "../indexing/persist.ts";
+import { createDeterministicInboxCaptureId, generatePrefixedId } from "../shared.ts";
 
 export interface PipelineContext {
   vaultRoot: string;

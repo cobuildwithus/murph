@@ -1,7 +1,7 @@
 import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-} from "./contracts.js";
+} from "./contracts.ts";
 
 const HMAC_ALGORITHM = "HMAC";
 const HMAC_HASH = "SHA-256";

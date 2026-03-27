@@ -2,18 +2,18 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, type ApiClientOptions, type RawApi } from "grammy";
-import { relayAbort } from "../../shared.js";
+import { relayAbort } from "../../shared.ts";
 import {
   createNormalizedChatPollConnector,
   type ChatPollDriver,
-} from "../chat/poll.js";
-import { normalizeTelegramUpdate, type TelegramAttachmentDownloadDriver } from "./normalize.js";
+} from "../chat/poll.ts";
+import { normalizeTelegramUpdate, type TelegramAttachmentDownloadDriver } from "./normalize.ts";
 import type {
   TelegramFile,
   TelegramUpdateLike,
   TelegramUser,
   TelegramWebhookInfo,
-} from "./types.js";
+} from "./types.ts";
 
 export const DEFAULT_TELEGRAM_ALLOWED_UPDATES = [
   "message",

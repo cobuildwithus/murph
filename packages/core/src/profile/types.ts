@@ -1,4 +1,4 @@
-import type { UnknownRecord } from "../types.js";
+import type { UnknownRecord } from "../types.ts";
 
 export const PROFILE_SNAPSHOT_SCHEMA_VERSION = "hb.profile-snapshot.v1";
 export const PROFILE_SNAPSHOT_LEDGER_DIRECTORY = "ledger/profile-snapshots";

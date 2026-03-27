@@ -6,7 +6,7 @@ import { test } from "vitest";
 
 import {
   readHealthLibraryGraph,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(testDir, "../../..");

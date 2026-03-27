@@ -22,7 +22,7 @@ import {
   VAULT_LAYOUT,
 } from "@healthybob/core";
 
-import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.js";
+import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.ts";
 import {
   buildAttachmentId,
   createDeterministicInboxCaptureId,
@@ -38,8 +38,8 @@ import {
   sanitizeSegment,
   sha256File,
   walkNamedFiles,
-} from "../shared.js";
-import type { InboxRuntimeStore } from "../kernel/sqlite.js";
+} from "../shared.ts";
+import type { InboxRuntimeStore } from "../kernel/sqlite.ts";
 
 const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";

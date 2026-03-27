@@ -1,11 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import type { EmitCapture, PollConnector } from '../types.js'
-import { normalizeLinqWebhookEvent, type LinqAttachmentDownloadDriver } from './normalize.js'
+import type { EmitCapture, PollConnector } from '../types.ts'
+import { normalizeLinqWebhookEvent, type LinqAttachmentDownloadDriver } from './normalize.ts'
 import {
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   verifyAndParseLinqWebhookRequest,
-} from './webhook.js'
+} from './webhook.ts'
 
 const DEFAULT_LINQ_WEBHOOK_HOST = '0.0.0.0'
 const DEFAULT_LINQ_WEBHOOK_PATH = '/linq-webhook'

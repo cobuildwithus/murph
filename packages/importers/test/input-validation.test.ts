@@ -6,11 +6,12 @@ import { test } from "vitest";
 
 import {
   defineSampleImportPreset,
+  importAssessmentResponse,
   prepareAssessmentResponseImport,
   prepareDocumentImport,
   prepareMealImport,
   resolveSampleImportConfig,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "healthybob-importers-zod-"));
@@ -85,6 +86,7 @@ test("prepareDocumentImport parses and normalizes object input with zod", async 
 
   const payload = await prepareDocumentImport({
     filePath: `  ${filePath}  `,
+    vaultRoot: "  canonical-vault  ",
     vault: "  fixture-vault  ",
     title: "  Annual Labs  ",
     occurredAt: "2026-03-11T14:00:00-05:00",
@@ -93,11 +95,46 @@ test("prepareDocumentImport parses and normalizes object input with zod", async 
   });
 
   assert.deepEqual(payload, {
-    vaultRoot: "fixture-vault",
+    vaultRoot: "canonical-vault",
     sourcePath: filePath,
     title: "Annual Labs",
     occurredAt: "2026-03-11T19:00:00.000Z",
     note: "annual lab packet",
+    source: "manual",
+  });
+});
+
+test("importAssessmentResponse prefers vaultRoot over vault and normalizes the payload", async () => {
+  const filePath = await createTempFile("assessment.json", "{\"ok\":true}");
+  let receivedPayload: Record<string, unknown> | undefined;
+
+  const result = await importAssessmentResponse<{ ok: boolean }>(
+    {
+      filePath: `  ${filePath}  `,
+      vaultRoot: "  canonical-vault  ",
+      vault: "  legacy-vault  ",
+      title: "  Sleep Survey  ",
+      occurredAt: "2026-03-11T14:00:00-05:00",
+      importedAt: "2026-03-11T19:05:00Z",
+      source: "  manual  ",
+    },
+    {
+      corePort: {
+        async importAssessmentResponse(payload: Record<string, unknown>) {
+          receivedPayload = payload;
+          return { ok: true };
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, { ok: true });
+  assert.deepEqual(receivedPayload, {
+    vaultRoot: "canonical-vault",
+    sourcePath: filePath,
+    title: "Sleep Survey",
+    occurredAt: "2026-03-11T19:00:00.000Z",
+    importedAt: "2026-03-11T19:05:00.000Z",
     source: "manual",
   });
 });

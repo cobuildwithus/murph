@@ -3,29 +3,29 @@ export {
   prepareDeviceProviderSnapshotImport,
   type DeviceProviderImporterExecutionOptions,
   type DeviceProviderSnapshotImportInput,
-} from "./import-device-provider-snapshot.js";
+} from "./import-device-provider-snapshot.ts";
 export {
   createDeviceProviderRegistry,
   type DeviceProviderRegistry,
-} from "./registry.js";
-export { defaultDeviceProviderAdapters } from "./defaults.js";
+} from "./registry.ts";
+export { defaultDeviceProviderAdapters } from "./defaults.ts";
 export {
   normalizeGarminSnapshot,
   garminProviderAdapter,
   type GarminSnapshotInput,
-} from "./garmin.js";
+} from "./garmin.ts";
 export {
   normalizeOuraSnapshot,
   ouraProviderAdapter,
   type OuraSnapshotInput,
-} from "./oura.js";
+} from "./oura.ts";
 export {
   normalizeWhoopSnapshot,
   whoopProviderAdapter,
   type WhoopSnapshotInput,
-} from "./whoop.js";
+} from "./whoop.ts";
 export type {
   DeviceProviderAdapter,
   DeviceProviderSnapshotImportPayload,
   NormalizedDeviceBatch,
-} from "./types.js";
+} from "./types.ts";

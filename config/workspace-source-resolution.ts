@@ -1,131 +1,53 @@
 import path from "node:path";
 
 export type WorkspaceSourceEntryRelativePaths = Readonly<Record<string, string>>;
+export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> = Record<
+  keyof T & string,
+  string
+>;
 
-const SOURCE_EXTENSION_ALIAS: Record<string, string[]> = {
-  ".js": [".ts", ".tsx", ".js"],
-  ".mjs": [".mts", ".mjs"],
-  ".cjs": [".cts", ".cjs"],
-};
-const TURBOPACK_SOURCE_RESOLVE_EXTENSIONS = [
-  ".tsx",
-  ".ts",
-  ".jsx",
-  ".js",
-  ".mts",
-  ".mjs",
-  ".cts",
-  ".cjs",
-  ".json",
-] as const;
-const TURBOPACK_SOURCE_REWRITE_GLOBS = [
-  "*.ts",
-  "*.tsx",
-  "*.mts",
-  "*.cts",
-] as const;
-const TURBOPACK_SOURCE_REWRITE_CONDITION: {
-  all: [
-    { not: "foreign" },
-    {
-      path: RegExp;
-    },
-  ];
-} = {
-  all: [
-    { not: "foreign" },
-    { path: /^packages\/[^/]+\/src\// },
-  ],
+type VitestAlias = {
+  find: RegExp;
+  replacement: string;
 };
 
-export function createWorkspaceSourcePackageNames(
-  relativePaths: WorkspaceSourceEntryRelativePaths,
-): readonly string[] {
-  return Object.freeze(Object.keys(relativePaths));
+export function createWorkspaceSourcePackageNames<T extends WorkspaceSourceEntryRelativePaths>(
+  entryRelativePaths: T,
+): readonly (keyof T & string)[] {
+  return Object.freeze(Object.keys(entryRelativePaths) as (keyof T & string)[]);
 }
 
-export function resolveWorkspaceSourceEntries(
-  configDir: string,
-  relativePaths: WorkspaceSourceEntryRelativePaths,
-): Record<string, string> {
+export function resolveWorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths>(
+  workspaceDir: string,
+  entryRelativePaths: T,
+): WorkspaceSourceEntries<T> {
   return Object.fromEntries(
-    Object.entries(relativePaths).map(([packageName, relativePath]) => [
+    Object.entries(entryRelativePaths).map(([packageName, relativeEntryPath]) => [
       packageName,
-      path.resolve(configDir, relativePath),
+      path.resolve(workspaceDir, relativeEntryPath),
     ]),
-  );
+  ) as WorkspaceSourceEntries<T>;
 }
 
 export function createVitestWorkspaceRuntimeAliases(
-  sourceEntries: Record<string, string>,
-): Array<{
-  find: RegExp;
-  replacement: string;
-}> {
-  return Object.entries(sourceEntries).flatMap(([packageName, entryPath]) => {
-    const sourceDir = path.dirname(entryPath);
-    const escapedPackageName = escapeRegex(packageName);
+  entries: Readonly<Record<string, string>>,
+): VitestAlias[] {
+  return Object.entries(entries).flatMap(([packageName, entryPath]) => {
+    const packageSourceRoot = path.dirname(entryPath);
 
     return [
       {
-        find: new RegExp(`^${escapedPackageName}$`),
+        find: new RegExp(`^${escapeRegExp(packageName)}$`),
         replacement: entryPath,
       },
       {
-        find: new RegExp(`^${escapedPackageName}/(.+)$`),
-        replacement: `${sourceDir}/$1.ts`,
+        find: new RegExp(`^${escapeRegExp(packageName)}/(.+)$`),
+        replacement: `${packageSourceRoot}/$1`,
       },
     ];
   });
 }
 
-interface ResolveConfigLike {
-  extensionAlias?: Record<string, string[]>;
-}
-
-interface WebpackConfigLike {
-  resolve?: ResolveConfigLike;
-}
-
-interface TurbopackRuleLike {
-  as: (typeof TURBOPACK_SOURCE_REWRITE_GLOBS)[number];
-  condition: typeof TURBOPACK_SOURCE_REWRITE_CONDITION;
-  loaders: string[];
-}
-
-export function installSourceExtensionAliases<T extends WebpackConfigLike>(config: T): T {
-  config.resolve = {
-    ...config.resolve,
-    extensionAlias: {
-      ...(config.resolve?.extensionAlias ?? {}),
-      ...SOURCE_EXTENSION_ALIAS,
-    },
-  };
-
-  return config;
-}
-
-export function createTurbopackSourceResolutionOptions(
-  sourceImportRewriteLoaderPath: string,
-): {
-  resolveExtensions: string[];
-  rules: Record<(typeof TURBOPACK_SOURCE_REWRITE_GLOBS)[number], TurbopackRuleLike>;
-} {
-  return {
-    resolveExtensions: [...TURBOPACK_SOURCE_RESOLVE_EXTENSIONS],
-    rules: Object.fromEntries(
-      TURBOPACK_SOURCE_REWRITE_GLOBS.map((as) => [
-        as,
-        {
-          as,
-          condition: TURBOPACK_SOURCE_REWRITE_CONDITION,
-          loaders: [sourceImportRewriteLoaderPath],
-        } satisfies TurbopackRuleLike,
-      ]),
-    ) as Record<(typeof TURBOPACK_SOURCE_REWRITE_GLOBS)[number], TurbopackRuleLike>,
-  };
-}
-
-function escapeRegex(value: string): string {
+function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

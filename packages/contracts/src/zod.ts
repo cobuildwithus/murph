@@ -39,13 +39,13 @@ import {
   TEST_RESULT_STATUSES,
   VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES,
-} from "./constants.js";
-import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.js";
+} from "./constants.ts";
+import { GENERIC_CONTRACT_ID_PATTERN, idPattern } from "./ids.ts";
 import {
   isStrictIsoDate,
   isStrictIsoDateTime,
   isValidIanaTimeZone,
-} from "./time.js";
+} from "./time.ts";
 
 export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];

@@ -1,8 +1,8 @@
-import { VaultError } from "../errors.js";
-import { normalizeRelativeVaultPath, sanitizePathSegment } from "../path-safety.js";
-import { toIsoTimestamp } from "../time.js";
+import { VaultError } from "../errors.ts";
+import { normalizeRelativeVaultPath, sanitizePathSegment } from "../path-safety.ts";
+import { toIsoTimestamp } from "../time.ts";
 
-import type { DateInput } from "../types.js";
+import type { DateInput } from "../types.ts";
 
 const ULID_SUFFIX_PATTERN = "[0-9A-HJKMNP-TV-Z]{26}";
 

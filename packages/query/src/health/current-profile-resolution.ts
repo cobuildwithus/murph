@@ -2,7 +2,7 @@ import {
   fallbackCurrentProfileEntity,
   normalizeCanonicalDate,
   type CanonicalEntity,
-} from "../canonical-entities.js";
+} from "../canonical-entities.ts";
 
 export interface CurrentProfileSnapshotSortFields {
   snapshotId: string;

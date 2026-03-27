@@ -7,12 +7,14 @@ import {
   optionalTrimmedStringSchema,
   parseInputObject,
   requiredTrimmedStringSchema,
+  resolveVaultRootAlias,
   stripUndefined,
-} from "../shared.js";
+  vaultRootAliasSchemaFields,
+} from "../shared.ts";
 
-import { assertAssessmentImportPort } from "./core-port.js";
+import { assertAssessmentImportPort } from "./core-port.ts";
 
-import type { AssessmentResponseImportPayload } from "./core-port.js";
+import type { AssessmentResponseImportPayload } from "./core-port.ts";
 
 export interface AssessmentImporterExecutionOptions {
   corePort?: unknown;
@@ -31,8 +33,7 @@ export interface AssessmentResponseImportInput {
 const assessmentResponseImportInputSchema = z
   .object({
     filePath: requiredTrimmedStringSchema("filePath"),
-    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
-    vault: optionalTrimmedStringSchema("vault"),
+    ...vaultRootAliasSchemaFields,
     title: optionalTrimmedStringSchema("title"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     importedAt: optionalTimestampSchema("importedAt"),
@@ -51,7 +52,7 @@ export async function prepareAssessmentResponseImport(
   const rawArtifact = await inspectFileAsset(request.filePath, "assessment");
 
   return stripUndefined({
-    vaultRoot: request.vaultRoot ?? request.vault,
+    vaultRoot: resolveVaultRootAlias(request),
     sourcePath: rawArtifact.sourcePath,
     title: request.title ?? basename(rawArtifact.sourcePath),
     occurredAt: request.occurredAt,

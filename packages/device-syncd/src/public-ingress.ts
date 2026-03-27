@@ -1,4 +1,4 @@
-import { deviceSyncError, isDeviceSyncError } from "./errors.js";
+import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import {
   addMilliseconds,
   generateStateCode,
@@ -8,7 +8,7 @@ import {
   normalizeString,
   resolveRelativeOrAllowedOriginUrl,
   toIsoTimestamp,
-} from "./shared.js";
+} from "./shared.ts";
 
 import type {
   BeginConnectionResult,
@@ -23,7 +23,7 @@ import type {
   HandleWebhookResult,
   PublicProviderDescriptor,
   StartConnectionInput,
-} from "./types.js";
+} from "./types.ts";
 
 export interface CreateDeviceSyncPublicIngressInput {
   publicBaseUrl: string;

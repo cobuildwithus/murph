@@ -10,10 +10,10 @@ import {
   uniqueStrings,
   type CanonicalEntity,
   type CanonicalEntityFamily,
-} from "./canonical-entities.js";
-import { collectCanonicalEntities } from "./health/canonical-collector.js";
-import { deriveVaultRecordIdentity } from "./id-families.js";
-import { parseMarkdownDocument } from "./markdown.js";
+} from "./canonical-entities.ts";
+import { collectCanonicalEntities } from "./health/canonical-collector.ts";
+import { deriveVaultRecordIdentity } from "./id-families.ts";
+import { parseMarkdownDocument } from "./markdown.ts";
 
 type QueryRecordData = Record<string, unknown>;
 type FrontmatterRecordType = "core" | "experiment" | "journal";

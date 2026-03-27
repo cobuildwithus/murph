@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
-import { writeJsonFileAtomic } from "./atomic-write.js";
+import { writeJsonFileAtomic } from "./atomic-write.ts";
 
 interface ProcessDirectoryLockState {
   depth: number;

@@ -2,7 +2,7 @@ import {
   geneticsRecordFromEntity,
   geneticsRegistryDefinition,
   createProjectedRegistryQueries,
-} from "./registries.js";
+} from "./registries.ts";
 
 const geneticsQueries = createProjectedRegistryQueries(
   geneticsRegistryDefinition,

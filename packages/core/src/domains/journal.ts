@@ -1,13 +1,13 @@
 import type { JournalDayFrontmatter } from "@healthybob/contracts";
 import { journalDayFrontmatterSchema } from "@healthybob/contracts";
 
-import { FRONTMATTER_SCHEMA_VERSIONS, VAULT_LAYOUT } from "../constants.js";
-import { emitAuditRecord } from "../audit.js";
-import { VaultError } from "../errors.js";
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { writeVaultTextFile } from "../fs.js";
-import { loadVault } from "../vault.js";
-import { defaultTimeZone, toLocalDayKey } from "../time.js";
+import { FRONTMATTER_SCHEMA_VERSIONS, VAULT_LAYOUT } from "../constants.ts";
+import { emitAuditRecord } from "../audit.ts";
+import { VaultError } from "../errors.ts";
+import { stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { writeVaultTextFile } from "../fs.ts";
+import { loadVault } from "../vault.ts";
+import { defaultTimeZone, toLocalDayKey } from "../time.ts";
 
 import {
   appendMarkdownParagraph,
@@ -16,9 +16,9 @@ import {
   sortStrings,
   uniqueTrimmedStringList,
   validateContract,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { DateInput } from "../types.js";
+import type { DateInput } from "../types.ts";
 
 type JournalMutationKey = "eventIds" | "sampleStreams";
 type JournalMutationOperation = "link" | "unlink";

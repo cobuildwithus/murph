@@ -16,11 +16,11 @@ import {
   openInboxRuntime,
   rebuildRuntimeFromVault,
   runPollConnector,
-} from "../src/index.js";
+} from "../src/index.ts";
 import {
   sanitizeRawMetadata,
   toIsoTimestamp,
-} from "../src/shared.js";
+} from "../src/shared.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));

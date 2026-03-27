@@ -3,25 +3,25 @@ import { randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { promises as fs } from "node:fs";
 
-import { VaultError } from "../errors.js";
-import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.js";
+import { VaultError } from "../errors.ts";
+import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.ts";
 import {
   normalizeRelativeVaultPath,
   normalizeVaultRoot,
   resolveVaultPath,
-} from "../path-safety.js";
-import { toIsoTimestamp } from "../time.js";
-import { isErrnoException, isPlainRecord } from "../types.js";
+} from "../path-safety.ts";
+import { toIsoTimestamp } from "../time.ts";
+import { isErrnoException, isPlainRecord } from "../types.ts";
 import {
   applyImmutableWriteTarget,
   applyJsonlAppendTarget,
   applyTextWriteTarget,
   assertWriteTargetPolicy,
   prepareVerifiedWriteTarget,
-} from "../write-policy.js";
-import { acquireCanonicalWriteLock } from "./canonical-write-lock.js";
+} from "../write-policy.ts";
+import { acquireCanonicalWriteLock } from "./canonical-write-lock.ts";
 
-import type { DateInput } from "../types.js";
+import type { DateInput } from "../types.ts";
 
 export const WRITE_OPERATION_SCHEMA_VERSION = "hb.write-operation.v1";
 export const WRITE_OPERATION_DIRECTORY = ".runtime/operations";

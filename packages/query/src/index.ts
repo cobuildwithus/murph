@@ -11,7 +11,7 @@ export {
   lookupRecordById,
   readVault,
   readVaultTolerant,
-} from "./model.js";
+} from "./model.ts";
 export type {
   EntityFilter,
   ExperimentFilter,
@@ -20,17 +20,17 @@ export type {
   VaultReadModel,
   VaultRecord,
   VaultRecordType,
-} from "./model.js";
-export type { CanonicalEntity, CanonicalEntityFamily } from "./canonical-entities.js";
+} from "./model.ts";
+export type { CanonicalEntity, CanonicalEntityFamily } from "./canonical-entities.ts";
 export {
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,
   inferIdEntityKind,
   isQueryableLookupId,
-} from "./id-families.js";
+} from "./id-families.ts";
 export {
   searchVault,
-} from "./search.js";
+} from "./search.ts";
 export {
   getSqliteSearchStatus,
   rebuildSqliteSearchIndex,
@@ -39,11 +39,11 @@ export {
   type RebuildSqliteSearchIndexResult,
   type SearchBackend,
   type SqliteSearchStatus,
-} from "./search-sqlite.js";
-export { summarizeDailySamples } from "./summaries.js";
-export { buildTimeline } from "./timeline.js";
-export type { TimelineEntry, TimelineFilters } from "./timeline.js";
-export { buildExportPack } from "./export-pack.js";
+} from "./search-sqlite.ts";
+export { summarizeDailySamples } from "./summaries.ts";
+export { buildTimeline } from "./timeline.ts";
+export type { TimelineEntry, TimelineFilters } from "./timeline.ts";
+export { buildExportPack } from "./export-pack.ts";
 export type {
   BuildExportPackOptions,
   ExportPack,
@@ -62,11 +62,11 @@ export type {
   QuestionPackContextJournal,
   QuestionPackInstructions,
   QuestionPackTimelineRecord,
-} from "./export-pack.js";
+} from "./export-pack.ts";
 export {
   readHealthLibraryGraph,
   type HealthLibraryEntityType,
   type HealthLibraryGraph,
   type HealthLibraryNode,
-} from "./health-library.js";
-export * from "./health/index.js";
+} from "./health-library.ts";
+export * from "./health/index.ts";

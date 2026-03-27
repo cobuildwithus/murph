@@ -1,6 +1,6 @@
 import type { ActivityStrengthExercise } from "@healthybob/contracts";
 
-import type { DateInput } from "../types.js";
+import type { DateInput } from "../types.ts";
 
 export const GOAL_SCHEMA_VERSION = "hb.frontmatter.goal.v1";
 export const GOAL_DOC_TYPE = "goal";

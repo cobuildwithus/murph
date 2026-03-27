@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { DeviceSyncError } from "../src/errors.js";
-import { createDeviceSyncPublicIngress } from "../src/public-ingress.js";
-import { createDeviceSyncRegistry } from "../src/registry.js";
+import { DeviceSyncError } from "../src/errors.ts";
+import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
+import { createDeviceSyncRegistry } from "../src/registry.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -15,7 +15,7 @@ import type {
   ProviderAuthTokens,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
-} from "../src/types.js";
+} from "../src/types.ts";
 
 class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   private readonly oauthStates = new Map<string, OAuthStateRecord>();

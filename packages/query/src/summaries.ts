@@ -1,4 +1,4 @@
-import type { VaultReadModel, VaultRecord } from "./model.js";
+import type { VaultReadModel, VaultRecord } from "./model.ts";
 
 export interface DailySampleSummary {
   date: string;

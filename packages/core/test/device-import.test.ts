@@ -11,8 +11,8 @@ import {
   initializeVault,
   readJsonlRecords,
   VaultError,
-} from "../src/index.js";
-import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.js";
+} from "../src/index.ts";
+import { prepareInlineRawArtifact, prepareRawArtifact } from "../src/raw.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));

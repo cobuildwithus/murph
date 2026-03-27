@@ -1,4 +1,4 @@
-import type { IndexedAttachment, InboundCapture } from "./capture.js";
+import type { IndexedAttachment, InboundCapture } from "./capture.ts";
 
 export interface InboxCaptureRecord extends InboundCapture {
   captureId: string;

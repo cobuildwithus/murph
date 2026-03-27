@@ -8,7 +8,7 @@ import {
   type AgentmailFetch,
   type InboundCapture,
   type PersistedCapture,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 function createPersistedCapture(capture: InboundCapture): PersistedCapture {
   return {

@@ -1,4 +1,4 @@
-import type { InboundCapture, PersistedCapture } from "../contracts/capture.js";
+import type { InboundCapture, PersistedCapture } from "../contracts/capture.ts";
 
 export type ConnectorKind = "poll" | "webhook";
 export type Cursor = Record<string, unknown>;

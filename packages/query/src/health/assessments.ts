@@ -6,12 +6,12 @@ import {
   matchesDateRange,
   matchesLookup,
   matchesText,
-} from "./shared.js";
-import { compareByRecordedOrImportedAtDescThenId } from "./comparators.js";
-import { readJsonlRecords } from "./loaders.js";
-import { projectAssessmentEntity } from "../canonical-entities.js";
+} from "./shared.ts";
+import { compareByRecordedOrImportedAtDescThenId } from "./comparators.ts";
+import { readJsonlRecords } from "./loaders.ts";
+import { projectAssessmentEntity } from "../canonical-entities.ts";
 
-import type { CanonicalEntity } from "../canonical-entities.js";
+import type { CanonicalEntity } from "../canonical-entities.ts";
 
 export interface AssessmentQueryRecord {
   id: string;

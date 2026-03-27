@@ -1,15 +1,15 @@
 import path from 'node:path'
-import type { InboundAttachment, InboundCapture } from '../../contracts/capture.js'
-import type { ChatMessage } from '../chat/message.js'
-import { createInboundCaptureFromChatMessage } from '../chat/message.js'
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from '../../shared.js'
+import type { InboundAttachment, InboundCapture } from '../../contracts/capture.ts'
+import type { ChatMessage } from '../chat/message.ts'
+import { createInboundCaptureFromChatMessage } from '../chat/message.ts'
+import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from '../../shared.ts'
 import type {
   LinqMediaPart,
   LinqMessagePart,
   LinqMessageReceivedData,
   LinqMessageReceivedEvent,
   LinqWebhookEvent,
-} from './types.js'
+} from './types.ts'
 
 export interface LinqAttachmentDownloadDriver {
   downloadUrl(url: string, signal?: AbortSignal): Promise<Uint8Array | null>

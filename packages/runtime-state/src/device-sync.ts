@@ -77,6 +77,17 @@ export interface ResolveDeviceSyncControlTokenInput {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface ResolveDeviceSyncControlPlaneInput {
+  baseUrl?: string | null;
+  controlToken?: string | null;
+  env?: NodeJS.ProcessEnv;
+}
+
+export interface DeviceSyncControlPlane {
+  baseUrl: string;
+  controlToken: string | null;
+}
+
 export interface DeviceSyncRequestErrorContext {
   baseUrl: string;
   path: string;
@@ -105,6 +116,18 @@ export interface DeviceSyncJsonRequestInput {
   fetchImpl?: typeof fetch;
   controlToken?: string | null;
   request?: RequestInit;
+  createUnavailableError(context: DeviceSyncRequestUnavailableContext): Error;
+  createHttpError(context: DeviceSyncRequestErrorContext): Error;
+  createInvalidResponseError(
+    context: DeviceSyncRequestInvalidResponseContext,
+  ): Error;
+}
+
+export interface CreateDeviceSyncJsonRequesterInput {
+  baseUrl: string;
+  controlToken?: string | null;
+  fetchImpl?: typeof fetch;
+  requestDefaults?: RequestInit;
   createUnavailableError(context: DeviceSyncRequestUnavailableContext): Error;
   createHttpError(context: DeviceSyncRequestErrorContext): Error;
   createInvalidResponseError(
@@ -150,6 +173,24 @@ export function resolveDeviceSyncControlToken(
     null;
 
   return configured || null;
+}
+
+export function resolveDeviceSyncControlPlane(
+  input: ResolveDeviceSyncControlPlaneInput = {},
+): DeviceSyncControlPlane {
+  const controlToken = resolveDeviceSyncControlToken({
+    value: input.controlToken,
+    env: input.env,
+  });
+
+  return {
+    baseUrl: resolveDeviceSyncBaseUrl({
+      value: input.baseUrl,
+      env: input.env,
+      controlToken,
+    }),
+    controlToken,
+  };
 }
 
 export function isLoopbackDeviceSyncBaseUrl(baseUrl: string): boolean {
@@ -253,6 +294,29 @@ export function asErrorPayload(payload: unknown): DeviceSyncErrorPayload {
   };
 }
 
+export function createDeviceSyncJsonRequester(
+  input: CreateDeviceSyncJsonRequesterInput,
+): <TResponse>(path: string, request?: RequestInit) => Promise<TResponse> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const controlToken = input.controlToken ?? null;
+
+  return async function requestJson<TResponse>(
+    path: string,
+    request?: RequestInit,
+  ): Promise<TResponse> {
+    return await requestDeviceSyncJson<TResponse>({
+      baseUrl: input.baseUrl,
+      path,
+      fetchImpl,
+      controlToken,
+      request: mergeRequestInit(input.requestDefaults, request),
+      createUnavailableError: input.createUnavailableError,
+      createHttpError: input.createHttpError,
+      createInvalidResponseError: input.createInvalidResponseError,
+    });
+  };
+}
+
 export async function requestDeviceSyncJson<TResponse>(
   input: DeviceSyncJsonRequestInput,
 ): Promise<TResponse> {
@@ -303,4 +367,43 @@ export async function requestDeviceSyncJson<TResponse>(
   }
 
   return payload as TResponse;
+}
+
+function mergeRequestInit(
+  defaults: RequestInit | undefined,
+  request: RequestInit | undefined,
+): RequestInit | undefined {
+  if (!defaults) {
+    return request;
+  }
+
+  if (!request) {
+    return { ...defaults };
+  }
+
+  return {
+    ...defaults,
+    ...request,
+    headers: mergeHeaders(defaults.headers, request.headers),
+  };
+}
+
+function mergeHeaders(
+  defaults: HeadersInit | undefined,
+  request: HeadersInit | undefined,
+): HeadersInit | undefined {
+  if (defaults === undefined) {
+    return request;
+  }
+
+  if (request === undefined) {
+    return defaults;
+  }
+
+  const headers = new Headers(defaults);
+  new Headers(request).forEach((value, key) => {
+    headers.set(key, value);
+  });
+
+  return headers;
 }

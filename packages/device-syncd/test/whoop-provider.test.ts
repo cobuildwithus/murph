@@ -2,11 +2,11 @@ import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { DeviceSyncError } from "../src/errors.js";
-import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.js";
-import { sha256Text, subtractDays } from "../src/shared.js";
+import { DeviceSyncError } from "../src/errors.ts";
+import { createWhoopDeviceSyncProvider } from "../src/providers/whoop.ts";
+import { sha256Text, subtractDays } from "../src/shared.ts";
 
-import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.js";
+import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext, StoredDeviceSyncAccount } from "../src/types.ts";
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

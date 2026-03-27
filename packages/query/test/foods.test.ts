@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
 
-import { listFoods, readFood, showFood } from "../src/index.js";
+import { listFoods, readFood, showFood } from "../src/index.ts";
 
 async function writeVaultFile(vaultRoot: string, relativePath: string, contents: string) {
   await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {

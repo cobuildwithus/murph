@@ -13,7 +13,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-import { generatePrefixedId, sanitizeObjectKey } from "../src/shared.js";
+import { generatePrefixedId, sanitizeObjectKey } from "../src/shared.ts";
 
 test("inboxd id helpers preserve underscore sanitation", () => {
   assert.equal(generatePrefixedId("Capture Name", 0), "capture_name_00000000000123456789ABCDEF");

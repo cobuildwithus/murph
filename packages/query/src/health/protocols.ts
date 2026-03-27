@@ -2,7 +2,7 @@ import {
   createProjectedRegistryQueries,
   protocolRecordFromEntity,
   protocolRegistryDefinition,
-} from "./registries.js";
+} from "./registries.ts";
 
 const protocolQueries = createProjectedRegistryQueries(
   protocolRegistryDefinition,

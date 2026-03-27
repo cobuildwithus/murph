@@ -1,4 +1,4 @@
-import { ID_PREFIXES } from "./constants.js";
+import { ID_PREFIXES } from "./constants.ts";
 
 export type HealthEntityKind =
   | "assessment"

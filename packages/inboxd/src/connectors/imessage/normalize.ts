@@ -1,5 +1,5 @@
-import type { InboundAttachment, InboundCapture } from "../../contracts/capture.js";
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.js";
+import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
+import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";
 
 export interface ImessageKitAttachmentLike {
   guid?: string | null;

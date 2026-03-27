@@ -1,13 +1,15 @@
-import { VaultError } from "../errors.js";
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import type { FoodUpsertPayload } from "@healthybob/contracts";
+
+import { VaultError } from "../errors.ts";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   FOODS_DIRECTORY,
   FOOD_DOC_TYPE,
   FOOD_SCHEMA_VERSION,
   FOOD_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
@@ -27,9 +29,9 @@ import {
   resolveRequiredUpsertValue,
   section,
   stripUndefined,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   DeleteFoodInput,
   DeleteFoodResult,
@@ -39,7 +41,7 @@ import type {
   ReadFoodInput,
   UpsertFoodInput,
   UpsertFoodResult,
-} from "./types.js";
+} from "./types.ts";
 
 const DAILY_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/u;
 
@@ -161,11 +163,8 @@ function parseFoodRecord(
   });
 }
 
-function buildAttributes(record: FoodRecord): FrontmatterObject {
+export function foodRecordToBasePayload(record: FoodRecord): Omit<FoodUpsertPayload, "foodId"> {
   return stripUndefined({
-    schemaVersion: FOOD_SCHEMA_VERSION,
-    docType: FOOD_DOC_TYPE,
-    foodId: record.foodId,
     slug: record.slug,
     title: record.title,
     status: record.status,
@@ -181,6 +180,15 @@ function buildAttributes(record: FoodRecord): FrontmatterObject {
     note: record.note,
     attachedProtocolIds: record.attachedProtocolIds,
     autoLogDaily: record.autoLogDaily,
+  }) as Omit<FoodUpsertPayload, "foodId">;
+}
+
+function buildAttributes(record: FoodRecord): FrontmatterObject {
+  return stripUndefined({
+    schemaVersion: FOOD_SCHEMA_VERSION,
+    docType: FOOD_DOC_TYPE,
+    foodId: record.foodId,
+    ...foodRecordToBasePayload(record),
   }) as unknown as FrontmatterObject;
 }
 

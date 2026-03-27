@@ -11,8 +11,8 @@ import {
   type RawImportManifestArtifact,
 } from "@healthybob/contracts";
 
-import type { WriteBatch } from "./write-batch.js";
-import { normalizeRelativeVaultPath } from "../path-safety.js";
+import type { WriteBatch } from "./write-batch.ts";
+import { normalizeRelativeVaultPath } from "../path-safety.ts";
 
 interface RawArtifactLike {
   relativePath: string;

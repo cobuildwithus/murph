@@ -8,10 +8,10 @@ import {
   RECIPE_STATUSES,
   WORKOUT_FORMAT_STATUSES,
   ID_PREFIXES,
-} from "./constants.js";
-import { activityStrengthExerciseSchema } from "./zod.js";
-import { idPattern } from "./ids.js";
-import { isStrictIsoDate, isStrictIsoDateTime } from "./time.js";
+} from "./constants.ts";
+import { activityStrengthExerciseSchema } from "./zod.ts";
+import { idPattern } from "./ids.ts";
+import { isStrictIsoDate, isStrictIsoDateTime } from "./time.ts";
 
 function withContractMetadata<TSchema extends z.ZodTypeAny>(
   schema: TSchema,

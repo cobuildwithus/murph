@@ -1,14 +1,14 @@
 import type { EventRecord, ExperimentEventRecord } from "@healthybob/contracts";
 import { CONTRACT_SCHEMA_VERSION, EVENT_KINDS, eventRecordSchema } from "@healthybob/contracts";
 
-import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
-import { VaultError } from "../errors.js";
-import { walkVaultFiles } from "../fs.js";
-import { generateRecordId } from "../ids.js";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
-import type { WriteBatch } from "../operations/write-batch.js";
-import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.js";
-import { loadVault } from "../vault.js";
+import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
+import { VaultError } from "../errors.ts";
+import { walkVaultFiles } from "../fs.ts";
+import { generateRecordId } from "../ids.ts";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
+import type { WriteBatch } from "../operations/write-batch.ts";
+import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.ts";
+import { loadVault } from "../vault.ts";
 
 import {
   compactObject,
@@ -18,7 +18,7 @@ import {
   runLoadedCanonicalWrite,
   uniqueTrimmedStringList,
   validateContract,
-} from "./shared.js";
+} from "./shared.ts";
 
 type JsonObject = Record<string, unknown>;
 

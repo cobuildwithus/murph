@@ -5,31 +5,31 @@ import {
   safeParseContract,
 } from "@healthybob/contracts";
 
-import { buildAuditRecord, resolveAuditShardPath } from "../audit.js";
-import { stringifyFrontmatterDocument } from "../frontmatter.js";
-import { pathExists, readUtf8File, walkVaultFiles } from "../fs.js";
-import { generateRecordId } from "../ids.js";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
-import { WriteBatch } from "../operations/write-batch.js";
-import { resolveVaultPath } from "../path-safety.js";
-import { toIsoTimestamp } from "../time.js";
-import { VaultError } from "../errors.js";
-import { isPlainRecord } from "../types.js";
+import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
+import { stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { pathExists, readUtf8File, walkVaultFiles } from "../fs.ts";
+import { generateRecordId } from "../ids.ts";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
+import { WriteBatch } from "../operations/write-batch.ts";
+import { resolveVaultPath } from "../path-safety.ts";
+import { toIsoTimestamp } from "../time.ts";
+import { VaultError } from "../errors.ts";
+import { isPlainRecord } from "../types.ts";
 
-import type { FrontmatterObject, UnknownRecord } from "../types.js";
+import type { FrontmatterObject, UnknownRecord } from "../types.ts";
 import type {
   AppendProfileSnapshotInput,
   CurrentProfileState,
   ProfileSnapshotRecord,
   RebuiltCurrentProfile,
-} from "./types.js";
+} from "./types.ts";
 import {
   PROFILE_CURRENT_DOC_TYPE,
   PROFILE_CURRENT_DOCUMENT_PATH,
   PROFILE_CURRENT_SCHEMA_VERSION,
   PROFILE_SNAPSHOT_LEDGER_DIRECTORY,
   PROFILE_SNAPSHOT_SCHEMA_VERSION,
-} from "./types.js";
+} from "./types.ts";
 
 interface ListProfileSnapshotsInput {
   vaultRoot: string;

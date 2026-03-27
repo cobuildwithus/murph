@@ -6,9 +6,9 @@ import {
   resolveMarkdownRegistryUpsertTarget,
   selectExistingRegistryRecord,
   writeMarkdownRegistryRecord,
-} from "./markdown.js";
+} from "./markdown.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 
 type MarkdownRegistryAuditAction = Parameters<typeof writeMarkdownRegistryRecord>[0]["audit"]["action"];
 

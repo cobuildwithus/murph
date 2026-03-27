@@ -6,8 +6,8 @@ export {
   REQUIRED_DIRECTORIES,
   VAULT_LAYOUT,
   VAULT_SCHEMA_VERSION,
-} from "./constants.js";
-export { VaultError, isVaultError } from "./errors.js";
+} from "./constants.ts";
+export { VaultError, isVaultError } from "./errors.ts";
 export {
   assertPathWithinVault,
   assertPathWithinVaultOnDisk,
@@ -16,10 +16,10 @@ export {
   normalizeVaultRoot,
   resolveVaultPath,
   resolveVaultPathOnDisk,
-} from "./path-safety.js";
-export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.js";
-export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
-export { loadVault } from "./vault.js";
+} from "./path-safety.ts";
+export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
+export { loadVault } from "./vault.ts";
 export {
   addMeal,
   applyCanonicalWriteBatch,
@@ -66,7 +66,7 @@ export {
   upsertWorkoutFormat,
   upsertProtocolItem,
   validateVault,
-} from "./public-mutations.js";
+} from "./public-mutations.ts";
 export type {
   ApplyCanonicalWriteBatchInput,
   ApplyCanonicalWriteBatchResult,
@@ -75,7 +75,7 @@ export type {
   CanonicalRawContentInput,
   CanonicalRawCopyInput,
   CanonicalTextWriteInput,
-} from "./public-mutations.js";
+} from "./public-mutations.ts";
 export {
   acquireCanonicalWriteLock,
   CANONICAL_WRITE_LOCK_DIRECTORY,
@@ -83,20 +83,20 @@ export {
   inspectCanonicalWriteLock,
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
-} from "./operations/index.js";
+} from "./operations/index.ts";
 export type {
   CanonicalWriteLockHandle,
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,
-} from "./operations/index.js";
-export type { ResolvedVaultPath } from "./path-safety.js";
+} from "./operations/index.ts";
+export type { ResolvedVaultPath } from "./path-safety.ts";
 export {
   listAssessmentResponses,
   projectAssessmentResponse,
   readAssessmentResponse,
   ASSESSMENT_LEDGER_DIRECTORY,
   ASSESSMENT_RESPONSE_SCHEMA_VERSION,
-} from "./assessment/index.js";
+} from "./assessment/index.ts";
 export type {
   AllergyProposal,
   AssessmentProposalSource,
@@ -110,11 +110,11 @@ export type {
   ImportAssessmentResponseInput,
   ProfileSnapshotProposal,
   ProtocolProposal,
-} from "./assessment/index.js";
-export * from "./bank/index.js";
-export * from "./profile/index.js";
-export * from "./history/index.js";
-export * from "./family/index.js";
-export * from "./genetics/index.js";
+} from "./assessment/index.ts";
+export * from "./bank/index.ts";
+export * from "./profile/index.ts";
+export * from "./history/index.ts";
+export * from "./family/index.ts";
+export * from "./genetics/index.ts";
 
-export * from "./shares.js";
+export * from "./shares.ts";

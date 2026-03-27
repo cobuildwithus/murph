@@ -1,7 +1,7 @@
-import type { ChatMessage } from "../chat/message.js";
-import { createInboundCaptureFromChatMessage } from "../chat/message.js";
-import type { InboundAttachment, InboundCapture } from "../../contracts/capture.js";
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.js";
+import type { ChatMessage } from "../chat/message.ts";
+import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
+import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
+import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";
 import type {
   TelegramChat,
   TelegramContact,
@@ -16,8 +16,8 @@ import type {
   TelegramUpdateLike,
   TelegramUser,
   TelegramVenue,
-} from "./types.js";
-import { serializeTelegramThreadTarget } from "./target.js";
+} from "./types.ts";
+import { serializeTelegramThreadTarget } from "./target.ts";
 
 export interface TelegramAttachmentDownloadDriver {
   getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile>;

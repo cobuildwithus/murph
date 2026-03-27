@@ -1,6 +1,6 @@
-import { VaultError } from "../errors.js";
-import { generateRecordId } from "../ids.js";
-import { createMarkdownRegistryApi } from "../registry/api.js";
+import { VaultError } from "../errors.ts";
+import { generateRecordId } from "../ids.ts";
+import { createMarkdownRegistryApi } from "../registry/api.ts";
 
 import {
   CONDITIONS_DIRECTORY,
@@ -9,7 +9,7 @@ import {
   CONDITION_SCHEMA_VERSION,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 import {
   buildDocumentFromAttributes,
   buildMarkdownBody,
@@ -29,15 +29,15 @@ import {
   stripUndefined,
   normalizeId,
   validateSortedStringList,
-} from "./shared.js";
+} from "./shared.ts";
 
-import type { FrontmatterObject } from "../types.js";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   ConditionRecord,
   ReadConditionInput,
   UpsertConditionInput,
   UpsertConditionResult,
-} from "./types.js";
+} from "./types.ts";
 
 function buildBody(record: ConditionRecord): string {
   return buildMarkdownBody(

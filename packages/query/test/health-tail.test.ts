@@ -21,12 +21,12 @@ import {
   showBloodTest,
   showSupplementCompound,
   showProfile,
-} from "../src/index.js";
-import { collectCanonicalEntities } from "../src/health/canonical-collector.js";
-import { ALL_VAULT_RECORD_TYPES } from "../src/model.js";
-import { readHealthContext } from "../src/export-pack-health.js";
-import { listAssessments } from "../src/health/assessments.js";
-import type { VaultReadModel, VaultRecord } from "../src/model.js";
+} from "../src/index.ts";
+import { collectCanonicalEntities } from "../src/health/canonical-collector.ts";
+import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
+import { readHealthContext } from "../src/export-pack-health.ts";
+import { listAssessments } from "../src/health/assessments.ts";
+import type { VaultReadModel, VaultRecord } from "../src/model.ts";
 
 async function writeVaultFile(
   vaultRoot: string,

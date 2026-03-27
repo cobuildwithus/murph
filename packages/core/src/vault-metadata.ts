@@ -10,10 +10,10 @@ import {
   VAULT_SCHEMA_VERSION,
   VAULT_SHARDS,
   ID_PREFIXES,
-} from "./constants.js";
-import { VaultError } from "./errors.js";
-import { readJsonFile } from "./fs.js";
-import { isPlainRecord } from "./types.js";
+} from "./constants.ts";
+import { VaultError } from "./errors.ts";
+import { readJsonFile } from "./fs.ts";
+import { isPlainRecord } from "./types.ts";
 
 export interface BuildVaultMetadataInput {
   vaultId: string;

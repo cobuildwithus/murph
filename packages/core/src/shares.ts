@@ -9,14 +9,14 @@ import {
   type SharePackEntity,
 } from "@healthybob/contracts";
 
-import { generateRecordId } from "./ids.js";
-import { addMeal } from "./public-mutations.js";
-import { readFood, upsertFood } from "./bank/foods.js";
-import { readProtocolItem, upsertProtocolItem } from "./bank/protocols.js";
-import { readRecipe, upsertRecipe } from "./bank/recipes.js";
+import { generateRecordId } from "./ids.ts";
+import { addMeal } from "./public-mutations.ts";
+import { foodRecordToBasePayload, readFood, upsertFood } from "./bank/foods.ts";
+import { protocolRecordToUpsertPayload, readProtocolItem, upsertProtocolItem } from "./bank/protocols.ts";
+import { readRecipe, recipeRecordToUpsertPayload, upsertRecipe } from "./bank/recipes.ts";
 
-import type { DateInput } from "./types.js";
-import type { FoodRecord, ProtocolItemRecord, RecipeRecord } from "./bank/types.js";
+import type { DateInput } from "./types.ts";
+import type { FoodRecord, ProtocolItemRecord, RecipeRecord } from "./bank/types.ts";
 
 export interface ShareEntitySelector {
   id?: string;
@@ -70,25 +70,7 @@ export async function buildSharePackFromVault(
     const ref = buildProtocolRef(record);
     const payload = assertContract(
       protocolUpsertPayloadSchema,
-      stripUndefined({
-        slug: record.slug,
-        title: record.title,
-        kind: record.kind,
-        status: record.status,
-        startedOn: record.startedOn,
-        stoppedOn: record.stoppedOn,
-        substance: record.substance,
-        dose: record.dose,
-        unit: record.unit,
-        schedule: record.schedule,
-        brand: record.brand,
-        manufacturer: record.manufacturer,
-        servingSize: record.servingSize,
-        ingredients: record.ingredients,
-        relatedGoalIds: record.relatedGoalIds,
-        relatedConditionIds: record.relatedConditionIds,
-        group: record.group,
-      }),
+      protocolRecordToUpsertPayload(record),
       `protocol payload ${record.protocolId}`,
     );
 
@@ -121,23 +103,11 @@ export async function buildSharePackFromVault(
     }
 
     const ref = buildFoodRef(record);
+    const { attachedProtocolIds: _attachedProtocolIds, ...foodPayload } = foodRecordToBasePayload(record);
     const payload = assertContract(
       sharePackFoodPayloadSchema,
       stripUndefined({
-        slug: record.slug,
-        title: record.title,
-        status: record.status,
-        summary: record.summary,
-        kind: record.kind,
-        brand: record.brand,
-        vendor: record.vendor,
-        location: record.location,
-        serving: record.serving,
-        aliases: record.aliases,
-        ingredients: record.ingredients,
-        tags: record.tags,
-        note: record.note,
-        autoLogDaily: record.autoLogDaily,
+        ...foodPayload,
         attachedProtocolRefs: attachedProtocolRefs.length > 0 ? attachedProtocolRefs : undefined,
       }),
       `food payload ${record.foodId}`,
@@ -162,24 +132,7 @@ export async function buildSharePackFromVault(
     const ref = buildRecipeRef(record);
     const payload = assertContract(
       recipeUpsertPayloadSchema,
-      stripUndefined({
-        slug: record.slug,
-        title: record.title,
-        status: record.status,
-        summary: record.summary,
-        cuisine: record.cuisine,
-        dishType: record.dishType,
-        source: record.source,
-        servings: record.servings,
-        prepTimeMinutes: record.prepTimeMinutes,
-        cookTimeMinutes: record.cookTimeMinutes,
-        totalTimeMinutes: record.totalTimeMinutes,
-        tags: record.tags,
-        ingredients: record.ingredients,
-        steps: record.steps,
-        relatedGoalIds: record.relatedGoalIds,
-        relatedConditionIds: record.relatedConditionIds,
-      }),
+      recipeRecordToUpsertPayload(record),
       `recipe payload ${record.recipeId}`,
     );
 

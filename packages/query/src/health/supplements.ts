@@ -3,17 +3,17 @@ import {
   compareNullableStrings,
   matchesLookup,
   matchesText,
-} from "./shared.js";
+} from "./shared.ts";
 import {
   listProtocols,
   readProtocol,
-} from "./protocols.js";
+} from "./protocols.ts";
 
 import type {
   ProtocolQueryRecord,
   RegistryListOptions,
   SupplementIngredientQueryRecord,
-} from "./registries.js";
+} from "./registries.ts";
 
 export interface SupplementQueryRecord extends ProtocolQueryRecord {
   kind: string | null;

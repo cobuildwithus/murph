@@ -4,13 +4,13 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import type { InboundCapture, PersistedCapture } from "../src/contracts/capture.js";
-import { createImessageConnector } from "../src/connectors/imessage/connector.js";
-import { normalizeImessageMessage } from "../src/connectors/imessage/normalize.js";
-import type { PollConnector } from "../src/connectors/types.js";
-import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.js";
-import type { InboxPipeline } from "../src/kernel/pipeline.js";
-import { createConnectorRegistry } from "../src/kernel/registry.js";
+import type { InboundCapture, PersistedCapture } from "../src/contracts/capture.ts";
+import { createImessageConnector } from "../src/connectors/imessage/connector.ts";
+import { normalizeImessageMessage } from "../src/connectors/imessage/normalize.ts";
+import type { PollConnector } from "../src/connectors/types.ts";
+import { runInboxDaemon, runPollConnector } from "../src/kernel/daemon.ts";
+import type { InboxPipeline } from "../src/kernel/pipeline.ts";
+import { createConnectorRegistry } from "../src/kernel/registry.ts";
 
 test("connector registry keeps distinct runtime ids under the same source family", () => {
   const left = createStubPollConnector({

@@ -1,7 +1,7 @@
-import { loadDeviceSyncEnvironment } from "./config.js";
-import { formatDeviceSyncStartupError } from "./errors.js";
-import { startDeviceSyncHttpServer } from "./http.js";
-import { createDeviceSyncService } from "./service.js";
+import { loadDeviceSyncEnvironment } from "./config.ts";
+import { formatDeviceSyncStartupError } from "./errors.ts";
+import { startDeviceSyncHttpServer } from "./http.ts";
+import { createDeviceSyncService } from "./service.ts";
 
 async function main(): Promise<void> {
   const environment = loadDeviceSyncEnvironment(process.env);

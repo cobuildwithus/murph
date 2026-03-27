@@ -1,15 +1,17 @@
 import { z } from "zod";
 
-import { assertCanonicalWritePort } from "./core-port.js";
-import type { DocumentImportPayload } from "./core-port.js";
+import { assertCanonicalWritePort } from "./core-port.ts";
+import type { DocumentImportPayload } from "./core-port.ts";
 import {
   inspectFileAsset,
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
   parseInputObject,
   requiredTrimmedStringSchema,
+  resolveVaultRootAlias,
   stripUndefined,
-} from "./shared.js";
+  vaultRootAliasSchemaFields,
+} from "./shared.ts";
 
 export interface DocumentImportInput {
   filePath: string;
@@ -28,8 +30,7 @@ export interface ImporterExecutionOptions {
 const documentImportInputSchema = z
   .object({
     filePath: requiredTrimmedStringSchema("filePath"),
-    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
-    vault: optionalTrimmedStringSchema("vault"),
+    ...vaultRootAliasSchemaFields,
     title: optionalTrimmedStringSchema("title"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
@@ -46,7 +47,7 @@ export async function prepareDocumentImport(input: unknown): Promise<DocumentImp
   const rawArtifact = await inspectFileAsset(request.filePath);
 
   return stripUndefined({
-    vaultRoot: request.vaultRoot ?? request.vault,
+    vaultRoot: resolveVaultRootAlias(request),
     sourcePath: rawArtifact.sourcePath,
     title: request.title ?? rawArtifact.fileName,
     occurredAt: request.occurredAt,

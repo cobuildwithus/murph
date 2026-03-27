@@ -1,8 +1,8 @@
-import { stripEmptyObject, stripUndefined } from "../shared.js";
+import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   minutesBetween,
   pushObservationEvent,
-} from "./shared-normalization.js";
+} from "./shared-normalization.ts";
 import {
   asObjectArray,
   firstDefined,
@@ -19,12 +19,12 @@ import {
   normalizeActivityType,
   pushGarminArtifact,
   secondsToMinutes,
-} from "./garmin-helpers.js";
+} from "./garmin-helpers.ts";
 
 import type {
   DeviceEventPayload,
   DeviceRawArtifactPayload,
-} from "../core-port.js";
+} from "../core-port.ts";
 
 export interface GarminActivityNormalizationContext {
   importedAt: string;

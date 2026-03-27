@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { IncomingHttpHeaders } from 'node:http'
 
-import type { LinqWebhookEvent } from './types.js'
+import type { LinqWebhookEvent } from './types.ts'
 
 export class LinqWebhookVerificationError extends Error {
   constructor(message: string) {

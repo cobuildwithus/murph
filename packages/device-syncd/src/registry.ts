@@ -1,6 +1,6 @@
-import { normalizeString } from "./shared.js";
+import { normalizeString } from "./shared.ts";
 
-import type { DeviceSyncProvider, DeviceSyncRegistry } from "./types.js";
+import type { DeviceSyncProvider, DeviceSyncRegistry } from "./types.ts";
 
 export function createDeviceSyncRegistry(providers: readonly DeviceSyncProvider[] = []): DeviceSyncRegistry {
   const registry = new Map<string, DeviceSyncProvider>();

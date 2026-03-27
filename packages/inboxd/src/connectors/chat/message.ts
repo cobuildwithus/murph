@@ -1,4 +1,4 @@
-import type { InboundAttachment, InboundCapture } from "../../contracts/capture.js";
+import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
 
 export interface ChatAttachment extends InboundAttachment {}
 

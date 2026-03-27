@@ -2,8 +2,8 @@ export {
   importAssessmentResponse,
   listAssessmentResponses,
   readAssessmentResponse,
-} from "./storage.js";
-export { projectAssessmentResponse } from "./project.js";
+} from "./storage.ts";
+export { projectAssessmentResponse } from "./project.ts";
 
 export type {
   AllergyProposal,
@@ -18,9 +18,9 @@ export type {
   ImportAssessmentResponseInput,
   ProfileSnapshotProposal,
   ProtocolProposal,
-} from "./types.js";
+} from "./types.ts";
 
 export {
   ASSESSMENT_LEDGER_DIRECTORY,
   ASSESSMENT_RESPONSE_SCHEMA_VERSION,
-} from "./types.js";
+} from "./types.ts";

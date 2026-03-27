@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { buildCallbackErrorRedirectLocation } from "../src/http.js";
+import { buildCallbackErrorRedirectLocation } from "../src/http.ts";
 
 test("callback error redirects keep only safe machine-readable params", () => {
   const location = buildCallbackErrorRedirectLocation({

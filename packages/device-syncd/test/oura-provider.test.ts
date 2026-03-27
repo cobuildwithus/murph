@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vitest";
 
-import { DeviceSyncError } from "../src/errors.js";
-import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.js";
+import { DeviceSyncError } from "../src/errors.ts";
+import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
 
-import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.js";
+import type { DeviceSyncAccount, DeviceSyncJobRecord, ProviderJobContext } from "../src/types.ts";
 
 function createJsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

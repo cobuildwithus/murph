@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { DeviceSyncError, formatDeviceSyncStartupError } from "../src/errors.js";
+import { DeviceSyncError, formatDeviceSyncStartupError } from "../src/errors.ts";
 import {
   assertDeviceSyncControlRequest,
   buildPublicDeviceSyncErrorPayload,
   renderCallbackHtml,
   startDeviceSyncHttpServer,
-} from "../src/http.js";
+} from "../src/http.ts";
 
-import type { DeviceSyncService } from "../src/service.js";
+import type { DeviceSyncService } from "../src/service.ts";
 
 const accountRecord = {
   id: "acct_demo_01",

@@ -33,28 +33,28 @@ import {
   SAMPLE_SCHEMA_VERSION,
   SAMPLE_SOURCES,
   VAULT_LAYOUT,
-} from "./constants.js";
-import { emitAuditRecord } from "./audit.js";
-import { VaultError } from "./errors.js";
-import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.js";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.js";
-import { generateRecordId } from "./ids.js";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.js";
-import { stageRawImportManifest } from "./operations/raw-manifests.js";
-import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.js";
-import { resolveVaultPath } from "./path-safety.js";
-import { sanitizePathSegment } from "./path-safety.js";
-import { prepareInlineRawArtifact, prepareRawArtifact } from "./raw.js";
+} from "./constants.ts";
+import { emitAuditRecord } from "./audit.ts";
+import { VaultError } from "./errors.ts";
+import { pathExists, readUtf8File, writeVaultTextFile } from "./fs.ts";
+import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
+import { generateRecordId } from "./ids.ts";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
+import { stageRawImportManifest } from "./operations/raw-manifests.ts";
+import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
+import { resolveVaultPath } from "./path-safety.ts";
+import { sanitizePathSegment } from "./path-safety.ts";
+import { prepareInlineRawArtifact, prepareRawArtifact } from "./raw.ts";
 import {
   defaultTimeZone,
   normalizeTimeZone,
   toIsoTimestamp,
   toLocalDayKey,
-} from "./time.js";
-import { loadVault } from "./vault.js";
+} from "./time.ts";
+import { loadVault } from "./vault.ts";
 
-import type { RawArtifact } from "./raw.js";
-import type { DateInput, UnknownRecord } from "./types.js";
+import type { RawArtifact } from "./raw.ts";
+import type { DateInput, UnknownRecord } from "./types.ts";
 
 type EventRecordByKind<K extends EventKind> = Extract<EventRecord, { kind: K }>;
 type LooseRecord = Record<string, unknown>;

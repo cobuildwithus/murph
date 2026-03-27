@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { deviceSyncError } from "../errors.js";
+import { deviceSyncError } from "../errors.ts";
 import {
   addMilliseconds,
   coerceRecord,
@@ -8,7 +8,7 @@ import {
   normalizeString,
   sha256Text,
   subtractDays,
-} from "../shared.js";
+} from "../shared.ts";
 import {
   buildOAuthConnectUrl,
   buildProviderApiError,
@@ -21,7 +21,7 @@ import {
   requireRefreshToken,
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
-} from "./shared-oauth.js";
+} from "./shared-oauth.ts";
 
 import type {
   DeviceSyncAccount,
@@ -36,7 +36,7 @@ import type {
   ProviderWebhookContext,
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
-} from "../types.js";
+} from "../types.ts";
 
 const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
 const OURA_API_BASE_URL = "https://api.ouraring.com";

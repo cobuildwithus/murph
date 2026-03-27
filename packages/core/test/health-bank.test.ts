@@ -4,8 +4,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault, readJsonlRecords, VaultError } from "../src/index.js";
-import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.js";
+import { initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
+import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
 import {
   deleteFood,
   deleteProvider,
@@ -35,7 +35,7 @@ import {
   upsertRecipe,
   upsertWorkoutFormat,
   upsertProtocolItem,
-} from "../src/bank/index.js";
+} from "../src/bank/index.ts";
 
 type AuditLikeRecord = {
   action?: string;
@@ -490,6 +490,7 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.match(foodMarkdown, /## Aliases/u);
   assert.match(foodMarkdown, /## Ingredients/u);
   assert.match(foodMarkdown, /Auto-log daily/u);
+  assert.doesNotMatch(foodMarkdown, /^attachedProtocolRefs:/mu);
 
   await assert.rejects(
     () =>
@@ -896,6 +897,10 @@ test("protocols support medication and supplement groups plus stop handling", as
     slug: supplement.record.slug,
     group: "supplement",
   });
+  const protocolMarkdown = await fs.readFile(
+    path.join(vaultRoot, supplement.record.relativePath),
+    "utf8",
+  );
   const patchedSupplement = await upsertProtocolItem({
     vaultRoot,
     protocolId: supplement.record.protocolId,
@@ -957,6 +962,7 @@ test("protocols support medication and supplement groups plus stop handling", as
   assert.match(readSupplement.markdown, /## Ingredients/);
   assert.match(readSupplement.markdown, /EPA — 600 mg/);
   assert.match(readSupplement.markdown, /DHA — 400 mg/);
+  assert.doesNotMatch(protocolMarkdown, /^group:/mu);
   assert.deepEqual(selectAuditMetadata(protocolAuditRecords, "protocol_upsert"), [
     { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },
     { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },

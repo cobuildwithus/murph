@@ -4,9 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
 import {
-  createTurbopackSourceResolutionOptions,
   createWorkspaceSourcePackageNames,
-  installSourceExtensionAliases,
   resolveWorkspaceSourceEntries as resolveWorkspaceSourceEntriesFromMap,
 } from "../../config/workspace-source-resolution";
 
@@ -32,10 +30,6 @@ const PRIVY_REQUIRED_CONNECT_SOURCES = [
 const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
-const sourceImportRewriteLoaderPath = path.resolve(
-  appDir,
-  "../../config/turbopack-rewrite-relative-js-imports-loader.cjs",
-);
 const require = createRequire(import.meta.url);
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@healthybob/contracts": "../../packages/contracts/src/index.ts",
@@ -57,8 +51,6 @@ export function resolveWorkspaceSourceEntries(appDir: string): Record<string, st
     WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
   );
 }
-
-export { installSourceExtensionAliases };
 
 export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -175,13 +167,16 @@ function installOptionalModuleFallbacks(config: Parameters<NonNullable<NextConfi
   return config;
 }
 
+export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
+  return {
+    root: path.resolve(appDir, "../.."),
+  };
+}
+
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(appDir, "../.."),
   transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
-  turbopack: {
-    root: path.resolve(appDir, "../.."),
-    ...createTurbopackSourceResolutionOptions(sourceImportRewriteLoaderPath),
-  },
+  turbopack: buildHostedWebTurbopackConfig(),
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -191,7 +186,7 @@ const nextConfig: NextConfig = {
       headers: buildHostedWebSecurityHeaders(process.env),
     },
   ],
-  webpack: (config) => installOptionalModuleFallbacks(installSourceExtensionAliases(config)),
+  webpack: (config) => installOptionalModuleFallbacks(config),
 };
 
 export default nextConfig;

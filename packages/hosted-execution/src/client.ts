@@ -1,17 +1,17 @@
-import { createHostedExecutionSignatureHeaders } from "./auth.js";
+import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserEnvUpdate,
   HostedExecutionUserStatus,
-} from "./contracts.js";
-import { normalizeHostedExecutionBaseUrl } from "./env.js";
+} from "./contracts.ts";
+import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   HOSTED_EXECUTION_DISPATCH_PATH,
-} from "./routes.js";
+} from "./routes.ts";
 
 export interface HostedExecutionDispatchClient {
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;

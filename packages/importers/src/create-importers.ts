@@ -1,16 +1,16 @@
-import type { SamplePresetRegistry } from "./preset-registry.js";
-import { importAssessmentResponse } from "./assessment/import-assessment-response.js";
-import { importCsvSamples } from "./csv-sample-importer.js";
-import { importDocument } from "./document-importer.js";
+import type { SamplePresetRegistry } from "./preset-registry.ts";
+import { importAssessmentResponse } from "./assessment/import-assessment-response.ts";
+import { importCsvSamples } from "./csv-sample-importer.ts";
+import { importDocument } from "./document-importer.ts";
 import {
   createDeviceProviderRegistry,
   defaultDeviceProviderAdapters,
   importDeviceProviderSnapshot,
-} from "./device-providers/index.js";
-import { importMeal } from "./meal-importer.js";
-import { createSamplePresetRegistry } from "./preset-registry.js";
+} from "./device-providers/index.ts";
+import { importMeal } from "./meal-importer.ts";
+import { createSamplePresetRegistry } from "./preset-registry.ts";
 
-import type { DeviceProviderRegistry } from "./device-providers/index.js";
+import type { DeviceProviderRegistry } from "./device-providers/index.ts";
 
 export interface CreateImportersOptions {
   corePort?: unknown;

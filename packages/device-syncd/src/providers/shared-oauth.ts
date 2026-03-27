@@ -1,8 +1,8 @@
-import { deviceSyncError } from "../errors.js";
-import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, subtractDays } from "../shared.js";
+import { deviceSyncError } from "../errors.ts";
+import { addMilliseconds, computeRetryDelayMs, normalizeString, sha256Text, sleep, subtractDays } from "../shared.ts";
 
-import type { DeviceSyncErrorOptions } from "../errors.js";
-import type { DeviceSyncAccount, ProviderAuthTokens, ProviderJobContext, ProviderScheduleResult } from "../types.js";
+import type { DeviceSyncErrorOptions } from "../errors.ts";
+import type { DeviceSyncAccount, ProviderAuthTokens, ProviderJobContext, ProviderScheduleResult } from "../types.ts";
 
 export async function parseResponseBody(response: Response): Promise<string> {
   try {

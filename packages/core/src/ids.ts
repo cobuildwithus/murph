@@ -1,6 +1,6 @@
 import { generateUlid } from "@healthybob/runtime-state";
 
-import { ID_PREFIXES } from "./constants.js";
+import { ID_PREFIXES } from "./constants.ts";
 
 function normalizePrefix(prefix: unknown, fallback = "rec"): string {
   if (typeof prefix === "string" && prefix in ID_PREFIXES) {

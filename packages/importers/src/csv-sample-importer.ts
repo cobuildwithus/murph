@@ -1,11 +1,11 @@
-import { assertCanonicalWritePort } from "./core-port.js";
+import { assertCanonicalWritePort } from "./core-port.ts";
 import type {
   SampleImportPayload,
   SampleImportRecord,
   SampleImportRowProvenance,
-} from "./core-port.js";
-import type { SamplePresetRegistry } from "./preset-registry.js";
-import { resolveSampleImportConfig } from "./preset-registry.js";
+} from "./core-port.ts";
+import type { SamplePresetRegistry } from "./preset-registry.ts";
+import { resolveSampleImportConfig } from "./preset-registry.ts";
 import {
   assertPlainObject,
   inspectFileAsset,
@@ -14,9 +14,10 @@ import {
   normalizeRequiredString,
   normalizeTimestamp,
   readUtf8File,
+  resolveVaultRootAlias,
   stripEmptyObject,
   stripUndefined,
-} from "./shared.js";
+} from "./shared.ts";
 
 export interface CsvSampleImportInput {
   filePath: string;
@@ -113,7 +114,7 @@ export async function prepareCsvSampleImport(
   }
 
   return stripUndefined({
-    vaultRoot: normalizeOptionalString(request.vaultRoot ?? request.vault, "vaultRoot"),
+    vaultRoot: normalizeOptionalString(resolveVaultRootAlias(request), "vaultRoot"),
     stream,
     unit,
     source: config.source,

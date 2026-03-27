@@ -1,6 +1,6 @@
 import { extractIsoDatePrefix } from "@healthybob/contracts";
 
-import { stripEmptyObject, stripUndefined } from "../shared.js";
+import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
   asPlainObject,
@@ -18,20 +18,20 @@ import {
   stringId,
   toIso,
   trimToLength,
-} from "./shared-normalization.js";
+} from "./shared-normalization.ts";
 
 import type {
   DeviceEventPayload,
   DeviceExternalRefPayload,
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
-} from "../core-port.js";
+} from "../core-port.ts";
 import type {
   ObservationMetricDescriptor,
   PlainObject,
   SampleMetricDescriptor,
-} from "./shared-normalization.js";
-import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.js";
+} from "./shared-normalization.ts";
+import type { DeviceProviderAdapter, NormalizedDeviceBatch } from "./types.ts";
 
 export interface OuraSnapshotInput {
   accountId?: string | number;

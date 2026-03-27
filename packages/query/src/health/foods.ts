@@ -2,8 +2,8 @@ import {
   createRegistryQueries,
   type RegistryListOptions,
   type RegistryMarkdownRecord,
-} from "./registries.js";
-import { firstObject, firstString, firstStringArray } from "./shared.js";
+} from "./registries.ts";
+import { firstObject, firstString, firstStringArray } from "./shared.ts";
 
 interface FoodAutoLogDailyQueryRule {
   time: string;

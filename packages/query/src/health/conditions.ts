@@ -2,7 +2,7 @@ import {
   conditionRecordFromEntity,
   conditionRegistryDefinition,
   createProjectedRegistryQueries,
-} from "./registries.js";
+} from "./registries.ts";
 
 const conditionQueries = createProjectedRegistryQueries(
   conditionRegistryDefinition,

@@ -5,7 +5,6 @@ import { test } from "vitest";
 
 import {
   WORKSPACE_SOURCE_PACKAGE_NAMES,
-  installSourceExtensionAliases,
   resolveWorkspaceSourceEntries,
 } from "../next.config";
 import nextConfig from "../next.config";
@@ -29,47 +28,8 @@ test("next.config transpiles workspace source packages instead of pinning dist a
   assert.deepEqual(nextConfig.transpilePackages, [...WORKSPACE_SOURCE_PACKAGE_NAMES]);
 });
 
-test("next.config configures Turbopack to resolve workspace .js specifiers to TS sources", () => {
-  assert.equal(nextConfig.turbopack?.root, process.cwd());
-  assert.deepEqual(Object.keys(nextConfig.turbopack?.rules ?? {}), [
-    "*.ts",
-    "*.tsx",
-    "*.mts",
-    "*.cts",
-  ]);
-  assert.deepEqual(nextConfig.turbopack?.rules?.["*.ts"], {
-    as: "*.ts",
-    condition: {
-      all: [{ not: "foreign" }, { path: /^packages\/[^/]+\/src\// }],
-    },
-    loaders: [path.resolve(process.cwd(), "config/turbopack-rewrite-relative-js-imports-loader.cjs")],
-  });
-  assert.deepEqual(nextConfig.turbopack?.resolveExtensions, [
-    ".tsx",
-    ".ts",
-    ".jsx",
-    ".js",
-    ".mts",
-    ".mjs",
-    ".cts",
-    ".cjs",
-    ".json",
-  ]);
-});
-
-test("installSourceExtensionAliases lets Next resolve workspace .js specifiers to TS sources", () => {
-  const config = installSourceExtensionAliases({
-    resolve: {
-      extensionAlias: {
-        ".jsx": [".tsx", ".jsx"],
-      },
-    },
-  });
-
-  assert.deepEqual(config.resolve?.extensionAlias, {
-    ".jsx": [".tsx", ".jsx"],
-    ".js": [".ts", ".tsx", ".js"],
-    ".mjs": [".mts", ".mjs"],
-    ".cjs": [".cts", ".cjs"],
+test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
+  assert.deepEqual(nextConfig.turbopack, {
+    root: process.cwd(),
   });
 });

@@ -1,49 +1,49 @@
-export { listAssessments, readAssessment, showAssessment } from "./assessments.js";
+export { listAssessments, readAssessment, showAssessment } from "./assessments.ts";
 export {
   listProfileSnapshots,
   readCurrentProfile,
   readProfileSnapshot,
   showProfile,
-} from "./profile-snapshots.js";
-export { listGoals, readGoal, showGoal } from "./goals.js";
-export { listConditions, readCondition, showCondition } from "./conditions.js";
-export { listAllergies, readAllergy, showAllergy } from "./allergies.js";
-export { listFoods, readFood, showFood } from "./foods.js";
-export { listProtocols, readProtocol, showProtocol } from "./protocols.js";
+} from "./profile-snapshots.ts";
+export { listGoals, readGoal, showGoal } from "./goals.ts";
+export { listConditions, readCondition, showCondition } from "./conditions.ts";
+export { listAllergies, readAllergy, showAllergy } from "./allergies.ts";
+export { listFoods, readFood, showFood } from "./foods.ts";
+export { listProtocols, readProtocol, showProtocol } from "./protocols.ts";
 export {
   listSupplementCompounds,
   listSupplements,
   readSupplement,
   showSupplement,
   showSupplementCompound,
-} from "./supplements.js";
+} from "./supplements.ts";
 export {
   listBloodTests,
   readBloodTest,
   showBloodTest,
-} from "./blood-tests.js";
+} from "./blood-tests.ts";
 export {
   listHistoryEvents,
   readHistoryEvent,
   showHistoryEvent,
-} from "./history.js";
+} from "./history.ts";
 export {
   listFamilyMembers,
   readFamilyMember,
   showFamilyMember,
-} from "./family.js";
+} from "./family.ts";
 export {
   listGeneticVariants,
   readGeneticVariant,
   showGeneticVariant,
-} from "./genetics.js";
+} from "./genetics.ts";
 
-export type { AssessmentListOptions, AssessmentQueryRecord } from "./assessments.js";
+export type { AssessmentListOptions, AssessmentQueryRecord } from "./assessments.ts";
 export type {
   CurrentProfileQueryRecord,
   ProfileSnapshotListOptions,
   ProfileSnapshotQueryRecord,
-} from "./profile-snapshots.js";
+} from "./profile-snapshots.ts";
 export type {
   AllergyQueryRecord,
   ConditionQueryRecord,
@@ -53,17 +53,17 @@ export type {
   RegistryListOptions,
   ProtocolQueryRecord,
   SupplementIngredientQueryRecord,
-} from "./registries.js";
-export type { FoodQueryRecord } from "./foods.js";
+} from "./registries.ts";
+export type { FoodQueryRecord } from "./foods.ts";
 export type {
   BloodTestListOptions,
   BloodTestQueryRecord,
-} from "./blood-tests.js";
+} from "./blood-tests.ts";
 export type {
   HealthHistoryKind,
   HistoryListOptions,
   HistoryQueryRecord,
-} from "./history.js";
+} from "./history.ts";
 export type {
   SupplementCompoundListOptions,
   SupplementCompoundQueryRecord,
@@ -71,4 +71,4 @@ export type {
   SupplementCompoundTotalRecord,
   SupplementListOptions,
   SupplementQueryRecord,
-} from "./supplements.js";
+} from "./supplements.ts";

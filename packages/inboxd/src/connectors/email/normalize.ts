@@ -1,11 +1,11 @@
-import type { InboundAttachment, InboundCapture } from "../../contracts/capture.js";
-import type { ChatMessage } from "../chat/message.js";
-import { createInboundCaptureFromChatMessage } from "../chat/message.js";
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.js";
+import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
+import type { ChatMessage } from "../chat/message.ts";
+import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
+import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";
 import type {
   AgentmailMessageAttachment,
   AgentmailMessageLike,
-} from "./types.js";
+} from "./types.ts";
 
 export interface AgentmailAttachmentDownloadDriver {
   downloadAttachment(input: {

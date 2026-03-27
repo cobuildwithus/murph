@@ -29,13 +29,13 @@ import {
   searchVault,
   searchVaultRuntime,
   summarizeDailySamples,
-} from "../src/index.js";
-import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.js";
-import { parseMarkdownDocument } from "../src/markdown.js";
+} from "../src/index.ts";
+import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
+import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
   scoreSearchDocuments,
   type SearchableDocument,
-} from "../src/search.js";
+} from "../src/search.ts";
 
 test("parseMarkdownDocument keeps tolerant parsing explicit", () => {
   const parsed = parseMarkdownDocument(`---

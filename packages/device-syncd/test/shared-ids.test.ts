@@ -13,7 +13,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-import { generatePrefixedId, generateStateCode, generateUlid, sanitizeKey } from "../src/shared.js";
+import { generatePrefixedId, generateStateCode, generateUlid, sanitizeKey } from "../src/shared.ts";
 
 test("device-syncd id helpers preserve dash sanitation and state-code format", () => {
   assert.equal(generateUlid(0), "00000000000123456789ABCDEF");

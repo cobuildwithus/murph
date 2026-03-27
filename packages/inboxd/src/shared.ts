@@ -10,7 +10,7 @@ import {
   resolveVaultPathOnDisk,
 } from "@healthybob/core";
 
-import type { StoredAttachment } from "./contracts/capture.js";
+import type { StoredAttachment } from "./contracts/capture.ts";
 
 export function toIsoTimestamp(value: Date | string | number): string {
   const date = value instanceof Date ? value : new Date(value);

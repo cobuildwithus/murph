@@ -1,14 +1,14 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { VaultError } from "./errors.js";
+import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
   isAppendOnlyRelativePath,
   isRawRelativePath,
   resolveVaultPath,
-} from "./path-safety.js";
-import { isErrnoException } from "./types.js";
+} from "./path-safety.ts";
+import { isErrnoException } from "./types.ts";
 
 export type ResolvedVaultPath = ReturnType<typeof resolveVaultPath>;
 export type WriteTargetPolicyKind = "text" | "raw" | "jsonl_append" | "delete";

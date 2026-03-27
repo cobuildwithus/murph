@@ -1,8 +1,8 @@
 import type { ZodType } from "zod";
 import { ZodError } from "zod";
 
-import type { FrontmatterParseProblem } from "./frontmatter.js";
-import { parseFrontmatterDocument } from "./frontmatter.js";
+import type { FrontmatterParseProblem } from "./frontmatter.ts";
+import { parseFrontmatterDocument } from "./frontmatter.ts";
 
 type FrontmatterObjectValue = Record<string, string>;
 type FrontmatterValue = string | string[] | FrontmatterObjectValue;

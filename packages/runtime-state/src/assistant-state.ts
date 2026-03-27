@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   ASSISTANT_STATE_DIRECTORY_NAME,
   resolveSiblingLocalStateBucketRoot,
-} from "./shared.js";
+} from "./shared.ts";
 
 export interface AssistantStatePaths {
   absoluteVaultRoot: string;

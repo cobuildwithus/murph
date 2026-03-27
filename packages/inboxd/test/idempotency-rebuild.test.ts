@@ -22,10 +22,10 @@ import {
   openInboxRuntime,
   persistRawCapture,
   rebuildRuntimeFromVault,
-} from "../src/index.js";
-import { findStoredCaptureEnvelope } from "../src/indexing/persist.js";
-import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.js";
-import type { InboundCapture } from "../src/contracts/capture.js";
+} from "../src/index.ts";
+import { findStoredCaptureEnvelope } from "../src/indexing/persist.ts";
+import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.ts";
+import type { InboundCapture } from "../src/contracts/capture.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));

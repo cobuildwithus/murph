@@ -1,8 +1,8 @@
 import path from "node:path";
 
-import { VaultError } from "../errors.js";
-import { sanitizePathSegment } from "../path-safety.js";
-import { toDateOnly } from "../time.js";
+import { VaultError } from "../errors.ts";
+import { sanitizePathSegment } from "../path-safety.ts";
+import { toDateOnly } from "../time.ts";
 
 import {
   bulletList,
@@ -14,9 +14,9 @@ import {
   optionalString,
   requireString,
   validateSortedStringList,
-} from "../history/shared.js";
+} from "../history/shared.ts";
 
-import type { DateInput, FrontmatterObject } from "../types.js";
+import type { DateInput, FrontmatterObject } from "../types.ts";
 
 export function stripUndefined<TRecord>(record: TRecord): TRecord {
   return Object.fromEntries(

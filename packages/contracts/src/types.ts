@@ -1,4 +1,4 @@
-import type { ErrorCodeValue, JsonValue } from "./zod.js";
+import type { ErrorCodeValue, JsonValue } from "./zod.ts";
 
 export interface ErrorCodeEntry {
   code: ErrorCodeValue;

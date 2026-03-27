@@ -1,4 +1,4 @@
-import { normalizeTimestamp, stripUndefined } from "../shared.js";
+import { normalizeTimestamp, stripUndefined } from "../shared.ts";
 
 import type {
   DeviceEventPayload,
@@ -6,8 +6,8 @@ import type {
   DeviceRawArtifactPayload,
   DeviceSamplePayload,
   DeviceSampleValuePayload,
-} from "../core-port.js";
-import type { NormalizedDeviceBatch } from "./types.js";
+} from "../core-port.ts";
+import type { NormalizedDeviceBatch } from "./types.ts";
 
 export interface ObservationEventOptions {
   metric: string;
@@ -81,15 +81,7 @@ export interface DeletionObservationOptions {
   ) => DeviceExternalRefPayload;
 }
 
-export interface NormalizedDeviceBatchOptions {
-  provider: string;
-  accountId?: string;
-  importedAt?: string;
-  events?: DeviceEventPayload[];
-  samples?: DeviceSamplePayload[];
-  rawArtifacts?: DeviceRawArtifactPayload[];
-  provenance?: Record<string, unknown>;
-}
+export type NormalizedDeviceBatchOptions = Omit<NormalizedDeviceBatch, "source">;
 
 export function asPlainObject(value: unknown): PlainObject | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

@@ -14,7 +14,7 @@ import {
   upsertFood,
   upsertProtocolItem,
   upsertRecipe,
-} from "../src/index.js";
+} from "../src/index.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -169,6 +169,154 @@ test("share packs reject attached refs and post-import meal refs that point at t
     }, "share pack"),
     /afterImport\.logMeal\.foodRef must target a food share entity/u,
   );
+});
+
+test("share packs reuse bank payload projections for protocol, recipe, and food exports", async () => {
+  const vaultRoot = await makeTempDirectory("healthybob-share-pack-payloads");
+  await initializeVault({ vaultRoot });
+
+  const protocol = await upsertProtocolItem({
+    vaultRoot,
+    title: "Fish Oil",
+    slug: "fish-oil",
+    kind: "supplement",
+    group: "supplement/omega",
+    status: "active",
+    startedOn: "2026-03-01",
+    substance: "omega-3",
+    dose: 2000,
+    unit: "mg",
+    schedule: "daily",
+    brand: "Nordic Naturals",
+    manufacturer: "Nordic Naturals",
+    servingSize: "2 softgels",
+    ingredients: [
+      {
+        compound: "EPA",
+        label: "Eicosapentaenoic acid",
+        amount: 600,
+        unit: "mg",
+        note: "From anchovy oil.",
+      },
+    ],
+    relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+    relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+  });
+  const recipe = await upsertRecipe({
+    vaultRoot,
+    title: "Sheet Pan Salmon Bowls",
+    slug: "sheet-pan-salmon-bowls",
+    status: "saved",
+    summary: "A reliable salmon bowl for weeknights.",
+    cuisine: "mediterranean",
+    dishType: "dinner",
+    source: "Family notes",
+    servings: 2,
+    prepTimeMinutes: 15,
+    cookTimeMinutes: 20,
+    totalTimeMinutes: 35,
+    tags: ["protein", "weeknight"],
+    ingredients: ["2 salmon fillets", "2 cups cooked rice"],
+    steps: ["Roast the broccoli.", "Add the salmon and finish roasting."],
+    relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+    relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+  });
+  const food = await upsertFood({
+    vaultRoot,
+    title: "Usual Salmon Bowl",
+    slug: "usual-salmon-bowl",
+    status: "active",
+    summary: "My standard salmon lunch.",
+    kind: "bowl",
+    brand: "Home",
+    vendor: "Kitchen",
+    location: "Home",
+    serving: "1 bowl",
+    aliases: ["usual salmon bowl"],
+    ingredients: ["salmon", "rice", "broccoli"],
+    tags: ["lunch", "favorite"],
+    note: "Usually add lemon.",
+    autoLogDaily: {
+      time: "12:30",
+    },
+    attachedProtocolIds: [protocol.record.protocolId],
+  });
+
+  const pack = await buildSharePackFromVault({
+    vaultRoot,
+    foods: [{ id: food.record.foodId }],
+    protocols: [{ id: protocol.record.protocolId }],
+    recipes: [{ id: recipe.record.recipeId }],
+    includeAttachedProtocols: true,
+  });
+
+  const exportedProtocol = pack.entities.find((entity) => entity.kind === "protocol");
+  const exportedRecipe = pack.entities.find((entity) => entity.kind === "recipe");
+  const exportedFood = pack.entities.find((entity) => entity.kind === "food");
+
+  assert.deepEqual(exportedProtocol?.payload, {
+    slug: "fish-oil",
+    title: "Fish Oil",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-03-01",
+    substance: "omega-3",
+    dose: 2000,
+    unit: "mg",
+    schedule: "daily",
+    brand: "Nordic Naturals",
+    manufacturer: "Nordic Naturals",
+    servingSize: "2 softgels",
+    ingredients: [
+      {
+        compound: "EPA",
+        label: "Eicosapentaenoic acid",
+        amount: 600,
+        unit: "mg",
+        note: "From anchovy oil.",
+      },
+    ],
+    relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+    relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+    group: "supplement/omega",
+  });
+  assert.deepEqual(exportedRecipe?.payload, {
+    slug: "sheet-pan-salmon-bowls",
+    title: "Sheet Pan Salmon Bowls",
+    status: "saved",
+    summary: "A reliable salmon bowl for weeknights.",
+    cuisine: "mediterranean",
+    dishType: "dinner",
+    source: "Family notes",
+    servings: 2,
+    prepTimeMinutes: 15,
+    cookTimeMinutes: 20,
+    totalTimeMinutes: 35,
+    tags: ["protein", "weeknight"],
+    ingredients: ["2 salmon fillets", "2 cups cooked rice"],
+    steps: ["Roast the broccoli.", "Add the salmon and finish roasting."],
+    relatedGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+    relatedConditionIds: ["cond_01JNW7YJ7MNE7M9Q2QWQK4Z3F9"],
+  });
+  assert.deepEqual(exportedFood?.payload, {
+    slug: "usual-salmon-bowl",
+    title: "Usual Salmon Bowl",
+    status: "active",
+    summary: "My standard salmon lunch.",
+    kind: "bowl",
+    brand: "Home",
+    vendor: "Kitchen",
+    location: "Home",
+    serving: "1 bowl",
+    aliases: ["usual salmon bowl"],
+    ingredients: ["salmon", "rice", "broccoli"],
+    tags: ["favorite", "lunch"],
+    note: "Usually add lemon.",
+    autoLogDaily: {
+      time: "12:30",
+    },
+    attachedProtocolRefs: exportedProtocol ? [exportedProtocol.ref] : [],
+  });
 });
 
 test("share pack imports create fresh destination records instead of overwriting same-slug entities", async () => {

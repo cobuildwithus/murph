@@ -4,15 +4,15 @@ import {
   safeParseContract,
 } from "@healthybob/contracts";
 
-import { VAULT_LAYOUT } from "./constants.js";
-import { VaultError } from "./errors.js";
-import { readExperimentFrontmatterDocument } from "./domains/experiments.js";
+import { VAULT_LAYOUT } from "./constants.ts";
+import { VaultError } from "./errors.ts";
+import { readExperimentFrontmatterDocument } from "./domains/experiments.ts";
 import {
   ensureJournalDay as ensureJournalDayInternal,
   readJournalDayFrontmatterDocument,
-} from "./domains/journal.js";
-import { stringifyFrontmatterDocument } from "./frontmatter.js";
-import { runCanonicalWrite } from "./operations/write-batch.js";
+} from "./domains/journal.ts";
+import { stringifyFrontmatterDocument } from "./frontmatter.ts";
+import { runCanonicalWrite } from "./operations/write-batch.ts";
 
 interface InboxPromotionCaptureAttachment {
   attachmentId?: string | null;

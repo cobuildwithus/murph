@@ -1,4 +1,4 @@
-import type { HealthEntityKind } from "./health-entities.js";
+import type { HealthEntityKind } from "./health-entities.ts";
 
 export type CommandCapability =
   | "show"

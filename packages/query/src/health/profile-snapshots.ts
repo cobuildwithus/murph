@@ -7,15 +7,15 @@ import {
   matchesDateRange,
   matchesLookup,
   matchesText,
-} from "./shared.js";
+} from "./shared.ts";
 import {
   readJsonlRecords,
   readOptionalMarkdownDocumentOutcome,
-} from "./loaders.js";
+} from "./loaders.ts";
 import {
   projectCurrentProfileEntity,
   projectProfileSnapshotEntity,
-} from "../canonical-entities.js";
+} from "../canonical-entities.ts";
 import {
   compareCurrentProfileSnapshotRecency,
   resolveCurrentProfileDocument,
@@ -23,13 +23,13 @@ import {
   resolveCurrentProfileSnapshot,
   type CurrentProfileDocumentOutcome,
   type CurrentProfileSnapshotSortFields,
-} from "./current-profile-resolution.js";
+} from "./current-profile-resolution.ts";
 
 import type {
   CanonicalEntity,
-} from "../canonical-entities.js";
-import type { ParseFailure } from "./loaders.js";
-import type { MarkdownDocumentRecord } from "./shared.js";
+} from "../canonical-entities.ts";
+import type { ParseFailure } from "./loaders.ts";
+import type { MarkdownDocumentRecord } from "./shared.ts";
 
 export interface ProfileSnapshotQueryRecord {
   id: string;

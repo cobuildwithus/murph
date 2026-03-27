@@ -1,8 +1,8 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { VaultError } from "./errors.js";
-import { isErrnoException } from "./types.js";
+import { VaultError } from "./errors.ts";
+import { isErrnoException } from "./types.ts";
 
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;

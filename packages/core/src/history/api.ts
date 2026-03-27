@@ -11,15 +11,15 @@ import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
 } from "@healthybob/contracts";
-import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.js";
-import { emitAuditRecord } from "../audit.js";
-import { VaultError } from "../errors.js";
-import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.js";
-import { generateRecordId } from "../ids.js";
-import { runCanonicalWrite } from "../operations/index.js";
-import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.js";
-import { walkVaultFiles } from "../fs.js";
-import { loadVault } from "../vault.js";
+import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
+import { emitAuditRecord } from "../audit.ts";
+import { VaultError } from "../errors.ts";
+import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
+import { generateRecordId } from "../ids.ts";
+import { runCanonicalWrite } from "../operations/index.ts";
+import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.ts";
+import { walkVaultFiles } from "../fs.ts";
+import { loadVault } from "../vault.ts";
 
 import {
   compareIsoTimestamps,
@@ -31,7 +31,7 @@ import {
   optionalString,
   requireString,
   validateSortedStringList,
-} from "./shared.js";
+} from "./shared.ts";
 import {
   ADVERSE_EFFECT_SEVERITIES,
   HEALTH_HISTORY_KINDS,
@@ -39,7 +39,7 @@ import {
   HISTORY_EVENT_ORDER,
   PROCEDURE_STATUSES,
   TEST_STATUSES,
-} from "./types.js";
+} from "./types.ts";
 
 import type {
   AppendBloodTestInput,
@@ -56,7 +56,7 @@ import type {
   ReadHistoryEventResult,
   TestHistoryEventRecord,
   TestResultStatus,
-} from "./types.js";
+} from "./types.ts";
 
 const HISTORY_KIND_SET = new Set<HistoryEventKind>(HEALTH_HISTORY_KINDS);
 const BLOOD_TEST_RESULT_COMPARATORS = ["<", "<=", ">", ">="] as const;

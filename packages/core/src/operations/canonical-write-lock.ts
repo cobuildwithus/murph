@@ -8,10 +8,10 @@ import {
   isProcessRunning,
 } from "@healthybob/runtime-state";
 
-import { VaultError } from "../errors.js";
-import { normalizeVaultRoot, resolveVaultPath } from "../path-safety.js";
-import { toIsoTimestamp } from "../time.js";
-import { isErrnoException, isPlainRecord } from "../types.js";
+import { VaultError } from "../errors.ts";
+import { normalizeVaultRoot, resolveVaultPath } from "../path-safety.ts";
+import { toIsoTimestamp } from "../time.ts";
+import { isErrnoException, isPlainRecord } from "../types.ts";
 
 export const CANONICAL_WRITE_LOCK_DIRECTORY = ".runtime/locks/canonical-write";
 export const CANONICAL_WRITE_LOCK_METADATA_PATH = `${CANONICAL_WRITE_LOCK_DIRECTORY}/owner.json`;

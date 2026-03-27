@@ -19,7 +19,7 @@ import type {
   WorkoutFormatFrontmatter,
   SampleRecord,
   VaultMetadata,
-} from "./zod.js";
+} from "./zod.ts";
 
 type FrontmatterExamples = {
   core: CoreFrontmatter;

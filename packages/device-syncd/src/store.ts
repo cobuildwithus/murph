@@ -7,7 +7,7 @@ import {
   maybeParseJsonObject,
   stringifyJson,
   toIsoTimestamp,
-} from "./shared.js";
+} from "./shared.ts";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -19,7 +19,7 @@ import type {
   OAuthStateRecord,
   ProviderAuthTokens,
   StoredDeviceSyncAccount,
-} from "./types.js";
+} from "./types.ts";
 
 interface AccountUpsertInput {
   provider: string;
