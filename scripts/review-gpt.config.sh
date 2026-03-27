@@ -21,6 +21,12 @@ review_gpt_register_dir_preset "bad-code" "bad-code-quality.md" \
   "anti-patterns-and-bad-practices" \
   "code-quality" \
   "bad-code-quality"
+review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
+  "Greenfield hard-cut audit for removable legacy compatibility, migrations, and fallback paths." \
+  "remove-legacy" \
+  "legacy-cleanup" \
+  "hard-cut" \
+  "greenfield-hard-cut"
 review_gpt_register_preset "test-coverage-audit" "agent-docs/prompts/test-coverage-audit.md" \
   "Post-simplify test-coverage audit that adds the highest-impact missing tests." \
   "coverage" \
