@@ -508,7 +508,7 @@ async function writeExecutable(
 
 function buildExpectedCliShimScript(
   cliBinPath: string,
-  shimName: 'healthybob' | 'murph' | 'vault-cli' = 'murph',
+  shimName: 'murph' | 'vault-cli' = 'murph',
 ): string {
   const cliSourceBinPath = path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
   const cliPackageRoot = path.resolve(path.dirname(cliBinPath), '..')
@@ -2380,7 +2380,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       } | null
       defaultVault: string | null
     }
-    const healthybobShim = await readFile(healthybobShimPath, 'utf8')
     const murphShim = await readFile(murphShimPath, 'utf8')
     const vaultCliShim = await readFile(vaultCliShimPath, 'utf8')
     const shellProfile = await readFile(shellProfilePath, 'utf8')
@@ -2393,7 +2392,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     assert.equal(operatorConfig.assistant?.account?.planName, 'Plus')
     assert.equal(operatorConfig.assistant?.account?.quota?.creditsRemaining, 18)
     assert.equal(operatorConfig.assistant?.account?.quota?.primaryWindow?.remainingPercent, 55)
-    assert.equal(healthybobShim, buildExpectedCliShimScript(cliBinPath, 'healthybob'))
+    await assert.rejects(readFile(healthybobShimPath, 'utf8'), /ENOENT/u)
     assert.equal(murphShim, buildExpectedCliShimScript(cliBinPath, 'murph'))
     assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath, 'vault-cli'))
     assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)
@@ -2408,7 +2407,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   }
 })
 
-test.sequential('setup service reuses existing Murph shims and PATH wiring', async () => {
+test.sequential('setup service removes a legacy healthybob shim and keeps the active Murph shims', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-shim-reuse-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
@@ -2424,6 +2423,7 @@ test.sequential('setup service reuses existing Murph shims and PATH wiring', asy
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const userBinDirectory = path.join(homeRoot, '.local', 'bin')
+  const legacyShimPath = path.join(userBinDirectory, 'healthybob')
   const shellProfilePath = path.join(homeRoot, '.zshrc')
   const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
   let bootstrapCalls = 0
@@ -2435,10 +2435,7 @@ test.sequential('setup service reuses existing Murph shims and PATH wiring', asy
   await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
   await mkdir(userBinDirectory, { recursive: true })
-  await writeExecutable(
-    path.join(userBinDirectory, 'healthybob'),
-    buildExpectedCliShimScript(cliBinPath, 'healthybob'),
-  )
+  await writeExecutable(legacyShimPath, '#!/usr/bin/env bash\nprintf \'legacy\\n\'\n')
   await writeExecutable(
     path.join(userBinDirectory, 'murph'),
     buildExpectedCliShimScript(cliBinPath, 'murph'),
@@ -2515,13 +2512,14 @@ export PATH="$HOME/.local/bin:$PATH"
 
     assert.equal(bootstrapCalls, 1)
     assert.equal(
-      result.steps.some((step) => step.id === 'cli-shims' && step.status === 'reused'),
+      result.steps.some((step) => step.id === 'cli-shims' && step.status === 'completed'),
       true,
     )
     assert.equal(
       result.steps.some((step) => step.id === 'default-vault' && step.status === 'reused'),
       true,
     )
+    await assert.rejects(readFile(legacyShimPath, 'utf8'), /ENOENT/u)
     assert.equal(
       result.notes.includes('Open a new shell or run source ~/.zshrc to use murph immediately.'),
       false,
@@ -3178,11 +3176,11 @@ test('setup routing helpers keep the setup alias stable', () => {
   )
   assert.equal(
     detectSetupProgramName('/usr/local/bin/healthybob'),
-    'murph',
+    'vault-cli',
   )
   assert.equal(
     detectSetupProgramName('/tmp/packages/cli/dist/bin.js', 'healthybob'),
-    'murph',
+    'vault-cli',
   )
   assert.equal(
     detectSetupProgramName('/tmp/packages/cli/dist/bin.js'),

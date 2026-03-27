@@ -55,8 +55,7 @@
   ],
   "bin": {
     "vault-cli": "dist/bin.js",
-    "murph": "dist/bin.js",
-    "healthybob": "dist/bin.js"
+    "murph": "dist/bin.js"
   },
   "engines": {
     "node": ">=22.16.0"

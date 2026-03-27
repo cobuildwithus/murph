@@ -1073,12 +1073,12 @@ export function detectSetupProgramName(
   shimProgramName = process.env.SETUP_PROGRAM_NAME,
 ): string {
   const normalizedShimProgramName = shimProgramName?.trim().toLowerCase()
-  if (normalizedShimProgramName === 'murph' || normalizedShimProgramName === 'healthybob') {
+  if (normalizedShimProgramName === 'murph') {
     return 'murph'
   }
 
   const baseName = path.basename(argv0 ?? '').toLowerCase()
-  return baseName === 'murph' || baseName === 'healthybob' ? 'murph' : 'vault-cli'
+  return baseName === 'murph' ? 'murph' : 'vault-cli'
 }
 
 export function isSetupInvocation(

@@ -30,12 +30,15 @@ Done:
 - Completed required audit passes: `simplify`, `test-coverage-audit`, and `task-finish-review`.
 - Re-ran focused verification for `packages/cli/test/assistant-service.test.ts` and `packages/cli/test/setup-cli.test.ts`.
 - Re-ran repo wrappers and confirmed `pnpm typecheck` now passes.
+- Follow-up hard-cut the visible CLI surface to `murph` only by removing the published `healthybob` bin alias, stopping new `healthybob` shim installation, deleting a legacy `~/.local/bin/healthybob` shim during setup reruns, and removing `healthybob` normalization from `detectSetupProgramName`.
+- Re-ran focused CLI verification for package shape plus `packages/cli/test/setup-cli.test.ts`.
+- Re-ran required audit subagents for the murph-only CLI follow-up; simplify found no issues, and coverage/finish-review findings about legacy shim absence/cleanup were fixed locally.
 
 Now:
-- Capture the final migration-owned file set and commit without sweeping in unrelated shared-tree changes.
+- Commit the murph-only CLI follow-up without sweeping unrelated shared-tree changes.
 
 Next:
-- Commit the migration slice with notes that `pnpm test` is blocked by repo-wide doc-drift on the dirty working tree and `pnpm test:coverage` is blocked by unrelated `apps/cloudflare/test/user-runner.test.ts` failures.
+- Commit the murph-only CLI follow-up with notes that `pnpm test` is currently blocked by repo-wide doc-drift on the dirty working tree and `pnpm test:coverage` is currently blocked by unrelated `apps/web/src/lib/hosted-execution/hydration.ts` type errors in the shared tree.
 
 Open questions (UNCONFIRMED if needed):
 - UNCONFIRMED: whether npm publish metadata or external consumers require extra `exports`/alias shims beyond the current package/bin compatibility window.
@@ -47,6 +50,9 @@ Working set (files/ids/commands):
 - `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
 - `CONTINUITY_murph-rename-migration.md`
 - `packages/cli/src/{assistant/onboarding.ts,setup-services/shell.ts}`
+- `packages/cli/src/setup-services.ts`
+- `packages/cli/package.json`
+- `packages/cli/scripts/verify-package-shape.ts`
 - `packages/cli/test/{assistant-service.test.ts,setup-cli.test.ts}`
 - `pnpm typecheck`
 - `pnpm test`

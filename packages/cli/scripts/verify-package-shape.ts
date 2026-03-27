@@ -85,8 +85,8 @@ assert(
   'package.json must expose murph from dist/bin.js as the setup alias.',
 )
 assert(
-  packageJson.bin?.healthybob === 'dist/bin.js',
-  'package.json must keep the temporary healthybob compatibility alias on dist/bin.js.',
+  !('healthybob' in (packageJson.bin ?? {})),
+  'package.json must not expose a healthybob compatibility alias once the CLI surface is murph-only.',
 )
 assert(
   packageJson.exports?.['.']?.default === './dist/index.js',
