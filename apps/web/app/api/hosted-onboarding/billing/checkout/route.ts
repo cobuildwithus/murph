@@ -12,6 +12,7 @@ export async function POST(request: Request) {
         inviteCode,
         sessionRecord,
         ...(typeof body.shareCode === "string" ? { shareCode: body.shareCode } : {}),
+        ...(typeof body.walletAddress === "string" ? { walletAddress: body.walletAddress } : {}),
       }),
     );
   } catch (error) {

@@ -6,8 +6,13 @@ const mocks = vi.hoisted(() => {
 
   return {
     dispatchHostedExecution: vi.fn(),
+    isHostedOnboardingRevnetEnabled: vi.fn(),
+    normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
+    requireHostedRevnetConfig: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
+    submitHostedRevnetPayment: vi.fn(),
     stripeConstructEvent,
+    waitForHostedRevnetPaymentConfirmation: vi.fn(),
   };
 });
 
@@ -35,6 +40,15 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
     publicBaseUrl: "https://join.example.test",
+    revnetChainId: null,
+    revnetPaymentCurrency: null,
+    revnetPaymentTokenAddress: null,
+    revnetPaymentTokenDecimals: null,
+    revnetProjectId: null,
+    revnetRpcUrl: null,
+    revnetTerminalAddress: null,
+    revnetTreasuryPrivateKey: null,
+    revnetWaitConfirmations: 1,
     sessionCookieName: "hb_hosted_session",
     sessionTtlDays: 30,
     stripeBillingMode: "payment",
@@ -58,6 +72,17 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
+  coerceHostedWalletAddress: (value: string | null | undefined) => value ?? null,
+  convertStripeMinorAmountToRevnetTokenAmount: (amountMinor: number, tokenDecimals: number) =>
+    BigInt(amountMinor) * 10n ** BigInt(Math.max(tokenDecimals - 2, 0)),
+  isHostedOnboardingRevnetEnabled: mocks.isHostedOnboardingRevnetEnabled,
+  normalizeHostedWalletAddress: mocks.normalizeHostedWalletAddress,
+  requireHostedRevnetConfig: mocks.requireHostedRevnetConfig,
+  submitHostedRevnetPayment: mocks.submitHostedRevnetPayment,
+  waitForHostedRevnetPaymentConfirmation: mocks.waitForHostedRevnetPaymentConfirmation,
+}));
+
 import {
   handleHostedOnboardingLinqWebhook,
   handleHostedStripeWebhook,
@@ -66,6 +91,24 @@ import {
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
+    mocks.requireHostedRevnetConfig.mockReturnValue({
+      chainId: 8453,
+      paymentCurrency: "usd",
+      paymentTokenAddress: "0x0000000000000000000000000000000000000002",
+      paymentTokenDecimals: 6,
+      projectId: 1n,
+      rpcUrl: "https://rpc.example.test",
+      terminalAddress: "0x0000000000000000000000000000000000000001",
+      treasuryPrivateKey: `0x${"11".repeat(32)}`,
+      waitConfirmations: 1,
+    });
+    mocks.submitHostedRevnetPayment.mockResolvedValue({
+      approvalTxHash: null,
+      payTxHash: "0xabc123",
+      terminalTokenAmount: 5_000_000n,
+    });
+    mocks.waitForHostedRevnetPaymentConfirmation.mockResolvedValue(undefined);
   });
 
   it("allows a Linq active-member webhook to retry after a dispatch failure", async () => {
@@ -384,6 +427,197 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(mocks.dispatchHostedExecution).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("submits and confirms an inline RevNet payment exactly once for a paid invoice", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_123",
+      type: "invoice.paid",
+    });
+
+    const issuanceRow = {
+      id: "hbrv_123",
+      idempotencyKey: "stripe:invoice:in_123",
+      payTxHash: null,
+      status: "pending",
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    };
+    const submittedIssuanceRow = {
+      ...issuanceRow,
+      payTxHash: "0xabc123",
+      status: "submitted",
+      updatedAt: new Date("2026-03-26T12:00:01.000Z"),
+    };
+
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+        update: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+      },
+      hostedRevnetIssuance: {
+        findUnique: vi.fn(),
+        upsert: vi.fn().mockResolvedValue(issuanceRow),
+        update: vi.fn()
+          .mockResolvedValueOnce(submittedIssuanceRow)
+          .mockResolvedValueOnce({
+            ...submittedIssuanceRow,
+            confirmedAt: new Date("2026-03-26T12:00:02.000Z"),
+            status: "confirmed",
+          }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(prisma.hostedRevnetIssuance.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          beneficiaryAddress: "0x00000000000000000000000000000000000000aa",
+          paymentAmountMinor: 500,
+          paymentCurrency: "usd",
+          stripeInvoiceId: "in_123",
+          stripePaymentIntentId: "pi_123",
+        }),
+        where: {
+          idempotencyKey: "stripe:invoice:in_123",
+        },
+      }),
+    );
+    expect(mocks.submitHostedRevnetPayment).toHaveBeenCalledWith({
+      amountMinor: 500,
+      beneficiaryAddress: "0x00000000000000000000000000000000000000aa",
+      memo: "HealthyBob invoice in_123 member member_123",
+    });
+    expect(mocks.waitForHostedRevnetPaymentConfirmation).toHaveBeenCalledWith({
+      txHash: "0xabc123",
+    });
+    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(1);
+    expect(mocks.waitForHostedRevnetPaymentConfirmation.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.dispatchHostedExecution.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not resubmit a RevNet payment when the issuance is already confirmed", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_confirmed_123",
+      type: "invoice.paid",
+    });
+
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+        update: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+      },
+      hostedRevnetIssuance: {
+        upsert: vi.fn().mockResolvedValue({
+          id: "hbrv_123",
+          idempotencyKey: "stripe:invoice:in_123",
+          payTxHash: "0xabc123",
+          status: "confirmed",
+          updatedAt: new Date("2026-03-26T12:00:02.000Z"),
+        }),
+      },
+    };
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_confirmed_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(prisma.hostedRevnetIssuance.upsert).toHaveBeenCalledTimes(1);
+    expect(mocks.submitHostedRevnetPayment).not.toHaveBeenCalled();
+    expect(mocks.waitForHostedRevnetPaymentConfirmation).not.toHaveBeenCalled();
+    expect(mocks.dispatchHostedExecution).toHaveBeenCalledTimes(1);
   });
 
   it("treats completed Stripe receipts as duplicates without replaying durable updates", async () => {

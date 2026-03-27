@@ -168,6 +168,14 @@ enum HostedBillingCheckoutStatus {
   failed
 }
 
+enum HostedRevnetIssuanceStatus {
+  pending
+  submitting
+  submitted
+  confirmed
+  failed
+}
+
 model HostedMember {
   id                           String              @id
   phoneNumber                  String              @map("phone_number")
@@ -192,6 +200,7 @@ model HostedMember {
   invites                      HostedInvite[]
   sessions                     HostedSession[]
   checkouts                    HostedBillingCheckout[]
+  revnetIssuances              HostedRevnetIssuance[]
 
   @@index([status])
   @@index([billingStatus])
@@ -269,6 +278,39 @@ model HostedBillingCheckout {
   @@index([stripeCustomerId])
   @@index([stripeSubscriptionId])
   @@map("hosted_billing_checkout")
+}
+
+model HostedRevnetIssuance {
+  id                    String                     @id
+  memberId              String                     @map("member_id")
+  idempotencyKey        String                     @unique @map("idempotency_key")
+  stripeInvoiceId       String                     @unique @map("stripe_invoice_id")
+  stripePaymentIntentId String?                    @map("stripe_payment_intent_id")
+  stripeChargeId        String?                    @map("stripe_charge_id")
+  chainId               Int                        @map("chain_id")
+  projectId             String                     @map("project_id")
+  terminalAddress       String                     @map("terminal_address")
+  tokenAddress          String                     @map("token_address")
+  beneficiaryAddress    String                     @map("beneficiary_address")
+  paymentAmountMinor    Int                        @map("payment_amount_minor")
+  paymentCurrency       String                     @map("payment_currency")
+  terminalTokenAmount   String                     @map("terminal_token_amount")
+  status                HostedRevnetIssuanceStatus @default(pending)
+  approvalTxHash        String?                    @unique @map("approval_tx_hash")
+  payTxHash             String?                    @unique @map("pay_tx_hash")
+  failureCode           String?                    @map("failure_code")
+  failureMessage        String?                    @map("failure_message")
+  submittedAt           DateTime?                  @map("submitted_at")
+  confirmedAt           DateTime?                  @map("confirmed_at")
+  createdAt             DateTime                   @default(now()) @map("created_at")
+  updatedAt             DateTime                   @updatedAt @map("updated_at")
+  member                HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, createdAt])
+  @@index([status, createdAt])
+  @@index([stripePaymentIntentId])
+  @@index([stripeChargeId])
+  @@map("hosted_revnet_issuance")
 }
 
 model HostedShareLink {

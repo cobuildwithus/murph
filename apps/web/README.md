@@ -176,8 +176,16 @@ The onboarding lane is intentionally thin:
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres
-- Privy handles phone OTP, the frontend manually creates an embedded wallet for whitelabel flows, and the backend verifies a Privy identity token before creating the hosted session cookie
+- Privy handles phone OTP, auto-creates the embedded wallet for users who do not already have one, and the backend reads a Privy identity token from the Privy cookie before creating the hosted session cookie
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
+- optional hosted RevNet issuance can submit an inline onchain payment from `invoice.paid` after Stripe succeeds, using invoice-level Postgres idempotency plus stored tx hashes to prevent duplicate issuance
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
 - hosted share links can now store an encrypted one-time share pack for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation
 - once a member is active, hosted onboarding and hosted share acceptance dispatch signed internal execution events to `apps/cloudflare` for member activation, shared-bundle imports, direct Linq messages, and later scheduled assistant ticks instead of trying to run the inbox/assistant loop inside Next.js
+
+Current RevNet MVP assumptions:
+
+- RevNet issuance is only enabled when `HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription`.
+- The configured treasury key must already control a wallet funded on the target chain.
+- The Stripe webhook waits for the configured number of confirmations before dispatching member activation.
+- Chargebacks and disputes are not clawed back onchain in this MVP; the implementation is safe and idempotent, not reversible.

@@ -25,6 +25,18 @@ export function mapStripeSubscriptionStatusToHostedBillingStatus(
   }
 }
 
+export function coerceStripeObjectId(value: { id?: unknown } | string | null | undefined): string | null {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value && typeof value === "object" && typeof value.id === "string") {
+    return value.id;
+  }
+
+  return null;
+}
+
 export function coerceStripeSubscriptionId(value: string | Stripe.Subscription | null | undefined): string | null {
   if (typeof value === "string") {
     return value;

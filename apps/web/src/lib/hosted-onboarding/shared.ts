@@ -70,6 +70,10 @@ export function generateHostedCheckoutId(): string {
   return `hbco_${randomBytes(12).toString("base64url")}`;
 }
 
+export function generateHostedRevnetIssuanceId(): string {
+  return `hbrv_${randomBytes(12).toString("base64url")}`;
+}
+
 export function generateHostedSessionToken(): string {
   return randomBytes(32).toString("base64url");
 }

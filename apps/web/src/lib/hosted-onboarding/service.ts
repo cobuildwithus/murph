@@ -7,12 +7,13 @@ import {
   HostedBillingStatus,
   HostedInviteStatus,
   HostedMemberStatus,
+  HostedRevnetIssuanceStatus,
 } from "@prisma/client";
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecution } from "../hosted-execution/dispatch";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { hasHostedPrivyPhoneAuthConfig } from "./landing";
 import {
   buildHostedInviteReply,
@@ -36,6 +37,7 @@ import {
   generateHostedInviteCode,
   generateHostedInviteId,
   generateHostedMemberId,
+  generateHostedRevnetIssuanceId,
   inviteExpiresAt,
   maskPhoneNumber,
   normalizeNullableString,
@@ -45,11 +47,31 @@ import {
 import {
   buildStripeCancelUrl,
   buildStripeSuccessUrl,
+  coerceStripeObjectId,
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
+import {
+  coerceHostedWalletAddress,
+  convertStripeMinorAmountToRevnetTokenAmount,
+  isHostedOnboardingRevnetEnabled,
+  normalizeHostedWalletAddress,
+  requireHostedRevnetConfig,
+  submitHostedRevnetPayment,
+  waitForHostedRevnetPaymentConfirmation,
+} from "./revnet";
 
 import type { HostedInviteStatusPayload } from "./types";
+
+type HostedRevnetIssuanceRecord = {
+  id: string;
+  idempotencyKey: string;
+  payTxHash: string | null;
+  status: HostedRevnetIssuanceStatus;
+  updatedAt: Date;
+};
+
+const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
 
 export async function getHostedInviteStatus(input: {
   inviteCode: string;
@@ -410,12 +432,12 @@ export async function completeHostedPrivyVerification(input: {
 }
 
 export async function createHostedBillingCheckout(input: {
-
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
   sessionRecord: HostedSessionRecord;
   shareCode?: string | null;
+  walletAddress?: string | null;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -436,15 +458,34 @@ export async function createHostedBillingCheckout(input: {
     };
   }
 
+  const shareCode = normalizeNullableString(input.shareCode);
+  const resolvedWalletAddress = resolveHostedMemberWalletAddress({
+    existingWalletAddress: invite.member.walletAddress,
+    nextWalletAddress: normalizeNullableString(input.walletAddress),
+    requireWalletAddress: isHostedOnboardingRevnetEnabled(),
+  });
   const { billingMode, priceId, stripe } = requireHostedOnboardingStripeConfig();
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+  const memberForCustomer = resolvedWalletAddress
+    ? {
+        ...invite.member,
+        walletAddress: resolvedWalletAddress,
+      }
+    : invite.member;
   const customerId = await ensureHostedStripeCustomer({
-    member: invite.member,
+    member: memberForCustomer,
     prisma,
     stripe,
   });
-  const checkoutSession = await stripe.checkout.sessions.create({
-    cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, normalizeNullableString(input.shareCode)),
+  const checkoutMetadata: Record<string, string> = {
+    inviteCode: invite.inviteCode,
+    inviteId: invite.id,
+    memberId: invite.member.id,
+    normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
+    ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
+  };
+  const checkoutSessionParams: Stripe.Checkout.SessionCreateParams = {
+    cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
     client_reference_id: invite.member.id,
     customer: customerId,
     line_items: [
@@ -453,15 +494,22 @@ export async function createHostedBillingCheckout(input: {
         quantity: 1,
       },
     ],
-    metadata: {
-      inviteCode: invite.inviteCode,
-      inviteId: invite.id,
-      memberId: invite.member.id,
-      normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
-    },
+    metadata: checkoutMetadata,
     mode: billingMode,
-    success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, normalizeNullableString(input.shareCode)),
-  });
+    success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, shareCode),
+  };
+
+  if (billingMode === "subscription") {
+    checkoutSessionParams.subscription_data = {
+      metadata: checkoutMetadata,
+    };
+  } else {
+    checkoutSessionParams.payment_intent_data = {
+      metadata: checkoutMetadata,
+    };
+  }
+
+  const checkoutSession = await stripe.checkout.sessions.create(checkoutSessionParams);
 
   if (!checkoutSession.url) {
     throw hostedOnboardingError({
@@ -494,6 +542,7 @@ export async function createHostedBillingCheckout(input: {
       billingStatus: HostedBillingStatus.checkout_open,
       stripeCustomerId: customerId,
       stripeLatestCheckoutSessionId: checkoutSession.id,
+      ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
     },
   });
 
@@ -855,11 +904,6 @@ async function reconcileHostedPrivyIdentityOnMember(input: {
   }
 }
 
-function normalizeHostedWalletAddress(value: string | null | undefined): string | null {
-  const normalized = normalizeNullableString(value);
-  return normalized ? normalized.toLowerCase() : null;
-}
-
 async function issueHostedInvite(input: {
   channel: "linq" | "share" | "web";
   linqChatId: string | null;
@@ -995,15 +1039,23 @@ async function ensureHostedStripeCustomer(input: {
   prisma: PrismaClient;
   stripe: Stripe;
 }): Promise<string> {
+  const customerMetadata = {
+    memberId: input.member.id,
+    normalizedPhoneNumber: input.member.normalizedPhoneNumber,
+    ...(input.member.walletAddress ? { walletAddress: input.member.walletAddress } : {}),
+  };
+
   if (input.member.stripeCustomerId) {
+    await input.stripe.customers.update(input.member.stripeCustomerId, {
+      metadata: customerMetadata,
+      phone: input.member.normalizedPhoneNumber,
+    });
+
     return input.member.stripeCustomerId;
   }
 
   const customer = await input.stripe.customers.create({
-    metadata: {
-      memberId: input.member.id,
-      normalizedPhoneNumber: input.member.normalizedPhoneNumber,
-    },
+    metadata: customerMetadata,
     phone: input.member.normalizedPhoneNumber,
   });
 
@@ -1013,10 +1065,345 @@ async function ensureHostedStripeCustomer(input: {
     },
     data: {
       stripeCustomerId: customer.id,
+      ...(input.member.walletAddress ? { walletAddress: input.member.walletAddress } : {}),
     },
   });
 
   return customer.id;
+}
+
+function resolveHostedMemberWalletAddress(input: {
+  existingWalletAddress: string | null | undefined;
+  nextWalletAddress: string | null | undefined;
+  requireWalletAddress: boolean;
+}): string | null {
+  const normalizedNextWalletAddress = normalizeNullableString(input.nextWalletAddress);
+
+  if (normalizedNextWalletAddress) {
+    const walletAddress = normalizeHostedWalletAddress(normalizedNextWalletAddress);
+
+    if (!walletAddress) {
+      throw hostedOnboardingError({
+        code: "HOSTED_WALLET_ADDRESS_INVALID",
+        message: "The hosted wallet address must be a valid EVM address.",
+        httpStatus: 400,
+      });
+    }
+
+    return walletAddress;
+  }
+
+  const normalizedExistingWalletAddress = normalizeNullableString(input.existingWalletAddress);
+
+  if (normalizedExistingWalletAddress) {
+    const walletAddress = normalizeHostedWalletAddress(normalizedExistingWalletAddress);
+
+    if (walletAddress) {
+      return walletAddress;
+    }
+
+    if (!input.requireWalletAddress) {
+      return null;
+    }
+
+    throw hostedOnboardingError({
+      code: "HOSTED_WALLET_ADDRESS_INVALID",
+      message: "The hosted wallet address must be a valid EVM address.",
+      httpStatus: 400,
+    });
+  }
+
+  if (input.requireWalletAddress) {
+    throw hostedOnboardingError({
+      code: "HOSTED_WALLET_ADDRESS_REQUIRED",
+      message: "A hosted wallet address is required before Stripe checkout can begin.",
+      httpStatus: 400,
+    });
+  }
+
+  return null;
+}
+
+function requireHostedMemberWalletAddressForRevnet(member: HostedMember) {
+  const walletAddress = coerceHostedWalletAddress(member.walletAddress);
+
+  if (!walletAddress) {
+    throw hostedOnboardingError({
+      code: "REVNET_BENEFICIARY_REQUIRED",
+      message: "Hosted RevNet issuance requires a valid wallet address on the hosted member.",
+      httpStatus: 503,
+      retryable: true,
+      details: {
+        memberId: member.id,
+      },
+    });
+  }
+
+  return walletAddress;
+}
+
+async function maybeIssueHostedRevnetForStripeInvoice(input: {
+  invoice: Stripe.Invoice;
+  member: HostedMember;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!isHostedOnboardingRevnetEnabled()) {
+    return;
+  }
+
+  const amountPaid = typeof input.invoice.amount_paid === "number" ? input.invoice.amount_paid : 0;
+
+  if (amountPaid < 1) {
+    return;
+  }
+
+  const config = requireHostedRevnetConfig();
+  const invoiceCurrency = normalizeNullableString(input.invoice.currency)?.toLowerCase() ?? null;
+
+  if (invoiceCurrency && invoiceCurrency !== config.paymentCurrency) {
+    throw hostedOnboardingError({
+      code: "REVNET_PAYMENT_CURRENCY_MISMATCH",
+      message: `Stripe invoice ${input.invoice.id} used ${invoiceCurrency}, but Hosted RevNet issuance is configured for ${config.paymentCurrency}.`,
+      httpStatus: 502,
+    });
+  }
+
+  const beneficiaryAddress = requireHostedMemberWalletAddressForRevnet(input.member);
+  const idempotencyKey = `stripe:invoice:${input.invoice.id}`;
+  const terminalTokenAmount = convertStripeMinorAmountToRevnetTokenAmount(
+    amountPaid,
+    config.paymentTokenDecimals,
+  );
+  const paymentIntentId = coerceStripeObjectId(
+    (input.invoice as Stripe.Invoice & { payment_intent?: string | { id?: unknown } | null }).payment_intent ??
+      null,
+  );
+  const chargeId = coerceStripeObjectId(
+    (input.invoice as Stripe.Invoice & { charge?: string | { id?: unknown } | null }).charge ?? null,
+  );
+
+  let issuance = await input.prisma.hostedRevnetIssuance.upsert({
+    where: {
+      idempotencyKey,
+    },
+    create: {
+      id: generateHostedRevnetIssuanceId(),
+      memberId: input.member.id,
+      idempotencyKey,
+      stripeInvoiceId: input.invoice.id,
+      stripePaymentIntentId: paymentIntentId,
+      stripeChargeId: chargeId,
+      chainId: config.chainId,
+      projectId: config.projectId.toString(),
+      terminalAddress: config.terminalAddress,
+      tokenAddress: config.paymentTokenAddress,
+      beneficiaryAddress: beneficiaryAddress.toLowerCase(),
+      paymentAmountMinor: amountPaid,
+      paymentCurrency: config.paymentCurrency,
+      terminalTokenAmount: terminalTokenAmount.toString(),
+      status: HostedRevnetIssuanceStatus.pending,
+    },
+    update: {
+      stripePaymentIntentId: paymentIntentId ?? undefined,
+      stripeChargeId: chargeId ?? undefined,
+      beneficiaryAddress: beneficiaryAddress.toLowerCase(),
+      paymentAmountMinor: amountPaid,
+      paymentCurrency: config.paymentCurrency,
+      terminalTokenAmount: terminalTokenAmount.toString(),
+    },
+  });
+
+  if (issuance.status === HostedRevnetIssuanceStatus.confirmed) {
+    return;
+  }
+
+  if (
+    issuance.payTxHash &&
+    (issuance.status === HostedRevnetIssuanceStatus.submitted ||
+      issuance.status === HostedRevnetIssuanceStatus.failed)
+  ) {
+    await confirmHostedRevnetIssuance({
+      issuance,
+      prisma: input.prisma,
+    });
+    return;
+  }
+
+  if (
+    issuance.status === HostedRevnetIssuanceStatus.submitting &&
+    !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt)
+  ) {
+    throw hostedOnboardingError({
+      code: "REVNET_ISSUANCE_IN_FLIGHT",
+      message: `Hosted RevNet issuance is already in flight for Stripe invoice ${input.invoice.id}.`,
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  const claimedIssuance = await input.prisma.hostedRevnetIssuance.updateMany({
+    where: {
+      id: issuance.id,
+      status: issuance.status,
+      updatedAt: issuance.updatedAt,
+    },
+    data: {
+      status: HostedRevnetIssuanceStatus.submitting,
+      failureCode: null,
+      failureMessage: null,
+    },
+  });
+
+  if (claimedIssuance.count !== 1) {
+    const latestIssuance = await input.prisma.hostedRevnetIssuance.findUnique({
+      where: {
+        idempotencyKey,
+      },
+    });
+
+    if (latestIssuance?.status === HostedRevnetIssuanceStatus.confirmed) {
+      return;
+    }
+
+    if (
+      latestIssuance?.payTxHash &&
+      (latestIssuance.status === HostedRevnetIssuanceStatus.submitted ||
+        latestIssuance.status === HostedRevnetIssuanceStatus.failed)
+    ) {
+      await confirmHostedRevnetIssuance({
+        issuance: latestIssuance,
+        prisma: input.prisma,
+      });
+      return;
+    }
+
+    throw hostedOnboardingError({
+      code: "REVNET_ISSUANCE_CLAIM_FAILED",
+      message: `Hosted RevNet issuance could not be claimed safely for Stripe invoice ${input.invoice.id}.`,
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  try {
+    const submission = await submitHostedRevnetPayment({
+      amountMinor: amountPaid,
+      beneficiaryAddress,
+      memo: buildHostedRevnetPaymentMemo(input.member.id, input.invoice.id),
+    });
+
+    issuance = await input.prisma.hostedRevnetIssuance.update({
+      where: {
+        id: issuance.id,
+      },
+      data: {
+        approvalTxHash: submission.approvalTxHash ?? undefined,
+        payTxHash: submission.payTxHash,
+        status: HostedRevnetIssuanceStatus.submitted,
+        submittedAt: new Date(),
+        terminalTokenAmount: submission.terminalTokenAmount.toString(),
+      },
+    });
+  } catch (error) {
+    const failure = serializeHostedRevnetIssuanceFailure(error);
+
+    await input.prisma.hostedRevnetIssuance.update({
+      where: {
+        id: issuance.id,
+      },
+      data: {
+        failureCode: failure.code,
+        failureMessage: failure.message,
+        status: HostedRevnetIssuanceStatus.failed,
+      },
+    });
+
+    throw error;
+  }
+
+  await confirmHostedRevnetIssuance({
+    issuance,
+    prisma: input.prisma,
+  });
+}
+
+async function confirmHostedRevnetIssuance(input: {
+  issuance: HostedRevnetIssuanceRecord;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.issuance.payTxHash) {
+    throw hostedOnboardingError({
+      code: "REVNET_PAYMENT_HASH_MISSING",
+      message: "Hosted RevNet issuance is missing the submitted transaction hash.",
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  try {
+    await waitForHostedRevnetPaymentConfirmation({
+      txHash: input.issuance.payTxHash as `0x${string}`,
+    });
+  } catch (error) {
+    const failure = serializeHostedRevnetIssuanceFailure(error);
+
+    await input.prisma.hostedRevnetIssuance.update({
+      where: {
+        id: input.issuance.id,
+      },
+      data: {
+        failureCode: failure.code,
+        failureMessage: failure.message,
+        status: HostedRevnetIssuanceStatus.failed,
+      },
+    });
+
+    throw error;
+  }
+
+  await input.prisma.hostedRevnetIssuance.update({
+    where: {
+      id: input.issuance.id,
+    },
+    data: {
+      confirmedAt: new Date(),
+      failureCode: null,
+      failureMessage: null,
+      status: HostedRevnetIssuanceStatus.confirmed,
+    },
+  });
+}
+
+function buildHostedRevnetPaymentMemo(memberId: string, invoiceId: string): string {
+  return `HealthyBob invoice ${invoiceId} member ${memberId}`;
+}
+
+function isHostedRevnetIssuanceSubmittingStale(updatedAt: Date): boolean {
+  return updatedAt.getTime() <= Date.now() - HOSTED_REVNET_SUBMITTING_STALE_MS;
+}
+
+function serializeHostedRevnetIssuanceFailure(error: unknown): {
+  code: string;
+  message: string;
+} {
+  if (isHostedOnboardingError(error)) {
+    return {
+      code: error.code,
+      message: error.message,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      code: "REVNET_PAYMENT_FAILED",
+      message: error.message,
+    };
+  }
+
+  return {
+    code: "REVNET_PAYMENT_FAILED",
+    message: "Unknown Hosted RevNet issuance failure.",
+  };
 }
 
 async function recordHostedWebhookReceipt(input: {
@@ -1351,6 +1738,7 @@ async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, pr
     subscriptionId: coerceStripeSubscriptionId(session.subscription),
   });
   const inviteId = normalizeNullableString(session.metadata?.inviteId);
+  const walletAddress = normalizeHostedWalletAddress(normalizeNullableString(session.metadata?.walletAddress));
   const billingStatus =
     session.mode === "subscription"
       ? session.payment_status === "paid" || session.payment_status === "no_payment_required"
@@ -1370,9 +1758,13 @@ async function applyStripeCheckoutCompleted(session: Stripe.Checkout.Session, pr
         stripeCustomerId: typeof session.customer === "string" ? session.customer : session.customer?.id ?? member.stripeCustomerId,
         stripeSubscriptionId: coerceStripeSubscriptionId(session.subscription) ?? member.stripeSubscriptionId,
         stripeLatestCheckoutSessionId: session.id,
+        ...(walletAddress ? { walletAddress } : {}),
       },
     });
-    if (billingStatus === HostedBillingStatus.active) {
+    if (
+      billingStatus === HostedBillingStatus.active &&
+      !(isHostedOnboardingRevnetEnabled() && session.mode === "subscription")
+    ) {
       await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
     }
   }
@@ -1460,7 +1852,7 @@ async function applyStripeSubscriptionUpdated(subscription: Stripe.Subscription,
       stripeSubscriptionId: subscription.id,
     },
   });
-  if (billingStatus === HostedBillingStatus.active) {
+  if (billingStatus === HostedBillingStatus.active && !isHostedOnboardingRevnetEnabled()) {
     await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
   }
   await prisma.hostedBillingCheckout.updateMany({
@@ -1491,7 +1883,7 @@ async function applyStripeInvoicePaid(invoice: Stripe.Invoice, prisma: PrismaCli
     return;
   }
 
-  await prisma.hostedMember.update({
+  const updatedMember = await prisma.hostedMember.update({
     where: {
       id: member.id,
     },
@@ -1503,7 +1895,17 @@ async function applyStripeInvoicePaid(invoice: Stripe.Invoice, prisma: PrismaCli
       stripeSubscriptionId: subscriptionId ?? member.stripeSubscriptionId,
     },
   });
-  await dispatchHostedMemberActivationSafely(member.id, member.normalizedPhoneNumber, member.linqChatId);
+
+  await maybeIssueHostedRevnetForStripeInvoice({
+    invoice,
+    member: updatedMember,
+    prisma,
+  });
+  await dispatchHostedMemberActivationSafely(
+    updatedMember.id,
+    updatedMember.normalizedPhoneNumber,
+    updatedMember.linqChatId,
+  );
 }
 
 async function applyStripeInvoicePaymentFailed(invoice: Stripe.Invoice, prisma: PrismaClient): Promise<void> {

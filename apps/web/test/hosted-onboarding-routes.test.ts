@@ -65,10 +65,10 @@ describe("hosted onboarding routes", () => {
     const response = await privyCompleteRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         body: JSON.stringify({
-          identityToken: "identity-token",
           inviteCode: "invite-code",
         }),
         headers: {
+          cookie: "privy-id-token=identity-token; hb_hosted_session=session-token",
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -92,6 +92,104 @@ describe("hosted onboarding routes", () => {
       joinUrl: "https://join.example.test/join/invite-code",
       ok: true,
       stage: "checkout",
+    });
+  });
+
+  it("accepts a valid Privy identity cookie even when the request body is empty", async () => {
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          cookie: "privy-id-token=identity-token",
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      identityToken: "identity-token",
+      inviteCode: null,
+      userAgent: "test-agent",
+    });
+    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith({
+      expiresAt: new Date("2026-03-27T12:00:00.000Z"),
+      response: expect.anything(),
+      token: "session-token",
+    });
+  });
+
+  it("ignores any body identity token and keeps the cookie authoritative", async () => {
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          identityToken: "body-token",
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          cookie: "privy-id-token=cookie-token",
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledWith({
+      identityToken: "cookie-token",
+      inviteCode: "invite-code",
+      userAgent: "test-agent",
+    });
+  });
+
+  it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("does not accept a body identity token when the Privy identity cookie is missing", async () => {
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          identityToken: "body-token",
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        retryable: false,
+      },
     });
   });
 
@@ -150,6 +248,34 @@ describe("hosted onboarding routes", () => {
         member: { id: "member_123" },
         session: { id: "session_123" },
       },
+    });
+    await expect(response.json()).resolves.toEqual({
+      alreadyActive: false,
+      url: "https://billing.example.test/session_123",
+    });
+  });
+
+  it("forwards wallet state through the hosted billing checkout route when present", async () => {
+    const request = new Request("https://join.example.test/api/hosted-onboarding/billing/checkout", {
+      body: JSON.stringify({
+        inviteCode: "invite-code",
+        walletAddress: "0x00000000000000000000000000000000000000aa",
+      }),
+      method: "POST",
+    });
+
+    const response = await billingCheckoutRoute.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
+      inviteCode: "invite-code",
+      sessionRecord: {
+        member: { id: "member_123" },
+        session: { id: "session_123" },
+      },
+      walletAddress: "0x00000000000000000000000000000000000000aa",
     });
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
