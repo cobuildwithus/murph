@@ -57,9 +57,9 @@ import {
   submitHostedRevnetPayment,
 } from "./revnet";
 import { requireHostedMemberWalletAddressForRevnet } from "./billing-service";
+import { revokeHostedSessionsForMember } from "./session";
 
 const REVNET_BROADCAST_STATUS_UNKNOWN_CODE = "REVNET_PAYMENT_BROADCAST_STATUS_UNKNOWN";
-import { revokeHostedSessionsForMember } from "./session";
 
 type HostedRevnetIssuanceRecord = Pick<
   HostedRevnetIssuance,

@@ -1727,6 +1727,244 @@ describe("hosted onboarding webhook retry safety", () => {
     });
   });
 
+  it("does not overwrite existing Stripe payment references on duplicate invoice events", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          amount_paid: 500,
+          charge: "ch_new",
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_new",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_duplicate_refs_123",
+      type: "invoice.paid",
+    });
+
+    const issuanceRow = {
+      beneficiaryAddress: "0x00000000000000000000000000000000000000bb",
+      chainId: 8453,
+      id: "hbrv_existing_refs_123",
+      idempotencyKey: "stripe:invoice:in_123",
+      payTxHash: null,
+      paymentAmount: "42",
+      projectId: "99",
+      status: "pending",
+      stripeChargeId: "ch_existing",
+      stripePaymentIntentId: "pi_existing",
+      terminalAddress: "0x0000000000000000000000000000000000000002",
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    };
+
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+        update: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+      },
+      hostedRevnetIssuance: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(issuanceRow),
+        update: vi.fn()
+          .mockResolvedValueOnce({
+            ...issuanceRow,
+            payTxHash: "0xabc123",
+            status: "submitted",
+            updatedAt: new Date("2026-03-26T12:00:01.000Z"),
+          })
+          .mockResolvedValueOnce({
+            ...issuanceRow,
+            confirmedAt: new Date("2026-03-26T12:00:02.000Z"),
+            payTxHash: "0xabc123",
+            status: "confirmed",
+          }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_duplicate_refs_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(
+      prisma.hostedRevnetIssuance.update.mock.calls.some(
+        ([payload]: [{ data?: { stripeChargeId?: string; stripePaymentIntentId?: string } }]) =>
+          "stripeChargeId" in (payload.data ?? {}) || "stripePaymentIntentId" in (payload.data ?? {}),
+      ),
+    ).toBe(false);
+    expect(mocks.submitHostedRevnetPayment).toHaveBeenCalledWith({
+      beneficiaryAddress: "0x00000000000000000000000000000000000000bb",
+      chainId: 8453,
+      memo: "issuance:hbrv_existing_refs_123",
+      paymentAmount: 42n,
+      projectId: 99n,
+      terminalAddress: "0x0000000000000000000000000000000000000002",
+    });
+  });
+
+  it("backfills missing Stripe payment references exactly once on a duplicate invoice event", async () => {
+    mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(true);
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          amount_paid: 500,
+          charge: "ch_123",
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_123",
+          payment_intent: "pi_123",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_revnet_backfill_refs_123",
+      type: "invoice.paid",
+    });
+
+    const issuanceRow = {
+      beneficiaryAddress: "0x00000000000000000000000000000000000000bb",
+      chainId: 8453,
+      id: "hbrv_existing_backfill_123",
+      idempotencyKey: "stripe:invoice:in_123",
+      payTxHash: null,
+      paymentAmount: "42",
+      projectId: "99",
+      status: "pending",
+      stripeChargeId: null,
+      stripePaymentIntentId: null,
+      terminalAddress: "0x0000000000000000000000000000000000000002",
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    };
+
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+        update: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+          walletAddress: "0x00000000000000000000000000000000000000aa",
+        }),
+      },
+      hostedRevnetIssuance: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(issuanceRow),
+        update: vi.fn()
+          .mockResolvedValueOnce({
+            ...issuanceRow,
+            stripeChargeId: "ch_123",
+            stripePaymentIntentId: "pi_123",
+          })
+          .mockResolvedValueOnce({
+            ...issuanceRow,
+            stripeChargeId: "ch_123",
+            stripePaymentIntentId: "pi_123",
+            payTxHash: "0xabc123",
+            status: "submitted",
+            updatedAt: new Date("2026-03-26T12:00:01.000Z"),
+          })
+          .mockResolvedValueOnce({
+            ...issuanceRow,
+            confirmedAt: new Date("2026-03-26T12:00:02.000Z"),
+            payTxHash: "0xabc123",
+            status: "confirmed",
+            stripeChargeId: "ch_123",
+            stripePaymentIntentId: "pi_123",
+          }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_revnet_backfill_refs_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(prisma.hostedRevnetIssuance.update.mock.calls[0]?.[0]).toEqual({
+      where: {
+        id: "hbrv_existing_backfill_123",
+      },
+      data: {
+        stripeChargeId: "ch_123",
+        stripePaymentIntentId: "pi_123",
+      },
+    });
+  });
+
   it("suspends hosted access and revokes sessions when Stripe creates a refund", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       data: {

@@ -200,17 +200,16 @@ async function resolveHostedMemberWalletAddress(input: {
   requireWalletAddress: boolean;
 }): Promise<string | null> {
   const normalizedExistingWalletAddress = normalizeNullableString(input.existingWalletAddress);
-  const trustedWalletAddress = normalizedExistingWalletAddress
-    ? normalizeHostedWalletAddress((await getOptionalHostedPrivyIdentityFromCookies())?.wallet.address)
-    : normalizeHostedWalletAddress(
-        (await resolveHostedBillingWalletIdentity(input.requireWalletAddress))?.wallet.address,
-      );
 
   if (normalizedExistingWalletAddress) {
     const walletAddress = normalizeHostedWalletAddress(normalizedExistingWalletAddress);
 
     if (walletAddress) {
-      if (trustedWalletAddress && trustedWalletAddress !== walletAddress) {
+      const privyWalletAddress = normalizeHostedWalletAddress(
+        (await getOptionalHostedPrivyIdentityFromCookies())?.wallet.address,
+      );
+
+      if (privyWalletAddress && privyWalletAddress !== walletAddress) {
         throw hostedOnboardingError({
           code: "HOSTED_WALLET_ADDRESS_CONFLICT",
           message: "This hosted member is already bound to a different verified rewards wallet.",
@@ -232,8 +231,16 @@ async function resolveHostedMemberWalletAddress(input: {
     });
   }
 
-  if (trustedWalletAddress) {
-    return trustedWalletAddress;
+  const privyWalletAddress = normalizeHostedWalletAddress(
+    (
+      input.requireWalletAddress
+        ? await requireHostedPrivyIdentityFromCookies()
+        : await getOptionalHostedPrivyIdentityFromCookies()
+    )?.wallet.address,
+  );
+
+  if (privyWalletAddress) {
+    return privyWalletAddress;
   }
 
   if (input.requireWalletAddress) {
@@ -245,14 +252,6 @@ async function resolveHostedMemberWalletAddress(input: {
   }
 
   return null;
-}
-
-async function resolveHostedBillingWalletIdentity(requireWalletAddress: boolean) {
-  if (requireWalletAddress) {
-    return requireHostedPrivyIdentityFromCookies();
-  }
-
-  return getOptionalHostedPrivyIdentityFromCookies();
 }
 
 export function requireHostedMemberWalletAddressForRevnet(member: HostedMember) {

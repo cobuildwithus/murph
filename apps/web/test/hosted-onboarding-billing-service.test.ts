@@ -129,6 +129,7 @@ describe("createHostedBillingCheckout", () => {
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
+    const createdCustomerMetadata = mocks.stripe.customers.create.mock.calls[0]?.[0]?.metadata;
     expect(mocks.requireHostedPrivyIdentityFromCookies).toHaveBeenCalledTimes(1);
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -138,6 +139,11 @@ describe("createHostedBillingCheckout", () => {
         },
       }),
     );
+    expect(createdCustomerMetadata).toEqual({
+      memberId: "member_123",
+    });
+    expect(createdCustomerMetadata).not.toHaveProperty("normalizedPhoneNumber");
+    expect(createdCustomerMetadata).not.toHaveProperty("walletAddress");
     expect(prisma.hostedMember.update).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -147,6 +153,52 @@ describe("createHostedBillingCheckout", () => {
         }),
       }),
     );
+  });
+
+  it("updates an existing Stripe customer without writing phone or wallet values into metadata", async () => {
+    mocks.requireHostedInviteForAuthentication.mockResolvedValue(
+      makeInvite({
+        stripeCustomerId: "cus_existing_123",
+        walletAddress: "0x00000000000000000000000000000000000000aa",
+      }),
+    );
+
+    const prisma: any = {
+      hostedBillingCheckout: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    await createHostedBillingCheckout({
+      inviteCode: "invite-code",
+      now: NOW,
+      prisma,
+      sessionRecord: {
+        member: {
+          id: "member_123",
+        },
+      } as any,
+    });
+
+    const updatedCustomerMetadata = mocks.stripe.customers.update.mock.calls[0]?.[1]?.metadata;
+
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.update).toHaveBeenCalledWith(
+      "cus_existing_123",
+      expect.objectContaining({
+        metadata: {
+          memberId: "member_123",
+        },
+      }),
+    );
+    expect(updatedCustomerMetadata).toEqual({
+      memberId: "member_123",
+    });
+    expect(updatedCustomerMetadata).not.toHaveProperty("normalizedPhoneNumber");
+    expect(updatedCustomerMetadata).not.toHaveProperty("walletAddress");
   });
 
   it("rejects a new trusted wallet when the hosted member already has a different verified wallet", async () => {
@@ -196,7 +248,10 @@ describe("createHostedBillingCheckout", () => {
   });
 });
 
-function makeInvite(overrides: { walletAddress: string | null }) {
+function makeInvite(overrides: {
+  stripeCustomerId?: string | null;
+  walletAddress: string | null;
+}) {
   return {
     id: "invite_123",
     inviteCode: "invite-code",
@@ -205,7 +260,7 @@ function makeInvite(overrides: { walletAddress: string | null }) {
       id: "member_123",
       normalizedPhoneNumber: "+15551234567",
       status: HostedMemberStatus.registered,
-      stripeCustomerId: null,
+      stripeCustomerId: overrides.stripeCustomerId ?? null,
       stripeLatestCheckoutSessionId: null,
       stripeSubscriptionId: null,
       walletAddress: overrides.walletAddress,

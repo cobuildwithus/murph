@@ -39,3 +39,16 @@ Apply the requested hosted onboarding billing and webhook hardening without wide
 - `pnpm test:coverage`
 - Focused `apps/web` tests as needed during development
 - Required completion-workflow audit passes via spawned subagents after implementation
+
+## Current Status
+
+- Implemented the hosted onboarding hardening pass in `billing-service.ts`, `revnet.ts`, and `webhook-service.ts`.
+- Stripe metadata is now limited to correlation identifiers, onchain memos use opaque issuance ids, persisted RevNet issuance facts are reused for submission, RPC chain identity is asserted, and treasury submissions are serialized behind a local lock.
+- Focused regression coverage now also asserts that Stripe customer metadata excludes phone and wallet fields, and that duplicate invoice retries preserve or backfill Stripe payment references without mutating frozen issuance facts.
+- Focused `apps/web` verification is green:
+  - `pnpm --dir apps/web exec tsc --noEmit`
+  - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-onboarding-billing-service.test.ts apps/web/test/hosted-onboarding-revnet.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`
+- Repo-wide wrappers still fail in unrelated dirty-tree work outside this lane:
+  - `pnpm typecheck`: active `packages/contracts/scripts/*` module-resolution and implicit-`any` failures
+  - `pnpm test`: active `packages/contracts/src/*` `.ts`-extension import failures during the root contracts build
+  - `pnpm test:coverage`: widespread `.ts`-extension import failures across active workspace packages (`contracts`, `core`, `device-syncd`, `hosted-execution`, `importers`, `inboxd`, `runtime-state`)
