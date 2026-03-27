@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createHostedExecutionSignature } from "../src/auth.js";
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
-import { encryptHostedBundle } from "../src/crypto.js";
-import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.js";
-import worker, { UserRunnerDurableObject } from "../src/index.js";
-import { handleRunnerOutboundRequest } from "../src/runner-outbound.js";
-import { createTestSqlStorage } from "./sql-storage.js";
+import { createHostedExecutionSignature } from "../src/auth.ts";
+import {
+  parseHostedEmailThreadTarget,
+  type HostedExecutionDispatchRequest,
+} from "@healthybob/runtime-state";
+import { encryptHostedBundle } from "../src/crypto.ts";
+import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
+import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
+import { createTestSqlStorage } from "./sql-storage.ts";
 
 describe("cloudflare worker routes", () => {
   afterEach(() => {
@@ -599,6 +602,181 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution control token is not configured.",
     });
     expect(stub.status).not.toHaveBeenCalled();
+  });
+
+
+  it("returns a stable hosted email address for a user through the control route", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const firstResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const secondResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    const firstPayload = await firstResponse.json() as {
+      address: string;
+      identityId: string;
+      userId: string;
+    };
+    const secondPayload = await secondResponse.json() as typeof firstPayload;
+    expect(firstPayload.userId).toBe("member_123");
+    expect(firstPayload.identityId).toBe("assistant@mail.example.test");
+    expect(firstPayload.address).toContain("assistant+u-");
+    expect(firstPayload.address.endsWith("@mail.example.test")).toBe(true);
+    expect(secondPayload.address).toBe(firstPayload.address);
+  });
+
+  it("routes inbound hosted email through the stable alias and stores the raw message for the runner", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const addressResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const { address } = await addressResponse.json() as { address: string };
+    const raw = [
+      'From: Alice Example <alice@example.test>',
+      `To: ${address}`,
+      'Subject: Hosted hello',
+      'Message-ID: <msg_123@example.test>',
+      'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+      '',
+      'Hello from the hosted email worker.',
+      '',
+    ].join('\r\n');
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: 'alice@example.test',
+      raw,
+      setReject,
+      to: address,
+    } as never, env as never);
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    const dispatch = stub.dispatch.mock.calls[0]?.[0] as HostedExecutionDispatchRequest;
+    const dispatchedEvent = dispatch.event as Extract<
+      HostedExecutionDispatchRequest["event"],
+      { kind: "email.message.received" }
+    >;
+    expect(dispatchedEvent.kind).toBe("email.message.received");
+    expect(dispatchedEvent.userId).toBe("member_123");
+    expect(dispatchedEvent.identityId).toBe("assistant@mail.example.test");
+    expect(dispatchedEvent.threadTarget).toBeNull();
+    expect(dispatchedEvent.rawMessageKey).toMatch(/^[0-9a-f]{32}$/u);
+    expect(dispatch.eventId).toBe(`email:${dispatchedEvent.rawMessageKey}`);
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://email.worker/messages/${dispatchedEvent.rawMessageKey}`, {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(readResponse.headers.get("content-type")).toBe("message/rfc822");
+    await expect(readResponse.text()).resolves.toBe(raw);
+  });
+
+  it("sends hosted email through email.worker and returns a canonical serialized thread target", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Healthy Bob update",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        expect(String(url)).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/acct_123/email/sending/send_raw",
+        );
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer cf-token");
+        const body = JSON.parse(String(init?.body)) as {
+          from: string;
+          mime_message: string;
+          recipients: string[];
+        };
+        expect(body.from).toBe("assistant@mail.example.test");
+        expect(body.recipients).toEqual(["user@example.test"]);
+        expect(body.mime_message).toContain("Reply-To: assistant+t-");
+        expect(body.mime_message).toContain("To: user@example.test");
+        return new Response(JSON.stringify({
+          result: {
+            queued: ["user@example.test"],
+          },
+          success: true,
+        }), { status: 200 });
+      }),
+    );
+
+    const response = await callRunnerOutbound(
+      new Request("http://email.worker/send", {
+        body: JSON.stringify({
+          identityId: "assistant@mail.example.test",
+          message: "Hosted email hello.",
+          target: "user@example.test",
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      ok: boolean;
+      target: string;
+    };
+    expect(payload.ok).toBe(true);
+    const threadTarget = parseHostedEmailThreadTarget(payload.target);
+    expect(threadTarget).not.toBeNull();
+    expect(threadTarget?.to).toEqual(["user@example.test"]);
+    expect(threadTarget?.replyAliasAddress).toContain("assistant+t-");
+    expect(threadTarget?.replyAliasAddress?.endsWith("@mail.example.test")).toBe(true);
+    expect(threadTarget?.lastMessageId).toMatch(/^<hb\./u);
+    expect(threadTarget?.subject).toBe("Healthy Bob update");
   });
 
   it("returns method and auth errors on protected routes in the same order as before", async () => {

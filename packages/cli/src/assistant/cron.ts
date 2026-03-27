@@ -9,22 +9,22 @@ import {
   type AssistantCronRunRecord,
   type AssistantCronSchedule,
   type AssistantCronTrigger,
-} from '../assistant-cli-contracts.js'
-import { loadRuntimeModule } from '../runtime-import.js'
-import { renderAutoLoggedFoodMealNote } from '../usecases/food-autolog.js'
-import { loadImporterRuntime } from '../usecases/runtime.js'
-import { VaultCliError } from '../vault-cli-errors.js'
-import { withAssistantCronWriteLock } from './cron/locking.js'
+} from '../assistant-cli-contracts.ts'
+import { loadRuntimeModule } from '../runtime-import.ts'
+import { renderAutoLoggedFoodMealNote } from '../usecases/food-autolog.ts'
+import { loadImporterRuntime } from '../usecases/runtime.ts'
+import { VaultCliError } from '../vault-cli-errors.ts'
+import { withAssistantCronWriteLock } from './cron/locking.ts'
 import {
   buildAssistantCronSchedule,
   computeAssistantCronNextRunAt,
-} from './cron/schedule.js'
+} from './cron/schedule.ts'
 import {
   getAssistantCronPresetDefinition,
   listAssistantCronPresets as listBuiltinAssistantCronPresets,
   renderAssistantCronPreset,
   type AssistantCronPresetDefinition,
-} from './cron/presets.js'
+} from './cron/presets.ts'
 import {
   appendAssistantCronRun,
   assertAssistantCronJobNameIsAvailable,
@@ -42,21 +42,21 @@ import {
   sortAssistantCronJobs,
   type AssistantCronTargetInput,
   writeAssistantCronStore,
-} from './cron/store.js'
-import { sendAssistantMessage } from './service.js'
-import { getAssistantChannelAdapter } from './channel-adapters.js'
-import { resolveAssistantBindingDelivery } from './bindings.js'
-import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.js'
+} from './cron/store.ts'
+import { sendAssistantMessage } from './service.ts'
+import { getAssistantChannelAdapter } from './channel-adapters.ts'
+import { resolveAssistantBindingDelivery } from './bindings.ts'
+import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.ts'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
-} from './store.js'
-import type { AssistantOutboxDispatchMode } from './outbox.js'
-import { errorMessage, normalizeNullableString } from './shared.js'
+} from './store.ts'
+import type { AssistantOutboxDispatchMode } from './outbox.ts'
+import { errorMessage, normalizeNullableString } from './shared.ts'
 import {
   assertAssistantStateDocumentId,
   buildDefaultAssistantCronStateDocId,
-} from './state.js'
+} from './state.ts'
 
 const ASSISTANT_CRON_JOB_SCHEMA = 'healthybob.assistant-cron-job.v1'
 const ASSISTANT_CRON_RUN_SCHEMA = 'healthybob.assistant-cron-run.v1'
@@ -544,7 +544,7 @@ function buildValidatedAssistantCronTarget(
   if (channel === 'email' && !identityId) {
     throw new VaultCliError(
       'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Email cron jobs require an AgentMail inbox identity. Pass --identity with the configured inbox id.',
+      'Email cron jobs require a configured email sender identity. Pass --identity with the email address or provider identity you want to send from.',
     )
   }
 

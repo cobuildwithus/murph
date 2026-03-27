@@ -596,14 +596,21 @@ async function handleHostedDispatchEvent(input: {
 
   switch (dispatch.event.kind) {
     case "member.activated":
-      return await handleHostedMemberActivatedDispatch();
+      return {
+        shareImportResult: null,
+        shareImportTitle: null,
+      };
     case "linq.message.received":
-      return await handleHostedLinqDispatch(input.vaultRoot, {
+      await ingestHostedLinqMessage(input.vaultRoot, {
         ...dispatch,
         event: dispatch.event,
       });
+      return {
+        shareImportResult: null,
+        shareImportTitle: null,
+      };
     case "email.message.received":
-      return await handleHostedEmailDispatch(
+      await ingestHostedEmailMessage(
         input.vaultRoot,
         {
           ...dispatch,
@@ -611,9 +618,16 @@ async function handleHostedDispatchEvent(input: {
         },
         input.emailBaseUrl,
       );
+      return {
+        shareImportResult: null,
+        shareImportTitle: null,
+      };
     case "assistant.cron.tick":
     case "device-sync.wake":
-      return await handleHostedMaintenanceDispatch();
+      return {
+        shareImportResult: null,
+        shareImportTitle: null,
+      };
     case "vault.share.accepted":
       return await handleHostedShareAcceptedDispatch(input.vaultRoot, {
         ...dispatch,
@@ -622,63 +636,6 @@ async function handleHostedDispatchEvent(input: {
     default:
       return assertNever(dispatch.event);
   }
-}
-
-async function handleHostedMemberActivatedDispatch(): Promise<Pick<
-  HostedDispatchExecutionMetrics,
-  "shareImportResult" | "shareImportTitle"
->> {
-  return {
-    shareImportResult: null,
-    shareImportTitle: null,
-  };
-}
-
-async function handleHostedLinqDispatch(
-  vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest & {
-    event: Extract<HostedDispatchEvent, { kind: "linq.message.received" }>;
-  },
-): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
-  await ingestHostedLinqMessage(vaultRoot, {
-    ...dispatch,
-    event: dispatch.event,
-  });
-  return {
-    shareImportResult: null,
-    shareImportTitle: null,
-  };
-}
-
-async function handleHostedEmailDispatch(
-  vaultRoot: string,
-  dispatch: HostedExecutionDispatchRequest & {
-    event: Extract<HostedDispatchEvent, { kind: "email.message.received" }>;
-  },
-  emailBaseUrl: string,
-): Promise<Pick<HostedDispatchExecutionMetrics, "shareImportResult" | "shareImportTitle">> {
-  await ingestHostedEmailMessage(
-    vaultRoot,
-    {
-      ...dispatch,
-      event: dispatch.event,
-    },
-    emailBaseUrl,
-  );
-  return {
-    shareImportResult: null,
-    shareImportTitle: null,
-  };
-}
-
-async function handleHostedMaintenanceDispatch(): Promise<Pick<
-  HostedDispatchExecutionMetrics,
-  "shareImportResult" | "shareImportTitle"
->> {
-  return {
-    shareImportResult: null,
-    shareImportTitle: null,
-  };
 }
 
 async function handleHostedShareAcceptedDispatch(
@@ -798,6 +755,7 @@ async function ingestHostedLinqMessage(
   const runtime = await openInboxRuntime({
     vaultRoot,
   });
+  let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
     await rebuildRuntimeFromVault({
@@ -809,18 +767,17 @@ async function ingestHostedLinqMessage(
       defaultAccountId: dispatch.event.normalizedPhoneNumber,
       event,
     });
-    const pipeline = await createInboxPipeline({
+    pipeline = await createInboxPipeline({
       runtime,
       vaultRoot,
     });
-
-    try {
-      await pipeline.processCapture(capture);
-    } finally {
-      pipeline.close();
-    }
+    await pipeline.processCapture(capture);
   } finally {
-    runtime.close();
+    if (pipeline) {
+      pipeline.close();
+    } else {
+      runtime.close();
+    }
   }
 }
 
@@ -844,6 +801,7 @@ async function ingestHostedEmailMessage(
   const runtime = await openInboxRuntime({
     vaultRoot,
   });
+  let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
   try {
     await rebuildRuntimeFromVault({
@@ -857,18 +815,17 @@ async function ingestHostedEmailMessage(
       source: "email",
       threadTarget: dispatch.event.threadTarget,
     });
-    const pipeline = await createInboxPipeline({
+    pipeline = await createInboxPipeline({
       runtime,
       vaultRoot,
     });
-
-    try {
-      await pipeline.processCapture(capture);
-    } finally {
-      pipeline.close();
-    }
+    await pipeline.processCapture(capture);
   } finally {
-    runtime.close();
+    if (pipeline) {
+      pipeline.close();
+    } else {
+      runtime.close();
+    }
   }
 }
 

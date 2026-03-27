@@ -4,7 +4,7 @@ import {
   destroyHostedExecutionContainer,
   invokeHostedExecutionContainerRunner,
   RunnerContainer,
-} from "../src/runner-container.js";
+} from "../src/runner-container.ts";
 
 describe("RunnerContainer", () => {
   it("starts the container, waits for the port, and forwards the runner request", async () => {
@@ -67,6 +67,12 @@ describe("RunnerContainer", () => {
       },
       "side-effects.worker": {
         method: "outboxWorker",
+        params: {
+          userId: "member_123",
+        },
+      },
+      "email.worker": {
+        method: "emailWorker",
         params: {
           userId: "member_123",
         },

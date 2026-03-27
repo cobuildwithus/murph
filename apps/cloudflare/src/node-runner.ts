@@ -8,14 +8,17 @@ import {
   type HostedAssistantRuntimeJobRequest,
 } from "@healthybob/assistant-runtime";
 
-import { buildHostedRunnerContainerEnv } from "./runner-env.js";
-import { normalizeHostedUserEnv } from "./user-env.js";
+import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
+import { normalizeHostedUserEnv } from "./user-env.ts";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
 let hostedExecutionCallbackBaseUrlsForTests: {
   commitBaseUrl?: string | null;
+  emailBaseUrl?: string | null;
   outboxBaseUrl?: string | null;
+  sharePackBaseUrl?: string | null;
+  sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
 } | null = null;
 
@@ -35,7 +38,10 @@ export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null
 
 export function setHostedExecutionCallbackBaseUrlsForTests(input: {
   commitBaseUrl?: string | null;
+  emailBaseUrl?: string | null;
   outboxBaseUrl?: string | null;
+  sharePackBaseUrl?: string | null;
+  sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
 } | null): void {
   hostedExecutionCallbackBaseUrlsForTests = input;

@@ -18,7 +18,7 @@ const cronServiceMocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../src/assistant/service.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant/service.js')>(
+  const actual = await vi.importActual<typeof import('../src/assistant/service.ts')>(
     '../src/assistant/service.js',
   )
 
@@ -42,9 +42,9 @@ import {
   removeAssistantCronJob,
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
-} from '../src/assistant/cron.js'
-import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.js'
-import { resolveAssistantStatePaths } from '../src/assistant/store.js'
+} from '../src/assistant/cron.ts'
+import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.ts'
+import { resolveAssistantStatePaths } from '../src/assistant/store.ts'
 
 const cleanupPaths: string[] = []
 
@@ -284,7 +284,7 @@ test('assistant cron jobs require explicit outbound delivery routing', async () 
           channel: 'email',
           deliveryTarget: 'me@example.com',
         }),
-      /Email cron jobs require an AgentMail inbox identity/u,
+      /Email cron jobs require a configured email sender identity/u,
     )
 
     await assert.rejects(

@@ -4,8 +4,8 @@ import type {
   HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
 
-import { json, readJsonObject } from "./json.js";
-import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.js";
+import { json, readJsonObject } from "./json.ts";
+import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -63,6 +63,17 @@ export class RunnerContainer extends Container {
       );
     },
     async outboxWorker(
+      request: Request,
+      env: unknown,
+      ctx: RunnerOutboundHandlerContext,
+    ): Promise<Response> {
+      return handleRunnerOutboundRequest(
+        request,
+        env as RunnerOutboundEnvironmentSource,
+        requireString(ctx.params?.userId, "ctx.params.userId"),
+      );
+    },
+    async emailWorker(
       request: Request,
       env: unknown,
       ctx: RunnerOutboundHandlerContext,
@@ -184,6 +195,12 @@ export class RunnerContainer extends Container {
       },
       "side-effects.worker": {
         method: "outboxWorker",
+        params: {
+          userId,
+        },
+      },
+      "email.worker": {
+        method: "emailWorker",
         params: {
           userId,
         },

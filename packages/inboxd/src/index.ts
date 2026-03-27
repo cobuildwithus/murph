@@ -59,16 +59,38 @@ export type {
 } from "./connectors/email/connector.ts";
 export {
   buildAgentmailMessageText,
+  buildEmailMessageText,
+  inferAttachmentKind,
   inferDirectEmailThread,
+  inferDirectEmailThreadFromParticipants,
   normalizeAgentmailMessage,
   resolveAgentmailAddress,
   resolveAgentmailDisplayName,
+  resolveEmailAddress,
+  resolveEmailDisplayName,
   toAgentmailChatMessage,
 } from "./connectors/email/normalize.ts";
 export type {
   AgentmailAttachmentDownloadDriver,
+  BuildEmailMessageTextInput,
+  InferDirectEmailThreadParticipantsInput,
   NormalizeAgentmailMessageInput,
 } from "./connectors/email/normalize.ts";
+export {
+  normalizeParsedEmailMessage,
+  toParsedEmailChatMessage,
+} from "./connectors/email/normalize-parsed.ts";
+export type {
+  NormalizeParsedEmailMessageInput,
+} from "./connectors/email/normalize-parsed.ts";
+export {
+  parseRawEmailMessage,
+  splitEmailAddressList,
+} from "./connectors/email/parsed.ts";
+export type {
+  ParsedEmailAttachment,
+  ParsedEmailMessage,
+} from "./connectors/email/parsed.ts";
 export type {
   AgentmailAttachmentDownload,
   AgentmailListMessagesResponse,

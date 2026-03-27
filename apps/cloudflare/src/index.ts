@@ -1,27 +1,39 @@
-import type {
-  HostedExecutionBundleRef,
-  HostedExecutionDispatchRequest,
-  HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
+import {
+  buildHostedExecutionAssistantCronTickDispatch,
+  parseHostedExecutionDispatchRequest,
+  type HostedExecutionBundleRef,
+  type HostedExecutionDispatchRequest,
+  type HostedExecutionUserStatus,
+} from "@healthybob/hosted-execution";
 
-import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.js";
-import { readHostedExecutionEnvironment } from "./env.js";
+import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
+import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommittedResult,
   HostedExecutionCommitPayload,
   HostedExecutionFinalizePayload,
-} from "./execution-journal.js";
-import { json, readJsonObject } from "./json.js";
-export { RunnerContainer } from "./runner-container.js";
-import { buildHostedRunnerContainerEnv } from "./runner-env.js";
-import { parseHostedUserEnvUpdate, type HostedUserEnvUpdate } from "./user-env.js";
+} from "./execution-journal.ts";
+import { json, readJsonObject } from "./json.ts";
+export { RunnerContainer } from "./runner-container.ts";
+import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
+import {
+  createHostedEmailUserAddress,
+  readHostedEmailConfig,
+  readHostedEmailMessageBytes,
+  resolveHostedEmailInboundRoute,
+  writeHostedEmailRawMessage,
+  type HostedEmailWorkerRequest,
+} from "./hosted-email.ts";
+import { serializeHostedEmailThreadTarget } from "@healthybob/runtime-state";
+import { parseHostedUserEnvUpdate, type HostedUserEnvUpdate } from "./user-env.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
-} from "./user-runner.js";
+} from "./user-runner.ts";
 
 interface UserRunnerDurableObjectStubLike {
-  clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  bootstrapUser(userId: string): Promise<{ userId: string }>;
+  clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
   commit(input: {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
@@ -30,18 +42,15 @@ interface UserRunnerDurableObjectStubLike {
         vault: HostedExecutionBundleRef | null;
       };
     };
-    userId: string;
   }): Promise<HostedExecutionCommittedResult>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId: string;
   }): Promise<HostedExecutionCommittedResult>;
-  getUserEnvStatus(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  status(userId: string): Promise<HostedExecutionUserStatus>;
+  getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  status(): Promise<HostedExecutionUserStatus>;
   updateUserEnv(
-    userId: string,
     update: HostedUserEnvUpdate,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
 }
@@ -51,7 +60,7 @@ interface DurableObjectNamespaceLike {
 }
 
 interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
-  BUNDLES: import("./bundle-store.js").R2BucketLike;
+  BUNDLES: import("./bundle-store.ts").R2BucketLike;
   HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
   HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
@@ -63,8 +72,15 @@ interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
-  HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET?: string;
-  RUNNER_CONTAINER: import("./runner-container.js").HostedExecutionContainerNamespaceLike;
+  HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
+  HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
+  HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
+  HOSTED_EMAIL_DEFAULT_SUBJECT?: string;
+  HOSTED_EMAIL_DOMAIN?: string;
+  HOSTED_EMAIL_FROM_ADDRESS?: string;
+  HOSTED_EMAIL_LOCAL_PART?: string;
+  HOSTED_EMAIL_SIGNING_SECRET?: string;
+  RUNNER_CONTAINER: import("./runner-container.ts").HostedExecutionContainerNamespaceLike;
   USER_RUNNER: DurableObjectNamespaceLike;
 }
 
@@ -143,6 +159,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     methods: ["GET", "PUT", "DELETE"],
     wrongMethodResponse: "method-not-allowed",
   },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "control",
+    async handle(context, params) {
+      return handleUserEmailAddressRoute(context, params.userId);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/email-address$/u),
+    methods: ["GET"],
+    wrongMethodResponse: "method-not-allowed",
+  },
 ];
 
 export default {
@@ -177,6 +203,9 @@ export default {
       );
     }
   },
+  async email(message: HostedEmailWorkerRequest, env: WorkerEnvironmentSource): Promise<void> {
+    await handleHostedEmailIngress(message, env);
+  },
 };
 
 export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike {
@@ -194,6 +223,10 @@ export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike 
     );
   }
 
+  async bootstrapUser(userId: string): Promise<{ userId: string }> {
+    return this.runner.bootstrapUser(userId);
+  }
+
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     return this.runner.dispatch(input);
   }
@@ -206,40 +239,59 @@ export class UserRunnerDurableObject implements UserRunnerDurableObjectStubLike 
         vault: HostedExecutionBundleRef | null;
       };
     };
-    userId: string;
+    userId?: string;
   }): Promise<HostedExecutionCommittedResult> {
+    if (input.userId) {
+      await this.runner.bootstrapUser(input.userId);
+    }
     return this.runner.commit(input);
   }
 
   async finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId: string;
+    userId?: string;
   }): Promise<HostedExecutionCommittedResult> {
+    if (input.userId) {
+      await this.runner.bootstrapUser(input.userId);
+    }
     return this.runner.finalizeCommit(input);
   }
 
-  async status(userId: string): Promise<HostedExecutionUserStatus> {
-    return this.runner.status(userId);
+  async status(userId?: string): Promise<HostedExecutionUserStatus> {
+    if (userId) {
+      await this.runner.bootstrapUser(userId);
+    }
+    return this.runner.status();
   }
 
-  async getUserEnvStatus(
-    userId: string,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.getUserEnvStatus(userId);
+  async getUserEnvStatus(userId?: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    if (userId) {
+      await this.runner.bootstrapUser(userId);
+    }
+    return this.runner.getUserEnvStatus();
   }
 
   async updateUserEnv(
-    userId: string,
-    update: HostedUserEnvUpdate,
+    userIdOrUpdate: string | HostedUserEnvUpdate,
+    update?: HostedUserEnvUpdate,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.updateUserEnv(userId, update);
+    if (typeof userIdOrUpdate === "string") {
+      await this.runner.bootstrapUser(userIdOrUpdate);
+      if (!update) {
+        throw new TypeError("Hosted user env update payload is required.");
+      }
+      return this.runner.updateUserEnv(update);
+    }
+
+    return this.runner.updateUserEnv(userIdOrUpdate);
   }
 
-  async clearUserEnv(
-    userId: string,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.clearUserEnv(userId);
+  async clearUserEnv(userId?: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    if (userId) {
+      await this.runner.bootstrapUser(userId);
+    }
+    return this.runner.clearUserEnv();
   }
 
   async fetch(): Promise<Response> {
@@ -332,7 +384,7 @@ async function handleManualRunRoute(
   await readOptionalJsonObject(context.request);
   const userId = decodeRouteParam(encodedUserId);
   const dispatch = createManualRunDispatch(userId);
-  const status = await getUserRunnerStub(context.env, userId).dispatch(dispatch);
+  const status = await (await resolveUserRunnerStub(context.env, userId)).dispatch(dispatch);
 
   return isBackpressuredStatus(status, dispatch.eventId)
     ? json(status, 429)
@@ -344,7 +396,8 @@ async function handleStatusRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  return json(await getUserRunnerStub(context.env, userId).status(userId));
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  return json(await callRunnerStatus(stub, userId));
 }
 
 async function handleUserEnvRoute(
@@ -352,27 +405,105 @@ async function handleUserEnvRoute(
   encodedUserId: string,
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
-  const stub = getUserRunnerStub(context.env, userId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
 
   if (context.request.method === "GET") {
-    return json(await stub.getUserEnvStatus(userId));
+    return json(await callRunnerGetUserEnvStatus(stub, userId));
   }
 
   if (context.request.method === "PUT") {
-    return json(await stub.updateUserEnv(
-      userId,
-      parseHostedUserEnvUpdate(await readJsonObject(context.request)),
-    ));
+    return json(
+      await callRunnerUpdateUserEnv(
+        stub,
+        userId,
+        parseHostedUserEnvUpdate(await readJsonObject(context.request)),
+      ),
+    );
   }
 
-  return json(await stub.clearUserEnv(userId));
+  return json(await callRunnerClearUserEnv(stub, userId));
 }
 
+async function handleUserEmailAddressRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const config = readHostedEmailConfig(
+    context.env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  const address = await createHostedEmailUserAddress({
+    bucket: context.env.BUNDLES,
+    config,
+    key: context.environment.bundleEncryptionKey,
+    keyId: context.environment.bundleEncryptionKeyId,
+    userId,
+  });
+
+  return json({
+    address,
+    identityId: config.fromAddress,
+    userId,
+  });
+}
+
+async function handleHostedEmailIngress(
+  message: HostedEmailWorkerRequest,
+  env: WorkerEnvironmentSource,
+): Promise<void> {
+  const environment = readHostedExecutionEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  const config = readHostedEmailConfig(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  const route = await resolveHostedEmailInboundRoute({
+    bucket: env.BUNDLES,
+    config,
+    key: environment.bundleEncryptionKey,
+    to: message.to,
+  });
+
+  if (!route) {
+    message.setReject?.("Hosted email address is not recognized.");
+    return;
+  }
+
+  const rawBytes = await readHostedEmailMessageBytes(message.raw);
+  const rawMessageKey = await writeHostedEmailRawMessage({
+    bucket: env.BUNDLES,
+    key: environment.bundleEncryptionKey,
+    keyId: environment.bundleEncryptionKeyId,
+    plaintext: rawBytes,
+    userId: route.userId,
+  });
+  const eventId = `email:${rawMessageKey}`;
+
+  const stub = await resolveUserRunnerStub(env, route.userId);
+  await stub.dispatch({
+    event: {
+      envelopeFrom: normalizeHostedEmailEnvelopeAddress(message.from),
+      envelopeTo: normalizeHostedEmailEnvelopeAddress(message.to),
+      identityId: route.identityId,
+      kind: "email.message.received",
+      rawMessageKey,
+      threadTarget: route.target ? serializeHostedEmailThreadTarget(route.target) : null,
+      userId: route.userId,
+    },
+    eventId,
+    occurredAt: new Date().toISOString(),
+  });
+}
+
+function normalizeHostedEmailEnvelopeAddress(value: string | null | undefined): string | null {
+  const normalized = value?.trim() ?? "";
+  return normalized.length > 0 ? normalized.toLowerCase() : null;
+}
 
 async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {
   const payload = await readCachedRequestText(context);
-  const dispatch = JSON.parse(payload) as HostedExecutionDispatchRequest;
-  const status = await getUserRunnerStub(context.env, dispatch.event.userId).dispatch(dispatch);
+  const dispatch = parseHostedExecutionDispatchRequest(JSON.parse(payload) as unknown);
+  const status = await (await resolveUserRunnerStub(context.env, dispatch.event.userId)).dispatch(dispatch);
 
   return isBackpressuredStatus(status, dispatch.eventId)
     ? json(status, 429)
@@ -380,22 +511,92 @@ async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<R
 }
 
 function createManualRunDispatch(userId: string): HostedExecutionDispatchRequest {
-  return {
-    event: {
-      kind: "assistant.cron.tick",
-      reason: "manual",
-      userId,
-    },
+  return buildHostedExecutionAssistantCronTickDispatch({
     eventId: `manual:${Date.now()}`,
     occurredAt: new Date().toISOString(),
-  };
+    reason: "manual",
+    userId,
+  });
 }
 
-function getUserRunnerStub(
+async function resolveUserRunnerStub(
   env: WorkerEnvironmentSource,
   userId: string,
-): UserRunnerDurableObjectStubLike {
-  return env.USER_RUNNER.getByName(userId);
+): Promise<UserRunnerDurableObjectStubLike> {
+  const stub = env.USER_RUNNER.getByName(userId);
+  await maybeBootstrapRunnerUser(stub, userId);
+  return stub;
+}
+
+async function callRunnerStatus(
+  stub: UserRunnerDurableObjectStubLike,
+  userId: string,
+): Promise<HostedExecutionUserStatus> {
+  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
+    status: (userId?: string) => Promise<HostedExecutionUserStatus>;
+  };
+  return compatibleStub.status.length > 0
+    ? compatibleStub.status(userId)
+    : compatibleStub.status();
+}
+
+async function callRunnerGetUserEnvStatus(
+  stub: UserRunnerDurableObjectStubLike,
+  userId: string,
+): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
+    getUserEnvStatus: (userId?: string) => Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  };
+  return compatibleStub.getUserEnvStatus.length > 0
+    ? compatibleStub.getUserEnvStatus(userId)
+    : compatibleStub.getUserEnvStatus();
+}
+
+async function callRunnerUpdateUserEnv(
+  stub: UserRunnerDurableObjectStubLike,
+  userId: string,
+  update: HostedUserEnvUpdate,
+): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
+    updateUserEnv: (
+      userIdOrUpdate: string | HostedUserEnvUpdate,
+      update?: HostedUserEnvUpdate,
+    ) => Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  };
+  return compatibleStub.updateUserEnv.length > 1
+    ? compatibleStub.updateUserEnv(userId, update)
+    : compatibleStub.updateUserEnv(update);
+}
+
+async function callRunnerClearUserEnv(
+  stub: UserRunnerDurableObjectStubLike,
+  userId: string,
+): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  const compatibleStub = stub as UserRunnerDurableObjectStubLike & {
+    clearUserEnv: (userId?: string) => Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  };
+  return compatibleStub.clearUserEnv.length > 0
+    ? compatibleStub.clearUserEnv(userId)
+    : compatibleStub.clearUserEnv();
+}
+
+async function maybeBootstrapRunnerUser(
+  stub: UserRunnerDurableObjectStubLike,
+  userId: string,
+): Promise<void> {
+  try {
+    await (stub as UserRunnerDurableObjectStubLike & {
+      bootstrapUser?: (userId: string) => Promise<{ userId: string }>;
+    }).bootstrapUser?.(userId);
+  } catch (error) {
+    if (
+      error instanceof TypeError
+      && error.message.includes('does not implement "bootstrapUser"')
+    ) {
+      return;
+    }
+    throw error;
+  }
 }
 
 function matchExactPath(...paths: readonly string[]): RouteMatcher {

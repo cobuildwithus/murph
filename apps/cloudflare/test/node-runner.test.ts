@@ -6,12 +6,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  assistantOutboxIntentSchema,
-  resolveAssistantStatePaths,
-} from "@healthybob/assistant-runtime";
 import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@healthybob/core";
-import { restoreHostedExecutionContext, snapshotHostedExecutionContext } from "@healthybob/runtime-state";
+import {
+  resolveAssistantStatePaths,
+  restoreHostedExecutionContext,
+  snapshotHostedExecutionContext,
+} from "@healthybob/runtime-state";
+import { assistantOutboxIntentSchema } from "healthybob";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
@@ -377,7 +378,9 @@ describe("runHostedExecutionJob", () => {
     });
     const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
 
-    expect(result.result.summary).toContain('Imported share pack');
+    expect(result.result.summary).toBe(
+      `Imported share pack "${pack.title}" (1 foods, 1 protocols, 0 recipes). Logged one meal entry from the shared food. Parser jobs: 0. Device sync jobs: 0 (skipped: providers not configured).`,
+    );
     expect(importedFood).toBeDefined();
     expect(importedFood.attachedProtocolIds?.length).toBe(1);
     expect(importedFood.autoLogDaily?.time).toBe("08:00");
