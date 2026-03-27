@@ -36,19 +36,27 @@ import {
 import {
   createIntegratedInboxCliServices,
   createIntegratedVaultCliServices,
-  drainAssistantOutbox,
+  dispatchAssistantOutboxIntent,
   getAssistantCronStatus,
+  listAssistantOutboxIntents,
   readAssistantAutomationState,
   refreshAssistantStatusSnapshot,
   runAssistantAutomation,
   saveAssistantAutomationState,
+  shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
 } from "healthybob";
+import {
+  buildHostedAssistantDeliverySideEffect,
+  parseHostedExecutionSideEffects,
+  type HostedExecutionSideEffect,
+  type HostedExecutionSideEffectRecord,
+} from "./contracts.js";
 
 const HOSTED_MAX_PARSER_JOBS = 50;
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
-const HOSTED_MAX_OUTBOX_DRAIN = 20;
+const HOSTED_MAX_COMMITTED_SIDE_EFFECTS = 20;
 const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 const HOSTED_RUNNER_COMMIT_BASE_URL = "http://commit.worker";
 const HOSTED_RUNNER_OUTBOX_BASE_URL = "http://outbox.worker";
@@ -58,8 +66,6 @@ export interface HostedExecutionCommitCallback {
     agentState: HostedExecutionBundleRef | null;
     vault: HostedExecutionBundleRef | null;
   };
-  token: string | null;
-  url: string;
 }
 
 export interface HostedAssistantRuntimeConfig {
@@ -72,6 +78,12 @@ export interface HostedAssistantRuntimeConfig {
 
 export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerRequest {
   commit?: HostedExecutionCommitCallback | null;
+  resume?: {
+    committedResult: {
+      result: HostedExecutionRunnerResult["result"];
+      sideEffects: HostedExecutionSideEffect[];
+    };
+  } | null;
 }
 
 export interface HostedAssistantRuntimeJobInput {
@@ -86,6 +98,11 @@ interface HostedAssistantRuntimeChildResult {
     stack?: string | null;
   };
   result?: HostedExecutionRunnerResult;
+}
+
+interface HostedBootstrapResult {
+  linqAutoReplyEnabled: boolean;
+  vaultCreated: boolean;
 }
 
 export async function runHostedAssistantRuntimeJobInProcess(
@@ -114,7 +131,55 @@ export async function runHostedAssistantRuntimeJobInProcess(
         vaultRoot: restored.vaultRoot,
       },
       async () => {
-        await ensureHostedBootstrap(restored.vaultRoot, input.request.dispatch);
+        if (input.request.resume?.committedResult) {
+          const committedResult: HostedExecutionRunnerResult = {
+            bundles: {
+              agentState: input.request.bundles.agentState,
+              vault: input.request.bundles.vault,
+            },
+            result: input.request.resume.committedResult.result,
+          };
+          const committedSideEffects = parseHostedExecutionSideEffects(
+            input.request.resume.committedResult.sideEffects,
+          );
+
+          await drainHostedAssistantOutboxAfterCommit({
+            commit: input.request.commit ?? null,
+            commitTimeoutMs: runtime.commitTimeoutMs,
+            dispatch: input.request.dispatch,
+            outboxBaseUrl: runtime.outboxBaseUrl,
+            sideEffects: committedSideEffects,
+            vaultRoot: restored.vaultRoot,
+          });
+          await refreshAssistantStatusSnapshot(restored.vaultRoot);
+
+          const finalSnapshot = await snapshotHostedExecutionContext({
+            operatorHomeRoot: restored.operatorHomeRoot,
+            vaultRoot: restored.vaultRoot,
+          });
+          const finalResult: HostedExecutionRunnerResult = {
+            bundles: {
+              agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
+              vault: encodeHostedBundleBase64(finalSnapshot.vaultBundle),
+            },
+            result: committedResult.result,
+          };
+
+          await finalizeHostedExecutionResult({
+            commit: input.request.commit ?? null,
+            committedResult,
+            dispatch: input.request.dispatch,
+            finalResult,
+            runtime,
+          });
+
+          return finalResult;
+        }
+
+        const bootstrapResult = await prepareHostedDispatchContext(
+          restored.vaultRoot,
+          input.request.dispatch,
+        );
         let shareImportResult: Awaited<ReturnType<typeof importSharePackIntoVault>> | null = null;
 
         switch (input.request.dispatch.event.kind) {
@@ -147,6 +212,9 @@ export async function runHostedAssistantRuntimeJobInProcess(
           operatorHomeRoot: restored.operatorHomeRoot,
           vaultRoot: restored.vaultRoot,
         });
+        const committedSideEffects = await collectHostedExecutionSideEffects(
+          restored.vaultRoot,
+        );
 
         const committedResult: HostedExecutionRunnerResult = {
           bundles: {
@@ -157,6 +225,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
             eventsHandled: 1,
             nextWakeAt: assistantCronStatus.nextRunAt,
             summary: summarizeDispatch(input.request.dispatch, {
+              bootstrapResult,
               deviceSyncProcessed: deviceSyncResult.processedJobs,
               deviceSyncSkipped: deviceSyncResult.skipped,
               parserProcessed: parserResult.processedJobs,
@@ -169,15 +238,16 @@ export async function runHostedAssistantRuntimeJobInProcess(
           commit: input.request.commit ?? null,
           dispatch: input.request.dispatch,
           result: committedResult,
+          sideEffects: committedSideEffects,
           runtime,
         });
 
         await drainHostedAssistantOutboxAfterCommit({
           commit: input.request.commit ?? null,
-          commitBaseUrl: runtime.commitBaseUrl,
-          dispatch: input.request.dispatch,
           commitTimeoutMs: runtime.commitTimeoutMs,
+          dispatch: input.request.dispatch,
           outboxBaseUrl: runtime.outboxBaseUrl,
+          sideEffects: committedSideEffects,
           vaultRoot: restored.vaultRoot,
         });
         await refreshAssistantStatusSnapshot(restored.vaultRoot);
@@ -369,6 +439,7 @@ async function commitHostedExecutionResult(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   result: HostedExecutionRunnerResult;
+  sideEffects: HostedExecutionSideEffect[];
   runtime: {
     commitBaseUrl: string;
     commitTimeoutMs: number | null;
@@ -381,7 +452,6 @@ async function commitHostedExecutionResult(input: {
   const response = await fetch(
     buildHostedRunnerCommitUrl(
       input.runtime.commitBaseUrl,
-      input.dispatch.event.userId,
       input.dispatch.eventId,
       "commit",
     ).toString(),
@@ -389,13 +459,9 @@ async function commitHostedExecutionResult(input: {
       body: JSON.stringify({
         currentBundleRefs: input.commit.bundleRefs,
         ...input.result,
+        sideEffects: input.sideEffects,
       }),
       headers: {
-        ...(input.commit.token
-          ? {
-              authorization: `Bearer ${input.commit.token}`,
-            }
-          : {}),
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -427,7 +493,6 @@ async function finalizeHostedExecutionResult(input: {
   const response = await fetch(
     buildHostedRunnerCommitUrl(
       input.runtime.commitBaseUrl,
-      input.dispatch.event.userId,
       input.dispatch.eventId,
       "finalize",
     ).toString(),
@@ -436,11 +501,6 @@ async function finalizeHostedExecutionResult(input: {
         bundles: input.finalResult.bundles,
       }),
       headers: {
-        ...(input.commit.token
-          ? {
-              authorization: `Bearer ${input.commit.token}`,
-            }
-          : {}),
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -455,32 +515,78 @@ async function finalizeHostedExecutionResult(input: {
   }
 }
 
-async function ensureHostedBootstrap(
+async function prepareHostedDispatchContext(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest,
+): Promise<HostedBootstrapResult | null> {
+  const bootstrapResult = dispatch.event.kind === "member.activated"
+    ? await bootstrapHostedMemberContext(vaultRoot, dispatch)
+    : null;
+
+  await requireHostedBootstrapForDispatch(vaultRoot, dispatch);
+  await prepareHostedLocalRuntime(vaultRoot, dispatch.eventId);
+  return bootstrapResult;
+}
+
+async function bootstrapHostedMemberContext(
+  vaultRoot: string,
+  dispatch: HostedExecutionDispatchRequest,
+): Promise<HostedBootstrapResult> {
+  const requestId = dispatch.eventId;
+  const vaultServices = createIntegratedVaultCliServices();
+  const vaultMetadataPath = path.join(vaultRoot, "vault.json");
+  const vaultCreated = !existsSync(vaultMetadataPath);
+
+  if (vaultCreated) {
+    await vaultServices.core.init({
+      requestId,
+      vault: vaultRoot,
+    });
+  }
+
+  const automationState = await readAssistantAutomationState(vaultRoot);
+  const linqAutoReplyEnabled = !automationState.autoReplyChannels.includes("linq");
+
+  if (linqAutoReplyEnabled) {
+    await saveAssistantAutomationState(vaultRoot, {
+      ...automationState,
+      autoReplyChannels: [...automationState.autoReplyChannels, "linq"],
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    linqAutoReplyEnabled,
+    vaultCreated,
+  };
+}
+
+async function requireHostedBootstrapForDispatch(
   vaultRoot: string,
   dispatch: HostedExecutionDispatchRequest,
 ): Promise<void> {
-  const requestId = dispatch.eventId;
-  const inboxServices = createIntegratedInboxCliServices();
-  const vaultServices = createIntegratedVaultCliServices();
+  if (existsSync(path.join(vaultRoot, "vault.json"))) {
+    return;
+  }
 
-  await vaultServices.core.init({
-    requestId,
-    vault: vaultRoot,
-  });
+  if (dispatch.event.kind === "member.activated") {
+    return;
+  }
+
+  throw new Error(
+    `Hosted execution for ${dispatch.event.kind} requires member.activated bootstrap first.`,
+  );
+}
+
+async function prepareHostedLocalRuntime(
+  vaultRoot: string,
+  requestId: string,
+): Promise<void> {
+  const inboxServices = createIntegratedInboxCliServices();
   await inboxServices.init({
     rebuild: false,
     requestId,
     vault: vaultRoot,
-  });
-  const automationState = await readAssistantAutomationState(vaultRoot);
-  const autoReplyChannels = automationState.autoReplyChannels.includes("linq")
-    ? automationState.autoReplyChannels
-    : [...automationState.autoReplyChannels, "linq"];
-
-  await saveAssistantAutomationState(vaultRoot, {
-    ...automationState,
-    autoReplyChannels,
-    updatedAt: new Date().toISOString(),
   });
 }
 
@@ -549,32 +655,51 @@ async function runHostedAssistantAutomation(
   }
 }
 
+async function collectHostedExecutionSideEffects(
+  vaultRoot: string,
+): Promise<HostedExecutionSideEffect[]> {
+  const now = new Date();
+  const intents = await listAssistantOutboxIntents(vaultRoot);
+
+  return intents
+    .filter((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
+      shouldDispatchAssistantOutboxIntent(intent, now),
+    )
+    .slice(0, HOSTED_MAX_COMMITTED_SIDE_EFFECTS)
+    .map((intent: Awaited<ReturnType<typeof listAssistantOutboxIntents>>[number]) =>
+      buildHostedAssistantDeliverySideEffect({
+        dedupeKey: intent.dedupeKey,
+        intentId: intent.intentId,
+      }),
+    );
+}
+
 async function drainHostedAssistantOutboxAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
-  commitBaseUrl: string;
   commitTimeoutMs: number | null;
   dispatch: HostedExecutionDispatchRequest;
   outboxBaseUrl: string;
+  sideEffects: HostedExecutionSideEffect[];
   vaultRoot: string;
 }): Promise<void> {
-  await drainAssistantOutbox({
-    dispatchHooks: input.commit
-      ? createHostedAssistantOutboxDispatchHooks({
-          commit: input.commit,
-          commitBaseUrl: input.commitBaseUrl,
-          commitTimeoutMs: input.commitTimeoutMs,
-          outboxBaseUrl: input.outboxBaseUrl,
-          userId: input.dispatch.event.userId,
-        })
-      : undefined,
-    limit: HOSTED_MAX_OUTBOX_DRAIN,
-    vault: input.vaultRoot,
-  });
+  for (const sideEffect of input.sideEffects) {
+    await dispatchAssistantOutboxIntent({
+      dispatchHooks: input.commit
+        ? createHostedAssistantOutboxDispatchHooks({
+            commit: input.commit,
+            commitTimeoutMs: input.commitTimeoutMs,
+            outboxBaseUrl: input.outboxBaseUrl,
+            userId: input.dispatch.event.userId,
+          })
+        : undefined,
+      intentId: sideEffect.intentId,
+      vault: input.vaultRoot,
+    });
+  }
 }
 
 function createHostedAssistantOutboxDispatchHooks(input: {
   commit: HostedExecutionCommitCallback;
-  commitBaseUrl: string;
   commitTimeoutMs: number | null;
   outboxBaseUrl: string;
   userId: string;
@@ -590,11 +715,16 @@ function createHostedAssistantOutboxDispatchHooks(input: {
     }) => {
       await callHostedRunnerOutboxJournal({
         commit: input.commit,
-        commitBaseUrl: input.commitBaseUrl,
         commitTimeoutMs: input.commitTimeoutMs,
-        delivery,
-        intent,
         method: "PUT",
+        record: {
+          delivery,
+          effectId: intent.intentId,
+          fingerprint: intent.dedupeKey,
+          intentId: intent.intentId,
+          kind: "assistant.delivery",
+          recordedAt: delivery.sentAt,
+        },
         outboxBaseUrl: input.outboxBaseUrl,
         userId: input.userId,
       });
@@ -606,56 +736,55 @@ function createHostedAssistantOutboxDispatchHooks(input: {
       };
       vault: string;
     }) => {
-      const payload = await callHostedRunnerOutboxJournal({
+      const record = await callHostedRunnerOutboxJournal({
         commit: input.commit,
-        commitBaseUrl: input.commitBaseUrl,
         commitTimeoutMs: input.commitTimeoutMs,
-        intent,
         method: "GET",
+        sideEffect: buildHostedAssistantDeliverySideEffect({
+          dedupeKey: intent.dedupeKey,
+          intentId: intent.intentId,
+        }),
         outboxBaseUrl: input.outboxBaseUrl,
         userId: input.userId,
       });
 
-      return payload.delivery;
+      return record?.kind === "assistant.delivery" ? record.delivery : null;
     },
   };
 }
 
-async function callHostedRunnerOutboxJournal(input: {
-  commit: HostedExecutionCommitCallback;
-  commitBaseUrl: string;
-  commitTimeoutMs: number | null;
-  delivery?: AssistantChannelDelivery;
-  intent: {
-    dedupeKey: string;
-    intentId: string;
-  };
-  method: "GET" | "PUT";
-  outboxBaseUrl: string;
-  userId: string;
-}): Promise<{ delivery: AssistantChannelDelivery | null; intentId: string }> {
-  const url = buildHostedRunnerOutboxUrl(
-    input.outboxBaseUrl,
-    input.userId,
-    input.intent.intentId,
-  );
-  url.searchParams.set("dedupeKey", input.intent.dedupeKey);
+async function callHostedRunnerOutboxJournal(input:
+  | {
+      commit: HostedExecutionCommitCallback;
+      commitTimeoutMs: number | null;
+      method: "GET";
+      sideEffect: HostedExecutionSideEffect;
+      outboxBaseUrl: string;
+      userId: string;
+    }
+  | {
+      commit: HostedExecutionCommitCallback;
+      commitTimeoutMs: number | null;
+      method: "PUT";
+      record: HostedExecutionSideEffectRecord;
+      outboxBaseUrl: string;
+      userId: string;
+    }): Promise<HostedExecutionSideEffectRecord | null> {
+  const sideEffect = input.method === "GET"
+    ? input.sideEffect
+    : buildHostedAssistantDeliverySideEffect({
+        dedupeKey: input.record.fingerprint,
+        intentId: input.record.intentId,
+      });
+  const url = buildHostedRunnerOutboxUrl(input.outboxBaseUrl, sideEffect.effectId);
+  url.searchParams.set("fingerprint", sideEffect.fingerprint);
+  url.searchParams.set("kind", sideEffect.kind);
 
   let response: Response;
   try {
     response = await fetch(url.toString(), {
-      body: input.method === "PUT"
-        ? JSON.stringify({
-            dedupeKey: input.intent.dedupeKey,
-            delivery: input.delivery,
-          })
-        : undefined,
+      body: input.method === "PUT" ? JSON.stringify(input.record) : undefined,
       headers: {
-        ...(input.commit.token
-          ? {
-              authorization: `Bearer ${input.commit.token}`,
-            }
-          : {}),
         ...(input.method === "PUT"
           ? {
               "content-type": "application/json; charset=utf-8",
@@ -673,10 +802,12 @@ async function callHostedRunnerOutboxJournal(input: {
     throw createHostedRunnerOutboxJournalError(input, response.status);
   }
 
-  return (await response.json()) as {
-    delivery: AssistantChannelDelivery | null;
-    intentId: string;
+  const payload = (await response.json()) as {
+    effectId: string;
+    record: HostedExecutionSideEffectRecord | null;
   };
+
+  return payload.record;
 }
 
 function normalizeCallbackBaseUrl(value: string | null | undefined, fallback: string): string {
@@ -686,21 +817,14 @@ function normalizeCallbackBaseUrl(value: string | null | undefined, fallback: st
 
 function buildHostedRunnerCommitUrl(
   baseUrl: string,
-  userId: string,
   eventId: string,
   action: "commit" | "finalize",
 ): URL {
-  return new URL(
-    `/internal/runner-events/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}/${action}`,
-    baseUrl,
-  );
+  return new URL(`/events/${encodeURIComponent(eventId)}/${action}`, baseUrl);
 }
 
-function buildHostedRunnerOutboxUrl(baseUrl: string, userId: string, intentId: string): URL {
-  return new URL(
-    `/internal/runner-outbox/${encodeURIComponent(userId)}/${encodeURIComponent(intentId)}`,
-    baseUrl,
-  );
+function buildHostedRunnerOutboxUrl(baseUrl: string, intentId: string): URL {
+  return new URL(`/intents/${encodeURIComponent(intentId)}`, baseUrl);
 }
 
 async function drainHostedParserQueue(vaultRoot: string): Promise<{ processedJobs: number }> {
@@ -809,6 +933,7 @@ function createHostedDeviceSyncRuntime(input: {
 function summarizeDispatch(
   dispatch: HostedExecutionDispatchRequest,
   metrics: {
+    bootstrapResult: HostedBootstrapResult | null;
     deviceSyncProcessed: number;
     deviceSyncSkipped: boolean;
     parserProcessed: number;
@@ -818,8 +943,19 @@ function summarizeDispatch(
   const suffix = ` Parser jobs: ${metrics.parserProcessed}. Device sync jobs: ${metrics.deviceSyncProcessed}${metrics.deviceSyncSkipped ? " (skipped: providers not configured)." : "."}`;
 
   switch (dispatch.event.kind) {
-    case "member.activated":
-      return `Initialized hosted member bundles and ran the hosted maintenance loop.${suffix}`;
+    case "member.activated": {
+      const bootstrapDetail = metrics.bootstrapResult
+        ? [
+            metrics.bootstrapResult.vaultCreated
+              ? "created the canonical vault"
+              : "reused the canonical vault",
+            metrics.bootstrapResult.linqAutoReplyEnabled
+              ? "enabled Linq auto-reply"
+              : "kept Linq auto-reply enabled",
+          ].join("; ")
+        : "bootstrap state unavailable";
+      return `Processed member activation (${bootstrapDetail}) and ran the hosted maintenance loop.${suffix}`;
+    }
     case "linq.message.received":
       return `Persisted Linq capture and ran the hosted maintenance loop.${suffix}`;
     case "assistant.cron.tick":
@@ -889,13 +1025,17 @@ export function readHostedRunnerCommitTimeoutMs(timeoutMs: number | null): numbe
 }
 
 function createHostedRunnerOutboxJournalError(
-  input: {
-    intent: {
-      intentId: string;
-    };
-    method: "GET" | "PUT";
-    userId: string;
-  },
+  input:
+    | {
+        method: "GET";
+        sideEffect: HostedExecutionSideEffect;
+        userId: string;
+      }
+    | {
+        method: "PUT";
+        record: HostedExecutionSideEffectRecord;
+        userId: string;
+      },
   status: number | null,
   cause?: unknown,
 ): Error & {
@@ -906,10 +1046,11 @@ function createHostedRunnerOutboxJournalError(
   };
   retryable: true;
 } {
+  const effectId = input.method === "GET" ? input.sideEffect.effectId : input.record.effectId;
   const error = new Error(
     status === null
-      ? `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${input.intent.intentId}.`
-      : `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${input.intent.intentId} with HTTP ${status}.`,
+      ? `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${effectId}.`
+      : `Hosted runner outbox journal ${input.method} failed for ${input.userId}/${effectId} with HTTP ${status}.`,
   ) as Error & {
     code: string;
     context: {
@@ -920,7 +1061,7 @@ function createHostedRunnerOutboxJournalError(
     retryable: true;
   };
 
-  error.code = "HOSTED_ASSISTANT_OUTBOX_JOURNAL_FAILED";
+  error.code = "HOSTED_OUTBOX_JOURNAL_FAILED";
   error.context = {
     retryable: true,
     status,

@@ -14,6 +14,7 @@ import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsert
 import { restoreHostedExecutionContext, snapshotHostedExecutionContext } from "@healthybob/runtime-state";
 
 const hostedCliMocks = vi.hoisted(() => ({
+  dispatchAssistantOutboxIntent: vi.fn(),
   drainAssistantOutbox: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
@@ -22,6 +23,8 @@ vi.mock("healthybob", async () => {
   const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
   return {
     ...actual,
+    dispatchAssistantOutboxIntent: (...args: Parameters<typeof actual.dispatchAssistantOutboxIntent>) =>
+      hostedCliMocks.dispatchAssistantOutboxIntent(...args),
     drainAssistantOutbox: (...args: Parameters<typeof actual.drainAssistantOutbox>) =>
       hostedCliMocks.drainAssistantOutbox(...args),
     runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
@@ -35,7 +38,6 @@ import {
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
 } from "../src/node-runner.js";
-import { writeHostedUserEnvToAgentStateBundle } from "../src/user-env.js";
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
@@ -45,6 +47,8 @@ describe("runHostedExecutionJob", () => {
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
     const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
+    hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
+      actual.dispatchAssistantOutboxIntent(input));
     hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actual.runAssistantAutomation(input));
     hostedCliMocks.drainAssistantOutbox.mockImplementation((input) => actual.drainAssistantOutbox(input));
   });
@@ -56,7 +60,7 @@ describe("runHostedExecutionJob", () => {
     await Promise.all(cleanupPaths.splice(0).map((target) => rm(target, { force: true, recursive: true })));
   });
 
-  it("bootstraps a new hosted member context and persists assistant auto-reply state", async () => {
+  it("bootstraps a new hosted member context only during activation and records the result explicitly", async () => {
     const result = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -84,13 +88,109 @@ describe("runHostedExecutionJob", () => {
       await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
     ) as { autoReplyChannels: string[] };
 
-    expect(result.result.summary).toContain("Initialized");
+    expect(result.result.summary).toContain("Processed member activation");
+    expect(result.result.summary).toContain("created the canonical vault");
+    expect(result.result.summary).toContain("enabled Linq auto-reply");
     expect(result.result.summary).toContain("Parser jobs: 0.");
     expect(automationState.autoReplyChannels).toContain("linq");
     await expect(
       readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
     ).rejects.toThrow();
+    await expect(
+      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+    ).rejects.toThrow();
     await expect(readFile(path.join(restored.vaultRoot, "vault.json"), "utf8")).resolves.toContain("{");
+  });
+
+  it("reuses the existing hosted member bootstrap on repeated activation", async () => {
+    const firstActivation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          userId: "member_123",
+        },
+        eventId: "evt_activation_first",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const secondActivation = await runHostedExecutionJob({
+      bundles: firstActivation.bundles,
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          userId: "member_123",
+        },
+        eventId: "evt_activation_second",
+        occurredAt: "2026-03-26T12:05:00.000Z",
+      },
+    });
+
+    expect(secondActivation.result.summary).toContain("Processed member activation");
+    expect(secondActivation.result.summary).toContain("reused the canonical vault");
+    expect(secondActivation.result.summary).toContain("kept Linq auto-reply enabled");
+  });
+
+  it("rejects non-activation hosted events until member activation bootstrap has run", async () => {
+    await expect(runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_tick_without_bootstrap",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    })).rejects.toThrow(
+      "Hosted execution for assistant.cron.tick requires member.activated bootstrap first.",
+    );
+  });
+
+  it("runs follow-up hosted events without re-running durable bootstrap", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          userId: "member_123",
+        },
+        eventId: "evt_activation",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const followUp = await runHostedExecutionJob({
+      bundles: activation.bundles,
+      dispatch: {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_tick",
+        occurredAt: "2026-03-26T12:05:00.000Z",
+      },
+    });
+
+    expect(followUp.result.summary).toContain("Processed assistant cron tick (manual)");
   });
 
   it("imports a shared food bundle with attached supplement protocols", async () => {
@@ -122,12 +222,25 @@ describe("runHostedExecutionJob", () => {
         food: { id: smoothie.record.foodId },
       },
     });
-
-    const result = await runHostedExecutionJob({
+    const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
         vault: null,
       },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_456",
+          normalizedPhoneNumber: "+15557654321",
+          userId: "member_456",
+        },
+        eventId: "evt_activation_share",
+        occurredAt: "2026-03-26T12:25:00.000Z",
+      },
+    });
+
+    const result = await runHostedExecutionJob({
+      bundles: activation.bundles,
       dispatch: {
         event: {
           kind: "vault.share.accepted",
@@ -155,18 +268,9 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {
-    const initialAgentState = writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: null,
-      env: {
-        OPENAI_API_KEY: "sk-user",
-        TELEGRAM_BOT_TOKEN: "bot-token",
-      },
-      now: "2026-03-26T12:00:00.000Z",
-    });
-
     const result = await runHostedExecutionJob({
       bundles: {
-        agentState: Buffer.from(initialAgentState).toString("base64"),
+        agentState: null,
         vault: null,
       },
       dispatch: {
@@ -179,6 +283,10 @@ describe("runHostedExecutionJob", () => {
         eventId: "evt_user_env",
         occurredAt: "2026-03-26T12:00:00.000Z",
       },
+      userEnv: {
+        OPENAI_API_KEY: "sk-user",
+        TELEGRAM_BOT_TOKEN: "bot-token",
+      },
     });
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
@@ -190,17 +298,10 @@ describe("runHostedExecutionJob", () => {
 
     await expect(
       readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
-    ).resolves.toContain("\"OPENAI_API_KEY\": \"sk-user\"");
+    ).rejects.toThrow();
   });
 
   it("restores the prior process env after per-user overrides are applied", async () => {
-    const initialAgentState = writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: null,
-      env: {
-        CUSTOM_API_KEY: "custom-user-key",
-      },
-      now: "2026-03-26T12:00:00.000Z",
-    });
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     const previousCustomApiKey = process.env.CUSTOM_API_KEY;
     const previousHome = process.env.HOME;
@@ -216,7 +317,7 @@ describe("runHostedExecutionJob", () => {
     try {
       await runHostedExecutionJob({
         bundles: {
-          agentState: Buffer.from(initialAgentState).toString("base64"),
+          agentState: null,
           vault: null,
         },
         dispatch: {
@@ -228,6 +329,9 @@ describe("runHostedExecutionJob", () => {
           },
           eventId: "evt_user_env_restore",
           occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+        userEnv: {
+          CUSTOM_API_KEY: "custom-user-key",
         },
       });
     } finally {
@@ -247,20 +351,6 @@ describe("runHostedExecutionJob", () => {
 
   it("allows concurrent hosted runs because each job uses isolated process env", async () => {
     setHostedExecutionRunModeForTests("isolated");
-    const firstAgentState = writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: null,
-      env: {
-        CUSTOM_API_KEY: "user-one-key",
-      },
-      now: "2026-03-26T12:00:00.000Z",
-    });
-    const secondAgentState = writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: null,
-      env: {
-        CUSTOM_API_KEY: "user-two-key",
-      },
-      now: "2026-03-26T12:00:00.000Z",
-    });
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
 
@@ -322,16 +412,17 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted test server to expose a TCP port.");
       }
+      setHostedExecutionCallbackBaseUrlsForTests({
+        commitBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
 
       const firstRun = runHostedExecutionJob({
         bundles: {
-          agentState: Buffer.from(firstAgentState).toString("base64"),
+          agentState: null,
           vault: null,
         },
         commit: {
           bundleRefs: { agentState: null, vault: null },
-          token: "runner-token",
-          url: `http://127.0.0.1:${address.port}/internal/runner-events/member_1/evt_one/commit`,
         },
         dispatch: {
           event: {
@@ -343,17 +434,18 @@ describe("runHostedExecutionJob", () => {
           eventId: "evt_one",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
+        userEnv: {
+          CUSTOM_API_KEY: "user-one-key",
+        },
       });
 
       const secondRun = runHostedExecutionJob({
         bundles: {
-          agentState: Buffer.from(secondAgentState).toString("base64"),
+          agentState: null,
           vault: null,
         },
         commit: {
           bundleRefs: { agentState: null, vault: null },
-          token: "runner-token",
-          url: `http://127.0.0.1:${address.port}/internal/runner-events/member_2/evt_two/commit`,
         },
         dispatch: {
           event: {
@@ -364,6 +456,9 @@ describe("runHostedExecutionJob", () => {
           },
           eventId: "evt_two",
           occurredAt: "2026-03-26T12:00:01.000Z",
+        },
+        userEnv: {
+          CUSTOM_API_KEY: "user-two-key",
         },
       });
 
@@ -381,6 +476,7 @@ describe("runHostedExecutionJob", () => {
       expect(commitCount).toBe(2);
       expect(maxCommitsInFlight).toBe(2);
     } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
@@ -441,20 +537,31 @@ describe("runHostedExecutionJob", () => {
       vi.fn(async (url, init) => {
         fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
 
-        if (String(url).includes("/internal/runner-events/")) {
+        if (String(url).startsWith("http://commit.worker/events/")) {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
 
-        if (String(url).includes("/internal/runner-outbox/")) {
+        if (
+          String(url).startsWith(
+            "http://outbox.worker/intents/",
+          )
+        ) {
           return new Response(JSON.stringify({
-            delivery: {
-              channel: "linq",
-              sentAt: "2026-03-26T12:00:05.000Z",
-              target: "chat_123",
-              targetKind: "thread",
-              messageLength: "Queued the Linq reply.".length,
+            effectId: intentId,
+            record: {
+              delivery: {
+                channel: "linq",
+                sentAt: "2026-03-26T12:00:05.000Z",
+                target: "chat_123",
+                targetKind: "thread",
+                messageLength: "Queued the Linq reply.".length,
+              },
+              effectId: intentId,
+              fingerprint: "dedupe_hosted",
+              intentId,
+              kind: "assistant.delivery",
+              recordedAt: "2026-03-26T12:00:05.000Z",
             },
-            intentId,
           }), { status: 200 });
         }
 
@@ -472,8 +579,6 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        token: "runner-token",
-        url: "https://worker.example.test/internal/runner-events/member_123/evt_outbox/commit",
       },
       dispatch: {
         event: {
@@ -488,9 +593,9 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(fetchCalls).toEqual([
-      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox/commit",
-      "GET https://worker.example.test/internal/runner-outbox/member_123/outbox_hosted_reconcile?dedupeKey=dedupe_hosted",
-      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox/finalize",
+      "POST http://commit.worker/events/evt_outbox/commit",
+      "GET http://outbox.worker/intents/outbox_hosted_reconcile?fingerprint=dedupe_hosted&kind=assistant.delivery",
+      "POST http://commit.worker/events/evt_outbox/finalize",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-restored-"));
@@ -572,8 +677,8 @@ describe("runHostedExecutionJob", () => {
     hostedCliMocks.runAssistantAutomation.mockImplementationOnce(async ({ vault }) => {
       await writePendingIntent(vault);
     });
-    hostedCliMocks.drainAssistantOutbox.mockImplementationOnce(async ({ dispatchHooks, limit, vault }) => {
-      expect(limit).toBe(20);
+    hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dispatchHooks, intentId: nextIntentId, vault }) => {
+      expect(nextIntentId).toBe(intentId);
       const statePaths = resolveAssistantStatePaths(vault);
       const intentPath = path.join(statePaths.outboxDirectory, `${intentId}.json`);
       const pendingIntent = assistantOutboxIntentSchema.parse(
@@ -605,35 +710,68 @@ describe("runHostedExecutionJob", () => {
       );
 
       return {
-        attempted: 1,
-        failed: 0,
-        queued: 0,
-        sent: 1,
+        deliveryError: null,
+        intent: assistantOutboxIntentSchema.parse({
+          ...pendingIntent,
+          updatedAt: sentAt,
+          nextAttemptAt: null,
+          sentAt,
+          status: "sent",
+          delivery,
+          lastError: null,
+        }),
+        session: null,
       };
     });
-
     const fetchCalls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url, init) => {
         fetchCalls.push(`${init?.method ?? "GET"} ${String(url)}`);
 
-        if (String(url).includes("/internal/runner-events/") && String(url).includes("/commit")) {
+        if (
+          String(url)
+          === "http://commit.worker/events/evt_outbox_send/commit"
+        ) {
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            sideEffects: [
+              {
+                effectId: intentId,
+                fingerprint: "dedupe_hosted_send",
+                intentId,
+                kind: "assistant.delivery",
+              },
+            ],
+          });
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
 
-        if (String(url).includes("/internal/runner-outbox/") && (init?.method ?? "GET") === "GET") {
+        if (
+          String(url)
+          === "http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          && (init?.method ?? "GET") === "GET"
+        ) {
           return new Response(JSON.stringify({
-            delivery: null,
-            intentId,
+            effectId: intentId,
+            record: null,
           }), { status: 200 });
         }
 
-        if (String(url).includes("/internal/runner-outbox/") && init?.method === "PUT") {
-          return new Response(String(init?.body), { status: 200 });
+        if (
+          String(url)
+          === "http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery"
+          && init?.method === "PUT"
+        ) {
+          return new Response(JSON.stringify({
+            effectId: intentId,
+            record: JSON.parse(String(init?.body)),
+          }), { status: 200 });
         }
 
-        if (String(url).includes("/internal/runner-events/") && String(url).includes("/finalize")) {
+        if (
+          String(url)
+          === "http://commit.worker/events/evt_outbox_send/finalize"
+        ) {
           return new Response(JSON.stringify({ ok: true }), { status: 200 });
         }
 
@@ -651,8 +789,6 @@ describe("runHostedExecutionJob", () => {
           agentState: null,
           vault: null,
         },
-        token: "runner-token",
-        url: "https://worker.example.test/internal/runner-events/member_123/evt_outbox_send/commit",
       },
       dispatch: {
         event: {
@@ -667,10 +803,10 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(fetchCalls).toEqual([
-      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox_send/commit",
-      "GET https://worker.example.test/internal/runner-outbox/member_123/outbox_hosted_send?dedupeKey=dedupe_hosted_send",
-      "PUT https://worker.example.test/internal/runner-outbox/member_123/outbox_hosted_send?dedupeKey=dedupe_hosted_send",
-      "POST https://worker.example.test/internal/runner-events/member_123/evt_outbox_send/finalize",
+      "POST http://commit.worker/events/evt_outbox_send/commit",
+      "GET http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+      "PUT http://outbox.worker/intents/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+      "POST http://commit.worker/events/evt_outbox_send/finalize",
     ]);
 
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-restored-"));
@@ -724,8 +860,6 @@ describe("runHostedExecutionJob", () => {
             agentState: null,
             vault: null,
           },
-          token: "runner-token",
-          url: "https://worker.example.test/internal/runner-events/member_123/evt_commit/commit",
         },
         dispatch: {
           event: {
@@ -743,9 +877,10 @@ describe("runHostedExecutionJob", () => {
       expect(timeoutSpy).toHaveBeenCalledWith(15_000);
       const [commitUrl, commitInit] = commitFetch.mock.calls[0] ?? [];
       const [finalizeUrl, finalizeInit] = commitFetch.mock.calls[1] ?? [];
-      expect(commitUrl).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/commit");
+      expect(commitUrl).toBe(
+        "http://commit.worker/events/evt_commit/commit",
+      );
       expect(commitInit?.headers).toMatchObject({
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       });
       expect(JSON.parse(String(commitInit?.body))).toMatchObject({
@@ -755,9 +890,10 @@ describe("runHostedExecutionJob", () => {
         },
         result: result.result,
       });
-      expect(String(finalizeUrl)).toBe("https://worker.example.test/internal/runner-events/member_123/evt_commit/finalize");
+      expect(String(finalizeUrl)).toBe(
+        "http://commit.worker/events/evt_commit/finalize",
+      );
       expect(finalizeInit?.headers).toMatchObject({
-        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       });
       expect(JSON.parse(String(finalizeInit?.body))).toEqual({
@@ -803,8 +939,6 @@ describe("runHostedExecutionJob", () => {
             agentState: null,
             vault: null,
           },
-          token: "runner-token",
-          url: "https://worker.example.test/internal/runner-events/member_123/evt_commit/commit",
         },
         dispatch: {
           event: {
@@ -849,7 +983,7 @@ describe("runHostedExecutionJob", () => {
       const secondResult = await secondRun;
 
       expect(startedRunCount).toBe(2);
-      expect(secondResult.result.summary).toContain("Initialized hosted member bundles");
+      expect(secondResult.result.summary).toContain("Processed member activation");
     } finally {
       setHostedExecutionRunStartHookForTests(null);
     }

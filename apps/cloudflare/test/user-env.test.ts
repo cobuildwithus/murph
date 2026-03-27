@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyHostedUserEnvUpdate,
-  readHostedUserEnvFromAgentStateBundle,
-  writeHostedUserEnvToAgentStateBundle,
+  decodeHostedUserEnvPayload,
+  encodeHostedUserEnvPayload,
 } from "../src/user-env.js";
 
 const REMOVED_HOSTED_USER_PREFIX_KEY = "HB_USER_SAMPLE_FLAG";
@@ -64,9 +64,8 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("round-trips user env config through the agent-state bundle", () => {
-    const bundle = writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: null,
+  it("round-trips user env config through the standalone hosted payload", () => {
+    const payload = encodeHostedUserEnvPayload({
       env: {
         OPENAI_API_KEY: "sk-user",
         TELEGRAM_BOT_TOKEN: "bot-token",
@@ -74,22 +73,21 @@ describe("hosted user env helpers", () => {
       now: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(readHostedUserEnvFromAgentStateBundle(bundle)).toEqual({
+    expect(decodeHostedUserEnvPayload(payload)).toEqual({
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     });
   });
 
   it("round-trips extension-only keys when the same allowlist source is provided on read", () => {
-    const bundle = writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: null,
+    const payload = encodeHostedUserEnvPayload({
       env: {
         CUSTOM_API_KEY: "custom-secret",
       },
       now: "2026-03-26T12:00:00.000Z",
     });
 
-    expect(readHostedUserEnvFromAgentStateBundle(bundle, {
+    expect(decodeHostedUserEnvPayload(payload, {
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
     })).toEqual({
       CUSTOM_API_KEY: "custom-secret",

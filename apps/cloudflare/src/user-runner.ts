@@ -15,7 +15,7 @@ import {
 } from "./execution-journal.js";
 import {
   destroyHostedExecutionContainer,
-  hasHostedExecutionContainer,
+  type HostedExecutionContainerNamespaceLike,
   invokeHostedExecutionContainerRunner,
 } from "./runner-container.js";
 import { listHostedUserEnvKeys, type HostedUserEnvUpdate } from "./user-env.js";
@@ -42,14 +42,22 @@ export class HostedUserRunner {
   private readonly commitRecovery: ReturnType<typeof createRunnerCommitRecovery>;
   private readonly finalizeLocks = new Map<string, Promise<HostedExecutionCommittedResult>>();
   private readonly queueStore: RunnerQueueStore;
+  private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly scheduler: RunnerScheduler;
+  private readonly userEnvLocks = new Map<string, Promise<void>>();
 
   constructor(
     private readonly state: DurableObjectStateLike,
     private readonly env: HostedExecutionEnvironment,
     private readonly bucket: R2BucketLike,
     private readonly runnerContainerEnvironment: Readonly<Record<string, string>> = {},
+    runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null = (
+      state as {
+        runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
+      }
+    ).runnerContainerNamespace ?? null,
   ) {
+    this.runnerContainerNamespace = runnerContainerNamespace;
     this.queueStore = new RunnerQueueStore(state);
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
     this.bundleSync = new RunnerBundleSync(
@@ -152,7 +160,7 @@ export class HostedUserRunner {
     userId: string,
     update: HostedUserEnvUpdate,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.bundleSync.updateUserEnv(userId, update);
+    return this.withUserEnvLock(userId, () => this.bundleSync.updateUserEnv(userId, update));
   }
 
   async clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
@@ -225,7 +233,22 @@ export class HostedUserRunner {
         }
 
         try {
-          const runnerResult = await this.invokeRunner(record.userId, nextPending.dispatch);
+          const committed = await this.commitRecovery.readCommittedDispatch(
+            record.userId,
+            nextPending.dispatch.eventId,
+          );
+          const runnerResult = await this.invokeRunner(
+            record.userId,
+            nextPending.dispatch,
+            committed && !isCommittedResultFinalized(committed)
+              ? {
+                  committedResult: {
+                    result: committed.result,
+                    sideEffects: committed.sideEffects,
+                  },
+                }
+              : null,
+          );
           record = await this.commitRecovery.requireCommittedDispatch(
             record.userId,
             nextPending.dispatch.eventId,
@@ -271,7 +294,7 @@ export class HostedUserRunner {
       }
     } finally {
       await destroyHostedExecutionContainer({
-        runnerContainerNamespace: this.state.runnerContainerNamespace ?? null,
+        runnerContainerNamespace: this.runnerContainerNamespace,
         userId,
       });
     }
@@ -280,35 +303,42 @@ export class HostedUserRunner {
   private async invokeRunner(
     userId: string,
     dispatch: HostedExecutionDispatchRequest,
+    resume: {
+      committedResult: {
+        result: HostedExecutionCommittedResult["result"];
+        sideEffects: HostedExecutionCommittedResult["sideEffects"];
+      };
+    } | null = null,
   ) {
-    if (!hasHostedExecutionContainer(this.state)) {
+    if (!this.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
-    }
-
-    if (!this.env.cloudflareBaseUrl) {
-      throw new Error("HOSTED_EXECUTION_CLOUDFLARE_BASE_URL is not configured.");
     }
 
     const bundleState = await this.queueStore.readBundleState(userId);
     const requestBody: HostedExecutionRunnerRequest & {
       commit: {
         bundleRefs: typeof bundleState.bundleRefs;
-        token: string | null;
-        url: string;
       };
+      resume?: {
+        committedResult: {
+          result: HostedExecutionCommittedResult["result"];
+          sideEffects: HostedExecutionCommittedResult["sideEffects"];
+        };
+      };
+      userEnv: Record<string, string>;
     } = {
       bundles: await this.bundleSync.readBundlesForRunner(userId),
       commit: {
         bundleRefs: bundleState.bundleRefs,
-        token: this.env.runnerControlToken,
-        url: `${this.env.cloudflareBaseUrl}/internal/runner-events/${encodeURIComponent(userId)}/${encodeURIComponent(dispatch.eventId)}/commit`,
       },
       dispatch,
+      ...(resume ? { resume } : {}),
+      userEnv: await this.bundleSync.readUserEnv(userId),
     };
 
     return invokeHostedExecutionContainerRunner({
       request: requestBody,
-      runnerContainerNamespace: this.state.runnerContainerNamespace,
+      runnerContainerNamespace: this.runnerContainerNamespace,
       runnerControlToken: this.env.runnerControlToken,
       runnerEnvironment: this.runnerContainerEnvironment,
       timeoutMs: this.env.runnerTimeoutMs,
@@ -362,5 +392,25 @@ export class HostedUserRunner {
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: this.env.allowedUserEnvKeys ?? undefined,
       HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES: this.env.allowedUserEnvPrefixes ?? undefined,
     };
+  }
+
+  private async withUserEnvLock<T>(userId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.userEnvLocks.get(userId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.catch(() => {}).then(() => current);
+    this.userEnvLocks.set(userId, chain);
+    await previous.catch(() => {});
+
+    try {
+      return await run();
+    } finally {
+      release();
+      if (this.userEnvLocks.get(userId) === chain) {
+        this.userEnvLocks.delete(userId);
+      }
+    }
   }
 }

@@ -7,12 +7,16 @@ import {
   type HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
 
-import { createHostedBundleStore, type R2BucketLike } from "../bundle-store.js";
+import {
+  createHostedBundleStore,
+  createHostedUserEnvStore,
+  type R2BucketLike,
+} from "../bundle-store.js";
 import {
   applyHostedUserEnvUpdate,
+  decodeHostedUserEnvPayload,
+  encodeHostedUserEnvPayload,
   listHostedUserEnvKeys,
-  readHostedUserEnvFromAgentStateBundle,
-  writeHostedUserEnvToAgentStateBundle,
   type HostedUserEnvUpdate,
 } from "../user-env.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
@@ -42,8 +46,8 @@ export class RunnerBundleSync {
   }
 
   async readUserEnv(userId: string): Promise<Record<string, string>> {
-    return readHostedUserEnvFromAgentStateBundle(
-      await this.createBundleStore().readBundle(userId, "agent-state"),
+    return decodeHostedUserEnvPayload(
+      await this.createUserEnvStore().readUserEnv(userId),
       this.userEnvSource,
     );
   }
@@ -52,50 +56,32 @@ export class RunnerBundleSync {
     userId: string,
     update: HostedUserEnvUpdate,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
-      const bundleState = await this.queueStore.readBundleState(userId);
-      const currentBundle = await this.createBundleStore().readBundle(userId, "agent-state");
-      const currentUserEnv = readHostedUserEnvFromAgentStateBundle(currentBundle, this.userEnvSource);
-      const nextUserEnv = applyHostedUserEnvUpdate({
-        current: currentUserEnv,
-        source: this.userEnvSource,
-        update,
-      });
+    const currentUserEnv = await this.readUserEnv(userId);
+    const nextUserEnv = applyHostedUserEnvUpdate({
+      current: currentUserEnv,
+      source: this.userEnvSource,
+      update,
+    });
 
-      if (currentBundle === null && Object.keys(nextUserEnv).length === 0) {
-        return {
-          configuredUserEnvKeys: [],
-          userId,
-        };
-      }
-
-      const nextBundle = writeHostedUserEnvToAgentStateBundle({
-        agentStateBundle: currentBundle,
-        env: nextUserEnv,
-      });
-      const nextAgentStateRef = await this.writeBundleBytes(
+    if (Object.keys(nextUserEnv).length === 0) {
+      await this.createUserEnvStore().clearUserEnv(userId);
+      return {
+        configuredUserEnvKeys: [],
         userId,
-        "agent-state",
-        nextBundle,
-        bundleState.bundleRefs.agentState,
-      );
-      const swapped = await this.queueStore.compareAndSwapBundleRefs(userId, {
-        expectedVersions: bundleState.bundleVersions,
-        nextBundleRefs: {
-          agentState: nextAgentStateRef,
-          vault: bundleState.bundleRefs.vault,
-        },
-      });
-
-      if (swapped.applied) {
-        return {
-          configuredUserEnvKeys: listHostedUserEnvKeys(nextUserEnv),
-          userId,
-        };
-      }
+      };
     }
 
-    throw new Error(`Hosted user env update for ${userId} conflicted too many times.`);
+    await this.createUserEnvStore().writeUserEnv(
+      userId,
+      encodeHostedUserEnvPayload({
+        env: nextUserEnv,
+      }) as Uint8Array,
+    );
+
+    return {
+      configuredUserEnvKeys: listHostedUserEnvKeys(nextUserEnv),
+      userId,
+    };
   }
 
   async applyRunnerResultBundles(
@@ -104,7 +90,7 @@ export class RunnerBundleSync {
     bundles: HostedExecutionRunnerResult["bundles"],
   ): Promise<RunnerStateRecord> {
     let nextExpectedVersions = expectedVersions;
-    let nextAgentStateBytes = decodeHostedBundleBase64(bundles.agentState);
+    const nextAgentStateBytes = decodeHostedBundleBase64(bundles.agentState);
     const nextVaultBytes = decodeHostedBundleBase64(bundles.vault);
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
@@ -136,6 +122,13 @@ export class RunnerBundleSync {
       }
 
       if (
+        bundleState.bundleVersions.agentState !== nextExpectedVersions.agentState
+        && !sameBundleRef(bundleState.bundleRefs.agentState, nextBundleRefs.agentState)
+      ) {
+        throw new Error(`Hosted agent-state bundle changed during finalize for ${userId}.`);
+      }
+
+      if (
         bundleState.bundleVersions.vault !== nextExpectedVersions.vault
         && !sameBundleRef(bundleState.bundleRefs.vault, nextBundleRefs.vault)
       ) {
@@ -143,12 +136,6 @@ export class RunnerBundleSync {
       }
 
       nextExpectedVersions = swapped.record.bundleVersions;
-
-      if (bundles.agentState === null) {
-        return swapped.record;
-      }
-
-      nextAgentStateBytes = await this.mergeLatestUserEnvIntoAgentStateBundle(userId, bundles.agentState);
     }
 
     throw new Error(`Hosted bundle finalize for ${userId} conflicted too many times.`);
@@ -162,23 +149,11 @@ export class RunnerBundleSync {
     });
   }
 
-  private async mergeLatestUserEnvIntoAgentStateBundle(
-    userId: string,
-    encodedAgentStateBundle: string | null,
-  ): Promise<Uint8Array | null> {
-    if (encodedAgentStateBundle === null) {
-      return null;
-    }
-
-    const latestAgentStateBundle = await this.createBundleStore().readBundle(userId, "agent-state");
-    const latestUserEnv = readHostedUserEnvFromAgentStateBundle(
-      latestAgentStateBundle,
-      this.userEnvSource,
-    );
-
-    return writeHostedUserEnvToAgentStateBundle({
-      agentStateBundle: decodeHostedBundleBase64(encodedAgentStateBundle) ?? new Uint8Array(),
-      env: latestUserEnv,
+  private createUserEnvStore() {
+    return createHostedUserEnvStore({
+      bucket: this.bucket,
+      key: this.bundleEncryptionKey,
+      keyId: this.bundleEncryptionKeyId,
     });
   }
 

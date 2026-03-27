@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHostedExecutionSignature } from "../src/auth.js";
 import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.js";
-import worker, { HostedRunnerOutbound, UserRunnerDurableObject } from "../src/index.js";
+import worker, { UserRunnerDurableObject } from "../src/index.js";
+import { handleRunnerOutboundRequest } from "../src/runner-outbound.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
 describe("cloudflare worker routes", () => {
@@ -163,7 +164,7 @@ describe("cloudflare worker routes", () => {
   it("persists runner commits through the outbound commit.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
 
-    const response = await callHostedRunnerOutbound(
+    const response = await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_commit/commit", {
         body: JSON.stringify({
           bundles: {
@@ -207,7 +208,7 @@ describe("cloudflare worker routes", () => {
   it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
 
-    await callHostedRunnerOutbound(
+    await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize/commit", {
         body: JSON.stringify({
           bundles: {
@@ -231,7 +232,7 @@ describe("cloudflare worker routes", () => {
       harness.env,
     );
 
-    const finalizeResponse = await callHostedRunnerOutbound(
+    const finalizeResponse = await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize/finalize", {
         body: JSON.stringify({
           bundles: {
@@ -279,7 +280,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("keeps malformed outbound callbacks from mutating journal state and removes the public callback routes", async () => {
+  it("keeps malformed outbound callbacks from mutating journal state even when runner auth is unset", async () => {
     const harness = createUserRunnerDurableObject();
     const journalStore = createHostedExecutionJournalStore({
       bucket: harness.bucket.api,
@@ -287,7 +288,7 @@ describe("cloudflare worker routes", () => {
       keyId: "v1",
     });
 
-    await callHostedRunnerOutbound(
+    await callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize_auth/commit", {
         body: JSON.stringify({
           bundles: {
@@ -311,7 +312,7 @@ describe("cloudflare worker routes", () => {
       harness.env,
     );
 
-    const malformedFinalizeResponse = await callHostedRunnerOutbound(
+    await expect(() => callRunnerOutbound(
       new Request("http://commit.worker/events/evt_finalize_auth/finalize", {
         body: JSON.stringify({
           bundles: {
@@ -325,10 +326,9 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    );
-    expect(malformedFinalizeResponse.status).toBe(500);
+    )).rejects.toThrow("bundles.agentState must be a base64 string or null.");
 
-    const malformedCommitResponse = await callHostedRunnerOutbound(
+    await expect(() => callRunnerOutbound(
       new Request("http://commit.worker/events/evt_bad_commit/commit", {
         body: JSON.stringify({
           bundles: {
@@ -350,8 +350,7 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    );
-    expect(malformedCommitResponse.status).toBe(500);
+    )).rejects.toThrow("bundles.vault must be a base64 string or null.");
 
     const publicCommitResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {
@@ -377,13 +376,17 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("persists and reads hosted outbox delivery journal records through the outbound outbox.worker handler", async () => {
+  it("persists and reads hosted outbox journal records through the outbound outbox.worker handler", async () => {
     const env = createWorkerEnv();
-    const response = await callHostedRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_123", {
+    const response = await callRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
-          dedupeKey: "dedupe_123",
           delivery: createOutboxDelivery(),
+          effectId: "outbox_123",
+          fingerprint: "dedupe_123",
+          intentId: "outbox_123",
+          kind: "assistant.delivery",
+          recordedAt: "2026-03-26T12:00:05.000Z",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -395,8 +398,8 @@ describe("cloudflare worker routes", () => {
 
     expect(response.status).toBe(200);
 
-    const readResponse = await callHostedRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_123?dedupeKey=dedupe_123", {
+    const readResponse = await callRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -404,22 +407,31 @@ describe("cloudflare worker routes", () => {
 
     expect(readResponse.status).toBe(200);
     await expect(readResponse.json()).resolves.toMatchObject({
-      delivery: {
-        channel: "telegram",
-        target: "thread_123",
+      effectId: "outbox_123",
+      record: {
+        delivery: {
+          channel: "telegram",
+          target: "thread_123",
+        },
+        effectId: "outbox_123",
+        intentId: "outbox_123",
+        kind: "assistant.delivery",
       },
-      intentId: "outbox_123",
     });
   });
 
-  it("falls back to dedupe delivery records when the outbound outbox intent id changes", async () => {
+  it("falls back to fingerprint side-effect records when the outbound effect id changes", async () => {
     const env = createWorkerEnv();
 
-    await callHostedRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_a", {
+    await callRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
-          dedupeKey: "dedupe_123",
           delivery: createOutboxDelivery(),
+          effectId: "outbox_a",
+          fingerprint: "dedupe_123",
+          intentId: "outbox_a",
+          kind: "assistant.delivery",
+          recordedAt: "2026-03-26T12:00:05.000Z",
         }),
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -429,8 +441,8 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
-    const readResponse = await callHostedRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_b?dedupeKey=dedupe_123", {
+    const readResponse = await callRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_b?kind=assistant.delivery&fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -438,10 +450,15 @@ describe("cloudflare worker routes", () => {
 
     expect(readResponse.status).toBe(200);
     await expect(readResponse.json()).resolves.toMatchObject({
-      delivery: {
-        channel: "telegram",
+      effectId: "outbox_a",
+      record: {
+        delivery: {
+          channel: "telegram",
+        },
+        effectId: "outbox_a",
+        intentId: "outbox_a",
+        kind: "assistant.delivery",
       },
-      intentId: "outbox_a",
     });
   });
 
@@ -525,16 +542,11 @@ describe("cloudflare worker routes", () => {
       error: "Unauthorized",
     });
 
-    const wrongMethodOutboxResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/runner-outbox/member_123/outbox_123", {
-        headers: {
-          authorization: "Bearer runner-token",
-        },
+    const wrongMethodOutboxResponse = await callRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_123", {
         method: "POST",
       }),
-      createWorkerEnv(undefined, {
-        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      }),
+      createWorkerEnv(),
     );
 
     expect(wrongMethodOutboxResponse.status).toBe(405);
@@ -562,9 +574,7 @@ describe("cloudflare worker routes", () => {
       new Request("https://runner.example.test/internal/runner-events/%E0%A4%A/evt_commit/commit", {
         method: "GET",
       }),
-      createWorkerEnv(undefined, {
-        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
-      }),
+      createWorkerEnv(),
     );
 
     expect(runnerEventResponse.status).toBe(404);
@@ -701,6 +711,13 @@ function createWorkerEnv(
     },
     ...overrides,
   };
+}
+
+function callRunnerOutbound(
+  request: Request,
+  env: Record<string, unknown>,
+): Promise<Response> {
+  return handleRunnerOutboundRequest(request, env as never, "member_123");
 }
 
 function createBucketStore(input: {
@@ -931,7 +948,6 @@ function createUserRunnerDurableObject(
   const env = {
     BUNDLES: bucket.api,
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
-    HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://runner.example.test",
     HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     RUNNER_CONTAINER: storage.runnerContainerNamespace,

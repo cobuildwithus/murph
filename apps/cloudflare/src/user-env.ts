@@ -1,11 +1,4 @@
-import path from "node:path";
-import { readFile } from "node:fs/promises";
-
-import { readHostedBundleTextFile, writeHostedBundleTextFile } from "@healthybob/runtime-state";
-
 export const HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
-export const HOSTED_USER_ENV_ROOT = "operator-home";
-export const HOSTED_USER_ENV_RELATIVE_PATH = ".healthybob/hosted/user-env.json";
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "AGENTMAIL_API_BASE_URL",
@@ -97,56 +90,29 @@ export interface HostedUserEnvUpdate {
   mode: "merge" | "replace";
 }
 
-export async function loadHostedUserEnvForRunner(
-  operatorHomeRoot: string,
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<Record<string, string>> {
-  try {
-    return parseHostedUserEnvConfig(
-      await readFile(resolveHostedUserEnvFilePath(operatorHomeRoot), "utf8"),
-      source,
-    ).env;
-  } catch (error) {
-    if (
-      error && typeof error === "object" && "code" in error && error.code === "ENOENT"
-    ) {
-      return {};
-    }
+const utf8Decoder = new TextDecoder();
+const utf8Encoder = new TextEncoder();
 
-    throw error;
-  }
-}
-
-export function readHostedUserEnvFromAgentStateBundle(
-  agentStateBundle: Uint8Array | ArrayBuffer | null,
+export function decodeHostedUserEnvPayload(
+  payload: Uint8Array | ArrayBuffer | null,
   source: Readonly<Record<string, string | undefined>> = process.env,
 ): Record<string, string> {
-  const text = readHostedBundleTextFile({
-    bytes: agentStateBundle,
-    expectedKind: "agent-state",
-    path: HOSTED_USER_ENV_RELATIVE_PATH,
-    root: HOSTED_USER_ENV_ROOT,
-  });
-
-  return text ? parseHostedUserEnvConfig(text, source).env : {};
+  return payload
+    ? parseHostedUserEnvConfig(utf8Decoder.decode(payload), source).env
+    : {};
 }
 
-export function writeHostedUserEnvToAgentStateBundle(input: {
-  agentStateBundle: Uint8Array | ArrayBuffer | null;
+export function encodeHostedUserEnvPayload(input: {
   env: Record<string, string>;
   now?: string;
-}): Uint8Array {
-  const text = Object.keys(input.env).length > 0
-    ? `${JSON.stringify(createHostedUserEnvConfig(input.env, input.now), null, 2)}\n`
-    : null;
+}): Uint8Array | null {
+  if (Object.keys(input.env).length === 0) {
+    return null;
+  }
 
-  return writeHostedBundleTextFile({
-    bytes: input.agentStateBundle,
-    kind: "agent-state",
-    path: HOSTED_USER_ENV_RELATIVE_PATH,
-    root: HOSTED_USER_ENV_ROOT,
-    text,
-  });
+  return utf8Encoder.encode(
+    `${JSON.stringify(createHostedUserEnvConfig(input.env, input.now), null, 2)}\n`,
+  );
 }
 
 export function applyHostedUserEnvUpdate(input: {
@@ -185,6 +151,30 @@ export function applyHostedUserEnvUpdate(input: {
 
 export function listHostedUserEnvKeys(env: Record<string, string>): string[] {
   return Object.keys(env).sort((left, right) => left.localeCompare(right));
+}
+
+export function normalizeHostedUserEnv(
+  env: Record<string, string>,
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): Record<string, string> {
+  const normalized: Record<string, string | null> = {};
+
+  for (const [key, value] of Object.entries(env)) {
+    if (typeof value !== "string") {
+      throw new TypeError(`Hosted user env value for ${key} must be a string.`);
+    }
+
+    normalized[key] = value;
+  }
+
+  return applyHostedUserEnvUpdate({
+    current: {},
+    source,
+    update: {
+      env: normalized,
+      mode: "replace",
+    },
+  });
 }
 
 export function parseHostedUserEnvUpdate(value: unknown): HostedUserEnvUpdate {
@@ -236,10 +226,6 @@ export function createHostedUserEnvConfig(
   };
 }
 
-export function resolveHostedUserEnvFilePath(operatorHomeRoot: string): string {
-  return path.join(operatorHomeRoot, ".healthybob", "hosted", "user-env.json");
-}
-
 function parseHostedUserEnvConfig(
   text: string,
   source: Readonly<Record<string, string | undefined>> = process.env,
@@ -250,20 +236,16 @@ function parseHostedUserEnvConfig(
     throw new Error("Hosted user env config is invalid.");
   }
 
-  const env = applyHostedUserEnvUpdate({
-    current: {},
-    source,
-    update: {
-      env: Object.fromEntries(Object.entries(parsed.env).map(([key, value]) => {
-        if (typeof value !== "string") {
-          throw new TypeError(`Hosted user env value for ${key} must be a string.`);
-        }
+  const env = normalizeHostedUserEnv(
+    Object.fromEntries(Object.entries(parsed.env).map(([key, value]) => {
+      if (typeof value !== "string") {
+        throw new TypeError(`Hosted user env value for ${key} must be a string.`);
+      }
 
-        return [key, value] as const;
-      })),
-      mode: "replace",
-    },
-  });
+      return [key, value] as const;
+    })),
+    source,
+  );
 
   return {
     env,

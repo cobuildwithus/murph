@@ -20,7 +20,6 @@ describe("HostedUserRunner", () => {
     allowedUserEnvPrefixes: null,
     bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
     bundleEncryptionKeyId: "v1",
-    cloudflareBaseUrl: "https://worker.example.test",
     controlToken: null,
     defaultAlarmDelayMs: 60_000,
     dispatchSigningSecret: "dispatch-secret",
@@ -69,6 +68,7 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "ok",
       },
+      sideEffects: [],
     };
 
     await journalStore.writeCommittedResult("member_123", "evt_roundtrip", committedResult);
@@ -118,6 +118,7 @@ describe("HostedUserRunner", () => {
         eventsHandled: 1,
         summary: "legacy",
       },
+      sideEffects: [],
     });
   });
 
@@ -249,7 +250,6 @@ describe("HostedUserRunner", () => {
       ? invokeInput
       : new Request(invokeInput);
     const invokePayload = JSON.parse(await invokeRequest.text()) as {
-      userId: string;
       request: {
         commit: {
           bundleRefs: {
@@ -260,11 +260,88 @@ describe("HostedUserRunner", () => {
       };
     };
 
-    expect(invokePayload.userId).toBe("member_123");
     expect(invokePayload.request.commit.bundleRefs).toEqual({
       agentState: null,
       vault: null,
     });
+  });
+
+  it("forwards stored per-user env through the runner container invoke payload", async () => {
+    const resultPayload = createRunnerSuccessPayload({
+      agentState: Buffer.from("agent-state").toString("base64"),
+      summary: "ok",
+      vault: Buffer.from("vault").toString("base64"),
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload: resultPayload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(resultPayload), {
+          status: 200,
+        });
+      }),
+    );
+    const runner = new HostedUserRunner(
+      storage.state,
+      {
+        ...environment,
+        allowedUserEnvKeys: "OPENAI_API_KEY",
+      },
+      bucket.api,
+    );
+
+    await runner.updateUserEnv("member_123", {
+      env: {
+        OPENAI_API_KEY: "sk-user",
+      },
+      mode: "replace",
+    });
+    await runner.dispatch(createDispatch("evt_user_env_set"));
+    await runner.clearUserEnv("member_123");
+    await runner.dispatch(createDispatch("evt_user_env_cleared"));
+
+    const invokePayloads = await Promise.all(
+      storage.runnerContainerFetch.mock.calls
+        .filter(([input]) => {
+          const request = input instanceof Request ? input : new Request(input);
+          return new URL(request.url).pathname === "/internal/invoke";
+        })
+        .map(async ([input]) => {
+          const request = input instanceof Request ? input : new Request(input);
+          const payload = JSON.parse(await request.text()) as {
+            request: {
+              dispatch: {
+                eventId: string;
+              };
+              userEnv: Record<string, string>;
+            };
+          };
+
+          return {
+            eventId: payload.request.dispatch.eventId,
+            userEnv: payload.request.userEnv,
+          };
+        }),
+    );
+
+    expect(invokePayloads).toEqual([
+      {
+        eventId: "evt_user_env_set",
+        userEnv: {
+          OPENAI_API_KEY: "sk-user",
+        },
+      },
+      {
+        eventId: "evt_user_env_cleared",
+        userEnv: {},
+      },
+    ]);
   });
 
   it("reconciles final runner bundles after the durable commit path advances earlier bundle refs", async () => {
@@ -362,8 +439,17 @@ describe("HostedUserRunner", () => {
   it("keeps committed events retryable until durable finalize succeeds", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const sideEffects = [
+      {
+        effectId: "outbox_retry",
+        fingerprint: "dedupe_retry",
+        intentId: "outbox_retry",
+        kind: "assistant.delivery" as const,
+      },
+    ];
     const committedPayload = createRunnerSuccessPayload({
       agentState: Buffer.from("agent-state-committed").toString("base64"),
+      sideEffects,
       summary: "committed",
       vault: Buffer.from("vault-committed").toString("base64"),
     });
@@ -384,11 +470,11 @@ describe("HostedUserRunner", () => {
       })
       .mockImplementationOnce(async (_url, init) => {
         const requestBody = JSON.parse(String(init?.body));
-        await commitResultForRunnerRequest({
-          bucket,
-          environment,
-          payload: committedPayload,
-          requestBody,
+        expect(requestBody.resume).toEqual({
+          committedResult: {
+            result: committedPayload.result,
+            sideEffects,
+          },
         });
         await finalizeResultForRunnerRequest({
           bucket,
@@ -421,7 +507,7 @@ describe("HostedUserRunner", () => {
     expect(firstStatus.bundleRefs.vault?.size).toBe("vault-committed".length);
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/destroy")).toBe(1);
 
-    vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
+    vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
     await runner.alarm();
 
     const finalStatus = await runner.status("member_123");
@@ -1282,7 +1368,7 @@ describe("HostedUserRunner", () => {
     expect(replayed.poisonedEventIds).not.toContain("evt_poison_expiry");
   });
 
-  it("stores encrypted per-user env config inside the agent-state bundle", async () => {
+  it("stores encrypted per-user env config in a dedicated hosted object", async () => {
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
 
     const saved = await runner.updateUserEnv("member_123", {
@@ -1297,7 +1383,7 @@ describe("HostedUserRunner", () => {
       "OPENAI_API_KEY",
       "TELEGRAM_BOT_TOKEN",
     ]);
-    expect(bucket.keys()).toEqual(["users/member_123/agent-state.bundle.json"]);
+    expect(bucket.keys()).toEqual(["users/member_123/user-env.json"]);
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"],
       userId: "member_123",
@@ -1357,7 +1443,13 @@ describe("HostedUserRunner", () => {
       },
       mode: "replace",
     });
-    expect(bucket.putCount()).toBeGreaterThan(writesAfterBootstrap);
+    expect(bucket.putCount()).toBe(writesAfterBootstrap + 1);
+    expect(bucket.keys()).toEqual([
+      "users/member_123/agent-state.bundle.json",
+      "users/member_123/execution-journal/evt_bootstrap.json",
+      "users/member_123/user-env.json",
+      "users/member_123/vault.bundle.json",
+    ]);
 
     const cleared = await runner.clearUserEnv("member_123");
 
@@ -1592,6 +1684,12 @@ function createDeferred<T>() {
 function createRunnerSuccessPayload(input: Partial<{
   agentState: string | null;
   eventsHandled: number;
+  sideEffects: Array<{
+    effectId: string;
+    fingerprint: string;
+    intentId: string;
+    kind: "assistant.delivery";
+  }>;
   summary: string;
   vault: string | null;
 }> = {}) {
@@ -1604,6 +1702,7 @@ function createRunnerSuccessPayload(input: Partial<{
       eventsHandled: input.eventsHandled ?? 1,
       summary: input.summary ?? "ok",
     },
+    sideEffects: input.sideEffects ?? [],
   };
 }
 
@@ -1653,6 +1752,12 @@ async function commitResultForRunnerRequest(input: {
       eventsHandled: number;
       summary: string;
     };
+    sideEffects?: Array<{
+      effectId: string;
+      fingerprint: string;
+      intentId: string;
+      kind: "assistant.delivery";
+    }>;
   };
   requestBody: {
     commit: {
@@ -1691,6 +1796,12 @@ async function finalizeResultForRunnerRequest(input: {
       agentState: string | null;
       vault: string | null;
     };
+    sideEffects?: Array<{
+      effectId: string;
+      fingerprint: string;
+      intentId: string;
+      kind: "assistant.delivery";
+    }>;
   };
   requestBody: {
     dispatch: {

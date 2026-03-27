@@ -1,5 +1,4 @@
 import {
-  decodeHostedBundleBase64,
   type HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
 import {
@@ -10,7 +9,7 @@ import {
 } from "@healthybob/assistant-runtime";
 
 import { buildHostedRunnerContainerEnv } from "./runner-env.js";
-import { readHostedUserEnvFromAgentStateBundle } from "./user-env.js";
+import { normalizeHostedUserEnv } from "./user-env.js";
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
@@ -19,7 +18,9 @@ let hostedExecutionCallbackBaseUrlsForTests: {
   outboxBaseUrl?: string | null;
 } | null = null;
 
-export type HostedExecutionRunnerJobRequest = HostedAssistantRuntimeJobRequest;
+export interface HostedExecutionRunnerJobRequest extends HostedAssistantRuntimeJobRequest {
+  userEnv?: Record<string, string> | null;
+}
 
 export function setHostedExecutionRunModeForTests(
   mode: "in-process" | "isolated" | null,
@@ -42,8 +43,7 @@ export async function runHostedExecutionJob(
   input: HostedExecutionRunnerJobRequest,
 ): Promise<HostedExecutionRunnerResult> {
   hostedExecutionRunStartHookForTests?.();
-  const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests
-    ?? readHostedExecutionCallbackBaseUrls(input.commit?.url ?? null);
+  const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
 
   const runtime = {
     ...callbackBaseUrls,
@@ -51,10 +51,7 @@ export async function runHostedExecutionJob(
       Number.parseInt(process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
     forwardedEnv: buildHostedRunnerContainerEnv(process.env),
-    userEnv: readHostedUserEnvFromAgentStateBundle(
-      decodeHostedBundleBase64(input.bundles.agentState),
-      process.env,
-    ),
+    userEnv: normalizeHostedUserEnv(input.userEnv ?? {}, process.env),
   };
 
   if (hostedExecutionRunModeForTests === "in-process") {
@@ -68,20 +65,4 @@ export async function runHostedExecutionJob(
     request: input,
     runtime,
   });
-}
-
-function readHostedExecutionCallbackBaseUrls(url: string | null): {
-  commitBaseUrl?: string;
-  outboxBaseUrl?: string;
-} | null {
-  if (!url) {
-    return null;
-  }
-
-  const parsed = new URL(url);
-  const baseUrl = `${parsed.protocol}//${parsed.host}`;
-  return {
-    commitBaseUrl: baseUrl,
-    outboxBaseUrl: baseUrl,
-  };
 }
