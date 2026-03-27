@@ -55,6 +55,9 @@ const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
 
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
+const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
+const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
+const HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS = new Set(["v1", "v2"]);
 
 export interface HostedDeployAutomationEnvironment {
   allowedUserEnvKeys: string | null;
@@ -62,17 +65,29 @@ export interface HostedDeployAutomationEnvironment {
   bundlesBucketName: string;
   bundlesPreviewBucketName: string;
   bundleEncryptionKeyId: string;
-  cloudflareBaseUrl: string;
   compatibilityDate: string;
   containerMaxInstances: number;
   defaultAlarmDelayMs: string;
   imageVars: Record<string, string>;
+  logHeadSamplingRate: number;
   maxEventAttempts: string;
   retryDelayMs: string;
   runnerCommitTimeoutMs: string;
   runnerTimeoutMs: string;
+  traceHeadSamplingRate: number;
   workerName: string;
   workerVars: Record<string, string>;
+}
+
+export interface HostedWorkerDeploymentVersionTraffic {
+  percentage: number;
+  versionId: string;
+}
+
+export interface HostedWorkerGradualDeploymentSupport {
+  directDeployRequiredReason: string | null;
+  gradualDeploymentsSupported: boolean;
+  migrationTags: string[];
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
@@ -89,10 +104,6 @@ export function readHostedDeployAutomationEnvironment(
       "CF_BUNDLES_PREVIEW_BUCKET",
     ),
     bundleEncryptionKeyId: normalizeString(source.CF_BUNDLE_KEY_ID) ?? "v1",
-    cloudflareBaseUrl: normalizeBaseUrl(
-      requireString(source.CF_PUBLIC_BASE_URL, "CF_PUBLIC_BASE_URL"),
-      "CF_PUBLIC_BASE_URL",
-    ),
     compatibilityDate: normalizeString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerMaxInstances: normalizePositiveInteger(
       source.CF_CONTAINER_MAX_INSTANCES,
@@ -105,6 +116,11 @@ export function readHostedDeployAutomationEnvironment(
       "CF_DEFAULT_ALARM_DELAY_MS",
     ),
     imageVars: readPresentStringMap(source, HOSTED_CONTAINER_IMAGE_VAR_NAMES),
+    logHeadSamplingRate: normalizeSamplingRate(
+      source.CF_LOG_HEAD_SAMPLING_RATE,
+      DEFAULT_LOG_HEAD_SAMPLING_RATE,
+      "CF_LOG_HEAD_SAMPLING_RATE",
+    ),
     maxEventAttempts: normalizePositiveIntegerString(
       source.CF_MAX_EVENT_ATTEMPTS,
       "3",
@@ -127,6 +143,11 @@ export function readHostedDeployAutomationEnvironment(
       "60000",
       "CF_RUNNER_TIMEOUT_MS",
     ),
+    traceHeadSamplingRate: normalizeSamplingRate(
+      source.CF_TRACE_HEAD_SAMPLING_RATE,
+      DEFAULT_TRACE_HEAD_SAMPLING_RATE,
+      "CF_TRACE_HEAD_SAMPLING_RATE",
+    ),
     workerName: requireString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
     workerVars: readPresentStringMap(source, HOSTED_WORKER_OPTIONAL_VAR_NAMES),
   };
@@ -137,7 +158,6 @@ export function buildHostedWranglerDeployConfig(
 ): Record<string, unknown> {
   const vars: Record<string, string> = {
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: environment.bundleEncryptionKeyId,
-    HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: environment.cloudflareBaseUrl,
     HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS: environment.defaultAlarmDelayMs,
     HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS: environment.maxEventAttempts,
     HOSTED_EXECUTION_RETRY_DELAY_MS: environment.retryDelayMs,
@@ -162,7 +182,7 @@ export function buildHostedWranglerDeployConfig(
     compatibility_flags: ["nodejs_compat"],
     containers: [
       {
-        class_name: "UserRunnerDurableObject",
+        class_name: "RunnerContainer",
         image: "../../../Dockerfile.cloudflare-hosted-runner",
         ...(Object.keys(environment.imageVars).length > 0
           ? {
@@ -178,12 +198,20 @@ export function buildHostedWranglerDeployConfig(
           name: "USER_RUNNER",
           class_name: "UserRunnerDurableObject",
         },
+        {
+          name: "RUNNER_CONTAINER",
+          class_name: "RunnerContainer",
+        },
       ],
     },
     migrations: [
       {
         tag: "v1",
         new_sqlite_classes: ["UserRunnerDurableObject"],
+      },
+      {
+        tag: "v2",
+        new_sqlite_classes: ["RunnerContainer"],
       },
     ],
     r2_buckets: [
@@ -193,10 +221,135 @@ export function buildHostedWranglerDeployConfig(
         preview_bucket_name: environment.bundlesPreviewBucketName,
       },
     ],
+    observability: {
+      enabled: true,
+      head_sampling_rate: environment.logHeadSamplingRate,
+      traces: {
+        enabled: true,
+        head_sampling_rate: environment.traceHeadSamplingRate,
+      },
+    },
     vars,
     secrets: {
       required: [...HOSTED_WORKER_REQUIRED_SECRET_NAMES],
     },
+  };
+}
+
+export function resolveHostedWorkerDeploymentTraffic(input: {
+  candidateVersionId: string;
+  currentDeploymentVersions: HostedWorkerDeploymentVersionTraffic[];
+  rolloutPercentage: number;
+}): HostedWorkerDeploymentVersionTraffic[] {
+  const rolloutPercentage = normalizeRolloutPercentage(input.rolloutPercentage);
+  const currentDeploymentVersions = input.currentDeploymentVersions.map((version) => ({
+    percentage: normalizeRolloutPercentage(version.percentage),
+    versionId: version.versionId,
+  }));
+
+  if (currentDeploymentVersions.length === 0) {
+    throw new Error(
+      "Gradual deployments require an existing deployment. Use a direct deploy for the first rollout.",
+    );
+  }
+
+  if (currentDeploymentVersions.length > 2) {
+    throw new Error("Cloudflare gradual deployments support at most two active versions.");
+  }
+
+  const candidateIndex = currentDeploymentVersions.findIndex(
+    ({ versionId }) => versionId === input.candidateVersionId,
+  );
+
+  if (currentDeploymentVersions.length === 1) {
+    const [currentVersion] = currentDeploymentVersions;
+
+    if (currentVersion.versionId === input.candidateVersionId) {
+      if (rolloutPercentage !== 100) {
+        throw new Error(
+          "The candidate version is already 100% deployed. Select a different candidate or use a 100% rollout.",
+        );
+      }
+
+      return [currentVersion];
+    }
+
+    if (rolloutPercentage === 100) {
+      return [
+        {
+          percentage: 100,
+          versionId: input.candidateVersionId,
+        },
+      ];
+    }
+
+    return [
+      {
+        percentage: 100 - rolloutPercentage,
+        versionId: currentVersion.versionId,
+      },
+      {
+        percentage: rolloutPercentage,
+        versionId: input.candidateVersionId,
+      },
+    ];
+  }
+
+  if (candidateIndex === -1) {
+    throw new Error(
+      "The current deployment already splits traffic between two versions. Finish or roll back that deployment before introducing a new candidate version.",
+    );
+  }
+
+  const remainingPercentage = 100 - rolloutPercentage;
+  const nextTraffic = currentDeploymentVersions.map((version, index) => ({
+    percentage: index === candidateIndex ? rolloutPercentage : remainingPercentage,
+    versionId: version.versionId,
+  }));
+
+  if (rolloutPercentage === 100) {
+    return [
+      {
+        percentage: 100,
+        versionId: input.candidateVersionId,
+      },
+    ];
+  }
+
+  return nextTraffic;
+}
+
+export function formatHostedWorkerDeploymentVersionSpecs(
+  traffic: HostedWorkerDeploymentVersionTraffic[],
+): string[] {
+  return traffic.map(({ percentage, versionId }) => `${versionId}@${percentage}`);
+}
+
+export function resolveHostedWorkerGradualDeploymentSupport(
+  config: Record<string, unknown>,
+): HostedWorkerGradualDeploymentSupport {
+  const migrationTags = readHostedWorkerMigrationTags(config);
+  const unsupportedMigrationTags = migrationTags.filter(
+    (tag) => !HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS.has(tag),
+  );
+
+  if (unsupportedMigrationTags.length > 0) {
+    return {
+      directDeployRequiredReason: [
+        "Rendered Wrangler config includes unsupported Durable Object migration tag(s)",
+        unsupportedMigrationTags.map((tag) => `\`${tag}\``).join(", "),
+        "for gradual versions/deployments.",
+        "Use HOSTED_EXECUTION_DEPLOYMENT_MODE=direct for the migration rollout first.",
+      ].join(" "),
+      gradualDeploymentsSupported: false,
+      migrationTags,
+    };
+  }
+
+  return {
+    directDeployRequiredReason: null,
+    gradualDeploymentsSupported: true,
+    migrationTags,
   };
 }
 
@@ -221,18 +374,6 @@ export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
     workerSecretsPath: path.join(deployDir, "worker-secrets.json"),
     wranglerConfigPath: path.join(deployDir, "wrangler.generated.jsonc"),
   };
-}
-
-function normalizeBaseUrl(value: string, label: string): string {
-  const url = new URL(value.trim());
-
-  if (url.protocol !== "https:" && url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
-    throw new Error(`${label} must be an https URL.`);
-  }
-
-  url.hash = "";
-  url.search = "";
-  return url.toString().replace(/\/$/u, "");
 }
 
 function normalizePositiveInteger(
@@ -270,6 +411,34 @@ function normalizePositiveIntegerString(
   return String(parsed);
 }
 
+function normalizeSamplingRate(
+  value: string | undefined,
+  fallback: number,
+  label: string,
+): number {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return fallback;
+  }
+
+  const parsed = Number(normalized);
+
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    throw new Error(`${label} must be a number between 0 and 1.`);
+  }
+
+  return parsed;
+}
+
+function normalizeRolloutPercentage(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    throw new Error("Hosted rollout percentages must be integers between 0 and 100.");
+  }
+
+  return value;
+}
+
 function normalizeString(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -287,6 +456,23 @@ function requireString(value: string | undefined, label: string): string {
   }
 
   return normalized;
+}
+
+function readHostedWorkerMigrationTags(config: Record<string, unknown>): string[] {
+  const migrations = config.migrations;
+
+  if (!Array.isArray(migrations)) {
+    return [];
+  }
+
+  return migrations.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const tag = "tag" in entry ? normalizeString(String(entry.tag)) : null;
+    return tag ? [tag] : [];
+  });
 }
 
 function readPresentStringMap(

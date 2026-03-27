@@ -1,0 +1,46 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "healthybob-hosted-runner-vitest",
+  "main": "./worker-entry.ts",
+  "compatibility_date": "2026-03-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_RUNNER",
+        "class_name": "VitestUserRunnerDurableObject"
+      },
+      {
+        "name": "RUNNER_CONTAINER",
+        "class_name": "RunnerContainerTestDouble"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["VitestUserRunnerDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["RunnerContainerTestDouble"]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BUNDLES",
+      "bucket_name": "healthybob-hosted-runner-vitest-bundles"
+    }
+  ],
+  "vars": {
+    "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID": "v1",
+    "HOSTED_EXECUTION_CONTROL_TOKEN": "control-token",
+    "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS": "60000",
+    "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
+    "HOSTED_EXECUTION_RETRY_DELAY_MS": "1000",
+    "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN": "runner-token",
+    "HOSTED_EXECUTION_RUNNER_TIMEOUT_MS": "60000",
+    "HOSTED_EXECUTION_SIGNING_SECRET": "dispatch-secret"
+  }
+}
