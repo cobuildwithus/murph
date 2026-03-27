@@ -8,7 +8,7 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "build": "pnpm --dir packages/hosted-execution build && pnpm --dir packages/runtime-state build && pnpm --dir packages/core build && pnpm --dir packages/importers build && pnpm --dir packages/device-syncd build && pnpm --dir packages/query build && pnpm --dir packages/inboxd build && pnpm --dir packages/parsers build && pnpm --dir packages/cli build && pnpm --dir packages/assistant-runtime build",
+    "build": "pnpm --dir packages/hosted-execution build && pnpm --dir packages/runtime-state build && pnpm --dir packages/core build && pnpm --dir packages/importers build && pnpm --dir packages/device-syncd build && pnpm --dir packages/query build && pnpm --dir packages/inboxd build && pnpm --dir packages/parsers build && pnpm --dir packages/cli build && pnpm --dir packages/assistant-services build && pnpm --dir packages/assistant-runtime build",
     "clean": "rimraf packages/*/dist packages/*/.next packages/*/.test-dist packages/*/*.tsbuildinfo apps/*/.next apps/*/*.tsbuildinfo && pnpm clean:source-sidecars",
     "clean:source-sidecars": "tsx scripts/prune-generated-source-sidecars.ts --quiet",
     "typecheck": "bash scripts/workspace-verify.sh typecheck",

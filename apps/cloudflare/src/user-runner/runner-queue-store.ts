@@ -1,19 +1,17 @@
-import type {
-  HostedExecutionBundleRef,
-  HostedExecutionDispatchRequest,
-} from "@healthybob/runtime-state";
+import {
+  parseHostedExecutionDispatchRequest,
+  type HostedExecutionBundleRef,
+  type HostedExecutionDispatchRequest,
+} from "@healthybob/hosted-execution";
 
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import {
   CONSUMED_EVENT_TTL_MS,
-  LEGACY_STATE_STORAGE_KEY,
   MAX_BACKPRESSURED_EVENT_IDS,
   MAX_PENDING_EVENTS,
   MAX_POISONED_EVENT_IDS,
   type DurableObjectSqlValue,
   type DurableObjectStateLike,
-  type LegacyPendingDispatchRecord,
-  type LegacyUserRunnerRecord,
   type PendingDispatchRecord,
   type RunnerBundleVersions,
   type RunnerStateRecord,
@@ -58,27 +56,38 @@ interface BundleRefSwapInput {
   nextBundleRefs: RunnerStateRecord["bundleRefs"];
 }
 
-const DEFAULT_USER_ID = "unknown";
-
 export class RunnerQueueStore {
-  private hydrated = false;
-  private hydrationPromise: Promise<void> | null = null;
+  private userId: string | null = null;
 
   constructor(private readonly state: DurableObjectStateLike) {
     this.ensureSchema();
   }
 
-  async readState(userIdHint: string | null): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(userIdHint);
-    this.pruneExpiredConsumedEventsSync();
-    return this.readStateSync(userIdHint);
+  async bootstrapUser(userId: string): Promise<string> {
+    const meta = this.selectMetaRowSync();
+
+    if (meta) {
+      if (meta.user_id !== userId) {
+        throw new Error(
+          `Hosted runner Durable Object is already bound to ${meta.user_id}, not ${userId}.`,
+        );
+      }
+
+      this.userId = userId;
+      return userId;
+    }
+
+    this.insertMetaRowSync(defaultMetaRow(userId));
+    this.userId = userId;
+    return userId;
   }
 
-  async readEventPresence(
-    userIdHint: string | null,
-    eventId: string,
-  ): Promise<EventPresenceState> {
-    await this.ensureHydrated(userIdHint);
+  async readState(): Promise<RunnerStateRecord> {
+    this.pruneExpiredConsumedEventsSync();
+    return this.readStateSync();
+  }
+
+  async readEventPresence(eventId: string): Promise<EventPresenceState> {
     this.pruneExpiredConsumedEventsSync();
 
     return {
@@ -87,22 +96,19 @@ export class RunnerQueueStore {
     };
   }
 
-  async listPendingDispatches(userIdHint: string | null): Promise<PendingDispatchRecord[]> {
-    await this.ensureHydrated(userIdHint);
+  async listPendingDispatches(): Promise<PendingDispatchRecord[]> {
     this.pruneExpiredConsumedEventsSync();
     return this.readPendingDispatchesSync();
   }
 
-  async hasDuePendingDispatch(userIdHint: string | null, nowMs: number): Promise<boolean> {
-    await this.ensureHydrated(userIdHint);
+  async hasDuePendingDispatch(nowMs: number): Promise<boolean> {
     return this.readNextDuePendingDispatchSync(nowMs) !== null;
   }
 
-  async clearNextWakeIfDue(userIdHint: string | null, nowMs: number): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(userIdHint);
+  async clearNextWakeIfDue(nowMs: number): Promise<RunnerStateRecord> {
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(userIdHint);
+    const meta = this.requireMetaRowSync();
     const parsedMs = meta.next_wake_at ? Date.parse(meta.next_wake_at) : Number.NaN;
 
     if (Number.isFinite(parsedMs) && parsedMs <= nowMs) {
@@ -116,10 +122,10 @@ export class RunnerQueueStore {
   async enqueueDispatch(
     dispatch: HostedExecutionDispatchRequest,
   ): Promise<{ accepted: boolean; alreadySeen: boolean; record: RunnerStateRecord }> {
-    await this.ensureHydrated(dispatch.event.userId);
+    await this.bootstrapUser(dispatch.event.userId);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(dispatch.event.userId);
+    const meta = this.requireMetaRowSync();
     if (this.hasPendingDispatchSync(dispatch.eventId) || this.hasConsumedEventSync(dispatch.eventId)) {
       return {
         accepted: false,
@@ -162,7 +168,7 @@ export class RunnerQueueStore {
       null,
     );
 
-    meta.activated = meta.activated || dispatch.event.kind === "member.activated" ? 1 : 0;
+    meta.activated = meta.activated === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
     meta.backpressured_event_ids_json = JSON.stringify(
       parseStringArray(meta.backpressured_event_ids_json)
         .filter((eventId) => eventId !== dispatch.eventId),
@@ -178,14 +184,13 @@ export class RunnerQueueStore {
     };
   }
 
-  async claimNextDuePendingDispatch(userIdHint: string | null, nowMs: number): Promise<{
+  async claimNextDuePendingDispatch(nowMs: number): Promise<{
     pendingDispatch: PendingDispatchRecord | null;
     record: RunnerStateRecord;
   }> {
-    await this.ensureHydrated(userIdHint);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(userIdHint);
+    const meta = this.requireMetaRowSync();
     if (meta.in_flight) {
       return {
         pendingDispatch: null,
@@ -214,13 +219,12 @@ export class RunnerQueueStore {
   }
 
   async applyCommittedDispatch(
-    userIdHint: string | null,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(userIdHint);
+    await this.bootstrapUserFromCommittedResult(committed);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(userIdHint);
+    const meta = this.requireMetaRowSync();
     this.removePendingDispatchSync(committed.eventId);
     this.deletePoisonedEventSync(committed.eventId);
     this.writeConsumedEventSync(committed.eventId, new Date(Date.now() + CONSUMED_EVENT_TTL_MS).toISOString());
@@ -240,13 +244,12 @@ export class RunnerQueueStore {
   }
 
   async syncCommittedBundles(
-    userIdHint: string | null,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(userIdHint);
+    await this.bootstrapUserFromCommittedResult(committed);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(userIdHint);
+    const meta = this.requireMetaRowSync();
     assignBundleRefs(meta, committed.bundleRefs);
     meta.in_flight = 0;
     meta.last_event_id = committed.eventId;
@@ -264,13 +267,11 @@ export class RunnerQueueStore {
     eventId: string;
     maxEventAttempts: number;
     retryDelayMs: number;
-    userIdHint: string | null;
   }): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(input.userIdHint);
     this.pruneExpiredConsumedEventsSync();
 
     const pending = this.readPendingDispatchByEventIdSync(input.eventId);
-    const meta = this.readMetaRowSync(input.userIdHint);
+    const meta = this.requireMetaRowSync();
 
     if (!pending) {
       meta.in_flight = 0;
@@ -314,13 +315,11 @@ export class RunnerQueueStore {
     errorMessage: string;
     eventId: string;
     retryDelayMs: number;
-    userIdHint: string | null;
   }): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(input.userIdHint);
     this.pruneExpiredConsumedEventsSync();
 
     const pending = this.readPendingDispatchByEventIdSync(input.eventId);
-    const meta = this.readMetaRowSync(input.userIdHint);
+    const meta = this.requireMetaRowSync();
 
     meta.in_flight = 0;
     meta.last_error = input.errorMessage;
@@ -351,12 +350,11 @@ export class RunnerQueueStore {
     committed: HostedExecutionCommittedResult;
     errorMessage: string;
     retryDelayMs: number;
-    userIdHint: string | null;
   }): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(input.userIdHint);
+    await this.bootstrapUserFromCommittedResult(input.committed);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(input.userIdHint);
+    const meta = this.requireMetaRowSync();
     assignBundleRefs(meta, input.committed.bundleRefs);
     meta.in_flight = 0;
     meta.last_error = input.errorMessage;
@@ -378,22 +376,21 @@ export class RunnerQueueStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async rememberCommittedEvent(userIdHint: string | null, eventId: string): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(userIdHint);
+  async rememberCommittedEvent(eventId: string): Promise<RunnerStateRecord> {
     this.pruneExpiredConsumedEventsSync();
 
     if (!this.hasConsumedEventSync(eventId)) {
       this.writeConsumedEventSync(eventId, new Date(Date.now() + CONSUMED_EVENT_TTL_MS).toISOString());
     }
 
-    return this.readStateSync(userIdHint);
+    return this.readStateSync();
   }
 
-  async readBundleState(userIdHint: string | null): Promise<Pick<
+  async readBundleState(): Promise<Pick<
     RunnerStateRecord,
     "bundleRefs" | "bundleVersions" | "inFlight" | "userId"
   >> {
-    const record = await this.readState(userIdHint);
+    const record = await this.readState();
     return {
       bundleRefs: record.bundleRefs,
       bundleVersions: record.bundleVersions,
@@ -403,13 +400,11 @@ export class RunnerQueueStore {
   }
 
   async compareAndSwapBundleRefs(
-    userIdHint: string | null,
     input: BundleRefSwapInput,
   ): Promise<{ applied: boolean; record: RunnerStateRecord }> {
-    await this.ensureHydrated(userIdHint);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(userIdHint);
+    const meta = this.requireMetaRowSync();
     if (
       meta.agent_state_bundle_version !== input.expectedVersions.agentState
       || meta.vault_bundle_version !== input.expectedVersions.vault
@@ -431,12 +426,10 @@ export class RunnerQueueStore {
   async syncNextWake(input: {
     defaultAlarmDelayMs: number;
     preferredWakeAt?: string | null;
-    userIdHint: string | null;
   }): Promise<RunnerStateRecord> {
-    await this.ensureHydrated(input.userIdHint);
     this.pruneExpiredConsumedEventsSync();
 
-    const meta = this.readMetaRowSync(input.userIdHint);
+    const meta = this.requireMetaRowSync();
     const nextPendingAvailableAt = this.readNextPendingAvailableAtSync();
     const preferredWakeAt = input.preferredWakeAt === undefined
       ? meta.next_wake_at
@@ -452,6 +445,21 @@ export class RunnerQueueStore {
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta, nextPendingAvailableAt);
+  }
+
+  private async bootstrapUserFromCommittedResult(committed: HostedExecutionCommittedResult): Promise<void> {
+    const existingUserId = this.tryResolveUserIdSync();
+    if (existingUserId) {
+      return;
+    }
+
+    const pendingDispatch = this.readPendingDispatchByEventIdSync(committed.eventId);
+    if (pendingDispatch) {
+      await this.bootstrapUser(pendingDispatch.dispatch.event.userId);
+      return;
+    }
+
+    throw new Error(`Hosted runner user is not initialized for committed event ${committed.eventId}.`);
   }
 
   private ensureSchema(): void {
@@ -510,84 +518,6 @@ export class RunnerQueueStore {
     `);
   }
 
-  private async ensureHydrated(userIdHint: string | null): Promise<void> {
-    if (this.hydrated) {
-      this.ensureKnownUserIdSync(userIdHint);
-      return;
-    }
-
-    if (!this.hydrationPromise) {
-      this.hydrationPromise = this.hydrateFromLegacyState(userIdHint).finally(() => {
-        this.hydrated = true;
-        this.hydrationPromise = null;
-      });
-    }
-
-    await this.hydrationPromise;
-    this.ensureKnownUserIdSync(userIdHint);
-  }
-
-  private async hydrateFromLegacyState(userIdHint: string | null): Promise<void> {
-    if (this.selectMetaRowSync(userIdHint)) {
-      return;
-    }
-
-    const existing = await this.state.storage.get<LegacyUserRunnerRecord>(LEGACY_STATE_STORAGE_KEY);
-    const normalized = existing
-      ? normalizeLegacyUserRunnerRecord(existing, userIdHint ?? existing.userId ?? DEFAULT_USER_ID)
-      : null;
-    if (normalized) {
-      await this.state.storage.put(LEGACY_STATE_STORAGE_KEY, normalized);
-    }
-    const meta = legacyRecordToMetaRow(normalized, userIdHint);
-    this.insertMetaRowSync(meta);
-
-    if (!normalized) {
-      return;
-    }
-
-    for (const pending of normalized.pendingEvents) {
-      this.sql.exec(
-        `INSERT OR REPLACE INTO pending_events (
-          event_id,
-          dispatch_json,
-          attempts,
-          available_at,
-          enqueued_at,
-          last_error
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
-        pending.dispatch.eventId,
-        JSON.stringify(pending.dispatch),
-        pending.attempts,
-        pending.availableAt,
-        pending.enqueuedAt,
-        pending.lastError,
-      );
-    }
-
-    for (const [eventId, expiresAt] of Object.entries(normalized.consumedEventExpirations)) {
-      this.writeConsumedEventSync(eventId, expiresAt);
-    }
-
-    for (const eventId of normalized.poisonedEventIds) {
-      this.writePoisonedEventSync(eventId, normalized.lastError ?? "poisoned", new Date().toISOString());
-    }
-  }
-
-  private ensureKnownUserIdSync(userIdHint: string | null): void {
-    if (!userIdHint) {
-      return;
-    }
-
-    const meta = this.readMetaRowSync(userIdHint);
-    if (meta.user_id !== DEFAULT_USER_ID) {
-      return;
-    }
-
-    meta.user_id = userIdHint;
-    this.writeMetaRowSync(meta);
-  }
-
   private pruneExpiredConsumedEventsSync(): void {
     const nowIso = new Date().toISOString();
     this.sql.exec(
@@ -600,8 +530,8 @@ export class RunnerQueueStore {
     );
   }
 
-  private readStateSync(userIdHint: string | null): RunnerStateRecord {
-    return this.readStateFromMetaSync(this.readMetaRowSync(userIdHint));
+  private readStateSync(): RunnerStateRecord {
+    return this.readStateFromMetaSync(this.requireMetaRowSync());
   }
 
   private readStateFromMetaSync(
@@ -632,18 +562,37 @@ export class RunnerQueueStore {
     };
   }
 
-  private readMetaRowSync(userIdHint: string | null): RunnerMetaRow {
-    const row = this.selectMetaRowSync(userIdHint);
+  private requireMetaRowSync(): RunnerMetaRow {
+    const row = this.selectMetaRowSync();
     if (row) {
       return row;
     }
 
-    const fallback = defaultMetaRow(userIdHint);
-    this.insertMetaRowSync(fallback);
-    return fallback;
+    const userId = this.tryResolveUserIdSync();
+    if (!userId) {
+      throw new Error("Hosted runner user is not initialized.");
+    }
+
+    const meta = defaultMetaRow(userId);
+    this.insertMetaRowSync(meta);
+    return meta;
   }
 
-  private selectMetaRowSync(userIdHint: string | null): RunnerMetaRow | null {
+  private tryResolveUserIdSync(): string | null {
+    if (this.userId) {
+      return this.userId;
+    }
+
+    const row = this.selectMetaRowSync();
+    if (!row) {
+      return null;
+    }
+
+    this.userId = row.user_id;
+    return row.user_id;
+  }
+
+  private selectMetaRowSync(): RunnerMetaRow | null {
     const row = this.sql.exec<RunnerMetaRow>(
       `SELECT
         user_id,
@@ -663,12 +612,8 @@ export class RunnerQueueStore {
       WHERE singleton = 1`,
     ).toArray()[0] ?? null;
 
-    if (!row) {
-      return null;
-    }
-
-    if (userIdHint && row.user_id === DEFAULT_USER_ID) {
-      row.user_id = userIdHint;
+    if (row) {
+      this.userId = row.user_id;
     }
 
     return row;
@@ -711,6 +656,7 @@ export class RunnerQueueStore {
 
   private writeMetaRowSync(meta: RunnerMetaRow): void {
     this.insertMetaRowSync(meta);
+    this.userId = meta.user_id;
   }
 
   private readPendingDispatchesSync(): PendingDispatchRecord[] {
@@ -727,7 +673,7 @@ export class RunnerQueueStore {
     ).toArray().map((row) => ({
       attempts: row.attempts,
       availableAt: row.available_at,
-      dispatch: JSON.parse(row.dispatch_json) as HostedExecutionDispatchRequest,
+      dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
       enqueuedAt: row.enqueued_at,
       eventId: row.event_id,
       lastError: row.last_error,
@@ -752,7 +698,7 @@ export class RunnerQueueStore {
       ? {
           attempts: row.attempts,
           availableAt: row.available_at,
-          dispatch: JSON.parse(row.dispatch_json) as HostedExecutionDispatchRequest,
+          dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
           enqueuedAt: row.enqueued_at,
           eventId: row.event_id,
           lastError: row.last_error,
@@ -781,7 +727,7 @@ export class RunnerQueueStore {
       ? {
           attempts: row.attempts,
           availableAt: row.available_at,
-          dispatch: JSON.parse(row.dispatch_json) as HostedExecutionDispatchRequest,
+          dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
           enqueuedAt: row.enqueued_at,
           eventId: row.event_id,
           lastError: row.last_error,
@@ -902,7 +848,7 @@ function assignBundleRefs(
   }
 }
 
-function defaultMetaRow(userIdHint: string | null): RunnerMetaRow {
+function defaultMetaRow(userId: string): RunnerMetaRow {
   return {
     activated: 0,
     agent_state_bundle_ref_json: null,
@@ -914,85 +860,9 @@ function defaultMetaRow(userIdHint: string | null): RunnerMetaRow {
     last_run_at: null,
     next_wake_at: null,
     retrying_event_id: null,
-    user_id: userIdHint ?? DEFAULT_USER_ID,
+    user_id: userId,
     vault_bundle_ref_json: null,
     vault_bundle_version: 0,
-  };
-}
-
-function legacyRecordToMetaRow(
-  record: LegacyUserRunnerRecord | null,
-  userIdHint: string | null,
-): RunnerMetaRow {
-  if (!record) {
-    return defaultMetaRow(userIdHint);
-  }
-
-  return {
-    activated: record.activated ? 1 : 0,
-    agent_state_bundle_ref_json: stringifyHostedBundleRef(record.bundleRefs.agentState),
-    agent_state_bundle_version: record.bundleRefs.agentState ? 1 : 0,
-    backpressured_event_ids_json: JSON.stringify(record.backpressuredEventIds),
-    in_flight: record.inFlight ? 1 : 0,
-    last_error: record.lastError,
-    last_event_id: record.lastEventId,
-    last_run_at: record.lastRunAt,
-    next_wake_at: record.nextWakeAt,
-    retrying_event_id: record.retryingEventId,
-    user_id: record.userId || userIdHint || DEFAULT_USER_ID,
-    vault_bundle_ref_json: stringifyHostedBundleRef(record.bundleRefs.vault),
-    vault_bundle_version: record.bundleRefs.vault ? 1 : 0,
-  };
-}
-
-function normalizeLegacyUserRunnerRecord(
-  record: Partial<LegacyUserRunnerRecord>,
-  fallbackUserId: string,
-): LegacyUserRunnerRecord {
-  const existingConsumedEventExpirations = record.consumedEventExpirations ?? Object.fromEntries(
-    [...(record.recentEventIds ?? []), ...(record.poisonedEventIds ?? [])]
-      .map((eventId) => [eventId, new Date(Date.now() + CONSUMED_EVENT_TTL_MS).toISOString()]),
-  );
-  const consumedEventExpirations = pruneConsumedEventExpirations(existingConsumedEventExpirations);
-  const backpressuredEventIds = (record.backpressuredEventIds ?? []).slice(-MAX_BACKPRESSURED_EVENT_IDS);
-  const poisonedEventIds = (record.poisonedEventIds ?? [])
-    .filter((eventId) => consumedEventExpirations[eventId] !== undefined)
-    .slice(-MAX_POISONED_EVENT_IDS);
-
-  return {
-    activated: record.activated ?? false,
-    backpressuredEventIds,
-    bundleRefs: record.bundleRefs ?? {
-      agentState: null,
-      vault: null,
-    },
-    consumedEventExpirations,
-    inFlight: record.inFlight ?? false,
-    lastError: record.lastError ?? null,
-    lastEventId: record.lastEventId ?? null,
-    lastRunAt: record.lastRunAt ?? null,
-    nextWakeAt: record.nextWakeAt ?? null,
-    pendingEvents: (record.pendingEvents ?? []).map((pending) => normalizeLegacyPendingDispatchRecord(pending)),
-    poisonedEventIds,
-    recentEventIds: (record.recentEventIds ?? []).slice(-MAX_PENDING_EVENTS),
-    retryingEventId: record.retryingEventId ?? null,
-    userId: record.userId ?? fallbackUserId,
-  };
-}
-
-function normalizeLegacyPendingDispatchRecord(
-  record: Partial<LegacyPendingDispatchRecord>,
-): LegacyPendingDispatchRecord {
-  if (!record.dispatch?.eventId) {
-    throw new Error("Legacy hosted runner state is missing pending dispatch event ids.");
-  }
-
-  return {
-    attempts: record.attempts ?? 0,
-    availableAt: record.availableAt ?? new Date().toISOString(),
-    dispatch: record.dispatch,
-    enqueuedAt: record.enqueuedAt ?? new Date().toISOString(),
-    lastError: record.lastError ?? null,
   };
 }
 
@@ -1022,18 +892,6 @@ function parseStringArray(value: string): string[] {
   } catch {
     return [];
   }
-}
-
-function pruneConsumedEventExpirations(
-  consumedEventExpirations: Record<string, string>,
-): Record<string, string> {
-  const nowMs = Date.now();
-  return Object.fromEntries(
-    Object.entries(consumedEventExpirations).filter(([, expiresAt]) => {
-      const parsedMs = Date.parse(expiresAt);
-      return Number.isFinite(parsedMs) && parsedMs > nowMs;
-    }),
-  );
 }
 
 function stringifyHostedBundleRef(value: HostedExecutionBundleRef | null): string | null {

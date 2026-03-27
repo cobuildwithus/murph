@@ -2,10 +2,12 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   sha256HostedBundleHex,
-  type HostedExecutionBundleRef,
-  type HostedExecutionBundleKind,
-  type HostedExecutionRunnerResult,
 } from "@healthybob/runtime-state";
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionBundleKind,
+  HostedExecutionRunnerResult,
+} from "@healthybob/hosted-execution";
 
 import {
   createHostedBundleStore,
@@ -39,9 +41,10 @@ export class RunnerBundleSync {
 
   async readBundlesForRunner(userId: string): Promise<HostedExecutionRunnerResult["bundles"]> {
     const store = this.createBundleStore();
+    const bundleState = await this.queueStore.readBundleState();
     return {
-      agentState: encodeHostedBundleBase64(await store.readBundle(userId, "agent-state")),
-      vault: encodeHostedBundleBase64(await store.readBundle(userId, "vault")),
+      agentState: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.agentState)),
+      vault: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.vault)),
     };
   }
 
@@ -94,7 +97,7 @@ export class RunnerBundleSync {
     const nextVaultBytes = decodeHostedBundleBase64(bundles.vault);
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
-      const bundleState = await this.queueStore.readBundleState(userId);
+      const bundleState = await this.queueStore.readBundleState();
       const nextBundleRefs = {
         agentState: await this.resolveNextBundleRef(
           userId,
@@ -112,7 +115,7 @@ export class RunnerBundleSync {
         ),
       };
 
-      const swapped = await this.queueStore.compareAndSwapBundleRefs(userId, {
+      const swapped = await this.queueStore.compareAndSwapBundleRefs({
         expectedVersions: nextExpectedVersions,
         nextBundleRefs,
       });

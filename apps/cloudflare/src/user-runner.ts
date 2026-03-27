@@ -1,8 +1,9 @@
 import type {
+  HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
+} from "@healthybob/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
@@ -45,7 +46,7 @@ export class HostedUserRunner {
   private readonly queueStore: RunnerQueueStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly scheduler: RunnerScheduler;
-  private readonly userEnvLocks = new Map<string, Promise<void>>();
+  private userEnvLock: Promise<void> | null = null;
 
   constructor(
     private readonly state: DurableObjectStateLike,
@@ -77,10 +78,17 @@ export class HostedUserRunner {
     });
   }
 
+  async bootstrapUser(userId: string): Promise<{ userId: string }> {
+    return {
+      userId: await this.queueStore.bootstrapUser(userId),
+    };
+  }
+
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
+    await this.queueStore.bootstrapUser(input.event.userId);
     const committed = await this.commitRecovery.readCommittedDispatch(input.event.userId, input.eventId);
     if (committed) {
-      const presence = await this.queueStore.readEventPresence(input.event.userId, input.eventId);
+      const presence = await this.queueStore.readEventPresence(input.eventId);
       if (presence.pending || presence.consumed || isCommittedResultFresh(committed, CONSUMED_EVENT_TTL_MS)) {
         if (!isCommittedResultFinalized(committed)) {
           return toUserStatus(
@@ -105,7 +113,7 @@ export class HostedUserRunner {
     let record = enqueueResult.record;
 
     if (enqueueResult.accepted) {
-      record = await this.scheduler.syncNextWake(record.userId);
+      record = await this.scheduler.syncNextWake();
     }
 
     if (enqueueResult.alreadySeen || record.backpressuredEventIds.includes(input.eventId)) {
@@ -116,13 +124,19 @@ export class HostedUserRunner {
   }
 
   async alarm(): Promise<void> {
-    let record = await this.queueStore.readState(null);
-    record = await this.queueStore.clearNextWakeIfDue(record.userId, Date.now());
+    let record: RunnerStateRecord;
+    try {
+      record = await this.queueStore.readState();
+    } catch {
+      return;
+    }
+
+    record = await this.queueStore.clearNextWakeIfDue(Date.now());
     if (!record.activated && record.pendingEventCount === 0) {
       return;
     }
 
-    if (record.activated && !(await this.queueStore.hasDuePendingDispatch(record.userId, Date.now()))) {
+    if (record.activated && !(await this.queueStore.hasDuePendingDispatch(Date.now()))) {
       const enqueueResult = await this.queueStore.enqueueDispatch({
         event: {
           kind: "assistant.cron.tick",
@@ -134,7 +148,7 @@ export class HostedUserRunner {
       });
 
       if (enqueueResult.accepted) {
-        record = await this.scheduler.syncNextWake(record.userId);
+        record = await this.scheduler.syncNextWake();
       } else {
         record = enqueueResult.record;
       }
@@ -147,11 +161,12 @@ export class HostedUserRunner {
     await this.runQueuedEvents(record.userId);
   }
 
-  async status(userId: string): Promise<HostedExecutionUserStatus> {
-    return toUserStatus(await this.queueStore.readState(userId));
+  async status(): Promise<HostedExecutionUserStatus> {
+    return toUserStatus(await this.queueStore.readState());
   }
 
-  async getUserEnvStatus(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    const userId = await this.requireBoundUserId();
     return {
       configuredUserEnvKeys: listHostedUserEnvKeys(await this.bundleSync.readUserEnv(userId)),
       userId,
@@ -159,14 +174,14 @@ export class HostedUserRunner {
   }
 
   async updateUserEnv(
-    userId: string,
     update: HostedUserEnvUpdate,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.withUserEnvLock(userId, () => this.bundleSync.updateUserEnv(userId, update));
+    const userId = await this.requireBoundUserId();
+    return this.withUserEnvLock(() => this.bundleSync.updateUserEnv(userId, update));
   }
 
-  async clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.updateUserEnv(userId, {
+  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.updateUserEnv({
       env: {},
       mode: "replace",
     });
@@ -176,11 +191,10 @@ export class HostedUserRunner {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
       currentBundleRefs: {
-        agentState: import("@healthybob/runtime-state").HostedExecutionBundleRef | null;
-        vault: import("@healthybob/runtime-state").HostedExecutionBundleRef | null;
+        agentState: HostedExecutionBundleRef | null;
+        vault: HostedExecutionBundleRef | null;
       };
     };
-    userId: string;
   }): Promise<HostedExecutionCommittedResult> {
     const existingLock = this.commitLocks.get(input.eventId);
     if (existingLock) {
@@ -197,7 +211,6 @@ export class HostedUserRunner {
   async finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId: string;
   }): Promise<HostedExecutionCommittedResult> {
     const existingLock = this.finalizeLocks.get(input.eventId);
     if (existingLock) {
@@ -212,7 +225,7 @@ export class HostedUserRunner {
   }
 
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
-    let record = await this.queueStore.readState(userId);
+    let record = await this.queueStore.readState();
     let processedDispatch = false;
     const recovered = await this.recoverCommittedPendingDispatchAndCleanup(record);
     if (recovered) {
@@ -227,12 +240,12 @@ export class HostedUserRunner {
         continue;
       }
 
-      const claim = await this.queueStore.claimNextDuePendingDispatch(userId, Date.now());
+      const claim = await this.queueStore.claimNextDuePendingDispatch(Date.now());
       const nextPending = claim.pendingDispatch;
       record = claim.record;
 
       if (!nextPending) {
-        return toUserStatus(processedDispatch ? record : await this.scheduler.syncNextWake(userId));
+        return toUserStatus(processedDispatch ? record : await this.scheduler.syncNextWake());
       }
 
       try {
@@ -262,7 +275,6 @@ export class HostedUserRunner {
           runnerResult.bundles,
         );
         record = await this.scheduler.syncNextWake(
-          record.userId,
           runnerResult.result.nextWakeAt ?? null,
         );
         await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
@@ -295,9 +307,8 @@ export class HostedUserRunner {
             errorMessage,
             eventId: nextPending.dispatch.eventId,
             retryDelayMs: this.env.retryDelayMs,
-            userIdHint: record.userId,
           });
-          record = await this.scheduler.syncNextWake(record.userId);
+          record = await this.scheduler.syncNextWake();
           return toUserStatus(record);
         }
 
@@ -306,9 +317,8 @@ export class HostedUserRunner {
           eventId: nextPending.dispatch.eventId,
           maxEventAttempts: this.env.maxEventAttempts,
           retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
-          userIdHint: record.userId,
         });
-        record = await this.scheduler.syncNextWake(record.userId);
+        record = await this.scheduler.syncNextWake();
         return toUserStatus(record);
       }
     }
@@ -328,7 +338,7 @@ export class HostedUserRunner {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const bundleState = await this.queueStore.readBundleState(userId);
+    const bundleState = await this.queueStore.readBundleState();
     const requestBody: HostedExecutionRunnerRequest & {
       commit: {
         bundleRefs: typeof bundleState.bundleRefs;
@@ -388,7 +398,7 @@ export class HostedUserRunner {
     userId: string,
     eventId: string,
   ): Promise<RunnerStateRecord> {
-    const record = await this.queueStore.rememberCommittedEvent(userId, eventId);
+    const record = await this.queueStore.rememberCommittedEvent(eventId);
     await this.deleteCommittedDispatchBestEffort(userId, eventId);
     return record;
   }
@@ -405,13 +415,13 @@ export class HostedUserRunner {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
       currentBundleRefs: {
-        agentState: import("@healthybob/runtime-state").HostedExecutionBundleRef | null;
-        vault: import("@healthybob/runtime-state").HostedExecutionBundleRef | null;
+        agentState: HostedExecutionBundleRef | null;
+        vault: HostedExecutionBundleRef | null;
       };
     };
-    userId: string;
   }): Promise<HostedExecutionCommittedResult> {
-    const existing = await this.commitRecovery.readCommittedDispatch(input.userId, input.eventId);
+    const userId = await this.requireBoundUserId();
+    const existing = await this.commitRecovery.readCommittedDispatch(userId, input.eventId);
     if (existing) {
       return existing;
     }
@@ -423,22 +433,22 @@ export class HostedUserRunner {
       key: this.env.bundleEncryptionKey,
       keyId: this.env.bundleEncryptionKeyId,
       payload: input.payload,
-      userId: input.userId,
+      userId,
     });
   }
 
   private async finalizeOnce(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId: string;
   }): Promise<HostedExecutionCommittedResult> {
+    const userId = await this.requireBoundUserId();
     return persistHostedExecutionFinalBundles({
       bucket: this.bucket,
       eventId: input.eventId,
       key: this.env.bundleEncryptionKey,
       keyId: this.env.bundleEncryptionKeyId,
       payload: input.payload,
-      userId: input.userId,
+      userId,
     });
   }
 
@@ -449,22 +459,26 @@ export class HostedUserRunner {
     };
   }
 
-  private async withUserEnvLock<T>(userId: string, run: () => Promise<T>): Promise<T> {
-    const previous = this.userEnvLocks.get(userId) ?? Promise.resolve();
+  private async requireBoundUserId(): Promise<string> {
+    return (await this.queueStore.readState()).userId;
+  }
+
+  private async withUserEnvLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.userEnvLock ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chain = previous.catch(() => {}).then(() => current);
-    this.userEnvLocks.set(userId, chain);
+    this.userEnvLock = chain;
     await previous.catch(() => {});
 
     try {
       return await run();
     } finally {
       release();
-      if (this.userEnvLocks.get(userId) === chain) {
-        this.userEnvLocks.delete(userId);
+      if (this.userEnvLock === chain) {
+        this.userEnvLock = null;
       }
     }
   }

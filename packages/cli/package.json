@@ -14,6 +14,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./inbox-services": {
+      "types": "./dist/inbox-services.d.ts",
+      "default": "./dist/inbox-services.js"
+    },
+    "./vault-cli-services": {
+      "types": "./dist/vault-cli-services.d.ts",
+      "default": "./dist/vault-cli-services.js"
+    },
+    "./assistant/automation": {
+      "types": "./dist/assistant/automation.d.ts",
+      "default": "./dist/assistant/automation.js"
+    },
+    "./assistant/cron": {
+      "types": "./dist/assistant/cron.d.ts",
+      "default": "./dist/assistant/cron.js"
+    },
+    "./assistant/outbox": {
+      "types": "./dist/assistant/outbox.d.ts",
+      "default": "./dist/assistant/outbox.js"
+    },
+    "./assistant/status": {
+      "types": "./dist/assistant/status.d.ts",
+      "default": "./dist/assistant/status.js"
+    },
+    "./assistant/store": {
+      "types": "./dist/assistant/store.d.ts",
+      "default": "./dist/assistant/store.js"
     }
   },
   "files": [

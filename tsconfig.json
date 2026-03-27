@@ -32,6 +32,9 @@
       "path": "./packages/cli"
     },
     {
+      "path": "./packages/assistant-services"
+    },
+    {
       "path": "./packages/assistant-runtime"
     }
   ]
