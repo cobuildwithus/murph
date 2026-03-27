@@ -1,11 +1,10 @@
-import { createHmac } from "node:crypto";
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
-} from "@healthybob/runtime-state";
+  verifyHostedExecutionSignature,
+} from "@healthybob/hosted-execution";
 
 import {
   dispatchHostedExecutionStatus,
@@ -181,6 +180,70 @@ describe("dispatchHostedExecutionBestEffort", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
+  it("dispatches through the web boundary when only legacy env aliases are configured", async () => {
+    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://runner.example.test";
+    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
+    process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = "47000";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: false,
+          lastError: null,
+          lastEventId: "evt_legacy",
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "user-123",
+        }),
+        { status: 200 },
+      ),
+    );
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    await expect(
+      dispatchHostedExecutionStatus({
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "user-123",
+        },
+        eventId: "evt_legacy",
+        occurredAt: "2026-03-20T12:00:00.000Z",
+      }),
+    ).resolves.toMatchObject({
+      lastEventId: "evt_legacy",
+      userId: "user-123",
+    });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(47_000);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const fetchMock = global.fetch as unknown as {
+      mock: { calls: Array<[RequestInfo | URL, RequestInit | undefined]> };
+    };
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    const headers = new Headers(init?.headers);
+    const payload = typeof init?.body === "string" ? init.body : "";
+
+    expect(url).toBe("https://runner.example.test/internal/dispatch");
+    await expect(
+      verifyHostedExecutionSignature({
+        payload,
+        secret: "secret",
+        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+        nowMs: Date.parse("2026-03-27T09:15:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+  });
+
   it("signs dispatches with a fresh envelope timestamp instead of business occurredAt", async () => {
     process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
     process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
@@ -228,10 +291,14 @@ describe("dispatchHostedExecutionBestEffort", () => {
 
     expect(timestamp).toBe("2026-03-27T09:15:00.000Z");
     expect(timestamp).not.toBe("2026-03-20T12:00:00.000Z");
-    expect(headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER)).toBe(
-      createHmac("sha256", "secret")
-        .update(`${timestamp}.${payload}`)
-        .digest("hex"),
-    );
+    await expect(
+      verifyHostedExecutionSignature({
+        payload,
+        secret: "secret",
+        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
+        timestamp,
+        nowMs: Date.parse("2026-03-27T09:15:00.000Z"),
+      }),
+    ).resolves.toBe(true);
   });
 });

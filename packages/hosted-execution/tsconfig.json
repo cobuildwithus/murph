@@ -11,7 +11,7 @@
   ],
   "references": [
     {
-      "path": "../hosted-execution"
+      "path": "../contracts/tsconfig.build.json"
     }
   ],
   "exclude": [

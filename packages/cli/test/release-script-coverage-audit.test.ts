@@ -85,6 +85,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(summary.primaryPackage?.name).toBe('healthybob')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
       '@healthybob/contracts',
+      '@healthybob/hosted-execution',
       '@healthybob/runtime-state',
       '@healthybob/core',
       '@healthybob/query',

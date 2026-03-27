@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/runtime-state",
+  "name": "@healthybob/hosted-execution",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -31,6 +31,6 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "@healthybob/hosted-execution": "workspace:*"
+    "@healthybob/contracts": "workspace:*"
   }
 }

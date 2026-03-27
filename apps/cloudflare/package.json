@@ -9,31 +9,39 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --pretty false",
-    "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1",
+    "test": "pnpm typecheck && pnpm test:node",
+    "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage --maxWorkers 1",
+    "test:workers": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage --maxWorkers 1",
+    "verify": "pnpm typecheck && pnpm test:node && pnpm test:workers",
     "deploy:config:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-deploy-config.ts",
+    "deploy:rollout": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/deploy-worker-version.ts",
     "deploy:secrets:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-worker-secrets.ts",
     "deploy:smoke": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/smoke-hosted-deploy.ts",
     "runner:docker:build": "docker build -f ../../Dockerfile.cloudflare-hosted-runner -t healthybob-cloudflare-runner ../..",
     "worker:deploy": "pnpm exec wrangler deploy",
+    "worker:deployment:status": "pnpm exec wrangler deployments status",
     "worker:dev": "pnpm exec wrangler dev",
-    "worker:secret:bulk": "pnpm exec wrangler secret bulk"
+    "worker:secret:bulk": "pnpm exec wrangler secret bulk",
+    "worker:version:deploy": "pnpm exec wrangler versions deploy",
+    "worker:version:upload": "pnpm exec wrangler versions upload"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.2.0",
     "@healthybob/assistant-runtime": "workspace:*",
+    "@healthybob/core": "workspace:*",
     "@healthybob/device-syncd": "workspace:*",
     "@healthybob/hosted-execution": "workspace:*",
     "@healthybob/inboxd": "workspace:*",
     "@healthybob/parsers": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*",
-    "@healthybob/core": "workspace:*"
+    "@healthybob/runtime-state": "workspace:*"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.13.4",
     "@cloudflare/workers-types": "^4.20260317.1",
     "@types/node": "^25.5.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18",
+    "vitest": "^4.1.2",
     "wrangler": "^4.68.0"
   }
 }

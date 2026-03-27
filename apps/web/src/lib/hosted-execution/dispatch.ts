@@ -1,16 +1,10 @@
-import { createHmac } from "node:crypto";
-
 import {
-  HOSTED_EXECUTION_SIGNATURE_HEADER,
-  HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  createHostedExecutionDispatchClient,
   type HostedExecutionDispatchRequest,
-  type HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
-
-import {
-  readHostedExecutionDispatchEnvironment,
   type HostedExecutionDispatchEnvironment,
-} from "./env";
+  readHostedExecutionDispatchEnvironment,
+  type HostedExecutionUserStatus,
+} from "@healthybob/hosted-execution";
 
 export async function dispatchHostedExecutionStatus(
   input: HostedExecutionDispatchRequest,
@@ -98,40 +92,9 @@ async function postHostedExecutionDispatch(
     signingSecret: string;
   },
 ): Promise<HostedExecutionUserStatus> {
-  const payload = JSON.stringify(input);
-  const envelopeTimestamp = new Date().toISOString();
-  const signature = createExecutionSignature({
-    payload,
-    secret: environment.signingSecret,
-    timestamp: envelopeTimestamp,
-  });
-  const response = await fetch(`${environment.dispatchUrl}/internal/dispatch`, {
-    body: payload,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      [HOSTED_EXECUTION_SIGNATURE_HEADER]: signature,
-      [HOSTED_EXECUTION_TIMESTAMP_HEADER]: envelopeTimestamp,
-    },
-    method: "POST",
-    signal: AbortSignal.timeout(environment.dispatchTimeoutMs),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `Hosted execution dispatch failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 500)}` : ""}.`,
-    );
-  }
-
-  return (await response.json()) as HostedExecutionUserStatus;
-}
-
-function createExecutionSignature(input: {
-  payload: string;
-  secret: string;
-  timestamp: string;
-}): string {
-  return createHmac("sha256", input.secret)
-    .update(`${input.timestamp}.${input.payload}`)
-    .digest("hex");
+  return createHostedExecutionDispatchClient({
+    baseUrl: environment.dispatchUrl,
+    signingSecret: environment.signingSecret,
+    timeoutMs: environment.dispatchTimeoutMs,
+  }).dispatch(input);
 }

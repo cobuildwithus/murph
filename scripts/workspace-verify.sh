@@ -100,7 +100,7 @@ run_test_packages_common() {
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
-  pnpm --dir "apps/cloudflare" test
+  pnpm --dir "apps/cloudflare" verify
 }
 
 seed_coverage_placeholders() {
@@ -139,7 +139,7 @@ run_test_packages_coverage() {
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
-  pnpm --dir "apps/cloudflare" test
+  pnpm --dir "apps/cloudflare" verify
   vitest run --coverage --maxWorkers 1
 }
 

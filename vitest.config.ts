@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@healthybob/contracts": path.resolve("packages/contracts/src/index.ts"),
+      "@healthybob/hosted-execution": path.resolve("packages/hosted-execution/src/index.ts"),
       "@healthybob/runtime-state": path.resolve("packages/runtime-state/src/index.ts"),
       "@healthybob/core": path.resolve("packages/core/src/index.ts"),
       "@healthybob/importers": path.resolve("packages/importers/src/index.ts"),
@@ -29,7 +30,9 @@ export default defineConfig({
       "packages/importers/test/device-providers.test.ts",
       "packages/importers/test/importers.test.ts",
       "packages/importers/test/input-validation.test.ts",
+      "packages/hosted-execution/test/hosted-execution.test.ts",
       "packages/runtime-state/test/hosted-bundle.test.ts",
+      "packages/runtime-state/test/hosted-execution-reexport.test.ts",
       "packages/runtime-state/test/ulid.test.ts",
       "packages/device-syncd/test/config.test.ts",
       "packages/device-syncd/test/http.test.ts",
@@ -98,6 +101,7 @@ export default defineConfig({
         "packages/importers/src/csv-sample-importer.ts",
         "packages/importers/src/document-importer.ts",
         "packages/importers/src/meal-importer.ts",
+        "packages/hosted-execution/src/**/*.ts",
         "packages/query/src/export-pack.ts",
         "packages/query/src/model.ts",
         "packages/query/src/search.ts",

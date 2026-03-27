@@ -11,6 +11,10 @@
       "path": "packages/contracts"
     },
     {
+      "name": "@healthybob/hosted-execution",
+      "path": "packages/hosted-execution"
+    },
+    {
       "name": "@healthybob/runtime-state",
       "path": "packages/runtime-state"
     },
