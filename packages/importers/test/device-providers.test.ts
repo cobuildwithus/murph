@@ -1103,10 +1103,7 @@ test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections 
         },
       ],
       readinessWidgets: [
-        {
-          id: "widget-1",
-          score: 72,
-        },
+        42,
       ],
     },
   });
@@ -1154,6 +1151,31 @@ test("prepareDeviceProviderSnapshotImport rejects Garmin snapshots with invalid 
       },
     }),
   );
+
+  const handledCollections = [
+    "dailySummaries",
+    "dailySummary",
+    "epochSummaries",
+    "epochs",
+    "sleeps",
+    "activities",
+    "activityFiles",
+    "files",
+    "womenHealth",
+    "womenHealthSummaries",
+    "deletions",
+  ];
+
+  for (const key of handledCollections) {
+    await assert.rejects(
+      () => prepareDeviceProviderSnapshotImport({
+        provider: "garmin",
+        snapshot: {
+          [key]: [42],
+        },
+      }),
+    );
+  }
 });
 
 test("importDeviceProviderSnapshot round-trips Garmin date buckets through real core without vault-day shift", async () => {

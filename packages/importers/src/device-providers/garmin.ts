@@ -53,21 +53,24 @@ export interface GarminSnapshotInput {
   deletions?: unknown[];
 }
 
+const garminCollectionEntrySchema = z.object({}).catchall(z.unknown());
+const garminHandledCollectionSchema = z.array(garminCollectionEntrySchema);
+
 const garminSnapshotSchema = z.object({
   accountId: z.union([z.string(), z.number()]).optional(),
   importedAt: z.union([z.string(), z.number(), z.date()]).optional(),
   profile: z.unknown().optional(),
-  dailySummaries: z.array(z.unknown()).optional(),
-  dailySummary: z.array(z.unknown()).optional(),
-  epochSummaries: z.array(z.unknown()).optional(),
-  epochs: z.array(z.unknown()).optional(),
-  sleeps: z.array(z.unknown()).optional(),
-  activities: z.array(z.unknown()).optional(),
-  activityFiles: z.array(z.unknown()).optional(),
-  files: z.array(z.unknown()).optional(),
-  womenHealth: z.array(z.unknown()).optional(),
-  womenHealthSummaries: z.array(z.unknown()).optional(),
-  deletions: z.array(z.unknown()).optional(),
+  dailySummaries: garminHandledCollectionSchema.optional(),
+  dailySummary: garminHandledCollectionSchema.optional(),
+  epochSummaries: garminHandledCollectionSchema.optional(),
+  epochs: garminHandledCollectionSchema.optional(),
+  sleeps: garminHandledCollectionSchema.optional(),
+  activities: garminHandledCollectionSchema.optional(),
+  activityFiles: garminHandledCollectionSchema.optional(),
+  files: garminHandledCollectionSchema.optional(),
+  womenHealth: garminHandledCollectionSchema.optional(),
+  womenHealthSummaries: garminHandledCollectionSchema.optional(),
+  deletions: garminHandledCollectionSchema.optional(),
 }).catchall(z.unknown());
 
 const GARMIN_HANDLED_KEYS = new Set([
