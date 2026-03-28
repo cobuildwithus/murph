@@ -12,6 +12,7 @@ import {
   createAssistantBinding,
   type AssistantBindingPatch,
 } from './bindings.js'
+import { normalizeAssistantSessionSnapshot } from './provider-state.js'
 import {
   conversationRefFromLocator,
 } from './conversation-ref.js'
@@ -20,6 +21,7 @@ import {
   normalizeNullableString,
   resolveTimestamp,
 } from './shared.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
   ensureAssistantState,
   appendTranscriptEntries,
@@ -29,6 +31,7 @@ import {
   readAssistantSession,
   readAssistantTranscriptEntries,
   readAutomationState,
+  replaceTranscriptEntries,
   synchronizeAssistantIndexes,
   writeAssistantSession,
 } from './store/persistence.js'
@@ -63,7 +66,7 @@ import type {
   AssistantTranscriptEntryInput,
 } from './store/types.js'
 
-const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v2'
+const ASSISTANT_STATE_SCHEMA = 'murph.assistant-session.v3'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -77,98 +80,98 @@ export function isAssistantSessionNotFoundError(error: unknown): boolean {
 export async function resolveAssistantSession(
   input: ResolveAssistantSessionInput,
 ): Promise<ResolvedAssistantSession> {
-  const paths = resolveAssistantStatePaths(input.vault)
-  await ensureAssistantState(paths)
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
 
-  const conversation = conversationRefFromLocator(input)
-  const sessionId = normalizeNullableString(input.sessionId ?? conversation.sessionId)
-  const manualAlias = normalizeNullableString(conversation.alias)
-  const bindingPatch = bindingPatchFromLocator(input)
-  const persistenceInput = {
-    alias: manualAlias,
-    bindingPatch,
-  }
-  const conversationKey = resolveAssistantConversationLookupKey(input)
-
-  if (sessionId) {
-    const resolved = await loadAndPersistResolvedSession({
-      paths,
-      sessionId,
-      persistenceInput,
-    })
-    if (!resolved) {
-      throw await createAssistantSessionNotFoundError({
-        paths,
-        sessionId,
-      })
+    const conversation = conversationRefFromLocator(input)
+    const sessionId = normalizeNullableString(input.sessionId ?? conversation.sessionId)
+    const manualAlias = normalizeNullableString(conversation.alias)
+    const bindingPatch = bindingPatchFromLocator(input)
+    const persistenceInput = {
+      alias: manualAlias,
+      bindingPatch,
     }
-    return resolved
-  }
+    const conversationKey = resolveAssistantConversationLookupKey(input)
 
-  const indexes = await readAssistantIndexStore(paths)
-
-  if (manualAlias) {
-    const sessionId = indexes.aliases[manualAlias]
     if (sessionId) {
       const resolved = await loadAndPersistResolvedSession({
         paths,
-        sessionId,
         persistenceInput,
+        sessionId,
       })
-      if (resolved) {
-        return resolved
+      if (!resolved) {
+        throw await createAssistantSessionNotFoundError({
+          paths,
+          sessionId,
+        })
+      }
+      return resolved
+    }
+
+    const indexes = await readAssistantIndexStore(paths)
+
+    if (manualAlias) {
+      const sessionId = indexes.aliases[manualAlias]
+      if (sessionId) {
+        const resolved = await loadAndPersistResolvedSession({
+          paths,
+          sessionId,
+          persistenceInput,
+        })
+        if (resolved) {
+          return resolved
+        }
       }
     }
-  }
 
-  if (conversationKey) {
-    const sessionId = indexes.conversationKeys[conversationKey]
-    if (sessionId) {
-      const resolved = await loadAndPersistResolvedSession({
-        paths,
-        sessionId,
-        persistenceInput,
-        skipIfExpired: true,
-        maxSessionAgeMs: input.maxSessionAgeMs,
-        now: input.now,
-      })
-      if (resolved) {
-        return resolved
+    if (conversationKey) {
+      const sessionId = indexes.conversationKeys[conversationKey]
+      if (sessionId) {
+        const resolved = await loadAndPersistResolvedSession({
+          paths,
+          sessionId,
+          persistenceInput,
+          skipIfExpired: true,
+          maxSessionAgeMs: input.maxSessionAgeMs,
+          now: input.now,
+        })
+        if (resolved) {
+          return resolved
+        }
       }
     }
-  }
 
-  if (input.createIfMissing === false) {
-    throw new VaultCliError(
-      'ASSISTANT_SESSION_NOT_FOUND',
-      'Assistant session could not be resolved from the supplied identifiers.',
-    )
-  }
+    if (input.createIfMissing === false) {
+      throw new VaultCliError(
+        'ASSISTANT_SESSION_NOT_FOUND',
+        'Assistant session could not be resolved from the supplied identifiers.',
+      )
+    }
 
-  const now = resolveTimestamp(input.now)
-  const providerOptions = normalizeProviderOptions(input)
+    const now = resolveTimestamp(input.now)
+    const providerOptions = normalizeProviderOptions(input)
   const session = assistantSessionSchema.parse({
     schema: ASSISTANT_STATE_SCHEMA,
     sessionId: createAssistantSessionId(),
     provider: input.provider ?? 'codex-cli',
-    providerSessionId: null,
     providerOptions,
+    providerBinding: null,
     alias: manualAlias,
     binding: createAssistantBinding(bindingInputFromLocator(input)),
     createdAt: now,
-    updatedAt: now,
-    lastTurnAt: null,
-    turnCount: 0,
+      updatedAt: now,
+      lastTurnAt: null,
+      turnCount: 0,
+    })
+
+    await saveAssistantSessionAtPaths(paths, session)
+
+    return {
+      created: true,
+      paths,
+      session,
+    }
   })
-
-  await writeAssistantSession(paths, session)
-  await synchronizeAssistantIndexes(paths, session, null)
-
-  return {
-    created: true,
-    paths,
-    session,
-  }
 }
 
 export async function listAssistantSessions(
@@ -221,17 +224,36 @@ export async function saveAssistantSession(
   vault: string,
   session: AssistantSession,
 ): Promise<AssistantSession> {
-  const paths = resolveAssistantStatePaths(vault)
-  await ensureAssistantState(paths)
-
-  const existing = await readAssistantSession({
-    paths,
-    sessionId: session.sessionId,
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    return saveAssistantSessionAtPaths(paths, session)
   })
-  const parsed = assistantSessionSchema.parse(session)
-  await writeAssistantSession(paths, parsed)
-  await synchronizeAssistantIndexes(paths, parsed, existing)
-  return parsed
+}
+
+export async function restoreAssistantSessionSnapshot(
+  input: {
+    session: AssistantSession
+    transcriptEntries?: readonly AssistantTranscriptEntryInput[] | null
+    vault: string
+  },
+): Promise<AssistantSession> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const parsedSession = await saveAssistantSessionAtPaths(paths, input.session)
+    const transcriptEntries = parseAssistantTranscriptEntries(
+      input.transcriptEntries ?? [],
+    )
+
+    if (transcriptEntries.length > 0) {
+      await replaceTranscriptEntries(
+        paths,
+        parsedSession.sessionId,
+        transcriptEntries,
+      )
+    }
+
+    return parsedSession
+  })
 }
 
 export async function listAssistantTranscriptEntries(
@@ -312,4 +334,31 @@ export async function saveAssistantAutomationState(
   const parsed = assistantAutomationStateSchema.parse(state)
   await writeJsonFileAtomic(paths.automationPath, parsed)
   return parsed
+}
+
+async function saveAssistantSessionAtPaths(
+  paths: AssistantStatePaths,
+  session: AssistantSession,
+): Promise<AssistantSession> {
+  const existing = await readAssistantSession({
+    paths,
+    sessionId: session.sessionId,
+  })
+  const parsed = normalizeAssistantSessionSnapshot(session)
+  await writeAssistantSession(paths, parsed)
+  await synchronizeAssistantIndexes(paths, parsed, existing)
+  return parsed
+}
+
+function parseAssistantTranscriptEntries(
+  entries: readonly AssistantTranscriptEntryInput[],
+): AssistantTranscriptEntry[] {
+  return entries.map((entry) =>
+    assistantTranscriptEntrySchema.parse({
+      schema: 'murph.assistant-transcript-entry.v1',
+      kind: entry.kind,
+      text: entry.text,
+      createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
+    }),
+  )
 }

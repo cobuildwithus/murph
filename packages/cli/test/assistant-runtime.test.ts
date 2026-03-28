@@ -13,6 +13,7 @@ import {
   saveAssistantAutomationState,
 } from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
+import { listAssistantTurnReceipts } from '../src/assistant/receipts.js'
 import { readAssistantSession } from '../src/assistant/store/persistence.js'
 import {
   buildAssistantProviderDefaultsPatch,
@@ -50,9 +51,9 @@ vi.mock('../src/outbound-channel.js', async () => {
   }
 })
 
-vi.mock('../src/chat-provider.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/chat-provider.js')>(
-    '../src/chat-provider.js',
+vi.mock('../src/assistant-provider.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/assistant-provider.js')>(
+    '../src/assistant-provider.js',
   )
 
   return {
@@ -306,7 +307,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerSessionId, 'thread-pause-1')
+  assert.equal(resolved.session.providerSessionId, null)
   assert.equal(resolved.session.turnCount, 0)
 })
 
@@ -1620,20 +1621,21 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
   }
 
   const first = await runScan()
-  assert.deepEqual(first.routing, {
-    considered: 0,
-    failed: 0,
-    noAction: 0,
-    routed: 0,
-    skipped: 0,
+  assert.deepEqual(first, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 1,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    },
   })
-  assert.equal(first.replies.failed, 0)
-  assert.equal(first.replies.replied, 1)
-  assert.equal(
-    first.replies.considered,
-    first.replies.replied + first.replies.skipped,
-  )
-  assert.equal(first.replies.considered >= 1, true)
   assert.deepEqual(stateProgress[0], {
     autoReplyBacklogChannels: ['email'],
     autoReplyPrimed: true,
@@ -4106,7 +4108,6 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     cursor: { occurredAt: string; captureId: string } | null
     primed: boolean
   }> = []
-
   runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
     provider: 'codex-cli',
     providerSessionId: 'thread-zero-artifact',
@@ -4115,47 +4116,49 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     stdout: '',
     rawEvents: [],
   })
-  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
-    message: 'handled reply',
-    session: {
-      schema: 'murph.assistant-session.v2',
-      sessionId: 'session-zero-artifact',
-      provider: 'codex-cli',
-      providerSessionId: 'thread-zero-artifact',
-      providerOptions: {
-        model: null,
-        reasoningEffort: null,
-        sandbox: 'read-only',
-        approvalPolicy: 'never',
-        profile: null,
-        oss: false,
-      },
-      alias: null,
-      binding: {
-        conversationKey: 'channel:email|thread:chat-zero-artifact',
-        channel: 'email',
-        identityId: null,
-        actorId: 'zero@example.com',
-        threadId: 'chat-zero-artifact',
-        threadIsDirect: true,
-        delivery: {
-          kind: 'thread',
-          target: 'zero@example.com',
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
+    async (input: { message: string; sessionId: string }) => ({
+      message: input.message,
+      session: {
+        schema: 'murph.assistant-session.v2',
+        sessionId: input.sessionId,
+        provider: 'codex-cli',
+        providerSessionId: 'thread-zero-artifact',
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
         },
+        alias: null,
+        binding: {
+          conversationKey: 'channel:email|thread:chat-zero-artifact',
+          channel: 'email',
+          identityId: null,
+          actorId: 'zero@example.com',
+          threadId: 'chat-zero-artifact',
+          threadIsDirect: true,
+          delivery: {
+            kind: 'thread',
+            target: 'zero@example.com',
+          },
+        },
+        createdAt: '2026-03-18T09:03:00.000Z',
+        updatedAt: '2026-03-18T09:03:00.000Z',
+        lastTurnAt: '2026-03-18T09:03:00.000Z',
+        turnCount: 1,
       },
-      createdAt: '2026-03-18T09:03:00.000Z',
-      updatedAt: '2026-03-18T09:03:00.000Z',
-      lastTurnAt: '2026-03-18T09:03:00.000Z',
-      turnCount: 1,
-    },
-    delivery: {
-      channel: 'email',
-      target: 'zero@example.com',
-      targetKind: 'thread',
-      sentAt: '2026-03-18T09:03:00.000Z',
-      messageLength: 'handled reply'.length,
-    },
-  })
+      delivery: {
+        channel: 'email',
+        target: 'zero@example.com',
+        targetKind: 'thread',
+        sentAt: '2026-03-18T09:03:00.000Z',
+        messageLength: input.message.length,
+      },
+    }),
+  )
 
   const inboxServices = {
     async list() {
@@ -4201,31 +4204,39 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     },
   } as any
 
-  const writeResultArtifactsSpy = vi
-    .spyOn(assistantAutomationArtifacts, 'writeAssistantChatResultArtifacts')
-    .mockRejectedValueOnce(new Error('result artifact fan-out failed'))
+  const outcomeWriteSpy = vi
+    .spyOn(assistantAutomationArtifacts, 'writeAssistantAutoReplyGroupOutcomeArtifact')
+    .mockRejectedValueOnce(new Error('artifact write failed'))
 
-  try {
-    await assert.rejects(
-      () =>
-        scanAssistantAutoReplyOnce({
-          afterCursor: null,
-          autoReplyPrimed: true,
-          enabledChannels: ['email'],
-          inboxServices,
-          onEvent(event) {
-            events.push(event)
-          },
-          vault: vaultRoot,
-        }),
-      /result artifact fan-out failed/u,
-    )
-  } finally {
-    writeResultArtifactsSpy.mockRestore()
-  }
+  await assert.rejects(() =>
+    scanAssistantAutoReplyOnce({
+      afterCursor: null,
+      autoReplyPrimed: true,
+      enabledChannels: ['email'],
+      inboxServices,
+      onEvent(event) {
+        events.push(event)
+      },
+      async onStateProgress(next) {
+        stateProgress.push(next)
+      },
+      vault: vaultRoot,
+    }),
+  )
+  outcomeWriteSpy.mockRestore()
 
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  assert.equal(stateProgress.length, 0)
+
+  const receipts = await listAssistantTurnReceipts(vaultRoot, 5)
+  assert.equal(receipts.length, 1)
+  assert.equal(
+    receipts[0]?.timeline.find((event) => event.kind === 'turn.started')?.metadata
+      ?.autoReplyCaptureId,
+    'cap-zero-artifact',
+  )
+
   await assert.rejects(
     () =>
       readFile(
@@ -4244,27 +4255,26 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
       return true
     },
   )
-
-  const groupOutcome = JSON.parse(
-    await readFile(
-      path.join(
-        vaultRoot,
-        'derived',
-        'inbox',
-        'cap-zero-artifact',
-        'assistant',
-        'chat-group-outcome.json',
+  await assert.rejects(
+    () =>
+      readFile(
+        path.join(
+          vaultRoot,
+          'derived',
+          'inbox',
+          'cap-zero-artifact',
+          'assistant',
+          'chat-group-outcome.json',
+        ),
+        'utf8',
       ),
-      'utf8',
-    ),
-  ) as {
-    outcome: string
-    sessionId: string
-  }
-  assert.equal(groupOutcome.outcome, 'result')
-  assert.equal(groupOutcome.sessionId, 'session-zero-artifact')
+    (error) => {
+      assert.equal((error as NodeJS.ErrnoException).code, 'ENOENT')
+      return true
+    },
+  )
 
-  const second = await scanAssistantAutoReplyOnce({
+  const result = await scanAssistantAutoReplyOnce({
     afterCursor: null,
     autoReplyPrimed: true,
     enabledChannels: ['email'],
@@ -4278,7 +4288,7 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     vault: vaultRoot,
   })
 
-  assert.deepEqual(second, {
+  assert.deepEqual(result, {
     considered: 1,
     failed: 0,
     replied: 0,
@@ -4479,7 +4489,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
   )
 })
 
-test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the same capture with the preserved session', async () => {
+test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the same capture with a cold restart', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-stall-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -4710,7 +4720,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
   assert.equal(
     runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
-    'thread-stall-1',
+    null,
   )
   assert.equal(
     events.some(
@@ -5043,7 +5053,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
   })
   assert.equal(
     runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
-    'thread-retry-1',
+    null,
   )
   assert.equal(
     events.some(
@@ -5071,11 +5081,22 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerSessionId, 'thread-retry-1')
+  assert.equal(resolved.session.providerSessionId, null)
   assert.equal(resolved.session.turnCount, 0)
   assert.deepEqual(
-    await listAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId),
-    [],
+    (await listAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId)).map(
+      (entry) => ({
+        kind: entry.kind,
+        text: entry.text,
+      }),
+    ),
+    [
+      {
+        kind: 'error',
+        text:
+          'Failed assistant prompt attempt [automation-auto-reply]: Can you follow up?',
+      },
+    ],
   )
 })
 
@@ -6028,124 +6049,64 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
   )
 })
 
-test('assistant Ink resyncs the next turn selection after a failover-updated session', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-failover-sync-'))
-  const vaultRoot = path.join(parent, 'vault')
-  await mkdir(vaultRoot)
-  cleanupPaths.push(parent)
-
-  runtimeMocks.executeAssistantProviderTurn.mockImplementation(async (input: any) => {
-    if (input.provider === 'codex-cli') {
-      throw new VaultCliError(
-        'ASSISTANT_PROVIDER_TIMEOUT',
-        'Primary provider timed out before it produced a response.',
-      )
-    }
-
-    return {
-      provider: 'openai-compatible',
-      providerSessionId: 'backup-thread',
-      response: `reply via ${input.model ?? 'default'}`,
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-    }
-  })
-
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    alias: 'chat:failover-sync',
+test('assistant Ink resyncs the next turn selection after a failover-updated session', () => {
+  const previousSession = {
+    schema: 'murph.assistant-session.v2',
+    sessionId: 'asst_failover_prev',
     provider: 'codex-cli',
-    model: 'gpt-5.4',
-    sandbox: 'workspace-write',
-    approvalPolicy: 'on-request',
-    oss: false,
-    profile: null,
-    reasoningEffort: 'high',
-    maxSessionAgeMs: null,
-  })
-  const setEntries: React.Dispatch<React.SetStateAction<InkChatEntry[]>> = () => {}
-  const setStatus: React.Dispatch<
-    React.SetStateAction<{
-      kind: 'error' | 'info' | 'success'
-      text: string
-    } | null>
-  > = () => {}
-
-  const firstOutcome = await runAssistantPromptTurn({
-    activeModel: 'gpt-5.4',
-    activeReasoningEffort: 'high',
-    input: {
-      vault: vaultRoot,
-      provider: 'codex-cli',
-      failoverRoutes: [
-        {
-          name: 'backup-ollama',
-          provider: 'openai-compatible',
-          codexCommand: null,
-          model: 'backup-model',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          providerName: 'ollama',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          cooldownMs: null,
-        },
-      ],
-      abortSignal: new AbortController().signal,
+    providerSessionId: 'thread-primary',
+    providerOptions: {
+      model: 'gpt-5.4',
+      reasoningEffort: 'high',
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      profile: null,
+      oss: false,
     },
-    prompt: 'first turn',
-    session: resolved.session,
-    setEntries,
-    setStatus,
-    turnTracePrefix: 'turn-1',
-  })
-
-  if (firstOutcome.kind !== 'completed') {
-    throw new Error(`expected completed first turn, received ${firstOutcome.kind}`)
-  }
-  assert.equal(firstOutcome.session.provider, 'openai-compatible')
-  assert.equal(firstOutcome.session.providerOptions.model, 'backup-model')
-  assert.equal(firstOutcome.session.providerOptions.reasoningEffort, null)
-
-  const secondTurnSelection = resolveAssistantSelectionAfterSessionSync({
-    currentSelection: {
-      activeModel: 'gpt-5.4',
-      activeReasoningEffort: 'high',
+    alias: 'chat:failover-sync',
+    binding: {
+      conversationKey: null,
+      channel: null,
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: null,
+      delivery: null,
     },
-    previousSession: resolved.session,
-    nextSession: firstOutcome.session,
-  })
-
-  assert.deepEqual(secondTurnSelection, {
-    activeModel: 'backup-model',
-    activeReasoningEffort: null,
-  })
-
-  const secondOutcome = await runAssistantPromptTurn({
-    ...secondTurnSelection,
-    input: {
-      vault: vaultRoot,
-      abortSignal: new AbortController().signal,
+    createdAt: '2026-03-17T00:00:00.000Z',
+    updatedAt: '2026-03-17T00:00:00.000Z',
+    lastTurnAt: '2026-03-17T00:00:00.000Z',
+    turnCount: 1,
+  } as const
+  const nextSession = {
+    ...previousSession,
+    provider: 'openai-compatible',
+    providerSessionId: 'thread-backup',
+    updatedAt: '2026-03-17T00:00:02.000Z',
+    providerOptions: {
+      ...previousSession.providerOptions,
+      model: 'backup-model',
+      reasoningEffort: null,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
     },
-    prompt: 'second turn',
-    session: firstOutcome.session,
-    setEntries,
-    setStatus,
-    turnTracePrefix: 'turn-2',
-  })
+  } as const
 
-  if (secondOutcome.kind !== 'completed') {
-    throw new Error(`expected completed second turn, received ${secondOutcome.kind}`)
-  }
-  const secondTurnProviderCall =
-    runtimeMocks.executeAssistantProviderTurn.mock.calls[2]?.[0]
-  assert.equal(secondTurnProviderCall.provider, 'openai-compatible')
-  assert.equal(secondTurnProviderCall.model, 'backup-model')
-  assert.equal(secondTurnProviderCall.reasoningEffort, null)
+  assert.deepEqual(
+    resolveAssistantSelectionAfterSessionSync({
+      currentSelection: {
+        activeModel: 'gpt-5.4',
+        activeReasoningEffort: 'high',
+      },
+      previousSession,
+      nextSession,
+    }),
+    {
+      activeModel: 'backup-model',
+      activeReasoningEffort: null,
+    },
+  )
 })
 
 test('assistant Ink preserves explicit selections when unrelated same-provider session options change', () => {

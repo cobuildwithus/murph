@@ -1,1 +1,1 @@
-export * from './chat-provider.js'
+export * from './assistant/provider-registry.js'

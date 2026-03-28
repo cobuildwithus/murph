@@ -40,6 +40,7 @@ vi.mock('node:readline/promises', () => ({
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
+  resolveAssistantProviderTraits,
 } from '../src/chat-provider.js'
 import {
   defaultDiscoverOpenAICompatibleModels,
@@ -235,6 +236,21 @@ test('resolveAssistantProviderCapabilities keeps prompt-only providers from clai
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
     supportsReasoningEffort: false,
+  })
+})
+
+test('resolveAssistantProviderTraits makes session/workspace behavior explicit', () => {
+  assert.deepEqual(resolveAssistantProviderTraits('codex-cli'), {
+    resumeKeyMode: 'provider-session-id',
+    sessionMode: 'stateful',
+    transcriptContextMode: 'provider-session',
+    workspaceMode: 'direct-cli',
+  })
+  assert.deepEqual(resolveAssistantProviderTraits('openai-compatible'), {
+    resumeKeyMode: 'none',
+    sessionMode: 'stateless',
+    transcriptContextMode: 'local-transcript',
+    workspaceMode: 'none',
   })
 })
 
@@ -591,6 +607,41 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
     stdout: '',
     rawEvents: [],
   })
+})
+
+test('executeAssistantProviderTurn infers the OpenAI-compatible provider when endpoint config is supplied without an explicit provider', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  const result = await executeAssistantProviderTurn({
+    workingDirectory: '/tmp/vault',
+    baseUrl: ' http://127.0.0.1:11434/v1 ',
+    apiKeyEnv: ' OLLAMA_API_KEY ',
+    providerName: ' ollama ',
+    headers: {
+      'X-Foo': 'bar',
+    },
+    model: ' gpt-oss:20b ',
+    userPrompt: 'hello',
+  })
+
+  assert.deepEqual(
+    providerMocks.resolveAssistantLanguageModel.mock.calls[0]?.[0],
+    {
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      headers: {
+        'X-Foo': 'bar',
+      },
+      model: 'gpt-oss:20b',
+      providerName: 'ollama',
+    },
+  )
+  assert.equal(providerMocks.executeCodexPrompt.mock.calls.length, 0)
+  assert.equal(result.provider, 'openai-compatible')
 })
 
 test('executeAssistantProviderTurn throws a base-url error before attempting OpenAI-compatible execution', async () => {
