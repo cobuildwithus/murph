@@ -61,7 +61,7 @@ The repo now has two separate ChatGPT upload paths:
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 
-`review:gpt` also supports reusable audit presets. Current examples include `security`, `simplify`, `bad-code`, `legacy-removal`, `test-coverage-audit`, and `task-finish-review`.
+`review:gpt` also supports reusable audit presets. Current examples include `security`, `architecture`, `simplify`, `bad-code`, `legacy-removal`, `test-coverage-audit`, and `task-finish-review`.
 
 `review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Murph precedence order: explicit `--vault`, then `VAULT`, then the saved default vault.
 

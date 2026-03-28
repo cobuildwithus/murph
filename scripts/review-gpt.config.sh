@@ -9,6 +9,11 @@ review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on vault trust boundaries." \
   "security-audit" \
   "audit-security"
+review_gpt_register_dir_preset "architecture" "architecture-review.md" \
+  "Architecture and data-model review focused on simplification, composability, and long-term maintainability." \
+  "architecture-review" \
+  "data-model" \
+  "refactor-architecture"
 review_gpt_register_dir_preset "simplify" "complexity-simplification.md" \
   "Behavior-preserving simplification pass for Murph." \
   "complexity" \
