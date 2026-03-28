@@ -40,6 +40,10 @@ import {
   recordPath,
   requirePayloadObjectField,
 } from "./shared.js"
+import {
+  explicitHealthCoreServiceMethodNames,
+  explicitHealthQueryServiceMethodNames,
+} from "./explicit-health-family-services.js"
 
 export function buildHealthCoreRuntimeInput(
   descriptor: HealthCoreDescriptorEntry,
@@ -344,6 +348,13 @@ export function createHealthCoreServices(
   const services: Record<string, unknown> = {}
 
   for (const descriptor of healthEntityDescriptors.filter(hasHealthCoreDescriptor)) {
+    if (
+      explicitHealthCoreServiceMethodNames.has(descriptor.core.scaffoldServiceMethod) ||
+      explicitHealthCoreServiceMethodNames.has(descriptor.core.upsertServiceMethod)
+    ) {
+      continue
+    }
+
     services[descriptor.core.scaffoldServiceMethod] = async (input: CommandContext) => ({
       vault: input.vault,
       noun: descriptor.core.scaffoldNoun,
@@ -370,6 +381,13 @@ export function createHealthQueryServices(
   const services: Record<string, unknown> = {}
 
   for (const descriptor of healthEntityDescriptors.filter(hasHealthQueryDescriptor)) {
+    if (
+      explicitHealthQueryServiceMethodNames.has(descriptor.query.showServiceMethod) ||
+      explicitHealthQueryServiceMethodNames.has(descriptor.query.listServiceMethod)
+    ) {
+      continue
+    }
+
     services[descriptor.query.showServiceMethod] = async (input: EntityLookupInput) => {
       const { query } = await loadRuntime()
       const record = await getQueryShowMethod(query, descriptor)(input.vault, input.id)

@@ -332,6 +332,140 @@ test.sequential("goal upsert rejects reserved vault-root overrides from JSON pay
   }
 });
 
+test.sequential("condition and allergy commands keep noun-specific and generic reads aligned", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const conditionPayloadPath = path.join(vaultRoot, "condition.json");
+  const allergyPayloadPath = path.join(vaultRoot, "allergy.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      conditionPayloadPath,
+      JSON.stringify({
+        title: "Seasonal allergies",
+        clinicalStatus: "active",
+        verificationStatus: "confirmed",
+        assertedOn: "2026-03-12",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      allergyPayloadPath,
+      JSON.stringify({
+        title: "Peanut allergy",
+        substance: "Peanut",
+        status: "active",
+        reaction: "Hives",
+      }),
+      "utf8",
+    );
+
+    const conditionUpsert = await runCli<{
+      conditionId: string;
+    }>([
+      "condition",
+      "upsert",
+      "--input",
+      `@${conditionPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const allergyUpsert = await runCli<{
+      allergyId: string;
+    }>([
+      "allergy",
+      "upsert",
+      "--input",
+      `@${allergyPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    const conditionId = requireData(conditionUpsert).conditionId;
+    const allergyId = requireData(allergyUpsert).allergyId;
+
+    const conditionShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "condition",
+      "show",
+      conditionId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const allergyShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "allergy",
+      "show",
+      allergyId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericConditionList = await runCli<{
+      items: Array<{
+        id: string;
+        kind: string;
+      }>;
+    }>([
+      "list",
+      "--kind",
+      "condition",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericAllergyList = await runCli<{
+      items: Array<{
+        id: string;
+        kind: string;
+      }>;
+    }>([
+      "list",
+      "--kind",
+      "allergy",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(conditionUpsert.ok, true);
+    assert.equal(allergyUpsert.ok, true);
+    assert.equal(conditionShow.ok, true);
+    assert.equal(allergyShow.ok, true);
+    assert.equal(requireData(conditionShow).entity.id, conditionId);
+    assert.equal(requireData(conditionShow).entity.kind, "condition");
+    assert.equal(requireData(conditionShow).entity.data.clinicalStatus, "active");
+    assert.equal(requireData(allergyShow).entity.id, allergyId);
+    assert.equal(requireData(allergyShow).entity.kind, "allergy");
+    assert.equal(requireData(allergyShow).entity.data.substance, "Peanut");
+    assert.deepEqual(
+      requireData(genericConditionList).items.map((item) => item.id),
+      [conditionId],
+    );
+    assert.deepEqual(
+      requireData(genericConditionList).items.map((item) => item.kind),
+      ["condition"],
+    );
+    assert.deepEqual(
+      requireData(genericAllergyList).items.map((item) => item.id),
+      [allergyId],
+    );
+    assert.deepEqual(
+      requireData(genericAllergyList).items.map((item) => item.kind),
+      ["allergy"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family.json");
@@ -434,6 +568,97 @@ test.sequential("family descriptor wiring keeps member-specific commands aligned
       requireData(genericList).items.map((item) => item.kind),
       ["family"],
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("protocol commands keep noun-specific and generic reads aligned", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "protocol.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "Morning metformin",
+        kind: "medication",
+        status: "active",
+        startedOn: "2026-03-12",
+        group: "medication",
+        dose: 500,
+        unit: "mg",
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli<{
+      protocolId: string;
+    }>([
+      "protocol",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const protocolId = requireData(upsertResult).protocolId;
+
+    const nounShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "protocol",
+      "show",
+      protocolId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounList = await runCli<{
+      count: number;
+      items: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    }>([
+      "protocol",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+      };
+    }>([
+      "show",
+      protocolId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, true);
+    assert.equal(nounShow.ok, true);
+    assert.equal(nounList.ok, true);
+    assert.equal(genericShow.ok, true);
+    assert.equal(requireData(nounShow).entity.id, protocolId);
+    assert.equal(requireData(nounShow).entity.kind, "protocol");
+    assert.equal(requireData(nounShow).entity.data.kind, "medication");
+    assert.equal(requireData(nounShow).entity.data.group, "medication");
+    assert.equal(requireData(nounList).count, 1);
+    assert.deepEqual(
+      requireData(nounList).items.map((item) => item.id),
+      [protocolId],
+    );
+    assert.equal(requireData(nounList).items[0]?.data.kind, "medication");
+    assert.equal(requireData(genericShow).entity.id, protocolId);
+    assert.equal(requireData(genericShow).entity.kind, "protocol");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

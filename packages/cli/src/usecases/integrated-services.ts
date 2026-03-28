@@ -30,6 +30,10 @@ import {
   createHealthQueryServices,
 } from "./health-services.js"
 import {
+  createExplicitHealthCoreServices,
+  createExplicitHealthQueryServices,
+} from "./explicit-health-family-services.js"
+import {
   createUnwiredMethod,
   loadImporterRuntime,
   loadIntegratedRuntime,
@@ -37,14 +41,10 @@ import {
 import {
   asEntityEnvelope,
   asListEnvelope,
-  assertNoReservedPayloadKeys,
-  buildEntityLinks,
   describeLookupConstraint,
   materializeExportPack,
   matchesGenericKindFilter,
   normalizeIssues,
-  readJsonPayload,
-  recordPath,
   toGenericListItem,
   toGenericShowEntity,
 } from "./shared.js"
@@ -104,158 +104,6 @@ import {
   unlinkJournalStreams,
 } from "./experiment-journal-vault.js"
 import { toVaultCliError } from "./vault-usecase-helpers.js"
-
-const SUPPLEMENT_SCAFFOLD_PAYLOAD = Object.freeze({
-  title: "Magnesium glycinate",
-  kind: "supplement",
-  status: "active",
-  startedOn: "2026-03-12",
-  schedule: "nightly",
-  brand: "Thorne",
-  manufacturer: "Thorne Health",
-  servingSize: "2 capsules",
-  ingredients: [
-    {
-      compound: "Magnesium",
-      label: "Magnesium glycinate chelate",
-      amount: 200,
-      unit: "mg",
-    },
-  ],
-}) as JsonObject
-
-const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
-  "id",
-  "protocolId",
-  "slug",
-  "title",
-  "markdown",
-  "body",
-  "relativePath",
-  "path",
-  "attributes",
-])
-const SUPPLEMENT_ID_PATTERN = /^prot_[0-9A-Za-z]+$/u
-
-function slugifyLookup(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-}
-
-function firstRawString(value: unknown): string | null {
-  return typeof value === "string" ? value : null
-}
-
-function toSupplementEntityData(record: object) {
-  const rawRecord = record as Record<string, unknown>
-
-  return Object.fromEntries(
-    Object.entries(rawRecord).filter(
-      ([key, value]) => !SUPPLEMENT_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
-    ),
-  )
-}
-
-function toSupplementReadEntity(record: object) {
-  const rawRecord = record as Record<string, unknown>
-  const data = toSupplementEntityData(record)
-  const id = firstRawString(rawRecord.id) ?? firstRawString(rawRecord.protocolId) ?? ""
-
-  return {
-    id,
-    kind: "supplement",
-    title: firstRawString(rawRecord.title),
-    occurredAt: firstRawString(rawRecord.startedOn),
-    path: firstRawString(rawRecord.relativePath) ?? firstRawString(rawRecord.path),
-    markdown: firstRawString(rawRecord.markdown) ?? firstRawString(rawRecord.body),
-    data,
-    links: buildEntityLinks({
-      data,
-    }),
-  }
-}
-
-async function renameSupplementRecord(input: CommandContext & {
-  lookup: string
-  title: string
-  slug?: string
-}) {
-  const { vault } = input
-  const lookup = input.lookup.trim()
-  const title = input.title.trim()
-  const slugInput = typeof input.slug === "string" ? input.slug.trim() || undefined : undefined
-
-  if (!title) {
-    throw new VaultCliError("contract_invalid", "title must be a non-empty string.")
-  }
-
-  const slug = slugInput ?? slugifyLookup(title)
-
-  const { core } = await loadIntegratedRuntime()
-
-  try {
-    const existing = await core.readProtocolItem({
-      vaultRoot: vault,
-      protocolId: SUPPLEMENT_ID_PATTERN.test(lookup) ? lookup : undefined,
-      slug: SUPPLEMENT_ID_PATTERN.test(lookup) ? undefined : lookup,
-      group: "supplement",
-    })
-
-    if (existing.kind !== "supplement") {
-      throw new VaultCliError("not_found", `No supplement found for "${input.lookup}".`)
-    }
-
-    const result = await core.upsertProtocolItem({
-      vaultRoot: vault,
-      protocolId: existing.protocolId,
-      slug,
-      allowSlugRename: true,
-      title,
-      kind: existing.kind,
-      status: existing.status,
-      startedOn: existing.startedOn,
-      stoppedOn: existing.stoppedOn,
-      substance: existing.substance,
-      dose: existing.dose,
-      unit: existing.unit,
-      schedule: existing.schedule,
-      brand: existing.brand,
-      manufacturer: existing.manufacturer,
-      servingSize: existing.servingSize,
-      ingredients: existing.ingredients,
-      relatedGoalIds: existing.relatedGoalIds,
-      relatedConditionIds: existing.relatedConditionIds,
-      group: existing.group,
-    })
-
-    return {
-      vault,
-      protocolId: String(result.record.protocolId),
-      lookupId: String(result.record.protocolId),
-      path: recordPath(result.record),
-      created: Boolean(result.created),
-    }
-  } catch (error) {
-    throw toVaultCliError(error, {
-      VAULT_PROTOCOL_MISSING: {
-        code: "not_found",
-        message: `No supplement found for "${input.lookup}".`,
-      },
-      VAULT_INVALID_INPUT: {
-        code: "contract_invalid",
-      },
-      VAULT_INVALID_PROTOCOL: {
-        code: "contract_invalid",
-      },
-      VAULT_PROTOCOL_CONFLICT: {
-        code: "conflict",
-      },
-    })
-  }
-}
 
 function createIntegratedCoreServices(): CoreWriteServices {
   return {
@@ -488,45 +336,14 @@ function createIntegratedCoreServices(): CoreWriteServices {
         proposal,
       }
     },
+    ...createExplicitHealthCoreServices(async () => {
+      const { core } = await loadIntegratedRuntime()
+      return { core }
+    }),
     ...createHealthCoreServices(async () => {
       const { core } = await loadIntegratedRuntime()
       return { core }
     }),
-    async scaffoldSupplement(input: CommandContext) {
-      return {
-        vault: input.vault,
-        noun: 'supplement' as const,
-        payload: SUPPLEMENT_SCAFFOLD_PAYLOAD,
-      }
-    },
-    async upsertSupplement(input: CommandContext & {
-      input: string
-    }) {
-      const { vault } = input
-      const payload = await readJsonPayload(input.input)
-      assertNoReservedPayloadKeys(payload)
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.upsertProtocolItem({
-        ...payload,
-        kind: payload.kind ?? 'supplement',
-        vaultRoot: vault,
-      })
-
-      return {
-        vault,
-        protocolId: String(result.record.protocolId),
-        lookupId: String(result.record.protocolId),
-        path: recordPath(result.record),
-        created: Boolean(result.created),
-      }
-    },
-    async renameSupplement(input: CommandContext & {
-      lookup: string
-      title: string
-      slug?: string
-    }) {
-      return renameSupplementRecord(input)
-    },
     async rebuildCurrentProfile(input: CommandContext) {
       const { vault } = input
       const { core } = await loadIntegratedRuntime()
@@ -539,40 +356,6 @@ function createIntegratedCoreServices(): CoreWriteServices {
         profilePath: result.relativePath,
         snapshotId: result.snapshot?.id ?? null,
         updated: result.updated,
-      }
-    },
-    async stopProtocol(input: StopProtocolInput) {
-      const { vault, protocolId, stoppedOn } = input
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.stopProtocolItem({
-        vaultRoot: vault,
-        protocolId,
-        stoppedOn,
-      })
-
-      return {
-        vault,
-        protocolId: String(result.record.protocolId),
-        lookupId: String(result.record.protocolId),
-        stoppedOn: result.record.stoppedOn ?? null,
-        status: String(result.record.status),
-      }
-    },
-    async stopSupplement(input: StopProtocolInput) {
-      const { vault, protocolId, stoppedOn } = input
-      const { core } = await loadIntegratedRuntime()
-      const result = await core.stopProtocolItem({
-        vaultRoot: vault,
-        protocolId,
-        stoppedOn,
-      })
-
-      return {
-        vault,
-        protocolId: String(result.record.protocolId),
-        lookupId: String(result.record.protocolId),
-        stoppedOn: result.record.stoppedOn ?? null,
-        status: String(result.record.status),
       }
     },
   } satisfies CoreWriteServices
@@ -648,82 +431,14 @@ function createIntegratedImporterServices(): ImporterServices {
 
 function createIntegratedQueryServices(): QueryServices {
   return {
+    ...createExplicitHealthQueryServices(async () => {
+      const { query } = await loadIntegratedRuntime()
+      return { query }
+    }),
     ...createHealthQueryServices(async () => {
       const { query } = await loadIntegratedRuntime()
       return { query }
     }),
-    async showSupplement(input: CommandContext & {
-      id: string
-    }) {
-      const { query } = await loadIntegratedRuntime()
-      const record = await query.showSupplement(input.vault, input.id)
-
-      return asEntityEnvelope(
-        input.vault,
-        record ? toSupplementReadEntity(record) : null,
-        `No supplement found for "${input.id}".`,
-      )
-    },
-    async listSupplements(input: CommandContext & {
-      status?: string
-      limit: number
-    }) {
-      const { query } = await loadIntegratedRuntime()
-      const records = await query.listSupplements(input.vault, {
-        limit: input.limit,
-        status: input.status,
-      })
-
-      return asListEnvelope(
-        input.vault,
-        {
-          limit: input.limit,
-          status: input.status,
-        },
-        records.map((record) => toSupplementReadEntity(record)),
-      )
-    },
-    async showSupplementCompound(input: CommandContext & {
-      compound: string
-      status?: string
-    }) {
-      const effectiveStatus = input.status ?? 'active'
-      const { query } = await loadIntegratedRuntime()
-      const compound = await query.showSupplementCompound(input.vault, input.compound, {
-        status: effectiveStatus,
-      })
-
-      if (!compound) {
-        throw new VaultCliError(
-          'not_found',
-          `No supplement compound found for "${input.compound}".`,
-        )
-      }
-
-      return {
-        vault: input.vault,
-        filters: {
-          status: effectiveStatus,
-        },
-        compound,
-      }
-    },
-    async listSupplementCompounds(input: CommandContext & {
-      status?: string
-      limit: number
-    }) {
-      const effectiveStatus = input.status ?? 'active'
-      const { query } = await loadIntegratedRuntime()
-      const items = await query.listSupplementCompounds(input.vault, {
-        limit: input.limit,
-        status: effectiveStatus,
-      })
-
-      return asListEnvelope(input.vault, {
-        status: effectiveStatus,
-        limit: input.limit,
-      }, items)
-    },
     async showDocument(input: CommandContext & {
       id: string
     }) {
