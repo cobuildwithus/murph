@@ -1,3 +1,5 @@
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murph/hosted-execution";
+
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -47,4 +49,18 @@ export function requireHostedExecutionSchedulerToken(request: Request): void {
       httpStatus: 401,
     });
   }
+}
+
+export function requireHostedExecutionUserId(request: Request): string {
+  const userId = normalizeOptionalString(request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER));
+
+  if (!userId) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_USER_REQUIRED",
+      message: "Hosted execution user binding is required.",
+      httpStatus: 400,
+    });
+  }
+
+  return userId;
 }

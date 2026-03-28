@@ -1,4 +1,20 @@
+import {
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
+  HOSTED_EXECUTION_PROXY_HOSTS,
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
+} from "@murph/hosted-execution";
+
 import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
+
+const HOSTED_INTERNAL_WORKER_HOSTNAMES = new Set<string>([
+  HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
+  HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.email,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.outbox,
+  HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
+]);
 
 export interface HostedJsonHttpResponse {
   payload: unknown;
@@ -11,8 +27,24 @@ export interface HostedBytesHttpResponse {
   response: Response;
 }
 
+export function createHostedInternalWorkerFetch(
+  runnerProxyToken: string | null | undefined,
+  fetchImpl: typeof fetch = fetch,
+): typeof fetch {
+  const normalizedToken = normalizeHostedRunnerProxyToken(runnerProxyToken);
+  if (!normalizedToken) {
+    return fetchImpl;
+  }
+
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const [nextInput, nextInit] = attachHostedRunnerProxyToken(input, init, normalizedToken);
+    return fetchImpl(nextInput, nextInit);
+  }) as typeof fetch;
+}
+
 export async function fetchHostedJsonResponse(input: {
   description: string;
+  fetchImpl?: typeof fetch;
   timeoutMs: number | null;
   init?: RequestInit;
   url: string | URL;
@@ -37,6 +69,7 @@ export async function fetchHostedJsonResponse(input: {
 
 export async function fetchHostedBytesResponse(input: {
   description: string;
+  fetchImpl?: typeof fetch;
   timeoutMs: number | null;
   init?: RequestInit;
   url: string | URL;
@@ -82,12 +115,13 @@ export function summarizeHostedJsonErrorBody(payload: unknown, text: string): st
 
 async function fetchHostedResponse(input: {
   description: string;
+  fetchImpl?: typeof fetch;
   timeoutMs: number | null;
   init?: RequestInit;
   url: string | URL;
 }): Promise<Response> {
   try {
-    return await fetch(input.url, {
+    return await (input.fetchImpl ?? fetch)(input.url, {
       ...input.init,
       signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.timeoutMs)),
     });
@@ -126,6 +160,72 @@ function parseHostedJsonBody(text: string): {
       value: null,
     };
   }
+}
+
+function attachHostedRunnerProxyToken(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  runnerProxyToken: string,
+): [RequestInfo | URL, RequestInit | undefined] {
+  const requestUrl = readHostedRequestUrl(input);
+  if (!requestUrl || !isHostedInternalWorkerUrl(requestUrl)) {
+    return [input, init];
+  }
+
+  if (input instanceof Request) {
+    const headers = new Headers(input.headers);
+    applyHostedRequestInitHeaders(headers, init?.headers);
+    headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, runnerProxyToken);
+    const { headers: _ignored, ...restInit } = init ?? {};
+    return [new Request(input, { ...restInit, headers }), undefined];
+  }
+
+  const headers = new Headers(init?.headers ?? undefined);
+  headers.set(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER, runnerProxyToken);
+  return [input, { ...init, headers }];
+}
+
+function applyHostedRequestInitHeaders(headers: Headers, initHeaders: HeadersInit | undefined): void {
+  if (!initHeaders) {
+    return;
+  }
+
+  new Headers(initHeaders).forEach((value, key) => {
+    headers.set(key, value);
+  });
+}
+
+function readHostedRequestUrl(input: RequestInfo | URL): string | null {
+  if (input instanceof Request) {
+    return input.url;
+  }
+
+  if (input instanceof URL) {
+    return input.toString();
+  }
+
+  if (typeof input === "string") {
+    return input;
+  }
+
+  return null;
+}
+
+function isHostedInternalWorkerUrl(value: string): boolean {
+  try {
+    return HOSTED_INTERNAL_WORKER_HOSTNAMES.has(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeHostedRunnerProxyToken(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function createHostedInternalHttpError(message: string, cause?: unknown): Error {

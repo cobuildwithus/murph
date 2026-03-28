@@ -93,13 +93,18 @@ export function readHostedSharePreview(
 }
 
 export async function readHostedSharePackByReference(input: {
+  boundMemberId: string;
   prisma: HostedSharePrismaClient;
   shareCode: string;
   shareId: string;
 }): Promise<HostedExecutionSharePackResponse> {
   const record = await findHostedShareLinkById(input.shareId, input.prisma);
 
-  if (!record || record.codeHash !== hashHostedShareCode(input.shareCode)) {
+  if (
+    !record
+    || record.codeHash !== hashHostedShareCode(input.shareCode)
+    || !isHostedShareReadableByMember(record, input.boundMemberId)
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_SHARE_NOT_FOUND",
       message: "That share link is not valid.",
@@ -250,4 +255,22 @@ export function requireHostedShareInternalToken(request: Request): void {
 
 export function requireHostedSharePublicBaseUrl(): string {
   return requireHostedOnboardingPublicBaseUrl();
+}
+
+function isHostedShareReadableByMember(
+  record: {
+    acceptedAt: Date | null;
+    acceptedByMemberId: string | null;
+    consumedAt: Date | null;
+    consumedByMemberId: string | null;
+  },
+  memberId: string,
+): boolean {
+  if (record.consumedByMemberId === memberId) {
+    return true;
+  }
+
+  return record.consumedAt === null
+    && record.acceptedAt !== null
+    && record.acceptedByMemberId === memberId;
 }

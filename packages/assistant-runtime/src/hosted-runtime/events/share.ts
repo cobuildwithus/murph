@@ -3,6 +3,7 @@ import {
 } from "@murph/core";
 import {
   fetchHostedExecutionSharePack,
+  HOSTED_EXECUTION_PROXY_HOSTS,
   parseHostedExecutionSharePackResponse,
 } from "@murph/hosted-execution";
 
@@ -17,6 +18,7 @@ export async function handleHostedShareAcceptedDispatch(
     dispatch: {
       event: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>;
     };
+    internalWorkerFetch?: typeof fetch;
     runtime: Pick<
       NormalizedHostedAssistantRuntimeConfig,
       "commitTimeoutMs" | "webControlPlane"
@@ -26,6 +28,7 @@ export async function handleHostedShareAcceptedDispatch(
 ): Promise<HostedDispatchEffect> {
   const sharePayload = await fetchHostedSharePayload(
     input.dispatch.event.share,
+    input.internalWorkerFetch,
     input.runtime,
   );
 
@@ -40,6 +43,7 @@ export async function handleHostedShareAcceptedDispatch(
 
 async function fetchHostedSharePayload(
   share: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>["share"],
+  internalWorkerFetch: typeof fetch | undefined,
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "webControlPlane"
@@ -53,6 +57,7 @@ async function fetchHostedSharePayload(
 
   return await fetchHostedExecutionSharePack({
     baseUrl,
+    fetchImpl: internalWorkerFetch,
     share,
     shareToken,
     timeoutMs: runtime.commitTimeoutMs,
@@ -67,7 +72,10 @@ function hasHostedSharePayloadAccess(
   }
 
   return webControlPlane.shareToken !== null
-    || isHostedWorkerProxyBaseUrl(webControlPlane.shareBaseUrl, "share-pack.worker");
+    || isHostedWorkerProxyBaseUrl(
+      webControlPlane.shareBaseUrl,
+      HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
+    );
 }
 
 function isHostedWorkerProxyBaseUrl(baseUrl: string, hostname: string): boolean {

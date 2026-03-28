@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 
 import {
-  fetchHostedDeviceSyncRuntimeSnapshot,
-} from "../src/hosted-device-sync-control-plane.ts";
+  fetchHostedExecutionDeviceSyncRuntimeSnapshot as fetchHostedDeviceSyncRuntimeSnapshot,
+} from "@murph/hosted-execution";
+import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
 import { sendHostedEmailOverWorker } from "../src/hosted-email.ts";
+import { createHostedInternalWorkerFetch } from "../src/hosted-runtime/internal-http.ts";
 import { ingestHostedEmailMessage } from "../src/hosted-runtime/events/email.ts";
 import { handleHostedShareAcceptedDispatch } from "../src/hosted-runtime/events/share.ts";
 
@@ -19,6 +21,141 @@ afterEach(() => {
   } else {
     delete (globalThis as { fetch?: typeof fetch }).fetch;
   }
+});
+
+test("hosted internal worker fetch adds the per-run header only for targeted internal worker hosts", async () => {
+  const fetchMock = vi.fn(async () =>
+    new Response(JSON.stringify({ connections: [] }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+    }));
+  const hostedFetch = createHostedInternalWorkerFetch("runner-proxy-token", fetchMock as typeof fetch);
+
+  await hostedFetch("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    method: "POST",
+  });
+  await hostedFetch("https://external.example.test/health");
+
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-runner-proxy-token"),
+    "runner-proxy-token",
+  );
+  assert.equal(
+    new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("x-hosted-execution-runner-proxy-token"),
+    null,
+  );
+});
+
+test("hosted share dispatch uses the explicit wrapped fetch for worker proxy share reads", async () => {
+  const fetchMock = vi.fn(async () =>
+    new Response("<html>service unavailable</html>", {
+      status: 503,
+      headers: {
+        "content-type": "text/html",
+      },
+    }));
+  const hostedFetch = createHostedInternalWorkerFetch("runner-proxy-token", fetchMock as typeof fetch);
+
+  await assert.rejects(
+    () =>
+      handleHostedShareAcceptedDispatch({
+        dispatch: {
+          event: {
+            kind: "vault.share.accepted",
+            share: {
+              shareCode: "share-code",
+              shareId: "share_123",
+            },
+            userId: "member_123",
+          },
+        },
+        internalWorkerFetch: hostedFetch,
+        runtime: {
+          commitTimeoutMs: 12_000,
+          webControlPlane: {
+            deviceSyncRuntimeBaseUrl: null,
+            internalToken: null,
+            schedulerToken: null,
+            shareBaseUrl: "http://share-pack.worker",
+            shareToken: null,
+          },
+        },
+        vaultRoot: "/tmp/share-vault",
+      }),
+    /Hosted share payload fetch failed with HTTP 503/u,
+  );
+
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-runner-proxy-token"),
+    "runner-proxy-token",
+  );
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
+    null,
+  );
+});
+
+test("hosted device-sync sync uses the explicit wrapped fetch for worker proxy snapshot reads", async () => {
+  const fetchMock = vi.fn(async (_input, init) =>
+    new Response(JSON.stringify({
+      connections: [],
+      generatedAt: "2026-03-27T08:05:00.000Z",
+      userId: "member_123",
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+    }));
+  const hostedFetch = createHostedInternalWorkerFetch("runner-proxy-token", fetchMock as typeof fetch);
+
+  const state = await syncHostedDeviceSyncControlPlaneState({
+    dispatch: {
+      event: {
+        kind: "member.activated",
+        userId: "member_123",
+      },
+      eventId: "evt_proxy_snapshot",
+      occurredAt: "2026-03-27T08:05:00.000Z",
+    },
+    fetchImpl: hostedFetch,
+    secret: "secret-for-tests",
+    service: {
+      store: {
+        getAccountByExternalAccount: vi.fn(),
+        hydrateHostedAccount: vi.fn(),
+        markPendingJobsDeadForAccount: vi.fn(),
+      },
+    } as never,
+    timeoutMs: 5_000,
+    webControlPlane: {
+      deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
+      internalToken: null,
+      schedulerToken: null,
+      shareBaseUrl: null,
+      shareToken: null,
+    },
+  });
+
+  assert.deepEqual(state.snapshot, {
+    connections: [],
+    generatedAt: "2026-03-27T08:05:00.000Z",
+    userId: "member_123",
+  });
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-runner-proxy-token"),
+    "runner-proxy-token",
+  );
+  assert.equal(
+    typeof fetchMock.mock.calls[0]?.[1]?.body,
+    "string",
+  );
+  assert.match(String(fetchMock.mock.calls[0]?.[1]?.body), /"userId":"member_123"/u);
 });
 
 test("hosted device-sync snapshot tolerates non-JSON error bodies and applies the hosted timeout", async () => {
@@ -152,6 +289,7 @@ test("hosted email message fetch applies the hosted timeout before failing on HT
           occurredAt: "2026-03-28T09:00:00.000Z",
         },
         "https://email.example.test",
+        undefined,
         18_000,
       ),
     /Hosted email message fetch failed/,

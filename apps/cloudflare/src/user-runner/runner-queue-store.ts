@@ -575,14 +575,24 @@ export class RunnerQueueStore {
 
   private readStateFromMetaSync(
     meta: RunnerMetaRow,
-    nextPendingAvailableAt = this.readNextPendingAvailableAtSync(),
+    nextPendingAvailableAtOverride: string | null = null,
   ): RunnerStateRecord {
+    const pendingDispatches = this.readPendingDispatchesSync();
+    const bundleRefState = sanitizeStoredBundleRefs(meta);
+
+    if (bundleRefState.changed) {
+      meta.agent_state_bundle_ref_json = stringifyHostedBundleRef(bundleRefState.agentState);
+      meta.vault_bundle_ref_json = stringifyHostedBundleRef(bundleRefState.vault);
+      meta.last_error = mergeRunnerLastError(meta.last_error, bundleRefState.warning);
+      this.writeMetaRowSync(meta);
+    }
+
     return {
       activated: meta.activated === 1,
       backpressuredEventIds: parseStringArray(meta.backpressured_event_ids_json),
       bundleRefs: {
-        agentState: parseHostedBundleRefJson(meta.agent_state_bundle_ref_json),
-        vault: parseHostedBundleRefJson(meta.vault_bundle_ref_json),
+        agentState: bundleRefState.agentState,
+        vault: bundleRefState.vault,
       },
       bundleVersions: {
         agentState: meta.agent_state_bundle_version,
@@ -592,9 +602,9 @@ export class RunnerQueueStore {
       lastError: meta.last_error,
       lastEventId: meta.last_event_id,
       lastRunAt: meta.last_run_at,
-      nextPendingAvailableAt,
+      nextPendingAvailableAt: nextPendingAvailableAtOverride ?? pendingDispatches[0]?.availableAt ?? null,
       nextWakeAt: meta.next_wake_at,
-      pendingEventCount: this.countPendingEventsSync(),
+      pendingEventCount: pendingDispatches.length,
       poisonedEventIds: this.readPoisonedEventIdsSync(),
       retryingEventId: meta.retrying_event_id,
       userId: meta.user_id,
@@ -699,7 +709,9 @@ export class RunnerQueueStore {
   }
 
   private readPendingDispatchesSync(): PendingDispatchRecord[] {
-    return this.sql.exec<PendingEventRow>(
+    const records: PendingDispatchRecord[] = [];
+
+    for (const row of this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
         dispatch_json,
@@ -709,14 +721,14 @@ export class RunnerQueueStore {
         last_error
       FROM pending_events
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC`,
-    ).toArray().map((row) => ({
-      attempts: row.attempts,
-      availableAt: row.available_at,
-      dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
-      enqueuedAt: row.enqueued_at,
-      eventId: row.event_id,
-      lastError: row.last_error,
-    }));
+    ).toArray()) {
+      const parsed = this.parsePendingDispatchRowSync(row);
+      if (parsed) {
+        records.push(parsed);
+      }
+    }
+
+    return records;
   }
 
   private readPendingDispatchByEventIdSync(eventId: string): PendingDispatchRecord | null {
@@ -733,21 +745,12 @@ export class RunnerQueueStore {
       eventId,
     ).toArray()[0] ?? null;
 
-    return row
-      ? {
-          attempts: row.attempts,
-          availableAt: row.available_at,
-          dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
-          enqueuedAt: row.enqueued_at,
-          eventId: row.event_id,
-          lastError: row.last_error,
-        }
-      : null;
+    return row ? this.parsePendingDispatchRowSync(row) : null;
   }
 
   private readNextDuePendingDispatchSync(nowMs: number): PendingDispatchRecord | null {
     const nowIso = new Date(nowMs).toISOString();
-    const row = this.sql.exec<PendingEventRow>(
+    for (const row of this.sql.exec<PendingEventRow>(
       `SELECT
         event_id,
         dispatch_json,
@@ -758,65 +761,41 @@ export class RunnerQueueStore {
       FROM pending_events
       WHERE available_at <= ?
       ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
-      LIMIT 1`,
+      `,
       nowIso,
-    ).toArray()[0] ?? null;
+    ).toArray()) {
+      const parsed = this.parsePendingDispatchRowSync(row);
+      if (parsed) {
+        return parsed;
+      }
+    }
 
-    return row
-      ? {
-          attempts: row.attempts,
-          availableAt: row.available_at,
-          dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
-          enqueuedAt: row.enqueued_at,
-          eventId: row.event_id,
-          lastError: row.last_error,
-        }
-      : null;
+    return null;
   }
 
   private readNextPendingAvailableAtSync(): string | null {
-    return this.sql.exec<{ available_at: DurableObjectSqlValue }>(
-      `SELECT available_at
-      FROM pending_events
-      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
-      LIMIT 1`,
-    ).toArray()[0]?.available_at as string | null | undefined ?? null;
+    return this.readPendingDispatchesSync()[0]?.availableAt ?? null;
   }
 
   private readRetryingEventIdSync(): string | null {
-    return this.sql.exec<{ event_id: DurableObjectSqlValue }>(
-      `SELECT event_id
-      FROM pending_events
-      WHERE attempts > 0
-      ORDER BY available_at ASC, enqueued_at ASC, event_id ASC
-      LIMIT 1`,
-    ).toArray()[0]?.event_id as string | null | undefined ?? null;
+    return this.readPendingDispatchesSync().find((pending) => pending.attempts > 0)?.eventId ?? null;
   }
 
   private countPendingEventsSync(): number {
-    return Number(
-      this.sql.exec<{ count: DurableObjectSqlValue }>(
-        "SELECT COUNT(*) AS count FROM pending_events",
-      ).toArray()[0]?.count ?? 0,
-    );
+    return this.readPendingDispatchesSync().length;
   }
 
   private hasPendingDispatchSync(eventId: string): boolean {
-    return this.sql.exec<{ count: DurableObjectSqlValue }>(
-      "SELECT COUNT(*) AS count FROM pending_events WHERE event_id = ?",
-      eventId,
-    ).toArray()[0]?.count === 1;
+    return this.readPendingDispatchByEventIdSync(eventId) !== null;
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
-    if (this.sql.exec<{ count: DurableObjectSqlValue }>(
+    // Exact tombstones remain authoritative. The replay filter is only retained as a
+    // best-effort hint and must never make a fresh event look consumed.
+    return this.sql.exec<{ count: DurableObjectSqlValue }>(
       "SELECT COUNT(*) AS count FROM consumed_events WHERE event_id = ?",
       eventId,
-    ).toArray()[0]?.count === 1) {
-      return true;
-    }
-
-    return this.replayFilterMayContainEventSync(eventId);
+    ).toArray()[0]?.count === 1;
   }
 
   private readPoisonedEventIdsSync(): string[] {
@@ -844,6 +823,41 @@ export class RunnerQueueStore {
 
   private removePendingDispatchSync(eventId: string): void {
     this.sql.exec("DELETE FROM pending_events WHERE event_id = ?", eventId);
+  }
+
+  private parsePendingDispatchRowSync(row: PendingEventRow): PendingDispatchRecord | null {
+    try {
+      return {
+        attempts: row.attempts,
+        availableAt: row.available_at,
+        dispatch: parseHostedExecutionDispatchRequest(JSON.parse(row.dispatch_json) as unknown),
+        enqueuedAt: row.enqueued_at,
+        eventId: row.event_id,
+        lastError: row.last_error,
+      };
+    } catch (error) {
+      this.poisonMalformedPendingDispatchRowSync(row, error);
+      return null;
+    }
+  }
+
+  private poisonMalformedPendingDispatchRowSync(row: PendingEventRow, error: unknown): void {
+    const message = formatMalformedPendingDispatchError(row.event_id, error);
+    this.removePendingDispatchSync(row.event_id);
+    this.writeConsumedEventSync(row.event_id, nextConsumedEventExactExpiryIso());
+    this.writePoisonedEventSync(row.event_id, message, new Date().toISOString());
+
+    const meta = this.selectMetaRowSync();
+    if (!meta) {
+      return;
+    }
+
+    meta.last_error = mergeRunnerLastError(meta.last_error, message);
+    meta.last_event_id = row.event_id;
+    if (meta.retrying_event_id === row.event_id) {
+      meta.retrying_event_id = null;
+    }
+    this.writeMetaRowSync(meta);
   }
 
   private writeConsumedEventSync(eventId: string, expiresAt: string): void {
@@ -893,19 +907,6 @@ export class RunnerQueueStore {
         )`,
       MAX_POISONED_EVENT_IDS,
     );
-  }
-
-  private replayFilterMayContainEventSync(eventId: string): boolean {
-    const bits = this.readConsumedReplayFilterBitsSync();
-    const bitCount = bits.length * 8;
-
-    for (const bitIndex of consumedReplayFilterBitIndexes(eventId, bitCount)) {
-      if ((bits[bitIndex >> 3] & (1 << (bitIndex & 7))) === 0) {
-        return false;
-      }
-    }
-
-    return true;
   }
 
   private rememberConsumedEventInReplayFilterSync(eventId: string): void {
@@ -1056,16 +1057,20 @@ function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRe
     return null;
   }
 
-  const parsed = JSON.parse(value) as HostedExecutionBundleRef;
-  return (
-    parsed
-    && typeof parsed.hash === "string"
-    && typeof parsed.key === "string"
-    && typeof parsed.size === "number"
-    && typeof parsed.updatedAt === "string"
-  )
-    ? parsed
-    : null;
+  try {
+    const parsed = JSON.parse(value) as HostedExecutionBundleRef;
+    return (
+      parsed
+      && typeof parsed.hash === "string"
+      && typeof parsed.key === "string"
+      && typeof parsed.size === "number"
+      && typeof parsed.updatedAt === "string"
+    )
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseStringArray(value: string): string[] {
@@ -1081,4 +1086,56 @@ function parseStringArray(value: string): string[] {
 
 function stringifyHostedBundleRef(value: HostedExecutionBundleRef | null): string | null {
   return value ? JSON.stringify(value) : null;
+}
+
+function sanitizeStoredBundleRefs(meta: RunnerMetaRow): {
+  agentState: HostedExecutionBundleRef | null;
+  changed: boolean;
+  vault: HostedExecutionBundleRef | null;
+  warning: string | null;
+} {
+  let changed = false;
+  const clearedKinds: string[] = [];
+
+  const agentState = parseHostedBundleRefJson(meta.agent_state_bundle_ref_json);
+  if (meta.agent_state_bundle_ref_json && !agentState) {
+    changed = true;
+    clearedKinds.push("agent-state");
+  }
+
+  const vault = parseHostedBundleRefJson(meta.vault_bundle_ref_json);
+  if (meta.vault_bundle_ref_json && !vault) {
+    changed = true;
+    clearedKinds.push("vault");
+  }
+
+  return {
+    agentState,
+    changed,
+    vault,
+    warning: clearedKinds.length > 0
+      ? `Hosted runner cleared malformed bundle ref(s): ${clearedKinds.join(", ")}.`
+      : null,
+  };
+}
+
+function formatMalformedPendingDispatchError(eventId: string, error: unknown): string {
+  return `Hosted runner poisoned malformed pending dispatch ${eventId}: ${
+    error instanceof Error ? error.message : String(error)
+  }`;
+}
+
+function mergeRunnerLastError(
+  current: string | null,
+  warning: string | null,
+): string | null {
+  if (!warning) {
+    return current;
+  }
+
+  if (!current) {
+    return warning;
+  }
+
+  return current.includes(warning) ? current : `${current} ${warning}`;
 }

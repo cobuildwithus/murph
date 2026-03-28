@@ -113,7 +113,7 @@ describe("handleRunnerOutboundRequest", () => {
     );
   });
 
-  it("falls back to the hosted execution internal token for share payload proxy auth", async () => {
+  it("fails closed when the dedicated hosted share token is missing", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -135,17 +135,11 @@ describe("handleRunnerOutboundRequest", () => {
       RUNNER_PROXY_TOKEN,
     );
 
-    expect(response.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://web.example.test/api/hosted-share/internal/share_123/payload?shareCode=code_123"),
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          authorization: "Bearer internal-token",
-          "x-hosted-execution-user-id": "member_123",
-        }),
-        method: "GET",
-      }),
-    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted web control token is not configured.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {

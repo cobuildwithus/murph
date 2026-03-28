@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   ExecutionOutboxStatus,
@@ -15,8 +16,12 @@ import {
 import { finalizeHostedShareAcceptance } from "../hosted-share/shared";
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";
-import { hydrateHostedExecutionDispatch } from "./hydration";
 import {
+  hydrateHostedExecutionDispatch,
+  isPermanentHostedExecutionHydrationError,
+} from "./hydration";
+import {
+  readHostedExecutionOutboxPayload,
   serializeHostedExecutionOutboxPayload,
 } from "./outbox-payload";
 
@@ -255,17 +260,22 @@ async function processHostedExecutionOutboxRecord(
       status: lifecycle.status,
     });
   } catch (error) {
+    const permanentHydrationFailure = isPermanentHostedExecutionHydrationError(error);
     return finalizeHostedExecutionOutboxAttempt(prisma, record, {
       acceptedAt: record.acceptedAt,
       completedAt: null,
-      failedAt: null,
+      failedAt: permanentHydrationFailure ? new Date(nowIso) : null,
       lastError: error instanceof Error ? error.message : String(error),
       lastStatusJson: record.lastStatusJson as Prisma.InputJsonValue | null,
-      nextAttemptAt: new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
+      nextAttemptAt: permanentHydrationFailure
+        ? null
+        : new Date(Date.parse(nowIso) + computeRetryDelayMs(record.attemptCount)),
       payloadJson: dispatch
         ? serializeHostedExecutionOutboxPayload(dispatch)
         : (record.payloadJson as Prisma.InputJsonValue),
-      status: record.acceptedAt ? ExecutionOutboxStatus.accepted : ExecutionOutboxStatus.pending,
+      status: permanentHydrationFailure
+        ? ExecutionOutboxStatus.failed
+        : (record.acceptedAt ? ExecutionOutboxStatus.accepted : ExecutionOutboxStatus.pending),
     });
   }
 }
@@ -357,7 +367,20 @@ function assertHostedExecutionOutboxRecordMatches(
     || record.sourceId !== expected.sourceId
     || record.sourceType !== expected.sourceType
     || record.userId !== expected.userId
-    || JSON.stringify(record.payloadJson) !== JSON.stringify(expected.payloadJson)
+    || !isDeepStrictEqual(
+      readHostedExecutionOutboxPayload(record.payloadJson, {
+        eventId: record.eventId,
+        eventKind: record.eventKind,
+        occurredAt: null,
+        userId: record.userId,
+      }),
+      readHostedExecutionOutboxPayload(expected.payloadJson, {
+        eventId: expected.eventId,
+        eventKind: expected.eventKind,
+        occurredAt: null,
+        userId: expected.userId,
+      }),
+    )
   ) {
     throw new Error(
       `Hosted execution outbox event ${expected.eventId} already exists with conflicting metadata.`,

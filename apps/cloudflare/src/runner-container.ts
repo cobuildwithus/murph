@@ -1,6 +1,7 @@
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import {
   HOSTED_EXECUTION_CALLBACK_HOSTS,
+  HOSTED_EXECUTION_PROXY_HOSTS,
   type HostedExecutionRunnerRequest,
   type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
@@ -26,6 +27,7 @@ export class HostedExecutionConfigurationError extends Error {
 }
 
 interface HostedExecutionContainerInvokeRequest<TRequest extends HostedExecutionRunnerRequest> {
+  internalWorkerProxyToken: string;
   request: TRequest;
   runnerEnvironment: Record<string, string>;
   timeoutMs: number;
@@ -54,7 +56,10 @@ export interface HostedExecutionContainerNamespaceLike {
   getByName(name: string): HostedExecutionContainerStubLike;
 }
 
-type RunnerOutboundHandlerContext = OutboundHandlerContext<{ userId?: unknown } | undefined>;
+type RunnerOutboundHandlerContext = OutboundHandlerContext<{
+  internalWorkerProxyToken?: unknown;
+  userId?: unknown;
+} | undefined>;
 
 interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
@@ -72,10 +77,10 @@ type RunnerOutboundHandlerName =
 const RUNNER_OUTBOUND_HOSTS = {
   [HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts]: "artifactsWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.commit]: "commitWorker",
-  "device-sync.worker": "deviceSyncWorker",
+  [HOSTED_EXECUTION_PROXY_HOSTS.deviceSync]: "deviceSyncWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.email]: "emailWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.outbox]: "outboxWorker",
-  "share-pack.worker": "sharePackWorker",
+  [HOSTED_EXECUTION_PROXY_HOSTS.sharePack]: "sharePackWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects]: "outboxWorker",
 } as const satisfies Record<string, RunnerOutboundHandlerName>;
 
@@ -154,6 +159,10 @@ export class RunnerContainer extends Container {
     runnerControlToken: string | null,
   ): Promise<Response> {
     const result = await this.invokeHostedExecution({
+      internalWorkerProxyToken: requireString(
+        payload.internalWorkerProxyToken,
+        "payload.internalWorkerProxyToken",
+      ),
       request: requireRecord(payload.request, "request") as unknown as HostedExecutionRunnerRequest,
       runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
       runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
@@ -186,11 +195,14 @@ export class RunnerContainer extends Container {
         },
       },
     });
-    await this.installOutboundHandlers(input.userId);
+    await this.installOutboundHandlers(input.userId, input.internalWorkerProxyToken);
 
     const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
     const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
-      body: JSON.stringify(input.request),
+      body: JSON.stringify({
+        ...input.request,
+        internalWorkerProxyToken: input.internalWorkerProxyToken,
+      }),
       headers: {
         authorization: `Bearer ${input.runnerControlToken}`,
         "content-type": "application/json; charset=utf-8",
@@ -206,7 +218,10 @@ export class RunnerContainer extends Container {
     return (await response.json()) as HostedExecutionRunnerResult;
   }
 
-  private async installOutboundHandlers(userId: string): Promise<void> {
+  private async installOutboundHandlers(
+    userId: string,
+    internalWorkerProxyToken: string,
+  ): Promise<void> {
     await this.setOutboundByHosts(
       Object.fromEntries(
         Object.entries(RUNNER_OUTBOUND_HOSTS).map(([host, method]) => [
@@ -214,6 +229,7 @@ export class RunnerContainer extends Container {
           {
             method,
             params: {
+              internalWorkerProxyToken,
               userId,
             },
           },
@@ -241,10 +257,12 @@ export async function invokeHostedExecutionContainerRunner<
   TRequest extends HostedExecutionRunnerRequest,
 >(input: HostedExecutionContainerRunnerInput<TRequest>): Promise<HostedExecutionRunnerResult> {
   const runnerControlToken = requireHostedExecutionRunnerControlToken(input.runnerControlToken);
+  const internalWorkerProxyToken = crypto.randomUUID();
 
   const response = await input.runnerContainerNamespace.getByName(input.userId).fetch(
     new Request(RUNNER_INVOKE_URL, {
       body: JSON.stringify({
+        internalWorkerProxyToken,
         request: input.request,
         runnerEnvironment: input.runnerEnvironment,
         timeoutMs: input.timeoutMs,
@@ -275,6 +293,10 @@ function createRunnerOutboundHandler() {
       request,
       env as RunnerOutboundEnvironmentSource,
       requireString(ctx.params?.userId, "ctx.params.userId"),
+      requireString(
+        ctx.params?.internalWorkerProxyToken,
+        "ctx.params.internalWorkerProxyToken",
+      ),
     );
   };
 }
