@@ -33,7 +33,7 @@ test("resolveDeviceSyncBaseUrl reads the unprefixed env var", () => {
 });
 
 test("resolveDeviceSyncBaseUrl falls back to the default base URL when env is unset", () => {
-  assert.equal(resolveDeviceSyncBaseUrl(), "http://127.0.0.1:8788");
+  assert.equal(resolveDeviceSyncBaseUrl(), "http://localhost:8788");
 });
 
 test("resolveDeviceSyncBaseUrl rejects non-loopback base URLs when a control-plane bearer is configured", () => {

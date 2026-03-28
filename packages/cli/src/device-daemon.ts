@@ -116,7 +116,8 @@ export async function getManagedDeviceSyncDaemonStatus(input: {
   const paths = resolveDeviceDaemonPaths(vault)
   const baseUrl = resolveDeviceSyncBaseUrl(input.baseUrl, input.env ?? process.env)
   const state = await readDeviceDaemonState(paths, dependencies)
-  const healthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl)
+  const managedToken = readManagedControlToken(vault, input.dependencies)
+  const healthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, managedToken)
   const managed = state !== null && state.baseUrl === baseUrl
   const running =
     managed &&
@@ -161,7 +162,8 @@ export async function startManagedDeviceSyncDaemon(input: {
 
   const paths = resolveDeviceDaemonPaths(vault)
   const state = await readDeviceDaemonState(paths, dependencies)
-  const existingHealthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl)
+  const existingToken = readManagedControlToken(vault, input.dependencies)
+  const existingHealthy = await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, existingToken)
 
   if (state !== null && state.baseUrl === baseUrl) {
     if (dependencies.isProcessAlive(state.pid) && existingHealthy) {
@@ -246,6 +248,7 @@ export async function startManagedDeviceSyncDaemon(input: {
     baseUrl,
     dependencies,
     DEVICE_DAEMON_START_TIMEOUT_MS,
+    controlToken,
   )
 
   if (!healthy) {

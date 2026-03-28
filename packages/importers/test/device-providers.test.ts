@@ -757,6 +757,33 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   assert.equal(activityFile?.metadata?.checksum, "abc123");
 });
 
+test("prepareDeviceProviderSnapshotImport rounds fractional integer sample streams", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      accountId: "garmin-user-1",
+      importedAt: "2026-03-16T11:00:00.000Z",
+      epochSummaries: [
+        {
+          epochId: "epoch-1",
+          timestamp: "2026-03-15T12:00:00.000Z",
+          heartRate: 64.6,
+          steps: 42.6,
+          respirationRate: 13.9,
+        },
+      ],
+    },
+  });
+
+  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 65));
+  assert.ok(payload.samples?.some((sample) => sample.stream === "steps" && sample.sample.value === 43));
+  assert.ok(
+    payload.samples?.some(
+      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.9,
+    ),
+  );
+});
+
 test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, aliases, and string numerics", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",

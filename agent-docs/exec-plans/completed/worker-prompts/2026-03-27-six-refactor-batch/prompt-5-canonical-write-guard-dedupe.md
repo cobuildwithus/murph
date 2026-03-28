@@ -45,4 +45,3 @@ Best-guess fix:
 Overlap notes:
 - `packages/cli/src/assistant/canonical-write-guard.ts` overlaps an active assistant guard lane.
 - `packages/core/src/operations/write-batch.ts` has nearby inbox/core mutation edits. Read both files carefully and preserve unrelated changes.
-
