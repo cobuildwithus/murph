@@ -124,6 +124,48 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
+  it("keeps downstream runtime TypeErrors as internal errors after request decoding succeeds", async () => {
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockRejectedValue(
+      new TypeError("missing hosted runtime config"),
+    );
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify({
+          bundles: { agentState: null, vault: null },
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_runtime_type_error",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Internal error.",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("allows concurrent hosted jobs inside one container process", async () => {
     const started: string[] = [];
     const finished: string[] = [];

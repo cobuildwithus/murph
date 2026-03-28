@@ -46,9 +46,19 @@ export async function startHostedContainerEntrypoint(input: {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
 
-      const job = requireJsonObject(
-        JSON.parse(Buffer.concat(chunks).toString("utf8")),
-      ) as HostedExecutionRunnerJobRequest;
+      let job: HostedExecutionRunnerJobRequest;
+
+      try {
+        job = parseHostedExecutionRunnerJobRequest(Buffer.concat(chunks));
+      } catch (error) {
+        console.warn("Hosted container entrypoint rejected the request body.", error);
+        const classified = classifyRequestDecodeError(error);
+        writeJsonResponse(response, classified.statusCode, {
+          error: classified.message,
+        });
+        return;
+      }
+
       const result = await runHostedExecutionJob(job, {
         signal: requestAbort.signal,
       });
@@ -66,9 +76,8 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       console.error("Hosted container entrypoint failed.", error);
-      const classified = classifyPublicEntrypointError(error);
-      writeJsonResponse(response, classified.statusCode, {
-        error: classified.message,
+      writeJsonResponse(response, 500, {
+        error: "Internal error.",
       });
     } finally {
       requestAbort.cleanup();
@@ -102,6 +111,12 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function parseHostedExecutionRunnerJobRequest(payload: Uint8Array): HostedExecutionRunnerJobRequest {
+  return requireJsonObject(
+    JSON.parse(Buffer.from(payload).toString("utf8")),
+  ) as HostedExecutionRunnerJobRequest;
 }
 
 function requireJsonObject(value: unknown): Record<string, unknown> {
@@ -143,7 +158,7 @@ function createRequestAbortController(
   };
 }
 
-function classifyPublicEntrypointError(error: unknown): {
+function classifyRequestDecodeError(error: unknown): {
   message: string;
   statusCode: number;
 } {
