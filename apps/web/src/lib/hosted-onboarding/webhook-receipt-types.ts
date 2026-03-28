@@ -27,8 +27,9 @@ export type HostedWebhookDispatchSideEffectPayload =
   | {
       dispatch: HostedExecutionDispatchRequest;
     }
-  | {
+    | {
       schemaVersion: string;
+      botUserId?: string | null;
       dispatchRef: HostedExecutionDispatchRef;
       storage?: "reference";
       linqEvent?: Record<string, unknown> | null;
@@ -135,13 +136,13 @@ export type HostedWebhookDispatchEnqueueInput = {
 export type HostedWebhookReceiptHandlers = {
   afterSideEffectSent?: (input: {
     effect: HostedWebhookSideEffect;
-    prisma: PrismaClient;
+    prisma: HostedWebhookReceiptPersistenceClient;
   }) => Promise<void>;
   enqueueDispatchEffect: (input: HostedWebhookDispatchEnqueueInput) => Promise<number>;
   performSideEffect: (
     effect: HostedWebhookSideEffect,
     options: {
-      prisma: PrismaClient;
+      prisma: HostedWebhookReceiptPersistenceClient;
       signal?: AbortSignal;
     },
   ) => Promise<HostedWebhookSideEffectResult>;

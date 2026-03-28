@@ -1,5 +1,5 @@
 import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murph/hosted-execution";
-import { HostedBillingStatus, HostedMemberStatus, type PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 
 import {
   buildHostedTelegramWebhookEventId,
@@ -10,6 +10,7 @@ import {
   createHostedWebhookDispatchSideEffect,
   type HostedWebhookDispatchSideEffect,
   type HostedWebhookPlan,
+  type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
 
 export type HostedOnboardingTelegramWebhookResponse = {
@@ -30,7 +31,7 @@ type HostedOnboardingTelegramWebhookPlan =
     };
 
 export async function planHostedOnboardingTelegramWebhook(input: {
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
 }): Promise<HostedWebhookPlan<HostedOnboardingTelegramWebhookResponse>> {
   const summary = await summarizeHostedTelegramWebhook(input.update);

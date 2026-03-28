@@ -481,6 +481,7 @@ function minimizeHostedWebhookDispatchPayload(
 
   if (dispatch.event.kind === "telegram.message.received") {
     return {
+      botUserId: dispatch.event.botUserId,
       dispatchRef: buildHostedExecutionDispatchRef(dispatch),
       schemaVersion: serializedDispatch.schemaVersion as string,
       storage: "reference",
