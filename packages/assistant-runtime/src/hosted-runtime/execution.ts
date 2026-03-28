@@ -3,6 +3,7 @@ import {
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,
   snapshotHostedExecutionContext,
+  type HostedBundleArtifactLocation,
 } from "@murph/runtime-state";
 import type {
   HostedExecutionDispatchRequest,
@@ -33,11 +34,12 @@ import { summarizeDispatch } from "./summary.ts";
 
 export async function executeHostedDispatchForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  materializedArtifactPaths?: ReadonlySet<string>;
   request: HostedAssistantRuntimeJobRequest;
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sharePackBaseUrl" | "sharePackToken"
+    "artifactsBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "webControlPlane"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
@@ -54,6 +56,7 @@ export async function executeHostedDispatchForCommit(input: {
     requestId: input.request.dispatch.eventId,
     timeoutMs: input.runtime.commitTimeoutMs,
     runtimeEnv: input.runtimeEnv,
+    webControlPlane: input.runtime.webControlPlane,
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSnapshot = await snapshotHostedExecutionContext({
@@ -65,6 +68,10 @@ export async function executeHostedDispatchForCommit(input: {
       timeoutMs: input.runtime.commitTimeoutMs,
     }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
+    preservedArtifacts: collectPreservedHostedArtifacts({
+      bytes: decodeHostedBundleBase64(input.request.bundles.vault),
+      materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
+    }),
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSideEffects = await collectHostedExecutionSideEffects(input.restored.vaultRoot);
@@ -91,6 +98,7 @@ export async function executeHostedDispatchForCommit(input: {
 export async function completeHostedExecutionAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
+  materializedArtifactPaths?: ReadonlySet<string>;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "artifactsBaseUrl" | "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv"
@@ -123,6 +131,10 @@ export async function completeHostedExecutionAfterCommit(input: {
       timeoutMs: input.runtime.commitTimeoutMs,
     }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
+    preservedArtifacts: collectPreservedHostedArtifacts({
+      bytes: decodeHostedBundleBase64(input.committedExecution.committedResult.bundles.vault),
+      materializedArtifactPaths: input.materializedArtifactPaths ?? new Set(),
+    }),
     vaultRoot: input.restored.vaultRoot,
   });
   const finalResult: HostedExecutionRunnerResult = {
@@ -157,5 +169,23 @@ function collectHostedBundleArtifactHashes(bytes: Uint8Array | null): Set<string
     );
   } catch {
     return new Set();
+  }
+}
+
+function collectPreservedHostedArtifacts(input: {
+  bytes: Uint8Array | null;
+  materializedArtifactPaths: ReadonlySet<string>;
+}): HostedBundleArtifactLocation[] {
+  if (!input.bytes) {
+    return [];
+  }
+
+  try {
+    return listHostedBundleArtifacts({
+      bytes: input.bytes,
+      expectedKind: "vault",
+    }).filter((artifact) => !input.materializedArtifactPaths.has(artifact.path));
+  } catch {
+    return [];
   }
 }

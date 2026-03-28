@@ -11,6 +11,7 @@ import type {
   HostedWebhookEventPayload,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptErrorState,
+  HostedWebhookResponsePayload,
   HostedWebhookReceiptState,
   HostedWebhookReceiptStatus,
   HostedWebhookSideEffect,
@@ -29,6 +30,8 @@ export function serializeHostedWebhookReceiptState(
       completedAt: receiptState.status === "completed" ? receiptState.completedAt : null,
       lastError: receiptState.status === "failed" ? receiptState.lastError : null,
       lastReceivedAt: receiptState.lastReceivedAt,
+      plannedAt: receiptState.plannedAt,
+      response: receiptState.response,
       sideEffects: receiptState.sideEffects.map((effect) => serializeHostedWebhookSideEffect(effect)),
       status: receiptState.status,
     },
@@ -52,6 +55,8 @@ export function readHostedWebhookReceiptState(
     eventPayload: readHostedWebhookReceiptEventPayload(payloadJson),
     lastError: readHostedWebhookReceiptError(nestedState.lastError),
     lastReceivedAt: readHostedWebhookReceiptString(nestedState.lastReceivedAt),
+    plannedAt: readHostedWebhookReceiptString(nestedState.plannedAt),
+    response: readHostedWebhookReceiptResponse(nestedState.response),
     sideEffects: readHostedWebhookReceiptSideEffects(nestedState.sideEffects),
     status,
   };
@@ -124,6 +129,16 @@ function readHostedWebhookReceiptEventPayload(
   return {};
 }
 
+function readHostedWebhookReceiptResponse(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): HostedWebhookResponsePayload | null {
+  const response = toHostedWebhookReceiptRecord(value);
+
+  return response
+    ? response as HostedWebhookResponsePayload
+    : null;
+}
+
 function readHostedWebhookReceiptError(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): HostedWebhookReceiptErrorState | null {
@@ -185,7 +200,7 @@ function readHostedWebhookReceiptStatusValue(
 function readHostedWebhookSideEffectStatusValue(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): HostedWebhookSideEffectStatus | null {
-  return value === "pending" || value === "sent"
+  return value === "pending" || value === "sent" || value === "sent_unconfirmed"
     ? value
     : null;
 }
@@ -288,6 +303,7 @@ function readHostedWebhookSideEffect(
         payload: {
           schemaVersion: payload.schemaVersion as string,
           dispatchRef,
+          storage: "reference",
           linqEvent: toHostedWebhookReceiptRecord(payload.linqEvent),
           telegramUpdate: toHostedWebhookReceiptRecord(payload.telegramUpdate),
         },
@@ -314,6 +330,7 @@ function readHostedWebhookSideEffect(
           chatId,
           inviteId: readHostedWebhookReceiptString(payload.inviteId),
           message,
+          replyToMessageId: readHostedWebhookReceiptString(payload.replyToMessageId),
         },
         result:
           Object.keys(result).length === 0

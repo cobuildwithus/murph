@@ -186,7 +186,212 @@ export interface HostedExecutionUserEnvUpdate {
   mode: "merge" | "replace";
 }
 
+export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
+
 export interface HostedExecutionSharePackResponse {
   pack: SharePack;
   shareId: string;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
+  accessToken: string;
+  accessTokenExpiresAt: string | null;
+  keyVersion: string;
+  refreshToken: string | null;
+  tokenVersion: number;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
+  connection: {
+    accessTokenExpiresAt: string | null;
+    connectedAt: string;
+    createdAt: string;
+    displayName: string | null;
+    externalAccountId: string;
+    id: string;
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    lastSyncCompletedAt: string | null;
+    lastSyncErrorAt: string | null;
+    lastSyncStartedAt: string | null;
+    lastWebhookAt: string | null;
+    metadata: Record<string, unknown>;
+    nextReconcileAt: string | null;
+    provider: string;
+    scopes: string[];
+    status: "active" | "reauthorization_required" | "disconnected";
+    updatedAt?: string;
+  };
+  tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeSnapshotRequest {
+  connectionId?: string | null;
+  provider?: string | null;
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
+  generatedAt: string;
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
+  accessTokenExpiresAt?: string | null;
+  clearError?: boolean;
+  connectionId: string;
+  displayName?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastSyncCompletedAt?: string | null;
+  lastSyncErrorAt?: string | null;
+  lastSyncStartedAt?: string | null;
+  lastWebhookAt?: string | null;
+  metadata?: Record<string, unknown>;
+  nextReconcileAt?: string | null;
+  observedTokenVersion?: number | null;
+  scopes?: string[];
+  status?: "active" | "reauthorization_required" | "disconnected";
+  tokenBundle?: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeApplyRequest {
+  occurredAt?: string | null;
+  updates: HostedExecutionDeviceSyncRuntimeConnectionUpdate[];
+  userId: string;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeApplyEntry {
+  connection: HostedExecutionDeviceSyncRuntimeConnectionSnapshot["connection"] | null;
+  connectionId: string;
+  status: "missing" | "updated";
+  tokenUpdate: "applied" | "cleared" | "missing" | "skipped_version_mismatch" | "unchanged";
+}
+
+export interface HostedExecutionDeviceSyncRuntimeApplyResponse {
+  appliedAt: string;
+  updates: HostedExecutionDeviceSyncRuntimeApplyEntry[];
+  userId: string;
+}
+
+export interface HostedExecutionDispatchStateSnapshot {
+  backpressured: boolean;
+  consumed: boolean;
+  lastError: string | null;
+  pending: boolean;
+  poisoned: boolean;
+}
+
+export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATUSES = [
+  "pending",
+  "accepted",
+  "completed",
+  "failed",
+] as const;
+
+export type HostedExecutionDispatchLifecycleStatus =
+  (typeof HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATUSES)[number];
+
+export interface HostedExecutionDispatchLifecycle {
+  lastError: string | null;
+  status: HostedExecutionDispatchLifecycleStatus;
+}
+
+export function resolveHostedExecutionDispatchOutcomeState(input: {
+  initialState: HostedExecutionDispatchStateSnapshot;
+  nextState: HostedExecutionDispatchStateSnapshot;
+}): HostedExecutionDispatchResult["event"]["state"] {
+  if (input.nextState.poisoned) {
+    return "poisoned";
+  }
+
+  if (input.nextState.backpressured) {
+    return "backpressured";
+  }
+
+  if (input.initialState.consumed) {
+    return "duplicate_consumed";
+  }
+
+  if (input.initialState.pending) {
+    return "duplicate_pending";
+  }
+
+  if (input.nextState.consumed) {
+    return "completed";
+  }
+
+  return "queued";
+}
+
+export function resolveHostedExecutionDispatchLifecycle(
+  dispatchResult: HostedExecutionDispatchResult,
+): HostedExecutionDispatchLifecycle {
+  const {
+    event,
+    status,
+  } = dispatchResult;
+
+  switch (event.state) {
+    case "completed":
+    case "duplicate_consumed":
+      return {
+        lastError: null,
+        status: "completed",
+      };
+    case "poisoned":
+      return {
+        lastError: event.lastError ?? status.lastError ?? "Hosted execution event was poisoned.",
+        status: "failed",
+      };
+    case "backpressured":
+      return {
+        lastError: event.lastError ?? status.lastError,
+        status: "pending",
+      };
+    case "queued":
+    case "duplicate_pending":
+      return {
+        lastError:
+          status.lastError === "Hosted execution dispatch is not configured."
+            ? status.lastError
+            : event.lastError ?? status.lastError,
+        status:
+          status.lastError === "Hosted execution dispatch is not configured."
+            ? "pending"
+            : "accepted",
+      };
+    default:
+      return event.state satisfies never;
+  }
+}
+
+export function resolveHostedDeviceSyncWakeContext(
+  event: HostedExecutionDeviceSyncWakeEvent,
+): {
+  connectionId: string | null;
+  hint: HostedExecutionDeviceSyncWakeEvent["hint"];
+  provider: string | null;
+} {
+  return {
+    connectionId: event.connectionId ?? null,
+    hint: event.hint ?? null,
+    provider: event.provider ?? null,
+  };
+}
+
+export function normalizeHostedDeviceSyncJobHints(
+  value: HostedExecutionDeviceSyncWakeEvent["hint"],
+): HostedExecutionDeviceSyncJobHint[] {
+  return Array.isArray(value?.jobs)
+    ? value.jobs.map((job) => ({
+        kind: job.kind,
+        ...(job.availableAt ? { availableAt: job.availableAt } : {}),
+        ...(job.dedupeKey !== undefined ? { dedupeKey: job.dedupeKey ?? null } : {}),
+        ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
+        ...(job.payload ? { payload: { ...job.payload } } : {}),
+        ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
+      }))
+    : [];
 }

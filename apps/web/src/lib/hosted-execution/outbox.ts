@@ -9,6 +9,7 @@ import {
 import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
+  resolveHostedExecutionDispatchLifecycle,
 } from "@murph/hosted-execution";
 
 import { finalizeHostedShareAcceptance } from "../hosted-share/shared";
@@ -39,8 +40,9 @@ export async function enqueueHostedExecutionOutbox(
   input: EnqueueHostedExecutionOutboxInput,
 ): Promise<ExecutionOutbox> {
   const now = new Date(input.now ?? new Date().toISOString());
+  const payloadJson = serializeHostedExecutionOutboxPayload(input.dispatch);
 
-  return input.tx.executionOutbox.upsert({
+  const record = await input.tx.executionOutbox.upsert({
     where: {
       eventId: input.dispatch.eventId,
     },
@@ -52,11 +54,22 @@ export async function enqueueHostedExecutionOutbox(
       sourceId: input.sourceId ?? null,
       eventId: input.dispatch.eventId,
       eventKind: input.dispatch.event.kind,
-      payloadJson: serializeHostedExecutionOutboxPayload(input.dispatch),
+      payloadJson,
       status: ExecutionOutboxStatus.pending,
       nextAttemptAt: now,
     },
   });
+
+  assertHostedExecutionOutboxRecordMatches(record, {
+    eventId: input.dispatch.eventId,
+    eventKind: input.dispatch.event.kind,
+    payloadJson,
+    sourceId: input.sourceId ?? null,
+    sourceType: input.sourceType,
+    userId: input.dispatch.event.userId,
+  });
+
+  return record;
 }
 
 export async function drainHostedExecutionOutbox(input: {
@@ -324,49 +337,46 @@ function readHostedExecutionDispatch(
   return hydrateHostedExecutionDispatch(record, prisma);
 }
 
+function assertHostedExecutionOutboxRecordMatches(
+  record: Pick<
+    ExecutionOutbox,
+    "eventId" | "eventKind" | "payloadJson" | "sourceId" | "sourceType" | "userId"
+  >,
+  expected: {
+    eventId: string;
+    eventKind: string;
+    payloadJson: Prisma.InputJsonValue;
+    sourceId: string | null;
+    sourceType: string;
+    userId: string;
+  },
+): void {
+  if (
+    record.eventId !== expected.eventId
+    || record.eventKind !== expected.eventKind
+    || record.sourceId !== expected.sourceId
+    || record.sourceType !== expected.sourceType
+    || record.userId !== expected.userId
+    || JSON.stringify(record.payloadJson) !== JSON.stringify(expected.payloadJson)
+  ) {
+    throw new Error(
+      `Hosted execution outbox event ${expected.eventId} already exists with conflicting metadata.`,
+    );
+  }
+}
+
 function resolveHostedExecutionLifecycle(input: {
   dispatchResult: HostedExecutionDispatchResult;
 }): {
   lastError: string | null;
   status: ExecutionOutboxStatus;
 } {
-  const {
-    event,
-    status,
-  } = input.dispatchResult;
+  const lifecycle = resolveHostedExecutionDispatchLifecycle(input.dispatchResult);
 
-  switch (event.state) {
-    case "completed":
-    case "duplicate_consumed":
-      return {
-        lastError: null,
-        status: ExecutionOutboxStatus.completed,
-      };
-    case "poisoned":
-      return {
-        lastError: event.lastError ?? status.lastError ?? "Hosted execution event was poisoned.",
-        status: ExecutionOutboxStatus.failed,
-      };
-    case "backpressured":
-      return {
-        lastError: event.lastError ?? status.lastError,
-        status: ExecutionOutboxStatus.pending,
-      };
-    case "queued":
-    case "duplicate_pending":
-      return {
-        lastError:
-          status.lastError === "Hosted execution dispatch is not configured."
-            ? status.lastError
-            : event.lastError ?? status.lastError,
-        status:
-          status.lastError === "Hosted execution dispatch is not configured."
-            ? ExecutionOutboxStatus.pending
-            : ExecutionOutboxStatus.accepted,
-      };
-    default:
-      throw new Error(`Unsupported hosted execution dispatch state: ${event.state}`);
-  }
+  return {
+    lastError: lifecycle.lastError,
+    status: mapHostedExecutionLifecycleStatus(lifecycle.status),
+  };
 }
 
 async function finalizeHostedExecutionSourceIfNeeded(input: {
@@ -396,6 +406,23 @@ async function finalizeHostedExecutionSourceIfNeeded(input: {
 
 function computeRetryDelayMs(attemptCount: number): number {
   return Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attemptCount - 1)));
+}
+
+function mapHostedExecutionLifecycleStatus(
+  status: "accepted" | "completed" | "failed" | "pending",
+): ExecutionOutboxStatus {
+  switch (status) {
+    case "accepted":
+      return ExecutionOutboxStatus.accepted;
+    case "completed":
+      return ExecutionOutboxStatus.completed;
+    case "failed":
+      return ExecutionOutboxStatus.failed;
+    case "pending":
+      return ExecutionOutboxStatus.pending;
+    default:
+      return status satisfies never;
+  }
 }
 
 function generateExecutionOutboxId(): string {

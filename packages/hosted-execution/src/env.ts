@@ -9,6 +9,14 @@ export interface HostedExecutionControlEnvironment {
   controlToken: string | null;
 }
 
+export interface HostedExecutionWebControlPlaneEnvironment {
+  deviceSyncRuntimeBaseUrl: string | null;
+  internalToken: string | null;
+  schedulerToken: string | null;
+  shareBaseUrl: string | null;
+  shareToken: string | null;
+}
+
 export interface HostedExecutionWorkerEnvironment {
   allowedUserEnvKeys: string | null;
   allowedUserEnvPrefixes: string | null;
@@ -51,6 +59,24 @@ export function readHostedExecutionControlEnvironment(
   return {
     baseUrl: dispatchUrl,
     controlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
+  };
+}
+
+export function readHostedExecutionWebControlPlaneEnvironment(
+  source: EnvSource = process.env,
+): HostedExecutionWebControlPlaneEnvironment {
+  const sharedBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL);
+
+  return {
+    deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(
+      source.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL,
+    ) ?? sharedBaseUrl,
+    internalToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKEN),
+    schedulerToken: normalizeHostedExecutionString(source.CRON_SECRET),
+    shareBaseUrl: normalizeHostedExecutionBaseUrl(
+      source.HOSTED_SHARE_BASE_URL ?? source.HOSTED_SHARE_API_BASE_URL,
+    ) ?? sharedBaseUrl,
+    shareToken: normalizeHostedExecutionString(source.HOSTED_SHARE_INTERNAL_TOKEN),
   };
 }
 

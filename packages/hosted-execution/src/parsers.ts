@@ -4,6 +4,10 @@ import type {
   HostedExecutionAssistantCronTickEvent,
   HostedExecutionBundleRef,
   HostedExecutionDeviceSyncJobHint,
+  HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeTokenBundle,
+  HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
@@ -170,6 +174,39 @@ export function parseHostedExecutionSharePackResponse(value: unknown): HostedExe
   };
 }
 
+export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncRuntimeSnapshotResponse {
+  const record = requireObject(value, "Hosted device-sync runtime snapshot response");
+
+  return {
+    connections: requireArray(
+      record.connections,
+      "Hosted device-sync runtime snapshot response connections",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(entry, index)),
+    generatedAt: requireString(
+      record.generatedAt,
+      "Hosted device-sync runtime snapshot response generatedAt",
+    ),
+    userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncRuntimeApplyResponse {
+  const record = requireObject(value, "Hosted device-sync runtime apply response");
+
+  return {
+    appliedAt: requireString(record.appliedAt, "Hosted device-sync runtime apply response appliedAt"),
+    updates: requireArray(
+      record.updates,
+      "Hosted device-sync runtime apply response updates",
+    ).map((entry, index) => parseHostedExecutionDeviceSyncRuntimeApplyEntry(entry, index)),
+    userId: requireString(record.userId, "Hosted device-sync runtime apply response userId"),
+  };
+}
+
 export function parseHostedExecutionBundleRef(value: unknown): HostedExecutionBundleRef | null {
   if (value === null || value === undefined) {
     return null;
@@ -182,6 +219,129 @@ export function parseHostedExecutionBundleRef(value: unknown): HostedExecutionBu
     key: requireString(record.key, "Hosted execution bundle ref key"),
     size: requireNumber(record.size, "Hosted execution bundle ref size"),
     updatedAt: requireString(record.updatedAt, "Hosted execution bundle ref updatedAt"),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
+  const record = requireObject(
+    value,
+    `Hosted device-sync runtime snapshot response connections[${index}]`,
+  );
+
+  return {
+    connection: parseHostedExecutionDeviceSyncRuntimeConnection(
+      record.connection,
+      `Hosted device-sync runtime snapshot response connections[${index}].connection`,
+    ),
+    tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+      record.tokenBundle,
+      `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
+    ),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
+  value: unknown,
+  index: number,
+): HostedExecutionDeviceSyncRuntimeApplyResponse["updates"][number] {
+  const record = requireObject(value, `Hosted device-sync runtime apply response updates[${index}]`);
+  const status = requireString(
+    record.status,
+    `Hosted device-sync runtime apply response updates[${index}].status`,
+  );
+  const tokenUpdate = requireString(
+    record.tokenUpdate,
+    `Hosted device-sync runtime apply response updates[${index}].tokenUpdate`,
+  );
+
+  if (status !== "missing" && status !== "updated") {
+    throw new TypeError(
+      `Hosted device-sync runtime apply response updates[${index}].status must be "missing" or "updated".`,
+    );
+  }
+
+  if (
+    tokenUpdate !== "applied"
+    && tokenUpdate !== "cleared"
+    && tokenUpdate !== "missing"
+    && tokenUpdate !== "skipped_version_mismatch"
+    && tokenUpdate !== "unchanged"
+  ) {
+    throw new TypeError(
+      `Hosted device-sync runtime apply response updates[${index}].tokenUpdate is invalid.`,
+    );
+  }
+
+  return {
+    connection: record.connection === null
+      ? null
+      : parseHostedExecutionDeviceSyncRuntimeConnection(
+          record.connection,
+          `Hosted device-sync runtime apply response updates[${index}].connection`,
+        ),
+    connectionId: requireString(
+      record.connectionId,
+      `Hosted device-sync runtime apply response updates[${index}].connectionId`,
+    ),
+    status,
+    tokenUpdate,
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeConnection(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeConnectionSnapshot["connection"] {
+  const record = requireObject(value, label);
+  const status = requireString(record.status, `${label}.status`);
+
+  if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
+    throw new TypeError(`${label}.status must be an active, reauthorization_required, or disconnected status.`);
+  }
+
+  return {
+    accessTokenExpiresAt: readNullableString(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    connectedAt: requireString(record.connectedAt, `${label}.connectedAt`),
+    createdAt: requireString(record.createdAt, `${label}.createdAt`),
+    displayName: readNullableString(record.displayName, `${label}.displayName`),
+    externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
+    id: requireString(record.id, `${label}.id`),
+    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
+    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    lastSyncCompletedAt: readNullableString(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
+    lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
+    lastSyncStartedAt: readNullableString(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
+    lastWebhookAt: readNullableString(record.lastWebhookAt, `${label}.lastWebhookAt`),
+    metadata: requireObject(record.metadata, `${label}.metadata`),
+    nextReconcileAt: readNullableString(record.nextReconcileAt, `${label}.nextReconcileAt`),
+    provider: requireString(record.provider, `${label}.provider`),
+    scopes: requireStringArray(record.scopes, `${label}.scopes`),
+    status,
+    ...(record.updatedAt === undefined
+      ? {}
+      : { updatedAt: readNullableString(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeTokenBundle(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeTokenBundle | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+
+  return {
+    accessToken: requireString(record.accessToken, `${label}.accessToken`),
+    accessTokenExpiresAt: readNullableString(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
+    refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
+    tokenVersion: requireNumber(record.tokenVersion, `${label}.tokenVersion`),
   };
 }
 

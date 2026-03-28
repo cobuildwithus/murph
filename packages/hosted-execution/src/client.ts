@@ -46,7 +46,7 @@ export interface HostedExecutionControlClient {
 
 export interface HostedExecutionControlClientOptions {
   baseUrl: string;
-  controlToken?: string | null;
+  controlToken: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -91,8 +91,9 @@ export function createHostedExecutionControlClient(
   options: HostedExecutionControlClientOptions,
 ): HostedExecutionControlClient {
   const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
+  const controlToken = requireHostedExecutionControlToken(options.controlToken);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const authHeaders = withHostedExecutionControlToken(undefined, options.controlToken ?? null);
+  const authHeaders = withHostedExecutionControlToken(undefined, controlToken);
 
   return {
     clearUserEnv(userId) {
@@ -147,7 +148,7 @@ export function createHostedExecutionControlClient(
             {
               "content-type": "application/json; charset=utf-8",
             },
-            options.controlToken ?? null,
+            controlToken,
           ),
           method: "POST",
         },
@@ -168,7 +169,7 @@ export function createHostedExecutionControlClient(
             {
               "content-type": "application/json; charset=utf-8",
             },
-            options.controlToken ?? null,
+            controlToken,
           ),
           method: "PUT",
         },
@@ -182,6 +183,16 @@ function requireHostedExecutionBaseUrl(value: string): string {
 
   if (!normalized) {
     throw new TypeError("Hosted execution baseUrl must be configured.");
+  }
+
+  return normalized;
+}
+
+function requireHostedExecutionControlToken(value: string): string {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    throw new TypeError("Hosted execution controlToken must be configured.");
   }
 
   return normalized;
@@ -219,12 +230,8 @@ async function requestHostedExecutionJson<TResponse>(input: {
 
 function withHostedExecutionControlToken(
   headers: HeadersInit | undefined,
-  controlToken: string | null,
-): HeadersInit | undefined {
-  if (!controlToken) {
-    return headers;
-  }
-
+  controlToken: string,
+): HeadersInit {
   const nextHeaders = new Headers(headers);
   nextHeaders.set("authorization", `Bearer ${controlToken}`);
   return nextHeaders;

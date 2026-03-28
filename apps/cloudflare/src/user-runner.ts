@@ -5,6 +5,9 @@ import type {
   HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
+import {
+  resolveHostedExecutionDispatchOutcomeState,
+} from "@murph/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
@@ -30,7 +33,7 @@ import { RunnerBundleSync } from "./user-runner/runner-bundle-sync.js";
 import { RunnerQueueStore } from "./user-runner/runner-queue-store.js";
 import { RunnerScheduler } from "./user-runner/runner-scheduler.js";
 import {
-  CONSUMED_EVENT_TTL_MS,
+  COMMITTED_RESULT_FRESH_WINDOW_MS,
   computeRetryDelayMs,
   toUserStatus,
   type DurableObjectStateLike,
@@ -102,7 +105,7 @@ export class HostedUserRunner {
       event: {
         eventId: input.eventId,
         lastError: nextState.lastError ?? status.lastError,
-        state: resolveDispatchOutcomeState({
+        state: resolveHostedExecutionDispatchOutcomeState({
           initialState,
           nextState,
         }),
@@ -118,7 +121,11 @@ export class HostedUserRunner {
     const committed = await this.commitRecovery.readCommittedDispatch(input.event.userId, input.eventId);
     if (committed) {
       const presence = await this.queueStore.readEventPresence(input.eventId);
-      if (presence.pending || presence.consumed || isCommittedResultFresh(committed, CONSUMED_EVENT_TTL_MS)) {
+      if (
+        presence.pending
+        || presence.consumed
+        || isCommittedResultFresh(committed, COMMITTED_RESULT_FRESH_WINDOW_MS)
+      ) {
         if (!isCommittedResultFinalized(committed)) {
           return toUserStatus(
             await this.commitRecovery.syncCommittedBundlesWithoutConsuming(
@@ -328,7 +335,8 @@ export class HostedUserRunner {
             retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
             userId: record.userId,
           });
-          return toUserStatus(record);
+          record = await this.scheduler.syncNextWake();
+          continue;
         }
 
         if (error instanceof HostedExecutionConfigurationError) {
@@ -338,7 +346,7 @@ export class HostedUserRunner {
             retryDelayMs: this.env.retryDelayMs,
           });
           record = await this.scheduler.syncNextWake();
-          return toUserStatus(record);
+          continue;
         }
 
         record = await this.queueStore.reschedulePendingFailure({
@@ -348,7 +356,7 @@ export class HostedUserRunner {
           retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
         });
         record = await this.scheduler.syncNextWake();
-        return toUserStatus(record);
+        continue;
       }
     }
   }
@@ -511,43 +519,4 @@ export class HostedUserRunner {
       }
     }
   }
-}
-
-function resolveDispatchOutcomeState(input: {
-  initialState: {
-    backpressured: boolean;
-    consumed: boolean;
-    lastError: string | null;
-    pending: boolean;
-    poisoned: boolean;
-  };
-  nextState: {
-    backpressured: boolean;
-    consumed: boolean;
-    lastError: string | null;
-    pending: boolean;
-    poisoned: boolean;
-  };
-}): HostedExecutionDispatchResult["event"]["state"] {
-  if (input.nextState.poisoned) {
-    return "poisoned";
-  }
-
-  if (input.nextState.backpressured) {
-    return "backpressured";
-  }
-
-  if (input.initialState.consumed) {
-    return "duplicate_consumed";
-  }
-
-  if (input.initialState.pending) {
-    return "duplicate_pending";
-  }
-
-  if (input.nextState.consumed) {
-    return "completed";
-  }
-
-  return "queued";
 }

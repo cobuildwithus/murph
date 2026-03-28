@@ -1,8 +1,8 @@
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
 import {
-  readHostedExecutionDispatchRef,
-  type HostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
+  type HostedExecutionDispatchRef,
+  readHostedExecutionOutboxPayload,
 } from "@murph/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
@@ -15,41 +15,45 @@ export async function hydrateHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: HostedExecutionHydrationClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  const dispatchRef = readHostedExecutionDispatchRef(record.payloadJson, {
+  const payload = readHostedExecutionOutboxPayload(record.payloadJson, {
     eventId: record.eventId,
     eventKind: record.eventKind,
     occurredAt: null,
     userId: record.userId,
   });
 
-  if (!dispatchRef) {
-    throw new Error(`Hosted execution outbox record ${record.eventId} is missing a dispatch ref.`);
+  if (!payload) {
+    throw new Error(`Hosted execution outbox record ${record.eventId} is missing a dispatch payload.`);
+  }
+
+  if (payload.storage === "inline") {
+    return validateHydratedHostedExecutionDispatch(payload.dispatch, record);
   }
 
   switch (record.sourceType) {
     case "device_sync_signal":
       return hydrateHostedExecutionDispatchFromDeviceSyncSignal(record, prisma);
     case "hosted_share_link":
-      return hydrateHostedExecutionDispatchFromHostedShareLink(record, dispatchRef);
+      return hydrateHostedExecutionDispatchFromHostedShareLink(record, payload.dispatchRef);
     case "hosted_webhook_receipt":
-      return hydrateHostedExecutionDispatchFromWebhookReceipt(record, prisma, dispatchRef.occurredAt);
+      return hydrateHostedExecutionDispatchFromWebhookReceipt(record, prisma, payload.dispatchRef.occurredAt);
     default:
       if (record.eventKind === "member.activated") {
         return validateHydratedHostedExecutionDispatch(
           {
             event: {
               kind: "member.activated",
-              userId: dispatchRef.userId,
+              userId: payload.dispatchRef.userId,
             },
-            eventId: dispatchRef.eventId,
-            occurredAt: dispatchRef.occurredAt,
+            eventId: payload.dispatchRef.eventId,
+            occurredAt: payload.dispatchRef.occurredAt,
           },
           record,
         );
       }
 
       throw new Error(
-        `Unsupported hosted execution outbox source ${record.sourceType} for event ${record.eventId}.`,
+        `Unsupported hosted execution outbox reference source ${record.sourceType} for event ${record.eventId}.`,
       );
   }
 }

@@ -28,7 +28,10 @@ vi.mock("@/src/lib/hosted-share/shared", async () => {
   };
 });
 
-import { drainHostedExecutionOutbox } from "@/src/lib/hosted-execution/outbox";
+import {
+  drainHostedExecutionOutbox,
+  enqueueHostedExecutionOutbox,
+} from "@/src/lib/hosted-execution/outbox";
 
 describe("drainHostedExecutionOutbox", () => {
   beforeEach(() => {
@@ -156,6 +159,26 @@ describe("drainHostedExecutionOutbox", () => {
     expect(record?.status).toBe(ExecutionOutboxStatus.failed);
     expect(record?.lastError).toBe("poisoned by runner");
   });
+
+  it("rejects reused event ids when source metadata changes", async () => {
+    const dispatch = createTickDispatch();
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      sourceId: "signal_1",
+      sourceType: "device_sync_signal",
+      userId: dispatch.event.userId,
+    }));
+
+    await expect(enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: "signal_2",
+      sourceType: "device_sync_signal",
+      tx: prisma as never,
+    })).rejects.toThrow(
+      "Hosted execution outbox event evt_tick already exists with conflicting metadata.",
+    );
+  });
 });
 
 function createTickDispatch(): HostedExecutionDispatchRequest {
@@ -221,6 +244,7 @@ function createDispatchResult(
 function createOutboxRecord(input: {
   eventId: string;
   eventKind: string;
+  sourceId?: string | null;
   sourceType?: string;
   userId: string;
 }): ExecutionOutbox {
@@ -240,9 +264,16 @@ function createOutboxRecord(input: {
     lastStatusJson: null,
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
     payloadJson: {
+      storage: "reference",
+      dispatchRef: {
+        eventId: input.eventId,
+        eventKind: input.eventKind,
+        occurredAt: "2026-03-28T11:00:00.000Z",
+        userId: input.userId,
+      },
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
     },
-    sourceId: input.sourceType === "hosted_share_link" ? "share_123" : null,
+    sourceId: input.sourceId ?? (input.sourceType === "hosted_share_link" ? "share_123" : null),
     sourceType: input.sourceType ?? "hosted_execution",
     status: ExecutionOutboxStatus.pending,
     updatedAt: new Date("2026-03-28T11:00:00.000Z"),
@@ -292,4 +323,12 @@ function createOutboxPrisma(record: ExecutionOutbox): PrismaClient {
       }),
     },
   } as unknown as PrismaClient;
+}
+
+function createEnqueueOutboxPrisma(record: ExecutionOutbox): Pick<PrismaClient, "executionOutbox"> {
+  return {
+    executionOutbox: {
+      upsert: vi.fn(async () => structuredClone(record)),
+    },
+  } as unknown as Pick<PrismaClient, "executionOutbox">;
 }

@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
-import { openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
+import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
@@ -842,7 +842,7 @@ describe("runHostedExecutionJob", () => {
         },
       });
 
-      expect(requests).toEqual([`GET /objects/${artifactHash}`]);
+      expect(requests).toEqual([]);
 
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-restored-"));
       cleanupPaths.push(workspaceRoot);
@@ -898,17 +898,53 @@ describe("runHostedExecutionJob", () => {
       vaultBundle: Buffer.from(activation.bundles.vault!, "base64"),
       workspaceRoot: activationWorkspaceRoot,
     });
-    const rawAttachmentPath = path.join(
-      restoredActivation.vaultRoot,
-      "raw",
-      "inbox",
-      "2026-03-28",
-      "capture_404",
-      "attachments",
-      "report.pdf",
-    );
-    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
-    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+    const sourceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-missing-source-"));
+    cleanupPaths.push(sourceRoot);
+    const attachmentPath = path.join(sourceRoot, "missing-photo.jpg");
+    await writeFile(attachmentPath, Buffer.from("image-bytes-placeholder\n", "utf8"));
+
+    const runtime = await openInboxRuntime({
+      vaultRoot: restoredActivation.vaultRoot,
+    });
+
+    try {
+      const pipeline = await createInboxPipeline({
+        runtime,
+        vaultRoot: restoredActivation.vaultRoot,
+      });
+      await pipeline.processCapture({
+        accountId: "self",
+        actor: {
+          displayName: "Friend",
+          id: "contact-404",
+          isSelf: false,
+        },
+        attachments: [
+          {
+            externalId: "att-404",
+            fileName: "missing-photo.jpg",
+            kind: "image",
+            mime: "image/jpeg",
+            originalPath: attachmentPath,
+          },
+        ],
+        externalId: "msg-404",
+        occurredAt: "2026-03-28T12:00:00.000Z",
+        raw: {},
+        receivedAt: "2026-03-28T12:00:05.000Z",
+        source: "imessage",
+        text: "photo inbound",
+        thread: {
+          id: "chat-404",
+          isDirect: true,
+          title: "Missing artifact",
+        },
+      });
+
+      expect(runtime.listAttachmentParseJobs({ state: "pending" })).toHaveLength(1);
+    } finally {
+      runtime.close();
+    }
 
     const artifacts = new Map<string, Uint8Array>();
     const snapshot = await snapshotHostedExecutionContext({
