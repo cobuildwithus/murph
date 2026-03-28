@@ -1854,6 +1854,77 @@ test("readRecoverableStoredWriteOperation rejects committed text actions that om
   assert.equal(await readRecoverableStoredWriteOperation(vaultRoot, relativePath), null);
 });
 
+test("readStoredWriteOperation rejects write actions with unknown states", async () => {
+  const vaultRoot = await makeTempDirectory("murph-write-operation-invalid-state");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
+
+  const relativePath = ".runtime/operations/op_test.json";
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    JSON.stringify(
+      {
+        schemaVersion: WRITE_OPERATION_SCHEMA_VERSION,
+        operationId: "op_test",
+        operationType: "document_import",
+        summary: "Invalid action state",
+        status: "staged",
+        createdAt: "2026-03-27T00:00:00.000Z",
+        updatedAt: "2026-03-27T00:00:01.000Z",
+        occurredAt: "2026-03-27T00:00:00.000Z",
+        actions: [
+          {
+            kind: "text_write",
+            state: "unknown",
+            targetRelativePath: "bank/test.md",
+            stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () => readStoredWriteOperation(vaultRoot, relativePath),
+    (error: unknown) => error instanceof VaultError && error.code === "OPERATION_INVALID",
+  );
+});
+
+test("readRecoverableStoredWriteOperation rejects write actions with unknown states", async () => {
+  const vaultRoot = await makeTempDirectory("murph-recoverable-write-operation-invalid-state");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
+
+  const relativePath = ".runtime/operations/op_test.json";
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    JSON.stringify(
+      {
+        operationId: "op_test",
+        status: "staged",
+        createdAt: "2026-03-27T00:00:00.000Z",
+        updatedAt: "2026-03-27T00:00:01.000Z",
+        actions: [
+          {
+            kind: "text_write",
+            state: "unknown",
+            targetRelativePath: "bank/test.md",
+            stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  assert.equal(await readRecoverableStoredWriteOperation(vaultRoot, relativePath), null);
+});
+
 test("listProtectedCanonicalPaths excludes symlinks under protected trees", async () => {
   const vaultRoot = await makeTempDirectory("murph-protected-path-symlink");
   const externalRoot = await makeTempDirectory("murph-protected-path-symlink-external");

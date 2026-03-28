@@ -203,6 +203,12 @@ function isStoredWriteOperationStatus(value: unknown): value is WriteOperationSt
   );
 }
 
+function parseWriteOperationActionState(value: unknown): WriteOperationActionState | null {
+  return value === "staged" || value === "applied" || value === "reused" || value === "rolled_back"
+    ? value
+    : null;
+}
+
 function nowIso(): string {
   return toIsoTimestamp(new Date(), "updatedAt");
 }
@@ -232,25 +238,41 @@ function normalizeStoredRelativePath(candidate: unknown): string | null {
   }
 }
 
+function parseStoredBackupRelativePath(record: Record<string, unknown>): string | undefined | null {
+  if (!("backupRelativePath" in record) || record.backupRelativePath === undefined) {
+    return undefined;
+  }
+
+  return normalizeStoredRelativePath(record.backupRelativePath);
+}
+
+function parseStoredStageRelativePath(record: Record<string, unknown>): string | null {
+  return normalizeStoredRelativePath(record.stageRelativePath);
+}
+
 function parseCommittedPayloadReceipt(value: unknown): CommittedPayloadReceipt | undefined | null {
   if (value === undefined) {
     return undefined;
   }
 
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
   if (
-    !isPlainRecord(value) ||
-    typeof value.sha256 !== "string" ||
-    !/^[a-f0-9]{64}$/u.test(value.sha256) ||
-    typeof value.byteLength !== "number" ||
-    !Number.isInteger(value.byteLength) ||
-    value.byteLength < 0
+    typeof record.sha256 !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(record.sha256) ||
+    typeof record.byteLength !== "number" ||
+    !Number.isInteger(record.byteLength) ||
+    record.byteLength < 0
   ) {
     return null;
   }
 
   return {
-    sha256: value.sha256,
-    byteLength: value.byteLength,
+    sha256: record.sha256,
+    byteLength: record.byteLength,
   };
 }
 
@@ -325,130 +347,120 @@ export async function listWriteOperationMetadataPaths(vaultRoot: string): Promis
 }
 
 function parseStoredAction(value: unknown): StoredWriteAction | null {
-  if (!isPlainRecord(value) || typeof value.kind !== "string" || typeof value.state !== "string") {
+  if (!isPlainRecord(value) || typeof value.kind !== "string") {
     return null;
   }
 
-  const targetRelativePath = normalizeStoredRelativePath(value.targetRelativePath);
-  if (!targetRelativePath) {
+  const record = value as Record<string, unknown>;
+  const state = parseWriteOperationActionState(record.state);
+  const targetRelativePath = normalizeStoredRelativePath(record.targetRelativePath);
+  if (!state || !targetRelativePath) {
     return null;
   }
 
-  if (
-    value.kind !== "raw_copy" &&
-    value.kind !== "text_write" &&
-    value.kind !== "jsonl_append" &&
-    value.kind !== "delete"
-  ) {
-    return null;
-  }
+  switch (record.kind) {
+    case "delete": {
+      const backupRelativePath = parseStoredBackupRelativePath(record);
+      if ("backupRelativePath" in record && record.backupRelativePath !== undefined && !backupRelativePath) {
+        return null;
+      }
 
-  if (value.kind === "delete") {
-    const backupRelativePath =
-      "backupRelativePath" in value && value.backupRelativePath !== undefined
-        ? (normalizeStoredRelativePath(value.backupRelativePath) ?? undefined)
-        : undefined;
-    if ("backupRelativePath" in value && value.backupRelativePath !== undefined && !backupRelativePath) {
-      return null;
+      return {
+        kind: "delete",
+        state,
+        targetRelativePath,
+        effect: record.effect === "delete" ? record.effect : undefined,
+        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
+        backupRelativePath: backupRelativePath ?? undefined,
+        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
+        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+      };
     }
+    case "raw_copy": {
+      const stageRelativePath = parseStoredStageRelativePath(record);
+      if (!stageRelativePath) {
+        return null;
+      }
 
-    return {
-      kind: "delete",
-      state: value.state as WriteOperationActionState,
-      targetRelativePath,
-      effect: value.effect === "delete" ? value.effect : undefined,
-      existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
-      backupRelativePath,
-      appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
-      rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
-    };
+      return {
+        kind: "raw_copy",
+        state,
+        targetRelativePath,
+        stageRelativePath,
+        allowExistingMatch: record.allowExistingMatch === true,
+        originalFileName: typeof record.originalFileName === "string" ? record.originalFileName : "",
+        mediaType: typeof record.mediaType === "string" ? record.mediaType : "",
+        effect: record.effect === "copy" || record.effect === "reuse" ? record.effect : undefined,
+        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
+        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
+        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+      };
+    }
+    case "text_write": {
+      const stageRelativePath = parseStoredStageRelativePath(record);
+      if (!stageRelativePath) {
+        return null;
+      }
+
+      const backupRelativePath = parseStoredBackupRelativePath(record);
+      if ("backupRelativePath" in record && record.backupRelativePath !== undefined && !backupRelativePath) {
+        return null;
+      }
+
+      const committedPayloadReceipt = parseCommittedPayloadReceipt(record.committedPayloadReceipt);
+      if (committedPayloadReceipt === null) {
+        return null;
+      }
+
+      return {
+        kind: "text_write",
+        state,
+        targetRelativePath,
+        stageRelativePath,
+        overwrite: record.overwrite !== false,
+        allowExistingMatch: record.allowExistingMatch === true,
+        allowRaw: record.allowRaw === true,
+        effect:
+          record.effect === "create" || record.effect === "update" || record.effect === "reuse"
+            ? record.effect
+            : undefined,
+        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
+        backupRelativePath: backupRelativePath ?? undefined,
+        committedPayloadReceipt,
+        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
+        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+      };
+    }
+    case "jsonl_append": {
+      const stageRelativePath = parseStoredStageRelativePath(record);
+      if (!stageRelativePath) {
+        return null;
+      }
+
+      const committedPayloadReceipt = parseCommittedPayloadReceipt(record.committedPayloadReceipt);
+      if (committedPayloadReceipt === null) {
+        return null;
+      }
+
+      return {
+        kind: "jsonl_append",
+        state,
+        targetRelativePath,
+        stageRelativePath,
+        effect: record.effect === "append" ? record.effect : undefined,
+        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
+        originalSize:
+          typeof record.originalSize === "number" && Number.isFinite(record.originalSize)
+            ? record.originalSize
+            : undefined,
+        committedPayloadReceipt,
+        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
+        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+      };
+    }
+    default:
+      return null;
   }
-
-  const stageRelativePath = normalizeStoredRelativePath(value.stageRelativePath);
-  if (!stageRelativePath) {
-    return null;
-  }
-
-  if (value.kind === "raw_copy") {
-    return {
-      kind: "raw_copy",
-      state: value.state as WriteOperationActionState,
-      targetRelativePath,
-      stageRelativePath,
-      allowExistingMatch: value.allowExistingMatch === true,
-      originalFileName: typeof value.originalFileName === "string" ? value.originalFileName : "",
-      mediaType: typeof value.mediaType === "string" ? value.mediaType : "",
-      effect: value.effect === "copy" || value.effect === "reuse" ? value.effect : undefined,
-      existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
-      appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
-      rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
-    };
-  }
-
-  const backupRelativePath =
-    "backupRelativePath" in value && value.backupRelativePath !== undefined
-      ? (normalizeStoredRelativePath(value.backupRelativePath) ?? undefined)
-      : undefined;
-  if ("backupRelativePath" in value && value.backupRelativePath !== undefined && !backupRelativePath) {
-    return null;
-  }
-  const committedPayloadReceipt = parseCommittedPayloadReceipt(value.committedPayloadReceipt);
-  if (committedPayloadReceipt === null) {
-    return null;
-  }
-
-  if (value.kind === "text_write") {
-    return {
-      kind: "text_write",
-      state: value.state as WriteOperationActionState,
-      targetRelativePath,
-      stageRelativePath,
-      overwrite: value.overwrite !== false,
-      allowExistingMatch: value.allowExistingMatch === true,
-      allowRaw: value.allowRaw === true,
-      effect:
-        value.effect === "create" || value.effect === "update" || value.effect === "reuse"
-          ? value.effect
-          : undefined,
-      existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
-      backupRelativePath,
-      committedPayloadReceipt,
-      appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
-      rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
-    };
-  }
-
-  return {
-    kind: "jsonl_append",
-    state: value.state as WriteOperationActionState,
-    targetRelativePath,
-    stageRelativePath,
-    effect: value.effect === "append" ? value.effect : undefined,
-    existedBefore: typeof value.existedBefore === "boolean" ? value.existedBefore : undefined,
-    originalSize:
-      typeof value.originalSize === "number" && Number.isFinite(value.originalSize)
-        ? value.originalSize
-        : undefined,
-    committedPayloadReceipt,
-    appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : undefined,
-    rolledBackAt: typeof value.rolledBackAt === "string" ? value.rolledBackAt : undefined,
-  };
-}
-
-function parseRecoverableStoredAction(value: unknown): StoredWriteAction | null {
-  const action = parseStoredAction(value);
-  if (!action) {
-    return null;
-  }
-
-  if (
-    (action.kind === "raw_copy" || action.kind === "text_write" || action.kind === "jsonl_append") &&
-    typeof action.stageRelativePath !== "string"
-  ) {
-    return null;
-  }
-
-  return action;
 }
 
 export function isProtectedCanonicalPath(relativePath: string): boolean {
@@ -515,6 +527,99 @@ async function walkProtectedCanonicalFiles(
   }
 }
 
+function parseStoredActions(value: unknown): StoredWriteAction[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const actions: StoredWriteAction[] = [];
+  for (const candidate of value) {
+    const action = parseStoredAction(candidate);
+    if (!action) {
+      return null;
+    }
+    actions.push(action);
+  }
+  return actions;
+}
+
+function hasMissingCommittedPayloadReceipts(status: string, actions: StoredWriteAction[]): boolean {
+  return (
+    status === "committed" &&
+    actions.some(
+      (action) =>
+        (action.kind === "text_write" || action.kind === "jsonl_append") &&
+        action.committedPayloadReceipt === undefined,
+    )
+  );
+}
+
+function parseStoredOperationError(value: unknown): StoredWriteOperationError | undefined {
+  return isPlainRecord(value) && typeof value.message === "string"
+    ? {
+        message: value.message,
+        code: typeof value.code === "string" ? value.code : undefined,
+      }
+    : undefined;
+}
+
+function parseStrictStoredWriteOperation(raw: Record<string, unknown>): StoredWriteOperation | null {
+  const actions = parseStoredActions(raw.actions);
+  if (
+    raw.schemaVersion !== WRITE_OPERATION_SCHEMA_VERSION ||
+    typeof raw.operationId !== "string" ||
+    typeof raw.operationType !== "string" ||
+    typeof raw.summary !== "string" ||
+    !isStoredWriteOperationStatus(raw.status) ||
+    typeof raw.createdAt !== "string" ||
+    typeof raw.updatedAt !== "string" ||
+    typeof raw.occurredAt !== "string" ||
+    !actions
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: WRITE_OPERATION_SCHEMA_VERSION,
+    operationId: raw.operationId,
+    operationType: raw.operationType,
+    summary: raw.summary,
+    status: raw.status,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    occurredAt: raw.occurredAt,
+    actions,
+    error: parseStoredOperationError(raw.error),
+  };
+}
+
+function parseRecoverableStoredWriteOperationRecord(
+  raw: Record<string, unknown>,
+): RecoverableStoredWriteOperation | null {
+  const actions = parseStoredActions(raw.actions);
+  if (
+    typeof raw.operationId !== "string" ||
+    typeof raw.createdAt !== "string" ||
+    typeof raw.updatedAt !== "string" ||
+    typeof raw.status !== "string" ||
+    !actions
+  ) {
+    return null;
+  }
+
+  if (hasMissingCommittedPayloadReceipts(raw.status, actions)) {
+    return null;
+  }
+
+  return {
+    operationId: raw.operationId,
+    status: raw.status,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    actions,
+  };
+}
+
 export async function readStoredWriteOperation(
   vaultRoot: string,
   relativePath: string,
@@ -528,33 +633,14 @@ export async function readStoredWriteOperation(
     });
   }
 
-  const actions = Array.isArray(raw.actions) ? raw.actions.map(parseStoredAction) : null;
-
-  if (
-    raw.schemaVersion !== WRITE_OPERATION_SCHEMA_VERSION ||
-    typeof raw.operationId !== "string" ||
-    typeof raw.operationType !== "string" ||
-    typeof raw.summary !== "string" ||
-    !isStoredWriteOperationStatus(raw.status) ||
-    typeof raw.createdAt !== "string" ||
-    typeof raw.updatedAt !== "string" ||
-    typeof raw.occurredAt !== "string" ||
-    !actions ||
-    actions.some((action) => action === null)
-  ) {
+  const operation = parseStrictStoredWriteOperation(raw as Record<string, unknown>);
+  if (!operation) {
     throw new VaultError("OPERATION_INVALID", "Write operation metadata has an unexpected shape.", {
       relativePath,
     });
   }
 
-  if (
-    raw.status === "committed" &&
-    (actions as StoredWriteAction[]).some(
-      (action) =>
-        (action.kind === "text_write" || action.kind === "jsonl_append") &&
-        action.committedPayloadReceipt === undefined,
-    )
-  ) {
+  if (hasMissingCommittedPayloadReceipts(operation.status, operation.actions)) {
     throw new VaultError(
       "OPERATION_INVALID",
       "Committed write operation metadata is missing committed payload receipts.",
@@ -564,24 +650,7 @@ export async function readStoredWriteOperation(
     );
   }
 
-  return {
-    schemaVersion: WRITE_OPERATION_SCHEMA_VERSION,
-    operationId: raw.operationId,
-    operationType: raw.operationType,
-    summary: raw.summary,
-    status: raw.status,
-    createdAt: raw.createdAt,
-    updatedAt: raw.updatedAt,
-    occurredAt: raw.occurredAt,
-    actions: actions as StoredWriteAction[],
-    error:
-      isPlainRecord(raw.error) && typeof raw.error.message === "string"
-        ? {
-            message: raw.error.message,
-            code: typeof raw.error.code === "string" ? raw.error.code : undefined,
-          }
-        : undefined,
-  };
+  return operation;
 }
 
 export async function readRecoverableStoredWriteOperation(
@@ -591,41 +660,7 @@ export async function readRecoverableStoredWriteOperation(
   try {
     const resolved = resolveVaultPath(vaultRoot, relativePath);
     const raw = JSON.parse(await readText(resolved.absolutePath)) as unknown;
-
-    if (!isPlainRecord(raw)) {
-      return null;
-    }
-
-    const actions = Array.isArray(raw.actions) ? raw.actions.map(parseRecoverableStoredAction) : null;
-    if (
-      typeof raw.operationId !== "string" ||
-      typeof raw.createdAt !== "string" ||
-      typeof raw.updatedAt !== "string" ||
-      typeof raw.status !== "string" ||
-      !actions ||
-      actions.some((action) => action === null)
-    ) {
-      return null;
-    }
-
-    if (
-      raw.status === "committed" &&
-      (actions as StoredWriteAction[]).some(
-        (action) =>
-          (action.kind === "text_write" || action.kind === "jsonl_append") &&
-          action.committedPayloadReceipt === undefined,
-      )
-    ) {
-      return null;
-    }
-
-    return {
-      operationId: raw.operationId,
-      status: raw.status,
-      createdAt: raw.createdAt,
-      updatedAt: raw.updatedAt,
-      actions: actions as StoredWriteAction[],
-    };
+    return isPlainRecord(raw) ? parseRecoverableStoredWriteOperationRecord(raw as Record<string, unknown>) : null;
   } catch {
     return null;
   }
