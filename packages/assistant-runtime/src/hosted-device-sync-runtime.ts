@@ -200,9 +200,7 @@ function applyHostedDeviceSyncWakeHint(input: {
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.dispatch.event);
-  const localAccountId =
-    (wake.connectionId ? input.hostedToLocalAccountIds.get(wake.connectionId) : null)
-    ?? (wake.connectionId ? input.service.store.getAccountById(wake.connectionId)?.id ?? null : null);
+  const localAccountId = wake.connectionId ? input.hostedToLocalAccountIds.get(wake.connectionId) ?? null : null;
 
   if (!localAccountId) {
     return;
@@ -433,6 +431,8 @@ function buildHostedAccountHydrationInput(input: {
     status: useHostedConnectionState
       ? hostedConnection.status
       : input.existing?.status ?? hostedConnection.status,
+    // Hosted only overwrites token/schedule state once the hosted snapshot advances past
+    // the last hosted state acknowledged by the local mirror.
     updatedAt: resolveHydratedHostedAccountUpdatedAt({
       connectedAt: hostedConnection.connectedAt,
       existing: input.existing,
@@ -500,7 +500,14 @@ function hasLocalPendingHostedChanges(account: StoredDeviceSyncAccount | null): 
     return false;
   }
 
-  return Date.parse(account.updatedAt) > Date.parse(account.hostedObservedUpdatedAt);
+  const localUpdatedAtMs = parseIsoMs(account.updatedAt);
+  const hostedObservedUpdatedAtMs = parseIsoMs(account.hostedObservedUpdatedAt);
+
+  if (localUpdatedAtMs === null || hostedObservedUpdatedAtMs === null) {
+    return true;
+  }
+
+  return localUpdatedAtMs > hostedObservedUpdatedAtMs;
 }
 
 function hasHostedConnectionAdvanced(
@@ -508,14 +515,21 @@ function hasHostedConnectionAdvanced(
   hostedUpdatedAt: string | null,
 ): boolean {
   if (!hostedUpdatedAt) {
-    return true;
+    return !account?.hostedObservedUpdatedAt;
   }
 
   if (!account?.hostedObservedUpdatedAt) {
     return true;
   }
 
-  return Date.parse(hostedUpdatedAt) > Date.parse(account.hostedObservedUpdatedAt);
+  const hostedUpdatedAtMs = parseIsoMs(hostedUpdatedAt);
+  const hostedObservedUpdatedAtMs = parseIsoMs(account.hostedObservedUpdatedAt);
+
+  if (hostedUpdatedAtMs === null || hostedObservedUpdatedAtMs === null) {
+    return false;
+  }
+
+  return hostedUpdatedAtMs > hostedObservedUpdatedAtMs;
 }
 
 function hasHostedTokenAdvanced(
@@ -554,7 +568,18 @@ function latestIsoTimestamp(left: string | null, right: string | null): string |
     return left;
   }
 
-  return Date.parse(left) >= Date.parse(right) ? left : right;
+  const leftMs = parseIsoMs(left);
+  const rightMs = parseIsoMs(right);
+
+  if (leftMs === null) {
+    return right;
+  }
+
+  if (rightMs === null) {
+    return left;
+  }
+
+  return leftMs >= rightMs ? left : right;
 }
 
 function latestObservedTokenVersion(left: number | null, right: number | null): number | null {
@@ -580,6 +605,11 @@ function resolveHydratedHostedAccountUpdatedAt(input: {
   }
 
   return input.existing?.updatedAt ?? input.hostedObservedUpdatedAt ?? input.connectedAt;
+}
+
+function parseIsoMs(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function assignMonotonicTimestampUpdate(

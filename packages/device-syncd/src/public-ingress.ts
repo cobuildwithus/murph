@@ -329,7 +329,9 @@ export class DeviceSyncPublicIngress {
       throw error;
     }
 
-    await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+    if (!this.hooks.onWebhookAccepted) {
+      await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+    }
 
     return {
       accepted: true,

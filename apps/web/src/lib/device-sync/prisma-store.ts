@@ -1184,9 +1184,10 @@ function resolveLocalHeartbeatErrorPatch(input: UpdateLocalHeartbeatInput): Loca
 
 function toPrismaHeartbeatErrorPatch(
   errorPatch: LocalHeartbeatErrorPatch,
-): Pick<Prisma.DeviceConnectionUpdateManyMutationInput, "lastErrorCode" | "lastErrorMessage"> {
+): Pick<Prisma.DeviceConnectionUpdateManyMutationInput, "lastErrorCode" | "lastErrorMessage" | "lastSyncErrorAt"> {
   if (errorPatch.kind === "clear") {
     return {
+      lastSyncErrorAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
     };

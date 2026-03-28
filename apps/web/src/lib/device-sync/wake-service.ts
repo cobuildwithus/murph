@@ -39,7 +39,6 @@ const HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS = new Set([
   "oauthRefreshToken",
   "refresh_token",
   "refreshToken",
-  "webhookPayload",
 ]);
 
 export async function disconnectHostedDeviceSyncConnection(input: {

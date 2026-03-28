@@ -73,6 +73,7 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
   it("treats clearError as authoritative even when error fields are also present", async () => {
     const { connections, store } = createHeartbeatStore([
       createConnection({
+        lastSyncErrorAt: new Date("2026-03-25T01:00:00.000Z"),
         lastErrorCode: "OLD_CODE",
         lastErrorMessage: "Old failure",
       }),
@@ -90,8 +91,10 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
       lastErrorCode: null,
       lastErrorMessage: null,
       lastSyncCompletedAt: "2026-03-25T01:30:00.000Z",
+      lastSyncErrorAt: null,
     });
     expect(connections.get("dsc_123")).toMatchObject({
+      lastSyncErrorAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
     });
@@ -216,7 +219,7 @@ function applyNullableDate(
     return;
   }
 
-  connection[key] = value instanceof Date ? new Date(value) : value ?? connection[key];
+  connection[key] = value instanceof Date ? new Date(value) : value === null ? null : connection[key];
 }
 
 function cloneDate(value: Date | null): Date | null {
