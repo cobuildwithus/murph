@@ -3,6 +3,8 @@ import * as z from "zod";
 import {
   CONTRACT_SCHEMA_VERSION,
   FOOD_STATUSES,
+  GOAL_HORIZONS,
+  GOAL_STATUSES,
   PROTOCOL_KINDS,
   PROTOCOL_STATUSES,
   RECIPE_STATUSES,
@@ -132,6 +134,7 @@ const slugSchema = patternedString(SLUG_PATTERN);
 const goalIdSchema = patternedString(idPattern(ID_PREFIXES.goal));
 const conditionIdSchema = patternedString(idPattern(ID_PREFIXES.condition));
 const protocolIdSchema = patternedString(idPattern(ID_PREFIXES.protocol));
+const experimentIdSchema = patternedString(idPattern(ID_PREFIXES.experiment));
 const shareEntityRefSchema = patternedString(SHARE_ENTITY_REF_PATTERN);
 
 export const attachedProtocolIdsSchema = uniqueArray(protocolIdSchema, {
@@ -227,6 +230,62 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
     .strict(),
   "@murph/contracts/workout-format-upsert-payload.schema.json",
   "Murph Workout Format Upsert Payload",
+);
+
+export const goalUpsertPayloadSchema = withContractMetadata(
+  z
+    .object({
+      goalId: goalIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, 160),
+      status: z.enum(GOAL_STATUSES).default("active"),
+      horizon: z.enum(GOAL_HORIZONS).default("ongoing"),
+      priority: integerSchema(1, 10).optional(),
+      window: z
+        .object({
+          startAt: isoDateString().optional(),
+          targetAt: isoDateString().optional(),
+        })
+        .strict()
+        .optional(),
+      parentGoalId: goalIdSchema.nullable().optional(),
+      relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
+      relatedExperimentIds: uniqueArray(experimentIdSchema, {
+        uniqueItems: true,
+      }).optional(),
+      domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
+    })
+    .strict(),
+  "@murph/contracts/goal-upsert-payload.schema.json",
+  "Murph Goal Upsert Payload",
+);
+
+export const goalUpsertPatchPayloadSchema = withContractMetadata(
+  z
+    .object({
+      goalId: goalIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, 160).optional(),
+      status: z.enum(GOAL_STATUSES).optional(),
+      horizon: z.enum(GOAL_HORIZONS).optional(),
+      priority: integerSchema(1, 10).optional(),
+      window: z
+        .object({
+          startAt: isoDateString().optional(),
+          targetAt: isoDateString().optional(),
+        })
+        .strict()
+        .optional(),
+      parentGoalId: goalIdSchema.nullable().optional(),
+      relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
+      relatedExperimentIds: uniqueArray(experimentIdSchema, {
+        uniqueItems: true,
+      }).optional(),
+      domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
+    })
+    .strict(),
+  "@murph/contracts/goal-upsert-patch-payload.schema.json",
+  "Murph Goal Upsert Patch Payload",
 );
 
 export const protocolUpsertPayloadSchema = withContractMetadata(

@@ -1,4 +1,7 @@
-import { extractIsoDatePrefix } from "@murph/contracts";
+import {
+  extractHealthEntityRegistryRelatedIds,
+  extractIsoDatePrefix,
+} from "@murph/contracts";
 
 import {
   asObject,
@@ -392,7 +395,9 @@ export function projectRegistryEntity(
       "assertedOn",
       "resolvedOn",
     ]) ?? null;
+  const sharedRegistryRelatedIds = extractHealthEntityRegistryRelatedIds(family, attributes);
   const relatedIds = uniqueStrings([
+    ...sharedRegistryRelatedIds,
     ...REGISTRY_RELATION_ARRAY_KEYS.flatMap((key) => firstStringArray(attributes, [key])),
     ...REGISTRY_RELATION_SCALAR_KEYS.map((key) => firstString(attributes, [key])),
   ]);

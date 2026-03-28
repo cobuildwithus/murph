@@ -1,4 +1,8 @@
-import { healthEntityDefinitionByKind } from "@murph/contracts";
+import {
+  goalRegistryEntityDefinition,
+  healthEntityDefinitionByKind,
+  safeParseContract,
+} from "@murph/contracts";
 import { VaultCliError } from "../vault-cli-errors.js";
 import type {
   CommandContext,
@@ -50,6 +54,7 @@ interface RegistryDocFamilyConfig<TIdField extends string> {
   kind: RegistryDocFamilyKind;
   listServiceMethod: ExplicitHealthQueryServiceMethodName;
   notFoundLabel: string;
+  parsePayload?: (payload: JsonObject) => JsonObject;
   scaffoldServiceMethod: ExplicitHealthCoreServiceMethodName;
   showServiceMethod: ExplicitHealthQueryServiceMethodName;
   upsert(
@@ -110,25 +115,57 @@ const SUPPLEMENT_ENTITY_OMIT_KEYS = new Set([
 
 const SUPPLEMENT_ID_PATTERN = /^prot_[0-9A-Za-z]+$/u;
 
-const registryDocFamilyConfigs = [
-  {
-    idField: "goalId",
-    kind: "goal",
-    listServiceMethod: "listGoals",
-    notFoundLabel: "goal",
-    scaffoldServiceMethod: "scaffoldGoal",
-    showServiceMethod: "showGoal",
-    upsert(core, input) {
-      return core.upsertGoal(input);
-    },
-    upsertServiceMethod: "upsertGoal",
-    show(query, vaultRoot, lookup) {
-      return query.showGoal(vaultRoot, lookup);
-    },
-    list(query, vaultRoot, options) {
-      return query.listGoals(vaultRoot, options);
-    },
-  },
+function parseRegistryPayloadWithSharedSchema(
+  kind: RegistryDocFamilyKind,
+  payload: JsonObject,
+): JsonObject {
+  const registry = healthEntityDefinitionByKind.get(kind)?.registry;
+  const schema = registry?.patchPayloadSchema ?? registry?.upsertPayloadSchema;
+  if (!schema) {
+    return payload;
+  }
+
+  const result = safeParseContract(schema, payload);
+  if (!result.success) {
+    throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
+      issues: result.errors,
+    });
+  }
+
+  return result.data as JsonObject;
+}
+
+const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] = [
+  (() => {
+    const command = goalRegistryEntityDefinition.registry.command;
+    const idField = goalRegistryEntityDefinition.registry.idField;
+
+    if (!command || !idField) {
+      throw new Error('Registry entity "goal" is missing shared command metadata.');
+    }
+
+    return {
+      idField: idField as "goalId",
+      kind: "goal",
+      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
+      notFoundLabel: goalRegistryEntityDefinition.noun,
+      parsePayload(payload) {
+        return parseRegistryPayloadWithSharedSchema("goal", payload);
+      },
+      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
+      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
+      upsert(core, input) {
+        return core.upsertGoal(input);
+      },
+      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
+      show(query, vaultRoot, lookup) {
+        return query.showGoal(vaultRoot, lookup);
+      },
+      list(query, vaultRoot, options) {
+        return query.listGoals(vaultRoot, options);
+      },
+    } satisfies RegistryDocFamilyConfig<"goalId">;
+  })(),
   {
     idField: "conditionId",
     kind: "condition",
@@ -603,9 +640,10 @@ function createRegistryDocCoreServices(
     services[config.upsertServiceMethod] = async (input: JsonFileInput) => {
       const payload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(payload);
+      const parsedPayload = config.parsePayload ? config.parsePayload(payload) : payload;
       const { core } = await loadRuntime();
       const result = await config.upsert(core, {
-        ...payload,
+        ...parsedPayload,
         vaultRoot: input.vault,
       });
       const identifier = String(result.record[config.idField] ?? "");

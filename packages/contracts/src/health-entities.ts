@@ -1,4 +1,8 @@
+import type { ZodTypeAny } from "zod";
+
 import { ID_PREFIXES } from "./constants.ts";
+import { goalUpsertPatchPayloadSchema, goalUpsertPayloadSchema } from "./shares.ts";
+import { goalFrontmatterReadSchema, goalFrontmatterSchema } from "./zod.ts";
 
 export type HealthEntityKind =
   | "assessment"
@@ -13,6 +17,38 @@ export type HealthEntityKind =
   | "genetics";
 
 export type HealthEntitySortBehavior = "priority-title" | "title";
+
+export type HealthEntityRegistryLinkCardinality = "one" | "many";
+
+export interface HealthEntityRegistryLink {
+  type: string;
+  targetId: string;
+  sourceKeys: readonly string[];
+}
+
+export interface HealthEntityRegistryLinkMetadata {
+  type: string;
+  keys: readonly string[];
+  cardinality: HealthEntityRegistryLinkCardinality;
+}
+
+export interface HealthEntityRegistryCommandMetadata {
+  commandName: string;
+  commandDescription: string;
+  listServiceMethod: string;
+  listStatusDescription?: string;
+  payloadFile: string;
+  runtimeListMethod: string;
+  runtimeMethod: string;
+  runtimeShowMethod: string;
+  scaffoldServiceMethod: string;
+  showId: {
+    description: string;
+    example: string;
+  };
+  showServiceMethod: string;
+  upsertServiceMethod: string;
+}
 
 export interface HealthEntityRegistryProjectionHelpers {
   firstBoolean(
@@ -45,9 +81,17 @@ export interface HealthEntityRegistryProjectionContext {
 
 export interface HealthEntityRegistryMetadata {
   directory: string;
+  idField?: string;
   idKeys: readonly string[];
+  slugKeys?: readonly string[];
   titleKeys: readonly string[];
   statusKeys: readonly string[];
+  frontmatterSchema?: ZodTypeAny;
+  frontmatterReadSchema?: ZodTypeAny;
+  upsertPayloadSchema?: ZodTypeAny;
+  patchPayloadSchema?: ZodTypeAny;
+  relationKeys?: readonly HealthEntityRegistryLinkMetadata[];
+  command?: HealthEntityRegistryCommandMetadata;
   sortBehavior?: HealthEntitySortBehavior;
   transform?(
     context: HealthEntityRegistryProjectionContext,
@@ -63,6 +107,77 @@ export interface HealthEntityDefinition {
   listKinds?: readonly string[];
   scaffoldTemplate?: Record<string, unknown>;
   registry?: HealthEntityRegistryMetadata;
+}
+
+export interface DefineRegistryEntityInput extends Omit<HealthEntityDefinition, "registry"> {
+  registry: Omit<HealthEntityRegistryMetadata, "idKeys"> & {
+    idField: string;
+    idKeys?: readonly string[];
+  };
+}
+
+function normalizeRegistryString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function readFirstRegistryString(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = normalizeRegistryString(source[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function readFirstRegistryStringArray(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): string[] {
+  for (const key of keys) {
+    const value = source[key];
+    if (!Array.isArray(value)) {
+      continue;
+    }
+
+    return [...new Set(value.map((entry) => normalizeRegistryString(entry)).filter((entry): entry is string => Boolean(entry)))];
+  }
+
+  return [];
+}
+
+function extractRegistryRelationTargets(
+  source: Record<string, unknown>,
+  relation: HealthEntityRegistryLinkMetadata,
+): string[] {
+  return relation.cardinality === "one"
+    ? [readFirstRegistryString(source, relation.keys)].filter((entry): entry is string => Boolean(entry))
+    : readFirstRegistryStringArray(source, relation.keys);
+}
+
+export function defineRegistryEntity(
+  input: DefineRegistryEntityInput,
+): HealthEntityDefinitionWithRegistry {
+  const registry: HealthEntityRegistryMetadata = {
+    ...input.registry,
+    idField: input.registry.idField,
+    idKeys: input.registry.idKeys ?? [input.registry.idField],
+    slugKeys: input.registry.slugKeys ?? ["slug"],
+  };
+
+  return {
+    ...input,
+    registry,
+  };
 }
 
 export function deriveProtocolGroupFromRelativePath(relativePath: string): string | null {
@@ -130,7 +245,7 @@ const checkedHealthEntityDefinitions = [
       },
     },
   },
-  {
+  defineRegistryEntity({
     kind: "goal",
     listKinds: ["goal"],
     noun: "goal",
@@ -148,8 +263,46 @@ const checkedHealthEntityDefinitions = [
       domains: ["sleep"],
     },
     registry: {
+      frontmatterReadSchema: goalFrontmatterReadSchema,
+      frontmatterSchema: goalFrontmatterSchema,
       directory: "bank/goals",
-      idKeys: ["goalId"],
+      idField: "goalId",
+      patchPayloadSchema: goalUpsertPatchPayloadSchema,
+      upsertPayloadSchema: goalUpsertPayloadSchema,
+      relationKeys: [
+        {
+          type: "parent_goal",
+          keys: ["parentGoalId"],
+          cardinality: "one",
+        },
+        {
+          type: "related_goal",
+          keys: ["relatedGoalIds"],
+          cardinality: "many",
+        },
+        {
+          type: "related_experiment",
+          keys: ["relatedExperimentIds"],
+          cardinality: "many",
+        },
+      ],
+      command: {
+        commandDescription: "Goal registry commands for the health extension surface.",
+        commandName: "goal",
+        listServiceMethod: "listGoals",
+        listStatusDescription: "Optional goal status to filter by.",
+        payloadFile: "goal.json",
+        runtimeListMethod: "listGoals",
+        runtimeMethod: "upsertGoal",
+        runtimeShowMethod: "showGoal",
+        scaffoldServiceMethod: "scaffoldGoal",
+        showId: {
+          description: "Goal id or slug to show.",
+          example: "<goal-id>",
+        },
+        showServiceMethod: "showGoal",
+        upsertServiceMethod: "upsertGoal",
+      },
       titleKeys: ["title"],
       statusKeys: ["status"],
       sortBehavior: "priority-title",
@@ -168,7 +321,7 @@ const checkedHealthEntityDefinitions = [
         };
       },
     },
-  },
+  }),
   {
     kind: "condition",
     listKinds: ["condition"],
@@ -381,3 +534,40 @@ export function hasHealthEntityRegistry(
 ): definition is HealthEntityDefinitionWithRegistry {
   return Boolean(definition.registry);
 }
+
+export function requireHealthEntityRegistryDefinition(
+  kind: HealthEntityKind,
+): HealthEntityDefinitionWithRegistry {
+  const definition = healthEntityDefinitionByKind.get(kind);
+
+  if (!definition || !hasHealthEntityRegistry(definition)) {
+    throw new Error(`Health entity "${kind}" does not define a registry projection.`);
+  }
+
+  return definition;
+}
+
+export function extractHealthEntityRegistryLinks(
+  kind: HealthEntityKind,
+  attributes: Record<string, unknown>,
+): HealthEntityRegistryLink[] {
+  const definition = requireHealthEntityRegistryDefinition(kind);
+  const relationKeys = definition.registry.relationKeys ?? [];
+
+  return relationKeys.flatMap((relation) =>
+    extractRegistryRelationTargets(attributes, relation).map((targetId) => ({
+      type: relation.type,
+      targetId,
+      sourceKeys: relation.keys,
+    })),
+  );
+}
+
+export function extractHealthEntityRegistryRelatedIds(
+  kind: HealthEntityKind,
+  attributes: Record<string, unknown>,
+): string[] {
+  return [...new Set(extractHealthEntityRegistryLinks(kind, attributes).map((link) => link.targetId))];
+}
+
+export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");

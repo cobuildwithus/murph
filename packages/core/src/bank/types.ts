@@ -61,6 +61,11 @@ export type WorkoutFormatStatus = (typeof WORKOUT_FORMAT_STATUSES)[number];
 export type ProtocolKind = (typeof PROTOCOL_KINDS)[number];
 export type ProtocolStatus = (typeof PROTOCOL_STATUSES)[number];
 
+export interface MarkdownRegistryDocumentEnvelope {
+  relativePath: string;
+  markdown: string;
+}
+
 export interface FoodAutoLogDailyRule {
   time: string;
 }
@@ -263,7 +268,14 @@ export interface GoalWindow {
   targetAt?: string;
 }
 
-export interface GoalRecord {
+export type GoalLinkType = "parent_goal" | "related_goal" | "related_experiment";
+
+export interface GoalLink {
+  type: GoalLinkType;
+  targetId: string;
+}
+
+export interface GoalEntity {
   schemaVersion: typeof GOAL_SCHEMA_VERSION;
   docType: typeof GOAL_DOC_TYPE;
   goalId: string;
@@ -277,9 +289,10 @@ export interface GoalRecord {
   relatedGoalIds?: string[];
   relatedExperimentIds?: string[];
   domains?: string[];
-  relativePath: string;
-  markdown: string;
+  links: GoalLink[];
 }
+
+export type GoalRecord = GoalEntity & MarkdownRegistryDocumentEnvelope;
 
 export interface UpsertGoalInput {
   vaultRoot: string;
