@@ -125,10 +125,7 @@ export function extractProfileTopGoalIds(profile: unknown): string[] {
   }
 
   const nestedGoals = firstObject(profileObject, ["goals"]);
-  const nestedTopGoalIds = nestedGoals ? firstStringArray(nestedGoals, ["topGoalIds"]) : [];
-  return nestedTopGoalIds.length > 0
-    ? nestedTopGoalIds
-    : firstStringArray(profileObject, ["topGoalIds"]);
+  return nestedGoals ? firstStringArray(nestedGoals, ["topGoalIds"]) : [];
 }
 
 export function extractProfileSummary(profile: unknown): string | null {
@@ -138,7 +135,7 @@ export function extractProfileSummary(profile: unknown): string | null {
   }
 
   const narrative = firstObject(profileObject, ["narrative"]);
-  return (narrative ? firstString(narrative, ["summary"]) : null) ?? firstString(profileObject, ["summary"]);
+  return narrative ? firstString(narrative, ["summary"]) : null;
 }
 
 export function projectAssessmentEntity(
@@ -213,7 +210,7 @@ export function projectProfileSnapshotEntity(
   const recordedAt = firstString(source, ["recordedAt", "capturedAt"]);
   const capturedAt = firstString(source, ["capturedAt", "recordedAt"]);
   const profile = firstObject(source, ["profile"]) ?? {};
-  const summary = extractProfileSummary(profile) ?? firstString(source, ["summary"]);
+  const summary = extractProfileSummary(profile);
   const status = firstString(source, ["status"]) ?? "accepted";
 
   return {

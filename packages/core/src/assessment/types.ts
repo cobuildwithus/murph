@@ -1,6 +1,6 @@
 import type { RawArtifact } from "../raw.ts";
 import type { UnknownRecord } from "../types.ts";
-import type { ProfileSnapshotProfileInput, ProfileSnapshotSource } from "../profile/types.ts";
+import type { ProfileSnapshotProfile, ProfileSnapshotSource } from "../profile/types.ts";
 
 export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = "murph.assessment-response.v1";
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments";
@@ -52,7 +52,7 @@ export interface ProfileSnapshotProposal {
   source: ProfileSnapshotSource;
   sourceAssessmentIds?: string[];
   sourceEventIds?: string[];
-  profile: ProfileSnapshotProfileInput;
+  profile: ProfileSnapshotProfile;
 }
 
 export interface GoalProposal {

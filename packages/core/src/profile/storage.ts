@@ -1,8 +1,4 @@
 import {
-  jsonObjectSchema,
-  profileSnapshotGoalsSchema,
-  profileSnapshotNarrativeSchema,
-  profileSnapshotProfileSchema,
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   safeParseContract,
@@ -19,12 +15,10 @@ import { toIsoTimestamp } from "../time.ts";
 import { VaultError } from "../errors.ts";
 import { isPlainRecord } from "../types.ts";
 
-import type { FrontmatterObject, UnknownRecord } from "../types.ts";
+import type { FrontmatterObject } from "../types.ts";
 import type {
   AppendProfileSnapshotInput,
   CurrentProfileState,
-  ProfileSnapshotProfile,
-  ProfileSnapshotProfileInput,
   ProfileSnapshotRecord,
   RebuiltCurrentProfile,
 } from "./types.ts";
@@ -48,109 +42,12 @@ interface RebuildCurrentProfileInput {
   vaultRoot: string;
 }
 
-const LEGACY_PROFILE_SECTION_KEYS = new Set([
-  "narrative",
-  "goals",
-  "custom",
-  "summary",
-  "highlights",
-  "topGoalIds",
-]);
-
-function compactProfileRecord<TRecord extends Record<string, unknown>>(record: TRecord): TRecord {
-  return Object.fromEntries(
-    Object.entries(record).filter(([, entryValue]) => entryValue !== undefined),
-  ) as TRecord;
-}
-
-function assertProfileRecord(value: unknown): asserts value is UnknownRecord {
-  const result = safeParseContract(jsonObjectSchema, value);
-
-  if (!result.success) {
-    throw new VaultError("PROFILE_INVALID", "Profile snapshots require a plain-object profile payload.");
-  }
-}
-
-function normalizeProfileHighlights(value: unknown): string[] | undefined {
-  const result = profileSnapshotNarrativeSchema.shape.highlights.safeParse(value);
-  return result.success ? result.data : undefined;
-}
-
-function normalizeProfileTopGoalIds(value: unknown): string[] | undefined {
-  const result = profileSnapshotGoalsSchema.shape.topGoalIds.safeParse(value);
-  return result.success ? result.data : undefined;
-}
-
-function hasTypedProfileSectionKeys(value: UnknownRecord): boolean {
-  return ["narrative", "goals", "custom"].some((key) => key in value);
-}
-
-function normalizeProfileSnapshotProfileInput(
-  value: ProfileSnapshotProfileInput,
-): ProfileSnapshotProfile {
-  const parsed = safeParseContract(profileSnapshotProfileSchema, value);
-  if (parsed.success) {
-    return compactProfileRecord(parsed.data) as ProfileSnapshotProfile;
-  }
-
-  assertProfileRecord(value);
-  const legacyProfile = value as UnknownRecord;
-  if (hasTypedProfileSectionKeys(legacyProfile)) {
-    throw new VaultError("PROFILE_INVALID", "Profile snapshots require a valid typed profile payload.", {
-      errors: parsed.errors,
-    });
-  }
-
-  const narrativeSummary = legacyProfile.summary;
-  const narrativeHighlights = normalizeProfileHighlights(legacyProfile.highlights);
-  const topGoalIds = normalizeProfileTopGoalIds(legacyProfile.topGoalIds);
-
-  const legacyCustomEntries = Object.fromEntries(
-    Object.entries(legacyProfile).filter(
-      ([key, entryValue]) =>
-        !LEGACY_PROFILE_SECTION_KEYS.has(key) &&
-        entryValue !== undefined,
-    ),
-  ) as UnknownRecord;
-
-  const normalized = compactProfileRecord({
-    narrative:
-      typeof narrativeSummary === "string" || narrativeHighlights !== undefined
-        ? {
-            ...(typeof narrativeSummary === "string" ? { summary: narrativeSummary } : {}),
-            ...(narrativeHighlights !== undefined ? { highlights: narrativeHighlights } : {}),
-          }
-        : undefined,
-    goals: topGoalIds !== undefined ? { topGoalIds } : undefined,
-    custom:
-      Object.keys(legacyCustomEntries).length > 0 ? legacyCustomEntries : undefined,
-  }) as ProfileSnapshotProfile;
-
-  const normalizedResult = safeParseContract(profileSnapshotProfileSchema, normalized);
-  if (!normalizedResult.success) {
-    throw new VaultError("PROFILE_INVALID", "Profile snapshots require a valid typed profile payload.", {
-      errors: normalizedResult.errors,
-    });
-  }
-
-  return normalizedResult.data;
-}
-
 function isProfileSnapshotSource(value: unknown): value is ProfileSnapshotRecord["source"] {
   return profileSnapshotSchema.shape.source.safeParse(value).success;
 }
 
 function toProfileSnapshotRecord(value: unknown): ProfileSnapshotRecord {
-  const candidate =
-    isPlainRecord(value) && "profile" in value
-      ? {
-          ...value,
-          profile: normalizeProfileSnapshotProfileInput(
-            (value as { profile: ProfileSnapshotProfileInput }).profile,
-          ),
-        }
-      : value;
-  const result = safeParseContract(profileSnapshotSchema, candidate);
+  const result = safeParseContract(profileSnapshotSchema, value);
 
   if (!result.success) {
     throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot record failed contract validation.", {
@@ -378,8 +275,6 @@ export async function appendProfileSnapshot({
   ledgerPath: string;
   currentProfile: RebuiltCurrentProfile;
 }> {
-  const normalizedProfile = normalizeProfileSnapshotProfileInput(profile);
-
   const recordedTimestamp = toIsoTimestamp(recordedAt, "recordedAt");
   const snapshot = toProfileSnapshotRecord({
     schemaVersion: PROFILE_SNAPSHOT_SCHEMA_VERSION,
@@ -390,7 +285,7 @@ export async function appendProfileSnapshot({
       sourceAssessmentIds && sourceAssessmentIds.length > 0 ? [...new Set(sourceAssessmentIds)] : undefined,
     sourceEventIds:
       sourceEventIds && sourceEventIds.length > 0 ? [...new Set(sourceEventIds)] : undefined,
-    profile: normalizedProfile,
+    profile,
   });
 
   const ledgerPath = toMonthlyShardRelativePath(

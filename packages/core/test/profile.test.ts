@@ -88,40 +88,28 @@ test("appendProfileSnapshot keeps current-profile rebuild audit details aligned 
   }
 });
 
-test("appendProfileSnapshot normalizes legacy flat profile fields into typed sections", async () => {
+test("appendProfileSnapshot rejects legacy flat profile fields after the hard cutover", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-profile-"));
 
   try {
     await initializeVault({ vaultRoot });
-    const appended = await appendProfileSnapshot({
-      vaultRoot,
-      recordedAt: "2026-03-12T10:00:00.000Z",
-      source: "manual",
-      profile: {
-        summary: "Sleep remains the main focus.",
-        highlights: ["Bedtime is more consistent"],
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-        sleep: {
-          averageHours: 7,
-        },
-      },
-    });
-
-    assert.deepEqual(appended.snapshot.profile, {
-      narrative: {
-        summary: "Sleep remains the main focus.",
-        highlights: ["Bedtime is more consistent"],
-      },
-      goals: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-      },
-      custom: {
-        sleep: {
-          averageHours: 7,
-        },
-      },
-    });
-    assert.deepEqual(appended.currentProfile.profile?.goals?.topGoalIds, ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"]);
+    await assert.rejects(
+      () =>
+        appendProfileSnapshot({
+          vaultRoot,
+          recordedAt: "2026-03-12T10:00:00.000Z",
+          source: "manual",
+          profile: {
+            summary: "Sleep remains the main focus.",
+            highlights: ["Bedtime is more consistent"],
+            topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
+            sleep: {
+              averageHours: 7,
+            },
+          } as unknown as Parameters<typeof appendProfileSnapshot>[0]["profile"],
+        }),
+      (error: unknown) => error instanceof VaultError && error.code === "PROFILE_SNAPSHOT_INVALID",
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -146,14 +134,14 @@ test("appendProfileSnapshot rejects malformed typed sections instead of silently
             topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
           } as unknown as Parameters<typeof appendProfileSnapshot>[0]["profile"],
         }),
-      (error: unknown) => error instanceof VaultError && error.code === "PROFILE_INVALID",
+      (error: unknown) => error instanceof VaultError && error.code === "PROFILE_SNAPSHOT_INVALID",
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 
-test("listProfileSnapshots and rebuildCurrentProfile normalize legacy flat snapshots on read", async () => {
+test("listProfileSnapshots rejects legacy flat snapshots on read after the hard cutover", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-profile-"));
 
   try {
@@ -179,13 +167,14 @@ test("listProfileSnapshots and rebuildCurrentProfile normalize legacy flat snaps
       "utf8",
     );
 
-    const snapshots = await listProfileSnapshots({ vaultRoot });
-    const rebuilt = await rebuildCurrentProfile({ vaultRoot });
-
-    assert.deepEqual(snapshots[0]?.profile.goals?.topGoalIds, ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"]);
-    assert.equal(snapshots[0]?.profile.narrative?.summary, "Sleep remains the main focus.");
-    assert.deepEqual(rebuilt.profile?.goals?.topGoalIds, ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"]);
-    assert.equal(rebuilt.profile?.narrative?.summary, "Sleep remains the main focus.");
+    await assert.rejects(
+      () => listProfileSnapshots({ vaultRoot }),
+      (error: unknown) => error instanceof VaultError && error.code === "PROFILE_SNAPSHOT_INVALID",
+    );
+    await assert.rejects(
+      () => rebuildCurrentProfile({ vaultRoot }),
+      (error: unknown) => error instanceof VaultError && error.code === "PROFILE_SNAPSHOT_INVALID",
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -202,9 +191,13 @@ test("rebuildCurrentProfile removes stale current profile markdown when no snaps
       recordedAt: "2026-03-12T10:00:00.000Z",
       source: "manual",
       profile: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-        sleep: {
-          averageHours: 7,
+        goals: {
+          topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
+        },
+        custom: {
+          sleep: {
+            averageHours: 7,
+          },
         },
       },
     });
@@ -266,9 +259,13 @@ test("rebuildCurrentProfile keeps rebuild audit details aligned when refreshing 
       recordedAt: "2026-03-12T10:00:00.000Z",
       source: "manual",
       profile: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-        sleep: {
-          averageHours: 7,
+        goals: {
+          topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
+        },
+        custom: {
+          sleep: {
+            averageHours: 7,
+          },
         },
       },
     });
@@ -308,9 +305,13 @@ test("rebuildCurrentProfile records no current-profile file changes when the mar
       recordedAt: "2026-03-12T10:00:00.000Z",
       source: "manual",
       profile: {
-        topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
-        sleep: {
-          averageHours: 7,
+        goals: {
+          topGoalIds: ["goal_01JNV43AK9SK58T6GX3DWRZH9Q"],
+        },
+        custom: {
+          sleep: {
+            averageHours: 7,
+          },
         },
       },
     });
