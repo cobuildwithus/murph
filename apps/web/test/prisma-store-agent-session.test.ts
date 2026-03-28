@@ -1,4 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const { randomBytesMock } = vi.hoisted(() => ({
+  randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
+}));
+
+vi.mock("node:crypto", async () => {
+  const actual = await vi.importActual<typeof import("node:crypto")>("node:crypto");
+  return {
+    ...actual,
+    randomBytes: randomBytesMock,
+  };
+});
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
@@ -109,6 +121,33 @@ function createSessionStore(seed: MutableAgentSession[]) {
 }
 
 describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
+  it("creates hosted agent sessions with the hosted random id shape", async () => {
+    const { sessions, store } = createSessionStore([]);
+    const suffix = hostedRandomSuffix(12);
+
+    const created = await store.createAgentSession({
+      user: {
+        id: "user-123",
+        email: "user@example.test",
+        name: "Example User",
+        source: "trusted-header",
+      },
+      label: "Mac mini",
+      tokenHash: "hash-created",
+      now: "2026-03-25T00:00:00.000Z",
+      expiresAt: "2026-03-26T00:00:00.000Z",
+    });
+
+    expect(created.id).toBe(`dsa_${suffix}`);
+    expect(created.id).not.toMatch(/^[a-z0-9-]+_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(sessions.get(created.id)).toMatchObject({
+      id: `dsa_${suffix}`,
+      userId: "user-123",
+      tokenHash: "hash-created",
+      label: "Mac mini",
+    });
+  });
+
   it("revokes expired sessions during bearer lookup", async () => {
     const { sessions, store } = createSessionStore([
       {
@@ -157,6 +196,7 @@ describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
         replacedBySessionId: null,
       },
     ]);
+    const suffix = hostedRandomSuffix(12);
 
     const rotated = await store.rotateAgentSession({
       sessionId: "dsa_active",
@@ -169,6 +209,7 @@ describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
     const replacement = sessions.get(rotated.id);
 
     expect(rotated).toMatchObject({
+      id: `dsa_${suffix}`,
       userId: "user-123",
       label: "Mac mini",
       expiresAt: "2026-03-26T01:00:00.000Z",
@@ -177,12 +218,14 @@ describe("PrismaDeviceSyncControlPlaneStore agent sessions", () => {
       replacedBySessionId: null,
     });
     expect(rotated.id).not.toBe("dsa_active");
+    expect(rotated.id).not.toMatch(/^[a-z0-9-]+_[0-9A-HJKMNP-TV-Z]{26}$/u);
     expect(prior?.revokedAt?.toISOString()).toBe("2026-03-25T01:00:00.000Z");
     expect(prior).toMatchObject({
       revokeReason: "rotated",
-      replacedBySessionId: rotated.id,
+      replacedBySessionId: `dsa_${suffix}`,
     });
     expect(replacement).toMatchObject({
+      id: `dsa_${suffix}`,
       tokenHash: "hash-rotated",
       userId: "user-123",
     });
@@ -299,6 +342,10 @@ function cloneSession(session: MutableAgentSession | null): MutableAgentSession 
     lastSeenAt: session.lastSeenAt ? new Date(session.lastSeenAt) : null,
     revokedAt: session.revokedAt ? new Date(session.revokedAt) : null,
   };
+}
+
+function hostedRandomSuffix(length: number): string {
+  return Buffer.from(Array.from({ length }, (_, index) => index)).toString("base64url");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

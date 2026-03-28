@@ -37,10 +37,13 @@ export function generateHostedRandomPrefixedId(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString("base64url")}`;
 }
 
+// Keep this hosted-local on purpose. Importing the daemon helper would widen
+// the `@murph/device-syncd` public surface just to reuse a trivial primitive.
 export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+// Keep this hosted-local on purpose for the same reason as `sha256Hex`.
 export function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};

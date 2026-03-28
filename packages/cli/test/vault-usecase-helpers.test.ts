@@ -186,3 +186,43 @@ test('shared patched-upsert helper preserves canonical ids while surfacing clear
     await rm(tempDir, { recursive: true, force: true })
   }
 })
+
+test('shared patched-upsert helper ignores set and clear attempts against the canonical entity id', async () => {
+  const originalRecord = {
+    foodId: 'food_123',
+    title: 'Regular Acai Bowl',
+    slug: 'regular-acai-bowl',
+    note: 'Usual order.',
+  }
+
+  const result = await preparePatchedUpsertPayload({
+    record: originalRecord,
+    entityIdField: 'foodId',
+    entityId: 'food_123',
+    set: ['foodId=food_PATCHATTEMPT1', 'title=Protein Acai Bowl'],
+    clear: ['foodId', 'note'],
+    patchLabel: 'food payload',
+    parsePayload(value) {
+      return value as {
+        foodId: string
+        title: string
+        slug: string
+        note?: string
+      }
+    },
+  })
+
+  assert.deepEqual(result.payload, {
+    foodId: 'food_123',
+    title: 'Protein Acai Bowl',
+    slug: 'regular-acai-bowl',
+  })
+  assert.equal(result.allowSlugRename, false)
+  assert.deepEqual([...result.clearedFields].sort(), ['foodId', 'note'])
+  assert.deepEqual(originalRecord, {
+    foodId: 'food_123',
+    title: 'Regular Acai Bowl',
+    slug: 'regular-acai-bowl',
+    note: 'Usual order.',
+  })
+})

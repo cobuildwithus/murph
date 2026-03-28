@@ -232,8 +232,8 @@ function parseHostedUserAssertion(assertion: string): HostedUserAssertionClaims 
 
   return {
     id,
-    email: normalizeNullableStringClaim(parsed.email),
-    name: normalizeNullableStringClaim(parsed.name),
+    email: normalizeStringClaim(parsed.email),
+    name: normalizeStringClaim(parsed.name),
     aud,
     method,
     path,
@@ -324,10 +324,6 @@ function normalizeHeaderValue(value: string | null): string | null {
 }
 
 function normalizeStringClaim(value: unknown): string | null {
-  return typeof value === "string" ? normalizeNullableString(value) : null;
-}
-
-function normalizeNullableStringClaim(value: unknown): string | null {
   return typeof value === "string" ? normalizeNullableString(value) : null;
 }
 
