@@ -683,6 +683,53 @@ slug broken-frontmatter
   }
 });
 
+test("profile snapshot recency tie-break stays aligned between listing and current-profile fallback", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_stale",
+  });
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "ledger/profile-snapshots/2026/2026-03.jsonl",
+      [
+        JSON.stringify({
+          schemaVersion: "murph.profile-snapshot.v1",
+          id: "psnap_same_01",
+          recordedAt: "2026-03-12T14:00:00Z",
+          sourceAssessmentIds: ["asmt_health_01"],
+          profile: {
+            topGoalIds: ["goal_same_01"],
+          },
+        }),
+        JSON.stringify({
+          schemaVersion: "murph.profile-snapshot.v1",
+          id: "psnap_same_02",
+          recordedAt: "2026-03-12T14:00:00Z",
+          sourceEventIds: ["evt_health_01"],
+          profile: {
+            topGoalIds: ["goal_same_02"],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const snapshots = await listProfileSnapshots(vaultRoot);
+    const current = await readCurrentProfile(vaultRoot);
+
+    assert.deepEqual(
+      snapshots.map((record) => record.id),
+      ["psnap_same_01", "psnap_same_02"],
+    );
+    assert.equal(current?.snapshotId, "psnap_same_01");
+    assert.deepEqual(current?.sourceAssessmentIds, ["asmt_health_01"]);
+    assert.deepEqual(current?.topGoalIds, ["goal_same_01"]);
+    assert.equal(current?.markdown, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("blood tests can be queried through dedicated helpers while remaining canonical history events", async () => {
   const vaultRoot = await createHealthVault();
 
