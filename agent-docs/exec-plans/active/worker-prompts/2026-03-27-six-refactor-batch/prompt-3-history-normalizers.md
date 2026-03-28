@@ -39,4 +39,3 @@ Best-guess fix:
 
 Overlap notes:
 - Keep the change tightly scoped to `packages/core/src/history/api.ts` and direct tests. Do not widen into unrelated history consumers unless a tiny compatibility edit is required.
-
