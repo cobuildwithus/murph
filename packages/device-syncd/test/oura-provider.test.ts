@@ -677,6 +677,36 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
   assert.equal(deletionEvent?.fields?.sourceEventType, "session.deleted");
 });
 
+test("Oura provider fallback trace ids ignore transport timestamps when the webhook body is unchanged", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "workout",
+      object_id: "workout-7",
+      user_id: "oura-user-1",
+      event_time: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+  const first = await provider.verifyAndParseWebhook?.({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:00:00.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+  const second = await provider.verifyAndParseWebhook?.({
+    headers: createOuraWebhookHeaders("oura-client-secret", "2026-03-16T10:05:00.000Z", rawBody),
+    rawBody,
+    now: "2026-03-16T10:05:00.000Z",
+  });
+
+  assert.equal(first?.traceId, second?.traceId);
+  assert.equal(first?.jobs[0]?.dedupeKey, second?.jobs[0]?.dedupeKey);
+});
+
 test("Oura webhook resource jobs fetch only the hinted collection and keep the matching object id", async () => {
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];

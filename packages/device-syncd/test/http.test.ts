@@ -444,7 +444,39 @@ test("device sync http server redirects OAuth callback errors back to the origin
 
 test("device sync http server serves the Oura webhook verification challenge on the public listener", async () => {
   const server = await startDeviceSyncHttpServer({
-    service: createStubService(),
+    service: createStubService({
+      registry: {
+        get(provider) {
+          if (provider !== "oura") {
+            return undefined;
+          }
+
+          return {
+            callbackPath: "/oauth/oura/callback",
+            defaultScopes: [],
+            executeJob: async () => ({}),
+            exchangeAuthorizationCode: async () => ({
+              externalAccountId: "oura-user-1",
+              tokens: {
+                accessToken: "access-token",
+              },
+            }),
+            provider: "oura",
+            refreshTokens: async () => ({
+              accessToken: "access-token",
+            }),
+            webhookAdmin: {
+              resolveVerificationChallenge({ url, verificationToken }) {
+                const challenge = url.searchParams.get("challenge");
+                const token = url.searchParams.get("verification_token");
+
+                return challenge && token === verificationToken ? challenge : null;
+              },
+            },
+          };
+        },
+      },
+    }),
     config: {
       host: "127.0.0.1",
       port: 0,

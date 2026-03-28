@@ -30,6 +30,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     }
   >();
   lastRecordedWebhookTrace: DeviceSyncWebhookTraceRecord | null = null;
+  completedWebhookTraceCalls = 0;
   private accountCounter = 0;
 
   deleteExpiredOAuthStates(now: string): number {
@@ -142,6 +143,7 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
   }
 
   completeWebhookTrace(provider: string, traceId: string): void {
+    this.completedWebhookTraceCalls += 1;
     const key = `${provider}:${traceId}`;
     const existing = this.webhookTraces.get(key);
 
@@ -194,6 +196,14 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
       status,
     });
   }
+}
+
+function completeWebhookAcceptDurably(
+  store: InMemoryPublicIngressStore,
+  account: PublicDeviceSyncAccount,
+  traceId: string,
+): void {
+  store.completeWebhookTrace(account.provider, traceId);
 }
 
 function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): DeviceSyncProvider {
@@ -322,6 +332,7 @@ test("public ingress processes an unknown-account retry exactly once after the a
     store,
     hooks: {
       onWebhookAccepted({ account, webhook }) {
+        completeWebhookAcceptDurably(store, account, webhook.traceId);
         acceptedWebhooks.push(`${account.id}:${webhook.eventType}`);
       },
       onUnknownWebhook({ provider, externalAccountId, webhook }) {
@@ -375,6 +386,7 @@ test("public ingress processes an inactive-account retry exactly once after reac
     store,
     hooks: {
       onWebhookAccepted({ account, webhook }) {
+        completeWebhookAcceptDurably(store, account, webhook.traceId);
         acceptedWebhooks.push(`${account.id}:${webhook.traceId}`);
       },
     },
@@ -427,13 +439,14 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
     ]),
     store,
     hooks: {
-      onWebhookAccepted() {
+      onWebhookAccepted({ account, webhook }) {
         attempts += 1;
 
         if (attempts === 1) {
           throw new Error("transient enqueue failure");
         }
 
+        completeWebhookAcceptDurably(store, account, webhook.traceId);
         successes += 1;
       },
     },
@@ -492,10 +505,11 @@ test("public ingress rejects overlapping active webhook deliveries until the fir
     ]),
     store,
     hooks: {
-      async onWebhookAccepted() {
+      async onWebhookAccepted({ account, webhook }) {
         acceptedCalls += 1;
         releaseProcessing?.();
         await processingGate;
+        completeWebhookAcceptDurably(store, account, webhook.traceId);
       },
     },
   });
@@ -584,7 +598,8 @@ test("public ingress stores webhook receipt timestamps using ingestion time, not
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ now }) {
+      onWebhookAccepted({ account, webhook, now }) {
+        completeWebhookAcceptDurably(store, account, webhook.traceId);
         observedAcceptedAt.push(now);
       },
     },
@@ -607,4 +622,29 @@ test("public ingress stores webhook receipt timestamps using ingestion time, not
     store.getConnectionByExternalAccount("demo", connected.account.externalAccountId)?.lastWebhookAt,
     "2026-03-01T00:00:00.000Z",
   );
+});
+
+test("public ingress does not complete a claimed webhook trace twice when the durable hook already owns completion", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store,
+    hooks: {
+      onWebhookAccepted({ account, webhook }) {
+        completeWebhookAcceptDurably(store, account, webhook.traceId);
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });

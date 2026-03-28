@@ -125,12 +125,13 @@ test("Oura webhook subscription ensure creates missing subscriptions with client
   );
 });
 
-test("Oura webhook subscription ensure renews expiring subscriptions and prunes duplicates per callback URL", async () => {
+test("Oura webhook subscription ensure re-lists after create and prunes stale managed callbacks across origins", async () => {
   const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
-  const otherCallbackUrl = "https://local.example.test/device-sync/webhooks/oura";
+  const otherCallbackUrl = "https://preview.example.test/api/device-sync/webhooks/oura";
   const soon = new Date(Date.now() + 60_000).toISOString();
   const later = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
   const operations: string[] = [];
+  let listCount = 0;
   const client = createOuraWebhookSubscriptionClient({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
@@ -140,51 +141,88 @@ test("Oura webhook subscription ensure renews expiring subscriptions and prunes 
       operations.push(`${method} ${url}`);
 
       if (url === "https://api.ouraring.com/v2/webhook/subscription" && method === "GET") {
-        return createJsonResponse({
-          data: [
-            {
-              id: "sub-create-primary",
-              callback_url: callbackUrl,
-              event_type: "create",
-              data_type: "daily_sleep",
-              expiration_time: soon,
-            },
-            {
-              id: "sub-create-duplicate",
-              callback_url: callbackUrl,
-              event_type: "create",
-              data_type: "daily_sleep",
-              expiration_time: soon,
-            },
-            {
-              id: "sub-delete-retained",
-              callback_url: callbackUrl,
-              event_type: "delete",
-              data_type: "daily_sleep",
-              expiration_time: later,
-            },
-            {
-              id: "sub-stale",
-              callback_url: callbackUrl,
-              event_type: "update",
-              data_type: "workout",
-              expiration_time: later,
-            },
-            {
-              id: "sub-other-callback",
-              callback_url: otherCallbackUrl,
-              event_type: "update",
-              data_type: "workout",
-              expiration_time: later,
-            },
-          ],
-        });
+        listCount += 1;
+
+        return createJsonResponse(
+          listCount === 1
+            ? {
+                data: [
+                  {
+                    id: "sub-create-a-primary",
+                    callback_url: callbackUrl,
+                    event_type: "create",
+                    data_type: "daily_sleep",
+                    expiration_time: soon,
+                  },
+                  {
+                    id: "sub-create-b-duplicate",
+                    callback_url: callbackUrl,
+                    event_type: "create",
+                    data_type: "daily_sleep",
+                    expiration_time: soon,
+                  },
+                  {
+                    id: "sub-delete-retained",
+                    callback_url: callbackUrl,
+                    event_type: "delete",
+                    data_type: "daily_sleep",
+                    expiration_time: later,
+                  },
+                  {
+                    id: "sub-other-callback",
+                    callback_url: otherCallbackUrl,
+                    event_type: "update",
+                    data_type: "workout",
+                    expiration_time: later,
+                  },
+                ],
+              }
+            : {
+                data: [
+                  {
+                    id: "sub-create-a-primary",
+                    callback_url: callbackUrl,
+                    event_type: "create",
+                    data_type: "daily_sleep",
+                    expiration_time: later,
+                  },
+                  {
+                    id: "sub-create-b-duplicate",
+                    callback_url: callbackUrl,
+                    event_type: "create",
+                    data_type: "daily_sleep",
+                    expiration_time: soon,
+                  },
+                  {
+                    id: "sub-delete-retained",
+                    callback_url: callbackUrl,
+                    event_type: "delete",
+                    data_type: "daily_sleep",
+                    expiration_time: later,
+                  },
+                  {
+                    id: "sub-update-current",
+                    callback_url: callbackUrl,
+                    event_type: "update",
+                    data_type: "workout",
+                    expiration_time: later,
+                  },
+                  {
+                    id: "sub-other-callback",
+                    callback_url: otherCallbackUrl,
+                    event_type: "update",
+                    data_type: "workout",
+                    expiration_time: later,
+                  },
+                ],
+              },
+        );
       }
 
-      if (url === "https://api.ouraring.com/v2/webhook/subscription/renew/sub-create-primary" && method === "PUT") {
+      if (url === "https://api.ouraring.com/v2/webhook/subscription/renew/sub-create-a-primary" && method === "PUT") {
         return createJsonResponse({
           data: {
-            id: "sub-create-primary",
+            id: "sub-create-a-primary",
             callback_url: callbackUrl,
             event_type: "create",
             data_type: "daily_sleep",
@@ -193,12 +231,27 @@ test("Oura webhook subscription ensure renews expiring subscriptions and prunes 
         });
       }
 
+      if (url === "https://api.ouraring.com/v2/webhook/subscription" && method === "POST") {
+        const payload = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
+        return createJsonResponse({
+          data: {
+            id: "sub-update-current",
+            callback_url: payload.callback_url,
+            event_type: payload.event_type,
+            data_type: payload.data_type,
+            expiration_time: later,
+          },
+        });
+      }
+
       if (
-        (url === "https://api.ouraring.com/v2/webhook/subscription/sub-create-duplicate" ||
-          url === "https://api.ouraring.com/v2/webhook/subscription/sub-stale") &&
+        (url === "https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate" ||
+          url === "https://api.ouraring.com/v2/webhook/subscription/sub-other-callback") &&
         method === "DELETE"
       ) {
-        return new Response(null, { status: 204 });
+        return new Response(null, {
+          status: url.endsWith("/sub-other-callback") ? 404 : 204,
+        });
       }
 
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -211,6 +264,7 @@ test("Oura webhook subscription ensure renews expiring subscriptions and prunes 
     desired: [
       { eventType: "create", dataType: "daily_sleep" },
       { eventType: "delete", dataType: "daily_sleep" },
+      { eventType: "update", dataType: "workout" },
     ],
     pruneDuplicates: true,
     renewIfExpiringWithinMs: 7 * 24 * 60 * 60_000,
@@ -218,21 +272,26 @@ test("Oura webhook subscription ensure renews expiring subscriptions and prunes 
 
   assert.deepEqual(
     result.renewed.map((subscription) => subscription.id),
-    ["sub-create-primary"],
+    ["sub-create-a-primary"],
   );
   assert.deepEqual(
     result.retained.map((subscription) => subscription.id),
     ["sub-delete-retained"],
   );
-  assert.deepEqual(result.created, []);
+  assert.deepEqual(
+    result.created.map((subscription) => subscription.id),
+    ["sub-update-current"],
+  );
   assert.deepEqual(
     result.deleted.map((subscription) => subscription.id).sort(),
-    ["sub-create-duplicate", "sub-stale"],
+    ["sub-create-b-duplicate", "sub-other-callback"],
   );
   assert.deepEqual(operations, [
     "GET https://api.ouraring.com/v2/webhook/subscription",
-    "PUT https://api.ouraring.com/v2/webhook/subscription/renew/sub-create-primary",
-    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-create-duplicate",
-    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-stale",
+    "PUT https://api.ouraring.com/v2/webhook/subscription/renew/sub-create-a-primary",
+    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate",
+    "POST https://api.ouraring.com/v2/webhook/subscription",
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-other-callback",
   ]);
 });
