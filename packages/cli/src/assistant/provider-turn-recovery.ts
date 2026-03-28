@@ -92,17 +92,9 @@ export async function readAssistantProviderRouteRecovery(
 ): Promise<AssistantProviderRouteRecovery | null> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
-
-  try {
-    const raw = await readFile(resolveAssistantProviderRouteRecoveryPath(paths, sessionId), 'utf8')
-    return assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (isMissingFileError(error)) {
-      return null
-    }
-
-    throw error
-  }
+  return readAssistantProviderRouteRecoveryAtPath(
+    resolveAssistantProviderRouteRecoveryPath(paths, sessionId),
+  )
 }
 
 export function readRecoveredAssistantProviderBindingForRoute(input: {

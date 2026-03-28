@@ -230,6 +230,8 @@ export function normalizeAssistantSessionSnapshot(
   const legacyProviderState = normalizeAssistantSessionProviderState(
     session.providerState,
   )
+  // An explicit `providerBinding: null` means "clear any provider resume state";
+  // only fall back to legacy compatibility fields when the binding key is absent.
   const hasExplicitProviderBinding = Object.prototype.hasOwnProperty.call(
     session,
     'providerBinding',
