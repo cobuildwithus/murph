@@ -31,6 +31,11 @@ export interface HostedPrivyWalletAccount {
   type: string;
 }
 
+export interface HostedPrivyTelegramAccountSelection {
+  account: HostedPrivyTelegramAccount | null;
+  ambiguous: boolean;
+}
+
 export interface HostedPrivyLinkedAccountContainer {
   linkedAccounts?: unknown;
   linked_accounts?: unknown;
@@ -73,34 +78,33 @@ export function resolveHostedPrivyLinkedAccountState(
 export function extractHostedPrivyPhoneAccount(
   linkedAccounts: readonly PrivyLinkedAccountLike[],
 ): HostedPrivyPhoneAccount | null {
-  for (const account of linkedAccounts) {
-    if (!account || account.type !== "phone") {
-      continue;
-    }
+  const candidates = linkedAccounts
+    .filter((account): account is PrivyLinkedAccountLike => Boolean(account) && account.type === "phone")
+    .map((account) => {
+      const rawNumber = firstString(account, ["phone_number", "number", "phoneNumber", "address"]);
+      const normalizedNumber = normalizePhoneNumber(rawNumber);
+      const verifiedAt = firstTimestamp(account, [
+        "latest_verified_at",
+        "verified_at",
+        "first_verified_at",
+        "latestVerifiedAt",
+        "verifiedAt",
+        "firstVerifiedAt",
+        "lv",
+      ]);
 
-    const rawNumber = firstString(account, ["phone_number", "number", "phoneNumber", "address"]);
-    const normalizedNumber = normalizePhoneNumber(rawNumber);
-    const verifiedAt = firstTimestamp(account, [
-      "latest_verified_at",
-      "verified_at",
-      "first_verified_at",
-      "latestVerifiedAt",
-      "verifiedAt",
-      "firstVerifiedAt",
-      "lv",
-    ]);
+      if (!normalizedNumber || verifiedAt === null) {
+        return null;
+      }
 
-    if (!normalizedNumber || verifiedAt === null) {
-      continue;
-    }
+      return {
+        number: normalizedNumber,
+        verifiedAt,
+      } satisfies HostedPrivyPhoneAccount;
+    })
+    .filter((account): account is HostedPrivyPhoneAccount => Boolean(account));
 
-    return {
-      number: normalizedNumber,
-      verifiedAt,
-    };
-  }
-
-  return null;
+  return selectNewestTimestampedCandidate(candidates, (account) => account.number);
 }
 
 export function extractHostedPrivyEmailAccount(
@@ -149,53 +153,54 @@ export function isHostedPrivyEmailAccountVerified(
 export function extractHostedPrivyVerifiedEmailAccount(
   linkedAccounts: readonly PrivyLinkedAccountLike[],
 ): (HostedPrivyEmailAccount & { verifiedAt: number }) | null {
-  let bestMatch: (HostedPrivyEmailAccount & { verifiedAt: number }) | null = null;
+  const candidates = linkedAccounts
+    .filter((account): account is PrivyLinkedAccountLike => Boolean(account) && account.type === "email")
+    .map((account) => {
+      const address = firstString(account, ["address", "email_address", "emailAddress", "email"]);
+      const verifiedAt = firstTimestamp(account, [
+        "latest_verified_at",
+        "verified_at",
+        "first_verified_at",
+        "latestVerifiedAt",
+        "verifiedAt",
+        "firstVerifiedAt",
+        "lv",
+      ]);
 
-  for (const account of linkedAccounts) {
-    if (!account || account.type !== "email") {
-      continue;
-    }
+      if (!address || verifiedAt === null) {
+        return null;
+      }
 
-    const address = firstString(account, ["address", "email_address", "emailAddress", "email"]);
-    const verifiedAt = firstTimestamp(account, [
-      "latest_verified_at",
-      "verified_at",
-      "first_verified_at",
-      "latestVerifiedAt",
-      "verifiedAt",
-      "firstVerifiedAt",
-      "lv",
-    ]);
-
-    if (!address || verifiedAt === null) {
-      continue;
-    }
-
-    if (!bestMatch || verifiedAt > bestMatch.verifiedAt) {
-      bestMatch = {
+      return {
         address,
         verifiedAt,
-      };
-    }
-  }
+      } satisfies HostedPrivyEmailAccount & { verifiedAt: number };
+    })
+    .filter((account): account is HostedPrivyEmailAccount & { verifiedAt: number } => Boolean(account));
 
-  return bestMatch;
+  return selectNewestTimestampedCandidate(candidates, (account) => account.address.toLowerCase());
 }
 
 export function extractHostedPrivyTelegramAccount(
   input: HostedPrivyLinkedAccountContainer | null | undefined,
 ): HostedPrivyTelegramAccount | null {
+  return resolveHostedPrivyTelegramAccountSelection(input).account;
+}
+
+export function resolveHostedPrivyTelegramAccountSelection(
+  input: HostedPrivyLinkedAccountContainer | null | undefined,
+): HostedPrivyTelegramAccountSelection {
+  const candidates: HostedPrivyTelegramAccount[] = [];
+
   if (input?.telegram && typeof input.telegram === "object" && !Array.isArray(input.telegram)) {
     const directAccount = coerceHostedPrivyTelegramAccount(input.telegram as Record<string, unknown>);
 
     if (directAccount) {
-      return directAccount;
+      candidates.push(directAccount);
     }
   }
 
-  const linkedAccounts = resolveHostedPrivyLinkedAccounts(input);
-
-  for (const account of linkedAccounts) {
+  for (const account of resolveHostedPrivyLinkedAccounts(input)) {
     if (!account || account.type !== "telegram") {
       continue;
     }
@@ -203,11 +208,38 @@ export function extractHostedPrivyTelegramAccount(
     const telegramAccount = coerceHostedPrivyTelegramAccount(account);
 
     if (telegramAccount) {
-      return telegramAccount;
+      candidates.push(telegramAccount);
     }
   }
 
-  return null;
+  if (candidates.length === 0) {
+    return {
+      account: null,
+      ambiguous: false,
+    };
+  }
+
+  const mergedByTelegramUserId = new Map<string, HostedPrivyTelegramAccount>();
+
+  for (const candidate of candidates) {
+    const existing = mergedByTelegramUserId.get(candidate.telegramUserId);
+    mergedByTelegramUserId.set(
+      candidate.telegramUserId,
+      mergeHostedPrivyTelegramAccounts(existing, candidate),
+    );
+  }
+
+  if (mergedByTelegramUserId.size !== 1) {
+    return {
+      account: null,
+      ambiguous: true,
+    };
+  }
+
+  return {
+    account: mergedByTelegramUserId.values().next().value ?? null,
+    ambiguous: false,
+  };
 }
 
 export function extractHostedPrivyWalletAccount(
@@ -237,25 +269,135 @@ export function extractHostedPrivyWalletAccount(
         chainType,
         id: firstString(account, ["id"]),
         type: "wallet",
-      } satisfies HostedPrivyWalletAccount;
+        walletIndex: firstInteger(account, ["wallet_index", "walletIndex"]),
+        normalizedAddress: address.toLowerCase(),
+      };
     })
-    .filter((account): account is HostedPrivyWalletAccount => Boolean(account));
+    .filter((account): account is HostedPrivyWalletAccount & {
+      normalizedAddress: string;
+      walletIndex: number | null;
+    } => Boolean(account));
 
   if (walletAccounts.length === 0) {
     return null;
   }
 
-  if (preferredChainType) {
-    const preferred = walletAccounts.find((account) => account.chainType === preferredChainType);
+  const preferredWalletAccounts = preferredChainType
+    ? walletAccounts.filter((account) => account.chainType === preferredChainType)
+    : walletAccounts;
 
-    if (preferred) {
-      return preferred;
-    }
+  const selectedWallet = selectLowestRankCandidate(
+    preferredWalletAccounts,
+    (account) => account.normalizedAddress,
+    (account) => account.walletIndex ?? Number.MAX_SAFE_INTEGER,
+  );
 
+  if (!selectedWallet) {
     return null;
   }
 
-  return walletAccounts[0] ?? null;
+  return {
+    address: selectedWallet.address,
+    chainType: selectedWallet.chainType,
+    id: selectedWallet.id,
+    type: selectedWallet.type,
+  };
+}
+
+function mergeHostedPrivyTelegramAccounts(
+  current: HostedPrivyTelegramAccount | undefined,
+  next: HostedPrivyTelegramAccount,
+): HostedPrivyTelegramAccount {
+  if (!current) {
+    return next;
+  }
+
+  return {
+    firstName: preferLongerString(current.firstName, next.firstName),
+    lastName: preferLongerString(current.lastName, next.lastName),
+    photoUrl: preferLongerString(current.photoUrl, next.photoUrl),
+    telegramUserId: current.telegramUserId,
+    username: preferLongerString(current.username, next.username),
+  };
+}
+
+function selectNewestTimestampedCandidate<T extends { verifiedAt: number }>(
+  candidates: readonly T[],
+  identityKey: (candidate: T) => string,
+): T | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const deduped = new Map<string, T>();
+
+  for (const candidate of candidates) {
+    const key = identityKey(candidate);
+    const existing = deduped.get(key);
+
+    if (!existing || candidate.verifiedAt > existing.verifiedAt) {
+      deduped.set(key, candidate);
+    }
+  }
+
+  let best: T | null = null;
+  let bestKey: string | null = null;
+
+  for (const [key, candidate] of deduped.entries()) {
+    if (!best || candidate.verifiedAt > best.verifiedAt) {
+      best = candidate;
+      bestKey = key;
+      continue;
+    }
+
+    if (best && candidate.verifiedAt === best.verifiedAt && key !== bestKey) {
+      return null;
+    }
+  }
+
+  return best;
+}
+
+function selectLowestRankCandidate<T>(
+  candidates: readonly T[],
+  identityKey: (candidate: T) => string,
+  rank: (candidate: T) => number,
+): T | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const deduped = new Map<string, T>();
+
+  for (const candidate of candidates) {
+    const key = identityKey(candidate);
+    const existing = deduped.get(key);
+
+    if (!existing || rank(candidate) < rank(existing)) {
+      deduped.set(key, candidate);
+    }
+  }
+
+  let best: T | null = null;
+  let bestRank = Number.POSITIVE_INFINITY;
+  let bestKey: string | null = null;
+
+  for (const [key, candidate] of deduped.entries()) {
+    const candidateRank = rank(candidate);
+
+    if (candidateRank < bestRank) {
+      best = candidate;
+      bestRank = candidateRank;
+      bestKey = key;
+      continue;
+    }
+
+    if (candidateRank === bestRank && key !== bestKey) {
+      return null;
+    }
+  }
+
+  return best;
 }
 
 function coerceHostedPrivyTelegramAccount(
@@ -310,6 +452,34 @@ function firstTimestamp(record: Record<string, unknown>, keys: readonly string[]
   }
 
   return null;
+}
+
+function firstInteger(record: Record<string, unknown>, keys: readonly string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === "number" && Number.isInteger(value)) {
+      return value;
+    }
+
+    if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+      return Number.parseInt(value, 10);
+    }
+  }
+
+  return null;
+}
+
+function preferLongerString(current: string | null, next: string | null): string | null {
+  if (!current) {
+    return next;
+  }
+
+  if (!next) {
+    return current;
+  }
+
+  return next.length > current.length ? next : current;
 }
 
 function firstString(record: Record<string, unknown>, keys: readonly string[]): string | null {

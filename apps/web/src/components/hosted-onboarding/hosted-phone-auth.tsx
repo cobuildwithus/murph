@@ -14,7 +14,10 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
-import { requestHostedOnboardingJson } from "./client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "./client-api";
 import { HostedPrivyProvider } from "./privy-provider";
 
 interface HostedPhoneAuthProps {
@@ -299,10 +302,7 @@ async function finalizeHostedPrivyVerification(input: {
   user: { linkedAccounts?: unknown } | null;
 }) {
   await requireHostedPrivyPhoneAndWalletReady(input);
-  const payload = await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
-    payload: input.inviteCode ? { inviteCode: input.inviteCode } : {},
-    url: "/api/hosted-onboarding/privy/complete",
-  });
+  const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
 
   if (input.onCompleted) {
     await input.onCompleted(payload);
@@ -324,6 +324,34 @@ async function finalizeHostedPrivyVerification(input: {
   }
 
   window.location.assign(payload.joinUrl);
+}
+
+async function requestHostedPrivyCompletionWithRetry(
+  inviteCode?: string | null,
+): Promise<HostedPrivyCompletionPayload> {
+  const retryDelaysMs = [0, 250, 500, 1_000] as const;
+  let lastError: unknown = null;
+
+  for (const delayMs of retryDelaysMs) {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    try {
+      return await requestHostedOnboardingJson<HostedPrivyCompletionPayload>({
+        payload: inviteCode ? { inviteCode } : {},
+        url: "/api/hosted-onboarding/privy/complete",
+      });
+    } catch (error) {
+      lastError = error;
+
+      if (!isRetryableHostedPrivyCompletionError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("We could not verify your Privy session.");
 }
 
 async function requireHostedPrivyPhoneAndWalletReady(input: {
@@ -360,6 +388,20 @@ async function readHostedPrivyClientSessionState(input: {
 
 function toErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function isRetryableHostedPrivyCompletionError(error: unknown): boolean {
+  return (
+    error instanceof HostedOnboardingApiError &&
+    error.retryable &&
+    (error.code === "PRIVY_PHONE_NOT_READY" || error.code === "PRIVY_WALLET_NOT_READY")
+  );
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, delayMs);
+  });
 }
 
 const inputClasses =

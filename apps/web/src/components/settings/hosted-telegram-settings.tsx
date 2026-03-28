@@ -75,8 +75,12 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
 
     try {
       await linkTelegram();
-      await refreshUser().catch(() => null);
-      await syncLinkedTelegram("link");
+      const refreshedUser = await refreshUser().catch(() => null);
+      const refreshedTelegram = resolveHostedTelegramSettingsDisplayState({
+        user: refreshedUser ?? user,
+      }).currentTelegram;
+
+      await syncLinkedTelegram("link", refreshedTelegram?.telegramUserId ?? null);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not link Telegram from Privy yet."));
     } finally {
@@ -93,7 +97,7 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
       return;
     }
 
-    await syncLinkedTelegram("resync");
+    await syncLinkedTelegram("resync", currentTelegram.telegramUserId);
   }
 
   async function handleLogout() {
@@ -109,11 +113,17 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
     }
   }
 
-  async function syncLinkedTelegram(mode: "link" | "resync") {
+  async function syncLinkedTelegram(mode: "link" | "resync", expectedTelegramUserId: string | null) {
+    if (!expectedTelegramUserId) {
+      setErrorMessage("Telegram linked in Privy, but the latest Telegram user id is not available yet. Try again.");
+      return;
+    }
+
     setIsSyncingTelegram(true);
 
     try {
       const syncPresentation = await syncHostedLinkedTelegram({
+        expectedTelegramUserId,
         mode,
       });
       setSuccessMessage(syncPresentation.successMessage);

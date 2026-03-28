@@ -77,7 +77,7 @@ export async function createHostedBillingCheckout(input: {
 
   const shareCode = normalizeNullableString(input.shareCode);
   const { linkedAccounts } = await requireHostedPrivyUserForSession(input.cookieStore, input.sessionRecord);
-  const resolvedWalletAddress = await resolveHostedMemberWalletAddress({
+  resolveHostedMemberWalletAddress({
     existingWalletAddress: invite.member.walletAddress,
     linkedAccounts,
     requireWalletAddress: isHostedOnboardingRevnetEnabled(),
@@ -88,7 +88,6 @@ export async function createHostedBillingCheckout(input: {
     memberId: invite.member.id,
     memberSnapshot: invite.member,
     normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
-    preferredWalletAddress: resolvedWalletAddress,
     prisma,
     stripe,
   });
@@ -117,7 +116,6 @@ export async function createHostedBillingCheckout(input: {
         billingStatus: HostedBillingStatus.checkout_open,
         stripeCustomerId: customerId,
         stripeLatestCheckoutSessionId: reusableCheckout.stripeCheckoutSessionId,
-        ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
       },
     });
 
@@ -213,7 +211,6 @@ export async function createHostedBillingCheckout(input: {
           billingStatus: HostedBillingStatus.checkout_open,
           stripeCustomerId: customerId,
           stripeLatestCheckoutSessionId: checkoutSession.id,
-          ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
         },
       });
     });
@@ -246,7 +243,6 @@ export async function createHostedBillingCheckout(input: {
           billingStatus: HostedBillingStatus.checkout_open,
           stripeCustomerId: customerId,
           stripeLatestCheckoutSessionId: concurrentOpenCheckout.stripeCheckoutSessionId,
-          ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
         },
       });
 
@@ -269,7 +265,6 @@ async function ensureHostedStripeCustomer(input: {
   memberId: string;
   memberSnapshot: Pick<HostedMember, "id" | "stripeCustomerId">;
   normalizedPhoneNumber: string;
-  preferredWalletAddress: string | null;
   prisma: PrismaClient;
   stripe: Stripe;
 }): Promise<string> {
@@ -314,7 +309,6 @@ async function ensureHostedStripeCustomer(input: {
     },
     data: {
       stripeCustomerId: customer.id,
-      ...(input.preferredWalletAddress ? { walletAddress: input.preferredWalletAddress } : {}),
     },
   });
 
@@ -380,11 +374,11 @@ function buildHostedStripeCheckoutIdempotencyKey(input: {
   ].join(":");
 }
 
-async function resolveHostedMemberWalletAddress(input: {
+function resolveHostedMemberWalletAddress(input: {
   existingWalletAddress: string | null | undefined;
   linkedAccounts: readonly PrivyLinkedAccountLike[];
   requireWalletAddress: boolean;
-}): Promise<string | null> {
+}): string | null {
   const normalizedExistingWalletAddress = normalizeNullableString(input.existingWalletAddress);
   const privyWalletAddress = normalizeHostedWalletAddress(
     extractHostedPrivyWalletAccount(input.linkedAccounts, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE)?.address,
@@ -416,14 +410,10 @@ async function resolveHostedMemberWalletAddress(input: {
     });
   }
 
-  if (privyWalletAddress) {
-    return privyWalletAddress;
-  }
-
   if (input.requireWalletAddress) {
     throw hostedOnboardingError({
       code: "HOSTED_WALLET_ADDRESS_REQUIRED",
-      message: "A hosted wallet address is required before Stripe checkout can begin.",
+      message: "A hosted wallet address must be bound during verification before Stripe checkout can begin.",
       httpStatus: 400,
     });
   }

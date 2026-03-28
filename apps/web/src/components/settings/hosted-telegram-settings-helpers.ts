@@ -40,12 +40,14 @@ export function resolveHostedTelegramSettingsDisplayState(input: {
 }
 
 export async function syncHostedLinkedTelegram(input: {
+  expectedTelegramUserId: string;
   fetchImpl?: typeof fetch;
   mode: HostedTelegramSyncMode;
   sleepImpl?: (delayMs: number) => Promise<void>;
 }): Promise<HostedTelegramSyncPresentation> {
   try {
     const syncResult = await syncHostedTelegramConnectionWithRetry({
+      expectedTelegramUserId: input.expectedTelegramUserId,
       fetchImpl: input.fetchImpl,
       sleepImpl: input.sleepImpl,
     });
@@ -75,12 +77,13 @@ export class HostedTelegramSyncError extends Error {
 }
 
 export async function syncHostedTelegramConnectionWithRetry(input: {
+  expectedTelegramUserId: string;
   fetchImpl?: typeof fetch;
   sleepImpl?: (delayMs: number) => Promise<void>;
-} = {}): Promise<HostedTelegramSyncResult> {
+}): Promise<HostedTelegramSyncResult> {
   return retrySyncOperation({
     errorFactory: (message) => new HostedTelegramSyncError(null, message),
-    operation: () => syncHostedTelegramConnection(input.fetchImpl ?? fetch),
+    operation: () => syncHostedTelegramConnection(input.expectedTelegramUserId, input.fetchImpl ?? fetch),
     retryable: (error) =>
       error instanceof HostedTelegramSyncError && error.code === "PRIVY_TELEGRAM_NOT_READY",
     sleepImpl: input.sleepImpl,
@@ -101,8 +104,17 @@ function formatHostedTelegramSyncSuccessMessage(
     : base;
 }
 
-async function syncHostedTelegramConnection(fetchImpl: typeof fetch): Promise<HostedTelegramSyncResult> {
+async function syncHostedTelegramConnection(
+  expectedTelegramUserId: string,
+  fetchImpl: typeof fetch,
+): Promise<HostedTelegramSyncResult> {
   const response = await fetchImpl("/api/settings/telegram/sync", {
+    body: JSON.stringify({
+      expectedTelegramUserId,
+    }),
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
     method: "POST",
   });
   const payload = await readOptionalJsonObject(response);

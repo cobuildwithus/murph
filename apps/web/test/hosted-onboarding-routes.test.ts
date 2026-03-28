@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   completeHostedPrivyVerification: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   clearHostedSessionCookie: vi.fn(),
-  requireHostedPrivyIdentityFromCookies: vi.fn(),
+  requireHostedPrivyCompletionIdentityFromCookies: vi.fn(),
   requireHostedSessionFromCookieStore: vi.fn(),
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
@@ -41,7 +41,7 @@ vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  requireHostedPrivyIdentityFromCookies: mocks.requireHostedPrivyIdentityFromCookies,
+  requireHostedPrivyCompletionIdentityFromCookies: mocks.requireHostedPrivyCompletionIdentityFromCookies,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/session", () => ({
@@ -76,7 +76,7 @@ describe("hosted onboarding routes", () => {
     mocks.cookies.mockResolvedValue({
       get: vi.fn().mockReturnValue(undefined),
     });
-    mocks.requireHostedPrivyIdentityFromCookies.mockResolvedValue({
+    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockResolvedValue({
       phone: {
         number: "+15551234567",
         verifiedAt: 1742990400,
@@ -226,7 +226,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("rejects hosted Privy completion requests that are missing the Privy identity cookie", async () => {
-    mocks.requireHostedPrivyIdentityFromCookies.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
         httpStatus: 401,
@@ -259,7 +259,7 @@ describe("hosted onboarding routes", () => {
   });
 
   it("does not accept a body identity token when the Privy identity cookie is missing", async () => {
-    mocks.requireHostedPrivyIdentityFromCookies.mockRejectedValue(
+    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
       hostedOnboardingError({
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
         httpStatus: 401,
@@ -287,6 +287,39 @@ describe("hosted onboarding routes", () => {
         code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
         message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
         retryable: false,
+      },
+    });
+  });
+
+  it("serializes retryable server-side Privy lag errors during completion", async () => {
+    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
+      hostedOnboardingError({
+        code: "PRIVY_WALLET_NOT_READY",
+        httpStatus: 409,
+        message: "Your rewards wallet has not reached the server-side Privy session yet. Wait a moment and try again.",
+        retryable: true,
+      }),
+    );
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: JSON.stringify({
+          inviteCode: "invite-code",
+        }),
+        headers: {
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_WALLET_NOT_READY",
+        message: "Your rewards wallet has not reached the server-side Privy session yet. Wait a moment and try again.",
+        retryable: true,
       },
     });
   });
@@ -497,7 +530,7 @@ describe("hosted onboarding routes", () => {
       });
     } finally {
       vi.doMock("@/src/lib/hosted-onboarding/privy", () => ({
-        requireHostedPrivyIdentityFromCookies: mocks.requireHostedPrivyIdentityFromCookies,
+        requireHostedPrivyCompletionIdentityFromCookies: mocks.requireHostedPrivyCompletionIdentityFromCookies,
       }));
       vi.resetModules();
     }
