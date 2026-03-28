@@ -69,7 +69,6 @@ const REGISTRY_RELATION_ARRAY_KEYS = [
   "sourceAssessmentIds",
   "sourceEventIds",
   "topGoalIds",
-  "familyMemberIds",
   "conditionIds",
   "goalIds",
   "protocolIds",

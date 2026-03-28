@@ -1198,6 +1198,77 @@ test("conditions and allergies are stored as deterministic markdown registry pag
   assert.ok(allergyOperations.every((operation) => operation.status === "committed"));
 });
 
+test("condition and allergy updates clear normalized relations without leaving stale markdown", async () => {
+  const vaultRoot = await makeTempDirectory("murph-condition-allergy-clear-links");
+  await initializeVault({ vaultRoot });
+
+  const goal = await upsertGoal({
+    vaultRoot,
+    title: "Reduce migraine frequency",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const protocol = await upsertProtocolItem({
+    vaultRoot,
+    title: "Magnesium glycinate",
+    kind: "supplement",
+    status: "active",
+    startedOn: "2026-03-03",
+    dose: 200,
+    unit: "mg",
+    schedule: "nightly",
+  });
+  const condition = await upsertCondition({
+    vaultRoot,
+    title: "Migraine",
+    relatedGoalIds: [goal.record.goalId],
+    relatedProtocolIds: [protocol.record.protocolId],
+    note: "Likely worsened by sleep disruption.",
+  });
+  const allergy = await upsertAllergy({
+    vaultRoot,
+    title: "Penicillin allergy",
+    substance: "penicillin",
+    relatedConditionIds: [condition.record.conditionId],
+    note: "Avoid beta-lactam exposure until formally reviewed.",
+  });
+
+  const clearedCondition = await upsertCondition({
+    vaultRoot,
+    conditionId: condition.record.conditionId,
+    relatedGoalIds: [],
+    relatedProtocolIds: [],
+  });
+  const clearedAllergy = await upsertAllergy({
+    vaultRoot,
+    allergyId: allergy.record.allergyId,
+    relatedConditionIds: [],
+  });
+  const readConditionRecord = await readCondition({
+    vaultRoot,
+    conditionId: condition.record.conditionId,
+  });
+  const readAllergyRecord = await readAllergy({
+    vaultRoot,
+    allergyId: allergy.record.allergyId,
+  });
+
+  assert.equal(clearedCondition.created, false);
+  assert.equal(clearedAllergy.created, false);
+  assert.equal(readConditionRecord.relatedGoalIds, undefined);
+  assert.equal(readConditionRecord.relatedProtocolIds, undefined);
+  assert.deepEqual(readConditionRecord.links, []);
+  assert.match(readConditionRecord.markdown, /## Related Goals[\s\S]*- none/);
+  assert.match(readConditionRecord.markdown, /## Related Protocols[\s\S]*- none/);
+  assert.doesNotMatch(readConditionRecord.markdown, new RegExp(goal.record.goalId));
+  assert.doesNotMatch(readConditionRecord.markdown, new RegExp(protocol.record.protocolId));
+  assert.equal(readAllergyRecord.relatedConditionIds, undefined);
+  assert.deepEqual(readAllergyRecord.links, []);
+  assert.match(readAllergyRecord.markdown, /## Related Conditions[\s\S]*- none/);
+  assert.doesNotMatch(readAllergyRecord.markdown, new RegExp(condition.record.conditionId));
+});
+
 test("condition and allergy id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
   const vaultRoot = await makeTempDirectory("murph-condition-allergy-resolution");
   await initializeVault({ vaultRoot });
