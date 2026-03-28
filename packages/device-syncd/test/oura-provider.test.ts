@@ -79,6 +79,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
           access_token: "access-token",
           refresh_token: "refresh-token",
           expires_in: 3600,
+          scope: "extapi:personal extapi:daily extapi:heartrate",
         });
       }
 
@@ -97,7 +98,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
     {
       callbackUrl: "https://healthybob.test/device-sync/oauth/oura/callback",
       now: "2026-03-16T10:00:00.000Z",
-      grantedScopes: ["personal", "daily", "heartrate"],
+      grantedScopes: [],
     },
     "auth-code-1",
   );
