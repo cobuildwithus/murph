@@ -1,3 +1,4 @@
+import { request as httpRequest } from "node:http";
 import { once } from "node:events";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -66,6 +67,60 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: "Hosted runner control token is not configured.",
+    });
+  });
+
+  it("returns a stable invalid JSON error for malformed run requests", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: "{]",
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid JSON.",
+    });
+  });
+
+  it("returns a stable invalid request error when the run body is not an object", async () => {
+    const server = await startHostedContainerEntrypoint({
+      controlToken: "runner-token",
+      port: 0,
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+      body: JSON.stringify(["not-an-object"]),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
     });
   });
 
@@ -226,12 +281,81 @@ describe("startHostedContainerEntrypoint", () => {
       expect(new Set(finished)).toEqual(new Set(["evt_a", "evt_b"]));
       expect(firstResponse.status).toBe(500);
       await expect(firstResponse.json()).resolves.toEqual({
-        error: "boom",
+        error: "Internal error.",
       });
       expect(secondResponse.status).toBe(200);
       await expect(secondResponse.json()).resolves.toMatchObject({
         result: { summary: "evt_b" },
       });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("aborts the hosted job when the client disconnects before the response completes", async () => {
+    let abortSignal: AbortSignal | null = null;
+    let abortReason: unknown = null;
+    let resolveStarted: (() => void) | null = null;
+    let resolveAborted: (() => void) | null = null;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      resolveAborted = resolve;
+    });
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (_job: any, options) => {
+      abortSignal = options?.signal ?? null;
+      resolveStarted?.();
+
+      await new Promise<never>((_, reject) => {
+        abortSignal?.addEventListener("abort", () => {
+          abortReason = abortSignal?.reason;
+          resolveAborted?.();
+          reject(abortReason instanceof Error ? abortReason : new Error("aborted"));
+        }, { once: true });
+      });
+
+      throw new Error("unreachable");
+    });
+
+    try {
+      const server = await startHostedContainerEntrypoint({ controlToken: "runner-token", port: 0 });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const request = httpRequest({
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        host: "127.0.0.1",
+        method: "POST",
+        path: "/__internal/run",
+        port: address.port,
+      });
+      request.on("error", () => {});
+      request.write(JSON.stringify({
+        bundles: { agentState: null, vault: null },
+        dispatch: {
+          event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+          eventId: "evt_disconnect",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      }));
+      request.end();
+
+      await started;
+      request.destroy();
+      await aborted;
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(abortSignal?.aborted).toBe(true);
+      expect(abortReason).toBeInstanceOf(Error);
+      expect((abortReason as Error).message).toContain("aborted");
     } finally {
       spy.mockRestore();
     }

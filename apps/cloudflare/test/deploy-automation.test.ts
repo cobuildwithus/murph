@@ -25,6 +25,7 @@ describe("hosted deploy automation helpers", () => {
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "api.example.test",
       HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "7m",
       INSTALL_PADDLEOCR: "1",
       TELEGRAM_BOT_USERNAME: "hosted_bot",
@@ -109,6 +110,7 @@ describe("hosted deploy automation helpers", () => {
       },
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
+    expect(config.vars.HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS).toBe("api.example.test");
     expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
     expect(config.vars.AGENTMAIL_BASE_URL).toBe("https://mail.example.test/v0");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");

@@ -510,20 +510,37 @@ function unauthorized(): Response {
 }
 
 function mapWorkerRouteError(error: unknown): Response {
-  const status = (
-    error instanceof SyntaxError
-    || error instanceof TypeError
-    || error instanceof URIError
-  )
-    ? 400
-    : 500;
+  console.error("Hosted worker route failed.", error);
+  const classified = classifyPublicRouteError(error);
 
   return json(
-    {
-      error: error instanceof Error ? error.message : String(error),
-    },
-    status,
+    { error: classified.error },
+    classified.status,
   );
+}
+
+function classifyPublicRouteError(error: unknown): {
+  error: string;
+  status: number;
+} {
+  if (error instanceof SyntaxError) {
+    return {
+      error: "Invalid JSON.",
+      status: 400,
+    };
+  }
+
+  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+    return {
+      error: "Invalid request.",
+      status: 400,
+    };
+  }
+
+  return {
+    error: "Internal error.",
+    status: 500,
+  };
 }
 
 async function readCachedRequestText(

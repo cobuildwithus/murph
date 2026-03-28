@@ -123,6 +123,24 @@ describe("readHostedOnboardingEnvironment", () => {
   it("requires DEVICE_SYNC_ENCRYPTION_KEY", () => {
     expect(() => readHostedOnboardingEnvironment(createProcessEnv({}))).toThrow(/DEVICE_SYNC_ENCRYPTION_KEY/u);
   });
+
+  it("rejects non-localhost HTTP public base URLs", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "http://join.example.test",
+      })),
+    ).toThrow(/Hosted execution base URLs must use HTTPS/u);
+  });
+
+  it("rejects embedded credentials in the public base URL", () => {
+    expect(() =>
+      readHostedOnboardingEnvironment(createProcessEnv({
+        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://user:pass@join.example.test",
+      })),
+    ).toThrow(/must not include embedded credentials/u);
+  });
 });
 
 function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {
