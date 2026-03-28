@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto'
 import {
+  createAssistantUsageId,
+  writePendingAssistantUsageRecord,
+} from '@murph/runtime-state'
+import {
   assistantCanonicalWriteBlockSchema,
   assistantAskResultSchema,
   type AssistantSession,
@@ -600,6 +604,12 @@ export async function sendAssistantMessage(
 
         const providerResult = providerOutcome.providerTurn
         responseText = providerResult.response
+        await persistPendingAssistantUsageEvent({
+          providerResult,
+          session: providerResult.session,
+          turnId: userTurn.turnId,
+          vault: input.vault,
+        })
         const session = await persistAssistantTurnAndSession({
           input,
           plan: sharedPlan,
@@ -1564,6 +1574,59 @@ function classifyAssistantProviderAttemptFailure(input: {
   return 'retry_next_route'
 }
 
+async function persistPendingAssistantUsageEvent(input: {
+  providerResult: ExecutedAssistantProviderTurnResult
+  session: AssistantSession
+  turnId: string
+  vault: string
+}): Promise<void> {
+  const usage = input.providerResult.usage
+
+  if (!usage) {
+    return
+  }
+
+  await writePendingAssistantUsageRecord({
+    vault: input.vault,
+    record: {
+      schema: 'murph.assistant-usage.v1',
+      usageId: createAssistantUsageId({
+        attemptCount: input.providerResult.attemptCount,
+        turnId: input.turnId,
+      }),
+      memberId: normalizeNullableString(process.env.HOSTED_MEMBER_ID),
+      sessionId: input.session.sessionId,
+      turnId: input.turnId,
+      attemptCount: input.providerResult.attemptCount,
+      occurredAt: new Date().toISOString(),
+      provider: input.providerResult.provider,
+      routeId: input.providerResult.route.routeId,
+      requestedModel: usage.requestedModel ?? input.providerResult.providerOptions.model,
+      servedModel: usage.servedModel ?? null,
+      providerName: normalizeNullableString(
+        usage.providerName ?? input.providerResult.providerOptions.providerName,
+      ),
+      baseUrl: normalizeNullableString(
+        usage.baseUrl ?? input.providerResult.providerOptions.baseUrl,
+      ),
+      apiKeyEnv: normalizeNullableString(
+        usage.apiKeyEnv ?? input.providerResult.providerOptions.apiKeyEnv,
+      ),
+      credentialSource: null,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      reasoningTokens: usage.reasoningTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      totalTokens: usage.totalTokens,
+      providerSessionId: input.providerResult.providerSessionId,
+      providerRequestId: usage.providerRequestId,
+      providerMetadataJson: usage.providerMetadataJson,
+      rawUsageJson: usage.rawUsageJson,
+    },
+  })
+}
+
 async function persistAssistantTurnAndSession(input: {
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
@@ -2120,27 +2183,54 @@ function resolveAssistantRouteResumeBinding(input: {
   workingDirectoryKey: string | null
 }): AssistantProviderBinding | null {
   if (
-    input.recoveredBinding?.provider === input.provider &&
-    readAssistantProviderResumeRouteId({
-      providerBinding: input.recoveredBinding,
-    }) === input.routeId
+    doesAssistantResumeBindingMatchRoute({
+      binding: input.recoveredBinding,
+      provider: input.provider,
+      routeId: input.routeId,
+      workingDirectoryKey: input.workingDirectoryKey,
+    })
   ) {
     return input.recoveredBinding
   }
 
   if (
-    input.sessionBinding?.provider === input.provider &&
-    ((readAssistantProviderResumeRouteId({
-      providerBinding: input.sessionBinding,
-    }) ?? input.routeId) === input.routeId) &&
-    ((readAssistantProviderResumeWorkspaceKey({
-      providerBinding: input.sessionBinding,
-    }) ?? input.workingDirectoryKey) === input.workingDirectoryKey)
+    doesAssistantResumeBindingMatchRoute({
+      binding: input.sessionBinding,
+      provider: input.provider,
+      routeId: input.routeId,
+      workingDirectoryKey: input.workingDirectoryKey,
+    })
   ) {
     return input.sessionBinding
   }
 
   return null
+}
+
+function doesAssistantResumeBindingMatchRoute(input: {
+  binding: AssistantProviderBinding | null
+  provider: AssistantChatProvider
+  routeId: string
+  workingDirectoryKey: string | null
+}): boolean {
+  if (
+    input.binding?.provider !== input.provider ||
+    input.workingDirectoryKey === null
+  ) {
+    return false
+  }
+
+  const resumeRouteId = readAssistantProviderResumeRouteId({
+    providerBinding: input.binding,
+  })
+  const resumeWorkspaceKey = readAssistantProviderResumeWorkspaceKey({
+    providerBinding: input.binding,
+  })
+
+  return (
+    resumeRouteId === input.routeId &&
+    resumeWorkspaceKey === input.workingDirectoryKey
+  )
 }
 
 function resolveNextAssistantProviderBinding(input: {

@@ -1267,6 +1267,11 @@ function assistantSelectionToOperatorDefaults(
       provider: assistant.provider,
       providerConfig: {
         model: assistant.model,
+        ...(assistant.codexCommand !== null
+          ? {
+              codexCommand: assistant.codexCommand,
+            }
+          : {}),
         reasoningEffort: assistant.reasoningEffort,
         sandbox: assistant.sandbox,
         approvalPolicy: assistant.approvalPolicy,
