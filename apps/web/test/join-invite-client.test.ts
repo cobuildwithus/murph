@@ -89,13 +89,8 @@ function createStatus(
       status: "opened",
     },
     member: {
-      billingStatus: "pending",
-      hasWallet: false,
       phoneHint: "+1 415 555 2671",
-      phoneVerified: false,
-      status: "pending",
-      walletAddress: null,
-      walletChainType: null,
+      status: "registered",
     },
     session: {
       authenticated: false,
@@ -113,7 +108,6 @@ function createShareStatus(stage: HostedSharePageData["stage"]): HostedSharePage
     session: {
       active: true,
       authenticated: true,
-      memberId: "member_123",
     },
     share: {
       acceptedByCurrentMember: true,

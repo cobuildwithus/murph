@@ -103,7 +103,6 @@ export async function buildHostedSharePageData(input: {
       session: {
         active: Boolean(sessionActive),
         authenticated: Boolean(input.sessionRecord),
-        memberId: input.sessionRecord?.member.id ?? null,
       },
       share: null,
       stage: "invalid",
@@ -130,7 +129,6 @@ export async function buildHostedSharePageData(input: {
     session: {
       active: Boolean(sessionActive),
       authenticated: Boolean(input.sessionRecord),
-      memberId: input.sessionRecord?.member.id ?? null,
     },
     share: {
       acceptedByCurrentMember,

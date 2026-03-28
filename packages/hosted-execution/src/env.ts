@@ -15,6 +15,7 @@ export interface HostedExecutionWebControlPlaneEnvironment {
   schedulerToken: string | null;
   shareBaseUrl: string | null;
   shareToken: string | null;
+  usageBaseUrl?: string | null;
 }
 
 export interface HostedExecutionWorkerEnvironment {
@@ -33,6 +34,11 @@ export interface HostedExecutionWorkerEnvironment {
 }
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
+
+export interface HostedExecutionBaseUrlNormalizationOptions {
+  allowHttpHosts?: readonly string[];
+  allowHttpLocalhost?: boolean;
+}
 
 export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
@@ -65,19 +71,23 @@ export function readHostedExecutionControlEnvironment(
 
 export function readHostedExecutionWebControlPlaneEnvironment(
   source: EnvSource = process.env,
+  options?: HostedExecutionBaseUrlNormalizationOptions,
 ): HostedExecutionWebControlPlaneEnvironment {
-  const sharedBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL);
+  const sharedBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL, options);
 
   return {
     deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(
       source.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL,
+      options,
     ) ?? sharedBaseUrl,
     internalToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKEN),
     schedulerToken: normalizeHostedExecutionString(source.CRON_SECRET),
     shareBaseUrl: normalizeHostedExecutionBaseUrl(
       source.HOSTED_SHARE_BASE_URL ?? source.HOSTED_SHARE_API_BASE_URL,
+      options,
     ) ?? sharedBaseUrl,
     shareToken: normalizeHostedExecutionString(source.HOSTED_SHARE_INTERNAL_TOKEN),
+    usageBaseUrl: normalizeHostedExecutionBaseUrl(source.HOSTED_AI_USAGE_BASE_URL, options) ?? sharedBaseUrl,
   };
 }
 
@@ -126,7 +136,10 @@ export function readHostedExecutionWorkerEnvironment(
   };
 }
 
-export function normalizeHostedExecutionBaseUrl(value: string | null | undefined): string | null {
+export function normalizeHostedExecutionBaseUrl(
+  value: string | null | undefined,
+  options?: HostedExecutionBaseUrlNormalizationOptions,
+): string | null {
   const normalized = normalizeHostedExecutionString(value);
 
   if (!normalized) {
@@ -134,6 +147,26 @@ export function normalizeHostedExecutionBaseUrl(value: string | null | undefined
   }
 
   const url = new URL(normalized);
+  const protocol = url.protocol.toLowerCase();
+  const hostname = url.hostname.toLowerCase();
+  const allowHttpHosts = new Set((options?.allowHttpHosts ?? []).map((entry) => entry.toLowerCase()));
+  const allowHttp =
+    protocol === "http:"
+    && (
+      allowHttpHosts.has(hostname)
+      || (options?.allowHttpLocalhost === true && isHostedExecutionLoopbackHost(hostname))
+    );
+
+  if (protocol !== "https:" && !allowHttp) {
+    throw new TypeError(
+      "Hosted execution base URLs must use HTTPS unless the host is explicitly allowlisted for HTTP.",
+    );
+  }
+
+  if (url.username || url.password) {
+    throw new TypeError("Hosted execution base URLs must not include embedded credentials.");
+  }
+
   url.hash = "";
   url.search = "";
   return url.toString().replace(/\/$/u, "");
@@ -173,4 +206,8 @@ function parsePositiveInteger(value: string | null, fallback: number, label: str
   }
 
   return parsed;
+}
+
+function isHostedExecutionLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
 }

@@ -35,6 +35,7 @@ import {
   readHostedExecutionOutboxPayload,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedExecutionWorkerEnvironment,
+  normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
   resolveHostedExecutionDispatchLifecycle,
@@ -173,6 +174,7 @@ describe("@murph/hosted-execution", () => {
       schedulerToken: "cron-token",
       shareBaseUrl: "https://join.example.test",
       shareToken: "share-token",
+      usageBaseUrl: "https://join.example.test",
     });
 
     expect(
@@ -186,6 +188,7 @@ describe("@murph/hosted-execution", () => {
       schedulerToken: null,
       shareBaseUrl: "https://share.example.test/internal",
       shareToken: null,
+      usageBaseUrl: "https://join.example.test",
     });
   });
 
@@ -742,6 +745,25 @@ describe("@murph/hosted-execution", () => {
     ).toBe(
       "/api/hosted-share/internal/share%2Fid/payload?shareCode=code%2Bwith+spaces",
     );
+  });
+
+  it("rejects unsafe hosted base urls and only allows explicit internal HTTP exceptions", () => {
+    expect(() => normalizeHostedExecutionBaseUrl("http://join.example.test")).toThrow(
+      /must use HTTPS/i,
+    );
+    expect(() => normalizeHostedExecutionBaseUrl("https://user:pass@join.example.test")).toThrow(
+      /must not include embedded credentials/i,
+    );
+    expect(
+      normalizeHostedExecutionBaseUrl("http://device-sync.worker/path", {
+        allowHttpHosts: ["device-sync.worker"],
+      }),
+    ).toBe("http://device-sync.worker/path");
+    expect(
+      normalizeHostedExecutionBaseUrl("http://127.0.0.1:8787/path", {
+        allowHttpLocalhost: true,
+      }),
+    ).toBe("http://127.0.0.1:8787/path");
   });
 
   it("normalizes device-sync wake helpers for hosted execution", () => {

@@ -32,9 +32,18 @@ vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
   buildHostedTelegramBotLink: mocks.buildHostedTelegramBotLink,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    publicBaseUrl: "https://join.example.test",
+  }),
+}));
+
 type SettingsTelegramSyncRouteModule = typeof import("../app/api/settings/telegram/sync/route");
 
 let settingsTelegramSyncRoute: SettingsTelegramSyncRouteModule;
+const SAME_ORIGIN_HEADERS = {
+  origin: "https://join.example.test",
+};
 
 describe("settings telegram sync route", () => {
   beforeAll(async () => {
@@ -83,6 +92,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),
@@ -129,6 +139,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),
@@ -149,6 +160,7 @@ describe("settings telegram sync route", () => {
   it("requires a client-confirmed Telegram user id before syncing Telegram", async () => {
     const response = await settingsTelegramSyncRoute.POST(
       new Request("https://join.example.test/api/settings/telegram/sync", {
+        headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
     );
@@ -179,6 +191,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),
@@ -211,6 +224,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),
@@ -237,6 +251,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),
@@ -275,6 +290,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),
@@ -319,6 +335,7 @@ describe("settings telegram sync route", () => {
         }),
         headers: {
           "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
         },
         method: "POST",
       }),

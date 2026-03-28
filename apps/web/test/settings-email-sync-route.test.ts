@@ -25,9 +25,18 @@ vi.mock("@/src/lib/hosted-onboarding/session", () => ({
   resolveHostedSessionFromCookieStore: mocks.resolveHostedSessionFromCookieStore,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  getHostedOnboardingEnvironment: () => ({
+    publicBaseUrl: "https://join.example.test",
+  }),
+}));
+
 type SettingsEmailSyncRouteModule = typeof import("../app/api/settings/email/sync/route");
 
 let settingsEmailSyncRoute: SettingsEmailSyncRouteModule;
+const SAME_ORIGIN_HEADERS = {
+  origin: "https://join.example.test",
+};
 
 describe("settings email sync route", () => {
   beforeAll(async () => {
@@ -70,6 +79,7 @@ describe("settings email sync route", () => {
         body: JSON.stringify({
           expectedEmailAddress: "user@example.com",
         }),
+        headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
     );
@@ -102,6 +112,7 @@ describe("settings email sync route", () => {
   it("accepts an empty POST body when the server-side Privy session already has the verified email", async () => {
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
+        headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
     );
@@ -123,6 +134,7 @@ describe("settings email sync route", () => {
 
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
+        headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
     );
@@ -156,6 +168,7 @@ describe("settings email sync route", () => {
         body: JSON.stringify({
           expectedEmailAddress: "user@example.com",
         }),
+        headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
     );
@@ -176,6 +189,7 @@ describe("settings email sync route", () => {
 
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
+        headers: SAME_ORIGIN_HEADERS,
         method: "POST",
       }),
     );

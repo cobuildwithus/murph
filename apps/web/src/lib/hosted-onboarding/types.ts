@@ -10,13 +10,8 @@ export interface HostedInviteStatusPayload {
     status: string;
   } | null;
   member: {
-    billingStatus: string;
-    hasWallet: boolean;
     phoneHint: string;
-    phoneVerified: boolean;
     status: string;
-    walletAddress: string | null;
-    walletChainType: string | null;
   } | null;
   session: {
     authenticated: boolean;

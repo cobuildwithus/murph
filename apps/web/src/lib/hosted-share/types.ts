@@ -20,7 +20,6 @@ export interface HostedSharePageData {
   session: {
     active: boolean;
     authenticated: boolean;
-    memberId: string | null;
   };
   share: {
     acceptedByCurrentMember: boolean;

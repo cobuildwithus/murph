@@ -2,9 +2,36 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 
+const RUNNER_PROXY_TOKEN = "proxy-token";
+const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
+
 describe("handleRunnerOutboundRequest", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("rejects internal worker proxy traffic that is missing the per-run proxy token", async () => {
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "oura",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unauthorized",
+    });
   });
 
   it("proxies device-sync runtime requests through the worker with the bound user id", async () => {
@@ -22,15 +49,16 @@ describe("handleRunnerOutboundRequest", () => {
           provider: "oura",
           userId: "member_other",
         }),
-        headers: {
+        headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
-        },
+        }),
         method: "POST",
       }),
       createRunnerOutboundEnv({
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
+      RUNNER_PROXY_TOKEN,
     );
 
     expect(response.status).toBe(200);
@@ -62,12 +90,14 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+        headers: createRunnerProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
         HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://web.example.test",
       }),
       "member_123",
+      RUNNER_PROXY_TOKEN,
     );
 
     expect(response.status).toBe(200);
@@ -94,6 +124,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     const response = await handleRunnerOutboundRequest(
       new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+        headers: createRunnerProxyHeaders(),
         method: "GET",
       }),
       createRunnerOutboundEnv({
@@ -101,6 +132,7 @@ describe("handleRunnerOutboundRequest", () => {
         HOSTED_SHARE_INTERNAL_TOKEN: undefined,
       }),
       "member_123",
+      RUNNER_PROXY_TOKEN,
     );
 
     expect(response.status).toBe(200);
@@ -133,13 +165,14 @@ describe("handleRunnerOutboundRequest", () => {
           kind: "assistant.delivery",
           recordedAt: "2026-03-26T12:00:05.000Z",
         }),
-        headers: {
+        headers: createRunnerProxyHeaders({
           "content-type": "application/json; charset=utf-8",
-        },
+        }),
         method: "PUT",
       }),
       createRunnerOutboundEnv(),
       "member_123",
+      RUNNER_PROXY_TOKEN,
     );
 
     expect(response.status).toBe(400);
@@ -148,6 +181,13 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 });
+
+function createRunnerProxyHeaders(headers: Record<string, string> = {}) {
+  return {
+    [RUNNER_PROXY_TOKEN_HEADER]: RUNNER_PROXY_TOKEN,
+    ...headers,
+  };
+}
 
 function createRunnerOutboundEnv(overrides: Partial<Record<string, unknown>> = {}) {
   return {

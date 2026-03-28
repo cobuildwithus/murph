@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { syncHostedVerifiedEmailToHostedExecution } from "@/src/lib/hosted-execution/control";
+import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
@@ -11,6 +12,7 @@ import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding
 
 export async function POST(request: Request) {
   try {
+    assertHostedOnboardingMutationOrigin(request);
     const cookieStore = await cookies();
     const hostedSession = await resolveHostedSessionFromCookieStore(cookieStore);
 

@@ -1,4 +1,8 @@
-import { DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL } from "@murph/hosted-execution";
+import {
+  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
+  normalizeHostedExecutionBaseUrl,
+} from "@murph/hosted-execution";
 
 import {
   fetchHostedJsonResponse,
@@ -15,7 +19,16 @@ export interface HostedEmailSendRequest {
 
 export function normalizeHostedEmailBaseUrl(value: string | null | undefined): string {
   const candidate = value?.trim() ? value.trim() : DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL;
-  return new URL(candidate).toString();
+  const normalized = normalizeHostedExecutionBaseUrl(candidate, {
+    allowHttpHosts: [HOSTED_EXECUTION_CALLBACK_HOSTS.email],
+    allowHttpLocalhost: true,
+  });
+
+  if (!normalized) {
+    throw new TypeError("Hosted email baseUrl must be configured.");
+  }
+
+  return normalized;
 }
 
 export function buildHostedRunnerEmailMessageUrl(baseUrl: string, rawMessageKey: string): URL {
