@@ -44,4 +44,3 @@ Best-guess fix:
 Overlap notes:
 - `apps/web/src/lib/hosted-onboarding/webhook-service.ts` is a live hosted-onboarding surface with adjacent billing/revnet edits nearby. Read the live file carefully and preserve unrelated changes.
 - Keep this worker off unrelated hosted-share or device-sync files.
-

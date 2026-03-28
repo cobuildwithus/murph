@@ -474,7 +474,7 @@ function resolveSetupWizardDeviceSyncLocalBaseUrl(
 ): string {
   return (
     readSetupEnvValue(env, ['DEVICE_SYNC_BASE_URL']) ??
-    'http://127.0.0.1:8788'
+    'http://localhost:8788'
   )
 }
 

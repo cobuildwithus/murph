@@ -244,10 +244,10 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
   assert.deepEqual(
     review.targets.map((target) => target.url),
     [
-      'http://127.0.0.1:8788/oauth/whoop/callback',
-      'http://127.0.0.1:8788/webhooks/whoop',
-      'http://127.0.0.1:8788/oauth/oura/callback',
-      'http://127.0.0.1:8788/webhooks/oura',
+      'http://localhost:8788/oauth/whoop/callback',
+      'http://localhost:8788/webhooks/whoop',
+      'http://localhost:8788/oauth/oura/callback',
+      'http://localhost:8788/webhooks/oura',
     ],
   )
   assert.match(

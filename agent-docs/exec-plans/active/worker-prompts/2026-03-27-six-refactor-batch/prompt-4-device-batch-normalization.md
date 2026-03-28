@@ -45,4 +45,3 @@ Best-guess fix:
 
 Overlap notes:
 - This lane stays inside `packages/core/src/mutations.ts` plus direct tests. Preserve existing deterministic ID inputs and the current precedence rules exactly.
-

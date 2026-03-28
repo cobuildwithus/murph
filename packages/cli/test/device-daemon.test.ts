@@ -20,11 +20,27 @@ interface SpawnProcessInput {
   stderrPath: string
 }
 
+function readAuthorizationHeader(headers?: HeadersInit): string | null {
+  return headers ? new Headers(headers).get('Authorization') : null
+}
+
+function readRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input
+  }
+  if (input instanceof URL) {
+    return input.toString()
+  }
+  return input.url
+}
+
 test.sequential(
   'startManagedDeviceSyncDaemon keeps launcher state non-secret and persists the managed bearer separately',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     const livePids = new Set<number>()
+    const healthCheckAuthorizations: Array<string | null> = []
+    const healthCheckUrls: string[] = []
     let healthy = false
     let spawned: SpawnProcessInput | null = null
 
@@ -35,15 +51,20 @@ test.sequential(
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
         },
         dependencies: {
-          fetchImpl: async () =>
-            new Response(
-              JSON.stringify({
-                ok: healthy,
-              }),
-              {
-                status: healthy ? 200 : 503,
-              },
-            ),
+          fetchImpl: async (input, init) => {
+            healthCheckUrls.push(readRequestUrl(input))
+            healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+            return (
+              new Response(
+                JSON.stringify({
+                  ok: healthy,
+                }),
+                {
+                  status: healthy ? 200 : 503,
+                },
+              )
+            )
+          },
           isProcessAlive(pid) {
             return livePids.has(pid)
           },
@@ -73,7 +94,7 @@ test.sequential(
       assert.equal(spawnedProcess.env.VAULT_ROOT, vaultRoot)
       assert.equal(
         spawnedProcess.env.DEVICE_SYNC_PUBLIC_BASE_URL,
-        'http://127.0.0.1:8788',
+        'http://localhost:8788',
       )
       assert.equal(
         spawnedProcess.env.DEVICE_SYNC_CONTROL_TOKEN,
@@ -100,22 +121,35 @@ test.sequential(
       )
 
       assert.equal(launcherState.pid, 4242)
-      assert.equal(launcherState.baseUrl, 'http://127.0.0.1:8788')
+      assert.equal(launcherState.baseUrl, 'http://localhost:8788')
       assert.equal('controlToken' in launcherState, false)
       assert.equal(persistedControlToken.trim(), 'control-token-for-tests')
+      assert.deepEqual(healthCheckAuthorizations, [
+        null,
+        'Bearer control-token-for-tests',
+      ])
+      assert.deepEqual(healthCheckUrls, [
+        'http://localhost:8788/healthz',
+        'http://localhost:8788/healthz',
+      ])
 
       const reusedControlPlane = await ensureManagedDeviceSyncControlPlane({
         vault: vaultRoot,
         dependencies: {
-          fetchImpl: async () =>
-            new Response(
-              JSON.stringify({
-                ok: healthy,
-              }),
-              {
-                status: healthy ? 200 : 503,
-              },
-            ),
+          fetchImpl: async (input, init) => {
+            healthCheckUrls.push(readRequestUrl(input))
+            healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+            return (
+              new Response(
+                JSON.stringify({
+                  ok: healthy,
+                }),
+                {
+                  status: healthy ? 200 : 503,
+                },
+              )
+            )
+          },
           isProcessAlive(pid) {
             return livePids.has(pid)
           },
@@ -123,6 +157,16 @@ test.sequential(
       })
 
       assert.equal(reusedControlPlane.controlToken, 'control-token-for-tests')
+      assert.deepEqual(healthCheckAuthorizations, [
+        null,
+        'Bearer control-token-for-tests',
+        'Bearer control-token-for-tests',
+      ])
+      assert.deepEqual(healthCheckUrls, [
+        'http://localhost:8788/healthz',
+        'http://localhost:8788/healthz',
+        'http://localhost:8788/healthz',
+      ])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -228,6 +272,8 @@ test.sequential(
   'getManagedDeviceSyncDaemonStatus reports stale launcher state clearly',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    const healthCheckAuthorizations: Array<string | null> = []
+    const healthCheckUrls: string[] = []
     let healthy = false
 
     try {
@@ -260,13 +306,16 @@ test.sequential(
       const status = await getManagedDeviceSyncDaemonStatus({
         vault: vaultRoot,
         dependencies: {
-          fetchImpl: async () =>
-            new Response(
+          fetchImpl: async (input, init) => {
+            healthCheckUrls.push(readRequestUrl(input))
+            healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
+            return new Response(
               JSON.stringify({
                 ok: false,
               }),
               { status: 503 },
-            ),
+            )
+          },
           isProcessAlive() {
             return false
           },
@@ -281,6 +330,8 @@ test.sequential(
         'Stale device-sync daemon state found; recorded PID is no longer running.',
       )
       assert.equal(status.statePath, '.runtime/device-syncd/launcher.json')
+      assert.deepEqual(healthCheckAuthorizations, ['Bearer control-token-for-tests'])
+      assert.deepEqual(healthCheckUrls, ['http://localhost:8788/healthz'])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

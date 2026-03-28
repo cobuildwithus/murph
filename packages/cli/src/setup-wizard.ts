@@ -99,7 +99,7 @@ type SetupWizardSelectionStep = Extract<
   'assistant' | 'scheduled-updates' | 'channels' | 'wearables'
 >
 
-const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://127.0.0.1:8788'
+const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://localhost:8788'
 const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
 
 const setupWizardAssistantOptions: readonly SetupWizardAssistantOption[] = [

@@ -43,4 +43,3 @@ Best-guess fix:
 
 Overlap notes:
 - This surface is comparatively isolated. Keep the patch limited to the canonical collector and the minimum adjacent type/call-site updates needed to make the refactor compile and test cleanly.
-

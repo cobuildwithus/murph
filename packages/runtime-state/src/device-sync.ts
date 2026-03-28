@@ -6,7 +6,7 @@ export const DEVICE_SYNC_CONTROL_TOKEN_ENV = "DEVICE_SYNC_CONTROL_TOKEN";
 export const DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS = [
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
 ] as const;
-export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://127.0.0.1:8788";
+export const DEFAULT_DEVICE_SYNC_BASE_URL = "http://localhost:8788";
 export const DEVICE_SYNC_LOCAL_CONTROL_PLANE_ERROR_PREFIX =
   "Device sync control-plane bearer tokens from DEVICE_SYNC_CONTROL_TOKEN may only target loopback DEVICE_SYNC_BASE_URL values.";
 export const DEVICE_SYNC_SECRET_ENV = "DEVICE_SYNC_SECRET";
