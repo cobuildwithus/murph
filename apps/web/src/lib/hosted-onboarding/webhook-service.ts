@@ -1211,7 +1211,7 @@ function resolveHostedSubscriptionBillingStatus(input: {
 }
 
 function resolveStripeInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
-  const parentSubscriptionId = coerceStripeObjectId(
+  return coerceStripeObjectId(
     (
       invoice as Stripe.Invoice & {
         parent?: {
@@ -1221,18 +1221,6 @@ function resolveStripeInvoiceSubscriptionId(invoice: Stripe.Invoice): string | n
         } | null;
       }
     ).parent?.subscription_details?.subscription ?? null,
-  );
-
-  if (parentSubscriptionId) {
-    return parentSubscriptionId;
-  }
-
-  return coerceStripeObjectId(
-    (
-      invoice as Stripe.Invoice & {
-        subscription?: unknown;
-      }
-    ).subscription ?? null,
   );
 }
 

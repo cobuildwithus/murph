@@ -485,7 +485,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to the legacy top-level invoice subscription field when parent subscription details are absent", async () => {
+  it("does not match members from the removed top-level invoice subscription field", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       data: {
         object: {
@@ -497,22 +497,7 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const findUnique = vi.fn().mockImplementation(({ where }: { where: Record<string, unknown> }) => {
-      if (where.stripeSubscriptionId === "sub_legacy_123") {
-        return Promise.resolve({
-          billingMode: HostedBillingMode.subscription,
-          billingStatus: HostedBillingStatus.past_due,
-          id: "member_123",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
-          stripeCustomerId: null,
-          stripeSubscriptionId: "sub_legacy_123",
-          status: HostedMemberStatus.active,
-        });
-      }
-
-      return Promise.resolve(null);
-    });
+    const findUnique = vi.fn().mockResolvedValue(null);
 
     const prisma: any = withPrismaTransaction({
       hostedInvite: {
@@ -548,11 +533,138 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    expect(findUnique).toHaveBeenCalledWith({
+    expect(findUnique).not.toHaveBeenCalledWith({
       where: {
         stripeSubscriptionId: "sub_legacy_123",
       },
     });
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("downgrades subscription members from invoice.payment_failed using parent subscription details", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          customer: null,
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_invoice_failed_123",
+      type: "invoice.payment_failed",
+    });
+
+    const findUnique = vi.fn().mockImplementation(({ where }: { where: Record<string, unknown> }) => {
+      if (where.stripeSubscriptionId === "sub_123") {
+        return Promise.resolve({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: null,
+          stripeSubscriptionId: "sub_123",
+          status: HostedMemberStatus.active,
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+
+    const prisma: any = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique,
+        update: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: null,
+          stripeSubscriptionId: "sub_123",
+          status: HostedMemberStatus.active,
+        }),
+      },
+    });
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_invoice_failed_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.payment_failed",
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+    expect(prisma.hostedMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          billingStatus: HostedBillingStatus.past_due,
+          stripeSubscriptionId: "sub_123",
+        }),
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("does not match invoice.payment_failed members from the removed top-level invoice subscription field", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          customer: null,
+          subscription: "sub_legacy_123",
+        },
+      },
+      id: "evt_stripe_invoice_failed_legacy_123",
+      type: "invoice.payment_failed",
+    });
+
+    const findUnique = vi.fn().mockResolvedValue(null);
+
+    const prisma: any = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique,
+        update: vi.fn(),
+      },
+    });
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_invoice_failed_legacy_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.payment_failed",
+    });
+
+    expect(findUnique).not.toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: "sub_legacy_123",
+      },
+    });
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("does not activate or mark the invite paid from checkout.session.completed when RevNet subscriptions are enabled", async () => {
