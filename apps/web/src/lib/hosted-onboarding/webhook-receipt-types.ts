@@ -90,12 +90,14 @@ export type HostedWebhookSideEffectResult =
   | NonNullable<HostedWebhookDispatchSideEffect["result"]>
   | NonNullable<HostedWebhookLinqMessageSideEffect["result"]>;
 
+export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.TransactionClient;
+
 export type HostedWebhookDispatchEnqueueInput = {
   dispatch: HostedExecutionDispatchRequest;
   eventId: string;
   nextPayloadJson: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
   previousClaim: HostedWebhookReceiptClaim;
-  prisma: PrismaClient;
+  prismaOrTransaction: HostedWebhookReceiptPersistenceClient;
   source: string;
 };
 

@@ -55,9 +55,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.runtimeEnv.telegramWebhookSecret = null;
   });
 
-  it("dispatches linked active-member Telegram messages to hosted execution", async () => {
+  it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const prisma = withPrismaTransaction({
+    const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -80,7 +80,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           status: HostedMemberStatus.active,
         }),
       },
-    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+    });
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -297,6 +297,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 });
+
+function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T) {
+  return prisma as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+}
 
 function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
   const prismaWithTransaction = prisma as T & {

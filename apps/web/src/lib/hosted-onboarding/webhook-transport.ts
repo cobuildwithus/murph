@@ -4,6 +4,7 @@ import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { sendHostedLinqChatMessage } from "./linq";
 import type {
   HostedWebhookDispatchEnqueueInput,
+  HostedWebhookReceiptPersistenceClient,
   HostedWebhookReceiptHandlers,
   HostedWebhookSideEffect,
 } from "./webhook-receipt-types";
@@ -27,40 +28,32 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
 }
 
 async function enqueueHostedWebhookDispatchEffect(input: HostedWebhookDispatchEnqueueInput): Promise<number> {
-  const transaction = input.prisma.$transaction;
-
-  if (typeof transaction === "function") {
-    return transaction.call(input.prisma, async (tx) => {
-      await enqueueHostedExecutionOutbox({
-        dispatch: input.dispatch,
-        sourceId: `${input.source}:${input.eventId}`,
-        sourceType: "hosted_webhook_receipt",
-        tx,
-      });
-      const updatedReceipt = await tx.hostedWebhookReceipt.updateMany({
-        where: {
-          source: input.source,
-          eventId: input.eventId,
-          payloadJson: {
-            equals: input.previousClaim.payloadJson ?? Prisma.JsonNull,
-          },
-        },
-        data: {
-          payloadJson: input.nextPayloadJson,
-        },
-      });
-
-      return updatedReceipt.count;
-    }) as Promise<number>;
+  if (isPrismaClient(input.prismaOrTransaction)) {
+    return input.prismaOrTransaction.$transaction((tx) =>
+      enqueueHostedWebhookDispatchEffectWithTransaction(input, tx),
+    );
   }
 
+  return enqueueHostedWebhookDispatchEffectWithTransaction(input, input.prismaOrTransaction);
+}
+
+function isPrismaClient(
+  client: HostedWebhookReceiptPersistenceClient,
+): client is PrismaClient {
+  return "$transaction" in client && typeof client.$transaction === "function";
+}
+
+async function enqueueHostedWebhookDispatchEffectWithTransaction(
+  input: HostedWebhookDispatchEnqueueInput,
+  transaction: Prisma.TransactionClient,
+): Promise<number> {
   await enqueueHostedExecutionOutbox({
     dispatch: input.dispatch,
     sourceId: `${input.source}:${input.eventId}`,
     sourceType: "hosted_webhook_receipt",
-    tx: input.prisma as unknown as Prisma.TransactionClient,
+    tx: transaction,
   });
-  const updatedReceipt = await input.prisma.hostedWebhookReceipt.updateMany({
+  const updatedReceipt = await transaction.hostedWebhookReceipt.updateMany({
     where: {
       source: input.source,
       eventId: input.eventId,
