@@ -41,6 +41,7 @@ export function buildHostedRunnerEmailSendUrl(baseUrl: string): URL {
 
 export function createHostedEmailChannelDependencies(input: {
   emailBaseUrl: string;
+  fetchImpl?: typeof fetch;
   timeoutMs?: number | null;
 }): {
   sendEmail: (input: HostedEmailSendRequest) => Promise<{ target: string } | void>
@@ -49,6 +50,7 @@ export function createHostedEmailChannelDependencies(input: {
     sendEmail: async (sendInput) => sendHostedEmailOverWorker({
       ...sendInput,
       emailBaseUrl: input.emailBaseUrl,
+      fetchImpl: input.fetchImpl,
       timeoutMs: sendInput.timeoutMs ?? input.timeoutMs ?? null,
     }),
   };
@@ -56,6 +58,7 @@ export function createHostedEmailChannelDependencies(input: {
 
 export async function sendHostedEmailOverWorker(input: HostedEmailSendRequest & {
   emailBaseUrl: string;
+  fetchImpl?: typeof fetch;
 }): Promise<
   | {
       target: string;
@@ -64,6 +67,7 @@ export async function sendHostedEmailOverWorker(input: HostedEmailSendRequest & 
 > {
   const { payload, response, text } = await fetchHostedJsonResponse({
     description: "Hosted email send worker",
+    fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs ?? null,
     url: buildHostedRunnerEmailSendUrl(input.emailBaseUrl).toString(),
     init: {

@@ -8,6 +8,7 @@ import { DurableObject } from "cloudflare:workers";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 
 interface RunnerContainerInvokePayload {
+  internalWorkerProxyToken: string;
   userId: string;
   request: HostedExecutionRunnerRequest & {
     commit: {
@@ -44,12 +45,14 @@ export class RunnerContainerTestDouble extends DurableObject {
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
+            "x-hosted-execution-runner-proxy-token": payload.internalWorkerProxyToken,
           },
           method: "POST",
         },
       ),
       this.env as never,
       payload.userId,
+      payload.internalWorkerProxyToken,
     );
 
     if (!commitResponse.ok) {

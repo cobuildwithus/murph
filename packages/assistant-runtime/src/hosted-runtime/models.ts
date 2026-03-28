@@ -23,6 +23,7 @@ export interface HostedAssistantRuntimeConfig {
   commitBaseUrl?: string | null;
   commitTimeoutMs?: number | null;
   emailBaseUrl?: string | null;
+  internalWorkerProxyToken?: string | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   outboxBaseUrl?: string | null;
   sideEffectsBaseUrl?: string | null;
@@ -56,6 +57,7 @@ export interface NormalizedHostedAssistantRuntimeConfig {
   commitBaseUrl: string;
   commitTimeoutMs: number | null;
   emailBaseUrl: string;
+  internalWorkerProxyToken: string | null;
   forwardedEnv: Record<string, string>;
   sideEffectsBaseUrl: string;
   userEnv: Record<string, string>;

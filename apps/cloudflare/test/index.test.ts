@@ -11,6 +11,9 @@ import worker, { UserRunnerDurableObject } from "../src/index.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
+const RUNNER_PROXY_TOKEN = "runner-proxy-token";
+const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
+
 describe("cloudflare worker routes", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -577,6 +580,52 @@ describe("cloudflare worker routes", () => {
         },
         effectId: "outbox_a",
         intentId: "outbox_a",
+        kind: "assistant.delivery",
+      },
+    });
+  });
+
+  it("reads side-effect journal records encrypted with a previous key id after rotation", async () => {
+    const previousKey = Buffer.alloc(32, 8);
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON: JSON.stringify({
+        v1: previousKey.toString("base64"),
+      }),
+    });
+
+    await writeEncryptedR2Json({
+      bucket: env.BUNDLES,
+      cryptoKey: previousKey,
+      key: "transient/side-effects/by-effect/member_123/outbox_rotated.json",
+      keyId: "v1",
+      value: {
+        delivery: createOutboxDelivery(),
+        effectId: "outbox_rotated",
+        fingerprint: "dedupe_rotated",
+        intentId: "outbox_rotated",
+        kind: "assistant.delivery",
+        recordedAt: "2026-03-26T12:00:05.000Z",
+      },
+    });
+
+    const response = await callRunnerOutbound(
+      new Request("http://outbox.worker/intents/outbox_rotated?kind=assistant.delivery&fingerprint=dedupe_rotated", {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      effectId: "outbox_rotated",
+      record: {
+        delivery: {
+          channel: "telegram",
+          target: "thread_123",
+        },
+        effectId: "outbox_rotated",
+        intentId: "outbox_rotated",
         kind: "assistant.delivery",
       },
     });
@@ -1189,7 +1238,14 @@ function callRunnerOutbound(
   env: Record<string, unknown>,
   userId = "member_123",
 ): Promise<Response> {
-  return handleRunnerOutboundRequest(request, env as never, userId);
+  const headers = new Headers(request.headers);
+  headers.set(RUNNER_PROXY_TOKEN_HEADER, RUNNER_PROXY_TOKEN);
+  return handleRunnerOutboundRequest(
+    new Request(request, { headers }),
+    env as never,
+    userId,
+    RUNNER_PROXY_TOKEN,
+  );
 }
 
 function createBucketStore(input: {

@@ -15,6 +15,7 @@ import { assertNever } from "./utils.ts";
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
+  internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "webControlPlane"
@@ -30,6 +31,7 @@ export async function executeHostedDispatchEvent(input: {
   const dispatchEffect = await handleHostedDispatchEvent({
     dispatch: input.dispatch,
     emailBaseUrl: input.emailBaseUrl,
+    internalWorkerFetch: input.internalWorkerFetch,
     runtime: input.runtime,
     vaultRoot: input.vaultRoot,
   });
@@ -44,6 +46,7 @@ export async function executeHostedDispatchEvent(input: {
 async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
+  internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "webControlPlane"
@@ -75,6 +78,7 @@ async function handleHostedDispatchEvent(input: {
           event: dispatch.event,
         },
         input.emailBaseUrl,
+        input.internalWorkerFetch,
         input.runtime.commitTimeoutMs,
       );
       return createNoopDispatchEffect();
@@ -87,6 +91,7 @@ async function handleHostedDispatchEvent(input: {
           ...dispatch,
           event: dispatch.event,
         },
+        internalWorkerFetch: input.internalWorkerFetch,
         runtime: input.runtime,
         vaultRoot: input.vaultRoot,
       });

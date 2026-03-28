@@ -19,10 +19,12 @@ export async function ingestHostedEmailMessage(
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
   },
   emailBaseUrl: string,
+  fetchImpl: typeof fetch | undefined,
   timeoutMs: number | null,
 ): Promise<void> {
   const { bytes, response } = await fetchHostedBytesResponse({
     description: "Hosted email message fetch",
+    fetchImpl,
     timeoutMs,
     url: buildHostedRunnerEmailMessageUrl(emailBaseUrl, dispatch.event.rawMessageKey).toString(),
   });
