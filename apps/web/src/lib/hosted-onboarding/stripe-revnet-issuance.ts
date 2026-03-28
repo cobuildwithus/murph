@@ -24,14 +24,22 @@ import { generateHostedRevnetIssuanceId, normalizeNullableString } from "./share
 const REVNET_BROADCAST_STATUS_UNKNOWN_CODE = "REVNET_PAYMENT_BROADCAST_STATUS_UNKNOWN";
 const REVNET_ISSUANCE_RECORDING_FAILED_CODE = "REVNET_ISSUANCE_RECORDING_FAILED";
 const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
+const HOSTED_REVNET_RETRY_DELAYS_MS = [
+  30 * 1000,
+  2 * 60 * 1000,
+  10 * 60 * 1000,
+  30 * 60 * 1000,
+] as const;
 
 type HostedRevnetIssuanceRecord = Pick<
   HostedRevnetIssuance,
+  | "attemptCount"
   | "beneficiaryAddress"
   | "chainId"
   | "failureCode"
   | "id"
   | "idempotencyKey"
+  | "nextAttemptAt"
   | "payTxHash"
   | "paymentAmount"
   | "projectId"
@@ -71,9 +79,9 @@ type HostedRevnetIssuanceSubmissionState =
       | "confirmed"
       | "missing"
       | "pay_tx_hash_recorded"
-      | "submitting_stale"
       | "submitted"
-      | "submitting_recent";
+      | "submitting_recent"
+      | "retry_scheduled";
   }
   | {
     issuance: HostedRevnetIssuanceRecord;
@@ -150,15 +158,29 @@ export async function drainHostedRevnetIssuanceSubmissionQueue(input: {
   prisma: PrismaClient;
 }): Promise<string[]> {
   const submittedIssuanceIds: string[] = [];
+  const staleSubmittingThreshold = new Date(Date.now() - HOSTED_REVNET_SUBMITTING_STALE_MS);
   const issuances = await input.prisma.hostedRevnetIssuance.findMany({
     where: {
       payTxHash: null,
       OR: [
         {
           status: HostedRevnetIssuanceStatus.pending,
+          nextAttemptAt: {
+            lte: new Date(),
+          },
         },
         {
           status: HostedRevnetIssuanceStatus.failed,
+          nextAttemptAt: {
+            lte: new Date(),
+          },
+        },
+        {
+          failureCode: null,
+          status: HostedRevnetIssuanceStatus.submitting,
+          updatedAt: {
+            lte: staleSubmittingThreshold,
+          },
         },
       ],
     },
@@ -215,6 +237,14 @@ function buildHostedRevnetPaymentMemo(issuanceId: string): string {
 
 function isHostedRevnetIssuanceSubmittingStale(updatedAt: Date): boolean {
   return updatedAt.getTime() <= Date.now() - HOSTED_REVNET_SUBMITTING_STALE_MS;
+}
+
+function computeHostedRevnetNextAttemptAt(attemptCount: number, now = new Date()): Date {
+  const delayMs =
+    HOSTED_REVNET_RETRY_DELAYS_MS[
+      Math.min(Math.max(attemptCount - 1, 0), HOSTED_REVNET_RETRY_DELAYS_MS.length - 1)
+    ];
+  return new Date(now.getTime() + delayMs);
 }
 
 function requireHostedRevnetIssuanceBigInt(value: string, label: string): bigint {
@@ -406,6 +436,18 @@ function loadHostedRevnetIssuanceSubmissionState(
   }
 
   if (
+    (issuance.status === HostedRevnetIssuanceStatus.pending ||
+      issuance.status === HostedRevnetIssuanceStatus.failed) &&
+    issuance.nextAttemptAt.getTime() > Date.now()
+  ) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "retry_scheduled",
+    };
+  }
+
+  if (
     issuance.status === HostedRevnetIssuanceStatus.submitting &&
     !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt)
   ) {
@@ -413,14 +455,6 @@ function loadHostedRevnetIssuanceSubmissionState(
       issuance,
       kind: "skip",
       reason: "submitting_recent",
-    };
-  }
-
-  if (issuance.status === HostedRevnetIssuanceStatus.submitting) {
-    return {
-      issuance,
-      kind: "skip",
-      reason: "submitting_stale",
     };
   }
 
@@ -460,6 +494,8 @@ async function findOrCreateHostedRevnetIssuance(
         stripePaymentAmountMinor: input.amountPaid,
         stripePaymentCurrency: input.config.stripeCurrency,
         paymentAmount: input.paymentAmount.toString(),
+        attemptCount: 0,
+        nextAttemptAt: new Date(),
         status: HostedRevnetIssuanceStatus.pending,
       },
     });
@@ -531,9 +567,13 @@ async function claimHostedRevnetIssuanceSubmission(input: {
       updatedAt: input.issuance.updatedAt,
     },
     data: {
+      attemptCount: {
+        increment: 1,
+      },
       status: HostedRevnetIssuanceStatus.submitting,
       failureCode: null,
       failureMessage: null,
+      nextAttemptAt: new Date(),
     },
   });
 
@@ -592,6 +632,7 @@ async function submitAndPersistHostedRevnetIssuance(input: {
     });
   } catch (error) {
     await persistHostedRevnetIssuanceSubmissionFailure({
+      attemptCount: input.issuance.attemptCount + 1,
       error,
       issuanceId: input.issuance.id,
       prisma: input.prisma,
@@ -603,6 +644,7 @@ async function submitAndPersistHostedRevnetIssuance(input: {
   const recordSubmissionData = {
     failureCode: null,
     failureMessage: null,
+    nextAttemptAt: new Date(),
     payTxHash: submission.payTxHash,
     status: HostedRevnetIssuanceStatus.submitted,
     submittedAt: new Date(),
@@ -650,6 +692,7 @@ async function submitAndPersistHostedRevnetIssuance(input: {
 }
 
 async function persistHostedRevnetIssuanceSubmissionFailure(input: {
+  attemptCount: number;
   error: unknown;
   issuanceId: string;
   prisma: PrismaClient | Prisma.TransactionClient;
@@ -663,6 +706,10 @@ async function persistHostedRevnetIssuanceSubmissionFailure(input: {
     data: {
       failureCode: failure.code,
       failureMessage: failure.message,
+      nextAttemptAt:
+        failure.bucket === "broadcast_unknown"
+          ? new Date()
+          : computeHostedRevnetNextAttemptAt(input.attemptCount),
       status: failure.bucket === "broadcast_unknown"
         ? HostedRevnetIssuanceStatus.submitting
         : HostedRevnetIssuanceStatus.failed,

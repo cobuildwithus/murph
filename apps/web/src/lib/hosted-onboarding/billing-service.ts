@@ -20,6 +20,7 @@ import {
 } from "./privy-shared";
 import {
   createHostedBillingAttempt,
+  expireHostedBillingAttemptBySessionId,
   findOpenHostedBillingAttempt,
   supersedeOpenHostedBillingAttempts,
 } from "./billing-attempts";
@@ -96,11 +97,15 @@ export async function createHostedBillingCheckout(input: {
     stripe,
   });
   const mode = billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription;
-  const reusableCheckout = await findOpenHostedBillingAttempt({
+  const reusableCheckout = await resolveReusableHostedBillingCheckout({
+    inviteId: invite.id,
     memberId: invite.member.id,
     mode,
+    now,
     priceId,
     prisma,
+    shareCode,
+    stripe,
   });
 
   if (reusableCheckout?.checkoutUrl) {
@@ -192,6 +197,7 @@ export async function createHostedBillingCheckout(input: {
       });
       await createHostedBillingAttempt({
         checkoutUrl: checkoutSession.url!,
+        hasShareContext: shareCode !== null,
         inviteId: invite.id,
         memberId: invite.member.id,
         mode,
@@ -218,11 +224,15 @@ export async function createHostedBillingCheckout(input: {
       throw error;
     }
 
-    const concurrentOpenCheckout = await findOpenHostedBillingAttempt({
+    const concurrentOpenCheckout = await resolveReusableHostedBillingCheckout({
+      inviteId: invite.id,
       memberId: invite.member.id,
       mode,
+      now,
       priceId,
       prisma,
+      shareCode,
+      stripe,
     });
 
     if (concurrentOpenCheckout?.checkoutUrl) {
@@ -250,6 +260,57 @@ export async function createHostedBillingCheckout(input: {
   return {
     alreadyActive: false,
     url: checkoutSession.url,
+  };
+}
+
+async function resolveReusableHostedBillingCheckout(input: {
+  inviteId: string;
+  memberId: string;
+  mode: HostedBillingMode;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  shareCode: string | null;
+  stripe: Stripe;
+}) {
+  if (input.shareCode) {
+    return null;
+  }
+
+  const attempt = await findOpenHostedBillingAttempt({
+    hasShareContext: false,
+    inviteId: input.inviteId,
+    memberId: input.memberId,
+    mode: input.mode,
+    priceId: input.priceId,
+    prisma: input.prisma,
+  });
+
+  if (!attempt?.checkoutUrl) {
+    return null;
+  }
+
+  const stripeSession = await input.stripe.checkout.sessions.retrieve(
+    attempt.stripeCheckoutSessionId,
+  );
+  const expiresAtMs = typeof stripeSession.expires_at === "number"
+    ? stripeSession.expires_at * 1000
+    : null;
+  const isOpen =
+    stripeSession.status === "open" &&
+    (expiresAtMs === null || expiresAtMs > input.now.getTime());
+
+  if (!isOpen) {
+    await expireHostedBillingAttemptBySessionId({
+      prisma: input.prisma,
+      stripeCheckoutSessionId: attempt.stripeCheckoutSessionId,
+    });
+    return null;
+  }
+
+  return {
+    ...attempt,
+    checkoutUrl: stripeSession.url ?? attempt.checkoutUrl,
   };
 }
 

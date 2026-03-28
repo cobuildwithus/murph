@@ -10,18 +10,24 @@ import { generateHostedCheckoutId } from "./shared";
 type HostedBillingAttemptClient = PrismaClient | Prisma.TransactionClient;
 
 export async function findOpenHostedBillingAttempt(input: {
+  hasShareContext: boolean;
+  inviteId: string | null;
   memberId: string;
   mode: HostedBillingMode;
   priceId: string;
   prisma: HostedBillingAttemptClient;
 }) {
+  const where = {
+    hasShareContext: input.hasShareContext,
+    inviteId: input.inviteId,
+    memberId: input.memberId,
+    mode: input.mode,
+    priceId: input.priceId,
+    status: HostedBillingCheckoutStatus.open,
+  } as Prisma.HostedBillingCheckoutWhereInput;
+
   return input.prisma.hostedBillingCheckout.findFirst({
-    where: {
-      memberId: input.memberId,
-      mode: input.mode,
-      priceId: input.priceId,
-      status: HostedBillingCheckoutStatus.open,
-    },
+    where,
     orderBy: {
       createdAt: "desc",
     },
@@ -56,6 +62,7 @@ export async function supersedeOpenHostedBillingAttempts(input: {
 
 export async function createHostedBillingAttempt(input: {
   checkoutUrl: string;
+  hasShareContext: boolean;
   inviteId: string;
   memberId: string;
   mode: HostedBillingMode;
@@ -65,19 +72,22 @@ export async function createHostedBillingAttempt(input: {
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
 }) {
+  const data = {
+    id: generateHostedCheckoutId(),
+    hasShareContext: input.hasShareContext,
+    memberId: input.memberId,
+    inviteId: input.inviteId,
+    stripeCheckoutSessionId: input.stripeCheckoutSessionId,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    priceId: input.priceId,
+    mode: input.mode,
+    status: HostedBillingCheckoutStatus.open,
+    checkoutUrl: input.checkoutUrl,
+  } as Prisma.HostedBillingCheckoutUncheckedCreateInput;
+
   return input.prisma.hostedBillingCheckout.create({
-    data: {
-      id: generateHostedCheckoutId(),
-      memberId: input.memberId,
-      inviteId: input.inviteId,
-      stripeCheckoutSessionId: input.stripeCheckoutSessionId,
-      stripeCustomerId: input.stripeCustomerId,
-      stripeSubscriptionId: input.stripeSubscriptionId,
-      priceId: input.priceId,
-      mode: input.mode,
-      status: HostedBillingCheckoutStatus.open,
-      checkoutUrl: input.checkoutUrl,
-    },
+    data,
   });
 }
 
