@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "vitest";
+
+import * as coreRuntime from "@murph/core";
 
 import {
   createDeviceProviderRegistry,
@@ -32,6 +37,10 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
     DeviceBatchImportPayload & { snapshot: unknown }
   >
 >;
+
+async function makeTempDirectory(name: string): Promise<string> {
+  return mkdtemp(join(tmpdir(), `${name}-`));
+}
 
 test("makeNormalizedDeviceBatch preserves the canonical device payload shape and hardcodes device source", () => {
   const options: NormalizedDeviceBatchOptions = {
@@ -552,6 +561,37 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
   assert.equal(deletionArtifact?.fileName, "deletion-session-session-42.json");
 });
 
+test("prepareDeviceProviderSnapshotImport records Oura daily aggregate deletions through explicit deletion markers", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "oura",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      deletions: [
+        {
+          data_type: "daily_readiness",
+          object_id: "2026-03-16",
+          occurred_at: "2026-03-16T09:58:00.000Z",
+          source_event_type: "daily_readiness.deleted",
+        },
+      ],
+    },
+  });
+
+  const deletionEvent = payload.events?.find(
+    (event) =>
+      event.externalRef?.facet === "deleted" && event.externalRef?.resourceType === "daily-readiness",
+  );
+
+  assert.equal(deletionEvent?.fields?.metric, "external-resource-deleted");
+  assert.equal(deletionEvent?.fields?.resourceType, "daily-readiness");
+  assert.equal(deletionEvent?.fields?.sourceEventType, "daily_readiness.deleted");
+  assert.ok(
+    payload.rawArtifacts?.some(
+      (artifact) => artifact.role === "deletion:daily-readiness:2026-03-16",
+    ),
+  );
+});
+
 test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canonical device payloads", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
@@ -743,12 +783,17 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
   const activityFile = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-1:fit");
+  const dailyStepsObservation = payload.events?.find(
+    (event) => event.kind === "observation" && event.fields?.metric === "daily-steps",
+  );
 
   assert.deepEqual(sleepEvent?.fields, {
     startAt: "2026-03-14T22:30:00.000Z",
     endAt: "2026-03-15T06:45:00.000Z",
     durationMinutes: 495,
   });
+  assert.equal(dailyStepsObservation?.dayKey, "2026-03-15");
+  assert.equal(dailyStepsObservation?.timeZone, undefined);
   assert.equal(activityEvent?.fields?.activityType, "running");
   assert.equal(activityEvent?.fields?.distanceKm, 7.25);
   assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-file:activity-1:fit"));
@@ -891,6 +936,285 @@ test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, alia
   assert.equal(activityFile?.fileName, "activity-2.tcx");
   assert.equal(activityFile?.mediaType, "application/xml");
   assert.equal(activityFile?.metadata?.checksum, "xyz789");
+});
+
+test("prepareDeviceProviderSnapshotImport keeps Garmin date buckets on the provider day and honors summaryDate aliases", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      dailySummaries: [
+        {
+          summaryDate: "2026-03-15",
+          steps: 8765,
+        },
+      ],
+      womenHealth: [
+        {
+          date: "2026-03-15",
+          cycleDay: 7,
+        },
+      ],
+    },
+  });
+
+  const dailySteps = payload.events?.find(
+    (event) => event.kind === "observation" && event.fields?.metric === "daily-steps",
+  );
+  const cycleDay = payload.events?.find(
+    (event) => event.kind === "observation" && event.fields?.metric === "cycle-day",
+  );
+
+  assert.equal(dailySteps?.occurredAt, "2026-03-15T00:00:00.000Z");
+  assert.equal(dailySteps?.recordedAt, "2026-03-15T00:00:00.000Z");
+  assert.equal(dailySteps?.dayKey, "2026-03-15");
+  assert.equal(dailySteps?.timeZone, undefined);
+  assert.equal(cycleDay?.dayKey, "2026-03-15");
+  assert.equal(cycleDay?.recordedAt, "2026-03-15T00:00:00.000Z");
+});
+
+test("prepareDeviceProviderSnapshotImport rounds Garmin duration fields before they reach integer-only canonical records", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      activities: [
+        {
+          activityId: "activity-1",
+          activityType: "run",
+          startTime: "2026-03-15T10:00:00.000Z",
+          endTime: "2026-03-15T10:01:35.000Z",
+          durationSeconds: 95,
+        },
+      ],
+      sleeps: [
+        {
+          sleepId: "sleep-1",
+          startTime: "2026-03-15T00:00:00.000Z",
+          endTime: "2026-03-15T00:01:35.000Z",
+          durationMillis: 95_000,
+          stages: [
+            {
+              stage: "light",
+              startTime: "2026-03-15T00:00:00.000Z",
+              endTime: "2026-03-15T00:01:35.000Z",
+              durationSeconds: 95,
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
+  const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
+  const sleepStage = payload.samples?.find((sample) => sample.stream === "sleep_stage");
+
+  assert.equal(activityEvent?.fields?.durationMinutes, 2);
+  assert.equal(sleepEvent?.fields?.durationMinutes, 2);
+  assert.equal(sleepStage?.sample.durationMinutes, 2);
+});
+
+test("prepareDeviceProviderSnapshotImport drops unsupported Garmin sleep stage labels", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      sleeps: [
+        {
+          sleepId: "sleep-1",
+          startTime: "2026-03-15T00:00:00.000Z",
+          endTime: "2026-03-15T01:00:00.000Z",
+          stages: [
+            {
+              stage: "mystery-phase",
+              startTime: "2026-03-15T00:00:00.000Z",
+              endTime: "2026-03-15T00:30:00.000Z",
+            },
+            {
+              stage: "light",
+              startTime: "2026-03-15T00:30:00.000Z",
+              endTime: "2026-03-15T01:00:00.000Z",
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  assert.equal(
+    payload.samples?.filter((sample) => sample.stream === "sleep_stage").length,
+    1,
+  );
+  assert.ok(
+    payload.samples?.some(
+      (sample) => sample.stream === "sleep_stage" && sample.sample.stage === "light",
+    ),
+  );
+  assert.ok(
+    !payload.samples?.some(
+      (sample) => sample.stream === "sleep_stage" && sample.sample.stage === "mystery-phase",
+    ),
+  );
+});
+
+test("prepareDeviceProviderSnapshotImport stores metadata-only Garmin activityFiles as JSON descriptors instead of fake FIT artifacts", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      activityFiles: [
+        {
+          activityId: "activity-1",
+          fileType: "fit",
+          fileName: "activity-1.fit",
+          checksum: "abc123",
+        },
+      ],
+    },
+  });
+
+  const descriptor = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file-descriptor:activity-1:fit");
+
+  assert.ok(descriptor);
+  assert.equal(descriptor?.fileName, "activity-1-fit-descriptor.json");
+  assert.equal(descriptor?.mediaType, "application/json");
+  assert.equal(descriptor?.metadata?.intendedFileType, "fit");
+  assert.equal(descriptor?.metadata?.intendedFileName, "activity-1.fit");
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:fit"));
+});
+
+test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections and keeps the legacy files alias conservative", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      files: [
+        {
+          activityId: "activity-1",
+          fileType: "gpx",
+          fileName: "activity-1.gpx",
+          content: "<gpx />",
+        },
+        {
+          fileType: "fit",
+          fileName: "daily-summary.fit",
+          checksum: "not-an-activity-file",
+        },
+      ],
+      readinessWidgets: [
+        {
+          id: "widget-1",
+          score: 72,
+        },
+      ],
+    },
+  });
+
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:gpx"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:files"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:readinesswidgets"));
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-file:unknown:fit")));
+  assert.deepEqual(
+    (payload.provenance?.importedSections as { retainedSnapshotSections?: string[] } | undefined)?.retainedSnapshotSections,
+    ["readinesswidgets", "files"],
+  );
+});
+
+test("prepareDeviceProviderSnapshotImport does not use Garmin activityName as the canonical activityType fallback", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      activities: [
+        {
+          activityId: "activity-1",
+          activityName: "Morning Victory Lap",
+          startTime: "2026-03-15T10:00:00.000Z",
+          endTime: "2026-03-15T10:30:00.000Z",
+        },
+      ],
+    },
+  });
+
+  const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
+
+  assert.equal(activityEvent?.fields?.activityType, "activity");
+  assert.equal(activityEvent?.title, "Garmin Morning Victory Lap");
+});
+
+test("prepareDeviceProviderSnapshotImport rejects Garmin snapshots with invalid collection shapes before normalization", async () => {
+  await assert.rejects(
+    () => prepareDeviceProviderSnapshotImport({
+      provider: "garmin",
+      snapshot: {
+        dailySummaries: {
+          summaryDate: "2026-03-15",
+        },
+      },
+    }),
+  );
+});
+
+test("importDeviceProviderSnapshot round-trips Garmin date buckets through real core without vault-day shift", async () => {
+  const vaultRoot = await makeTempDirectory("murph-garmin-roundtrip");
+  await coreRuntime.initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-12T12:00:00.000Z",
+    timezone: "America/Los_Angeles",
+  });
+
+  const result = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "garmin",
+      vaultRoot,
+      snapshot: {
+        importedAt: "2026-03-16T12:00:00.000Z",
+        dailySummaries: [
+          {
+            summaryDate: "2026-03-15",
+            steps: 5432,
+          },
+        ],
+        sleeps: [
+          {
+            sleepId: "sleep-1",
+            startTime: "2026-03-15T00:00:00.000Z",
+            endTime: "2026-03-15T00:01:35.000Z",
+            durationSeconds: 95,
+            stages: [
+              {
+                stage: "mystery-phase",
+                startTime: "2026-03-15T00:00:00.000Z",
+                endTime: "2026-03-15T00:00:30.000Z",
+              },
+              {
+                stage: "light",
+                startTime: "2026-03-15T00:00:30.000Z",
+                endTime: "2026-03-15T00:01:35.000Z",
+                durationSeconds: 65,
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      corePort: coreRuntime,
+    },
+  );
+
+  const dailySteps = result.events.find(
+    (event) => event.kind === "observation" && event.metric === "daily-steps",
+  );
+  const sleepEvent = result.events.find((event) => event.kind === "sleep_session");
+  const sleepStage = result.samples.find((sample) => sample.stream === "sleep_stage");
+
+  assert.equal(dailySteps?.dayKey, "2026-03-15");
+  assert.equal(dailySteps?.timeZone, "America/Los_Angeles");
+  assert.equal(sleepEvent?.durationMinutes, 2);
+  assert.equal(sleepStage?.durationMinutes, 1);
+  assert.equal(result.samples.filter((sample) => sample.stream === "sleep_stage").length, 1);
 });
 
 
