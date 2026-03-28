@@ -29,7 +29,12 @@ import {
   saveAssistantAutomationState,
 } from '../src/assistant-state.js'
 import { listAssistantCronJobs } from '../src/assistant/cron.js'
-import { resolveOperatorConfigPath, saveDefaultVaultConfig } from '../src/operator-config.js'
+import {
+  readOperatorConfig,
+  resolveOperatorConfigPath,
+  saveAssistantOperatorDefaultsPatch,
+  saveDefaultVaultConfig,
+} from '../src/operator-config.js'
 import {
   createSetupAssistantAccountResolver,
   detectCodexAccountFromAuthJson,
@@ -2425,6 +2430,157 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
         ({ args, file }) => path.basename(file) === 'brew' && args.join(' ') === 'install ffmpeg',
       ),
       true,
+    )
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('setup preserves saved OpenAI-compatible headers when re-saving assistant defaults', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-openai-compatible-headers-'))
+  const homeRoot = path.join(tempRoot, 'home')
+  const vaultRoot = path.join(homeRoot, 'vault')
+  const expectedWhisperModelPath = path.join(
+    homeRoot,
+    '.murph',
+    'toolchain',
+    'models',
+    'whisper',
+    'ggml-base.en.bin',
+  )
+  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
+  const formulaPrefixes = {
+    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
+    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
+    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
+    'python@3.12': path.join(tempRoot, 'Cellar', 'python@3.12'),
+  }
+  const brewCommand = path.join(homebrewBin, 'brew')
+  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
+  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
+  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
+  const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      provider: 'openai-compatible',
+      defaultsByProvider: {
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'llama3.2:latest',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+            'X-Foo': 'bar',
+          },
+        },
+      },
+      identityId: null,
+      failoverRoutes: null,
+      account: null,
+      selfDeliveryTargets: null,
+    },
+    homeRoot,
+  )
+
+  await writeExecutable(brewCommand)
+  await writeExecutable(ffmpegCommand)
+  await writeExecutable(pdftotextCommand)
+  await writeExecutable(whisperCommand)
+  await writeExecutable(pythonCommand)
+  await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
+  await writeFile(expectedWhisperModelPath, 'model', 'utf8')
+
+  const services = createSetupServices({
+    arch: () => 'arm64',
+    env: () => ({ PATH: homebrewBin, SHELL: '/bin/zsh' }),
+    getHomeDirectory: () => homeRoot,
+    inboxServices: {
+      async bootstrap() {
+        return makeBootstrapResult(vaultRoot)
+      },
+    },
+    log() {},
+    platform: () => 'darwin',
+    runCommand: async ({ file, args }) => {
+      const baseName = path.basename(file)
+
+      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${args[2] ?? ''} 1.0.0\n`,
+        }
+      }
+
+      if (baseName === 'brew' && args[0] === '--prefix') {
+        const formula = args[1] as keyof typeof formulaPrefixes
+        return {
+          exitCode: 0,
+          stderr: '',
+          stdout: `${formulaPrefixes[formula]}\n`,
+        }
+      }
+
+      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
+    },
+    vaultServices: {
+      core: {
+        async init(input: { vault: string }) {
+          return {
+            created: true,
+            directories: [],
+            files: [],
+            vault: input.vault,
+          }
+        },
+      },
+    } as any,
+  })
+
+  try {
+    await services.setupMacos({
+      assistant: {
+        preset: 'openai-compatible',
+        enabled: true,
+        provider: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        codexCommand: null,
+        profile: null,
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        oss: false,
+        account: null,
+        detail: 'Use gpt-oss:20b through Ollama.',
+      },
+      skipOcr: true,
+      vault: vaultRoot,
+      whisperModel: 'base.en',
+    })
+
+    const operatorConfig = await readOperatorConfig(homeRoot)
+    assert.equal(operatorConfig?.assistant?.provider, 'openai-compatible')
+    assert.equal(
+      operatorConfig?.assistant?.defaultsByProvider?.['openai-compatible']?.model,
+      'gpt-oss:20b',
+    )
+    assert.deepEqual(
+      operatorConfig?.assistant?.defaultsByProvider?.['openai-compatible']?.headers,
+      {
+        Authorization: 'Bearer override-token',
+        'X-Foo': 'bar',
+      },
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
