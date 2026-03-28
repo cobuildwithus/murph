@@ -73,7 +73,7 @@ export function readHostedExecutionWebControlPlaneEnvironment(
   source: EnvSource = process.env,
   options?: HostedExecutionBaseUrlNormalizationOptions,
 ): HostedExecutionWebControlPlaneEnvironment {
-  const sharedBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL, options);
+  const sharedBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_WEB_BASE_URL, options);
 
   return {
     deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(

@@ -121,6 +121,7 @@ describe("hosted device-sync internal routes", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "userId must match the authenticated hosted execution user.",
+        retryable: false,
       },
     });
     expect(mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot).not.toHaveBeenCalled();
@@ -220,6 +221,7 @@ describe("hosted device-sync internal routes", () => {
       error: {
         code: "INVALID_REQUEST",
         message: "userId must match the authenticated hosted execution user.",
+        retryable: false,
       },
     });
   });

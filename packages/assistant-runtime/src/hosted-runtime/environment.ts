@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
@@ -20,6 +22,27 @@ import type {
 } from "./models.ts";
 
 const hostedRuntimeModuleRequire = createRequire(import.meta.url);
+const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
+  "ALL_PROXY",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "NODE_EXTRA_CA_CERTS",
+  "NO_PROXY",
+  "PATH",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "TZ",
+] as const;
+
+export interface HostedRuntimeChildLauncherDirectories {
+  cacheRoot: string;
+  homeRoot: string;
+  huggingFaceRoot: string;
+  tempRoot: string;
+}
 
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
@@ -38,7 +61,7 @@ export function normalizeHostedAssistantRuntimeConfig(
     internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
     forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
     sideEffectsBaseUrl: normalizeCallbackBaseUrl(
-      input?.sideEffectsBaseUrl ?? input?.outboxBaseUrl,
+      input?.sideEffectsBaseUrl,
       DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
     ),
     userEnv: { ...(input?.userEnv ?? {}) },
@@ -68,6 +91,56 @@ export function resolveHostedRuntimeTsxImportSpecifier(): string {
   }
 }
 
+export async function createHostedRuntimeChildLauncherDirectories(
+  launcherRoot: string,
+): Promise<HostedRuntimeChildLauncherDirectories> {
+  const directories = {
+    cacheRoot: path.join(launcherRoot, "cache"),
+    homeRoot: path.join(launcherRoot, "home"),
+    huggingFaceRoot: path.join(launcherRoot, "hf-home"),
+    tempRoot: path.join(launcherRoot, "tmp"),
+  } satisfies HostedRuntimeChildLauncherDirectories;
+
+  await Promise.all(
+    Object.values(directories).map((directory) => mkdir(directory, { recursive: true })),
+  );
+
+  return directories;
+}
+
+export function createHostedRuntimeChildProcessEnv(input: {
+  ambientEnv?: Readonly<Record<string, string | undefined>>;
+  forwardedEnv: Record<string, string>;
+  isTypeScriptChild: boolean;
+  launcherDirectories: HostedRuntimeChildLauncherDirectories;
+}): Record<string, string> {
+  const env: Record<string, string> = {};
+  const ambientEnv = input.ambientEnv ?? process.env;
+
+  for (const key of HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS) {
+    const value = ambientEnv[key];
+
+    if (typeof value === "string" && value.length > 0) {
+      env[key] = value;
+    }
+  }
+
+  Object.assign(env, input.forwardedEnv, {
+    HF_HOME: input.launcherDirectories.huggingFaceRoot,
+    HOME: input.launcherDirectories.homeRoot,
+    TEMP: input.launcherDirectories.tempRoot,
+    TMP: input.launcherDirectories.tempRoot,
+    TMPDIR: input.launcherDirectories.tempRoot,
+    XDG_CACHE_HOME: input.launcherDirectories.cacheRoot,
+  });
+
+  if (input.isTypeScriptChild) {
+    env.TSX_TSCONFIG_PATH = resolveHostedRuntimeTsconfigPath();
+  }
+
+  return env;
+}
+
 export function hostedAssistantAutomationEnabledFromEnv(
   env: Readonly<Record<string, string | undefined>>,
 ): boolean {
@@ -79,12 +152,14 @@ export function hostedAssistantAutomationEnabledFromEnv(
 export async function withHostedProcessEnvironment<T>(input: {
   envOverrides: Record<string, string>;
   hostedMemberId: string;
+  hostedUserEnvKeys: readonly string[];
   operatorHomeRoot: string;
   vaultRoot: string;
 }, run: () => Promise<T>): Promise<T> {
   const previousValues = new Map<string, string | undefined>();
   const nextValues: Record<string, string> = {
     ...input.envOverrides,
+    HOSTED_EXECUTION_USER_ENV_KEYS: input.hostedUserEnvKeys.join(","),
     HOSTED_MEMBER_ID: input.hostedMemberId,
     HOME: input.operatorHomeRoot,
     VAULT: input.vaultRoot,

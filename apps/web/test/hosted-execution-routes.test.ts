@@ -3,6 +3,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  authorizeHostedExecutionInternalRequest: vi.fn(),
   buildHostedSharePageData: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
   drainHostedAiUsageStripeMetering: vi.fn(),
@@ -10,12 +11,15 @@ const mocks = vi.hoisted(() => ({
   importHostedAiUsageRecords: vi.fn(),
   requireHostedExecutionInternalToken: vi.fn(),
   requireHostedExecutionSchedulerToken: vi.fn(),
+  requireHostedExecutionUserId: vi.fn(),
   resolveHostedSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/internal", () => ({
+  authorizeHostedExecutionInternalRequest: mocks.authorizeHostedExecutionInternalRequest,
   requireHostedExecutionInternalToken: mocks.requireHostedExecutionInternalToken,
   requireHostedExecutionSchedulerToken: mocks.requireHostedExecutionSchedulerToken,
+  requireHostedExecutionUserId: mocks.requireHostedExecutionUserId,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
@@ -62,8 +66,12 @@ describe("hosted execution async routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.authorizeHostedExecutionInternalRequest.mockReturnValue({
+      trustedUserId: "member_123",
+    });
     mocks.requireHostedExecutionInternalToken.mockImplementation(() => {});
     mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {});
+    mocks.requireHostedExecutionUserId.mockReturnValue("member_123");
     mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.resolveHostedSessionFromRequest.mockResolvedValue({
       member: {
@@ -187,13 +195,16 @@ describe("hosted execution async routes", () => {
         headers: {
           authorization: "Bearer internal-token",
           "content-type": "application/json",
+          "x-hosted-execution-user-id": "member_123",
         },
         body: JSON.stringify({
           usage: [
             {
+              memberId: "member_123",
               usageId: "usage_1",
             },
             {
+              memberId: "member_123",
               usageId: "usage_2",
             },
           ],
@@ -203,13 +214,22 @@ describe("hosted execution async routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedExecutionInternalToken).toHaveBeenCalledTimes(1);
+    expect(mocks.authorizeHostedExecutionInternalRequest).toHaveBeenCalledWith({
+      acceptedToken: "internal",
+      bodyUserIdLabel: "memberId",
+      bodyUserIds: ["member_123", "member_123"],
+      request: expect.any(Request),
+      requireBoundUserId: true,
+    });
     expect(mocks.importHostedAiUsageRecords).toHaveBeenCalledWith({
+      trustedUserId: "member_123",
       usage: [
         {
+          memberId: "member_123",
           usageId: "usage_1",
         },
         {
+          memberId: "member_123",
           usageId: "usage_2",
         },
       ],
@@ -218,6 +238,39 @@ describe("hosted execution async routes", () => {
       recorded: 2,
       usageIds: ["usage_1", "usage_2"],
     });
+  });
+
+  it("rejects hosted AI usage writes without the trusted hosted execution user binding", async () => {
+    mocks.authorizeHostedExecutionInternalRequest.mockImplementation(() => {
+      throw hostedOnboardingError({
+        code: "HOSTED_EXECUTION_USER_REQUIRED",
+        httpStatus: 400,
+        message: "Hosted execution user binding is required.",
+      });
+    });
+
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer internal-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          usage: [],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_EXECUTION_USER_REQUIRED",
+        message: "Hosted execution user binding is required.",
+        retryable: false,
+      },
+    });
+    expect(mocks.importHostedAiUsageRecords).not.toHaveBeenCalled();
   });
 
   it("returns the Stripe usage cron drain summary", async () => {

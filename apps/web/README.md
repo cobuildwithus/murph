@@ -57,6 +57,7 @@ Optional but recommended:
 - `DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER`
 - `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET`
+- `HOSTED_WEB_BASE_URL` as the shared hosted control-plane base for internal device-sync, share, and usage routes unless a specific route needs its own host override
 - `OURA_WEBHOOK_VERIFICATION_TOKEN`
 - `HOSTED_SHARE_INTERNAL_TOKEN` for server-to-server share-link issuance from the assistant or other trusted callers
 
@@ -184,7 +185,7 @@ Hosted internal runner routes:
 - `GET /api/internal/hosted-execution/usage/cron`
 
 These routes are internal-only server-to-server seams for the Cloudflare runner. They let the runner hydrate escrowed device-sync connections before a one-shot pass and reconcile status/token changes back into Postgres afterward.
-The hosted AI usage record route imports immutable per-attempt usage rows after a hosted commit succeeds, and the optional usage cron later sends total-token meter events to Stripe while skipping member-supplied API-key runs.
+The device-sync runtime routes and the hosted AI usage record route now require both the internal bearer token and the trusted worker-injected `x-hosted-execution-user-id` header. The hosted AI usage record route rejects any usage row whose `memberId` does not match that bound user, then imports the immutable per-attempt usage rows after a hosted commit succeeds. The optional usage cron later sends total-token meter events to Stripe while skipping member-supplied API-key runs.
 
 ## Hosted onboarding routes
 
