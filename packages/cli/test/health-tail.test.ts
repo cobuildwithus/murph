@@ -1362,6 +1362,83 @@ test.sequential("profile list and current show preserve canonical links and stri
   }
 });
 
+test.sequential("profile list preserves date-range filters after explicit adapter migration", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const inRangePath = path.join(vaultRoot, "profile-in-range.json");
+  const outOfRangePath = path.join(vaultRoot, "profile-out-of-range.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      inRangePath,
+      JSON.stringify({
+        recordedAt: "2026-03-12T09:00:00Z",
+        profile: {
+          topGoalIds: [],
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(
+      outOfRangePath,
+      JSON.stringify({
+        recordedAt: "2026-03-20T09:00:00Z",
+        profile: {
+          topGoalIds: [],
+        },
+      }),
+      "utf8",
+    );
+
+    const inRangeUpsert = await runCli<{
+      snapshotId: string;
+    }>([
+      "profile",
+      "upsert",
+      "--input",
+      `@${inRangePath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    await runCli([
+      "profile",
+      "upsert",
+      "--input",
+      `@${outOfRangePath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    const listResult = await runCli<{
+      count: number;
+      filters: Record<string, unknown>;
+      items: Array<{
+        id: string;
+      }>;
+    }>([
+      "profile",
+      "list",
+      "--from",
+      "2026-03-12",
+      "--to",
+      "2026-03-12",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(listResult.ok, true);
+    assert.equal(requireData(listResult).filters.from, "2026-03-12");
+    assert.equal(requireData(listResult).filters.to, "2026-03-12");
+    assert.equal(requireData(listResult).count, 1);
+    assert.equal(
+      requireData(listResult).items[0]?.id,
+      requireData(inRangeUpsert).snapshotId,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const primaryPayloadPath = path.join(vaultRoot, "supplement-primary.json");

@@ -859,12 +859,16 @@ export function createExplicitHealthQueryServices(
     async listProfileSnapshots(input: HealthListInput) {
       const { query } = await loadRuntime();
       const records = await query.listProfileSnapshots(input.vault, {
+        from: input.from,
+        to: input.to,
         limit: input.limit,
       });
 
       return asListEnvelope(
         input.vault,
         {
+          from: input.from,
+          to: input.to,
           limit: input.limit ?? 50,
         },
         records.map((record) => toProfileReadEntity(record)),

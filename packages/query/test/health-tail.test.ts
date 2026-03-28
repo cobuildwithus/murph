@@ -683,6 +683,27 @@ slug broken-frontmatter
   }
 });
 
+test("profile snapshot list accepts day-only date bounds for recorded timestamps", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    const snapshots = await listProfileSnapshots(vaultRoot, {
+      from: "2026-03-12",
+      to: "2026-03-12",
+    });
+
+    assert.deepEqual(
+      snapshots.map((record) => record.id),
+      ["psnap_health_01"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("profile snapshot recency tie-break stays aligned between listing and current-profile fallback", async () => {
   const vaultRoot = await createHealthVault({
     currentProfileSnapshotId: "psnap_stale",

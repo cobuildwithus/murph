@@ -227,11 +227,14 @@ export function matchesDateRange(
     return !from && !to;
   }
 
-  if (from && value < from) {
+  const compareFrom = from && /^\d{4}-\d{2}-\d{2}$/u.test(from) ? value.slice(0, 10) : value;
+  const compareTo = to && /^\d{4}-\d{2}-\d{2}$/u.test(to) ? value.slice(0, 10) : value;
+
+  if (from && compareFrom < from) {
     return false;
   }
 
-  if (to && value > to) {
+  if (to && compareTo > to) {
     return false;
   }
 
