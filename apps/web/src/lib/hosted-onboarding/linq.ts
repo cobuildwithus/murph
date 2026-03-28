@@ -1,122 +1,59 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment, requireHostedOnboardingLinqConfig } from "./runtime";
 import { extractLinqTextMessage, normalizeNullableString } from "./shared";
+import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
+import {
+  isLinqWebhookPayloadError,
+  isLinqWebhookVerificationError,
+  parseCanonicalLinqMessageReceivedEvent,
+  parseLinqWebhookEvent,
+  verifyAndParseLinqWebhookRequest,
+  type LinqMessageReceivedEvent,
+  type LinqWebhookEvent,
+} from "@murph/inboxd";
 
-export interface HostedLinqWebhookEvent {
-  api_version: string;
-  event_id: string;
-  created_at: string;
-  event_type: string;
-  trace_id?: string | null;
-  partner_id?: string | null;
-  data: unknown;
-}
-
-export interface HostedLinqMessageReceivedData {
-  chat_id: string;
-  from: string;
-  recipient_phone?: string | null;
-  received_at?: string | null;
-  is_from_me: boolean;
-  service?: string | null;
-  message: {
-    id: string;
-    parts?: unknown;
-  };
-}
-
-export interface HostedLinqMessageReceivedEvent extends HostedLinqWebhookEvent {
-  event_type: "message.received";
-  data: HostedLinqMessageReceivedData;
-}
+export type HostedLinqWebhookEvent = LinqWebhookEvent;
+export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;
 
 export function parseHostedLinqWebhookEvent(rawBody: string): HostedLinqWebhookEvent {
-  let payload: unknown;
-
   try {
-    payload = JSON.parse(rawBody) as unknown;
+    return parseLinqWebhookEvent(rawBody);
   } catch (error) {
-    throw new TypeError(
-      `Linq webhook payload must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    if (isLinqWebhookPayloadError(error)) {
+      throw hostedOnboardingError({
+        code: "LINQ_PAYLOAD_INVALID",
+        message: error.message,
+        httpStatus: 400,
+      });
+    }
+
+    throw error;
   }
-
-  if (!payload || typeof payload !== "object") {
-    throw new TypeError("Linq webhook payload must be a JSON object.");
-  }
-
-  const record = payload as Record<string, unknown>;
-  const apiVersion = normalizeRequiredString(record.api_version, "Linq webhook api_version");
-  const eventId = normalizeRequiredString(record.event_id, "Linq webhook event_id");
-  const createdAt = normalizeRequiredString(record.created_at, "Linq webhook created_at");
-  const eventType = normalizeRequiredString(record.event_type, "Linq webhook event_type");
-
-  return {
-    api_version: apiVersion,
-    event_id: eventId,
-    created_at: createdAt,
-    event_type: eventType,
-    trace_id: normalizeNullableString(record.trace_id),
-    partner_id: normalizeNullableString(record.partner_id),
-    data: record.data,
-  };
 }
 
 export function requireHostedLinqMessageReceivedEvent(
   event: HostedLinqWebhookEvent,
 ): HostedLinqMessageReceivedEvent {
-  if (event.event_type !== "message.received" || !event.data || typeof event.data !== "object") {
-    throw new TypeError("Linq webhook event does not contain a supported message.received payload.");
-  }
-
-  const data = event.data as Record<string, unknown>;
-  const message = data.message;
-
-  if (!message || typeof message !== "object") {
-    throw new TypeError("Linq message.received payload is missing message data.");
-  }
-
-  return {
-    ...event,
-    event_type: "message.received",
-    data: {
-      chat_id: normalizeRequiredString(data.chat_id, "Linq message.received chat_id"),
-      from: normalizeRequiredString(data.from, "Linq message.received from"),
-      recipient_phone: normalizeNullableString(data.recipient_phone),
-      received_at: normalizeNullableString(data.received_at),
-      is_from_me: Boolean(data.is_from_me),
-      service: normalizeNullableString(data.service),
-      message: {
-        id: normalizeRequiredString((message as Record<string, unknown>).id, "Linq message.received message.id"),
-        parts: (message as Record<string, unknown>).parts,
-      },
-    },
-  };
-}
-
-export function verifyHostedLinqWebhookSignature(
-  secret: string,
-  payload: string,
-  timestamp: string,
-  signature: string,
-): boolean {
-  const expected = createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex");
-  const normalizedSignature = signature.replace(/^sha256=/iu, "").trim().toLowerCase();
-
   try {
-    return timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(normalizedSignature, "hex"));
-  } catch {
-    return false;
+    return parseCanonicalLinqMessageReceivedEvent(event);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw hostedOnboardingError({
+        code: "LINQ_PAYLOAD_INVALID",
+        message: error.message,
+        httpStatus: 400,
+      });
+    }
+
+    throw error;
   }
 }
 
-export function assertHostedLinqWebhookSignature(input: {
-  payload: string;
+export function verifyAndParseHostedLinqWebhookRequest(input: {
+  rawBody: string;
   signature: string | null;
   timestamp: string | null;
-}): void {
+}): HostedLinqWebhookEvent {
   const { linqWebhookSecret: webhookSecret } = getHostedOnboardingEnvironment();
 
   if (!webhookSecret) {
@@ -127,21 +64,47 @@ export function assertHostedLinqWebhookSignature(input: {
     });
   }
 
-  if (!input.signature || !input.timestamp) {
-    throw hostedOnboardingError({
-      code: "LINQ_SIGNATURE_REQUIRED",
-      message: "Missing Linq webhook signature headers.",
-      httpStatus: 401,
+  try {
+    return verifyAndParseLinqWebhookRequest({
+      headers: {
+        "x-webhook-signature": input.signature ?? undefined,
+        "x-webhook-timestamp": input.timestamp ?? undefined,
+      },
+      rawBody: input.rawBody,
+      webhookSecret,
     });
-  }
+  } catch (error) {
+    if (isLinqWebhookVerificationError(error)) {
+      const code = input.signature && input.timestamp ? "LINQ_SIGNATURE_INVALID" : "LINQ_SIGNATURE_REQUIRED";
+      throw hostedOnboardingError({
+        code,
+        message: error.message,
+        httpStatus: 401,
+      });
+    }
 
-  if (!verifyHostedLinqWebhookSignature(webhookSecret, input.payload, input.timestamp, input.signature)) {
-    throw hostedOnboardingError({
-      code: "LINQ_SIGNATURE_INVALID",
-      message: "Invalid Linq webhook signature.",
-      httpStatus: 401,
-    });
+    if (isLinqWebhookPayloadError(error)) {
+      throw hostedOnboardingError({
+        code: "LINQ_PAYLOAD_INVALID",
+        message: error.message,
+        httpStatus: 400,
+      });
+    }
+
+    throw error;
   }
+}
+
+export function assertHostedLinqWebhookSignature(input: {
+  payload: string;
+  signature: string | null;
+  timestamp: string | null;
+}): void {
+  verifyAndParseHostedLinqWebhookRequest({
+    rawBody: input.payload,
+    signature: input.signature,
+    timestamp: input.timestamp,
+  });
 }
 
 export async function sendHostedLinqChatMessage(input: {
@@ -152,14 +115,11 @@ export async function sendHostedLinqChatMessage(input: {
 }): Promise<{ chatId: string | null; messageId: string | null }> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
   const replyToMessageId = normalizeNullableString(input.replyToMessageId);
-  const response = await fetch(
-    new URL(`chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/messages`, `${apiBaseUrl}/`),
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${apiToken}`,
-        "content-type": "application/json",
-      },
+  let response: Response;
+  try {
+    response = await fetchLinqApi({
+      apiBaseUrl,
+      apiToken,
       body: JSON.stringify({
         message: {
           parts: [
@@ -177,9 +137,22 @@ export async function sendHostedLinqChatMessage(input: {
             : {}),
         },
       }),
+      method: "POST",
+      path: `chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/messages`,
       signal: input.signal,
-    },
-  );
+    });
+  } catch (error) {
+    if (error instanceof LinqApiTimeoutError) {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        message: "Linq outbound reply timed out.",
+        httpStatus: 502,
+        retryable: true,
+      });
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
     throw hostedOnboardingError({

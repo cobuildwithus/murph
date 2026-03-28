@@ -1,4 +1,4 @@
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import { HostedBillingStatus } from "@prisma/client";
 
 import {
   buildHostedInviteReply,
@@ -19,6 +19,7 @@ import {
   type HostedWebhookDispatchSideEffect,
   type HostedWebhookLinqMessageSideEffect,
   type HostedWebhookPlan,
+  type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
 import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murph/hosted-execution";
 
@@ -33,7 +34,7 @@ export type HostedOnboardingLinqWebhookResponse = {
 
 export async function planHostedOnboardingLinqWebhook(input: {
   event: ReturnType<typeof parseHostedLinqWebhookEvent>;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
 }): Promise<HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>> {
   if (input.event.event_type !== "message.received") {
     return {
@@ -85,7 +86,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         createHostedWebhookDispatchSideEffect({
           dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
             eventId: input.event.event_id,
-            linqEvent: input.event as unknown as Record<string, unknown>,
+            linqEvent: messageEvent as unknown as Record<string, unknown>,
             normalizedPhoneNumber,
             occurredAt: resolveHostedLinqOccurredAt(messageEvent),
             userId: existingMember.id,

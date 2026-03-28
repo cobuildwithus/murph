@@ -1,11 +1,13 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHmac } from "node:crypto";
+
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   fetch: vi.fn(),
   getPrisma: vi.fn(),
   verifyAndParseLinqWebhookRequest: vi.fn(),
-  requireLinqMessageReceivedEvent: vi.fn(),
+  parseCanonicalLinqMessageReceivedEvent: vi.fn(),
   store: {
     listBindingsForUser: vi.fn(),
     getBindingByRecipientPhone: vi.fn(),
@@ -29,20 +31,35 @@ vi.mock("@/src/lib/linq/prisma-store", () => ({
   }),
 }));
 
-vi.mock("@murph/inboxd", () => ({
-  verifyAndParseLinqWebhookRequest: mocks.verifyAndParseLinqWebhookRequest,
-  requireLinqMessageReceivedEvent: mocks.requireLinqMessageReceivedEvent,
-}));
+vi.mock("@murph/inboxd", async () => {
+  const actual = await vi.importActual<typeof import("@murph/inboxd")>("@murph/inboxd");
+
+  return {
+    ...actual,
+    verifyAndParseLinqWebhookRequest: mocks.verifyAndParseLinqWebhookRequest,
+    parseCanonicalLinqMessageReceivedEvent: mocks.parseCanonicalLinqMessageReceivedEvent,
+  };
+});
 
 type LinqControlPlaneModule = typeof import("../src/lib/linq/control-plane");
+type InboxdModule = typeof import("@murph/inboxd");
 
 let linqControlPlane: LinqControlPlaneModule;
+let inboxd: Pick<
+  InboxdModule,
+  "parseCanonicalLinqMessageReceivedEvent" | "verifyAndParseLinqWebhookRequest"
+>;
 const REMOVED_LINQ_WEBHOOK_SECRET_ALIAS = ["HEALTHY", "BOB", "LINQ", "WEBHOOK", "SECRET"].join("_");
 
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {
     linqControlPlane = await import("../src/lib/linq/control-plane");
+    inboxd = await vi.importActual<InboxdModule>("@murph/inboxd");
     vi.stubGlobal("fetch", mocks.fetch);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   beforeEach(() => {
@@ -102,7 +119,7 @@ describe("HostedLinqControlPlane", () => {
     };
 
     mocks.verifyAndParseLinqWebhookRequest.mockReturnValue(event);
-    mocks.requireLinqMessageReceivedEvent.mockReturnValue(event);
+    mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue(event);
 
     const controlPlane = new linqControlPlane.HostedLinqControlPlane(
       new Request("https://example.test/api/linq/webhook", {
@@ -209,6 +226,7 @@ describe("HostedLinqControlPlane", () => {
           authorization: "Bearer linq-token",
         },
         method: "GET",
+        signal: expect.any(AbortSignal),
       }),
     );
     expect(mocks.store.upsertBinding).toHaveBeenCalledWith({
@@ -286,7 +304,7 @@ describe("HostedLinqControlPlane", () => {
     };
 
     mocks.verifyAndParseLinqWebhookRequest.mockReturnValue(event);
-    mocks.requireLinqMessageReceivedEvent.mockReturnValue(event);
+    mocks.parseCanonicalLinqMessageReceivedEvent.mockReturnValue(event);
     mocks.store.getBindingByRecipientPhone.mockResolvedValue({
       id: "linqb_123",
       userId: "user-123",
@@ -348,4 +366,100 @@ describe("HostedLinqControlPlane", () => {
     expect(JSON.stringify(queuedInput)).not.toContain("https://cdn.example.test/private.png");
     expect(JSON.stringify(queuedInput)).not.toContain("att_private_123");
   });
+
+  it("rejects malformed signed message.received payloads with the hosted payload error surface", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    const payload = JSON.stringify({
+      api_version: "v3",
+      event_id: "evt_invalid_payload",
+      created_at: "2026-03-25T10:00:00.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_123",
+        from: "+15550001111",
+        recipient_phone: "+15557654321",
+        is_from_me: "false",
+        message: {
+          id: "msg_123",
+          parts: [],
+        },
+      },
+    });
+    const timestamp = "1711360800";
+    mocks.verifyAndParseLinqWebhookRequest.mockImplementation(
+      inboxd.verifyAndParseLinqWebhookRequest,
+    );
+    mocks.parseCanonicalLinqMessageReceivedEvent.mockImplementation(
+      inboxd.parseCanonicalLinqMessageReceivedEvent,
+    );
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: payload,
+        headers: {
+          "x-webhook-signature": signLinqWebhook("linq-secret", payload, timestamp),
+          "x-webhook-timestamp": timestamp,
+        },
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).rejects.toMatchObject({
+      code: "LINQ_PAYLOAD_INVALID",
+      httpStatus: 400,
+      message: "Linq message.received is_from_me must be a boolean.",
+    });
+    expect(mocks.store.getBindingByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
+  });
+
+  it("fails hosted recipient verification when the Linq phone-number probe times out", async () => {
+    vi.useFakeTimers();
+    const authControlPlane = {
+      assertBrowserMutationOrigin: vi.fn(),
+      requireAuthenticatedUser: vi.fn().mockResolvedValue({
+        id: "user-123",
+      }),
+    };
+
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
+    mocks.fetch.mockImplementation((_url: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined;
+        signal?.addEventListener(
+          "abort",
+          () => reject(signal.reason ?? new Error("aborted")),
+          { once: true },
+        );
+      }),
+    );
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/bindings", {
+        method: "POST",
+      }),
+    );
+
+    const result = controlPlane.upsertBinding({
+      recipientPhone: "+15557654321",
+    });
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "LINQ_BINDING_PROBE_FAILED",
+      httpStatus: 502,
+      message: "Linq recipient verification timed out.",
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expectation;
+  });
 });
+
+function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
+  const signature = createHmac("sha256", secret)
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+
+  return `sha256=${signature}`;
+}

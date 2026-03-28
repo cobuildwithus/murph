@@ -387,7 +387,7 @@ function createFakeInboxRuntimeModule(input?: {
       host?: string
       path?: string
       port?: number
-      webhookSecret?: string | null
+      webhookSecret: string
       downloadAttachments?: boolean
     }) {
       return {
@@ -3463,6 +3463,55 @@ test.sequential('doctor reports Telegram diagnostics without consuming updates',
     )
     assert.equal(getMessagesCalls, 0)
     assert.equal(startWatchingCalls, 0)
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('doctor fails Linq webhook-secret checks before probing when LINQ_WEBHOOK_SECRET is missing', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-linq-doctor')
+  const services = createIntegratedInboxCliServices({
+    getEnvironment: () => ({
+      LINQ_API_TOKEN: 'linq-token',
+    }),
+    loadInboxModule: async () => createFakeInboxRuntimeModule(),
+  })
+
+  try {
+    await services.init({
+      vault: fixture.vaultRoot,
+      requestId: null,
+    })
+    await services.sourceAdd({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      source: 'linq',
+      id: 'linq:default',
+    })
+
+    const doctor = await services.doctor({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'linq:default',
+    })
+    assert.equal(doctor.ok, false)
+    assert.equal(
+      doctor.checks.some(
+        (check) => check.name === 'token' && check.status === 'pass',
+      ),
+      true,
+    )
+    assert.equal(
+      doctor.checks.some(
+        (check) => check.name === 'webhook-secret' && check.status === 'fail',
+      ),
+      true,
+    )
+    assert.equal(
+      doctor.checks.some((check) => check.name === 'probe'),
+      false,
+    )
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

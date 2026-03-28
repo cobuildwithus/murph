@@ -15,6 +15,7 @@ export async function POST(request: Request) {
       await handleHostedOnboardingLinqWebhook({
         rawBody,
         signature: request.headers.get("x-webhook-signature"),
+        signal: request.signal,
         timestamp: request.headers.get("x-webhook-timestamp"),
       }),
       202,

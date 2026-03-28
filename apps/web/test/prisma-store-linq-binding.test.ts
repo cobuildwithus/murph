@@ -81,6 +81,38 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       httpStatus: 409,
     });
   });
+
+  it("lists only the preferred row when the same user has legacy and canonical duplicates", async () => {
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          findMany: vi.fn().mockResolvedValue([
+            createBindingRecord({
+              id: "linqb_legacy",
+              label: "Legacy",
+              recipientPhone: "15557654321",
+              userId: "user-123",
+            }),
+            createBindingRecord({
+              id: "linqb_canonical",
+              label: "Canonical",
+              recipientPhone: "+15557654321",
+              userId: "user-123",
+            }),
+          ]),
+        },
+      } as never,
+    });
+
+    await expect(store.listBindingsForUser("user-123")).resolves.toEqual([
+      expect.objectContaining({
+        id: "linqb_canonical",
+        label: "Canonical",
+        recipientPhone: "+15557654321",
+        userId: "user-123",
+      }),
+    ]);
+  });
 });
 
 function createBindingRecord(input: {
