@@ -3,7 +3,7 @@ import { CONTRACT_SCHEMA_VERSION, providerFrontmatterSchema } from "@murph/contr
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { VaultError } from "../errors.ts";
-import { parseFrontmatterDocument, stringifyFrontmatterDocument } from "../frontmatter.ts";
+import { parseFrontmatterDocument } from "../frontmatter.ts";
 import { generateRecordId } from "../ids.ts";
 import {
   compactObject,
@@ -12,10 +12,12 @@ import {
   uniqueTrimmedStringList,
   validateContract,
 } from "../domains/shared.ts";
-import { runCanonicalWrite } from "../operations/write-batch.ts";
 import {
+  deleteMarkdownRegistryDocument,
   loadMarkdownRegistryDocuments,
   readRegistryRecord,
+  resolveMarkdownRegistryUpsertTarget,
+  writeMarkdownRegistryRecord,
 } from "../registry/markdown.ts";
 import { loadVault } from "../vault.ts";
 
@@ -104,10 +106,6 @@ function normalizeProviderBody(
   return `# ${title}\n\n## Notes\n\n${noteBlock}`;
 }
 
-function providerRelativePath(slug: string): string {
-  return `${VAULT_LAYOUT.providersDirectory}/${slug}.md`;
-}
-
 function validateProviderFrontmatter(
   value: unknown,
   relativePath: string,
@@ -190,15 +188,22 @@ export async function upsertProvider(
   const desiredSlug = normalizeProviderSlug(input.slug ?? normalizedTitle);
   const requestedId = normalizeOptionalText(input.providerId) ?? undefined;
   const existingRecord = selectExistingProviderRecord(existingRecords, requestedId, desiredSlug);
-  const providerId = requestedId ?? existingRecord?.providerId ?? generateRecordId(ID_PREFIXES.provider);
-  const relativePath = providerRelativePath(desiredSlug);
-  const previousPath = existingRecord?.relativePath ?? null;
+  const target = resolveMarkdownRegistryUpsertTarget({
+    existingRecord,
+    recordId: requestedId,
+    requestedSlug: desiredSlug,
+    defaultSlug: desiredSlug,
+    allowSlugUpdate: true,
+    directory: VAULT_LAYOUT.providersDirectory,
+    getRecordId: (record) => record.providerId,
+    createRecordId: () => generateRecordId(ID_PREFIXES.provider),
+  });
   const nextAttributes = validateProviderFrontmatter(
     compactObject({
       schemaVersion: CONTRACT_SCHEMA_VERSION.providerFrontmatter,
       docType: "provider",
-      providerId,
-      slug: desiredSlug,
+      providerId: target.recordId,
+      slug: target.slug,
       title: normalizedTitle,
       status: normalizeOptionalText(input.status) ?? undefined,
       specialty: normalizeOptionalText(input.specialty) ?? undefined,
@@ -209,7 +214,7 @@ export async function upsertProvider(
       note: normalizeOptionalText(input.note) ?? undefined,
       aliases: uniqueTrimmedStringList(input.aliases) ?? undefined,
     }),
-    relativePath,
+    target.relativePath,
   );
   const body = normalizeProviderBody(
     input.body,
@@ -217,31 +222,27 @@ export async function upsertProvider(
     nextAttributes.title,
     nextAttributes.note,
   );
-  const markdown = stringifyFrontmatterDocument({
+  const { record } = await writeMarkdownRegistryRecord({
+    vaultRoot: input.vaultRoot,
+    target,
     attributes: nextAttributes as FrontmatterObject,
     body,
-  });
-
-  return runCanonicalWrite({
-    vaultRoot: input.vaultRoot,
+    recordFromParts: parseProviderRecord,
     operationType: "provider_upsert",
-    summary: `Upsert provider ${providerId}`,
-    occurredAt: new Date(),
-    mutate: async ({ batch }) => {
-      await batch.stageTextWrite(relativePath, markdown, {
-        overwrite: true,
-      });
-      if (previousPath && previousPath !== relativePath) {
-        await batch.stageDelete(previousPath);
-      }
-
-      return {
-        providerId,
-        relativePath,
-        created: existingRecord === null,
-      };
+    summary: `Upsert provider ${target.recordId}`,
+    audit: {
+      action: "provider_upsert",
+      commandName: "core.upsertProvider",
+      summary: `Upserted provider ${target.recordId}.`,
+      targetIds: [target.recordId],
     },
   });
+
+  return {
+    providerId: record.providerId,
+    relativePath: record.relativePath,
+    created: target.created,
+  };
 }
 
 export async function listProviders(vaultRoot: string): Promise<ProviderRecord[]> {
@@ -274,17 +275,16 @@ export async function deleteProvider({
     slug,
   });
 
-  return runCanonicalWrite({
+  await deleteMarkdownRegistryDocument({
     vaultRoot,
     operationType: "provider_delete",
     summary: `Delete provider ${provider.providerId}`,
-    mutate: async ({ batch }) => {
-      await batch.stageDelete(provider.relativePath);
-      return {
-        providerId: provider.providerId,
-        relativePath: provider.relativePath,
-        deleted: true as const,
-      };
-    },
+    relativePath: provider.relativePath,
   });
+
+  return {
+    providerId: provider.providerId,
+    relativePath: provider.relativePath,
+    deleted: true as const,
+  };
 }

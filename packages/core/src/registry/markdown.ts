@@ -167,6 +167,12 @@ export function readRegistryRecord<TRecord extends RegistryRecord>({
   return match;
 }
 
+/**
+ * Canonical slug/id-to-path resolution for markdown-backed registries.
+ *
+ * Keeping rename and record-id ownership here prevents bank domains from
+ * drifting on create-vs-update decisions or old-path cleanup.
+ */
 export function resolveMarkdownRegistryUpsertTarget<TRecord extends ExistingMarkdownRegistryRecord>({
   existingRecord,
   recordId,
@@ -257,6 +263,12 @@ export async function deleteMarkdownRegistryDocument({
   });
 }
 
+/**
+ * Canonical markdown-registry write path.
+ *
+ * This is the shared seam that turns validated frontmatter + markdown body into
+ * one canonical write transaction with the corresponding audit entry.
+ */
 export async function writeMarkdownRegistryRecord<TRecord>({
   vaultRoot,
   target,

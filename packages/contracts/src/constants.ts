@@ -160,6 +160,7 @@ export const AUDIT_ACTIONS = Object.freeze([
   "meal_add",
   "export_pack",
   "food_upsert",
+  "provider_upsert",
   "profile_current_rebuild",
   "profile_snapshot_add",
   "recipe_upsert",

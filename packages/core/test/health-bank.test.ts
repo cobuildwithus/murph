@@ -5,6 +5,7 @@ import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
 import { initializeVault, readJsonlRecords, VaultError } from "../src/index.ts";
+import { resolveAuditShardPath } from "../src/audit.ts";
 import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
 import {
   deleteFood,
@@ -298,6 +299,75 @@ test("providers and recipes use first-class markdown registry reads without chan
     (error: unknown) =>
       error instanceof VaultError && error.code === "PROVIDER_CONFLICT",
   );
+});
+
+test("markdown registry helpers keep provider and recipe rename writes on the shared canonical path", async () => {
+  const vaultRoot = await makeTempDirectory("murph-markdown-registry-write-seam");
+  await initializeVault({ vaultRoot });
+
+  const provider = await upsertProvider({
+    vaultRoot,
+    title: "Northwest Labs",
+    slug: "northwest-labs",
+    status: "active",
+    body: "# Northwest Labs\n",
+  });
+  const renamedProvider = await upsertProvider({
+    vaultRoot,
+    providerId: provider.providerId,
+    title: "Northwest Labs West",
+    slug: "northwest-labs-west",
+    status: "active",
+    body: "# Northwest Labs West\n",
+  });
+  const recipe = await upsertRecipe({
+    vaultRoot,
+    title: "Tahini Salmon Bowl",
+    slug: "tahini-salmon-bowl",
+    status: "saved",
+    ingredients: ["salmon", "rice"],
+    steps: ["Roast the salmon."],
+  });
+  const renamedRecipe = await upsertRecipe({
+    vaultRoot,
+    recipeId: recipe.record.recipeId,
+    title: "Tahini Salmon Bowl",
+    slug: "usual-tahini-salmon-bowl",
+    allowSlugRename: true,
+    status: "saved",
+    ingredients: ["salmon", "rice"],
+    steps: ["Roast the salmon."],
+  });
+  const auditRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: resolveAuditShardPath(new Date()),
+  });
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
+
+  await assert.rejects(() =>
+    fs.access(path.join(vaultRoot, "bank/providers/northwest-labs.md")));
+  await assert.rejects(() =>
+    fs.access(path.join(vaultRoot, "bank/recipes/tahini-salmon-bowl.md")));
+
+  assert.equal(renamedProvider.created, false);
+  assert.equal(renamedProvider.relativePath, "bank/providers/northwest-labs-west.md");
+  assert.equal(renamedRecipe.created, false);
+  assert.equal(renamedRecipe.record.relativePath, "bank/recipes/usual-tahini-salmon-bowl.md");
+  assert.deepEqual(selectAuditMetadata(auditRecords, "provider_upsert"), [
+    { action: "provider_upsert", commandName: "core.upsertProvider", op: "create" },
+    { action: "provider_upsert", commandName: "core.upsertProvider", op: "update" },
+  ]);
+  assert.deepEqual(selectAuditMetadata(auditRecords, "recipe_upsert"), [
+    { action: "recipe_upsert", commandName: "core.upsertRecipe", op: "create" },
+    { action: "recipe_upsert", commandName: "core.upsertRecipe", op: "update" },
+  ]);
+  assert.equal(operations.filter((operation) => operation.operationType === "provider_upsert").length, 2);
+  assert.equal(operations.filter((operation) => operation.operationType === "recipe_upsert").length, 2);
+  assert.ok(operations.every((operation) => operation.status === "committed"));
 });
 
 test("food, provider, and recipe deletes remove the markdown registry record cleanly", async () => {

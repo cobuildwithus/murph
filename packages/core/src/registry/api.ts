@@ -72,6 +72,14 @@ interface ResolveExistingMarkdownRegistryApiRecordInput {
   slug?: string;
 }
 
+/**
+ * Shared owner for registry-style markdown records.
+ *
+ * Domain modules still own parsing, sorting, and validation, but this API keeps
+ * selector conflict handling, canonical write staging, slug/rename path
+ * resolution, frontmatter serialization, and audit-backed upserts consistent
+ * across bank registries.
+ */
 export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
   directory,
   recordFromParts,
