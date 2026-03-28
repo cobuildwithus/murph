@@ -62,4 +62,23 @@ describe("handleHostedOnboardingLinqWebhook auth", () => {
       httpStatus: 401,
     });
   });
+
+  it("rejects hosted webhook requests with invalid signatures when signature headers are present", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-28T12:00:00.000Z",
+        data: {},
+        event_id: "evt_invalid_signature",
+        event_type: "message.received",
+      }),
+      signature: "sha256=deadbeef",
+      timestamp: "1711278000",
+    })).rejects.toMatchObject({
+      code: "LINQ_SIGNATURE_INVALID",
+      httpStatus: 401,
+    });
+  });
 });
