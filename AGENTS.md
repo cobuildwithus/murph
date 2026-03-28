@@ -67,9 +67,9 @@ If instructions still conflict after applying this order, ask the user before ac
 ## Commit and Handoff
 
 - Same-turn task completion = acceptance, unless the user explicitly says `review first` or `do not commit`.
-- If you changed files, run the required checks defined below before handoff. If they pass, run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
+- If you changed files, run the required checks defined below before handoff. If the task used an execution plan, close it and commit with `scripts/finish-task agent-docs/exec-plans/active/<plan>.md "type(scope): summary" path/to/file1 path/to/file2`. Otherwise run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
 - If a required check fails for a credibly unrelated pre-existing reason, do not leave your scoped work uncommitted solely because the repo is red. Commit your exact touched files after recording the failing command, the failing target, and why your diff did not cause it. If you cannot defend that causal separation, treat the failure as blocking.
-- Use `scripts/committer` only (no manual `git commit`).
+- Use `scripts/finish-task` for plan-bearing tasks and `scripts/committer` otherwise (no manual `git commit`).
 - Agent-authored commit messages should use Conventional Commits (`feat|fix|refactor|build|ci|chore|docs|style|perf|test`).
 - If no files changed, do not create a commit.
 - Commit only exact file paths touched in the current turn.

@@ -18,8 +18,9 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 9. Re-run required checks after simplify + coverage updates.
 10. Spawn a dedicated audit subagent for the final completion review and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below. Expect this audit to take about 5 to 10 minutes on non-trivial diffs; do not rush it or cancel it early just because it has not answered in the first minute.
 11. Resolve high-severity findings before final handoff.
-12. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
-13. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
+12. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <file> [file ...]` when the task is ready to commit.
+13. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
+14. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
 
 ## Required Audit Delegation
 

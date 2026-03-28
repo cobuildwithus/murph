@@ -31,6 +31,7 @@
     "release:major": "bash scripts/release.sh major",
     "plan:open": "bash scripts/open-exec-plan.sh",
     "plan:close": "bash scripts/close-exec-plan.sh",
+    "task:finish": "bash scripts/finish-task",
     "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
     "setup": "bash scripts/setup-host.sh",
