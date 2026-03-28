@@ -5,14 +5,24 @@ import {
   type HostedAssistantRuntimeJobRequest,
 } from "@murph/assistant-runtime";
 import {
+  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedEmailCapabilities,
   type HostedExecutionWebControlPlaneEnvironment,
   type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
 
-import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
+import {
+  buildHostedRunnerContainerEnv,
+  filterHostedRunnerUserEnv,
+} from "./runner-env.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";
+
+const HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL =
+  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL;
+const HOSTED_RUNNER_SHARE_PACK_BASE_URL =
+  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL;
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
@@ -28,6 +38,7 @@ let hostedExecutionCallbackBaseUrlsForTests: {
 } | null = null;
 
 export interface HostedExecutionRunnerJobRequest extends HostedAssistantRuntimeJobRequest {
+  internalWorkerProxyToken?: string | null;
   userEnv?: Record<string, string> | null;
 }
 
@@ -67,6 +78,7 @@ export async function runHostedExecutionJob(
     HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
     HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
   };
+  const { internalWorkerProxyToken, userEnv, ...request } = input;
 
   const runtime = {
     ...callbackBaseUrls,
@@ -74,28 +86,29 @@ export async function runHostedExecutionJob(
       Number.parseInt(process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
     forwardedEnv,
-    userEnv: normalizeHostedUserEnv(input.userEnv ?? {}, process.env),
+    internalWorkerProxyToken: internalWorkerProxyToken ?? null,
+    userEnv: filterHostedRunnerUserEnv(
+      normalizeHostedUserEnv(userEnv ?? {}, process.env),
+      process.env,
+    ),
     webControlPlane: {
       ...readHostedExecutionWebControlPlaneEnvironment(forwardedEnv),
-      ...(callbackBaseUrls?.sharePackBaseUrl || callbackBaseUrls?.sharePackToken
-        ? {
-            shareBaseUrl: callbackBaseUrls?.sharePackBaseUrl ?? null,
-            shareToken: callbackBaseUrls?.sharePackToken ?? null,
-          }
-        : {}),
+      deviceSyncRuntimeBaseUrl: HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
+      shareBaseUrl: callbackBaseUrls?.sharePackBaseUrl ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
+      shareToken: callbackBaseUrls?.sharePackToken ?? null,
       ...(callbackBaseUrls?.webControlPlane ?? {}),
     },
   };
 
   if (hostedExecutionRunModeForTests === "in-process") {
     return await runHostedAssistantRuntimeJobInProcess({
-      request: input,
+      request,
       runtime,
     });
   }
 
   return await runHostedAssistantRuntimeJobIsolated({
-    request: input,
+    request,
     runtime,
   });
 }
