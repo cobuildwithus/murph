@@ -431,6 +431,29 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
   });
 
+  it("keeps connect-time webhook upkeep best-effort when provider admin throws before returning a promise", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.ensureWebhookSubscriptions.mockImplementation(() => {
+      throw new Error("sync upkeep failure");
+    });
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/oauth/oura/callback?code=abc&state=xyz"),
+    );
+
+    await expect(controlPlane.handleOAuthCallback("oura")).resolves.toEqual({
+      connection: {
+        id: "dsc_123",
+      },
+    });
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to ensure hosted webhook subscriptions during connection setup.",
+      expect.objectContaining({
+        provider: "oura",
+        error: expect.any(Error),
+      }),
+    );
+  });
+
   it("stores and dispatches only sparse webhook hints from the ingress hook", async () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {

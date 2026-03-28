@@ -540,16 +540,6 @@ export function createOuraWebhookSubscriptionClient(
         retained.push(active);
       }
 
-      if (options.pruneDuplicates) {
-        for (const duplicate of matching) {
-          if (duplicate.id === active.id) {
-            continue;
-          }
-
-          await remove(duplicate.id);
-          deleted.push(duplicate);
-        }
-      }
     }
 
     if (options.pruneDuplicates) {

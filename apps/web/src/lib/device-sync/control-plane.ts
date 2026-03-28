@@ -267,18 +267,19 @@ export class HostedDeviceSyncControlPlane {
       return;
     }
 
-    const operation = ensureSubscriptions({
-      publicBaseUrl: this.publicBaseUrl,
-      verificationToken: this.env.ouraWebhookVerificationToken,
-    });
-
     if (!input.bestEffort) {
-      await operation;
+      await ensureSubscriptions({
+        publicBaseUrl: this.publicBaseUrl,
+        verificationToken: this.env.ouraWebhookVerificationToken,
+      });
       return;
     }
 
     try {
-      await operation;
+      await ensureSubscriptions({
+        publicBaseUrl: this.publicBaseUrl,
+        verificationToken: this.env.ouraWebhookVerificationToken,
+      });
     } catch (error) {
       console.error("Failed to ensure hosted webhook subscriptions during connection setup.", {
         provider: input.provider.provider,
