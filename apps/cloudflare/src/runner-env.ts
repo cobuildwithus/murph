@@ -1,3 +1,6 @@
+const RUNNER_DEVICE_SYNC_CONTROL_BASE_URL = "http://device-sync.worker";
+const RUNNER_SHARE_PACK_BASE_URL = "http://share-pack.worker";
+
 const EXACT_ALLOWED_ENV_KEYS = new Set<string>([
   "AGENTMAIL_API_KEY",
   "AGENTMAIL_BASE_URL",
@@ -7,9 +10,6 @@ const EXACT_ALLOWED_ENV_KEYS = new Set<string>([
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS",
   "HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES",
-  "HOSTED_DEVICE_SYNC_CONTROL_BASE_URL",
-  "HOSTED_EXECUTION_CONTROL_TOKEN",
-  "HOSTED_EXECUTION_INTERNAL_TOKEN",
   "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
   "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
   "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
@@ -70,6 +70,11 @@ export function buildHostedRunnerContainerEnv(
   if (!values.NODE_ENV) {
     values.NODE_ENV = "production";
   }
+
+  // Route runner-only share/device-sync fetches through the worker outbound proxy so
+  // the container never receives a broad web-internal token.
+  values.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL = RUNNER_DEVICE_SYNC_CONTROL_BASE_URL;
+  values.HOSTED_SHARE_API_BASE_URL = RUNNER_SHARE_PACK_BASE_URL;
 
   return values;
 }

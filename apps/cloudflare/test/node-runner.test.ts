@@ -217,6 +217,7 @@ describe("runHostedExecutionJob", () => {
       bundles: activation.bundles,
       dispatch: {
         event: {
+          botUserId: null,
           kind: "telegram.message.received",
           telegramUpdate: {
             message: {
@@ -642,6 +643,7 @@ describe("runHostedExecutionJob", () => {
       bundles: activation.bundles,
       dispatch: {
         event: {
+          botUserId: null,
           kind: "telegram.message.received",
           telegramUpdate: {
             update_id: 123,

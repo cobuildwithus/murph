@@ -83,6 +83,39 @@ describe("handleRunnerOutboundRequest", () => {
     );
   });
 
+  it("falls back to the hosted execution internal token for share payload proxy auth", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+        method: "GET",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://web.example.test",
+        HOSTED_SHARE_INTERNAL_TOKEN: undefined,
+      }),
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("https://web.example.test/api/hosted-share/internal/share_123/payload?shareCode=code_123"),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: "Bearer internal-token",
+          "x-hosted-execution-user-id": "member_123",
+        }),
+        method: "GET",
+      }),
+    );
+  });
+
   it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://side-effects.worker/effects/outbox_123", {
