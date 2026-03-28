@@ -119,6 +119,29 @@ function normalizeTags(value: unknown): string[] {
   return normalizeUniqueStringArray(value);
 }
 
+export function extractProfileTopGoalIds(profile: unknown): string[] {
+  const profileObject = asObject(profile);
+  if (!profileObject) {
+    return [];
+  }
+
+  const nestedGoals = firstObject(profileObject, ["goals"]);
+  const nestedTopGoalIds = nestedGoals ? firstStringArray(nestedGoals, ["topGoalIds"]) : [];
+  return nestedTopGoalIds.length > 0
+    ? nestedTopGoalIds
+    : firstStringArray(profileObject, ["topGoalIds"]);
+}
+
+export function extractProfileSummary(profile: unknown): string | null {
+  const profileObject = asObject(profile);
+  if (!profileObject) {
+    return null;
+  }
+
+  const narrative = firstObject(profileObject, ["narrative"]);
+  return (narrative ? firstString(narrative, ["summary"]) : null) ?? firstString(profileObject, ["summary"]);
+}
+
 export function projectAssessmentEntity(
   value: unknown,
   relativePath: string,
@@ -190,7 +213,8 @@ export function projectProfileSnapshotEntity(
   const sourceEventIds = firstStringArray(source, ["sourceEventIds"]);
   const recordedAt = firstString(source, ["recordedAt", "capturedAt"]);
   const capturedAt = firstString(source, ["capturedAt", "recordedAt"]);
-  const summary = firstString(source, ["summary"]);
+  const profile = firstObject(source, ["profile"]) ?? {};
+  const summary = extractProfileSummary(profile) ?? firstString(source, ["summary"]);
   const status = firstString(source, ["status"]) ?? "accepted";
 
   return {
@@ -215,7 +239,8 @@ export function projectProfileSnapshotEntity(
         firstString(sourceObject, ["kind", "source", "importedFrom"]),
       sourceAssessmentIds: resolvedAssessmentIds,
       sourceEventIds,
-      profile: firstObject(source, ["profile"]) ?? {},
+      profile,
+      summary,
     },
     frontmatter: null,
     relatedIds: uniqueStrings([...resolvedAssessmentIds, ...sourceEventIds]),
@@ -237,7 +262,7 @@ export function fallbackCurrentProfileEntity(
     latestSnapshot.attributes.sourceAssessmentIds,
   );
   const sourceEventIds = normalizeUniqueStringArray(latestSnapshot.attributes.sourceEventIds);
-  const topGoalIds = firstStringArray(profile, ["topGoalIds"]);
+  const topGoalIds = extractProfileTopGoalIds(profile);
 
   return {
     entityId: "current",

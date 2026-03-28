@@ -40,10 +40,51 @@
     },
     "profile": {
       "type": "object",
-      "properties": {},
-      "additionalProperties": {
-        "$ref": "#/$defs/__schema0"
-      }
+      "properties": {
+        "narrative": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "highlights": {
+              "maxItems": 25,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "goals": {
+          "type": "object",
+          "properties": {
+            "topGoalIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^goal_[0-9A-HJKMNP-TV-Z]{26}$"
+              },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "custom": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "required": [

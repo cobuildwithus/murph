@@ -33,6 +33,8 @@ import {
   appendJournal,
   appendProfileSnapshot,
   appendJsonlRecord,
+  buildActivitySessionEventDraft,
+  buildPublicEventRecord,
   checkpointExperiment,
   copyRawArtifact,
   createExperiment,
@@ -318,6 +320,49 @@ test("upsertEvent appends new events without parsing unrelated invalid shards", 
   assert.equal(result.created, true);
   assert.ok(eventRecord);
   assert.equal(eventRecord.note, "Should still append successfully.");
+});
+
+test("upsertEvent accepts typed public event drafts and still validates against the stored contract", async () => {
+  const vaultRoot = await makeTempDirectory("murph-event-typed-draft");
+  await initializeVault({
+    vaultRoot,
+    timezone: "Australia/Melbourne",
+  });
+
+  const draft = buildActivitySessionEventDraft({
+    occurredAt: new Date("2026-03-12T08:15:00.000Z"),
+    title: "Strength session",
+    note: "Usual upper-body work.",
+    activityType: "strength-training",
+    durationMinutes: 45,
+    strengthExercises: [
+      {
+        exercise: "pushups",
+        setCount: 4,
+        repsPerSet: 20,
+      },
+    ],
+  });
+  const preview = buildPublicEventRecord(draft, "Australia/Melbourne");
+  const result = await upsertEvent({
+    vaultRoot,
+    draft,
+  });
+  const ledgerRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: result.ledgerFile,
+  });
+  const eventRecord = ledgerRecords.find(
+    (record) => expectRecord<{ id?: string }>(record).id === result.eventId,
+  ) as EventRecord | undefined;
+
+  assert.equal(preview.kind, "activity_session");
+  assert.equal(preview.dayKey, "2026-03-12");
+  assert.equal(preview.source, "manual");
+  assert.equal(result.created, true);
+  assert.ok(eventRecord);
+  assert.equal(eventRecord.kind, "activity_session");
+  assert.equal((eventRecord as Extract<EventRecord, { kind: "activity_session" }>).activityType, "strength-training");
 });
 
 test("upsertEvent rewrites existing events into the correct shard and deleteEvent removes them", async () => {

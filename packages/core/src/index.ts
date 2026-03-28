@@ -121,3 +121,22 @@ export * from "./family/index.ts";
 export * from "./genetics/index.ts";
 
 export * from "./shares.ts";
+export {
+  buildActivitySessionEventDraft,
+  buildInterventionSessionEventDraft,
+  buildMedicationIntakeEventDraft,
+  buildNoteEventDraft,
+  buildObservationEventDraft,
+  buildPublicEventRecord,
+  buildSleepSessionEventDraft,
+  buildSupplementIntakeEventDraft,
+  buildSymptomEventDraft,
+} from "./domains/events.ts";
+export type {
+  EventDraftByKind,
+  PublicEventDraft,
+  PublicWritableEventKind,
+  UpsertEventDraftInput,
+  UpsertEventInput,
+  UpsertEventPayloadInput,
+} from "./domains/events.ts";

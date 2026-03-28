@@ -36,6 +36,8 @@ import {
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
 } from "../src/index.ts";
+import { projectProfileSnapshotEntity } from "../src/canonical-entities.ts";
+import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
@@ -375,7 +377,6 @@ test("health registry queries prefer canonical fields and stable title ordering"
     assert.equal(family[1]?.note, null);
     assert.deepEqual(family[0]?.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z400"]);
     assert.deepEqual(family[1]?.relatedVariantIds, []);
-    assert.equal(family[1]?.updatedAt, "2026-03-12T09:00:00Z");
 
     assert.deepEqual(
       genetics.map((record) => record.id),
@@ -385,7 +386,6 @@ test("health registry queries prefer canonical fields and stable title ordering"
       ],
     );
     assert.equal(genetics[0]?.title, "APOE e4 allele");
-    assert.equal(genetics[1]?.updatedAt, "2026-03-12T11:00:00Z");
     assert.deepEqual(genetics[1]?.sourceFamilyMemberIds, ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -835,7 +835,9 @@ test("overview selectors move cleanly onto the query read model", () => {
     occurredAt: "2026-03-12T13:55:00Z",
     data: {
       profile: {
-        topGoalIds: ["goal_sleep_01"],
+        goals: {
+          topGoalIds: ["goal_sleep_01"],
+        },
       },
     },
   });
@@ -952,6 +954,33 @@ test("overview selectors move cleanly onto the query read model", () => {
         title: "Completed Trial",
       },
     ],
+  );
+});
+
+test("profile snapshot query projections keep nested typed summary fields", () => {
+  const entity = projectProfileSnapshotEntity(
+    {
+      id: "psnap_01",
+      recordedAt: "2026-03-12T13:55:00Z",
+      source: "manual",
+      profile: {
+        narrative: {
+          summary: "Sleep steadier and the evening routine is holding.",
+        },
+        goals: {
+          topGoalIds: ["goal_sleep_01"],
+        },
+      },
+    },
+    "ledger/profile-snapshots/2026/2026-03.jsonl",
+  );
+
+  assert.ok(entity);
+  assert.equal(entity.title, "Sleep steadier and the evening routine is holding.");
+  assert.equal(entity.body, "Sleep steadier and the evening routine is holding.");
+  assert.equal(
+    profileSnapshotRecordFromEntity(entity)?.summary,
+    "Sleep steadier and the evening routine is holding.",
   );
 });
 

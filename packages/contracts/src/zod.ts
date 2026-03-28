@@ -826,6 +826,27 @@ export const rawImportManifestSchema = z
   })
   .strict();
 
+export const profileSnapshotNarrativeSchema = z
+  .object({
+    summary: boundedString(1, 4000).optional(),
+    highlights: uniqueArray(boundedString(1, 240), { maxItems: 25, uniqueItems: true }).optional(),
+  })
+  .strict();
+
+export const profileSnapshotGoalsSchema = z
+  .object({
+    topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
+  })
+  .strict();
+
+export const profileSnapshotProfileSchema = z
+  .object({
+    narrative: profileSnapshotNarrativeSchema.optional(),
+    goals: profileSnapshotGoalsSchema.optional(),
+    custom: jsonObjectSchema.optional(),
+  })
+  .strict();
+
 export const profileSnapshotSchema = withContractMetadata(
   z
     .object({
@@ -835,7 +856,7 @@ export const profileSnapshotSchema = withContractMetadata(
       source: z.enum(PROFILE_SNAPSHOT_SOURCES),
       sourceAssessmentIds: uniqueArray(idSchema(ID_PREFIXES.assessment), { uniqueItems: true }).optional(),
       sourceEventIds: uniqueArray(idSchema(ID_PREFIXES.event), { uniqueItems: true }).optional(),
-      profile: jsonObjectSchema,
+      profile: profileSnapshotProfileSchema,
     })
     .strict(),
   "@murph/contracts/profile-snapshot.schema.json",
@@ -1050,6 +1071,9 @@ export type WorkoutFormatFrontmatter = z.infer<typeof workoutFormatFrontmatterSc
 export type AssessmentResponseRecord = z.infer<typeof assessmentResponseSchema>;
 export type RawImportManifestArtifact = z.infer<typeof rawImportManifestArtifactSchema>;
 export type RawImportManifest = z.infer<typeof rawImportManifestSchema>;
+export type ProfileSnapshotNarrative = z.infer<typeof profileSnapshotNarrativeSchema>;
+export type ProfileSnapshotGoals = z.infer<typeof profileSnapshotGoalsSchema>;
+export type ProfileSnapshotProfile = z.infer<typeof profileSnapshotProfileSchema>;
 export type ProfileSnapshotRecord = z.infer<typeof profileSnapshotSchema>;
 export type ProfileCurrentFrontmatter = z.infer<typeof profileCurrentFrontmatterSchema>;
 export type GoalFrontmatter = z.infer<typeof goalFrontmatterSchema>;
