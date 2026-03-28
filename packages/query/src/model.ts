@@ -20,6 +20,7 @@ type FrontmatterRecordType = "core" | "experiment" | "journal";
 type JsonRecordType = "audit" | "event" | "sample";
 
 export type VaultRecordType = CanonicalEntityFamily;
+export type VaultRecordsByFamily = Partial<Record<VaultRecordType, VaultRecord[]>>;
 
 export interface VaultRecord {
   displayId: string;
@@ -47,6 +48,7 @@ export interface VaultReadModel {
   vaultRoot: string;
   metadata: QueryRecordData | null;
   entities: CanonicalEntity[];
+  byFamily: VaultRecordsByFamily;
   coreDocument: VaultRecord | null;
   experiments: VaultRecord[];
   journalEntries: VaultRecord[];
@@ -189,29 +191,31 @@ async function readVaultWithHealthMode(
   const entities = [...baseEntities, ...healthEntities.entities]
     .sort(compareCanonicalEntities);
   const records = entities.map((entity) => toVaultRecord(entity, vaultRoot));
+  const byFamily = groupRecordsByFamily(records);
 
-  const coreDocument = firstRecordOfType(records, "core");
-  const experiments = recordsOfType(records, "experiment");
-  const journalEntries = recordsOfType(records, "journal");
-  const events = recordsOfType(records, "event");
-  const samples = recordsOfType(records, "sample");
-  const audits = recordsOfType(records, "audit");
-  const assessments = recordsOfType(records, "assessment");
-  const profileSnapshots = recordsOfType(records, "profile_snapshot");
-  const currentProfile = firstRecordOfType(records, "current_profile");
-  const goals = recordsOfType(records, "goal");
-  const conditions = recordsOfType(records, "condition");
-  const allergies = recordsOfType(records, "allergy");
-  const protocols = recordsOfType(records, "protocol");
-  const history = recordsOfType(records, "history");
-  const familyMembers = recordsOfType(records, "family");
-  const geneticVariants = recordsOfType(records, "genetics");
+  const coreDocument = firstRecordOfType(byFamily, "core");
+  const experiments = recordsOfType(byFamily, "experiment");
+  const journalEntries = recordsOfType(byFamily, "journal");
+  const events = recordsOfType(byFamily, "event");
+  const samples = recordsOfType(byFamily, "sample");
+  const audits = recordsOfType(byFamily, "audit");
+  const assessments = recordsOfType(byFamily, "assessment");
+  const profileSnapshots = recordsOfType(byFamily, "profile_snapshot");
+  const currentProfile = firstRecordOfType(byFamily, "current_profile");
+  const goals = recordsOfType(byFamily, "goal");
+  const conditions = recordsOfType(byFamily, "condition");
+  const allergies = recordsOfType(byFamily, "allergy");
+  const protocols = recordsOfType(byFamily, "protocol");
+  const history = recordsOfType(byFamily, "history");
+  const familyMembers = recordsOfType(byFamily, "family");
+  const geneticVariants = recordsOfType(byFamily, "genetics");
 
   return {
     format: "murph.query.v1",
     vaultRoot,
     metadata,
     entities,
+    byFamily,
     coreDocument,
     experiments,
     journalEntries,
@@ -823,18 +827,36 @@ function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord 
   };
 }
 
-function firstRecordOfType(
+function groupRecordsByFamily(
   records: readonly VaultRecord[],
+): VaultRecordsByFamily {
+  const byFamily: VaultRecordsByFamily = {};
+
+  for (const record of records) {
+    const familyRecords = byFamily[record.recordType];
+    if (familyRecords) {
+      familyRecords.push(record);
+      continue;
+    }
+
+    byFamily[record.recordType] = [record];
+  }
+
+  return byFamily;
+}
+
+function firstRecordOfType(
+  byFamily: VaultRecordsByFamily,
   recordType: VaultRecordType,
 ): VaultRecord | null {
-  return records.find((record) => record.recordType === recordType) ?? null;
+  return byFamily[recordType]?.[0] ?? null;
 }
 
 function recordsOfType(
-  records: readonly VaultRecord[],
+  byFamily: VaultRecordsByFamily,
   recordType: VaultRecordType,
 ): VaultRecord[] {
-  return records.filter((record) => record.recordType === recordType);
+  return byFamily[recordType]?.slice() ?? [];
 }
 
 function compareDateStrings(

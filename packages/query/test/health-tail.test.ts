@@ -145,9 +145,13 @@ async function createHealthVault(options: {
         source: "assessment_projection",
         sourceAssessmentIds: ["asmt_health_01"],
         profile: {
-          topGoalIds: ["goal_sleep_01"],
-          sleep: {
-            averageHours: 6.5,
+          goals: {
+            topGoalIds: ["goal_sleep_01"],
+          },
+          custom: {
+            sleep: {
+              averageHours: 6.5,
+            },
           },
         },
       }),
@@ -161,7 +165,9 @@ async function createHealthVault(options: {
               assessmentId: "asmt_health_00",
             },
             profile: {
-              topGoalIds: ["goal_sleep_legacy"],
+              goals: {
+                topGoalIds: ["goal_sleep_legacy"],
+              },
             },
           })
         : null,
@@ -171,7 +177,9 @@ async function createHealthVault(options: {
             id: "psnap_health_missing_date",
             source: "manual",
             profile: {
-              topGoalIds: ["goal_missing_date"],
+              goals: {
+                topGoalIds: ["goal_missing_date"],
+              },
             },
           })
         : null,
@@ -497,6 +505,8 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
 }
 
 function createManualVault(records: VaultRecord[]): VaultReadModel {
+  const byFamily = groupRecordsByFamily(records);
+
   return {
     format: "murph.query.v1",
     vaultRoot: "manual-vault",
@@ -520,24 +530,40 @@ function createManualVault(records: VaultRecord[]): VaultReadModel {
       experimentSlug: record.experimentSlug,
       tags: record.tags,
     })),
-    coreDocument: records.find((record) => record.recordType === "core") ?? null,
-    experiments: records.filter((record) => record.recordType === "experiment"),
-    journalEntries: records.filter((record) => record.recordType === "journal"),
-    events: records.filter((record) => record.recordType === "event"),
-    samples: records.filter((record) => record.recordType === "sample"),
-    audits: records.filter((record) => record.recordType === "audit"),
-    assessments: records.filter((record) => record.recordType === "assessment"),
-    profileSnapshots: records.filter((record) => record.recordType === "profile_snapshot"),
-    currentProfile: records.find((record) => record.recordType === "current_profile") ?? null,
-    goals: records.filter((record) => record.recordType === "goal"),
-    conditions: records.filter((record) => record.recordType === "condition"),
-    allergies: records.filter((record) => record.recordType === "allergy"),
-    protocols: records.filter((record) => record.recordType === "protocol"),
-    history: records.filter((record) => record.recordType === "history"),
-    familyMembers: records.filter((record) => record.recordType === "family"),
-    geneticVariants: records.filter((record) => record.recordType === "genetics"),
+    byFamily,
+    coreDocument: byFamily.core?.[0] ?? null,
+    experiments: byFamily.experiment ?? [],
+    journalEntries: byFamily.journal ?? [],
+    events: byFamily.event ?? [],
+    samples: byFamily.sample ?? [],
+    audits: byFamily.audit ?? [],
+    assessments: byFamily.assessment ?? [],
+    profileSnapshots: byFamily.profile_snapshot ?? [],
+    currentProfile: byFamily.current_profile?.[0] ?? null,
+    goals: byFamily.goal ?? [],
+    conditions: byFamily.condition ?? [],
+    allergies: byFamily.allergy ?? [],
+    protocols: byFamily.protocol ?? [],
+    history: byFamily.history ?? [],
+    familyMembers: byFamily.family ?? [],
+    geneticVariants: byFamily.genetics ?? [],
     records,
   };
+}
+
+function groupRecordsByFamily(records: readonly VaultRecord[]) {
+  return records.reduce<Partial<Record<VaultRecord["recordType"], VaultRecord[]>>>(
+    (byFamily, record) => {
+      const familyRecords = byFamily[record.recordType];
+      if (familyRecords) {
+        familyRecords.push(record);
+      } else {
+        byFamily[record.recordType] = [record];
+      }
+      return byFamily;
+    },
+    {},
+  );
 }
 
 test("showProfile derives the current profile from the latest snapshot when the markdown page is stale", async () => {
@@ -720,7 +746,9 @@ test("profile snapshot recency tie-break stays aligned between listing and curre
           recordedAt: "2026-03-12T14:00:00Z",
           sourceAssessmentIds: ["asmt_health_01"],
           profile: {
-            topGoalIds: ["goal_same_01"],
+            goals: {
+              topGoalIds: ["goal_same_01"],
+            },
           },
         }),
         JSON.stringify({
@@ -729,7 +757,9 @@ test("profile snapshot recency tie-break stays aligned between listing and curre
           recordedAt: "2026-03-12T14:00:00Z",
           sourceEventIds: ["evt_health_01"],
           profile: {
-            topGoalIds: ["goal_same_02"],
+            goals: {
+              topGoalIds: ["goal_same_02"],
+            },
           },
         }),
       ].join("\n") + "\n",
@@ -843,6 +873,120 @@ test("readVault promotes health families into the shared search and timeline pro
         "profile_snapshot",
         "protocol",
       ]),
+    );
+    assert.deepEqual(
+      new Set(Object.keys(vault.byFamily)),
+      new Set([
+        "allergy",
+        "assessment",
+        "condition",
+        "current_profile",
+        "family",
+        "genetics",
+        "goal",
+        "history",
+        "profile_snapshot",
+        "protocol",
+      ]),
+    );
+    assert.deepEqual(vault.byFamily.goal?.map((record) => record.displayId), [
+      "goal_sleep_01",
+    ]);
+    assert.equal(vault.byFamily.current_profile?.[0]?.displayId, "current");
+    assert.deepEqual(
+      vault.assessments.map((record) => record.displayId),
+      vault.byFamily.assessment?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.profileSnapshots.map((record) => record.displayId),
+      vault.byFamily.profile_snapshot?.map((record) => record.displayId),
+    );
+    assert.equal(vault.currentProfile?.displayId, vault.byFamily.current_profile?.[0]?.displayId);
+    assert.deepEqual(
+      vault.goals.map((record) => record.displayId),
+      vault.byFamily.goal?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.conditions.map((record) => record.displayId),
+      vault.byFamily.condition?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.allergies.map((record) => record.displayId),
+      vault.byFamily.allergy?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.protocols.map((record) => record.displayId),
+      vault.byFamily.protocol?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.history.map((record) => record.displayId),
+      vault.byFamily.history?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.familyMembers.map((record) => record.displayId),
+      vault.byFamily.family?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.geneticVariants.map((record) => record.displayId),
+      vault.byFamily.genetics?.map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.assessments.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "assessment")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.profileSnapshots.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "profile_snapshot")
+        .map((record) => record.displayId),
+    );
+    assert.equal(
+      vault.currentProfile?.displayId ?? null,
+      vault.records.find((record) => record.recordType === "current_profile")?.displayId ?? null,
+    );
+    assert.deepEqual(
+      vault.goals.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "goal")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.conditions.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "condition")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.allergies.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "allergy")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.protocols.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "protocol")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.history.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "history")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.familyMembers.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "family")
+        .map((record) => record.displayId),
+    );
+    assert.deepEqual(
+      vault.geneticVariants.map((record) => record.displayId),
+      vault.records
+        .filter((record) => record.recordType === "genetics")
+        .map((record) => record.displayId),
     );
     assert.deepEqual(
       new Set(searchResult.hits.map((hit) => hit.recordType)),
@@ -1511,7 +1655,9 @@ test("buildExportPack trims health export strings and drops non-string array ent
         sourceAssessmentIds: ["  asmt_health_01  ", "", 42],
         sourceEventIds: ["  evt_health_01  ", null],
         profile: {
-          topGoalIds: ["  goal_sleep_01  ", "", 42],
+          goals: {
+            topGoalIds: ["  goal_sleep_01  ", "", 42],
+          },
         },
       })}\n`,
     );
