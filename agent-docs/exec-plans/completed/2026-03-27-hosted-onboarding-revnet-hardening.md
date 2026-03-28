@@ -42,13 +42,21 @@ Apply the requested hosted onboarding billing and webhook hardening without wide
 
 ## Current Status
 
-- Implemented the hosted onboarding hardening pass in `billing-service.ts`, `revnet.ts`, and `webhook-service.ts`.
-- Stripe metadata is now limited to correlation identifiers, onchain memos use opaque issuance ids, persisted RevNet issuance facts are reused for submission, RPC chain identity is asserted, and treasury submissions are serialized behind a local lock.
-- Focused regression coverage now also asserts that Stripe customer metadata excludes phone and wallet fields, and that duplicate invoice retries preserve or backfill Stripe payment references without mutating frozen issuance facts.
-- Focused `apps/web` verification is green:
-  - `pnpm --dir apps/web exec tsc --noEmit`
-  - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-onboarding-billing-service.test.ts apps/web/test/hosted-onboarding-revnet.test.ts apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`
+- Implemented the hosted onboarding hardening pass in `billing-service.ts`, `stripe-billing-policy.ts`, `stripe-event-queue.ts`, `stripe-revnet-issuance.ts`, and the supporting Prisma schema/migration.
+- Stripe billing freshness is now monotonic without relying on lexicographic `evt_*` ordering: same-second collisions either consult canonical Stripe subscription state or fail closed, while refund and cancellation-style reversals still win immediately.
+- Billing blockage no longer turns normal delinquency and resume flows into sticky member suspension. Only negative reversal paths force `member.status = suspended`; later positive Stripe facts can restore access and continue RevNet issuance.
+- RevNet confirmation activation is now compare-and-swap guarded against the current Stripe marker and blocked member state, so a later negative Stripe outcome can no longer be overwritten by a stale confirmation write.
+- Stripe event retries now use persisted `nextAttemptAt` backoff plus a poison terminal state, and RevNet issuance recovery now distinguishes retryable `failed` rows from ambiguous `submitting` rows while auto-reclaiming stale pre-submit claims.
+- Hosted checkout reuse now persists share-context provenance and revalidates the live Stripe Checkout Session before reuse, so stale or wrong-context URLs are no longer recycled.
+- Focused hosted onboarding verification is green:
+  - `pnpm exec prisma generate`
+  - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage apps/web/test/hosted-onboarding-billing-service.test.ts apps/web/test/hosted-onboarding-stripe-event-queue.test.ts`
+- Additional focused verification still hits an unrelated pre-existing `apps/web` typecheck failure outside this lane:
+  - `pnpm --dir apps/web exec tsc --noEmit`: `src/lib/hosted-execution/hydration.ts(267,7)` `TS2532` (`Object is possibly 'undefined'`)
 - Repo-wide wrappers still fail in unrelated dirty-tree work outside this lane:
   - `pnpm typecheck`: active `packages/contracts/scripts/*` module-resolution and implicit-`any` failures
-  - `pnpm test`: active `packages/contracts/src/*` `.ts`-extension import failures during the root contracts build
-  - `pnpm test:coverage`: widespread `.ts`-extension import failures across active workspace packages (`contracts`, `core`, `device-syncd`, `hosted-execution`, `importers`, `inboxd`, `runtime-state`)
+  - `pnpm test`: the same unrelated `apps/web/src/lib/hosted-execution/hydration.ts(267,7)` `TS2532`
+  - `pnpm test:coverage`: active `packages/cli` `@murph/contracts` resolution/type errors, followed by an unrelated cleanup failure in `packages/core/dist/domains`
+Status: completed
+Updated: 2026-03-29
+Completed: 2026-03-29

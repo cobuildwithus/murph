@@ -28,6 +28,14 @@ import { readHostedRevnetPaymentReceipt } from "./revnet";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "./stripe-revnet-issuance";
 
 const STRIPE_EVENT_LEASE_MS = 10 * 60_000;
+const STRIPE_EVENT_MAX_ATTEMPTS = 6;
+const STRIPE_EVENT_RETRY_DELAYS_MS = [
+  15 * 1000,
+  60 * 1000,
+  5 * 60 * 1000,
+  15 * 60 * 1000,
+  60 * 60 * 1000,
+] as const;
 
 export async function recordHostedStripeEvent(input: {
   event: Stripe.Event;
@@ -44,6 +52,7 @@ export async function recordHostedStripeEvent(input: {
         customerId: normalized.customerId,
         eventId: input.event.id,
         invoiceId: normalized.invoiceId,
+        nextAttemptAt: new Date(),
         paymentIntentId: normalized.paymentIntentId,
         payloadJson: normalized.payloadJson,
         receivedAt: new Date(),
@@ -80,9 +89,15 @@ export async function drainHostedStripeEventQueue(input: {
     where: {
       OR: [
         {
+          nextAttemptAt: {
+            lte: new Date(),
+          },
           status: HostedStripeEventStatus.pending,
         },
         {
+          nextAttemptAt: {
+            lte: new Date(),
+          },
           status: HostedStripeEventStatus.failed,
         },
         {
@@ -148,7 +163,11 @@ export async function drainHostedStripeEventQueue(input: {
           claimExpiresAt: null,
           lastErrorCode: deriveHostedStripeEventErrorCode(error),
           lastErrorMessage: error instanceof Error ? error.message : String(error),
-          status: HostedStripeEventStatus.failed,
+          nextAttemptAt: computeHostedStripeEventNextAttemptAt(claimed.attemptCount),
+          status:
+            claimed.attemptCount >= STRIPE_EVENT_MAX_ATTEMPTS
+              ? HostedStripeEventStatus.poisoned
+              : HostedStripeEventStatus.failed,
         },
       });
     }
@@ -294,6 +313,7 @@ async function claimHostedStripeEvent(input: {
       claimExpiresAt: new Date(Date.now() + STRIPE_EVENT_LEASE_MS),
       lastErrorCode: null,
       lastErrorMessage: null,
+      nextAttemptAt: new Date(),
       status: HostedStripeEventStatus.processing,
     },
   });
@@ -483,4 +503,12 @@ function deriveHostedStripeEventErrorCode(error: unknown): string {
   }
 
   return "HOSTED_STRIPE_EVENT_FAILED";
+}
+
+function computeHostedStripeEventNextAttemptAt(attemptCount: number, now = new Date()): Date {
+  const delayMs =
+    STRIPE_EVENT_RETRY_DELAYS_MS[
+      Math.min(Math.max(attemptCount - 1, 0), STRIPE_EVENT_RETRY_DELAYS_MS.length - 1)
+    ];
+  return new Date(now.getTime() + delayMs);
 }

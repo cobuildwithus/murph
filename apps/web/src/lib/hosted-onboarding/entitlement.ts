@@ -34,7 +34,7 @@ export function deriveHostedEntitlement(input: HostedEntitlementInput): HostedEn
     accessAllowed,
     activationReady,
     billingStatus: input.billingStatus,
-    memberStatus: resolveHostedMemberStatusForEntitlement(input.memberStatus, input.billingStatus),
+    memberStatus: input.memberStatus,
   };
 }
 
@@ -44,19 +44,4 @@ export function isHostedAccessBlockedBillingStatus(billingStatus: HostedBillingS
     billingStatus === HostedBillingStatus.paused ||
     billingStatus === HostedBillingStatus.unpaid
   );
-}
-
-function resolveHostedMemberStatusForEntitlement(
-  currentStatus: HostedMemberStatus,
-  billingStatus: HostedBillingStatus,
-): HostedMemberStatus {
-  if (currentStatus === HostedMemberStatus.suspended) {
-    return HostedMemberStatus.suspended;
-  }
-
-  if (isHostedAccessBlockedBillingStatus(billingStatus)) {
-    return HostedMemberStatus.suspended;
-  }
-
-  return currentStatus;
 }
