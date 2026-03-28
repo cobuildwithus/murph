@@ -587,6 +587,26 @@ snapshotId psnap_health_01
   }
 });
 
+test("readCurrentProfile retains the raw current-profile markdown when the document matches the latest snapshot", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+  });
+
+  try {
+    const current = await readCurrentProfile(vaultRoot);
+
+    assert.ok(current);
+    assert.equal(current.snapshotId, "psnap_health_01");
+    assert.match(current.markdown ?? "", /^---\n/);
+    assert.match(current.markdown ?? "", /docType: profile_current/);
+    assert.match(current.markdown ?? "", /updatedAt: 2026-03-01T00:00:00Z/);
+    assert.match(current.body ?? "", /^# Current Profile/);
+    assert.notEqual(current.markdown, current.body);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("dedicated health readers stay aligned with the shared canonical collector selectors", async () => {
   const vaultRoot = await createHealthVault({
     currentProfileSnapshotId: "psnap_health_01",
