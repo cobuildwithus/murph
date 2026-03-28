@@ -14,6 +14,7 @@ import type {
   HostedWebhookResponsePayload,
   HostedWebhookReceiptState,
   HostedWebhookReceiptStatus,
+  HostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookSideEffect,
   HostedWebhookSideEffectErrorState,
   HostedWebhookSideEffectStatus,
@@ -148,8 +149,13 @@ function readHostedWebhookReceiptError(
 
   return message && name
     ? {
+        code: readHostedWebhookReceiptString(errorObject.code),
         message,
         name,
+        retryable:
+          typeof errorObject.retryable === "boolean"
+            ? errorObject.retryable
+            : null,
       }
     : null;
 }
@@ -339,6 +345,37 @@ function readHostedWebhookSideEffect(
                 chatId: readHostedWebhookReceiptString(result.chatId),
                 messageId: readHostedWebhookReceiptString(result.messageId),
               },
+        sentAt,
+        status,
+      };
+    }
+    case "revnet_invoice_issue": {
+      const invoiceId = readHostedWebhookReceiptString(payload.invoiceId);
+      const memberId = readHostedWebhookReceiptString(payload.memberId);
+      const amountPaid = readHostedWebhookReceiptNumber(payload.amountPaid);
+
+      if (!invoiceId || !memberId) {
+        return null;
+      }
+
+      return {
+        attemptCount,
+        effectId,
+        kind,
+        lastAttemptAt,
+        lastError,
+        payload: {
+          amountPaid,
+          chargeId: readHostedWebhookReceiptString(payload.chargeId),
+          currency: readHostedWebhookReceiptString(payload.currency),
+          invoiceId,
+          memberId,
+          paymentIntentId: readHostedWebhookReceiptString(payload.paymentIntentId),
+        },
+        result:
+          result.handled === true
+            ? ({ handled: true } satisfies HostedWebhookRevnetIssuanceSideEffect["result"])
+            : null,
         sentAt,
         status,
       };

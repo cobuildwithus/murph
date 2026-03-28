@@ -58,6 +58,11 @@ describe("hosted RevNet repair service", () => {
             status: HostedRevnetIssuanceStatus.submitting,
             updatedAt: new Date(NOW.getTime() - HOSTED_REVNET_REPAIR_SUBMITTING_STALE_MS - 1),
           }),
+          makeIssuance({
+            id: "iss_stale_submitting_123",
+            status: HostedRevnetIssuanceStatus.submitting,
+            updatedAt: new Date(NOW.getTime() - HOSTED_REVNET_REPAIR_SUBMITTING_STALE_MS - 1),
+          }),
         ]),
       },
     };
@@ -88,6 +93,11 @@ describe("hosted RevNet repair service", () => {
       expect.objectContaining({
         id: "iss_repairing_123",
         repairCategory: "repair_in_progress_stale",
+        replayAllowedWithoutForce: false,
+      }),
+      expect.objectContaining({
+        id: "iss_stale_submitting_123",
+        repairCategory: "submitting_stale",
         replayAllowedWithoutForce: false,
       }),
     ]);
@@ -171,6 +181,32 @@ describe("hosted RevNet repair service", () => {
     await expect(
       replayHostedRevnetIssuanceById({
         issuanceId: "iss_unknown_123",
+        now: NOW,
+        prisma,
+      }),
+    ).rejects.toMatchObject({
+      code: "REVNET_ISSUANCE_REPLAY_UNSAFE",
+      httpStatus: 409,
+    });
+  });
+
+  it("blocks stale generic submitting replays until the operator explicitly forces them", async () => {
+    const prisma: any = {
+      hostedRevnetIssuance: {
+        findUnique: vi.fn().mockResolvedValue(
+          makeIssuance({
+            failureCode: null,
+            id: "iss_stale_submitting_123",
+            status: HostedRevnetIssuanceStatus.submitting,
+            updatedAt: new Date(NOW.getTime() - HOSTED_REVNET_REPAIR_SUBMITTING_STALE_MS - 1),
+          }),
+        ),
+      },
+    };
+
+    await expect(
+      replayHostedRevnetIssuanceById({
+        issuanceId: "iss_stale_submitting_123",
         now: NOW,
         prisma,
       }),

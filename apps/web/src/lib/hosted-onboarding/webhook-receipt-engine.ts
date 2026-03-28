@@ -1,3 +1,5 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
+
 import {
   markHostedWebhookDispatchEffectQueued,
   markHostedWebhookReceiptCompleted,
@@ -10,24 +12,28 @@ import {
   getHostedWebhookSideEffect,
   markHostedWebhookReceiptSideEffectSent,
   markHostedWebhookReceiptSideEffectFailed,
+  markHostedWebhookReceiptSideEffectSentUnconfirmed,
   startHostedWebhookReceiptSideEffect,
 } from "./webhook-receipt-transitions";
 import type {
+  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookPlan,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptHandlers,
+  HostedWebhookResponsePayload,
   HostedWebhookReceiptSideEffectDrainError,
 } from "./webhook-receipt-types";
 import { HostedWebhookReceiptSideEffectDrainError as ReceiptSideEffectDrainError } from "./webhook-receipt-types";
+import { hostedOnboardingError } from "./errors";
 
-export async function runHostedWebhookWithReceipt<TResult>(input: {
+export async function runHostedWebhookWithReceipt<TResult extends HostedWebhookResponsePayload>(input: {
   duplicateResponse: TResult;
   eventId: string;
   eventPayload: HostedWebhookEventPayload;
   handlers: HostedWebhookReceiptHandlers;
-  plan: () => Promise<HostedWebhookPlan<TResult>>;
-  prisma: import("@prisma/client").PrismaClient;
+  plan: (prisma: Prisma.TransactionClient) => Promise<HostedWebhookPlan<TResult>>;
+  prisma: PrismaClient;
   signal?: AbortSignal;
   source: string;
 }): Promise<TResult> {
@@ -42,16 +48,40 @@ export async function runHostedWebhookWithReceipt<TResult>(input: {
     return input.duplicateResponse;
   }
 
-  try {
-    const plan = await input.plan();
+  let response = claimedReceipt.state.response as TResult | null;
 
-    claimedReceipt = await queueHostedWebhookReceiptSideEffects({
-      claimedReceipt,
-      desiredSideEffects: plan.desiredSideEffects,
-      eventId: input.eventId,
-      prisma: input.prisma,
-      source: input.source,
-    });
+  try {
+    if (!claimedReceipt.state.plannedAt) {
+      const activeClaim = claimedReceipt;
+      const plannedResult = await runHostedWebhookReceiptTransaction(input.prisma, async (transaction) => {
+        const plan = await input.plan(transaction);
+
+        let nextClaim = await queueHostedWebhookReceiptSideEffects({
+          claimedReceipt: activeClaim,
+          desiredSideEffects: plan.desiredSideEffects,
+          eventId: input.eventId,
+          prisma: transaction,
+          response: plan.response,
+          source: input.source,
+        });
+        nextClaim = await queueHostedWebhookDispatchSideEffects({
+          claimedReceipt: nextClaim,
+          eventId: input.eventId,
+          handlers: input.handlers,
+          prisma: transaction,
+          source: input.source,
+        });
+
+        return {
+          claimedReceipt: nextClaim,
+          response: plan.response,
+        };
+      });
+
+      claimedReceipt = plannedResult.claimedReceipt;
+      response = plannedResult.response;
+    }
+
     claimedReceipt = await drainHostedWebhookReceiptSideEffects({
       claimedReceipt,
       eventId: input.eventId,
@@ -69,7 +99,7 @@ export async function runHostedWebhookWithReceipt<TResult>(input: {
       source: input.source,
     });
 
-    return plan.response;
+    return response ?? input.duplicateResponse;
   } catch (error) {
     const drainFailure = readHostedWebhookReceiptDrainError(error);
     const failure = drainFailure?.cause ?? error;
@@ -87,11 +117,60 @@ export async function runHostedWebhookWithReceipt<TResult>(input: {
   }
 }
 
+async function queueHostedWebhookDispatchSideEffects(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  eventId: string;
+  handlers: HostedWebhookReceiptHandlers;
+  prisma: Prisma.TransactionClient;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim> {
+  let currentClaim = input.claimedReceipt;
+
+  for (const sideEffect of currentClaim.state.sideEffects) {
+    if (sideEffect.kind !== "hosted_execution_dispatch" || sideEffect.status !== "pending") {
+      continue;
+    }
+
+    const startedAt = new Date().toISOString();
+    currentClaim = await updateHostedWebhookReceiptClaim({
+      claimedReceipt: currentClaim,
+      eventId: input.eventId,
+      mutate: (currentState) =>
+        startHostedWebhookReceiptSideEffect(currentState, sideEffect.effectId, startedAt),
+      prisma: input.prisma,
+      source: input.source,
+    });
+    currentClaim = await markHostedWebhookDispatchEffectQueued({
+      claimedReceipt: currentClaim,
+      dispatchEffect: getHostedWebhookSideEffect(
+        currentClaim.state,
+        sideEffect.effectId,
+      ) as HostedWebhookDispatchSideEffect,
+      enqueueDispatchEffect: input.handlers.enqueueDispatchEffect,
+      eventId: input.eventId,
+      prisma: input.prisma,
+      sentAt: new Date().toISOString(),
+      source: input.source,
+    });
+  }
+
+  return currentClaim;
+}
+
+async function runHostedWebhookReceiptTransaction<TResult>(
+  prisma: PrismaClient,
+  callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
+): Promise<TResult> {
+  return typeof prisma.$transaction === "function"
+    ? prisma.$transaction(callback)
+    : callback(prisma as unknown as Prisma.TransactionClient);
+}
+
 async function drainHostedWebhookReceiptSideEffects(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   eventId: string;
   handlers: HostedWebhookReceiptHandlers;
-  prisma: import("@prisma/client").PrismaClient;
+  prisma: PrismaClient;
   signal?: AbortSignal;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
@@ -100,6 +179,13 @@ async function drainHostedWebhookReceiptSideEffects(input: {
   for (const queuedEffect of currentClaim.state.sideEffects) {
     if (queuedEffect.status === "sent") {
       continue;
+    }
+
+    if (queuedEffect.status === "sent_unconfirmed") {
+      throw new ReceiptSideEffectDrainError(
+        currentClaim,
+        buildHostedWebhookUnconfirmedSideEffectError(queuedEffect),
+      );
     }
 
     const startedAt = new Date().toISOString();
@@ -128,26 +214,75 @@ async function drainHostedWebhookReceiptSideEffects(input: {
         continue;
       }
 
-      const result = await input.handlers.performSideEffect(effect, {
-        signal: input.signal,
-      });
-      const sentAt = new Date().toISOString();
-      currentClaim = await updateHostedWebhookReceiptClaim({
-        claimedReceipt: currentClaim,
-        eventId: input.eventId,
-        mutate: (currentState) =>
-          markHostedWebhookReceiptSideEffectSent(currentState, effect.effectId, result, sentAt),
-        prisma: input.prisma,
-        source: input.source,
-      });
-
-      if (input.handlers.afterSideEffectSent) {
-        await input.handlers.afterSideEffectSent({
-          effect,
+      let result;
+      try {
+        result = await input.handlers.performSideEffect(effect, {
           prisma: input.prisma,
+          signal: input.signal,
         });
+      } catch (error) {
+        currentClaim = await updateHostedWebhookReceiptClaim({
+          claimedReceipt: currentClaim,
+          eventId: input.eventId,
+          mutate: (currentState) =>
+            markHostedWebhookReceiptSideEffectFailed(currentState, effect.effectId, error),
+          prisma: input.prisma,
+          source: input.source,
+        });
+        throw new ReceiptSideEffectDrainError(currentClaim, error);
+      }
+
+      const sentAt = new Date().toISOString();
+      try {
+        currentClaim = await updateHostedWebhookReceiptClaim({
+          claimedReceipt: currentClaim,
+          eventId: input.eventId,
+          mutate: (currentState) =>
+            markHostedWebhookReceiptSideEffectSent(currentState, effect.effectId, result, sentAt),
+          prisma: input.prisma,
+          source: input.source,
+        });
+      } catch (error) {
+        try {
+          currentClaim = await updateHostedWebhookReceiptClaim({
+            claimedReceipt: currentClaim,
+            eventId: input.eventId,
+            mutate: (currentState) =>
+              markHostedWebhookReceiptSideEffectSentUnconfirmed(currentState, effect.effectId, {
+                error,
+                result,
+                sentAt,
+              }),
+            prisma: input.prisma,
+            source: input.source,
+          });
+        } catch (recordingError) {
+          throw new ReceiptSideEffectDrainError(
+            currentClaim,
+            buildHostedWebhookSideEffectDeliveryUncertainError(effect, error, recordingError),
+          );
+        }
+        throw new ReceiptSideEffectDrainError(
+          currentClaim,
+          buildHostedWebhookSideEffectDeliveryUncertainError(effect, error),
+        );
+      }
+
+      try {
+        if (input.handlers.afterSideEffectSent) {
+          await input.handlers.afterSideEffectSent({
+            effect,
+            prisma: input.prisma,
+          });
+        }
+      } catch (error) {
+        throw new ReceiptSideEffectDrainError(currentClaim, error);
       }
     } catch (error) {
+      if (error instanceof ReceiptSideEffectDrainError) {
+        throw error;
+      }
+
       currentClaim = await updateHostedWebhookReceiptClaim({
         claimedReceipt: currentClaim,
         eventId: input.eventId,
@@ -169,4 +304,50 @@ function readHostedWebhookReceiptDrainError(
   return error instanceof ReceiptSideEffectDrainError
     ? error
     : null;
+}
+
+function buildHostedWebhookSideEffectDeliveryUncertainError(
+  effect: {
+    effectId: string;
+    kind: string;
+  },
+  error: unknown,
+  sentUnconfirmedError?: unknown,
+): Error {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  const sentUnconfirmedMessage =
+    sentUnconfirmedError instanceof Error
+      ? sentUnconfirmedError.message
+      : sentUnconfirmedError
+        ? String(sentUnconfirmedError)
+        : null;
+
+  return hostedOnboardingError({
+    code: "hosted_webhook_side_effect_delivery_uncertain",
+    details: {
+      effectId: effect.effectId,
+      effectKind: effect.kind,
+      receiptWriteError: errorMessage,
+      sentUnconfirmedWriteError: sentUnconfirmedMessage,
+    },
+    httpStatus: 500,
+    message: `Hosted webhook side effect ${effect.effectId} may already have been delivered; automatic retry is blocked until the receipt is reconciled.`,
+    retryable: false,
+  });
+}
+
+function buildHostedWebhookUnconfirmedSideEffectError(effect: {
+  effectId: string;
+  kind: string;
+}): Error {
+  return hostedOnboardingError({
+    code: "hosted_webhook_side_effect_delivery_uncertain",
+    details: {
+      effectId: effect.effectId,
+      effectKind: effect.kind,
+    },
+    httpStatus: 500,
+    message: `Hosted webhook side effect ${effect.effectId} may already have been delivered; automatic retry is blocked until the receipt is reconciled.`,
+    retryable: false,
+  });
 }
