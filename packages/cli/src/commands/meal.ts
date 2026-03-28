@@ -55,7 +55,7 @@ export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) 
       output: mealAddResultSchema,
       async run({ options }) {
         const importers = (await loadImportersRuntimeModule()).createImporters()
-        const result = await importers.importMeal({
+        const result = await importers.addMeal({
           photoPath: typeof options.photo === 'string' ? options.photo : undefined,
           audioPath: typeof options.audio === 'string' ? options.audio : undefined,
           vaultRoot: String(options.vault ?? ''),

@@ -1,6 +1,7 @@
 import {
   getAssistantCronPresetDefinition,
   listAssistantCronPresets,
+  toAssistantCronPreset,
 } from '../assistant/cron/presets.js'
 import type { AssistantCronPreset } from '../assistant-cli-contracts.js'
 import type {
@@ -13,15 +14,14 @@ export interface ConfigureSetupScheduledUpdatesInput {
   dryRun: boolean
   presetIds: readonly string[]
   steps: SetupStepResult[]
-  vault: string
 }
 
-export async function configureSetupScheduledUpdates(
+export function configureSetupScheduledUpdates(
   input: ConfigureSetupScheduledUpdatesInput,
-): Promise<SetupScheduledUpdate[]> {
-  const selectedPresets = resolveSelectedScheduledUpdates(input.presetIds)
+): SetupScheduledUpdate[] {
+  const recommendedPresets = resolveSelectedScheduledUpdates(input.presetIds)
 
-  if (selectedPresets.length === 0) {
+  if (recommendedPresets.length === 0) {
     input.steps.push(
       createStep({
         detail: 'No assistant scheduled updates selected during onboarding.',
@@ -34,15 +34,17 @@ export async function configureSetupScheduledUpdates(
     return []
   }
 
-  const configured: SetupScheduledUpdate[] = selectedPresets.map((preset) => ({
-    preset,
-    jobName: preset.suggestedName,
-    status: 'skipped',
-  }))
+  const deferredRecommendations: SetupScheduledUpdate[] = recommendedPresets.map(
+    (preset) => ({
+      preset,
+      jobName: preset.suggestedName,
+      status: 'skipped',
+    }),
+  )
 
   input.steps.push(
     createStep({
-      detail: formatDeferredScheduledUpdatesDetail(selectedPresets, input.dryRun),
+      detail: formatDeferredScheduledUpdatesDetail(recommendedPresets, input.dryRun),
       id: 'assistant-scheduled-updates',
       kind: 'configure',
       status: 'skipped',
@@ -50,7 +52,7 @@ export async function configureSetupScheduledUpdates(
     }),
   )
 
-  return configured
+  return deferredRecommendations
 }
 
 function resolveSelectedScheduledUpdates(
@@ -68,21 +70,6 @@ function resolveSelectedScheduledUpdates(
   return uniqueIds.map((presetId) =>
     toAssistantCronPreset(getAssistantCronPresetDefinition(presetId)),
   )
-}
-
-function toAssistantCronPreset(
-  preset: ReturnType<typeof getAssistantCronPresetDefinition>,
-): AssistantCronPreset {
-  return {
-    id: preset.id,
-    category: preset.category,
-    title: preset.title,
-    description: preset.description,
-    suggestedName: preset.suggestedName,
-    suggestedSchedule: preset.suggestedSchedule,
-    suggestedScheduleLabel: preset.suggestedScheduleLabel,
-    variables: preset.variables,
-  }
 }
 
 function formatDeferredScheduledUpdatesDetail(

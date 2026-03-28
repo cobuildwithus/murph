@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  beginDeviceConnection,
   buildWebReturnTo,
   loadDeviceSyncOverviewFromEnv,
 } from "../src/lib/device-sync";
 
 test("loadDeviceSyncOverviewFromEnv returns provider and account state from the local daemon", async () => {
   const authorizationHeaders: string[] = [];
+  const cacheModes: Array<RequestCache | null> = [];
   const result = await loadDeviceSyncOverviewFromEnv({
     env: {
       NODE_ENV: "test",
@@ -17,6 +19,7 @@ test("loadDeviceSyncOverviewFromEnv returns provider and account state from the 
     fetchImpl: async (input, init) => {
       const url = String(input);
       authorizationHeaders.push(new Headers(init?.headers).get("Authorization") ?? "");
+      cacheModes.push(init?.cache ?? null);
 
       if (url.endsWith("/providers")) {
         return new Response(
@@ -80,6 +83,63 @@ test("loadDeviceSyncOverviewFromEnv returns provider and account state from the 
   assert.deepEqual(authorizationHeaders, [
     "Bearer control-token-for-tests",
     "Bearer control-token-for-tests",
+  ]);
+  assert.deepEqual(cacheModes, ["no-store", "no-store"]);
+});
+
+test("beginDeviceConnection posts the return target with control-plane auth", async () => {
+  const observedRequests: Array<{
+    url: string;
+    method: string | null;
+    cache: RequestCache | null;
+    authorization: string | null;
+    contentType: string | null;
+    body: string;
+  }> = [];
+
+  const result = await beginDeviceConnection({
+    provider: "whoop",
+    returnTo: "http://127.0.0.1:3000/settings/devices",
+    env: {
+      NODE_ENV: "test",
+      DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+    },
+    fetchImpl: async (input, init) => {
+      const requestHeaders = new Headers(init?.headers);
+      observedRequests.push({
+        url: String(input),
+        method: init?.method ?? null,
+        cache: init?.cache ?? null,
+        authorization: requestHeaders.get("Authorization"),
+        contentType: requestHeaders.get("Content-Type"),
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+
+      return new Response(
+        JSON.stringify({
+          provider: "whoop",
+          state: "state_01",
+          expiresAt: "2026-03-17T13:00:00.000Z",
+          authorizationUrl: "https://whoop.test/oauth?state=state_01",
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  assert.equal(result.provider, "whoop");
+  assert.equal(result.authorizationUrl, "https://whoop.test/oauth?state=state_01");
+  assert.deepEqual(observedRequests, [
+    {
+      url: "http://127.0.0.1:8788/providers/whoop/connect",
+      method: "POST",
+      cache: "no-store",
+      authorization: "Bearer control-token-for-tests",
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({
+        returnTo: "http://127.0.0.1:3000/settings/devices",
+      }),
+    },
   ]);
 });
 

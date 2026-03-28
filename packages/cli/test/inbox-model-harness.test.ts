@@ -516,6 +516,66 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
   }
 })
 
+test('materializeInboxModelBundle marks parse-failed PDFs with no text as multimodal fallback candidates', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-pdf-fallback-bundle-'))
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_pdf_fallback',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-pdf-fallback',
+      threadId: 'thread-pdf-fallback',
+      threadTitle: 'Care team',
+      actorId: 'contact-1',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-15T10:00:00.000Z',
+      receivedAt: '2026-03-15T10:00:02.000Z',
+      text: 'Please route this scanned PDF.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_pdf_fallback/envelope.json',
+      eventId: 'evt_pdf_fallback',
+      promotions: [],
+      createdAt: '2026-03-15T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_pdf_fallback',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'scanned-lab.pdf',
+          storedPath: 'raw/inbox/captures/cap_pdf_fallback/attachments/1/scanned-lab.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: null,
+          parserProviderId: 'pdftotext',
+          parseState: 'failed',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_pdf_fallback',
+      captureId: 'cap_pdf_fallback',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.equal(result.bundle.preparedInputMode, 'multimodal')
+    assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
+    assert.match(result.bundle.routingText, /Prepared input mode: multimodal/u)
+    assert.match(result.bundle.routingText, /parseState: failed/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('materializeInboxModelBundle ignores derived parser paths that escape the vault through symlinks', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-symlink-'))
   const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-outside-'))

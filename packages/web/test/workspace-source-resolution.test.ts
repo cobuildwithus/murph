@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
-import { createVitestWorkspaceRuntimeAliases } from "../../../config/workspace-source-resolution";
+import {
+  HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
+  LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
+  createVitestWorkspaceRuntimeAliases,
+  resolveHostedWebWorkspaceSourceEntries,
+  resolveLocalWebWorkspaceSourceEntries,
+} from "../../../config/workspace-source-resolution";
 
 test("createVitestWorkspaceRuntimeAliases maps package roots and subpaths to workspace sources", () => {
   const aliases = createVitestWorkspaceRuntimeAliases({
@@ -19,4 +25,34 @@ test("createVitestWorkspaceRuntimeAliases maps package roots and subpaths to wor
       replacement: "/repo/packages/query/src/$1",
     },
   ]);
+});
+
+test("workspace source resolution keeps the hosted and local web package allowlists exact", () => {
+  assert.deepEqual(HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES, [
+    "@murph/contracts",
+    "@murph/hosted-execution",
+    "@murph/runtime-state",
+    "@murph/core",
+    "@murph/importers",
+    "@murph/inboxd",
+    "@murph/device-syncd",
+  ]);
+  assert.deepEqual(LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES, [
+    "@murph/contracts",
+    "@murph/hosted-execution",
+    "@murph/runtime-state",
+    "@murph/query",
+  ]);
+});
+
+test("workspace source resolution does not widen beyond the explicit hosted/local package sets", () => {
+  const hostedEntries = resolveHostedWebWorkspaceSourceEntries("/repo/apps/web");
+  const localEntries = resolveLocalWebWorkspaceSourceEntries("/repo/packages/web");
+
+  assert.deepEqual(Object.keys(hostedEntries).sort(), [...HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES].sort());
+  assert.deepEqual(Object.keys(localEntries).sort(), [...LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES].sort());
+
+  assert.equal("@murph/query" in hostedEntries, false);
+  assert.equal("@murph/core" in localEntries, false);
+  assert.equal("@murph/device-syncd" in localEntries, false);
 });

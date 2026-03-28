@@ -15,7 +15,6 @@ import {
   applyCanonicalWriteBatch,
   type CanonicalRawContentInput,
   type CanonicalRawCopyInput,
-  isVaultError,
   loadVault,
   readJsonlRecords,
   toMonthlyShardRelativePath,
@@ -685,7 +684,11 @@ async function readJsonlRecordsIfPresent(input: {
   try {
     return await readJsonlRecords(input);
   } catch (error) {
-    if (isVaultError(error) && error.code === "VAULT_FILE_MISSING") {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "VAULT_FILE_MISSING"
+    ) {
       return [];
     }
 

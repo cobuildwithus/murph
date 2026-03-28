@@ -300,7 +300,7 @@ test.sequential(
 
       assert.equal(showResult.ok, true)
       assert.equal(showResult.meta?.command, 'vault show')
-      assert.match(requireData(showResult).schemaVersion ?? '', /^hb\./u)
+      assert.match(requireData(showResult).schemaVersion ?? '', /^murph\./u)
       assert.match(requireData(showResult).vaultId ?? '', /^vault_/u)
       assert.equal(requireData(showResult).corePath, 'CORE.md')
       assert.equal(requireData(showResult).title !== null, true)

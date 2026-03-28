@@ -50,11 +50,21 @@ const parserManifestSchema = z.object({
 })
 
 interface PreparedRoutingImage {
+  kind: 'image'
   ordinal: number
   fileName: string | null
   mediaType: string | null
   bytes: Buffer
 }
+
+interface PreparedRoutingPdf {
+  kind: 'pdf'
+  ordinal: number
+  fileName: string | null
+  bytes: Buffer
+}
+
+type PreparedRoutingEvidence = PreparedRoutingImage | PreparedRoutingPdf
 
 interface PreparedInboxPlacementInput {
   prompt: string
@@ -105,7 +115,7 @@ export async function materializeInboxModelBundle(
 export async function routeInboxCaptureWithModel(
   input: RouteInboxCaptureWithModelInput,
 ): Promise<InboxModelRouteResult> {
-  const { bundle, capture, toolCatalog } = await prepareInboxModelSession(input)
+  const { bundle, toolCatalog } = await prepareInboxModelSession(input)
   const bundlePath = await writeAssistantArtifact(
     input.vault,
     input.captureId,
@@ -115,7 +125,6 @@ export async function routeInboxCaptureWithModel(
   const model = resolveAssistantLanguageModel(input.modelSpec)
   const preparedInput = await prepareInboxPlacementInput({
     bundle,
-    capture,
     vaultRoot: input.vault,
   })
 
@@ -194,7 +203,6 @@ async function prepareInboxModelSession(
   input: BuildInboxModelBundleInput,
 ): Promise<{
   bundle: InboxModelBundle
-  capture: InboxShowResult['capture']
   toolCatalog: ReturnType<typeof createInboxRoutingAssistantToolCatalog>
 }> {
   const shown = await input.inboxServices.show({
@@ -226,7 +234,6 @@ async function prepareInboxModelSession(
   ).text
 
   return {
-    capture: shown.capture,
     toolCatalog,
     bundle: inboxModelBundleSchema.parse({
       schema: 'murph.inbox-model-bundle.v1',
@@ -257,8 +264,8 @@ function buildInboxPlacementSystemPrompt(): string {
     'Choose the smallest safe set of CLI tool calls needed to place the capture into canonical storage.',
     'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
     'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
-    'When routing images are attached, treat them as raw evidence alongside the normalized text bundle.',
-    'Do not invent facts that are not present in the normalized bundle or clearly visible in attached routing images.',
+    'When routing images or fallback PDF files are attached, treat them as raw evidence alongside the normalized text bundle.',
+    'Do not invent facts that are not present in the normalized bundle or clearly visible in attached routing images or PDFs.',
     'If the capture should not be written yet, return an empty actions array.',
     'Return JSON only.',
   ].join(' ')
@@ -283,7 +290,7 @@ function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
     'Choose zero to four tool calls from the catalog below.',
     'When a single inbox promotion tool safely captures the intent, prefer that over lower-level writes.',
     'If you choose a tool, copy the input field names exactly as shown in the example.',
-    'If raw routing images are attached as additional message parts, use them as evidence. Otherwise rely only on the text bundle below.',
+    'If raw routing images or fallback PDFs are attached as additional message parts, use them as evidence. Otherwise rely only on the text bundle below.',
     '',
     'Available tools:',
     renderToolCatalog(bundle.tools),
@@ -317,7 +324,6 @@ function buildInboxPlacementGenerationInput(
 
 async function prepareInboxPlacementInput(input: {
   bundle: InboxModelBundle
-  capture: InboxShowResult['capture']
   vaultRoot: string
 }): Promise<PreparedInboxPlacementInput> {
   const prompt = buildInboxPlacementPrompt(input.bundle)
@@ -329,19 +335,19 @@ async function prepareInboxPlacementInput(input: {
     }
   }
 
-  const routingImages = await readPreparedRoutingImages({
-    attachments: input.capture.attachments,
-    captureId: input.capture.captureId,
+  const routingEvidence = await readPreparedRoutingEvidence({
+    attachments: input.bundle.attachments,
+    captureId: input.bundle.captureId,
     vaultRoot: input.vaultRoot,
   })
 
-  if (routingImages.images.length === 0) {
+  if (routingEvidence.evidence.length === 0) {
     return {
       prompt,
       inputMode: 'text-only',
       fallbackError:
-        routingImages.error ??
-        'Falling back to text-only routing because no eligible image evidence could be loaded.',
+        routingEvidence.error ??
+        'Falling back to text-only routing because rich evidence could not be loaded.',
     }
   }
 
@@ -352,20 +358,34 @@ async function prepareInboxPlacementInput(input: {
     },
   ]
 
-  for (const image of routingImages.images) {
+  for (const item of routingEvidence.evidence) {
+    if (item.kind === 'image') {
+      content.push({
+        type: 'text',
+        text: `Routing image ${item.ordinal}${item.fileName ? ` (${item.fileName})` : ''}.`,
+      })
+      content.push({
+        type: 'image',
+        image: item.bytes,
+        ...(item.mediaType
+          ? {
+              mediaType: item.mediaType,
+              mimeType: item.mediaType,
+            }
+          : {}),
+      })
+      continue
+    }
+
     content.push({
       type: 'text',
-      text: `Routing image ${image.ordinal}${image.fileName ? ` (${image.fileName})` : ''}.`,
+      text: `Routing PDF ${item.ordinal}${item.fileName ? ` (${item.fileName})` : ''}.`,
     })
     content.push({
-      type: 'image',
-      image: image.bytes,
-      ...(image.mediaType
-        ? {
-            mediaType: image.mediaType,
-            mimeType: image.mediaType,
-          }
-        : {}),
+      type: 'file',
+      data: item.bytes,
+      mediaType: 'application/pdf',
+      ...(item.fileName ? { filename: item.fileName } : {}),
     })
   }
 
@@ -654,24 +674,25 @@ async function readRelativeTextFile(
   }
 }
 
-async function readPreparedRoutingImages(input: {
-  attachments: InboxShowResult['capture']['attachments']
+async function readPreparedRoutingEvidence(input: {
+  attachments: InboxModelBundle['attachments']
   captureId: string
   vaultRoot: string
 }): Promise<{
-  images: PreparedRoutingImage[]
+  evidence: PreparedRoutingEvidence[]
   error: string | null
 }> {
-  const images: PreparedRoutingImage[] = []
+  const evidence: PreparedRoutingEvidence[] = []
   const errors: string[] = []
 
   for (const attachment of input.attachments) {
-    const routingImage = getRoutingImageEligibility(attachment)
     const storedPath = normalizeCaptureStoredAttachmentPath(
       attachment.storedPath ?? null,
       input.captureId,
     )
-    if (!routingImage.eligible || !attachment.storedPath) {
+    const shouldLoadImage = attachment.routingImage.eligible
+    const shouldLoadPdf = isRoutingPdfFallbackCandidate(attachment)
+    if ((!shouldLoadImage && !shouldLoadPdf) || !attachment.storedPath) {
       continue
     }
 
@@ -684,22 +705,36 @@ async function readPreparedRoutingImages(input: {
         storedPath,
         'file path',
       )
-      images.push({
-        ordinal: attachment.ordinal,
-        fileName: attachment.fileName ?? null,
-        mediaType: routingImage.mediaType ?? null,
-        bytes: await readFile(absolutePath),
-      })
+      const bytes = await readFile(absolutePath)
+
+      if (shouldLoadImage) {
+        evidence.push({
+          kind: 'image',
+          ordinal: attachment.ordinal,
+          fileName: attachment.fileName ?? null,
+          mediaType: attachment.routingImage.mediaType ?? null,
+          bytes,
+        })
+      } else {
+        evidence.push({
+          kind: 'pdf',
+          ordinal: attachment.ordinal,
+          fileName: attachment.fileName ?? null,
+          bytes,
+        })
+      }
     } catch (error) {
-      errors.push(`attachment ${attachment.ordinal}: ${errorMessage(error)}`)
+      errors.push(
+        `attachment ${attachment.ordinal} (${shouldLoadPdf ? 'pdf' : 'image'}): ${errorMessage(error)}`,
+      )
     }
   }
 
   return {
-    images,
+    evidence,
     error:
-      images.length === 0 && errors.length > 0
-        ? `Falling back to text-only routing because image evidence could not be loaded (${errors.join('; ')}).`
+      evidence.length === 0 && errors.length > 0
+        ? `Falling back to text-only routing because rich evidence could not be loaded (${errors.join('; ')}).`
         : null,
   }
 }
@@ -791,7 +826,10 @@ function normalizeAnchoredVaultRelativePath(
 function inferPreparedInputMode(
   attachments: InboxModelAttachmentBundle[],
 ): InboxModelInputMode {
-  return attachments.some((attachment) => attachment.routingImage.eligible)
+  return attachments.some(
+    (attachment) =>
+      attachment.routingImage.eligible || isRoutingPdfFallbackCandidate(attachment),
+  )
     ? 'multimodal'
     : 'text-only'
 }
@@ -800,6 +838,9 @@ function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase()
   const mentionsImageInput = [
     'image',
+    'file',
+    'pdf',
+    'document',
     'vision',
     'multimodal',
     'multi-modal',
@@ -807,6 +848,7 @@ function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
     'mime type',
     'input_image',
     'image_url',
+    'input_file',
   ].some((token) => message.includes(token))
   const signalsUnsupported = [
     'unsupported',
@@ -818,6 +860,32 @@ function shouldRetryMultimodalAsTextOnly(error: unknown): boolean {
   ].some((token) => message.includes(token))
 
   return mentionsImageInput && signalsUnsupported
+}
+
+function isRoutingPdfFallbackCandidate(
+  attachment: InboxModelAttachmentBundle,
+): boolean {
+  return (
+    attachment.kind === 'document' &&
+    isPdfAttachment({
+      fileName: attachment.fileName,
+      mime: attachment.mime,
+    }) &&
+    typeof attachment.storedPath === 'string' &&
+    attachment.storedPath.length > 0 &&
+    attachment.parseState !== 'pending' &&
+    attachment.parseState !== 'running' &&
+    !attachment.fragments.some((fragment) => fragment.kind !== 'attachment_metadata')
+  )
+}
+
+function isPdfAttachment(input: {
+  fileName: string | null
+  mime: string | null
+}): boolean {
+  const fileName = input.fileName?.toLowerCase() ?? ''
+  const mime = input.mime?.toLowerCase() ?? ''
+  return fileName.endsWith('.pdf') || mime === 'application/pdf'
 }
 
 async function writeAssistantArtifact(

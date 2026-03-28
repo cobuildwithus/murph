@@ -2,17 +2,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
-import {
-  LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
-  resolveLocalWebWorkspaceSourceEntries,
-} from "../../config/workspace-source-resolution";
+import { LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES } from "../../config/workspace-source-resolution";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 export const WORKSPACE_SOURCE_PACKAGE_NAMES = LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
-
-export function resolveWorkspaceSourceEntries(packageDir: string): Record<string, string> {
-  return resolveLocalWebWorkspaceSourceEntries(packageDir);
-}
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.resolve(packageDir, "../.."),

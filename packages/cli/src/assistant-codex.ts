@@ -509,218 +509,337 @@ function tryParseJsonLine(
   }
 }
 
-interface NormalizedCodexEvent {
-  assistantText: string | null
-  commandLabel: string | null
-  errorText: string | null
-  eventType: string
-  exitCode: number | null
-  filePaths: string[]
-  itemId: string | null
-  itemState: 'completed' | 'running' | null
-  itemType: string | null
-  planEventText: string | null
-  planItemText: string | null
-  rawEvent: unknown
-  reasoningText: string | null
-  reroutedModel: string | null
-  searchQuery: string | null
-  textDelta: string | null
-  toolName: string | null
-  toolServer: string | null
-}
+type CodexEventState = 'completed' | 'running'
 
-function normalizeCodexEvent(event: unknown): NormalizedCodexEvent | null {
+type CodexNormalizedEvent =
+  | {
+      kind: 'assistant_delta'
+      deltaText: string
+      itemId: string | null
+      rawEvent: unknown
+    }
+  | {
+      kind: 'assistant_message'
+      itemId: string | null
+      itemState: CodexEventState
+      rawEvent: unknown
+      text: string
+    }
+  | {
+      kind: 'error'
+      message: string
+      rawEvent: unknown
+    }
+  | {
+      kind: 'model_rerouted'
+      model: string
+      rawEvent: unknown
+    }
+  | {
+      kind: 'plan_update'
+      itemId: string | null
+      rawEvent: unknown
+      text: string
+    }
+  | {
+      kind: 'reasoning_delta'
+      deltaText: string
+      itemId: string | null
+      rawEvent: unknown
+    }
+  | {
+      kind: 'status_item'
+      commandLabel: string | null
+      exitCode: number | null
+      filePaths: string[]
+      itemId: string | null
+      itemState: CodexEventState
+      itemType: string
+      planText: string | null
+      reasoningText: string | null
+      rawEvent: unknown
+    }
+  | {
+      kind: 'tool_call'
+      itemId: string | null
+      itemState: CodexEventState
+      rawEvent: unknown
+      toolName: string | null
+      toolServer: string | null
+    }
+  | {
+      kind: 'web_search'
+      itemId: string | null
+      itemState: CodexEventState
+      query: string | null
+      rawEvent: unknown
+    }
+  | {
+      kind: 'unknown'
+      eventType: string | null
+      rawEvent: unknown
+    }
+
+function normalizeCodexEvent(event: unknown): CodexNormalizedEvent {
   const record = asRecord(event)
   if (!record) {
-    return null
+    return {
+      kind: 'unknown',
+      eventType: null,
+      rawEvent: event,
+    }
   }
 
   const eventType = normalizeIdentifier(
     typeof record.type === 'string' ? record.type : null,
   )
+
+  const errorText = extractCodexErrorMessage(event)
+  const normalizedErrorText = normalizeStatusText(errorText)
+  if (normalizedErrorText) {
+    return {
+      kind: 'error',
+      message: normalizedErrorText,
+      rawEvent: event,
+    }
+  }
+
   if (!eventType) {
-    return null
+    return {
+      kind: 'unknown',
+      eventType: null,
+      rawEvent: event,
+    }
+  }
+
+  if (eventType === 'model.rerouted') {
+    const model = normalizeStatusText(
+      findDeepStringByKeys(record, ['model', 'target_model', 'targetModel']) ??
+        null,
+    )
+    if (!model) {
+      return {
+        kind: 'unknown',
+        eventType,
+        rawEvent: event,
+      }
+    }
+
+    return {
+      kind: 'model_rerouted',
+      model,
+      rawEvent: event,
+    }
   }
 
   const item = extractCodexEventItem(record)
+  const itemType = extractCodexEventItemType(record, item)
+  const itemState =
+    eventType === 'item.started'
+      ? 'running'
+      : eventType === 'item.completed'
+        ? 'completed'
+        : null
+  const itemId = extractCodexItemId(record, item)
+
+  if (
+    eventType.includes('agent.message.delta') ||
+    eventType.includes('assistant.message.delta')
+  ) {
+    const deltaText = extractEventTextDelta(record)
+    if (!deltaText) {
+      return {
+        kind: 'unknown',
+        eventType,
+        rawEvent: event,
+      }
+    }
+
+    return {
+      kind: 'assistant_delta',
+      deltaText,
+      itemId,
+      rawEvent: event,
+    }
+  }
+
+  if (
+    eventType.includes('reasoning.summary.text.delta') ||
+    eventType.includes('reasoning.text.delta')
+  ) {
+    const deltaText = extractEventTextDelta(record)
+    if (!deltaText) {
+      return {
+        kind: 'unknown',
+        eventType,
+        rawEvent: event,
+      }
+    }
+
+    return {
+      kind: 'reasoning_delta',
+      deltaText,
+      itemId,
+      rawEvent: event,
+    }
+  }
+
+  if (eventType.endsWith('plan.updated')) {
+    const text = extractCodexEventPlanText(record)
+    if (!text) {
+      return {
+        kind: 'unknown',
+        eventType,
+        rawEvent: event,
+      }
+    }
+
+    return {
+      kind: 'plan_update',
+      itemId,
+      rawEvent: event,
+      text,
+    }
+  }
+
+  if (itemType === 'agent.message' || itemType === 'assistant.message') {
+    if (!itemState) {
+      return {
+        kind: 'unknown',
+        eventType,
+        rawEvent: event,
+      }
+    }
+
+    const text = extractAssistantTextFromItem(item)
+    if (!text) {
+      return {
+        kind: 'unknown',
+        eventType,
+        rawEvent: event,
+      }
+    }
+
+    return {
+      kind: 'assistant_message',
+      itemId,
+      itemState,
+      rawEvent: event,
+      text,
+    }
+  }
+
+  if (!itemType || !itemState) {
+    return {
+      kind: 'unknown',
+      eventType,
+      rawEvent: event,
+    }
+  }
+
+  if (itemType === 'web.search') {
+    return {
+      kind: 'web_search',
+      itemId,
+      itemState,
+      query: normalizeStatusText(
+        findDeepStringByKeys(item, ['query', 'search_query', 'searchQuery']) ??
+          null,
+      ),
+      rawEvent: event,
+    }
+  }
+
+  if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
+    return {
+      kind: 'tool_call',
+      itemId,
+      itemState,
+      rawEvent: event,
+      toolName: normalizeStatusText(
+        findDeepStringByKeys(item, ['tool', 'tool_name', 'toolName', 'name']) ??
+          null,
+      ),
+      toolServer: normalizeStatusText(
+        findDeepStringByKeys(item, ['server', 'server_name', 'serverName']) ??
+          null,
+      ),
+    }
+  }
 
   return {
-    assistantText: extractAssistantTextFromItem(item),
+    kind: 'status_item',
     commandLabel: extractCommandLikeLabel(item),
-    errorText: normalizeStatusText(extractCodexErrorMessage(record)),
-    eventType,
     exitCode: extractNumericField(item, ['exit_code', 'exitCode']),
     filePaths: collectFilePaths(item),
-    itemId: extractCodexItemId(record, item),
-    itemState:
-      eventType === 'item.started'
-        ? 'running'
-        : eventType === 'item.completed'
-          ? 'completed'
-          : null,
-    itemType: extractCodexEventItemType(record, item),
-    planEventText: extractCodexEventPlanText(record),
-    planItemText: extractCodexItemPlanText(item),
-    rawEvent: event,
+    itemId,
+    itemState,
+    itemType,
+    planText: extractCodexItemPlanText(item),
     reasoningText: extractReasoningTextFromItem(item),
-    reroutedModel: normalizeStatusText(
-      findDeepStringByKeys(record, ['model', 'target_model', 'targetModel']) ?? null,
-    ),
-    searchQuery: normalizeStatusText(
-      findDeepStringByKeys(item, ['query', 'search_query', 'searchQuery']) ?? null,
-    ),
-    textDelta: extractEventTextDelta(record),
-    toolName: normalizeStatusText(
-      findDeepStringByKeys(item, ['tool', 'tool_name', 'toolName', 'name']) ?? null,
-    ),
-    toolServer: normalizeStatusText(
-      findDeepStringByKeys(item, ['server', 'server_name', 'serverName']) ?? null,
-    ),
+    rawEvent: event,
   }
 }
 
 function extractCodexProgressEventFromNormalized(
-  normalized: NormalizedCodexEvent | null,
+  normalized: CodexNormalizedEvent,
 ): CodexProgressEvent | null {
-  if (!normalized) {
-    return null
-  }
-
-  if (normalized.errorText) {
+  if (normalized.kind === 'error') {
     return {
       id: 'codex-status',
       kind: 'status',
       rawEvent: normalized.rawEvent,
       state: 'completed',
-      text: normalized.errorText,
+      text: normalized.message,
     }
   }
 
-  if (!normalized.itemType || normalized.itemState === null) {
-    return null
-  }
-
-  if (normalized.itemType === 'reasoning') {
+  if (normalized.kind === 'assistant_message') {
     return {
       id: normalized.itemId,
-      kind: 'reasoning',
+      kind: 'message',
       rawEvent: normalized.rawEvent,
       state: normalized.itemState,
-      text:
-        normalized.reasoningText ??
-        (normalized.itemState === 'running'
-          ? 'Thinking…'
-          : 'Thought through the next step.'),
+      text: normalized.text,
     }
   }
 
-  if (normalized.itemType === 'command.execution') {
-    if (!normalized.commandLabel) {
+  if (normalized.kind === 'status_item') {
+    const text = statusItemProgressText(normalized)
+    if (!text) {
       return null
     }
 
     return {
       id: normalized.itemId,
-      kind: 'command',
-      rawEvent: normalized.rawEvent,
-      state: normalized.itemState,
-      text: `$ ${normalized.commandLabel}`,
-    }
-  }
-
-  if (
-    normalized.itemType === 'mcp.tool.call' ||
-    normalized.itemType === 'tool.call'
-  ) {
-    return {
-      id: normalized.itemId,
-      kind: 'tool',
-      rawEvent: normalized.rawEvent,
-      state: normalized.itemState,
-      text:
-        normalized.toolName &&
-        normalized.toolServer &&
-        normalized.toolServer !== normalized.toolName
-          ? `Tool ${normalized.toolServer}.${normalized.toolName}`
-          : normalized.toolName
-            ? `Tool ${normalized.toolName}`
-            : normalized.toolServer
-              ? `Tool ${normalized.toolServer}`
-              : 'Used a tool.',
-    }
-  }
-
-  if (normalized.itemType === 'web.search') {
-    return {
-      id: normalized.itemId,
-      kind: 'search',
-      rawEvent: normalized.rawEvent,
-      state: normalized.itemState,
-      text: normalized.searchQuery
-        ? `Web: ${normalized.searchQuery}`
-        : 'Ran a web search.',
-    }
-  }
-
-  if (normalized.itemType === 'file.change') {
-    const text =
-      normalized.filePaths.length === 0
-        ? 'Updated files.'
-        : normalized.filePaths.length === 1
-          ? `Changed ${normalized.filePaths[0]}`
-          : `Changed files: ${normalized.filePaths.slice(0, 3).join(', ')}${normalized.filePaths.length > 3 ? ', …' : ''}`
-
-    return {
-      id: normalized.itemId,
-      kind: 'file',
+      kind: statusItemProgressKind(normalized),
       rawEvent: normalized.rawEvent,
       state: normalized.itemState,
       text,
     }
   }
 
-  if (normalized.itemType === 'plan') {
+  if (normalized.kind === 'tool_call') {
     return {
       id: normalized.itemId,
-      kind: 'plan',
+      kind: 'tool',
       rawEvent: normalized.rawEvent,
       state: normalized.itemState,
-      text: (normalized.planItemText ?? normalized.planEventText)
-        ? `Plan:\n${normalized.planItemText ?? normalized.planEventText}`
-        : 'Updated the plan.',
+      text: toolCallText(normalized),
     }
   }
 
-  if (
-    normalized.itemType === 'agent.message' ||
-    normalized.itemType === 'assistant.message'
-  ) {
-    if (!normalized.assistantText) {
-      return null
-    }
-
+  if (normalized.kind === 'web_search') {
     return {
       id: normalized.itemId,
-      kind: 'message',
+      kind: 'search',
       rawEvent: normalized.rawEvent,
       state: normalized.itemState,
-      text: normalized.assistantText,
+      text: webSearchProgressText(normalized),
     }
   }
 
-  const statusText = summarizeCodexStatusItem(normalized)
-  if (!statusText) {
-    return null
-  }
-
-  return {
-    id: normalized.itemId ?? `status:${normalized.itemType}`,
-    kind: 'status',
-    rawEvent: normalized.rawEvent,
-    state: normalized.itemState,
-    text: statusText,
-  }
+  return null
 }
 
 function extractCodexStatusEventFromStderrLine(
@@ -751,137 +870,299 @@ export function extractCodexTraceUpdates(
 }
 
 function extractCodexTraceUpdatesFromNormalized(
-  normalized: NormalizedCodexEvent | null,
+  normalized: CodexNormalizedEvent,
 ): AssistantProviderTraceUpdate[] {
-  if (!normalized) {
-    return []
-  }
-
-  if (normalized.errorText) {
+  if (normalized.kind === 'error') {
     return [
-      isRetryableConnectionStatus(normalized.errorText)
+      isRetryableConnectionStatus(normalized.message)
         ? {
             kind: 'status',
             mode: 'replace',
             streamKey: 'status:connection',
-            text: normalized.errorText,
+            text: normalized.message,
           }
         : {
             kind: 'error',
-            text: normalized.errorText,
+            text: normalized.message,
           },
     ]
   }
 
-  if (
-    normalized.eventType.includes('agent.message.delta') ||
-    normalized.eventType.includes('assistant.message.delta')
-  ) {
-    return normalized.textDelta
-      ? [
-          {
-            kind: 'assistant',
-            mode: 'append',
-            streamKey: buildTraceStreamKey('assistant', normalized.itemId),
-            text: normalized.textDelta,
-          },
-        ]
-      : []
+  if (normalized.kind === 'assistant_delta') {
+    return [
+      {
+        kind: 'assistant',
+        mode: 'append',
+        streamKey: buildTraceStreamKey('assistant', normalized.itemId),
+        text: normalized.deltaText,
+      },
+    ]
   }
 
-  if (
-    normalized.eventType.includes('reasoning.summary.text.delta') ||
-    normalized.eventType.includes('reasoning.text.delta')
-  ) {
-    return normalized.textDelta
-      ? [
-          {
-            kind: 'thinking',
-            mode: 'append',
-            streamKey: buildTraceStreamKey('thinking', normalized.itemId),
-            text: normalized.textDelta,
-          },
-        ]
-      : []
+  if (normalized.kind === 'reasoning_delta') {
+    return [
+      {
+        kind: 'thinking',
+        mode: 'append',
+        streamKey: buildTraceStreamKey('thinking', normalized.itemId),
+        text: normalized.deltaText,
+      },
+    ]
   }
 
-  if (normalized.eventType.endsWith('plan.updated')) {
-    return normalized.planEventText
-      ? [
-          {
-            kind: 'thinking',
-            mode: 'replace',
-            streamKey: buildTraceStreamKey(
-              'thinking',
-              normalized.itemId ?? 'plan',
-            ),
-            text: normalized.planEventText,
-          },
-        ]
-      : []
+  if (normalized.kind === 'plan_update') {
+    return [
+      {
+        kind: 'thinking',
+        mode: 'replace',
+        streamKey: buildTraceStreamKey('thinking', normalized.itemId ?? 'plan'),
+        text: normalized.text,
+      },
+    ]
   }
 
-  if (normalized.eventType === 'model.rerouted') {
-    return normalized.reroutedModel
-      ? [
-          {
-            kind: 'status',
-            mode: 'replace',
-            streamKey: 'status:model-reroute',
-            text: `Switched to ${normalized.reroutedModel}.`,
-          },
-        ]
-      : []
+  if (normalized.kind === 'model_rerouted') {
+    return [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'status:model-reroute',
+        text: `Switched to ${normalized.model}.`,
+      },
+    ]
   }
 
-  if (normalized.itemState === null) {
-    return []
+  if (normalized.kind === 'assistant_message') {
+    return [
+      {
+        kind: 'assistant',
+        mode: 'replace',
+        streamKey: buildTraceStreamKey('assistant', normalized.itemId),
+        text: normalized.text,
+      },
+    ]
   }
 
-  if (
-    normalized.itemType === 'agent.message' ||
-    normalized.itemType === 'assistant.message'
-  ) {
-    return normalized.assistantText
-      ? [
-          {
-            kind: 'assistant',
-            mode: 'replace',
-            streamKey: buildTraceStreamKey('assistant', normalized.itemId),
-            text: normalized.assistantText,
-          },
-        ]
-      : []
-  }
+  if (normalized.kind === 'status_item') {
+    if (normalized.itemType === 'reasoning') {
+      const text = statusItemTraceText(normalized)
+      if (!text) {
+        return []
+      }
 
-  if (normalized.itemType === 'reasoning') {
-    return normalized.reasoningText
-      ? [
-          {
-            kind: 'thinking',
-            mode: 'replace',
-            streamKey: buildTraceStreamKey('thinking', normalized.itemId),
-            text: normalized.reasoningText,
-          },
-        ]
-      : []
-  }
-
-  const statusText = summarizeCodexStatusItem(normalized)
-
-  return statusText
-    ? [
+      return [
         {
-          kind: 'status',
+          kind: 'thinking',
           mode: 'replace',
-          streamKey: buildTraceStreamKey(
-            'status',
-            normalized.itemId ?? normalized.itemType,
-          ),
-          text: statusText,
+          streamKey: buildTraceStreamKey('thinking', normalized.itemId),
+          text,
         },
       ]
-    : []
+    }
+
+    const text = statusItemTraceText(normalized)
+    if (!text) {
+      return []
+    }
+
+    return [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: buildTraceStreamKey('status', statusItemTraceStreamId(normalized)),
+        text,
+      },
+    ]
+  }
+
+  if (normalized.kind === 'tool_call') {
+    const text = toolCallTraceText(normalized)
+    if (!text) {
+      return []
+    }
+
+    return [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: buildTraceStreamKey(
+          'status',
+          normalized.itemId ?? 'tool.call',
+        ),
+        text,
+      },
+    ]
+  }
+
+  if (normalized.kind === 'web_search') {
+    const text = webSearchTraceText(normalized)
+    if (!text) {
+      return []
+    }
+
+    return [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: buildTraceStreamKey('status', normalized.itemId ?? 'web.search'),
+        text,
+      },
+    ]
+  }
+
+  return []
+}
+
+function statusItemProgressKind(
+  event: Extract<CodexNormalizedEvent, { kind: 'status_item' }>,
+): CodexProgressEvent['kind'] {
+  if (event.itemType === 'reasoning') {
+    return 'reasoning'
+  }
+  if (event.itemType === 'command.execution') {
+    return 'command'
+  }
+  if (event.itemType === 'file.change') {
+    return 'file'
+  }
+  if (event.itemType === 'plan') {
+    return 'plan'
+  }
+
+  return 'status'
+}
+
+function statusItemProgressText(
+  event: Extract<CodexNormalizedEvent, { kind: 'status_item' }>,
+): string | null {
+  if (event.itemType === 'reasoning') {
+    return (
+      event.reasoningText ??
+      (event.itemState === 'running'
+        ? 'Thinking…'
+        : 'Thought through the next step.')
+    )
+  }
+
+  if (event.itemType === 'command.execution') {
+    if (!event.commandLabel) {
+      return null
+    }
+
+    return `$ ${event.commandLabel}`
+  }
+
+  if (event.itemType === 'file.change') {
+    return event.filePaths.length === 0
+      ? 'Updated files.'
+      : event.filePaths.length === 1
+        ? `Changed ${event.filePaths[0]}`
+        : `Changed files: ${event.filePaths.slice(0, 3).join(', ')}${event.filePaths.length > 3 ? ', …' : ''}`
+  }
+
+  if (event.itemType === 'plan') {
+    return event.planText
+      ? `Plan:\n${event.planText}`
+      : 'Updated the plan.'
+  }
+
+  return null
+}
+
+function statusItemTraceText(
+  event: Extract<CodexNormalizedEvent, { kind: 'status_item' }>,
+): string | null {
+  if (event.itemType === 'command.execution') {
+    const isRunning = event.itemState === 'running'
+    if (isRunning) {
+      return event.commandLabel
+        ? `Running ${event.commandLabel}.`
+        : 'Running command.'
+    }
+
+    if (typeof event.exitCode === 'number') {
+      return event.commandLabel
+        ? event.exitCode === 0
+          ? `Finished ${event.commandLabel}.`
+          : `${event.commandLabel} exited with code ${event.exitCode}.`
+        : event.exitCode === 0
+          ? 'Command finished.'
+          : `Command exited with code ${event.exitCode}.`
+    }
+
+    return event.commandLabel
+      ? `Finished ${event.commandLabel}.`
+      : 'Command finished.'
+  }
+
+  if (event.itemType === 'reasoning') {
+    return event.reasoningText ?? null
+  }
+
+  if (event.itemType === 'file.change' && event.itemState === 'completed') {
+    if (event.filePaths.length === 0) {
+      return 'Updated files.'
+    }
+
+    if (event.filePaths.length === 1) {
+      return `Updated ${event.filePaths[0]}.`
+    }
+
+    return `Updated files: ${event.filePaths.slice(0, 3).join(', ')}${event.filePaths.length > 3 ? ', …' : ''}.`
+  }
+
+  return null
+}
+
+function toolCallText(
+  event: Extract<CodexNormalizedEvent, { kind: 'tool_call' }>,
+): string {
+  return event.toolName &&
+    event.toolServer &&
+    event.toolServer !== event.toolName
+    ? `Tool ${event.toolServer}.${event.toolName}`
+    : event.toolName
+      ? `Tool ${event.toolName}`
+      : event.toolServer
+        ? `Tool ${event.toolServer}`
+        : 'Used a tool.'
+}
+
+function toolCallTraceText(
+  event: Extract<CodexNormalizedEvent, { kind: 'tool_call' }>,
+): string | null {
+  const label =
+    event.toolServer && event.toolName
+      ? `${event.toolServer}/${event.toolName}`
+      : event.toolName ?? event.toolServer ?? 'tool call'
+
+  return event.itemState === 'running'
+    ? `Using ${label}.`
+    : `Finished ${label}.`
+}
+
+function webSearchProgressText(
+  event: Extract<CodexNormalizedEvent, { kind: 'web_search' }>,
+): string {
+  return event.query ? `Web: ${event.query}` : 'Ran a web search.'
+}
+
+function webSearchTraceText(
+  event: Extract<CodexNormalizedEvent, { kind: 'web_search' }>,
+): string {
+  return event.itemState === 'running'
+    ? event.query
+      ? `Searching the web for ${JSON.stringify(event.query)}.`
+      : 'Searching the web.'
+    : event.query
+      ? `Finished web search for ${JSON.stringify(event.query)}.`
+      : 'Finished web search.'
+}
+
+function statusItemTraceStreamId(
+  event: Extract<CodexNormalizedEvent, { kind: 'status_item' }>,
+): string {
+  return event.itemId ?? event.itemType
 }
 
 function extractCodexEventItem(
@@ -1078,77 +1359,6 @@ function extractEventTextDelta(record: Record<string, unknown>): string | null {
       (typeof delta.content === 'string' ? delta.content : null) ??
       null,
   )
-}
-
-function summarizeCodexStatusItem(input: NormalizedCodexEvent): string | null {
-  const itemType = input.itemType
-  if (!itemType) {
-    return null
-  }
-
-  const started = input.itemState === 'running'
-  const completed = input.itemState === 'completed'
-
-  if (itemType === 'command.execution') {
-    if (started) {
-      return input.commandLabel
-        ? `Running ${input.commandLabel}.`
-        : 'Running command.'
-    }
-
-    if (completed && typeof input.exitCode === 'number') {
-      return input.commandLabel
-        ? input.exitCode === 0
-          ? `Finished ${input.commandLabel}.`
-          : `${input.commandLabel} exited with code ${input.exitCode}.`
-        : input.exitCode === 0
-          ? 'Command finished.'
-          : `Command exited with code ${input.exitCode}.`
-    }
-
-    return input.commandLabel
-      ? `Finished ${input.commandLabel}.`
-      : 'Command finished.'
-  }
-
-  if (itemType === 'mcp.tool.call' || itemType === 'tool.call') {
-    const label =
-      input.toolServer && input.toolName
-        ? `${input.toolServer}/${input.toolName}`
-        : input.toolName ?? input.toolServer ?? 'tool call'
-
-    return started
-      ? `Using ${label}.`
-      : completed
-        ? `Finished ${label}.`
-        : null
-  }
-
-  if (itemType === 'web.search') {
-    if (started) {
-      return input.searchQuery
-        ? `Searching the web for ${JSON.stringify(input.searchQuery)}.`
-        : 'Searching the web.'
-    }
-
-    return input.searchQuery
-      ? `Finished web search for ${JSON.stringify(input.searchQuery)}.`
-      : 'Finished web search.'
-  }
-
-  if (itemType === 'file.change' && completed) {
-    if (input.filePaths.length === 0) {
-      return 'Updated files.'
-    }
-
-    if (input.filePaths.length === 1) {
-      return `Updated ${input.filePaths[0]}.`
-    }
-
-    return `Updated files: ${input.filePaths.slice(0, 3).join(', ')}${input.filePaths.length > 3 ? ', …' : ''}.`
-  }
-
-  return null
 }
 
 function extractCommandLikeLabel(item: Record<string, unknown> | null): string | null {

@@ -47,28 +47,18 @@ export function createPaddleOcrProvider(
     },
     supports(request: ParseRequest) {
       const kind = request.preparedKind ?? request.artifact.kind;
-      if (kind === "image") {
-        return true;
-      }
-
-      if (kind !== "document") {
-        return false;
-      }
-
-      return isPdfArtifact(request);
+      return kind === "image";
     },
     async run(request): Promise<ProviderRunResult> {
       const command = requireExecutable(await resolveCommand(), "PaddleOCR CLI not found.");
 
       const outputDirectory = path.join(request.scratchDirectory, "paddleocr-output");
-      const isPdf = isPdfArtifact(request);
       const isPaddlex = path.basename(command).toLowerCase().startsWith("paddlex");
       const args = isPaddlex
         ? buildPaddlexArgs(request.inputPath, outputDirectory)
         : buildPaddleOcrArgs({
             inputPath: request.inputPath,
             outputDirectory,
-            isPdf,
             language: options.language,
             extraArgs: options.extraArgs,
           });
@@ -95,32 +85,12 @@ export function createPaddleOcrProvider(
   };
 }
 
-function isPdfArtifact(request: ParseRequest): boolean {
-  const fileName = request.artifact.fileName?.toLowerCase() ?? "";
-  const mime = request.artifact.mime?.toLowerCase() ?? "";
-  return fileName.endsWith(".pdf") || mime === "application/pdf";
-}
-
 function buildPaddleOcrArgs(input: {
   inputPath: string;
   outputDirectory: string;
-  isPdf: boolean;
   language?: string;
   extraArgs?: string[];
 }): string[] {
-  if (input.isPdf) {
-    return [
-      `--image_dir=${input.inputPath}`,
-      "--type=structure",
-      "--recovery=true",
-      "--use_pdf2docx_api=true",
-      "--use_gpu=False",
-      `--output=${input.outputDirectory}`,
-      ...(input.language ? [`--lang=${input.language}`] : []),
-      ...(input.extraArgs ?? []),
-    ];
-  }
-
   return [
     `--image_dir=${input.inputPath}`,
     "--type=ocr",

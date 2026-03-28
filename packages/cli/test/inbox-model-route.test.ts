@@ -204,6 +204,47 @@ function createImageShowResult(vaultRoot: string, mime: string, fileName: string
   }
 }
 
+function createPdfFallbackShowResult(vaultRoot: string): InboxShowResult {
+  return {
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_pdf',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-pdf',
+      threadId: 'thread-pdf',
+      threadTitle: 'Care team',
+      actorId: 'contact-1',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-15T10:00:00.000Z',
+      receivedAt: '2026-03-15T10:00:02.000Z',
+      text: 'Please route this scanned PDF to canonical storage.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_pdf/envelope.json',
+      eventId: 'evt_pdf',
+      promotions: [],
+      createdAt: '2026-03-15T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_pdf',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'scanned-lab.pdf',
+          storedPath: 'raw/inbox/captures/cap_pdf/attachments/1/scanned-lab.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: null,
+          parserProviderId: 'pdftotext',
+          parseState: 'failed',
+        },
+      ],
+    },
+  }
+}
+
 test('routeInboxCaptureWithModel previews and applies text-only document plans without calling a live model backend', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-doc-'))
   const promoteDocument = vi.fn(async () => ({
@@ -379,6 +420,78 @@ test('routeInboxCaptureWithModel forwards supported image bytes as multimodal ro
   }
 })
 
+test('routeInboxCaptureWithModel forwards raw PDF bytes when parsed PDF text is unavailable', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-pdf-'))
+  const pdfDirectory = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    'cap_pdf',
+    'attachments',
+    '1',
+  )
+  const pdfBytes = Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n')
+  await mkdir(pdfDirectory, { recursive: true })
+  await writeFile(path.join(pdfDirectory, 'scanned-lab.pdf'), pdfBytes)
+
+  const inboxServices = createStubInboxServices({
+    showResult: createPdfFallbackShowResult(vaultRoot),
+  })
+
+  routeHarnessMocks.generateAssistantObject.mockResolvedValue({
+    schema: 'murph.assistant-plan.v1',
+    summary: 'Promote the capture as a document.',
+    rationale: 'The scanned PDF should be routed as a document.',
+    actions: [
+      {
+        tool: 'inbox.promote.document',
+        input: {
+          captureId: 'cap_pdf',
+        },
+      },
+    ],
+  })
+
+  try {
+    const preview = await routeInboxCaptureWithModel({
+      inboxServices,
+      requestId: 'req_pdf_preview',
+      captureId: 'cap_pdf',
+      vault: vaultRoot,
+      apply: false,
+      modelSpec: {
+        model: 'anthropic/claude-sonnet-4-5',
+      },
+    })
+
+    assert.equal(preview.preparedInputMode, 'multimodal')
+    assert.equal(preview.inputMode, 'multimodal')
+    assert.equal(preview.fallbackError, null)
+
+    const generationInput = routeHarnessMocks.generateAssistantObject.mock.calls[0]?.[0] as {
+      messages?: Array<{
+        content?: Array<{
+          type: string
+          data?: unknown
+          filename?: string
+          mediaType?: string
+        }>
+      }>
+    }
+    const content = generationInput.messages?.[0]?.content ?? []
+    const filePart = content.find((part) => part.type === 'file')
+
+    assert.ok(filePart)
+    assert.equal(Buffer.isBuffer(filePart.data), true)
+    assert.deepEqual(filePart.data, pdfBytes)
+    assert.equal(filePart.mediaType, 'application/pdf')
+    assert.equal(filePart.filename, 'scanned-lab.pdf')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('routeInboxCaptureWithModel falls back to text-only when a provider rejects multimodal image input', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-fallback-'))
   const imageDirectory = path.join(
@@ -456,6 +569,73 @@ test('routeInboxCaptureWithModel falls back to text-only when a provider rejects
   }
 })
 
+test('routeInboxCaptureWithModel falls back to text-only when a provider rejects PDF file input', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-pdf-fallback-'))
+  const pdfDirectory = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    'cap_pdf',
+    'attachments',
+    '1',
+  )
+  await mkdir(pdfDirectory, { recursive: true })
+  await writeFile(
+    path.join(pdfDirectory, 'scanned-lab.pdf'),
+    Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n'),
+  )
+
+  const inboxServices = createStubInboxServices({
+    showResult: createPdfFallbackShowResult(vaultRoot),
+  })
+
+  routeHarnessMocks.generateAssistantObject
+    .mockRejectedValueOnce(new Error('The selected model does not support PDF file input.'))
+    .mockResolvedValueOnce({
+      schema: 'murph.assistant-plan.v1',
+      summary: 'Promote the capture as a document.',
+      rationale: 'The capture metadata still indicates a document.',
+      actions: [
+        {
+          tool: 'inbox.promote.document',
+          input: {
+            captureId: 'cap_pdf',
+          },
+        },
+      ],
+    })
+
+  try {
+    const preview = await routeInboxCaptureWithModel({
+      inboxServices,
+      requestId: 'req_pdf_fallback_preview',
+      captureId: 'cap_pdf',
+      vault: vaultRoot,
+      apply: false,
+      modelSpec: {
+        model: 'anthropic/claude-sonnet-4-5',
+      },
+    })
+
+    assert.equal(routeHarnessMocks.generateAssistantObject.mock.calls.length, 2)
+    assert.equal(preview.preparedInputMode, 'multimodal')
+    assert.equal(preview.inputMode, 'text-only')
+    assert.equal(preview.fallbackError, 'The selected model does not support PDF file input.')
+    assert.ok(routeHarnessMocks.generateAssistantObject.mock.calls[0]?.[0]?.messages)
+    assert.equal(
+      routeHarnessMocks.generateAssistantObject.mock.calls[1]?.[0]?.messages,
+      undefined,
+    )
+    assert.equal(
+      typeof routeHarnessMocks.generateAssistantObject.mock.calls[1]?.[0]?.prompt,
+      'string',
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('routeInboxCaptureWithModel falls back to text-only when eligible routing images cannot be loaded', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-missing-image-'))
 
@@ -494,7 +674,7 @@ test('routeInboxCaptureWithModel falls back to text-only when eligible routing i
     assert.equal(preview.inputMode, 'text-only')
     assert.match(
       preview.fallbackError ?? '',
-      /Falling back to text-only routing because image evidence could not be loaded/u,
+      /Falling back to text-only routing because rich evidence could not be loaded/u,
     )
     assert.equal(
       routeHarnessMocks.generateAssistantObject.mock.calls[0]?.[0]?.messages,

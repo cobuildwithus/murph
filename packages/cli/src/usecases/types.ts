@@ -917,7 +917,7 @@ export interface ImportersRuntime {
       id: string
     }
   }>
-  importMeal(input: {
+  addMeal(input: {
     photoPath?: string
     audioPath?: string
     vaultRoot: string

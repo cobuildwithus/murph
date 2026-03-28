@@ -104,10 +104,9 @@ run_test_packages_common() {
   pnpm --dir "apps/cloudflare" verify
 }
 
-seed_coverage_placeholders() {
-  rimraf "coverage"
-  mkdir -p "coverage/.tmp"
-  node --input-type=module -e "import { writeFileSync } from 'node:fs'; for (let index = 0; index < 64; index += 1) { writeFileSync('coverage/.tmp/coverage-' + index + '.json', '{\"result\":[]}'); }"
+refresh_repo_vitest_runtime_artifacts() {
+  pnpm build
+  tsx "packages/cli/scripts/verify-package-shape.ts"
 }
 
 run_typecheck() {
@@ -129,18 +128,20 @@ run_test() {
 
 run_test_packages() {
   run_test_packages_common
+  refresh_repo_vitest_runtime_artifacts
   vitest run --no-coverage --maxWorkers 1
 }
 
 run_test_packages_coverage() {
   pnpm no-js
-  seed_coverage_placeholders
+  rimraf "coverage"
   pnpm --dir "packages/contracts" test
   pnpm build
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
   pnpm --dir "apps/cloudflare" verify
+  refresh_repo_vitest_runtime_artifacts
   vitest run --coverage --maxWorkers 1
 }
 

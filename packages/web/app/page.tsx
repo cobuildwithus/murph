@@ -21,6 +21,8 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
+
 const PLACEHOLDER_STATS: OverviewWeeklyStat[] = [
   { stream: "sleep", currentWeekAvg: null, previousWeekAvg: null, deltaPercent: null, unit: "hrs" },
   { stream: "resting_heart_rate", currentWeekAvg: null, previousWeekAvg: null, deltaPercent: null, unit: "bpm" },
@@ -48,6 +50,22 @@ export default async function HomePage() {
             <p className="text-muted text-base leading-relaxed max-w-[52ch]">
               What changed, what stayed steady, and what can stay simple.
             </p>
+            <div className="mt-5 flex max-w-[52rem] flex-wrap items-center gap-3 rounded-2xl border border-line bg-paper/70 px-4 py-3 text-sm text-muted">
+              <span className="font-display text-[0.72rem] font-bold tracking-[0.12em] uppercase text-accent">
+                Open source
+              </span>
+              <p className="leading-relaxed">
+                Murph is licensed under GPL 3.0.
+              </p>
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-display text-[0.78rem] font-bold tracking-[0.12em] uppercase text-accent transition-colors hover:text-foreground"
+              >
+                View GitHub
+              </a>
+            </div>
           </div>
           {overview.status === "ready" ? (
             <p className="text-muted font-display text-[0.78rem] font-bold tracking-[0.12em] uppercase">

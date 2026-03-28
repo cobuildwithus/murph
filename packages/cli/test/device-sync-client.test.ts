@@ -54,6 +54,23 @@ test("createDeviceSyncClient explains missing control-plane auth", async () => {
   );
 });
 
+test("createDeviceSyncClient surfaces invalid JSON responses from the daemon", async () => {
+  const client = createDeviceSyncClient({
+    baseUrl: "http://127.0.0.1:8788",
+    fetchImpl: async () => new Response("[]", { status: 200 }),
+  });
+
+  await assert.rejects(
+    () => client.listProviders(),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === "device_sync_invalid_response" &&
+      /invalid JSON payload/u.test(error.message) &&
+      error.context?.baseUrl === "http://127.0.0.1:8788" &&
+      error.context?.path === "/providers",
+  );
+});
+
 test("createDeviceSyncClient rejects non-loopback base URLs when a control-plane bearer is configured", () => {
   assert.throws(
     () =>

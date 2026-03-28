@@ -31,7 +31,7 @@ export {
 export { createImporters } from "./create-importers.ts";
 export { importDocument, prepareDocumentImport } from "./document-importer.ts";
 export * from "./device-providers/index.ts";
-export { importMeal, prepareMealImport } from "./meal-importer.ts";
+export { addMeal, prepareMealImport } from "./meal-importer.ts";
 export {
   createSamplePresetRegistry,
   defineSampleImportPreset,

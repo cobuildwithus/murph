@@ -23,7 +23,6 @@ const SOURCE_ROOTS = [
 ] as const
 
 const ALLOWED_NON_CORE_CANONICAL_MUTATORS = [
-  'packages/cli/src/assistant/canonical-write-guard.ts',
   'packages/inboxd/src/indexing/persist.ts',
 ] as const
 

@@ -57,9 +57,17 @@ export interface AssistantModelImagePart {
   mimeType?: string
 }
 
+export interface AssistantModelFilePart {
+  type: 'file'
+  data: string | Uint8Array | Buffer | ArrayBuffer | URL
+  mediaType: string
+  filename?: string
+}
+
 export type AssistantModelContentPart =
   | AssistantModelTextPart
   | AssistantModelImagePart
+  | AssistantModelFilePart
   | Record<string, unknown>
 
 export interface AssistantModelMessage {

@@ -33,3 +33,16 @@ test("callback error redirects return null without a returnTo destination", () =
     null,
   );
 });
+
+test("callback error redirects scrub stale deviceSyncErrorMessage params from returnTo", () => {
+  const location = buildCallbackErrorRedirectLocation({
+    returnTo:
+      "https://app.example.test/settings/devices?tab=wearables&deviceSyncErrorMessage=leak",
+    provider: "demo",
+    errorCode: "OAUTH_CALLBACK_REJECTED",
+  });
+
+  assert.ok(location);
+  const destination = new URL(location);
+  assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), null);
+});

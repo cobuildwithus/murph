@@ -2630,6 +2630,85 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
   assert.equal(session.session.providerSessionId, null)
 })
 
+test('sendAssistantMessage blocks on invalid write-operation action states and still rolls back later direct tampering', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-canonical-bad-operation-state-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/guard-corrupted-action-state.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const committedContent = '# Guarded invalid action state\n'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    const existingOperationPaths = new Set(
+      await listWriteOperationMetadataPaths(vaultRoot),
+    )
+    await applyCanonicalWriteBatch({
+      vaultRoot,
+      operationType: 'assistant_guard_bad_action_state_test',
+      summary: 'Write guarded invalid action state target',
+      textWrites: [
+        {
+          relativePath: targetRelativePath,
+          content: committedContent,
+        },
+      ],
+    })
+
+    const operationRelativePath = await findNewOperationMetadataPath(
+      vaultRoot,
+      existingOperationPaths,
+    )
+    const operationPath = path.join(vaultRoot, operationRelativePath)
+    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+      actions?: Array<Record<string, unknown>>
+    }
+    assert.ok(Array.isArray(operation.actions))
+    operation.actions?.forEach((action) => {
+      if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
+        action.state = 'unknown'
+      }
+    })
+    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+    await writeFile(targetPath, 'tampered-after-corruption\n')
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-bad-action-state',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:canonical-bad-action-state',
+    prompt: 'Update the vault title.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
+    paths: [targetRelativePath],
+  })
+
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+
+  const session = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:canonical-bad-action-state',
+  })
+  assert.equal(session.session.turnCount, 0)
+  assert.equal(session.session.providerSessionId, null)
+})
+
 test('sendAssistantMessage blocks when committed payload receipt metadata is missing', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-service-canonical-missing-committed-payload-'),

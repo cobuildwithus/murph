@@ -1,8 +1,10 @@
 import type {
   HostedExecutionBundleRef,
+} from "@murph/runtime-state";
+import type {
   HostedExecutionDispatchRequest,
   HostedExecutionUserStatus,
-} from "@murph/runtime-state";
+} from "@murph/hosted-execution";
 
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 

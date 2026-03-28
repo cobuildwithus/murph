@@ -5,7 +5,6 @@ import { generateUlid } from "@murph/runtime-state";
 
 import {
   assertPathWithinVaultOnDisk,
-  isVaultError,
   normalizeRelativeVaultPath,
   resolveVaultPathOnDisk,
 } from "@murph/core";
@@ -486,9 +485,9 @@ export async function walkNamedFiles(
 }
 
 function toTypeError(error: unknown): Error {
-  if (isVaultError(error)) {
+  if (error instanceof Error) {
     return new TypeError(error.message);
   }
 
-  return error instanceof Error ? error : new TypeError(String(error));
+  return new TypeError(String(error));
 }

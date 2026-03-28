@@ -10,8 +10,10 @@ import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy
 
 export const metadata: Metadata = {
   title: "Murph — Health guidance that fits your real life",
-  description: "Track meals, sync wearables, spot patterns, and get answers about your health in plain English.",
+  description: "Track meals, sync wearables, spot patterns, and get answers about your health in plain English. Murph is open source under GPL 3.0.",
 };
+
+const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
 const capabilities = [
   {
@@ -121,6 +123,22 @@ export default function HomePage() {
               or email. Ask questions, track meals, and spot patterns without
               downloading another app.
             </p>
+            <div className="mt-6 flex max-w-2xl flex-wrap items-center gap-3 rounded-lg border border-stone-200 bg-white/80 px-4 py-3 text-sm text-stone-500">
+              <span className="rounded bg-olive/10 px-2.5 py-1 font-semibold uppercase tracking-[0.14em] text-olive">
+                Open source
+              </span>
+              <p className="leading-relaxed">
+                Murph is licensed under GPL 3.0.
+              </p>
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-olive transition-colors hover:text-stone-900"
+              >
+                View the GitHub repo
+              </a>
+            </div>
           </div>
 
           <div className="animate-fade-up [animation-delay:0.2s]">

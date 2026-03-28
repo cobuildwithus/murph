@@ -663,25 +663,12 @@ test("PaddleOCR provider rejects stdout-only logs when no structured output file
   );
 });
 
-test("PaddleOCR treats MIME-only PDFs as PDF-mode inputs", async () => {
+test("PaddleOCR no longer claims PDF attachments", async () => {
   const directory = await makeTempDirectory("murph-parser-paddle-mime-pdf");
   const executablePath = await writeExecutableFile(
     directory,
     "fake-paddleocr-mime-pdf",
-    [
-      "#!/usr/bin/env node",
-      "const fs = require('node:fs');",
-      "const path = require('node:path');",
-      "const args = process.argv.slice(2);",
-      "if (!args.includes('--type=structure') || !args.includes('--use_pdf2docx_api=true')) {",
-      "  console.error(`expected pdf-mode args: ${args.join(' ')}`);",
-      "  process.exit(1);",
-      "}",
-      "const outputArg = args.find((arg) => arg.startsWith('--output='));",
-      "const outputDirectory = outputArg ? outputArg.slice('--output='.length) : process.cwd();",
-      "fs.mkdirSync(outputDirectory, { recursive: true });",
-      "fs.writeFileSync(path.join(outputDirectory, 'page1.txt'), 'PDF mode text\\n', 'utf8');",
-    ].join('\n'),
+    "#!/usr/bin/env node\nprocess.exit(0);\n",
   );
   const inputPath = await writeExternalFile(directory, "receipt.bin", "pdf-placeholder");
   const provider = createPaddleOcrProvider({
@@ -703,25 +690,8 @@ test("PaddleOCR treats MIME-only PDFs as PDF-mode inputs", async () => {
       inputPath,
       scratchDirectory: directory,
     }),
-    true,
+    false,
   );
-
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
-      captureId: "cap_pdf_mime_run",
-      attachmentId: "att_pdf_mime_run",
-      kind: "document",
-      fileName: "receipt.bin",
-      mime: "application/pdf",
-      storedPath: "raw/inbox/example/receipt.bin",
-      absolutePath: inputPath,
-    },
-    inputPath,
-    scratchDirectory: directory,
-  });
-
-  assert.equal(result.text, "PDF mode text");
 });
 
 test("registry prefers built-in text parsing for markdown documents", async () => {

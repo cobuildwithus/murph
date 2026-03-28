@@ -103,6 +103,9 @@
       "murph/assistant/store": [
         "packages/cli/src/assistant/store.ts"
       ],
+      "murph/operator-config": [
+        "packages/cli/src/operator-config.ts"
+      ],
       "@murph/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],

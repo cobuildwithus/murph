@@ -16,6 +16,10 @@ const sampleDocumentPath = path.join(
   'fixtures/sample-imports/README.md',
 )
 const runSourceCli = runCli
+const UTC_CLI_ENV = {
+  ...process.env,
+  TZ: 'UTC',
+}
 
 interface RetrievalFixture {
   journalPath: string
@@ -116,7 +120,7 @@ async function makeRetrievalFixture(): Promise<RetrievalFixture> {
     'init',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(initResult.ok, true)
   assert.equal(requireData(initResult).created, true)
 
@@ -126,7 +130,7 @@ async function makeRetrievalFixture(): Promise<RetrievalFixture> {
     '2026-03-12',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(journalResult.ok, true)
 
   await writeFile(
@@ -155,7 +159,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
     '2026-03-12T12:15:00Z',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(mealResult.ok, true)
 
   const samplesResult = await runCli<{ lookupIds: string[] }>([
@@ -172,7 +176,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
     'bpm',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(samplesResult.ok, true)
   assert.equal(requireData(samplesResult).lookupIds.length, 2)
 
@@ -202,7 +206,7 @@ async function makeSourceRetrievalFixture(): Promise<RetrievalFixture> {
     'init',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(initResult.ok, true)
   assert.equal(requireData(initResult).created, true)
 
@@ -212,7 +216,7 @@ async function makeSourceRetrievalFixture(): Promise<RetrievalFixture> {
     '2026-03-12',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(journalResult.ok, true)
 
   await writeFile(
@@ -241,7 +245,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
     '2026-03-12T12:15:00Z',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(mealResult.ok, true)
 
   const samplesResult = await runSourceCli<{ lookupIds: string[] }>([
@@ -258,7 +262,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
     'bpm',
     '--vault',
     vaultRoot,
-  ])
+  ], { env: UTC_CLI_ENV })
   assert.equal(samplesResult.ok, true)
   assert.equal(requireData(samplesResult).lookupIds.length, 2)
 

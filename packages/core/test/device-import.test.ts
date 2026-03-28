@@ -147,7 +147,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
   });
 
-  assert.equal(result.importId, "xfm_KQXMGM79XEKSXSKBN7J10F0WQ7");
+  assert.equal(result.importId, "xfm_VEENN6TG6H7NCF8DSKM5JX386M");
   assert.equal(result.events.length, 2);
   assert.equal(result.samples.length, 1);
   assert.equal(result.rawArtifacts.length, 2);
@@ -155,12 +155,12 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.equal(result.accountId, "whoop-user-1");
   assert.deepEqual(
     result.events.map((record) => record.id),
-    ["evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD", "evt_87GD6PEP1R7T5PAGT24YZN9BDW"],
+    ["evt_KBKEHWQT2XXW0K5XZCS1T5X9KA", "evt_S5K01TSPA86JJVS1DWVHT9RRZ1"],
   );
-  assert.deepEqual(result.samples.map((record) => record.id), ["smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK"]);
+  assert.deepEqual(result.samples.map((record) => record.id), ["smp_VJ3AZR2JBQVE89Z6B84EA60H0G"]);
   assert.equal(
     result.rawArtifacts[0]?.relativePath,
-    "raw/integrations/whoop/2026/03/xfm_KQXMGM79XEKSXSKBN7J10F0WQ7/01-sleep-sleep-1.json",
+    "raw/integrations/whoop/2026/03/xfm_VEENN6TG6H7NCF8DSKM5JX386M/01-sleep-sleep-1.json",
   );
 
   const eventRecords = (await readJsonlRecords({
@@ -180,7 +180,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.deepEqual(eventRecords, [
     {
       schemaVersion: "murph.event.v1",
-      id: "evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD",
+      id: "evt_KBKEHWQT2XXW0K5XZCS1T5X9KA",
       kind: "sleep_session",
       occurredAt: "2026-03-15T22:00:00.000Z",
       recordedAt: "2026-03-16T07:30:00.000Z",
@@ -189,7 +189,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
       source: "device",
       title: "WHOOP sleep",
       rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_KQXMGM79XEKSXSKBN7J10F0WQ7/01-sleep-sleep-1.json",
+        "raw/integrations/whoop/2026/03/xfm_VEENN6TG6H7NCF8DSKM5JX386M/01-sleep-sleep-1.json",
       ],
       externalRef: {
         system: "whoop",
@@ -203,7 +203,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
     },
     {
       schemaVersion: "murph.event.v1",
-      id: "evt_87GD6PEP1R7T5PAGT24YZN9BDW",
+      id: "evt_S5K01TSPA86JJVS1DWVHT9RRZ1",
       kind: "observation",
       occurredAt: "2026-03-16T07:30:00.000Z",
       recordedAt: "2026-03-16T07:30:00.000Z",
@@ -212,7 +212,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
       source: "device",
       title: "WHOOP recovery score",
       rawRefs: [
-        "raw/integrations/whoop/2026/03/xfm_KQXMGM79XEKSXSKBN7J10F0WQ7/02-recovery-sleep-1.json",
+        "raw/integrations/whoop/2026/03/xfm_VEENN6TG6H7NCF8DSKM5JX386M/02-recovery-sleep-1.json",
       ],
       externalRef: {
         system: "whoop",
@@ -229,7 +229,7 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.deepEqual(sampleRecords, [
     {
       schemaVersion: "murph.sample.v1",
-      id: "smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK",
+      id: "smp_VJ3AZR2JBQVE89Z6B84EA60H0G",
       dayKey: "2026-03-16",
       timeZone: "UTC",
       stream: "hrv",
@@ -252,10 +252,10 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   assert.equal(manifest.artifacts.length, 2);
   assert.equal(path.posix.dirname(manifest.artifacts[0]?.relativePath ?? ""), manifest.rawDirectory);
   assert.deepEqual(manifest.provenance.eventIds, [
-    "evt_Q4EB9ZXH4DP9HNQFVJK9M3JCZD",
-    "evt_87GD6PEP1R7T5PAGT24YZN9BDW",
+    "evt_KBKEHWQT2XXW0K5XZCS1T5X9KA",
+    "evt_S5K01TSPA86JJVS1DWVHT9RRZ1",
   ]);
-  assert.deepEqual(manifest.provenance.sampleIds, ["smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK"]);
+  assert.deepEqual(manifest.provenance.sampleIds, ["smp_VJ3AZR2JBQVE89Z6B84EA60H0G"]);
   assert.deepEqual(manifest.provenance.operatorMetadata, {
     syncMode: "test",
   });
@@ -431,9 +431,9 @@ test("importDeviceBatch retries reuse deterministic ids without duplicating ledg
   assert.equal(first.importId, second.importId);
   assert.equal(first.events[0]?.id, second.events[0]?.id);
   assert.equal(first.samples[0]?.id, second.samples[0]?.id);
-  assert.equal(first.importId, "xfm_X8RGG8PH36DJ3NDGF0ZFD6TZ22");
-  assert.equal(first.events[0]?.id, "evt_94AGES9S70YS6RGKNAHV7EAGKM");
-  assert.equal(first.samples[0]?.id, "smp_2WMMWVJNN91B6Q7PXTRTWTD6ZK");
+  assert.equal(first.importId, "xfm_BP6SP2P5FJ4YNF8PY8H0QZQT32");
+  assert.equal(first.events[0]?.id, "evt_30XC16ZG27S0ZM4TMPHDKJX7KP");
+  assert.equal(first.samples[0]?.id, "smp_VJ3AZR2JBQVE89Z6B84EA60H0G");
   assert.equal(eventRecords.length, 1);
   assert.equal(sampleRecords.length, 1);
 });
@@ -469,14 +469,14 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
   })) as EventRecord[];
   const manifest = await readDeviceImportManifest(vaultRoot, result.manifestPath);
 
-  assert.equal(result.importId, "xfm_57SVH349QXCASB1MGNNG0S25NZ");
-  assert.equal(result.events[0]?.id, "evt_PQ5N36XDAY9GEWX8DG8B6D9KKA");
+  assert.equal(result.importId, "xfm_E8RCCMNW9E4JGGQRXAK42GRACG");
+  assert.equal(result.events[0]?.id, "evt_2TSF1SDWFHHSQ8503JWDHCF47K");
   assert.equal(eventRecords[0]?.kind, "note");
   assert.deepEqual(eventRecords[0]?.rawRefs, [result.rawArtifacts[0]?.relativePath]);
   assert.deepEqual(eventRecords, [
     {
       schemaVersion: "murph.event.v1",
-      id: "evt_PQ5N36XDAY9GEWX8DG8B6D9KKA",
+      id: "evt_2TSF1SDWFHHSQ8503JWDHCF47K",
       kind: "note",
       occurredAt: "2026-03-16T09:30:00.000Z",
       recordedAt: "2026-03-16T09:30:00.000Z",
@@ -485,7 +485,7 @@ test("importDeviceBatch falls back to the sole raw artifact when events omit exp
       source: "device",
       title: "note",
       note: "single raw fallback",
-      rawRefs: ["raw/integrations/whoop/2026/03/xfm_57SVH349QXCASB1MGNNG0S25NZ/01-whoop-01.json"],
+      rawRefs: ["raw/integrations/whoop/2026/03/xfm_E8RCCMNW9E4JGGQRXAK42GRACG/01-whoop-01.json"],
     },
   ]);
   assert.equal(manifest.artifacts[0]?.role, "artifact-1");
@@ -517,14 +517,14 @@ test("importDeviceBatch supports sample-only batches without raw artifacts", asy
     relativePath: result.sampleShardPaths[0] as string,
   })) as SampleRecord[];
 
-  assert.equal(result.importId, "xfm_40N1ZZTYB1FKP8FD6T79JJJREC");
-  assert.equal(result.samples[0]?.id, "smp_4MJE9FC8C4J9V2SQDNTAXXRYJ3");
+  assert.equal(result.importId, "xfm_569JB3S5YXQTP6A255JC82WJDP");
+  assert.equal(result.samples[0]?.id, "smp_Z2ZBJH4EBC7QVGQ5CQ8G95M8R4");
   assert.equal(result.manifestPath, "");
   assert.equal(result.rawArtifacts.length, 0);
   assert.deepEqual(sampleRecords, [
     {
       schemaVersion: "murph.sample.v1",
-      id: "smp_4MJE9FC8C4J9V2SQDNTAXXRYJ3",
+      id: "smp_Z2ZBJH4EBC7QVGQ5CQ8G95M8R4",
       dayKey: "2026-03-16",
       timeZone: "UTC",
       stream: "respiratory_rate",

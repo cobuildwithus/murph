@@ -56,6 +56,9 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   const markup = renderToStaticMarkup(HomePage());
 
   assert.match(markup, /Phone signup is not configured for this environment yet\./);
+  assert.match(markup, /Open source/);
+  assert.match(markup, /Murph is licensed under GPL 3\.0\./);
+  assert.match(markup, /View the GitHub repo/);
   assert.match(markup, /curl -fsSL --proto &#x27;=https&#x27; --tlsv1\.2 https:\/\/YOUR_DOMAIN\/install\.sh \| bash/u);
   assert.match(markup, /View the raw installer/);
   assert.doesNotMatch(markup, /--no-onboard/u);
@@ -80,6 +83,8 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
 
   const markup = renderToStaticMarkup(HomePage());
 
+  assert.match(markup, /Murph is licensed under GPL 3\.0\./);
+  assert.match(markup, /View the GitHub repo/);
   assert.match(markup, /data-hosted-phone-auth="public"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
   assert.match(markup, /Hosted phone auth/);
@@ -107,6 +112,8 @@ test("HomePage keeps the fallback copy when the server auth config is ready but 
   const markup = renderToStaticMarkup(HomePage());
 
   assert.match(markup, /Phone signup is not configured for this environment yet\./);
+  assert.match(markup, /Murph is licensed under GPL 3\.0\./);
+  assert.match(markup, /View the GitHub repo/);
   assert.match(markup, /https:\/\/murph\.example\.test\/install\.sh/u);
   assert.doesNotMatch(markup, /--no-onboard/u);
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);

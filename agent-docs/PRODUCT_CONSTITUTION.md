@@ -1,4 +1,4 @@
-# HealthyBob Product Constitution
+# Murph Product Constitution
 
 Last verified: 2026-03-26
 
@@ -6,21 +6,21 @@ Draft v0.1
 
 ## Purpose
 
-HealthyBob exists to help people understand their bodies and lives better.
+Murph exists to help people understand their bodies and lives better.
 
 It is not here to turn the body into a permanent optimization project.
 It is not here to replace judgment with instruction.
 It is not here to make people feel behind, broken, or morally failing.
 
-If HealthyBob is working, users should gradually feel:
+If Murph is working, users should gradually feel:
 more clear, more at ease, more capable of noticing what matters, and less dependent on the app to tell them what to do.
 
 The phrase to keep in mind is **presence without piety**.
-HealthyBob should help people notice more, obsess less, and trust themselves more without sounding like a therapist, a guru, or a schoolmarm.
+Murph should help people notice more, obsess less, and trust themselves more without sounding like a therapist, a guru, or a schoolmarm.
 
 ## What We Are Building Toward
 
-HealthyBob should create:
+Murph should create:
 
 - more **body literacy**, less body surveillance
 - more **presence**, less self-management
@@ -62,18 +62,18 @@ A product whose engagement comes from worry, guilt, hypervigilance, or fear of m
 
 ## Core Principles
 
-### 1. HealthyBob Supports Judgment. It Does Not Replace It.
+### 1. Murph Supports Judgment. It Does Not Replace It.
 
-HealthyBob should help people see patterns, tradeoffs, and options. It should not become an authority they obey.
+Murph should help people see patterns, tradeoffs, and options. It should not become an authority they obey.
 
 Product implication:
 recommendations are suggestions, not commands. The product should feel easy to ignore without punishment.
 
-### 2. HealthyBob Should Get Quieter As It Gets Smarter.
+### 2. Murph Should Get Quieter As It Gets Smarter.
 
 The Whispering Earring problem is not just "bad advice." It is escalating intimacy and granularity.
 
-HealthyBob should do the opposite. More knowledge about the user should lead to fewer, better-timed interventions, not more micro-management.
+Murph should do the opposite. More knowledge about the user should lead to fewer, better-timed interventions, not more micro-management.
 
 Product implication:
 default to summaries and selective prompts, not constant nudges.
@@ -105,7 +105,7 @@ every protocol should come with a reason, burden, expected upside, stop conditio
 
 ### 6. The Default Should Be "Lighter," Not "More."
 
-When in doubt, HealthyBob should prefer lower-burden, lower-identity, lower-friction changes.
+When in doubt, Murph should prefer lower-burden, lower-identity, lower-friction changes.
 
 Product implication:
 the app should not routinely escalate from one intervention to five. It should often say:
@@ -113,7 +113,7 @@ keep this simple, leave this alone, this may be noise, this might not be worth o
 
 ### 7. Reflection Should Be Lightweight And Earned.
 
-HealthyBob should not constantly ask people to "reflect" in a sanctimonious or labor-intensive way. Reflection should mostly happen through good mirrors: clear summaries, pattern recognition, well-timed comparisons, and concise questions when they matter.
+Murph should not constantly ask people to "reflect" in a sanctimonious or labor-intensive way. Reflection should mostly happen through good mirrors: clear summaries, pattern recognition, well-timed comparisons, and concise questions when they matter.
 
 Product implication:
 less journaling homework, fewer open-ended soul-search prompts, more:
@@ -122,7 +122,7 @@ less journaling homework, fewer open-ended soul-search prompts, more:
 "Too annoying for real life?"
 "Probably noise?"
 
-### 8. HealthyBob Should Protect Ordinary Life.
+### 8. Murph Should Protect Ordinary Life.
 
 A health product becomes pathological when it steadily makes meals, social life, spontaneity, travel, pleasure, and rest harder.
 
@@ -141,7 +141,7 @@ No vibe of "you slipped."
 Product implication:
 language should be neutral, supportive, and reality-based, not disciplinary.
 
-### 10. HealthyBob Should Make Users Trust Themselves More Over Time.
+### 10. Murph Should Make Users Trust Themselves More Over Time.
 
 This is the real test.
 
@@ -177,7 +177,7 @@ when to stop, when to ignore, and when to revisit.
 
 ### 5. "Leave It Alone" Must Be A First-Class Outcome.
 
-HealthyBob should sometimes conclude:
+Murph should sometimes conclude:
 nothing to fix here,
 this is normal variation,
 don't add anything,
@@ -210,7 +210,7 @@ Users should be able to reduce prompts, pause experiments, mute recommendations,
 
 ## Tone And Language Rules
 
-HealthyBob should sound like:
+Murph should sound like:
 a calm, observant, competent companion.
 
 Not like:
@@ -240,11 +240,11 @@ a coach, a priest, a biohacking forum, a therapist worksheet, or a disappointed 
 - "Cheat"
 - "You need to do better"
 
-## What HealthyBob Should Lean Into
+## What Murph Should Lean Into
 
 More than avoidance, this is the positive shape.
 
-HealthyBob should lean into:
+Murph should lean into:
 
 ### Clear Mirrors
 
@@ -289,7 +289,7 @@ Before shipping any feature, ask:
 
 Here is the shortest version:
 
-**HealthyBob should help people understand themselves well enough that they need less management, not more.**
+**Murph should help people understand themselves well enough that they need less management, not more.**
 
 And the internal warning label:
 

@@ -5,15 +5,16 @@ Local-first multimedia parsing on top of `@murph/inboxd`.
 This package consumes attachment-level parse jobs from the inbox runtime,
 selects the best available local parser from a deterministic priority stack,
 and writes normalized derived artifacts under `derived/inbox/...` for later
-chat/model layers. The default ordering is text/native CLI first, OCR second,
-and remote APIs nowhere in the default stack.
+chat/model layers. The default ordering is text/native CLI first, with raw-PDF
+routing fallback handled in the model layer rather than by a second PDF OCR
+pass, and remote APIs nowhere in the default stack.
 
 ## Current default stack
 
 - text-like documents: built-in Node text reader
 - native-text PDFs: `pdftotext` when available
 - audio and extracted video audio: `whisper.cpp`
-- images and PDFs that need OCR/layout recovery: PaddleOCR CLI
+- images that still need OCR outside direct-vision routing: PaddleOCR CLI
 - media normalization: `ffmpeg`
 
 ## Design rules

@@ -199,11 +199,26 @@ export async function runRawCli(
     stdin?: string
   },
 ): Promise<string> {
+  return runRawCliAttempt(args, options, true)
+}
+
+async function runRawCliAttempt(
+  args: string[],
+  options: {
+    env?: NodeJS.ProcessEnv
+    stdin?: string
+  } | undefined,
+  allowRetry: boolean,
+): Promise<string> {
   try {
     const { stdout } = await execCli(args, options)
 
     return stdout.trim()
   } catch (error) {
+    if (allowRetry && shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
+      return runRawCliAttempt(args, options, false)
+    }
+
     const output = commandOutputFromError(error)
     if (output !== null) {
       return output
@@ -395,11 +410,20 @@ function shouldRetryCliOutput(output: string | null): boolean {
     return false
   }
 
-  return (
-    (output.includes('ERR_MODULE_NOT_FOUND') || output.includes('Cannot find module')) &&
-    output.includes('/packages/') &&
-    output.includes('/dist/')
-  )
+  const referencesBuiltWorkspaceArtifact =
+    output.includes('/packages/') && output.includes('/dist/')
+  const isMissingModuleError =
+    output.includes('ERR_MODULE_NOT_FOUND') ||
+    output.includes('Cannot find module') ||
+    output.includes('Cannot find package')
+  const isDistStartupFailure =
+    referencesBuiltWorkspaceArtifact &&
+    (output.includes('file://') ||
+      output.includes('does not provide an export named') ||
+      output.includes('SyntaxError:') ||
+      output.includes('ReferenceError:'))
+
+  return referencesBuiltWorkspaceArtifact && (isMissingModuleError || isDistStartupFailure)
 }
 
 function createMissingRuntimeArtifactsError(): Error {

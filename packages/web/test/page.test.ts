@@ -152,6 +152,9 @@ test("HomePage renders the ready state", async () => {
     timelineLimit: 8,
   });
   assert.match(markup, /Murph/);
+  assert.match(markup, /Open source/);
+  assert.match(markup, /Murph is licensed under GPL 3\.0\./);
+  assert.match(markup, /View GitHub/);
   assert.match(markup, /Weekly compass/);
   assert.match(markup, /What changed, what stayed steady, and what can stay simple/);
   assert.match(markup, /Not enough prior-week data yet to call a meaningful shift\./);

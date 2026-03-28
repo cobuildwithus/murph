@@ -2,6 +2,14 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "baseUrl": ".",
+    "paths": {
+      "@murph/contracts": [
+        "./dist/index.d.ts"
+      ],
+      "@murph/contracts/schemas": [
+        "./dist/schemas.d.ts"
+      ]
+    },
     "noEmit": false,
     "rootDir": "scripts",
     "outDir": "dist/scripts",

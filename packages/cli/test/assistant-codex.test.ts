@@ -813,4 +813,44 @@ test('extractCodexTraceUpdates normalizes assistant, thinking, and reconnect sta
       },
     ],
   )
+
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'item.started',
+      item: {
+        id: 'tool-1',
+        type: 'tool.call',
+      },
+    }),
+    [
+      {
+        kind: 'status',
+        mode: 'replace',
+        streamKey: 'status:tool-1',
+        text: 'Using tool call.',
+      },
+    ],
+  )
+})
+
+test('extractCodexTraceUpdates keeps unknown event types as non-error updates', () => {
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'tooling.experimental',
+      detail: 'ignored',
+    }),
+    [],
+  )
+
+  assert.deepEqual(
+    extractCodexTraceUpdates({
+      type: 'item.completed',
+      item: {
+        id: 'odd-1',
+        type: 'unmapped.item',
+        text: 'odd event payload',
+      },
+    }),
+    [],
+  )
 })

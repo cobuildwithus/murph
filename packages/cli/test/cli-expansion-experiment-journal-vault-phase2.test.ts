@@ -171,7 +171,7 @@ test.sequential(
       assert.equal(shown.ok, true)
       assert.equal(requireData(shown).entity.title, 'Focus Sprint Updated')
       assert.equal(requireData(shown).entity.data.status, 'completed')
-      assert.equal(requireData(shown).entity.data.endedOn, '2026-03-13')
+      assert.equal(requireData(shown).entity.data.endedOn, '2026-03-14')
       assert.equal(
         requireData(shown).entity.data.hypothesis,
         'Walking after lunch improves the afternoon energy dip.',

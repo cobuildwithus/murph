@@ -4,7 +4,6 @@ export * from "./device-sync.ts";
 export * from "./hosted-bundle.ts";
 export * from "./hosted-bundles.ts";
 export * from "./hosted-email.ts";
-export * from "./hosted-execution.ts";
 export * from "./hosted-user-env.ts";
 export * from "./locks.ts";
 export * from "./process-env.ts";

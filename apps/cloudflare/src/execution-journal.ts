@@ -2,8 +2,8 @@ import {
   decodeHostedBundleBase64,
   sha256HostedBundleHex,
   type HostedExecutionBundleRef,
-  type HostedExecutionRunnerResult,
 } from "@murph/runtime-state";
+import type { HostedExecutionRunnerResult } from "@murph/hosted-execution";
 import {
   parseHostedExecutionSideEffects,
   type HostedExecutionSideEffect,
