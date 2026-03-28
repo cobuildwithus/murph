@@ -1,3 +1,8 @@
+import {
+  profileSnapshotProfileSchema,
+  safeParseContract,
+} from "@murph/contracts";
+
 import { emitAuditRecord } from "../audit.ts";
 import { toIsoTimestamp } from "../time.ts";
 import { isPlainRecord } from "../types.ts";
@@ -388,12 +393,17 @@ function normalizeProfileSnapshotProposal(
 
   const nestedProfile = isPlainRecord(value.profile) ? value.profile : null;
   const profile = nestedProfile ?? value;
+  const parsedProfile = safeParseContract(profileSnapshotProfileSchema, profile);
+  if (!parsedProfile.success) {
+    return null;
+  }
+
   return {
     source:
       source.importedFrom === "derived" ? "derived" :
       source.assessmentId ? "assessment_projection" : "manual",
     sourceAssessmentIds: source.assessmentId ? [source.assessmentId] : undefined,
-    profile,
+    profile: parsedProfile.data,
   };
 }
 

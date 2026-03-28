@@ -997,7 +997,9 @@ test("assessment imports append contract-shaped records and emit intake audits",
     "intake.json",
     JSON.stringify({
       profile: {
-        topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        goals: {
+          topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+        },
       },
       family: [
         {
@@ -1436,8 +1438,12 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
     recordedAt: "2026-03-12T11:00:00.000Z",
     source: "manual",
     profile: {
-      domains: ["sleep"],
-      topGoalIds: [],
+      goals: {
+        topGoalIds: [],
+      },
+      custom: {
+        domains: ["sleep"],
+      },
     },
   });
 
@@ -2839,8 +2845,12 @@ test("validateVault covers current profile success, missing-file, and unreadable
     recordedAt: "2026-03-12T11:00:00.000Z",
     source: "manual",
     profile: {
-      domains: ["sleep"],
-      topGoalIds: [],
+      goals: {
+        topGoalIds: [],
+      },
+      custom: {
+        domains: ["sleep"],
+      },
     },
   });
 
