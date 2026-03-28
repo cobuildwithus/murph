@@ -331,20 +331,16 @@ async function listAssistantAutomationCandidates(input: {
   routing: AssistantInboxCaptureSummary[]
 }> {
   const limit = normalizeScanLimit(input.maxPerScan)
-  const [replyListed, routingListed] = await Promise.all([
-    input.replyChannels.length > 0
-      ? input.inboxServices.list({
-          vault: input.vault,
-          requestId: input.requestId,
-          limit,
-          sourceId: null,
-          afterOccurredAt: input.scanState.autoReplyScanCursor?.occurredAt ?? null,
-          afterCaptureId: input.scanState.autoReplyScanCursor?.captureId ?? null,
-          oldestFirst: true,
-        })
-      : Promise.resolve(
-          createEmptyAssistantInboxListResult(input.vault, limit, input.scanState.autoReplyScanCursor),
-        ),
+  const [reply, routingListed] = await Promise.all([
+    listAssistantReplyCandidates({
+      inboxServices: input.inboxServices,
+      limit,
+      replyChannels: input.replyChannels,
+      requestId: input.requestId,
+      restrictReplyToChannels: input.restrictReplyToChannels,
+      scanCursor: input.scanState.autoReplyScanCursor,
+      vault: input.vault,
+    }),
     input.routingEnabled
       ? input.inboxServices.list({
           vault: input.vault,
@@ -361,19 +357,67 @@ async function listAssistantAutomationCandidates(input: {
   ])
 
   return {
-    reply: [
-      ...(
-        // When a backlog channel is draining, keep other enabled channels
-        // pending so they are still eligible once backlog mode clears.
-        input.restrictReplyToChannels
-          ? replyListed.items.filter((capture) =>
-              input.replyChannels.includes(capture.source),
-            )
-          : replyListed.items
-      ),
-    ].sort(compareAssistantCaptureOrder),
+    reply,
     routing: [...routingListed.items].sort(compareAssistantCaptureOrder),
   }
+}
+
+async function listAssistantReplyCandidates(input: {
+  inboxServices: InboxCliServices
+  limit: number
+  replyChannels: readonly string[]
+  requestId: string | null
+  restrictReplyToChannels: boolean
+  scanCursor: AssistantAutomationScanStateProgress['autoReplyScanCursor']
+  vault: string
+}): Promise<AssistantInboxCaptureSummary[]> {
+  if (input.replyChannels.length === 0) {
+    return []
+  }
+
+  if (!input.restrictReplyToChannels) {
+    const listed = await input.inboxServices.list({
+      vault: input.vault,
+      requestId: input.requestId,
+      limit: input.limit,
+      sourceId: null,
+      afterOccurredAt: input.scanCursor?.occurredAt ?? null,
+      afterCaptureId: input.scanCursor?.captureId ?? null,
+      oldestFirst: true,
+    })
+    return [...listed.items].sort(compareAssistantCaptureOrder)
+  }
+
+  const backlogCandidates: AssistantInboxCaptureSummary[] = []
+  let cursor = input.scanCursor
+
+  while (backlogCandidates.length < input.limit) {
+    const listed = await input.inboxServices.list({
+      vault: input.vault,
+      requestId: input.requestId,
+      limit: input.limit,
+      sourceId: null,
+      afterOccurredAt: cursor?.occurredAt ?? null,
+      afterCaptureId: cursor?.captureId ?? null,
+      oldestFirst: true,
+    })
+    const listedItems = [...listed.items].sort(compareAssistantCaptureOrder)
+    if (listedItems.length === 0) {
+      break
+    }
+
+    backlogCandidates.push(
+      ...listedItems.filter((capture) => input.replyChannels.includes(capture.source)),
+    )
+
+    const lastListed = listedItems[listedItems.length - 1]
+    cursor = lastListed ? cursorFromCapture(lastListed) : cursor
+    if (listedItems.length < input.limit) {
+      break
+    }
+  }
+
+  return backlogCandidates.slice(0, input.limit)
 }
 
 function mergeAssistantAutomationCandidates(input: {
