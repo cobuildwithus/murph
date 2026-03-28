@@ -323,6 +323,35 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(connection.accessTokenExpiresAt).toBeNull();
     expect(connection.nextReconcileAt).toBeNull();
   });
+
+  it("records webhook receipt time without bumping the hosted connection updatedAt column", async () => {
+    const executeRaw = vi.fn(async () => 1);
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $executeRaw: executeRaw,
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => `enc:${value}`,
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+      },
+    });
+
+    await store.markWebhookReceived("dsc_123", "2026-03-25T02:00:00.000Z");
+
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    const [query, receivedAt, accountId] = executeRaw.mock.calls[0] as unknown as [
+      { strings?: string[] },
+      Date,
+      string,
+    ];
+    const queryText = Array.isArray(query?.strings) ? query.strings.join(" ") : String(query);
+    expect(queryText).toContain("update device_connection");
+    expect(queryText).toContain("set last_webhook_at =");
+    expect(queryText).not.toContain("updated_at");
+    expect(accountId).toBe("dsc_123");
+    expect(receivedAt).toEqual(new Date("2026-03-25T02:00:00.000Z"));
+  });
 });
 
 function createConnectionRecord(): MutableConnectionRecord {

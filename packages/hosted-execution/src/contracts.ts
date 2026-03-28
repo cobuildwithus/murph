@@ -188,6 +188,8 @@ export interface HostedExecutionUserEnvUpdate {
 }
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
+export const HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER =
+  "x-hosted-execution-runner-proxy-token";
 
 export interface HostedExecutionSharePackResponse {
   pack: SharePack;
@@ -251,6 +253,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
   lastWebhookAt?: string | null;
   metadata?: Record<string, unknown>;
   nextReconcileAt?: string | null;
+  observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
   scopes?: string[];
   status?: "active" | "reauthorization_required" | "disconnected";
