@@ -1,5 +1,6 @@
 import {
   SLEEP_STAGES,
+  formatTimeZoneDateTimeParts,
   extractIsoDatePrefix,
   normalizeIanaTimeZone,
 } from "@murph/contracts";
@@ -115,6 +116,30 @@ export function firstIsoFromPaths(record: PlainObject | undefined, paths: readon
   return firstIso(...paths.map((path) => readPath(record, path)));
 }
 
+export function firstInstant(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+        continue;
+      }
+    }
+
+    const normalized = toIso(candidate);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
+export function firstInstantFromPaths(record: PlainObject | undefined, paths: readonly string[]): string | undefined {
+  return firstInstant(...paths.map((path) => readPath(record, path)));
+}
+
 export function firstDayKey(...candidates: unknown[]): string | undefined {
   for (const candidate of candidates) {
     if (typeof candidate !== "string") {
@@ -153,6 +178,56 @@ export function firstTimeZone(...candidates: unknown[]): string | undefined {
 
 export function firstTimeZoneFromPaths(record: PlainObject | undefined, paths: readonly string[]): string | undefined {
   return firstTimeZone(...paths.map((path) => readPath(record, path)));
+}
+
+export function synthesizeUtcStartOfDay(dayKey: string, timeZone: string): string | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone);
+
+  if (!match || !normalizedTimeZone) {
+    return undefined;
+  }
+
+  const desiredUtcMs = Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    0,
+    0,
+    0,
+  );
+  let guessMs = desiredUtcMs;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const parts = formatTimeZoneDateTimeParts(guessMs, normalizedTimeZone);
+    const actualUtcMs = Date.UTC(
+      parts.year,
+      parts.month - 1,
+      parts.day,
+      parts.hour,
+      parts.minute,
+      parts.second,
+    );
+    const deltaMs = actualUtcMs - desiredUtcMs;
+
+    if (deltaMs === 0) {
+      return new Date(guessMs).toISOString();
+    }
+
+    guessMs -= deltaMs;
+  }
+
+  const parts = formatTimeZoneDateTimeParts(guessMs, normalizedTimeZone);
+  if (
+    parts.dayKey === dayKey &&
+    parts.hour === 0 &&
+    parts.minute === 0 &&
+    parts.second === 0
+  ) {
+    return new Date(guessMs).toISOString();
+  }
+
+  return undefined;
 }
 
 export function firstNumber(...candidates: unknown[]): number | undefined {
@@ -292,11 +367,11 @@ export function pushGarminArtifact(
   fileName: string,
   content: unknown,
   options: GarminArtifactOptions = {},
-): void {
+): boolean {
   const artifact = createRawArtifact(role, fileName, content);
 
   if (!artifact) {
-    return;
+    return false;
   }
 
   pushRawArtifact(
@@ -307,6 +382,8 @@ export function pushGarminArtifact(
       metadata: options.metadata ? stripEmptyObject(options.metadata) : undefined,
     }),
   );
+
+  return true;
 }
 
 export function inferGarminFileFormat(record: PlainObject): string {

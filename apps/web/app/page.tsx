@@ -366,7 +366,7 @@ export default function HomePage() {
             <div key={repeat} className="flex shrink-0 items-center gap-10 px-5">
               {[
                 "Works on iMessage, Telegram, and email",
-                "Syncs with Oura, WHOOP, and Garmin",
+                "Syncs with Oura and WHOOP, imports Garmin exports",
                 "Plain English — no jargon",
                 "Always online, always private",
               ].map((text) => (

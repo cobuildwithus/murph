@@ -973,6 +973,45 @@ test("prepareDeviceProviderSnapshotImport keeps Garmin date buckets on the provi
   assert.equal(cycleDay?.recordedAt, "2026-03-15T00:00:00.000Z");
 });
 
+test("prepareDeviceProviderSnapshotImport synthesizes Garmin date-bucket timestamps that match the provider timezone", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      dailySummaries: [
+        {
+          summaryDate: "2026-03-15",
+          timeZone: "America/Los_Angeles",
+          steps: 8765,
+        },
+      ],
+      womenHealth: [
+        {
+          date: "2026-03-15",
+          timeZone: "America/Los_Angeles",
+          cycleDay: 7,
+        },
+      ],
+    },
+  });
+
+  const dailySteps = payload.events?.find(
+    (event) => event.kind === "observation" && event.fields?.metric === "daily-steps",
+  );
+  const cycleDay = payload.events?.find(
+    (event) => event.kind === "observation" && event.fields?.metric === "cycle-day",
+  );
+
+  assert.equal(dailySteps?.occurredAt, "2026-03-15T07:00:00.000Z");
+  assert.equal(dailySteps?.recordedAt, "2026-03-15T07:00:00.000Z");
+  assert.equal(dailySteps?.dayKey, "2026-03-15");
+  assert.equal(dailySteps?.timeZone, "America/Los_Angeles");
+  assert.equal(cycleDay?.occurredAt, "2026-03-15T07:00:00.000Z");
+  assert.equal(cycleDay?.recordedAt, "2026-03-15T07:00:00.000Z");
+  assert.equal(cycleDay?.dayKey, "2026-03-15");
+  assert.equal(cycleDay?.timeZone, "America/Los_Angeles");
+});
+
 test("prepareDeviceProviderSnapshotImport rounds Garmin duration fields before they reach integer-only canonical records", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
@@ -1058,11 +1097,19 @@ test("prepareDeviceProviderSnapshotImport drops unsupported Garmin sleep stage l
   );
 });
 
-test("prepareDeviceProviderSnapshotImport stores metadata-only Garmin activityFiles as JSON descriptors instead of fake FIT artifacts", async () => {
+test("prepareDeviceProviderSnapshotImport keeps metadata-only Garmin activityFiles on stable legacy roles and links them from the activity event", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
     snapshot: {
       importedAt: "2026-03-16T12:00:00.000Z",
+      activities: [
+        {
+          activityId: "activity-1",
+          activityType: "run",
+          startTime: "2026-03-15T10:00:00.000Z",
+          endTime: "2026-03-15T10:30:00.000Z",
+        },
+      ],
       activityFiles: [
         {
           activityId: "activity-1",
@@ -1074,14 +1121,79 @@ test("prepareDeviceProviderSnapshotImport stores metadata-only Garmin activityFi
     },
   });
 
-  const descriptor = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file-descriptor:activity-1:fit");
+  const descriptor = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-1:fit");
+  const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
 
   assert.ok(descriptor);
   assert.equal(descriptor?.fileName, "activity-1-fit-descriptor.json");
   assert.equal(descriptor?.mediaType, "application/json");
   assert.equal(descriptor?.metadata?.intendedFileType, "fit");
   assert.equal(descriptor?.metadata?.intendedFileName, "activity-1.fit");
-  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:fit"));
+  assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-file:activity-1:fit"));
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-file-descriptor:")));
+});
+
+test("importDeviceProviderSnapshot re-imports metadata-only Garmin activity files without churning the canonical activity-session id", async () => {
+  const vaultRoot = await makeTempDirectory("murph-garmin-metadata-only-reimport");
+  await coreRuntime.initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-12T12:00:00.000Z",
+    timezone: "America/Los_Angeles",
+  });
+
+  const snapshot = {
+    importedAt: "2026-03-16T12:00:00.000Z",
+    activities: [
+      {
+        activityId: "activity-1",
+        activityType: "run",
+        startTime: "2026-03-15T10:00:00.000Z",
+        endTime: "2026-03-15T10:30:00.000Z",
+      },
+    ],
+    activityFiles: [
+      {
+        activityId: "activity-1",
+        fileType: "fit",
+        fileName: "activity-1.fit",
+        checksum: "abc123",
+      },
+    ],
+  };
+
+  const firstImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "garmin",
+      vaultRoot,
+      snapshot,
+    },
+    {
+      corePort: coreRuntime,
+    },
+  );
+  const secondImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+    {
+      provider: "garmin",
+      vaultRoot,
+      snapshot,
+    },
+    {
+      corePort: coreRuntime,
+    },
+  );
+
+  const firstActivityEvent = firstImport.events.find((event) => event.kind === "activity_session");
+  const secondActivityEvent = secondImport.events.find((event) => event.kind === "activity_session");
+  const storedEvents = await coreRuntime.readJsonlRecords({
+    vaultRoot,
+    relativePath: firstImport.eventShardPaths[0]!,
+  });
+
+  assert.equal(firstActivityEvent?.id, secondActivityEvent?.id);
+  assert.equal(
+    storedEvents.filter((event) => event.id === firstActivityEvent?.id).length,
+    1,
+  );
 });
 
 test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections and keeps the legacy files alias conservative", async () => {
@@ -1089,7 +1201,17 @@ test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections 
     provider: "garmin",
     snapshot: {
       importedAt: "2026-03-16T12:00:00.000Z",
+      activityFiles: [
+        42,
+        {
+          activityId: "activity-2",
+          fileType: "tcx",
+          fileName: "activity-2.tcx",
+          payload: "<TrainingCenterDatabase />",
+        },
+      ],
       files: [
+        "https://example.test/download/garmin/file",
         {
           activityId: "activity-1",
           fileType: "gpx",
@@ -1108,13 +1230,34 @@ test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections 
     },
   });
 
+  const retainedSnapshotSections =
+    (payload.provenance?.importedSections as { retainedSnapshotSections?: string[] } | undefined)?.retainedSnapshotSections;
+
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:gpx"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-2:tcx"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:activityfiles"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:files"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:readinesswidgets"));
   assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-file:unknown:fit")));
   assert.deepEqual(
-    (payload.provenance?.importedSections as { retainedSnapshotSections?: string[] } | undefined)?.retainedSnapshotSections,
-    ["readinesswidgets", "files"],
+    [...(retainedSnapshotSections ?? [])].sort(),
+    ["activityfiles", "files", "readinesswidgets"],
+  );
+});
+
+test("prepareDeviceProviderSnapshotImport only reports retained Garmin snapshot sections when an artifact was created", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      importedAt: "2026-03-16T12:00:00.000Z",
+      readinessWidgets: [],
+    },
+  });
+
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:readinesswidgets"));
+  assert.deepEqual(
+    (payload.provenance?.importedSections as { retainedSnapshotSections?: string[] } | undefined)?.retainedSnapshotSections ?? [],
+    [],
   );
 });
 
@@ -1159,8 +1302,6 @@ test("prepareDeviceProviderSnapshotImport rejects Garmin snapshots with invalid 
     "epochs",
     "sleeps",
     "activities",
-    "activityFiles",
-    "files",
     "womenHealth",
     "womenHealthSummaries",
     "deletions",
@@ -1176,6 +1317,16 @@ test("prepareDeviceProviderSnapshotImport rejects Garmin snapshots with invalid 
       }),
     );
   }
+
+  await assert.doesNotReject(
+    () => prepareDeviceProviderSnapshotImport({
+      provider: "garmin",
+      snapshot: {
+        activityFiles: [42],
+        files: [42],
+      },
+    }),
+  );
 });
 
 test("importDeviceProviderSnapshot round-trips Garmin date buckets through real core without vault-day shift", async () => {
