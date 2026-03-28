@@ -42,10 +42,17 @@ export async function encryptHostedBundle(input: {
 
 export async function decryptHostedBundle(input: {
   envelope: HostedCipherEnvelope;
+  expectedKeyId?: string;
   key: Uint8Array;
 }): Promise<Uint8Array> {
   if (!isSupportedHostedCipherSchema(input.envelope.schema) || input.envelope.algorithm !== "AES-GCM") {
     throw new Error("Hosted bundle envelope is invalid.");
+  }
+
+  if (input.expectedKeyId && input.envelope.keyId !== input.expectedKeyId) {
+    throw new Error(
+      `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId}, got ${input.envelope.keyId}. Multi-key decryption is not implemented.`,
+    );
   }
 
   const cryptoKey = await importAesKey(input.key);
@@ -77,6 +84,7 @@ const utf8Encoder = new TextEncoder();
 export async function readEncryptedR2Payload(input: {
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
+  expectedKeyId?: string;
   key: string;
 }): Promise<Uint8Array | null> {
   const object = await input.bucket.get(input.key);
@@ -87,6 +95,7 @@ export async function readEncryptedR2Payload(input: {
 
   return decryptHostedBundle({
     envelope: JSON.parse(utf8Decoder.decode(await object.arrayBuffer())) as HostedCipherEnvelope,
+    expectedKeyId: input.expectedKeyId,
     key: input.cryptoKey,
   });
 }
@@ -110,12 +119,14 @@ export async function writeEncryptedR2Payload(input: {
 export async function readEncryptedR2Json<T>(input: {
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
+  expectedKeyId?: string;
   key: string;
   parse(value: unknown): T;
 }): Promise<T | null> {
   const plaintext = await readEncryptedR2Payload({
     bucket: input.bucket,
     cryptoKey: input.cryptoKey,
+    expectedKeyId: input.expectedKeyId,
     key: input.key,
   });
 

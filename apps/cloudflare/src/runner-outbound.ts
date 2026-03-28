@@ -625,7 +625,8 @@ function readHostedDeviceSyncWebControlToken(env: RunnerOutboundEnvironmentSourc
 }
 
 function readHostedShareWebControlToken(env: RunnerOutboundEnvironmentSource): string | null {
-  return readOptionalString(env.HOSTED_SHARE_INTERNAL_TOKEN, "HOSTED_SHARE_INTERNAL_TOKEN");
+  return readOptionalString(env.HOSTED_SHARE_INTERNAL_TOKEN, "HOSTED_SHARE_INTERNAL_TOKEN")
+    ?? readOptionalString(env.HOSTED_EXECUTION_INTERNAL_TOKEN, "HOSTED_EXECUTION_INTERNAL_TOKEN");
 }
 
 function methodNotAllowed(): Response {

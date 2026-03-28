@@ -60,12 +60,14 @@ async function readRecordAtKey(
   input: {
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
+    keyId: string;
   },
   key: string,
 ): Promise<HostedExecutionSideEffectRecord | null> {
   return readEncryptedR2Json({
     bucket: input.bucket,
     cryptoKey: input.key,
+    expectedKeyId: input.keyId,
     key,
     parse(value) {
       return parseHostedExecutionSideEffectRecord(value);

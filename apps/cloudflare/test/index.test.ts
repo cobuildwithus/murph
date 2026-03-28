@@ -901,6 +901,7 @@ describe("cloudflare worker routes", () => {
   it("routes replies to a hosted send alias back through the configured sender identity", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
       HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
@@ -953,7 +954,7 @@ describe("cloudflare worker routes", () => {
       bucket: env.BUNDLES,
       cryptoKey: Buffer.alloc(32, 9),
       key: threadRouteKey,
-      keyId: "v1",
+      keyId: "v2",
       value: {
         identityId: "assistant@mail.example.test",
         replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),

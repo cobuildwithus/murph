@@ -29,6 +29,7 @@ export interface HostedExecutionCommittedResult {
   finalizedAt: string | null;
   result: HostedExecutionRunnerResult["result"];
   sideEffects: HostedExecutionSideEffect[];
+  userId: string;
 }
 
 export interface HostedExecutionCommitPayload {
@@ -61,6 +62,7 @@ export function createHostedExecutionJournalStore(input: {
       return readEncryptedR2Json({
         bucket: input.bucket,
         cryptoKey: input.key,
+        expectedKeyId: input.keyId,
         key: committedResultObjectKey(userId, eventId),
         parse(value) {
           return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
@@ -125,6 +127,7 @@ export async function persistHostedExecutionCommit(input: {
     finalizedAt: null,
     result: input.payload.result,
     sideEffects: parseHostedExecutionSideEffects(input.payload.sideEffects),
+    userId: input.userId,
   };
 
   await createHostedExecutionJournalStore({
@@ -234,6 +237,9 @@ function normalizeHostedExecutionCommittedResult(
     ...value,
     finalizedAt: value.finalizedAt ?? null,
     sideEffects: parseHostedExecutionSideEffects((value as { sideEffects?: unknown }).sideEffects),
+    userId: typeof (value as { userId?: unknown }).userId === "string"
+      ? (value as { userId: string }).userId
+      : "",
   };
 }
 

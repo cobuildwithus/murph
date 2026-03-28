@@ -6,12 +6,14 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  encodeHostedBundleBase64,
   listHostedBundleArtifacts,
   snapshotHostedBundleRoots,
   writeHostedBundleTextFile,
 } from "@murph/runtime-state";
 
 import {
+  artifactObjectKey,
   createHostedArtifactStore,
   createHostedBundleStore,
 } from "../src/bundle-store.js";
@@ -107,7 +109,7 @@ describe("HostedUserRunner", () => {
     );
   });
 
-  it("cleans up superseded bundle objects and orphaned per-user artifacts after a bundle transition", async () => {
+  it("cleans up orphaned per-user artifacts without deleting shared bundle objects", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-bundle-gc-"));
 
     try {
@@ -177,6 +179,11 @@ describe("HostedUserRunner", () => {
         "agent-state",
         new TextEncoder().encode("agent-state-next"),
       );
+      const otherUserSharedVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
+      const otherUserSharedAgentRef = await bundleStore.writeBundle(
+        "agent-state",
+        new TextEncoder().encode("agent-state-previous"),
+      );
 
       const collector = new HostedBundleGarbageCollector(
         bucket.api,
@@ -196,13 +203,181 @@ describe("HostedUserRunner", () => {
         userId: "member_gc",
       });
 
-      expect(bucket.keys()).not.toContain(previousAgentRef.key);
-      expect(bucket.keys()).not.toContain(previousVaultRef.key);
+      expect(otherUserSharedVaultRef.key).toBe(previousVaultRef.key);
+      expect(otherUserSharedAgentRef.key).toBe(previousAgentRef.key);
+      expect(bucket.keys()).toContain(previousAgentRef.key);
+      expect(bucket.keys()).toContain(previousVaultRef.key);
       expect(bucket.keys()).not.toContain(
         `users/member_gc/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
       );
       expect(bucket.keys()).toContain(nextAgentRef.key);
       expect(bucket.keys()).toContain(nextVaultRef.key);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("cleans up orphaned per-user artifacts when a prefinalized commit is recovered", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-recovered-bundle-gc-"));
+
+    try {
+      const previousVaultRoot = path.join(workspaceRoot, "previous-vault");
+      const nextVaultRoot = path.join(workspaceRoot, "next-vault");
+      const previousRawAttachmentPath = path.join(
+        previousVaultRoot,
+        "raw",
+        "inbox",
+        "example",
+        "photo.jpg",
+      );
+      await mkdir(path.dirname(previousRawAttachmentPath), { recursive: true });
+      await mkdir(nextVaultRoot, { recursive: true });
+      await writeFile(path.join(previousVaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+      await writeFile(previousRawAttachmentPath, Buffer.from("image-bytes-placeholder\n", "utf8"));
+      await writeFile(path.join(nextVaultRoot, "vault.json"), "{\"schema\":\"vault\",\"next\":true}\n");
+
+      const artifactStore = createHostedArtifactStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        userId: "member_recovered_gc",
+      });
+      const previousVaultBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (artifact) => {
+          const ref = {
+            byteSize: artifact.bytes.byteLength,
+            sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
+          };
+          await artifactStore.writeArtifact(ref.sha256, artifact.bytes);
+          return ref;
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: previousVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const nextVaultBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: nextVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const bundleStore = createHostedBundleStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+      });
+      const [previousArtifact] = listHostedBundleArtifacts({
+        bytes: previousVaultBundle!,
+        expectedKind: "vault",
+      });
+      const previousAgentBytes = new TextEncoder().encode("agent-state-previous");
+      const nextAgentBytes = new TextEncoder().encode("agent-state-next");
+      const previousAgentRef = await bundleStore.writeBundle("agent-state", previousAgentBytes);
+      const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
+
+      seedRunnerQueueState(storage, {
+        activated: true,
+        pendingEvents: [
+          {
+            attempts: 1,
+            availableAt: "2026-03-26T12:00:00.000Z",
+            dispatch: {
+              event: {
+                kind: "assistant.cron.tick",
+                reason: "manual",
+                userId: "member_recovered_gc",
+              },
+              eventId: "evt_recovered_gc",
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
+            enqueuedAt: "2026-03-26T12:00:00.000Z",
+            lastError: "lost ack",
+          },
+        ],
+        retryingEventId: "evt_recovered_gc",
+        userId: "member_recovered_gc",
+      });
+
+      const sql = storage.state.storage.sql;
+      if (!sql) {
+        throw new Error("Test storage.sql is required.");
+      }
+      sql.exec(
+        `UPDATE runner_meta
+         SET agent_state_bundle_ref_json = ?, vault_bundle_ref_json = ?,
+             agent_state_bundle_version = ?, vault_bundle_version = ?
+         WHERE singleton = 1`,
+        JSON.stringify(previousAgentRef),
+        JSON.stringify(previousVaultRef),
+        1,
+        1,
+      );
+
+      await persistHostedExecutionCommit({
+        bucket: bucket.api,
+        currentBundleRefs: {
+          agentState: previousAgentRef,
+          vault: previousVaultRef,
+        },
+        eventId: "evt_recovered_gc",
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        payload: {
+          bundles: {
+            agentState: Buffer.from(nextAgentBytes).toString("base64"),
+            vault: Buffer.from(nextVaultBundle!).toString("base64"),
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "recovered",
+          },
+        },
+        userId: "member_recovered_gc",
+      });
+      await persistHostedExecutionFinalBundles({
+        bucket: bucket.api,
+        eventId: "evt_recovered_gc",
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        payload: {
+          bundles: {
+            agentState: Buffer.from(nextAgentBytes).toString("base64"),
+            vault: Buffer.from(nextVaultBundle!).toString("base64"),
+          },
+        },
+        userId: "member_recovered_gc",
+      });
+
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+      const status = await runner.dispatch({
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_recovered_gc",
+        },
+        eventId: "evt_recovered_gc",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(status.pendingEventCount).toBe(0);
+      expect(status.retryingEventId).toBeNull();
+      expect(status.lastError).toBeNull();
+      expect(bucket.keys()).not.toContain(
+        artifactObjectKey("member_recovered_gc", previousArtifact!.ref.sha256),
+      );
+      expect(bucket.keys()).toContain(previousVaultRef.key);
+      expect(bucket.keys()).toContain(previousAgentRef.key);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -556,6 +731,172 @@ describe("HostedUserRunner", () => {
 
     expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
     expect(status.bundleRefs.vault?.size).toBe("vault-final".length);
+  });
+
+  it("keeps a successful dispatch green when artifact cleanup deletes fail during commit and finalize transitions", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-cleanup-failure-"));
+
+    try {
+      const bundleStore = createHostedBundleStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+      });
+      const artifactStore = createHostedArtifactStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        userId: "member_cleanup_failure",
+      });
+      const previousVaultRoot = path.join(workspaceRoot, "previous-vault");
+      const committedVaultRoot = path.join(workspaceRoot, "committed-vault");
+      const finalVaultRoot = path.join(workspaceRoot, "final-vault");
+      const previousArtifactPath = path.join(previousVaultRoot, "raw", "captures", "previous.jpg");
+      const committedArtifactPath = path.join(committedVaultRoot, "raw", "captures", "committed.jpg");
+
+      await mkdir(path.dirname(previousArtifactPath), { recursive: true });
+      await mkdir(path.dirname(committedArtifactPath), { recursive: true });
+      await mkdir(finalVaultRoot, { recursive: true });
+      await writeFile(path.join(previousVaultRoot, "vault.json"), "{\"stage\":\"previous\"}\n");
+      await writeFile(previousArtifactPath, Buffer.from("previous-artifact\n", "utf8"));
+      await writeFile(path.join(committedVaultRoot, "vault.json"), "{\"stage\":\"committed\"}\n");
+      await writeFile(committedArtifactPath, Buffer.from("committed-artifact\n", "utf8"));
+      await writeFile(path.join(finalVaultRoot, "vault.json"), "{\"stage\":\"final\"}\n");
+
+      const previousVaultBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (artifact) => {
+          const ref = {
+            byteSize: artifact.bytes.byteLength,
+            sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
+          };
+          await artifactStore.writeArtifact(ref.sha256, artifact.bytes);
+          return ref;
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: previousVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const committedVaultBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (artifact) => {
+          const ref = {
+            byteSize: artifact.bytes.byteLength,
+            sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
+          };
+          await artifactStore.writeArtifact(ref.sha256, artifact.bytes);
+          return ref;
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: committedVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const finalVaultBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: finalVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const [previousArtifact] = listHostedBundleArtifacts({
+        bytes: previousVaultBundle!,
+        expectedKind: "vault",
+      });
+      const [committedArtifact] = listHostedBundleArtifacts({
+        bytes: committedVaultBundle!,
+        expectedKind: "vault",
+      });
+      const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
+      const previousAgentRef = await bundleStore.writeBundle(
+        "agent-state",
+        new TextEncoder().encode("agent-state-previous"),
+      );
+      const queueStore = new (await import("../src/user-runner/runner-queue-store.js")).RunnerQueueStore(
+        storage.state,
+      );
+      await queueStore.bootstrapUser("member_cleanup_failure");
+      await queueStore.compareAndSwapBundleRefs({
+        expectedVersions: {
+          agentState: 0,
+          vault: 0,
+        },
+        nextBundleRefs: {
+          agentState: previousAgentRef,
+          vault: previousVaultRef,
+        },
+      });
+
+      const deleteArtifactSpy = vi.spyOn(bucket.api, "delete").mockImplementation(async (key: string) => {
+        if (key.includes("/artifacts/")) {
+          throw new Error("artifact delete failed");
+        }
+
+        return undefined;
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url, init) => {
+          await commitResultForRunnerRequest({
+            bucket,
+            environment,
+            payload: createRunnerSuccessPayload({
+              agentState: Buffer.from("agent-state-committed").toString("base64"),
+              summary: "committed",
+              vault: encodeHostedBundleBase64(committedVaultBundle),
+            }),
+            requestBody: JSON.parse(String(init?.body)),
+          });
+
+          return new Response(JSON.stringify(createRunnerSuccessPayload({
+            agentState: Buffer.from("agent-state-final").toString("base64"),
+            summary: "final",
+            vault: encodeHostedBundleBase64(finalVaultBundle),
+          })), {
+            status: 200,
+          });
+        }),
+      );
+      const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+      const status = await runner.dispatch({
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_cleanup_failure",
+        },
+        eventId: "evt_cleanup_failure",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      });
+
+      expect(status.lastError).toBeNull();
+      expect(status.pendingEventCount).toBe(0);
+      expect(status.bundleRefs.agentState?.size).toBe("agent-state-final".length);
+      expect(status.bundleRefs.vault?.size).toBe(finalVaultBundle!.byteLength);
+      expect(bucket.keys()).toContain(
+        `users/member_cleanup_failure/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
+      );
+      expect(bucket.keys()).toContain(
+        `users/member_cleanup_failure/artifacts/${committedArtifact!.ref.sha256}.artifact.bin`,
+      );
+      expect(
+        deleteArtifactSpy.mock.calls
+          .map(([key]) => String(key))
+          .filter((key) => key.includes("/artifacts/")),
+      ).toEqual(expect.arrayContaining([
+        `users/member_cleanup_failure/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
+        `users/member_cleanup_failure/artifacts/${committedArtifact!.ref.sha256}.artifact.bin`,
+      ]));
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
   });
 
   it("recovers finalized bundle refs when the runner fails after durable finalize but before returning", async () => {

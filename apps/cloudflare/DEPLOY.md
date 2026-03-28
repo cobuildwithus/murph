@@ -74,7 +74,7 @@ Set these in the selected GitHub environment as variables:
 
 Optional tuning variables:
 
-- `CF_BUNDLE_KEY_ID` (default `v1`)
+- `CF_BUNDLE_KEY_ID` (default `v1`; metadata only today, because runtime reads still support one active key id at a time)
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `basic`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
@@ -121,6 +121,7 @@ Both control tokens are treated as required runtime inputs now, not just deploy-
 
 - missing `HOSTED_EXECUTION_CONTROL_TOKEN` makes `/internal/users/:userId/{status,run,env}` fail closed
 - missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` makes native container invoke requests fail closed before the runner job starts
+- changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place is still unsupported; the runtime now fails closed on `keyId` mismatch instead of pretending multi-key decryption exists
 
 ### Optional provider/runtime secrets
 
