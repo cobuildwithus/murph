@@ -53,7 +53,10 @@ export async function prepareDeviceProviderSnapshotImport(
     throw new TypeError(`device provider "${request.provider}" is not registered`);
   }
 
-  const normalized = await adapter.normalizeSnapshot(request.snapshot);
+  const snapshot = adapter.parseSnapshot
+    ? adapter.parseSnapshot(request.snapshot)
+    : request.snapshot;
+  const normalized = await adapter.normalizeSnapshot(snapshot);
 
   return stripUndefined({
     vaultRoot: request.vaultRoot,

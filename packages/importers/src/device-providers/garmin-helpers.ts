@@ -1,3 +1,9 @@
+import {
+  SLEEP_STAGES,
+  extractIsoDatePrefix,
+  normalizeIanaTimeZone,
+} from "@murph/contracts";
+
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {
   asArray,
@@ -109,6 +115,46 @@ export function firstIsoFromPaths(record: PlainObject | undefined, paths: readon
   return firstIso(...paths.map((path) => readPath(record, path)));
 }
 
+export function firstDayKey(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+
+    const dayKey = extractIsoDatePrefix(candidate.trim());
+
+    if (dayKey) {
+      return dayKey;
+    }
+  }
+
+  return undefined;
+}
+
+export function firstDayKeyFromPaths(record: PlainObject | undefined, paths: readonly string[]): string | undefined {
+  return firstDayKey(...paths.map((path) => readPath(record, path)));
+}
+
+export function firstTimeZone(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") {
+      continue;
+    }
+
+    const normalized = normalizeIanaTimeZone(candidate);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
+export function firstTimeZoneFromPaths(record: PlainObject | undefined, paths: readonly string[]): string | undefined {
+  return firstTimeZone(...paths.map((path) => readPath(record, path)));
+}
+
 export function firstNumber(...candidates: unknown[]): number | undefined {
   for (const candidate of candidates) {
     const numeric = finiteNumber(candidate);
@@ -175,6 +221,16 @@ export function gramsToKilograms(value: unknown): number | undefined {
   return Math.max(0, numeric / 1000);
 }
 
+export function normalizePositiveIntegerMinutes(value: unknown): number | undefined {
+  const numeric = finiteNumber(value);
+
+  if (numeric === undefined || numeric <= 0) {
+    return undefined;
+  }
+
+  return Math.max(1, Math.round(numeric));
+}
+
 export function normalizeActivityType(value: unknown): string {
   return slugify(value, "activity");
 }
@@ -199,13 +255,20 @@ export function normalizeSleepStage(value: unknown): string | undefined {
   switch (normalized) {
     case "slow-wave":
     case "slow-wave-sleep":
+    case "deep-sleep":
       return "deep";
     case "rapid-eye-movement":
+    case "rem-sleep":
       return "rem";
     case "wake":
+    case "awake-time":
       return "awake";
+    case "light-sleep":
+      return "light";
     default:
-      return normalized;
+      return SLEEP_STAGES.includes(normalized as (typeof SLEEP_STAGES)[number])
+        ? normalized
+        : undefined;
   }
 }
 
@@ -285,4 +348,21 @@ export function inferGarminFileMediaType(format: string, fileName?: string): str
     default:
       return fileName && fileName.endsWith(".json") ? "application/json" : undefined;
   }
+}
+
+export function isStructuredGarminPayload(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return true;
+  }
+
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  if (value instanceof Date || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }

@@ -15,7 +15,7 @@ Owns ingestion adapters for documents, meals, and sample streams. Importers may 
 
 Provider transport stays separate from normalization. Each adapter accepts one provider snapshot, preserves the upstream payloads as raw artifacts, and only promotes fields that fit the current canonical device batch surface.
 
-The Garmin adapter keeps one provider key, `garmin`, and expects a snapshot with optional `profile`, `dailySummaries`, `epochSummaries`, `sleeps`, `activities`, `activityFiles`, `womenHealth`, and `deletions` collections. Unsupported or file-shaped Garmin payloads are still retained as raw artifacts so future FIT/GPX/TCX expansion can happen without changing the importer seam.
+The Garmin adapter keeps one provider key, `garmin`, and expects a snapshot object with optional `profile`, `dailySummaries`, `epochSummaries`, `sleeps`, `activities`, `activityFiles`, `womenHealth`, and `deletions` collections. It validates those known collection shapes at the adapter boundary, preserves unsupported top-level sections as raw `snapshot-section:*` artifacts, and treats the legacy `files` alias conservatively: only entries clearly tied to an activity are normalized as activity files, while descriptor-only entries stay honest JSON metadata artifacts instead of synthetic `.fit` / `.gpx` / `.tcx` evidence.
 
 ## Core Integration Seam
 

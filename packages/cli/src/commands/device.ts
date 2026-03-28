@@ -17,7 +17,7 @@ import type { VaultCliServices } from '../vault-cli-services.js'
 const providerNameSchema = z
   .string()
   .min(1)
-  .describe('Provider key such as whoop, garmin, or oura.')
+  .describe('Live device-sync provider key such as whoop or oura. Garmin snapshot imports use the importer path instead.')
 
 const accountIdSchema = z
   .string()

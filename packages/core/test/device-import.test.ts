@@ -261,6 +261,95 @@ test("importDeviceBatch writes inline raw integration payloads and canonical rec
   });
 });
 
+test("importDeviceBatch preserves Garmin-style explicit day keys in non-UTC vaults", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-import-garmin-daykey");
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-12T12:00:00.000Z",
+    timezone: "America/Los_Angeles",
+  });
+
+  const result = await importDeviceBatch({
+    vaultRoot,
+    provider: "garmin",
+    importedAt: "2026-03-16T12:00:00.000Z",
+    source: "device",
+    events: [
+      {
+        kind: "observation",
+        occurredAt: "2026-03-15T00:00:00.000Z",
+        recordedAt: "2026-03-15T00:00:00.000Z",
+        dayKey: "2026-03-15",
+        title: "Garmin daily steps",
+        rawArtifactRoles: ["daily-summary:2026-03-15"],
+        externalRef: {
+          system: "garmin",
+          resourceType: "daily-summary",
+          resourceId: "2026-03-15",
+          version: "2026-03-15T00:00:00.000Z",
+          facet: "daily-steps",
+        },
+        fields: {
+          metric: "daily-steps",
+          value: 5432,
+          unit: "count",
+        },
+      },
+    ],
+    samples: [
+      {
+        stream: "sleep_stage",
+        recordedAt: "2026-03-15T00:00:30.000Z",
+        unit: "stage",
+        quality: "normalized",
+        externalRef: {
+          system: "garmin",
+          resourceType: "sleep",
+          resourceId: "sleep-1",
+          version: "2026-03-15T00:01:35.000Z",
+          facet: "sleep-stage-light",
+        },
+        sample: {
+          stage: "light",
+          startAt: "2026-03-15T00:00:30.000Z",
+          endAt: "2026-03-15T00:01:35.000Z",
+          durationMinutes: 1,
+        },
+      },
+    ],
+    rawArtifacts: [
+      {
+        role: "daily-summary:2026-03-15",
+        fileName: "daily-summary-2026-03-15.json",
+        mediaType: "application/json",
+        content: {
+          summaryDate: "2026-03-15",
+          steps: 5432,
+        },
+      },
+      {
+        role: "activity-file-descriptor:activity-1:fit",
+        fileName: "activity-1-fit-descriptor.json",
+        mediaType: "application/json",
+        content: {
+          activityId: "activity-1",
+          fileType: "fit",
+        },
+      },
+    ],
+  });
+
+  assert.equal(result.events[0]?.dayKey, "2026-03-15");
+  assert.equal(result.events[0]?.timeZone, "America/Los_Angeles");
+  assert.equal(result.samples[0]?.dayKey, "2026-03-14");
+  assert.equal(result.samples[0]?.timeZone, "America/Los_Angeles");
+  assert.ok(
+    result.rawArtifacts.some(
+      (artifact) => artifact.relativePath.endsWith("02-activity-1-fit-descriptor.json"),
+    ),
+  );
+});
+
 test("importDeviceBatch keeps canonical manifest provenance authoritative over caller overrides", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-provenance");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });

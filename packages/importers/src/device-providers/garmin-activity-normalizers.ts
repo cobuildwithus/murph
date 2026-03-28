@@ -13,10 +13,12 @@ import {
   formatActivityLabel,
   inferGarminFileFormat,
   inferGarminFileMediaType,
+  isStructuredGarminPayload,
   makeGarminExternalRef,
   metersPerSecondToKilometersPerHour,
   metersToKilometers,
   normalizeActivityType,
+  normalizePositiveIntegerMinutes,
   pushGarminArtifact,
   secondsToMinutes,
 } from "./garmin-helpers.ts";
@@ -83,6 +85,27 @@ function nextActivityFileRole(
   };
 }
 
+function nextActivityFileDescriptorRole(
+  activityId: string | undefined,
+  format: string,
+  rawArtifacts: readonly DeviceRawArtifactPayload[],
+  anonymousCount: number,
+): { role: string; fileName: string } {
+  const baseRole = activityId
+    ? `activity-file-descriptor:${activityId}:${format}`
+    : `activity-file-descriptor:unknown:${format}`;
+  const ordinal = rawArtifacts.filter((artifact) => artifact.role.startsWith(baseRole)).length + 1;
+  const role = ordinal === 1 ? baseRole : `${baseRole}-${ordinal}`;
+  const baseFileName = activityId
+    ? `${activityId}-${format}-descriptor`
+    : `activity-file-${anonymousCount || rawArtifacts.length + 1}-${format}-descriptor`;
+
+  return {
+    role,
+    fileName: ordinal === 1 ? `${baseFileName}.json` : `${baseFileName}-${ordinal}.json`,
+  };
+}
+
 export function normalizeGarminActivityFiles(
   rawArtifacts: DeviceRawArtifactPayload[],
   activityFiles: readonly unknown[],
@@ -101,6 +124,41 @@ export function normalizeGarminActivityFiles(
     const format = inferGarminFileFormat(file);
     const { role, nextAnonymousCount } = nextActivityFileRole(activityId, format, activityFileRoles, anonymousCount);
     anonymousCount = nextAnonymousCount;
+    const extractedContent = firstDefined(file.content, file.fileContent, file.payload, file.data);
+    const hasFileContent = extractedContent !== undefined && extractedContent !== null;
+    const descriptorOnly =
+      !hasFileContent ||
+      (isStructuredGarminPayload(extractedContent) && format !== "json");
+
+    if (descriptorOnly) {
+      const descriptor = nextActivityFileDescriptorRole(activityId, format, rawArtifacts, anonymousCount);
+      const descriptorMetadata = stripEmptyObject({
+        activityId,
+        intendedFileType: format,
+        intendedFileName: firstStringFromPaths(file, ["fileName", "filename", "name"]),
+        intendedMediaType:
+          firstStringFromPaths(file, ["mediaType", "mimeType", "contentType"]) ??
+          inferGarminFileMediaType(format),
+        checksum: firstStringFromPaths(file, ["checksum", "sha256", "md5"]),
+        downloadUrl: firstStringFromPaths(file, ["downloadUrl", "url", "sourceUrl"]),
+        downloadedAt: firstIsoFromPaths(file, ["downloadedAt", "createdAt", "timestamp"]),
+        ...(typeof file.metadata === "object" && file.metadata && !Array.isArray(file.metadata)
+          ? (file.metadata as Record<string, unknown>)
+          : {}),
+      });
+
+      pushGarminArtifact(
+        rawArtifacts,
+        descriptor.role,
+        descriptor.fileName,
+        file,
+        {
+          mediaType: "application/json",
+          metadata: descriptorMetadata,
+        },
+      );
+      continue;
+    }
 
     const fileName =
       firstStringFromPaths(file, ["fileName", "filename", "name"]) ??
@@ -108,7 +166,6 @@ export function normalizeGarminActivityFiles(
     const mediaType =
       firstStringFromPaths(file, ["mediaType", "mimeType", "contentType"]) ??
       inferGarminFileMediaType(format, fileName);
-    const content = firstDefined(file.content, file.fileContent, file.payload, file.data) ?? file;
     const metadata = stripEmptyObject({
       activityId,
       fileType: format,
@@ -124,7 +181,7 @@ export function normalizeGarminActivityFiles(
       rawArtifacts,
       role,
       fileName,
-      content,
+      extractedContent,
       {
         mediaType,
         metadata,
@@ -162,16 +219,18 @@ export function normalizeGarminActivities(
       firstIsoFromPaths(activity, ["updatedAt", "timestamp", "recordedAt"]) ??
       recordedAt;
     const durationMinutes =
-      firstNumberFromPaths(activity, ["durationMinutes"]) ??
-      secondsToMinutes(firstNumberFromPaths(activity, ["durationSeconds", "durationInSeconds"])) ??
-      minutesBetween(startAt, endAt);
+      normalizePositiveIntegerMinutes(firstNumberFromPaths(activity, ["durationMinutes"])) ??
+      normalizePositiveIntegerMinutes(
+        secondsToMinutes(firstNumberFromPaths(activity, ["durationSeconds", "durationInSeconds"])),
+      ) ??
+      normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
     const distanceMeters = firstNumberFromPaths(activity, ["distanceMeters", "distanceInMeters", "distance"]);
     const distanceKm = metersToKilometers(distanceMeters);
     const activityLabel = formatActivityLabel(
       firstStringFromPaths(activity, ["activityTypeLabel", "activityName", "activityType", "sportName", "type"]),
     );
     const activityType = normalizeActivityType(
-      firstStringFromPaths(activity, ["activityType", "type", "sportName", "activityName"]),
+      firstStringFromPaths(activity, ["activityType", "type", "sportName"]),
     );
     const role = `activity:${activityId}`;
     const rawArtifactRoles = [role, ...(activityFileRoles.get(activityId) ?? [])];

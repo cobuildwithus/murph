@@ -6,14 +6,17 @@ import {
 } from "./shared-normalization.ts";
 import {
   asObjectArray,
+  firstDayKeyFromPaths,
   firstIdentifierFromPaths,
   firstIsoFromPaths,
   firstNumberFromPaths,
   firstStringFromPaths,
+  firstTimeZoneFromPaths,
   gramsToKilograms,
   makeGarminExternalRef,
   millisecondsToMinutes,
   normalizeSleepStage,
+  normalizePositiveIntegerMinutes,
   pushGarminArtifact,
   secondsToMinutes,
 } from "./garmin-helpers.ts";
@@ -40,6 +43,11 @@ interface GarminObservationSpec {
   resolveValue(record: PlainObject): number | undefined;
 }
 
+interface GarminCalendarBucketContext {
+  dayKey?: string;
+  timeZone?: string;
+}
+
 function pushGarminObservation(
   context: GarminHealthNormalizationContext,
   resourceType: string,
@@ -50,6 +58,7 @@ function pushGarminObservation(
   recordedAt: string,
   record: PlainObject,
   observation: GarminObservationSpec,
+  bucketContext: GarminCalendarBucketContext = {},
 ): void {
   pushObservationEvent(context.events, {
     metric: observation.metric,
@@ -57,6 +66,8 @@ function pushGarminObservation(
     unit: observation.unit,
     occurredAt,
     recordedAt,
+    dayKey: bucketContext.dayKey,
+    timeZone: bucketContext.timeZone,
     title: observation.title,
     rawArtifactRoles: [role],
     externalRef: makeGarminExternalRef(resourceType, resourceId, version, observation.facet),
@@ -83,10 +94,14 @@ function pushSleepStageSample(
     "end_timestamp",
   ]);
   const durationMinutes =
-    firstNumberFromPaths(stageRecord, ["durationMinutes"]) ??
-    secondsToMinutes(firstNumberFromPaths(stageRecord, ["durationSeconds", "durationInSeconds"])) ??
-    millisecondsToMinutes(firstNumberFromPaths(stageRecord, ["durationMillis", "durationInMilliseconds"])) ??
-    minutesBetween(startAt, endAt);
+    normalizePositiveIntegerMinutes(firstNumberFromPaths(stageRecord, ["durationMinutes"])) ??
+    normalizePositiveIntegerMinutes(
+      secondsToMinutes(firstNumberFromPaths(stageRecord, ["durationSeconds", "durationInSeconds"])),
+    ) ??
+    normalizePositiveIntegerMinutes(
+      millisecondsToMinutes(firstNumberFromPaths(stageRecord, ["durationMillis", "durationInMilliseconds"])),
+    ) ??
+    normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
 
   if (!stage || !startAt || !endAt || durationMinutes === undefined) {
     return;
@@ -99,7 +114,7 @@ function pushSleepStageSample(
       source: "device",
       quality: "normalized",
       unit: "stage",
-      externalRef: makeGarminExternalRef("sleep", sleepId, version, `sleep-stage:${stage}`),
+      externalRef: makeGarminExternalRef("sleep", sleepId, version, `sleep-stage-${stage}`),
       sample: {
         recordedAt: startAt,
         stage,
@@ -368,8 +383,21 @@ export function normalizeGarminDailySummaries(
     const summaryId =
       firstIdentifierFromPaths(summary, ["summaryId", "id", "calendarDate", "day", "date", "summaryDate"]) ??
       `daily-summary-${context.events.length + 1}`;
+    const bucketContext = {
+      dayKey: firstDayKeyFromPaths(summary, ["calendarDate", "day", "date", "summaryDate"]),
+      timeZone: firstTimeZoneFromPaths(summary, ["timeZone", "timezone", "time_zone"]),
+    } satisfies GarminCalendarBucketContext;
     const recordedAt =
-      firstIsoFromPaths(summary, ["timestamp", "summaryTimestamp", "recordedAt", "updatedAt", "calendarDate", "day", "date"]) ??
+      firstIsoFromPaths(summary, [
+        "timestamp",
+        "summaryTimestamp",
+        "recordedAt",
+        "updatedAt",
+        "calendarDate",
+        "day",
+        "date",
+        "summaryDate",
+      ]) ??
       context.importedAt;
     const version =
       firstIsoFromPaths(summary, ["updatedAt", "summaryTimestamp", "timestamp"]) ??
@@ -394,6 +422,7 @@ export function normalizeGarminDailySummaries(
         recordedAt,
         summary,
         observation,
+        bucketContext,
       );
     }
   }
@@ -521,10 +550,14 @@ export function normalizeGarminSleeps(
       firstIsoFromPaths(sleep, ["updatedAt", "timestamp", "recordedAt"]) ??
       recordedAt;
     const durationMinutes =
-      firstNumberFromPaths(sleep, ["durationMinutes"]) ??
-      secondsToMinutes(firstNumberFromPaths(sleep, ["durationSeconds", "sleepDurationSeconds"])) ??
-      millisecondsToMinutes(firstNumberFromPaths(sleep, ["durationMillis", "sleepDurationMillis"])) ??
-      minutesBetween(startAt, endAt);
+      normalizePositiveIntegerMinutes(firstNumberFromPaths(sleep, ["durationMinutes"])) ??
+      normalizePositiveIntegerMinutes(
+        secondsToMinutes(firstNumberFromPaths(sleep, ["durationSeconds", "sleepDurationSeconds"])),
+      ) ??
+      normalizePositiveIntegerMinutes(
+        millisecondsToMinutes(firstNumberFromPaths(sleep, ["durationMillis", "sleepDurationMillis"])),
+      ) ??
+      normalizePositiveIntegerMinutes(minutesBetween(startAt, endAt));
     const stages = asObjectArray(sleep.stages ?? sleep.sleepStages ?? sleep.sleepLevels);
     const role = `sleep:${sleepId}`;
 
@@ -748,6 +781,10 @@ export function normalizeGarminWomenHealth(
     const resourceId =
       firstIdentifierFromPaths(record, ["recordId", "id", "calendarDate", "date", "recordedAt"]) ??
       `women-health-${context.events.length + 1}`;
+    const bucketContext = {
+      dayKey: firstDayKeyFromPaths(record, ["calendarDate", "date"]),
+      timeZone: firstTimeZoneFromPaths(record, ["timeZone", "timezone", "time_zone"]),
+    } satisfies GarminCalendarBucketContext;
     const recordedAt =
       firstIsoFromPaths(record, ["recordedAt", "timestamp", "calendarDate", "date"]) ??
       context.importedAt;
@@ -774,6 +811,7 @@ export function normalizeGarminWomenHealth(
         recordedAt,
         record,
         observation,
+        bucketContext,
       );
     }
   }
