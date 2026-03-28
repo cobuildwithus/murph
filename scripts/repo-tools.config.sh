@@ -63,8 +63,10 @@ export COBUILD_AUDIT_CONTEXT_PREFIX='murph-audit'
 export COBUILD_AUDIT_CONTEXT_TITLE='Murph Audit Bundle'
 export COBUILD_AUDIT_CONTEXT_REPO_LABEL='murph'
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
+  ".dockerignore" \
   "AGENTS.md" \
   "ARCHITECTURE.md" \
+  "Dockerfile.cloudflare-hosted-runner" \
   "README.md" \
   "package.json" \
   "pnpm-workspace.yaml" \
