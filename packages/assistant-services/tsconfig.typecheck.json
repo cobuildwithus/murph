@@ -2,15 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "composite": false,
     "incremental": false
   },
-  "references": [
-    {
-      "path": "../cli/tsconfig.build.json"
-    }
-  ],
   "include": [
     "src/**/*.ts"
   ],

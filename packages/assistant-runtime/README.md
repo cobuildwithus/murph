@@ -17,4 +17,4 @@ Current non-goals:
 - Ink/UI surfaces
 - replacing the canonical vault or hosted bundle model
 
-The current implementation still composes the existing assistant/runtime exports from `murph`, but the hosted/runtime boundary is now this package rather than the CLI package itself.
+The current implementation now imports its assistant/inbox/vault service seams through `@murph/assistant-services`, which is the hosted-facing package boundary. That package still carries some compatibility wrappers while the underlying headless service ownership continues to move out of CLI-owned modules.

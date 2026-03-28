@@ -11,6 +11,9 @@
   ],
   "references": [
     {
+      "path": "../assistant-services"
+    },
+    {
       "path": "../hosted-execution"
     },
     {
@@ -27,9 +30,6 @@
     },
     {
       "path": "../parsers"
-    },
-    {
-      "path": "../cli"
     }
   ],
   "exclude": [

@@ -18,6 +18,46 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./automation": {
+      "types": "./dist/automation.d.ts",
+      "import": "./dist/automation.js",
+      "default": "./dist/automation.js"
+    },
+    "./cron": {
+      "types": "./dist/cron.d.ts",
+      "import": "./dist/cron.js",
+      "default": "./dist/cron.js"
+    },
+    "./inbox-services": {
+      "types": "./dist/inbox-services.d.ts",
+      "import": "./dist/inbox-services.js",
+      "default": "./dist/inbox-services.js"
+    },
+    "./operator-config": {
+      "types": "./dist/operator-config.d.ts",
+      "import": "./dist/operator-config.js",
+      "default": "./dist/operator-config.js"
+    },
+    "./outbox": {
+      "types": "./dist/outbox.d.ts",
+      "import": "./dist/outbox.js",
+      "default": "./dist/outbox.js"
+    },
+    "./status": {
+      "types": "./dist/status.d.ts",
+      "import": "./dist/status.js",
+      "default": "./dist/status.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "import": "./dist/store.js",
+      "default": "./dist/store.js"
+    },
+    "./vault-services": {
+      "types": "./dist/vault-services.d.ts",
+      "import": "./dist/vault-services.js",
+      "default": "./dist/vault-services.js"
     }
   },
   "files": [

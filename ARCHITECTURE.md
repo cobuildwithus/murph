@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-03-27
+Last verified: 2026-03-28
 
 ## Module Map
 
@@ -13,6 +13,7 @@ Last verified: 2026-03-27
 - `packages/inboxd`: inbox capture ingestion/runtime package that persists canonical raw inbox evidence while keeping inbox-only cursors, source-specific checkpoints, capture indexes, and attachment job state in local SQLite state; current first-class connectors cover iMessage, Telegram, Linq webhook delivery, and AgentMail-backed email
 - `packages/parsers`: local-first attachment parsing, parser-service helpers, and derived artifact publication under `derived/inbox/**`
 - `packages/query`: read helpers, export-pack generation, and the optional lexical search index over canonical vault data
+- `packages/assistant-services`: hosted-facing assistant/inbox/vault service boundary that `packages/assistant-runtime` imports from, including the current migration seam for headless assistant service composition plus hosted-safe operator-home helpers
 - `packages/assistant-runtime`: headless hosted assistant execution surface that exposes typed one-shot inbox/bootstrap/assistant/outbox/device-sync/share-import services behind explicit runtime context instead of ambient CLI process state
 - `packages/web`: local-only Next.js observability app that reads the selected vault on the server through the query package, preferring explicit `VAULT` selection and otherwise falling back to the saved CLI default vault, and may initiate device-auth control-plane actions against `packages/device-syncd`
 - `apps/web`: hosted Next.js integration control plane for Vercel-style deployments, backed by Postgres/Prisma for device OAuth sessions, encrypted token escrow, ownership mapping, webhook traces, sparse sync signals, a durable `execution_outbox` for Cloudflare-bound hosted execution intents, Linq recipient bindings, queued Linq webhook events, hosted onboarding webhook receipts with retry-side-effect state, Privy-backed hosted onboarding state, optional invoice-idempotent RevNet issuance records, one-time encrypted hosted share links, and local-agent pairing while keeping canonical health and inbox data out of the hosted tier

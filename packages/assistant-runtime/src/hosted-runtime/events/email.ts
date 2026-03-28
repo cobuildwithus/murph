@@ -1,9 +1,6 @@
 import {
-  createInboxPipeline,
   normalizeParsedEmailMessage,
-  openInboxRuntime,
   parseRawEmailMessage,
-  rebuildRuntimeFromVault,
 } from "@murph/inboxd";
 import {
   resolveHostedEmailSelfAddresses,
@@ -13,6 +10,7 @@ import {
 import {
   buildHostedRunnerEmailMessageUrl,
 } from "../../hosted-email.ts";
+import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 
 export async function ingestHostedEmailMessage(
   vaultRoot: string,
@@ -31,37 +29,19 @@ export async function ingestHostedEmailMessage(
     );
   }
 
-  const runtime = await openInboxRuntime({
-    vaultRoot,
+  const capture = await normalizeParsedEmailMessage({
+    accountAddress: dispatch.event.identityId,
+    accountId: dispatch.event.identityId,
+    message: parseRawEmailMessage(new Uint8Array(await response.arrayBuffer())),
+    selfAddresses: resolveHostedEmailSelfAddresses({
+      envelopeTo: dispatch.event.envelopeTo,
+      senderIdentity: dispatch.event.identityId,
+    }),
+    source: "email",
+    threadTarget: dispatch.event.threadTarget,
   });
-  let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
-  try {
-    await rebuildRuntimeFromVault({
-      runtime,
-      vaultRoot,
-    });
-    const capture = await normalizeParsedEmailMessage({
-      accountAddress: dispatch.event.identityId,
-      accountId: dispatch.event.identityId,
-      message: parseRawEmailMessage(new Uint8Array(await response.arrayBuffer())),
-      selfAddresses: resolveHostedEmailSelfAddresses({
-        envelopeTo: dispatch.event.envelopeTo,
-        senderIdentity: dispatch.event.identityId,
-      }),
-      source: "email",
-      threadTarget: dispatch.event.threadTarget,
-    });
-    pipeline = await createInboxPipeline({
-      runtime,
-      vaultRoot,
-    });
+  await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
     await pipeline.processCapture(capture);
-  } finally {
-    if (pipeline) {
-      pipeline.close();
-    } else {
-      runtime.close();
-    }
-  }
+  });
 }
