@@ -29,7 +29,7 @@ import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";
 import { listAssessments } from "../src/health/assessments.ts";
 import {
-  currentProfileRecordFromEntity,
+  resolveCurrentProfileRecord,
   selectAssessmentRecords,
   selectHistoryRecords,
   selectProfileSnapshotRecords,
@@ -612,13 +612,10 @@ test("dedicated health readers stay aligned with the shared canonical collector 
     );
     assert.deepEqual(
       await readCurrentProfile(vaultRoot),
-      collected.currentProfile
-        ? currentProfileRecordFromEntity(
-            collected.currentProfile,
-            collected.markdownByPath.get(collected.currentProfile.path) ??
-              collected.currentProfile.body,
-          )
-        : null,
+      resolveCurrentProfileRecord(
+        collected.currentProfile,
+        collected.markdownByPath,
+      ),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

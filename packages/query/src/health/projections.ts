@@ -8,6 +8,7 @@ import {
 } from "../canonical-entities.ts";
 import { compareByOccurredAtDescThenId, compareByRecordedOrImportedAtDescThenId } from "./comparators.ts";
 import {
+  buildCurrentProfileSnapshotSortFields,
   compareCurrentProfileSnapshotRecency,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.ts";
@@ -279,6 +280,18 @@ export function currentProfileRecordFromEntity(
   };
 }
 
+export function resolveCurrentProfileRecord(
+  entity: CanonicalEntity | null,
+  markdownByPath: ReadonlyMap<string, string>,
+): CurrentProfileQueryRecord | null {
+  return entity
+    ? currentProfileRecordFromEntity(
+        entity,
+        markdownByPath.get(entity.path) ?? entity.body,
+      )
+    : null;
+}
+
 export function buildCurrentProfileRecord(input: {
   snapshotId: string;
   updatedAt: string | null;
@@ -381,8 +394,8 @@ function matchesKindFilter(
 function profileSnapshotSortFields(
   snapshot: ProfileSnapshotQueryRecord,
 ): CurrentProfileSnapshotSortFields {
-  return {
-    snapshotId: snapshot.id,
-    snapshotTimestamp: snapshot.recordedAt ?? snapshot.capturedAt,
-  };
+  return buildCurrentProfileSnapshotSortFields(
+    snapshot.id,
+    snapshot.recordedAt ?? snapshot.capturedAt,
+  );
 }

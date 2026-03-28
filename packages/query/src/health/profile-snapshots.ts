@@ -11,7 +11,7 @@ import {
 import {
   buildCurrentProfileRecord,
   compareSnapshots,
-  currentProfileRecordFromEntity,
+  resolveCurrentProfileRecord,
   selectProfileSnapshotRecords,
   toCurrentProfileRecord,
   toProfileSnapshotRecord,
@@ -86,12 +86,10 @@ async function readCurrentProfileState(
   );
 
   return {
-    currentProfile: currentProfile.entity
-      ? currentProfileRecordFromEntity(
-          currentProfile.entity,
-          markdownByPath.get(currentProfile.entity.path) ?? currentProfile.entity.body,
-        )
-      : null,
+    currentProfile: resolveCurrentProfileRecord(
+      currentProfile.entity,
+      markdownByPath,
+    ),
     snapshots,
   };
 }

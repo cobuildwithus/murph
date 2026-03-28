@@ -8,6 +8,7 @@ import {
   type CanonicalEntity,
 } from "../canonical-entities.ts";
 import {
+  buildCurrentProfileSnapshotSortFields,
   resolveCurrentProfileDocument,
   resolveCurrentProfileSnapshot,
   type CurrentProfileDocumentOutcome,
@@ -226,10 +227,10 @@ function buildCurrentProfileRetainOptions(
 function canonicalProfileSnapshotSortFields(
   snapshot: CanonicalEntity,
 ): CurrentProfileSnapshotSortFields {
-  return {
-    snapshotId: snapshot.entityId,
-    snapshotTimestamp: snapshot.occurredAt ?? snapshot.date,
-  };
+  return buildCurrentProfileSnapshotSortFields(
+    snapshot.entityId,
+    snapshot.occurredAt ?? snapshot.date,
+  );
 }
 
 function currentProfileSnapshotId(
