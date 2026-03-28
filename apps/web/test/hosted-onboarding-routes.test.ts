@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
+    telegramBotUsername: null as string | null,
+    telegramWebhookSecret: null as string | null,
   },
   revokeHostedSessionFromRequest: vi.fn(),
   verifyIdentityToken: vi.fn(),
@@ -109,7 +111,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
-          cookie: "privy-id-token=identity-token; hb_hosted_session=session-token",
+          cookie: "privy-id-token=identity-token; hosted_session=session-token",
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -406,7 +408,7 @@ describe("hosted onboarding routes", () => {
   it("revokes the current hosted session record on logout before clearing the cookie", async () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/session/logout", {
       headers: {
-        cookie: "hb_hosted_session=session-token",
+        cookie: "hosted_session=session-token",
       },
       method: "POST",
     });

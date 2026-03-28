@@ -10,6 +10,14 @@ export interface HostedPrivyEmailAccount {
   verifiedAt: number | null;
 }
 
+export interface HostedPrivyTelegramAccount {
+  firstName: string | null;
+  lastName: string | null;
+  photoUrl: string | null;
+  telegramUserId: string;
+  username: string | null;
+}
+
 export interface HostedPrivyWalletAccount {
   address: string;
   chainType: string | null;
@@ -20,6 +28,7 @@ export interface HostedPrivyWalletAccount {
 export interface HostedPrivyLinkedAccountContainer {
   linkedAccounts?: unknown;
   linked_accounts?: unknown;
+  telegram?: unknown;
 }
 
 export interface HostedPrivyLinkedAccountState {
@@ -167,6 +176,34 @@ export function extractHostedPrivyVerifiedEmailAccount(
   return bestMatch;
 }
 
+export function extractHostedPrivyTelegramAccount(
+  input: HostedPrivyLinkedAccountContainer | null | undefined,
+): HostedPrivyTelegramAccount | null {
+  if (input?.telegram && typeof input.telegram === "object" && !Array.isArray(input.telegram)) {
+    const directAccount = coerceHostedPrivyTelegramAccount(input.telegram as Record<string, unknown>);
+
+    if (directAccount) {
+      return directAccount;
+    }
+  }
+
+  const linkedAccounts = resolveHostedPrivyLinkedAccounts(input);
+
+  for (const account of linkedAccounts) {
+    if (!account || account.type !== "telegram") {
+      continue;
+    }
+
+    const telegramAccount = coerceHostedPrivyTelegramAccount(account);
+
+    if (telegramAccount) {
+      return telegramAccount;
+    }
+  }
+
+  return null;
+}
+
 export function extractHostedPrivyWalletAccount(
   linkedAccounts: readonly PrivyLinkedAccountLike[],
   preferredChainType: string | null = "ethereum",
@@ -215,6 +252,25 @@ export function extractHostedPrivyWalletAccount(
   return walletAccounts[0] ?? null;
 }
 
+function coerceHostedPrivyTelegramAccount(
+  record: Record<string, unknown>,
+): HostedPrivyTelegramAccount | null {
+  const telegramUserId = firstString(record, ["telegram_user_id", "telegramUserId", "id"])
+    ?? firstNumberishString(record, ["telegram_user_id", "telegramUserId", "id"]);
+
+  if (!telegramUserId) {
+    return null;
+  }
+
+  return {
+    firstName: firstString(record, ["first_name", "firstName"]),
+    lastName: firstString(record, ["last_name", "lastName"]),
+    photoUrl: firstString(record, ["photo_url", "photoUrl"]),
+    telegramUserId,
+    username: firstString(record, ["username"]),
+  };
+}
+
 function parseLinkedAccounts(input: unknown): PrivyLinkedAccountLike[] {
   if (Array.isArray(input)) {
     return input.filter((value): value is PrivyLinkedAccountLike => Boolean(value) && typeof value === "object");
@@ -256,6 +312,22 @@ function firstString(record: Record<string, unknown>, keys: readonly string[]): 
 
     if (typeof value === "string" && value.trim()) {
       return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function firstNumberishString(record: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+
+    if (typeof value === "bigint") {
+      return String(value);
     }
   }
 

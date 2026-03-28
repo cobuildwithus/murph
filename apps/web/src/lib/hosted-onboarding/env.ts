@@ -25,6 +25,8 @@ export interface HostedOnboardingEnvironment {
   stripePriceId: string | null;
   stripeSecretKey: string | null;
   stripeWebhookSecret: string | null;
+  telegramBotUsername: string | null;
+  telegramWebhookSecret: string | null;
 }
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
@@ -78,7 +80,7 @@ export function readHostedOnboardingEnvironment(
     revnetTerminalAddress: revnet.terminalAddress,
     revnetTreasuryPrivateKey: revnet.treasuryPrivateKey,
     revnetWeiPerStripeMinorUnit: revnet.weiPerStripeMinorUnit,
-    sessionCookieName: readEnv(source, ["HOSTED_ONBOARDING_SESSION_COOKIE_NAME"]) ?? "hb_hosted_session",
+    sessionCookieName: readEnv(source, ["HOSTED_ONBOARDING_SESSION_COOKIE_NAME"]) ?? "hosted_session",
     sessionTtlDays: readPositiveInteger(
       readEnv(source, ["HOSTED_ONBOARDING_SESSION_TTL_DAYS"]),
       30,
@@ -88,6 +90,8 @@ export function readHostedOnboardingEnvironment(
     stripePriceId: readEnv(source, ["HOSTED_ONBOARDING_STRIPE_PRICE_ID"]),
     stripeSecretKey: readEnv(source, ["STRIPE_SECRET_KEY"]),
     stripeWebhookSecret: readEnv(source, ["STRIPE_WEBHOOK_SECRET"]),
+    telegramBotUsername: readEnv(source, ["TELEGRAM_BOT_USERNAME"]),
+    telegramWebhookSecret: readEnv(source, ["TELEGRAM_WEBHOOK_SECRET"]),
   };
 }
 

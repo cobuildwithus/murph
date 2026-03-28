@@ -21,15 +21,13 @@ import {
 
 interface HostedEmailSettingsProps {
   expectedPrivyUserId: string;
-  privyAppId: string;
+  privyAppId?: string;
 }
 
 export function HostedEmailSettings({ privyAppId, ...props }: HostedEmailSettingsProps) {
-  return (
-    <HostedPrivyProvider appId={privyAppId}>
-      <HostedEmailSettingsInner {...props} />
-    </HostedPrivyProvider>
-  );
+  const content = <HostedEmailSettingsInner {...props} />;
+
+  return privyAppId ? <HostedPrivyProvider appId={privyAppId}>{content}</HostedPrivyProvider> : content;
 }
 
 function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSettingsProps, "privyAppId">) {

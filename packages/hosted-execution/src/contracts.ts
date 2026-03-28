@@ -6,6 +6,7 @@ export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
 export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.activated",
   "linq.message.received",
+  "telegram.message.received",
   "email.message.received",
   "assistant.cron.tick",
   "device-sync.wake",
@@ -30,6 +31,10 @@ export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecution
   normalizedPhoneNumber: string;
 }
 
+export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecutionBaseEvent {
+  kind: "telegram.message.received";
+  telegramUpdate: Record<string, unknown>;
+}
 
 export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "email.message.received";
@@ -62,6 +67,7 @@ export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionB
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionLinqMessageReceivedEvent
+  | HostedExecutionTelegramMessageReceivedEvent
   | HostedExecutionEmailMessageReceivedEvent
   | HostedExecutionAssistantCronTickEvent
   | HostedExecutionDeviceSyncWakeEvent

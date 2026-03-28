@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
+    telegramBotUsername: null as string | null,
+    telegramWebhookSecret: null as string | null,
   },
   verifyIdentityToken: vi.fn(),
 }));

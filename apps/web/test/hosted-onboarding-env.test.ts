@@ -22,7 +22,7 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.revnetChainId).toBeNull();
     expect(environment.revnetStripeCurrency).toBeNull();
-    expect(environment.sessionCookieName).toBe("hb_hosted_session");
+    expect(environment.sessionCookieName).toBe("hosted_session");
     expect(environment.stripeBillingMode).toBe("payment");
     expect(environment.inviteTtlHours).toBe(24 * 7);
   });
@@ -34,12 +34,16 @@ describe("readHostedOnboardingEnvironment", () => {
       LINQ_API_BASE_URL: "https://linq.example.test/api",
       HOSTED_ONBOARDING_STRIPE_BILLING_MODE: "subscription",
       NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123",
+      TELEGRAM_BOT_USERNAME: "murph_bot",
+      TELEGRAM_WEBHOOK_SECRET: "telegram-secret",
     }));
 
     expect(environment.linqApiToken).toBe("linq-token");
     expect(environment.linqApiBaseUrl).toBe("https://linq.example.test/api");
     expect(environment.privyAppId).toBe("cm_app_123");
     expect(environment.stripeBillingMode).toBe("subscription");
+    expect(environment.telegramBotUsername).toBe("murph_bot");
+    expect(environment.telegramWebhookSecret).toBe("telegram-secret");
   });
 
   it("reads hosted RevNet config when the full subscription configuration is present", () => {

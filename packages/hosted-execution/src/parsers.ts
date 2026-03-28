@@ -7,6 +7,7 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionEvent,
+  HostedExecutionTelegramMessageReceivedEvent,
   HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
@@ -203,6 +204,15 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
+    case "telegram.message.received":
+      return {
+        kind,
+        telegramUpdate: requireObject(
+          record.telegramUpdate,
+          "Hosted execution Telegram message telegramUpdate",
+        ),
+        userId,
+      } satisfies HostedExecutionTelegramMessageReceivedEvent;
     case "email.message.received":
       return {
         envelopeFrom: readNullableString(

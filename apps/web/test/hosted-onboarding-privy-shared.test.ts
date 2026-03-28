@@ -4,6 +4,7 @@ import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyPreferredEmailAccount,
   extractHostedPrivyPhoneAccount,
+  extractHostedPrivyTelegramAccount,
   extractHostedPrivyVerifiedEmailAccount,
   extractHostedPrivyWalletAccount,
   isHostedPrivyEmailAccountVerified,
@@ -301,5 +302,38 @@ describe("hosted Privy identity helpers", () => {
         "ethereum",
       ),
     ).toBeNull();
+  });
+
+  it("extracts a Telegram account from direct or linked-account Privy shapes", () => {
+    expect(extractHostedPrivyTelegramAccount({
+      telegram: {
+        first_name: "Alice",
+        id: 456,
+        username: "alice",
+      },
+    })).toEqual({
+      firstName: "Alice",
+      lastName: null,
+      photoUrl: null,
+      telegramUserId: "456",
+      username: "alice",
+    });
+
+    expect(extractHostedPrivyTelegramAccount({
+      linked_accounts: [
+        {
+          first_name: "Alice",
+          id: "456",
+          type: "telegram",
+          username: "alice",
+        },
+      ],
+    })).toEqual({
+      firstName: "Alice",
+      lastName: null,
+      photoUrl: null,
+      telegramUserId: "456",
+      username: "alice",
+    });
   });
 });

@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 
+import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
+import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
 import { resolveHostedPrivyClientAppId } from "@/src/lib/hosted-onboarding/landing";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/shared";
@@ -10,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Murph account settings",
-  description: "Add or update the verified email linked to your Murph account.",
+  description: "Manage the verified email and Telegram account linked to your Murph account.",
 };
 
 export default async function SettingsPage() {
@@ -26,11 +28,11 @@ export default async function SettingsPage() {
             Account settings
           </span>
           <h1 className="text-4xl font-bold leading-none tracking-tight text-stone-900 md:text-5xl">
-            Verify your email
+            Manage connected accounts
           </h1>
           <p className="max-w-2xl text-lg leading-relaxed text-stone-500">
-            Add or update the email attached to your Murph account. We&apos;ll send a one-time code through Privy
-            and only save the email after the code is confirmed.
+            Add or update the verified email and Telegram account attached to your Murph account. We only save each
+            connection after Privy confirms it.
           </p>
         </header>
 
@@ -66,8 +68,8 @@ export default async function SettingsPage() {
                   {summarizePrivyUserId(sessionRecord.member.privyUserId)}
                 </p>
                 <p className="text-sm leading-relaxed text-stone-500">
-                  The email flow is pinned to this Privy identity so a different logged-in browser user cannot update
-                  the wrong account.
+                  Email and Telegram settings are pinned to this Privy identity so a different logged-in browser
+                  user cannot update the wrong account.
                 </p>
               </div>
             </section>
@@ -75,20 +77,24 @@ export default async function SettingsPage() {
             {!sessionRecord.member.privyUserId ? (
               <section className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm leading-relaxed text-amber-800">
                 This hosted member is missing a Privy user id. Reopen your invite link and complete phone verification
-                again before trying to add an email address.
+                again before trying to manage email or Telegram settings.
               </section>
             ) : !privyAppId ? (
               <section className="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm leading-relaxed text-amber-800">
                 Privy client auth is not configured for this environment yet. Set <code>NEXT_PUBLIC_PRIVY_APP_ID</code>
-                and make sure email login and linking are enabled in the Privy dashboard before using this page.
+                and make sure email and Telegram login and linking are enabled in the Privy dashboard before using this page.
               </section>
             ) : (
-              <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
-                <HostedEmailSettings
-                  expectedPrivyUserId={sessionRecord.member.privyUserId}
-                  privyAppId={privyAppId}
-                />
-              </section>
+              <HostedPrivyProvider appId={privyAppId}>
+                <div className="grid gap-6 xl:grid-cols-2">
+                  <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
+                    <HostedEmailSettings expectedPrivyUserId={sessionRecord.member.privyUserId} />
+                  </section>
+                  <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
+                    <HostedTelegramSettings expectedPrivyUserId={sessionRecord.member.privyUserId} />
+                  </section>
+                </div>
+              </HostedPrivyProvider>
             )}
           </>
         )}

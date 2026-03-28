@@ -4,8 +4,10 @@ import { HostedMemberStatus } from "@prisma/client";
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     isProduction: true,
-    sessionCookieName: "hb_hosted_session",
+    sessionCookieName: "hosted_session",
     sessionTtlDays: 30,
+    telegramBotUsername: null,
+    telegramWebhookSecret: null,
   }),
 }));
 
@@ -108,7 +110,7 @@ describe("hosted onboarding session lifecycle", () => {
     const revoked = await revokeHostedSessionFromRequest(
       new Request("https://join.example.test/api/hosted-onboarding/session/logout", {
         headers: {
-          cookie: "other=value; hb_hosted_session=session-token; third=1",
+          cookie: "other=value; hosted_session=session-token; third=1",
         },
         method: "POST",
       }),
@@ -146,7 +148,7 @@ describe("hosted onboarding session lifecycle", () => {
       resolveHostedSessionFromRequest(
         new Request("https://join.example.test/join/invite-1", {
           headers: {
-            cookie: "hb_hosted_session=session-token",
+            cookie: "hosted_session=session-token",
           },
         }),
         prisma as never,

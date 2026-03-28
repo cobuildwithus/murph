@@ -5,6 +5,7 @@ import type {
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionLinqMessageReceivedEvent,
   HostedExecutionMemberActivatedEvent,
+  HostedExecutionTelegramMessageReceivedEvent,
   HostedExecutionVaultShareAcceptedEvent,
 } from "./contracts.ts";
 
@@ -37,6 +38,23 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
       normalizedPhoneNumber: input.normalizedPhoneNumber,
       userId: input.userId,
     } satisfies HostedExecutionLinqMessageReceivedEvent,
+    eventId: input.eventId,
+    occurredAt: input.occurredAt,
+  });
+}
+
+export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
+  eventId: string;
+  occurredAt: string;
+  telegramUpdate: Record<string, unknown>;
+  userId: string;
+}): HostedExecutionDispatchRequest {
+  return buildHostedExecutionDispatch({
+    event: {
+      kind: "telegram.message.received",
+      telegramUpdate: { ...input.telegramUpdate },
+      userId: input.userId,
+    } satisfies HostedExecutionTelegramMessageReceivedEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
   });

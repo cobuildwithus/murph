@@ -6,6 +6,13 @@ import {
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
+import {
+  isRecord,
+  readOptionalJsonObject,
+  retrySyncOperation,
+  toErrorMessage,
+} from "./hosted-settings-sync-helpers";
+
 export interface HostedEmailSyncResult {
   emailAddress: string;
   runTriggered: boolean;
@@ -93,31 +100,14 @@ export async function syncHostedEmailConnectionWithRetry(
     sleepImpl?: (delayMs: number) => Promise<void>;
   } = {},
 ): Promise<HostedEmailSyncResult> {
-  const retryDelaysMs = [0, 250, 500, 1_000];
-  let lastError: unknown = null;
-
-  for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
-    if (retryDelaysMs[attempt] > 0) {
-      await (input.sleepImpl ?? sleep)(retryDelaysMs[attempt]);
-    }
-
-    try {
-      return await syncHostedEmailConnection(expectedEmailAddress, input.fetchImpl ?? fetch);
-    } catch (error) {
-      lastError = error;
-
-      if (!(error instanceof HostedEmailSyncError) || error.code !== "PRIVY_EMAIL_NOT_READY") {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new HostedEmailSyncError(
-        null,
-        "We verified your email, but the hosted assistant could not confirm it yet. Refresh and try again.",
-      );
+  return retrySyncOperation({
+    errorFactory: (message) => new HostedEmailSyncError(null, message),
+    operation: () => syncHostedEmailConnection(expectedEmailAddress, input.fetchImpl ?? fetch),
+    retryable: (error) => error instanceof HostedEmailSyncError && error.code === "PRIVY_EMAIL_NOT_READY",
+    sleepImpl: input.sleepImpl,
+    timeoutMessage:
+      "We verified your email, but the hosted assistant could not confirm it yet. Refresh and try again.",
+  });
 }
 
 export class HostedEmailSyncError extends Error {
@@ -188,43 +178,6 @@ async function syncHostedEmailConnection(
     runTriggered: payload.runTriggered !== false,
     verifiedAt: payload.verifiedAt,
   };
-}
-
-async function readOptionalJsonObject(response: Response): Promise<Record<string, unknown> | null> {
-  const text = await response.text();
-
-  if (!text.trim()) {
-    return null;
-  }
-
-  try {
-    const payload = JSON.parse(text) as unknown;
-    return isRecord(payload) ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function sleep(delayMs: number): Promise<void> {
-  return new Promise((resolve) => {
-    globalThis.setTimeout(resolve, delayMs);
-  });
-}
-
-function toErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error.trim();
-  }
-
-  return fallback;
 }
 
 function toHostedEmailSyncErrorMessage(error: unknown): string {

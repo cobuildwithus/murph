@@ -9,6 +9,7 @@ export {
 } from "./member-service";
 export {
   handleHostedOnboardingLinqWebhook,
+  handleHostedOnboardingTelegramWebhook,
   handleHostedStripeWebhook,
 } from "./webhook-service";
 

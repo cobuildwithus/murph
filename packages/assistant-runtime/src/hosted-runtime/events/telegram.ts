@@ -1,11 +1,10 @@
 import {
-  createInboxPipeline,
   normalizeTelegramUpdate,
-  openInboxRuntime,
-  rebuildRuntimeFromVault,
   type TelegramUpdateLike,
 } from "@murph/inboxd";
 import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+
+import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 
 export async function ingestHostedTelegramMessage(
   vaultRoot: string,
@@ -13,30 +12,12 @@ export async function ingestHostedTelegramMessage(
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "telegram.message.received" }>;
   },
 ): Promise<void> {
-  const runtime = await openInboxRuntime({
-    vaultRoot,
+  const capture = await normalizeTelegramUpdate({
+    accountId: "bot",
+    update: dispatch.event.telegramUpdate as TelegramUpdateLike,
   });
-  let pipeline: Awaited<ReturnType<typeof createInboxPipeline>> | null = null;
 
-  try {
-    await rebuildRuntimeFromVault({
-      runtime,
-      vaultRoot,
-    });
-    const capture = await normalizeTelegramUpdate({
-      accountId: "bot",
-      update: dispatch.event.telegramUpdate as TelegramUpdateLike,
-    });
-    pipeline = await createInboxPipeline({
-      runtime,
-      vaultRoot,
-    });
+  await withHostedInboxPipeline(vaultRoot, async (pipeline) => {
     await pipeline.processCapture(capture);
-  } finally {
-    if (pipeline) {
-      pipeline.close();
-    } else {
-      runtime.close();
-    }
-  }
+  });
 }
