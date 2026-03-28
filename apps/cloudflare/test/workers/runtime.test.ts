@@ -8,6 +8,9 @@ import { createHostedExecutionJournalStore } from "../../src/execution-journal.j
 import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 
+const RUNNER_PROXY_TOKEN = "runner-proxy-token";
+const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
+
 import type {
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
@@ -378,10 +381,13 @@ async function readBundleText(bundleRef: HostedExecutionBundleRef | null): Promi
 }
 
 function callRunnerOutbound(request: Request, userId: string): Promise<Response> {
+  const headers = new Headers(request.headers);
+  headers.set(RUNNER_PROXY_TOKEN_HEADER, RUNNER_PROXY_TOKEN);
   return handleRunnerOutboundRequest(
-    request,
+    new Request(request, { headers }),
     env as unknown as Parameters<typeof handleRunnerOutboundRequest>[1],
     userId,
+    RUNNER_PROXY_TOKEN,
   );
 }
 

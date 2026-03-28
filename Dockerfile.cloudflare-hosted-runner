@@ -3,14 +3,14 @@ FROM node:22-bookworm-slim
 ARG INSTALL_PADDLEOCR=0
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    HOME=/root \
+    HOME=/home/runner \
     NODE_ENV=production \
     PORT=8080 \
-    XDG_CACHE_HOME=/root/.cache \
-    HOSTED_HOME=/root/.murph \
-    HOSTED_MODELS_ROOT=/root/.murph/models \
+    XDG_CACHE_HOME=/home/runner/.cache \
+    HOSTED_HOME=/home/runner/.murph \
+    HOSTED_MODELS_ROOT=/home/runner/.murph/models \
     FFMPEG_COMMAND=/usr/bin/ffmpeg \
-    HF_HOME=/root/.cache/huggingface
+    HF_HOME=/home/runner/.cache/huggingface
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -23,11 +23,13 @@ RUN apt-get update \
     python3 \
     python3-pip \
     python3-venv \
+  && useradd --create-home --home-dir /home/runner --shell /bin/bash runner \
   && mkdir -p \
-    /root/.cache/huggingface \
-    /root/.murph/hosted \
-    /root/.murph/models/paddleocr \
-    /root/.murph/models/whisper \
+    /home/runner/.cache/huggingface \
+    /home/runner/.murph/hosted \
+    /home/runner/.murph/models/paddleocr \
+    /home/runner/.murph/models/whisper \
+  && chown -R runner:runner /home/runner \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -48,9 +50,12 @@ RUN corepack enable \
 
 RUN if [ "$INSTALL_PADDLEOCR" = "1" ]; then pip3 install --no-cache-dir paddleocr; fi
 
+USER runner
+
 EXPOSE 8080
 
 # This image intentionally keeps the current source-based hosted execution path.
-# Provider credentials, parser-toolchain paths, and model directories are supplied
-# through environment variables or pre-baked under /root/.murph.
-CMD ["bash", "-lc", "corepack pnpm exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/src/container-entrypoint.ts"]
+# The baked /app tree stays root-owned while the runtime executes as a dedicated
+# non-root user, so hosted jobs must use temp/vault paths instead of mutating
+# shipped source in warm containers.
+CMD ["node", "--import", "tsx", "apps/cloudflare/src/container-entrypoint.ts"]

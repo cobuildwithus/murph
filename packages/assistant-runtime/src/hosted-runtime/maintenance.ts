@@ -45,6 +45,7 @@ const HOSTED_MAX_PARSER_JOBS = 50;
 export async function runHostedMaintenanceLoop(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   dispatch: HostedExecutionDispatchRequest;
+  internalWorkerFetch?: typeof fetch;
   requestId: string;
   timeoutMs: number | null;
   runtimeEnv: Readonly<Record<string, string>>;
@@ -66,6 +67,7 @@ export async function runHostedMaintenanceLoop(input: {
     input.vaultRoot,
     input.runtimeEnv,
     webControlPlane,
+    input.internalWorkerFetch,
     input.timeoutMs,
   );
 
@@ -181,6 +183,7 @@ export async function runHostedDeviceSyncPass(
   vaultRoot: string,
   env: Readonly<Record<string, string>>,
   webControlPlane: HostedExecutionWebControlPlaneEnvironment,
+  fetchImpl: typeof fetch | undefined,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
@@ -211,6 +214,7 @@ export async function runHostedDeviceSyncPass(
       try {
         syncState = await syncHostedDeviceSyncControlPlaneState({
           dispatch,
+          fetchImpl,
           secret,
           service,
           timeoutMs,
@@ -233,6 +237,7 @@ export async function runHostedDeviceSyncPass(
       try {
         await reconcileHostedDeviceSyncControlPlaneState({
           dispatch,
+          fetchImpl,
           secret,
           service,
           state: syncState,

@@ -7,6 +7,7 @@ import { readHostedRunnerCommitTimeoutMs } from "./callbacks.ts";
 
 export function createHostedArtifactResolver(input: {
   baseUrl: string;
+  fetchImpl?: typeof fetch;
   timeoutMs: number | null;
 }) {
   const cache = new Map<string, Promise<Uint8Array>>();
@@ -22,6 +23,7 @@ export function createHostedArtifactResolver(input: {
 
 export function createHostedArtifactUploadSink(input: {
   artifactsBaseUrl: string;
+  fetchImpl?: typeof fetch;
   knownArtifactHashes: ReadonlySet<string>;
   timeoutMs: number | null;
 }) {
@@ -44,11 +46,12 @@ function buildHostedRunnerArtifactUrl(baseUrl: string, sha256: string): URL {
 async function fetchHostedArtifact(
   input: {
     baseUrl: string;
+    fetchImpl?: typeof fetch;
     timeoutMs: number | null;
   },
   ref: HostedBundleArtifactRef,
 ): Promise<Uint8Array> {
-  const response = await fetch(buildHostedRunnerArtifactUrl(input.baseUrl, ref.sha256).toString(), {
+  const response = await (input.fetchImpl ?? fetch)(buildHostedRunnerArtifactUrl(input.baseUrl, ref.sha256).toString(), {
     method: "GET",
     signal: AbortSignal.timeout(readHostedRunnerCommitTimeoutMs(input.timeoutMs)),
   });
@@ -63,13 +66,14 @@ async function fetchHostedArtifact(
 async function uploadHostedArtifact(
   input: {
     artifactsBaseUrl: string;
+    fetchImpl?: typeof fetch;
     timeoutMs: number | null;
   },
   artifact: HostedWorkspaceArtifactPersistInput,
 ): Promise<void> {
   const uploadBytes = new Uint8Array(artifact.bytes.byteLength);
   uploadBytes.set(artifact.bytes);
-  const response = await fetch(
+  const response = await (input.fetchImpl ?? fetch)(
     buildHostedRunnerArtifactUrl(input.artifactsBaseUrl, artifact.ref.sha256).toString(),
     {
       body: uploadBytes.buffer,

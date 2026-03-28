@@ -21,8 +21,10 @@ import {
   normalizeHostedAssistantRuntimeConfig,
   resolveHostedRuntimeChildEntry,
   resolveHostedRuntimeTsconfigPath,
+  resolveHostedRuntimeTsxImportSpecifier,
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
+import { createHostedInternalWorkerFetch } from "./hosted-runtime/internal-http.ts";
 import {
   completeHostedExecutionAfterCommit,
   executeHostedDispatchForCommit,
@@ -60,8 +62,10 @@ export async function runHostedAssistantRuntimeJobInProcess(
 
   try {
     const incomingVaultBundle = decodeHostedBundleBase64(input.request.bundles.vault);
+    const internalWorkerFetch = createHostedInternalWorkerFetch(runtime.internalWorkerProxyToken);
     const artifactResolver = createHostedArtifactResolver({
       baseUrl: runtime.artifactsBaseUrl,
+      fetchImpl: internalWorkerFetch,
       timeoutMs: runtime.commitTimeoutMs,
     });
     const materializedArtifactPaths = new Set<string>();
@@ -110,6 +114,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
                   }
                 : null,
               materializedArtifactPaths,
+              internalWorkerFetch,
               request: input.request,
               restored,
               runtime,
@@ -120,6 +125,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
           await commitHostedExecutionResult({
             commit: input.request.commit ?? null,
             dispatch: input.request.dispatch,
+            fetchImpl: internalWorkerFetch,
             result: committedExecution.committedResult,
             sideEffects: committedExecution.committedSideEffects,
             runtime,
@@ -129,6 +135,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
         return await completeHostedExecutionAfterCommit({
           commit: input.request.commit ?? null,
           dispatch: input.request.dispatch,
+          internalWorkerFetch,
           materializedArtifactPaths,
           runtime,
           restored,
@@ -148,86 +155,91 @@ export async function runHostedAssistantRuntimeJobIsolated(
   const childEntry = resolveHostedRuntimeChildEntry();
   const isTypeScriptChild = childEntry.endsWith(".ts");
   const childArgs = isTypeScriptChild
-    ? ["--import", "tsx", childEntry]
+    ? ["--import", resolveHostedRuntimeTsxImportSpecifier(), childEntry]
     : [childEntry];
+  const launcherRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-launch-"));
 
-  return await new Promise<HostedExecutionRunnerResult>((resolve, reject) => {
-    const child = spawn(process.execPath, childArgs, {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        ...runtime.forwardedEnv,
-        ...(isTypeScriptChild
-          ? {
-              TSX_TSCONFIG_PATH: resolveHostedRuntimeTsconfigPath(),
-            }
-          : {}),
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
+  try {
+    return await new Promise<HostedExecutionRunnerResult>((resolve, reject) => {
+      const child = spawn(process.execPath, childArgs, {
+        cwd: launcherRoot,
+        env: {
+          ...process.env,
+          ...runtime.forwardedEnv,
+          ...(isTypeScriptChild
+            ? {
+                TSX_TSCONFIG_PATH: resolveHostedRuntimeTsconfigPath(),
+              }
+            : {}),
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
 
-    const settleError = (error: Error) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      reject(error);
-    };
-
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", (error) => {
-      settleError(error);
-    });
-    child.on("close", (code) => {
-      if (settled) {
-        return;
-      }
-
-      try {
-        const payload = parseHostedRuntimeChildResult(stdout);
-
-        if (!payload.ok) {
-          settleError(
-            new Error(
-              payload.error?.message
-                ?? `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`,
-            ),
-          );
+      const settleError = (error: Error) => {
+        if (settled) {
           return;
         }
 
         settled = true;
-        resolve(payload.result as HostedExecutionRunnerResult);
-      } catch (error) {
-        settleError(
-          new Error(
-            [
-              `Hosted assistant runtime child failed${code === null ? "" : ` with exit code ${code}`}.`,
-              stderr.trim(),
-              stdout.trim(),
-              error instanceof Error ? error.message : String(error),
-            ]
-              .filter(Boolean)
-              .join("\n"),
-          ),
-        );
-      }
-    });
+        reject(error);
+      };
 
-    child.stdin.on("error", () => {});
-    child.stdin.end(JSON.stringify({ request: input.request, runtime }));
-  });
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) => {
+        settleError(error);
+      });
+      child.on("close", (code) => {
+        if (settled) {
+          return;
+        }
+
+        try {
+          const payload = parseHostedRuntimeChildResult(stdout);
+
+          if (!payload.ok) {
+            settleError(
+              new Error(
+                payload.error?.message
+                  ?? `Hosted assistant runtime child exited with code ${code ?? "unknown"}.`,
+              ),
+            );
+            return;
+          }
+
+          settled = true;
+          resolve(payload.result as HostedExecutionRunnerResult);
+        } catch (error) {
+          settleError(
+            new Error(
+              [
+                `Hosted assistant runtime child failed${code === null ? "" : ` with exit code ${code}`}.`,
+                stderr.trim(),
+                stdout.trim(),
+                error instanceof Error ? error.message : String(error),
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            ),
+          );
+        }
+      });
+
+      child.stdin.on("error", () => {});
+      child.stdin.end(JSON.stringify({ request: input.request, runtime }));
+    });
+  } finally {
+    await rm(launcherRoot, { force: true, recursive: true });
+  }
 }
 
 export function formatHostedRuntimeChildResult(
