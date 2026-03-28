@@ -7,8 +7,10 @@ import * as React from 'react'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 import {
   listAssistantTranscriptEntries,
+  readAssistantAutomationState,
   resolveAssistantSession,
   resolveAssistantStatePaths,
+  saveAssistantAutomationState,
 } from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 import { readAssistantSession } from '../src/assistant/store/persistence.js'
@@ -66,6 +68,7 @@ import {
   readAssistantStatusSnapshot,
   runAssistantAutomation,
   runAssistantChat,
+  scanAssistantAutomationOnce,
   scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
   sendAssistantMessage,
@@ -104,6 +107,8 @@ import {
   normalizeAssistantInkArrowKey,
   normalizeComposerInsertedText,
   partitionChatTranscriptEntries,
+  reduceAssistantPromptQueueState,
+  reduceAssistantTurnState,
   renderChatTranscriptFeed,
   renderComposerValue,
   renderWrappedPlainTextBlock,
@@ -118,7 +123,9 @@ import {
   resolveComposerTerminalAction,
   resolveComposerVerticalCursorMove,
   reconcileComposerControlledValue,
+  resolveAssistantBlockedTurnFeedback,
   shouldShowBusyStatus,
+  resolveAssistantQueuedPromptDisposition,
   splitAssistantMarkdownLinks,
   supportsAssistantInkRawMode,
   supportsAssistantTerminalHyperlinks,
@@ -1313,6 +1320,103 @@ test('scanAssistantInboxOnce still waits for pending document parsers', async ()
     ),
     true,
   )
+})
+
+test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture is waiting on parser completion', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-parser-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const stateProgress: Array<{
+    inboxScanCursor: { occurredAt: string; captureId: string } | null
+    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
+  }> = []
+
+  const result = await scanAssistantAutomationOnce({
+    inboxServices: {
+      list: async () => ({
+        items: [
+          {
+            captureId: 'cap-pdf-pending',
+            source: 'email',
+            accountId: 'self',
+            externalId: 'ext-pdf',
+            threadId: 'thread-pdf',
+            threadTitle: 'Scanned receipt',
+            actorId: 'sender@example.com',
+            actorName: 'Sender',
+            actorIsSelf: false,
+            occurredAt: '2026-03-16T16:12:00Z',
+            receivedAt: null,
+            text: 'See attached.',
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/pending.pdf.json',
+            eventId: 'evt-pdf',
+            promotions: [],
+          },
+        ],
+      }),
+      show: async () => ({
+        capture: {
+          captureId: 'cap-pdf-pending',
+          source: 'email',
+          threadTitle: 'Scanned receipt',
+          threadId: 'thread-pdf',
+          threadIsDirect: true,
+          actorId: 'sender@example.com',
+          actorName: 'Sender',
+          actorIsSelf: false,
+          occurredAt: '2026-03-16T16:12:00Z',
+          text: 'See attached.',
+          attachments: [
+            {
+              attachmentId: 'att-pdf',
+              fileName: 'receipt.pdf',
+              mediaType: 'application/pdf',
+              storedPath: 'raw/inbox/receipt.pdf',
+              parseState: 'pending',
+            },
+          ],
+        },
+      }),
+    } as any,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+    },
+    state: {
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: [],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: true,
+    },
+    vault: vaultRoot,
+    async onStateProgress(next) {
+      stateProgress.push({
+        inboxScanCursor: next.inboxScanCursor,
+        autoReplyScanCursor: next.autoReplyScanCursor,
+      })
+    },
+  })
+
+  assert.deepEqual(result, {
+    routing: {
+      considered: 1,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 1,
+    },
+    replies: {
+      considered: 0,
+      failed: 0,
+      replied: 0,
+      skipped: 0,
+    },
+  })
+  assert.equal(runtimeMocks.routeInboxCaptureWithModel.mock.calls.length, 0)
+  assert.deepEqual(stateProgress, [])
 })
 
 test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', async () => {
@@ -3873,6 +3977,190 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   assert.deepEqual(secondArtifact.groupCaptureIds, ['cap-album-1', 'cap-album-2'])
 })
 
+test('runAssistantAutomation merges routing and reply into one inbox decision pass', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-scan-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.routeInboxCaptureWithModel.mockResolvedValue({
+    plan: {
+      actions: [
+        {
+          tool: 'meal.add',
+        },
+      ],
+    },
+  })
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-auto',
+    response: 'auto reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(
+    async (input: any) => ({
+      message: input.message,
+      session: {
+        schema: 'murph.assistant-session.v2',
+        sessionId: input.sessionId,
+        provider: 'codex-cli',
+        providerSessionId: 'thread-auto',
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+        alias: null,
+        binding: {
+          conversationKey: 'channel:imessage|thread:chat-2',
+          channel: 'imessage',
+          identityId: null,
+          actorId: '+15551234567',
+          threadId: 'chat-2',
+          threadIsDirect: true,
+          delivery: {
+            kind: 'participant',
+            target: '+15551234567',
+          },
+        },
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:01.000Z',
+        lastTurnAt: '2026-03-18T00:00:01.000Z',
+        turnCount: 1,
+      },
+      delivery: {
+        channel: 'imessage',
+        target: '+15551234567',
+        targetKind: 'participant',
+        sentAt: '2026-03-18T00:00:01.000Z',
+        messageLength: input.message.length,
+      },
+    }),
+  )
+
+  await saveAssistantAutomationState(vaultRoot, {
+    version: 2,
+    inboxScanCursor: null,
+    autoReplyScanCursor: null,
+    autoReplyChannels: ['imessage'],
+    preferredChannels: [],
+    autoReplyBacklogChannels: [],
+    autoReplyPrimed: true,
+    updatedAt: '2026-03-18T00:00:00.000Z',
+  })
+
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const listCalls: Array<{
+    afterCaptureId?: string | null
+    afterOccurredAt?: string | null
+    oldestFirst?: boolean
+  }> = []
+  const inboxServices = {
+    async list(input: any) {
+      listCalls.push({
+        afterCaptureId: input.afterCaptureId,
+        afterOccurredAt: input.afterOccurredAt,
+        oldestFirst: input.oldestFirst,
+      })
+      return {
+        items: [
+          {
+            captureId: 'cap-new',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-2',
+            threadId: 'chat-2',
+            threadTitle: null,
+            actorId: '+15551234567',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:05:00Z',
+            receivedAt: null,
+            text: 'How are my macros today?',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/2.json',
+            eventId: 'evt-2',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      assert.equal(input.captureId, 'cap-new')
+      return {
+        capture: {
+          captureId: 'cap-new',
+          source: 'imessage',
+          threadTitle: null,
+          threadId: 'chat-2',
+          threadIsDirect: true,
+          actorId: '+15551234567',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:05:00Z',
+          text: 'How are my macros today?',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  const result = await runAssistantAutomation({
+    vault: vaultRoot,
+    once: true,
+    startDaemon: false,
+    inboxServices,
+    modelSpec: {
+      model: 'gpt-oss:20b',
+    },
+    onEvent(event) {
+      events.push(event)
+    },
+  })
+
+  assert.equal(result.considered, 1)
+  assert.equal(result.routed, 1)
+  assert.equal(result.replyConsidered, 1)
+  assert.equal(result.replied, 1)
+  assert.equal(listCalls.length, 2)
+  assert.equal(
+    events.filter((event) => event.type === 'scan.started').length,
+    1,
+  )
+  assert.equal(
+    events.some((event) => event.type === 'reply.scan.started'),
+    false,
+  )
+  assert.equal(
+    events.some(
+      (event) => event.type === 'capture.routed' && event.captureId === 'cap-new',
+    ),
+    true,
+  )
+  assert.equal(
+    events.some(
+      (event) => event.type === 'capture.replied' && event.captureId === 'cap-new',
+    ),
+    true,
+  )
+
+  const state = await readAssistantAutomationState(vaultRoot)
+  assert.deepEqual(state.inboxScanCursor, {
+    occurredAt: '2026-03-18T09:05:00Z',
+    captureId: 'cap-new',
+  })
+  assert.deepEqual(state.autoReplyScanCursor, {
+    occurredAt: '2026-03-18T09:05:00Z',
+    captureId: 'cap-new',
+  })
+})
+
 test('runAssistantAutomation rejects concurrent runs for the same vault and releases the lock after shutdown', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-run-lock-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -4812,6 +5100,150 @@ test('assistant Ink merges queued follow-ups back into the composer draft with b
   assert.equal(
     mergeComposerDraftWithQueuedPrompts('existing draft', ['queued follow-up']),
     'existing draft\n\nqueued follow-up',
+  )
+})
+
+test('assistant Ink prompt queue reducer preserves enqueue, pop-last, dequeue, and clear semantics', () => {
+  const queued = reduceAssistantPromptQueueState(
+    {
+      prompts: [],
+    },
+    {
+      kind: 'enqueue',
+      prompt: 'first follow-up',
+    },
+  )
+
+  const queuedAgain = reduceAssistantPromptQueueState(queued, {
+    kind: 'enqueue',
+    prompt: 'second follow-up',
+  })
+
+  assert.deepEqual(queuedAgain, {
+    prompts: ['first follow-up', 'second follow-up'],
+  })
+  assert.deepEqual(
+    reduceAssistantPromptQueueState(queuedAgain, {
+      kind: 'pop-last',
+    }),
+    {
+      prompts: ['first follow-up'],
+    },
+  )
+  assert.deepEqual(
+    reduceAssistantPromptQueueState(queuedAgain, {
+      kind: 'dequeue',
+    }),
+    {
+      prompts: ['second follow-up'],
+    },
+  )
+  assert.deepEqual(
+    reduceAssistantPromptQueueState(queuedAgain, {
+      kind: 'clear',
+    }),
+    {
+      prompts: [],
+    },
+  )
+})
+
+test('assistant Ink turn reducer keeps pause requests scoped to the active turn', () => {
+  const running = reduceAssistantTurnState(
+    {
+      pauseRequested: false,
+      phase: 'idle',
+    },
+    {
+      kind: 'start',
+    },
+  )
+
+  assert.deepEqual(running, {
+    pauseRequested: false,
+    phase: 'running',
+  })
+  assert.deepEqual(
+    reduceAssistantTurnState(running, {
+      kind: 'request-pause',
+    }),
+    {
+      pauseRequested: true,
+      phase: 'running',
+    },
+  )
+  assert.deepEqual(
+    reduceAssistantTurnState(running, {
+      kind: 'finish',
+    }),
+    {
+      pauseRequested: false,
+      phase: 'idle',
+    },
+  )
+})
+
+test('assistant Ink queued prompt disposition replays completed follow-ups and restores interrupted or failed queues', () => {
+  assert.deepEqual(
+    resolveAssistantQueuedPromptDisposition({
+      pauseRequested: false,
+      queuedPrompts: ['queued next', 'queued later'],
+      turnOutcome: 'completed',
+    }),
+    {
+      kind: 'replay-next',
+      nextQueuedPrompt: 'queued next',
+      remainingQueuedPrompts: ['queued later'],
+    },
+  )
+  assert.deepEqual(
+    resolveAssistantQueuedPromptDisposition({
+      pauseRequested: false,
+      queuedPrompts: ['queued next'],
+      turnOutcome: 'interrupted',
+    }),
+    {
+      kind: 'restore-composer',
+      restoredQueuedPromptCount: 1,
+    },
+  )
+  assert.deepEqual(
+    resolveAssistantQueuedPromptDisposition({
+      pauseRequested: false,
+      queuedPrompts: ['queued next'],
+      turnOutcome: 'failed',
+    }),
+    {
+      kind: 'restore-composer',
+      restoredQueuedPromptCount: 1,
+    },
+  )
+  assert.deepEqual(
+    resolveAssistantQueuedPromptDisposition({
+      pauseRequested: true,
+      queuedPrompts: ['queued next'],
+      turnOutcome: 'blocked',
+    }),
+    {
+      kind: 'restore-composer',
+      restoredQueuedPromptCount: 1,
+    },
+  )
+})
+
+test('assistant Ink blocked-turn feedback stays informational and status-only', () => {
+  assert.deepEqual(
+    resolveAssistantBlockedTurnFeedback('Assistant turn was blocked by the canonical write guard.'),
+    {
+      entry: {
+        kind: 'status',
+        text: 'Assistant turn was blocked by the canonical write guard.',
+      },
+      status: {
+        kind: 'info',
+        text: 'Assistant turn was blocked by the canonical write guard.',
+      },
+    },
   )
 })
 

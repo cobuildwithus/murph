@@ -16,6 +16,7 @@ import {
 } from 'ink'
 import {
   assistantChatResultSchema,
+  type AssistantSession,
 } from '../../assistant-cli-contracts.js'
 import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
 import {
@@ -2750,6 +2751,985 @@ function assistantModelDiscoveryResultsEqual(
   )
 }
 
+interface AssistantChatStatus {
+  kind: 'error' | 'info' | 'success'
+  text: string
+}
+
+interface AssistantBlockedTurnFeedback {
+  entry: {
+    kind: 'status'
+    streamKey?: string | null
+    text: string
+  }
+  status: AssistantChatStatus
+}
+
+interface AssistantPromptQueueState {
+  prompts: readonly string[]
+}
+
+type AssistantPromptQueueAction =
+  | {
+      kind: 'clear'
+    }
+  | {
+      kind: 'dequeue'
+    }
+  | {
+      kind: 'enqueue'
+      prompt: string
+    }
+  | {
+      kind: 'pop-last'
+    }
+
+interface AssistantTurnState {
+  pauseRequested: boolean
+  phase: 'idle' | 'running'
+}
+
+type AssistantTurnAction =
+  | {
+      kind: 'finish'
+    }
+  | {
+      kind: 'request-pause'
+    }
+  | {
+      kind: 'start'
+    }
+
+type AssistantSendMessageResult = Awaited<ReturnType<typeof sendAssistantMessage>>
+
+type AssistantPromptTurnOutcome =
+  | {
+      kind: 'blocked'
+      message: string
+      session: AssistantSession
+    }
+  | {
+      delivery: AssistantSendMessageResult['delivery']
+      deliveryError: AssistantSendMessageResult['deliveryError']
+      kind: 'completed'
+      response: string
+      session: AssistantSession
+      streamedAssistantEntryKey: string | null
+    }
+  | {
+      error: unknown
+      kind: 'failed'
+      recoveredSession: AssistantSession | null
+    }
+  | {
+      kind: 'interrupted'
+      recoveredSession: AssistantSession | null
+    }
+
+type AssistantQueuedPromptDisposition =
+  | {
+      kind: 'idle'
+    }
+  | {
+      kind: 'replay-next'
+      nextQueuedPrompt: string
+      remainingQueuedPrompts: readonly string[]
+    }
+  | {
+      kind: 'restore-composer'
+      restoredQueuedPromptCount: number
+    }
+
+interface RunAssistantPromptTurnInput {
+  activeModel: string | null
+  activeReasoningEffort: string | null
+  input: AssistantChatInput & {
+    abortSignal: AbortSignal
+  }
+  prompt: string
+  session: AssistantSession
+  setEntries: React.Dispatch<React.SetStateAction<InkChatEntry[]>>
+  setStatus: React.Dispatch<React.SetStateAction<AssistantChatStatus | null>>
+  turnTracePrefix: string
+}
+
+interface UseAssistantChatControllerInput {
+  codexDisplay: Awaited<ReturnType<typeof resolveCodexDisplayOptions>>
+  defaults: Awaited<ReturnType<typeof resolveAssistantOperatorDefaults>>
+  input: AssistantChatInput
+  redactedVault: string
+  resolvedSession: AssistantSession
+  selectedProviderDefaults: ReturnType<typeof resolveAssistantProviderDefaults>
+  transcriptEntries: Awaited<ReturnType<typeof listAssistantTranscriptEntries>>
+}
+
+interface AssistantChatController {
+  activeModel: string | null
+  activeReasoningEffort: string | null
+  bindingSummary: string | null
+  busy: boolean
+  composerValue: string
+  editLastQueuedPrompt: () => void
+  entries: readonly InkChatEntry[]
+  lastQueuedPrompt: string | null
+  latestSessionRef: React.MutableRefObject<AssistantSession>
+  latestTurnsRef: React.MutableRefObject<number>
+  metadataBadges: readonly ChatMetadataBadge[]
+  modelSwitcherState: ModelSwitcherState | null
+  moveModelSwitcherSelection: (delta: number) => void
+  queuedPromptCount: number
+  session: AssistantSession
+  setComposerValue: React.Dispatch<React.SetStateAction<string>>
+  status: AssistantChatStatus | null
+  submitPrompt: (
+    rawValue: string,
+    mode: ComposerSubmitMode,
+  ) => ComposerSubmitDisposition
+  cancelModelSwitcher: () => void
+  confirmModelSwitcher: () => void
+}
+
+const EMPTY_ASSISTANT_PROMPT_QUEUE_STATE: AssistantPromptQueueState = {
+  prompts: [],
+}
+
+const IDLE_ASSISTANT_TURN_STATE: AssistantTurnState = {
+  pauseRequested: false,
+  phase: 'idle',
+}
+
+export function resolveAssistantBlockedTurnFeedback(
+  message: string,
+): AssistantBlockedTurnFeedback {
+  return {
+    entry: {
+      kind: 'status' as const,
+      text: message,
+    },
+    status: {
+      kind: 'info' as const,
+      text: message,
+    },
+  }
+}
+
+export function reduceAssistantPromptQueueState(
+  state: AssistantPromptQueueState,
+  action: AssistantPromptQueueAction,
+): AssistantPromptQueueState {
+  switch (action.kind) {
+    case 'clear':
+      return EMPTY_ASSISTANT_PROMPT_QUEUE_STATE
+    case 'dequeue':
+      return state.prompts.length > 0
+        ? {
+            prompts: state.prompts.slice(1),
+          }
+        : state
+    case 'enqueue':
+      return {
+        prompts: [...state.prompts, action.prompt],
+      }
+    case 'pop-last':
+      return state.prompts.length > 0
+        ? {
+            prompts: state.prompts.slice(0, -1),
+          }
+        : state
+    default:
+      return state
+  }
+}
+
+export function reduceAssistantTurnState(
+  state: AssistantTurnState,
+  action: AssistantTurnAction,
+): AssistantTurnState {
+  switch (action.kind) {
+    case 'finish':
+      return IDLE_ASSISTANT_TURN_STATE
+    case 'request-pause':
+      return state.phase === 'running'
+        ? {
+            ...state,
+            pauseRequested: true,
+          }
+        : state
+    case 'start':
+      return {
+        pauseRequested: false,
+        phase: 'running',
+      }
+    default:
+      return state
+  }
+}
+
+function createAssistantTurnTracePrefix(): string {
+  return `turn:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function resolveAssistantQueuedPromptDisposition(input: {
+  pauseRequested: boolean
+  queuedPrompts: readonly string[]
+  turnOutcome: AssistantPromptTurnOutcome['kind']
+}): AssistantQueuedPromptDisposition {
+  if (
+    input.turnOutcome === 'failed' ||
+    input.turnOutcome === 'interrupted' ||
+    (input.pauseRequested &&
+      (input.turnOutcome === 'blocked' || input.turnOutcome === 'completed'))
+  ) {
+    return {
+      kind: 'restore-composer',
+      restoredQueuedPromptCount: input.queuedPrompts.length,
+    }
+  }
+
+  if (
+    (input.turnOutcome === 'blocked' || input.turnOutcome === 'completed') &&
+    input.queuedPrompts.length > 0
+  ) {
+    return {
+      kind: 'replay-next',
+      nextQueuedPrompt: input.queuedPrompts[0] ?? '',
+      remainingQueuedPrompts: input.queuedPrompts.slice(1),
+    }
+  }
+
+  return {
+    kind: 'idle',
+  }
+}
+
+async function runAssistantPromptTurn(
+  input: RunAssistantPromptTurnInput,
+): Promise<AssistantPromptTurnOutcome> {
+  let streamedAssistantEntryKey: string | null = null
+
+  const handleTraceEvent = (event: AssistantProviderTraceEvent) => {
+    const namespacedUpdates = namespaceTurnTraceUpdates(
+      event.updates,
+      input.turnTracePrefix,
+    )
+    if (namespacedUpdates.length === 0) {
+      return
+    }
+
+    for (const update of namespacedUpdates) {
+      if (update.kind === 'assistant' && update.streamKey) {
+        streamedAssistantEntryKey = streamedAssistantEntryKey ?? update.streamKey
+      }
+    }
+
+    input.setEntries((previous: InkChatEntry[]) =>
+      applyInkChatTraceUpdates(previous, namespacedUpdates),
+    )
+
+    const latestStatusUpdate = [...namespacedUpdates]
+      .reverse()
+      .find((update) => update.kind === 'error' || update.kind === 'status')
+
+    if (latestStatusUpdate) {
+      input.setStatus({
+        kind: latestStatusUpdate.kind === 'error' ? 'error' : 'info',
+        text: latestStatusUpdate.text,
+      })
+    }
+  }
+
+  try {
+    const result = await sendAssistantMessage({
+      ...input.input,
+      abortSignal: input.input.abortSignal,
+      conversation: {
+        ...(input.input.conversation ?? {}),
+        sessionId: input.session.sessionId,
+      },
+      model: input.activeModel,
+      onProviderEvent: (event) => {
+        input.setEntries((previous: InkChatEntry[]) =>
+          applyProviderProgressEventToEntries({
+            entries: previous,
+            event: namespaceProviderProgressEvent(event, input.turnTracePrefix),
+          }),
+        )
+      },
+      onTraceEvent: handleTraceEvent,
+      prompt: input.prompt,
+      reasoningEffort: input.activeReasoningEffort,
+      sessionSnapshot: input.session,
+      showThinkingTraces: true,
+    })
+
+    if (result.status === 'blocked') {
+      return {
+        kind: 'blocked',
+        message:
+          result.blocked?.message ??
+          'Assistant turn was blocked by the canonical write guard.',
+        session: result.session,
+      }
+    }
+
+    return {
+      delivery: result.delivery,
+      deliveryError: result.deliveryError,
+      kind: 'completed',
+      response: result.response,
+      session: result.session,
+      streamedAssistantEntryKey,
+    }
+  } catch (error) {
+    const recoveredSession = extractRecoveredAssistantSession(error)
+
+    if (isAssistantProviderInterruptedError(error)) {
+      return {
+        kind: 'interrupted',
+        recoveredSession,
+      }
+    }
+
+    return {
+      error,
+      kind: 'failed',
+      recoveredSession,
+    }
+  }
+}
+
+function useAssistantChatController(
+  input: UseAssistantChatControllerInput,
+): AssistantChatController {
+  const { exit } = useApp()
+  const [session, setSession] = React.useState(input.resolvedSession)
+  const [entries, setEntries] = React.useState(seedChatEntries(input.transcriptEntries))
+  const [status, setStatus] = React.useState<AssistantChatStatus | null>(null)
+  const [composerValue, setComposerValue] = React.useState('')
+  const initialActiveModel =
+    normalizeNullableString(input.input.model) ??
+    normalizeNullableString(input.selectedProviderDefaults?.model) ??
+    normalizeNullableString(input.resolvedSession.providerOptions.model) ??
+    normalizeNullableString(input.codexDisplay.model)
+  const initialActiveReasoningEffort =
+    normalizeNullableString(input.input.reasoningEffort) ??
+    normalizeNullableString(input.selectedProviderDefaults?.reasoningEffort) ??
+    normalizeNullableString(input.resolvedSession.providerOptions.reasoningEffort) ??
+    normalizeNullableString(input.codexDisplay.reasoningEffort)
+  const [activeModel, setActiveModel] = React.useState<string | null>(
+    initialActiveModel,
+  )
+  const [activeReasoningEffort, setActiveReasoningEffort] = React.useState<string | null>(
+    initialActiveReasoningEffort,
+  )
+  const [modelDiscovery, setModelDiscovery] =
+    React.useState<AssistantModelDiscoveryResult | null>(null)
+  const [modelSwitcherState, setModelSwitcherState] =
+    React.useState<ModelSwitcherState | null>(null)
+  const [promptQueueState, setPromptQueueState] =
+    React.useState<AssistantPromptQueueState>(EMPTY_ASSISTANT_PROMPT_QUEUE_STATE)
+  const [turnState, setTurnState] =
+    React.useState<AssistantTurnState>(IDLE_ASSISTANT_TURN_STATE)
+  const latestSessionRef = React.useRef(input.resolvedSession)
+  const latestTurnsRef = React.useRef(0)
+  const initialPromptRef = React.useRef(normalizeNullableString(input.input.initialPrompt))
+  const bootstrappedRef = React.useRef(false)
+  const promptQueueStateRef = React.useRef<AssistantPromptQueueState>(
+    EMPTY_ASSISTANT_PROMPT_QUEUE_STATE,
+  )
+  const turnStateRef = React.useRef<AssistantTurnState>(IDLE_ASSISTANT_TURN_STATE)
+  const activeTurnAbortControllerRef = React.useRef<AbortController | null>(null)
+  const modelCatalog = resolveAssistantModelCatalog({
+    provider: session.provider,
+    baseUrl: session.providerOptions.baseUrl,
+    currentModel: activeModel,
+    currentReasoningEffort: activeReasoningEffort,
+    discovery: modelDiscovery,
+    headers: session.providerOptions.headers ?? null,
+    apiKeyEnv: session.providerOptions.apiKeyEnv,
+    oss: session.providerOptions.oss,
+    providerName: session.providerOptions.providerName,
+  })
+
+  const updatePromptQueue = React.useCallback((action: AssistantPromptQueueAction) => {
+    const nextState = reduceAssistantPromptQueueState(promptQueueStateRef.current, action)
+    promptQueueStateRef.current = nextState
+    setPromptQueueState(nextState)
+    return nextState
+  }, [])
+
+  const updateTurnState = React.useCallback((action: AssistantTurnAction) => {
+    const nextState = reduceAssistantTurnState(turnStateRef.current, action)
+    turnStateRef.current = nextState
+    setTurnState(nextState)
+    return nextState
+  }, [])
+
+  React.useEffect(() => {
+    latestSessionRef.current = session
+  }, [session])
+
+  React.useEffect(() => {
+    let cancelled = false
+    const baseUrl = normalizeNullableString(session.providerOptions.baseUrl)
+
+    if (!modelCatalog.capabilities.supportsModelDiscovery || !baseUrl) {
+      setModelDiscovery((existing) => (existing === null ? existing : null))
+      return () => {
+        cancelled = true
+      }
+    }
+
+    void (async () => {
+      const nextDiscovery = await discoverAssistantProviderModels({
+        provider: session.provider,
+        baseUrl,
+        apiKeyEnv: session.providerOptions.apiKeyEnv,
+        headers: session.providerOptions.headers ?? null,
+        providerName: session.providerOptions.providerName,
+      })
+
+      if (cancelled) {
+        return
+      }
+
+      setModelDiscovery((existing) =>
+        assistantModelDiscoveryResultsEqual(existing, nextDiscovery)
+          ? existing
+          : nextDiscovery,
+      )
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    modelCatalog.capabilities.supportsModelDiscovery,
+    session.provider,
+    session.providerOptions.apiKeyEnv,
+    session.providerOptions.baseUrl,
+    session.providerOptions.headers,
+    session.providerOptions.providerName,
+  ])
+
+  const queuePrompt = (prompt: string) => {
+    updatePromptQueue({
+      kind: 'enqueue',
+      prompt,
+    })
+  }
+
+  const applyQueuedPromptDisposition = (
+    disposition: AssistantQueuedPromptDisposition,
+    queuedPrompts: readonly string[],
+  ): string | null => {
+    if (disposition.kind === 'restore-composer') {
+      updatePromptQueue({
+        kind: 'clear',
+      })
+      if (queuedPrompts.length > 0) {
+        setComposerValue((previous) =>
+          mergeComposerDraftWithQueuedPrompts(previous, queuedPrompts),
+        )
+      }
+      return null
+    }
+
+    if (disposition.kind === 'replay-next') {
+      promptQueueStateRef.current = {
+        prompts: disposition.remainingQueuedPrompts,
+      }
+      setPromptQueueState(promptQueueStateRef.current)
+      return disposition.nextQueuedPrompt
+    }
+
+    return null
+  }
+
+  const editLastQueuedPrompt = () => {
+    const lastQueuedPrompt = promptQueueStateRef.current.prompts.at(-1)
+
+    if (!lastQueuedPrompt) {
+      return
+    }
+
+    updatePromptQueue({
+      kind: 'pop-last',
+    })
+    setComposerValue((previous) =>
+      mergeComposerDraftWithQueuedPrompts(previous, [lastQueuedPrompt]),
+    )
+  }
+
+  const startPromptTurn = (prompt: string) => {
+    setEntries((previous: InkChatEntry[]) => [
+      ...previous,
+      {
+        kind: 'user',
+        text: prompt,
+      },
+    ])
+    setStatus(null)
+    updateTurnState({
+      kind: 'start',
+    })
+
+    const abortController = new AbortController()
+    const turnTracePrefix = createAssistantTurnTracePrefix()
+    activeTurnAbortControllerRef.current = abortController
+
+    void (async () => {
+      const outcome = await runAssistantPromptTurn({
+        activeModel,
+        activeReasoningEffort,
+        input: {
+          ...input.input,
+          abortSignal: abortController.signal,
+        },
+        prompt,
+        session: latestSessionRef.current,
+        setEntries,
+        setStatus,
+        turnTracePrefix,
+      })
+
+      if (
+        'session' in outcome &&
+        outcome.session !== latestSessionRef.current
+      ) {
+        latestSessionRef.current = outcome.session
+        setSession(outcome.session)
+      }
+
+      if (outcome.kind === 'completed') {
+        latestTurnsRef.current += 1
+        setEntries((previous: InkChatEntry[]) =>
+          outcome.streamedAssistantEntryKey
+            ? applyInkChatTraceUpdates(previous, [
+                {
+                  kind: 'assistant',
+                  mode: 'replace',
+                  streamKey: outcome.streamedAssistantEntryKey,
+                  text: outcome.response,
+                },
+              ])
+            : [
+                ...previous,
+                {
+                  kind: 'assistant',
+                  text: outcome.response,
+                },
+              ],
+        )
+        setStatus(
+          outcome.delivery
+            ? {
+                kind: 'success',
+                text: `Delivered over ${outcome.delivery.channel} to ${outcome.delivery.target}.`,
+              }
+            : outcome.deliveryError
+              ? {
+                  kind: 'error',
+                  text: `Response saved locally, but delivery failed: ${outcome.deliveryError.message}`,
+                }
+              : null,
+        )
+      }
+
+      if (outcome.kind === 'blocked') {
+        const blockedTurnFeedback = resolveAssistantBlockedTurnFeedback(outcome.message)
+        setEntries((previous: InkChatEntry[]) => [
+          ...previous,
+          blockedTurnFeedback.entry,
+        ])
+        setStatus(blockedTurnFeedback.status)
+      }
+
+      if (outcome.kind === 'failed') {
+        if (outcome.recoveredSession) {
+          latestSessionRef.current = outcome.recoveredSession
+          setSession(outcome.recoveredSession)
+        }
+
+        const queuedPrompts = promptQueueStateRef.current.prompts
+        const queuedPromptDisposition = resolveAssistantQueuedPromptDisposition({
+          pauseRequested: false,
+          queuedPrompts,
+          turnOutcome: 'failed',
+        })
+        applyQueuedPromptDisposition(queuedPromptDisposition, queuedPrompts)
+        const errorPresentation = resolveAssistantTurnErrorPresentation({
+          error: outcome.error,
+          restoredQueuedPromptCount:
+            queuedPromptDisposition.kind === 'restore-composer'
+              ? queuedPromptDisposition.restoredQueuedPromptCount
+              : 0,
+        })
+        setEntries((previous: InkChatEntry[]) => [
+          ...previous,
+          errorPresentation.entry,
+        ])
+        setStatus(errorPresentation.status)
+        if (errorPresentation.persistTranscriptError) {
+          void appendAssistantTranscriptEntries(
+            input.input.vault,
+            latestSessionRef.current.sessionId,
+            [
+              {
+                kind: 'error',
+                text: errorPresentation.entry.text,
+              },
+            ],
+          ).catch(() => {})
+        }
+      }
+
+      if (outcome.kind === 'interrupted' && outcome.recoveredSession) {
+        latestSessionRef.current = outcome.recoveredSession
+        setSession(outcome.recoveredSession)
+      }
+
+      activeTurnAbortControllerRef.current = null
+      setEntries((previous: InkChatEntry[]) =>
+        finalizePendingInkChatTraces(previous, turnTracePrefix),
+      )
+      const pauseRequested = turnStateRef.current.pauseRequested
+      updateTurnState({
+        kind: 'finish',
+      })
+
+      if (outcome.kind === 'interrupted') {
+        const queuedPrompts = promptQueueStateRef.current.prompts
+        const queuedPromptDisposition = resolveAssistantQueuedPromptDisposition({
+          pauseRequested,
+          queuedPrompts,
+          turnOutcome: 'interrupted',
+        })
+        applyQueuedPromptDisposition(queuedPromptDisposition, queuedPrompts)
+        setStatus({
+          kind: 'info',
+          text:
+            queuedPromptDisposition.kind === 'restore-composer' &&
+            queuedPromptDisposition.restoredQueuedPromptCount > 0
+              ? 'Paused current turn. Queued follow-ups are back in the composer.'
+              : 'Paused current turn.',
+        })
+        return
+      }
+
+      const queuedPrompts = promptQueueStateRef.current.prompts
+      const queuedPromptDisposition = resolveAssistantQueuedPromptDisposition({
+        pauseRequested,
+        queuedPrompts,
+        turnOutcome: outcome.kind,
+      })
+
+      if (
+        queuedPromptDisposition.kind === 'restore-composer' &&
+        (outcome.kind === 'completed' || outcome.kind === 'blocked') &&
+        pauseRequested
+      ) {
+        applyQueuedPromptDisposition(queuedPromptDisposition, queuedPrompts)
+        setStatus({
+          kind: 'info',
+          text:
+            queuedPromptDisposition.restoredQueuedPromptCount > 0
+              ? 'Stopped after the current turn. Queued follow-ups are back in the composer.'
+              : 'Stopped after the current turn.',
+        })
+        return
+      }
+
+      if (outcome.kind === 'completed' || outcome.kind === 'blocked') {
+        const nextQueuedPrompt = applyQueuedPromptDisposition(
+          queuedPromptDisposition,
+          queuedPrompts,
+        )
+        if (nextQueuedPrompt) {
+          queueMicrotask(() => {
+            startPromptTurn(nextQueuedPrompt)
+          })
+        }
+      }
+    })()
+  }
+
+  const openModelSwitcher = () => {
+    const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+      modelCatalog.models[findAssistantModelOptionIndex(activeModel, modelCatalog.modelOptions)],
+    )
+    setModelSwitcherState({
+      models: modelCatalog.models,
+      mode: 'model',
+      modelIndex: findAssistantModelOptionIndex(
+        activeModel,
+        modelCatalog.modelOptions,
+      ),
+      reasoningIndex: findAssistantReasoningOptionIndex(
+        activeReasoningEffort,
+        reasoningOptions,
+      ),
+      modelOptions: modelCatalog.modelOptions,
+      reasoningOptions,
+    })
+  }
+
+  const moveModelSwitcherSelection = (delta: number) => {
+    setModelSwitcherState((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      if (previous.mode === 'model') {
+        const modelIndex = wrapPickerIndex(
+          previous.modelIndex + delta,
+          previous.modelOptions.length,
+        )
+        const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+          previous.models[modelIndex],
+        )
+        return {
+          ...previous,
+          modelIndex,
+          reasoningIndex: findAssistantReasoningOptionIndex(
+            activeReasoningEffort,
+            reasoningOptions,
+          ),
+          reasoningOptions,
+        }
+      }
+
+      return {
+        ...previous,
+        reasoningIndex: wrapPickerIndex(
+          previous.reasoningIndex + delta,
+          previous.reasoningOptions.length,
+        ),
+      }
+    })
+  }
+
+  const cancelModelSwitcher = () => {
+    setModelSwitcherState((previous) => {
+      if (!previous) {
+        return previous
+      }
+
+      if (previous.mode === 'reasoning') {
+        return {
+          ...previous,
+          mode: 'model',
+        }
+      }
+
+      return null
+    })
+  }
+
+  const applyModelSwitcherSelection = (selection: ModelSwitcherState) => {
+    const nextModel =
+      selection.modelOptions[selection.modelIndex]?.value ??
+      activeModel ??
+      null
+    const nextReasoningEffort =
+      selection.reasoningOptions.length > 0
+        ? selection.reasoningOptions[selection.reasoningIndex]?.value ??
+          activeReasoningEffort ??
+          'medium'
+        : null
+    const selectedLabel = [
+      nextModel ?? 'the configured model',
+      normalizeNullableString(nextReasoningEffort),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join(' ')
+
+    setActiveModel(nextModel)
+    setActiveReasoningEffort(nextReasoningEffort)
+    setModelSwitcherState(null)
+    setStatus({
+      kind: 'info',
+      text: `Using ${selectedLabel}.`,
+    })
+
+    void (async () => {
+      try {
+        const updatedSession = await updateAssistantSessionOptions({
+          vault: input.input.vault,
+          sessionId: latestSessionRef.current.sessionId,
+          providerOptions: {
+            model: nextModel,
+            reasoningEffort: nextReasoningEffort,
+          },
+        })
+
+        latestSessionRef.current = updatedSession
+        setSession(updatedSession)
+
+        await saveAssistantOperatorDefaultsPatch(
+          buildAssistantProviderDefaultsPatch({
+            defaults: input.defaults,
+            provider: updatedSession.provider,
+            providerConfig: {
+              ...updatedSession.providerOptions,
+              model: nextModel,
+              reasoningEffort: nextReasoningEffort,
+            },
+          }),
+        )
+      } catch (error) {
+        setStatus({
+          kind: 'error',
+          text:
+            error instanceof Error && error.message.trim().length > 0
+              ? `Using ${selectedLabel} for now, but failed to save it for later chats: ${error.message}`
+              : `Using ${selectedLabel} for now, but failed to save it for later chats.`,
+        })
+      }
+    })()
+  }
+
+  const confirmModelSwitcher = () => {
+    if (!modelSwitcherState) {
+      return
+    }
+
+    if (
+      modelSwitcherState.mode === 'model' &&
+      modelSwitcherState.reasoningOptions.length > 0
+    ) {
+      setModelSwitcherState({
+        ...modelSwitcherState,
+        mode: 'reasoning',
+      })
+      return
+    }
+
+    applyModelSwitcherSelection(modelSwitcherState)
+  }
+
+  const requestPause = () => {
+    if (
+      turnStateRef.current.phase !== 'running' ||
+      modelSwitcherState ||
+      turnStateRef.current.pauseRequested ||
+      !activeTurnAbortControllerRef.current
+    ) {
+      return
+    }
+
+    updateTurnState({
+      kind: 'request-pause',
+    })
+    setStatus({
+      kind: 'info',
+      text:
+        promptQueueStateRef.current.prompts.length > 0
+          ? 'Pausing current turn. Queued follow-ups will return to the composer.'
+          : 'Pausing current turn...',
+    })
+    activeTurnAbortControllerRef.current.abort()
+  }
+
+  useInput(
+    (_input: string, key: Key) => {
+      if (!key.escape) {
+        return
+      }
+
+      requestPause()
+    },
+    {
+      isActive: turnState.phase === 'running' && modelSwitcherState === null,
+    },
+  )
+
+  const submitPrompt = (
+    rawValue: string,
+    mode: ComposerSubmitMode,
+  ): ComposerSubmitDisposition => {
+    const action = resolveChatSubmitAction(rawValue, {
+      busy: turnState.phase === 'running',
+      trigger: mode,
+    })
+
+    if (action.kind === 'ignore') {
+      return 'keep'
+    }
+
+    if (action.kind === 'exit') {
+      exit()
+      return 'keep'
+    }
+
+    if (action.kind === 'session') {
+      setStatus({
+        kind: 'info',
+        text: `session ${latestSessionRef.current.sessionId}`,
+      })
+      return 'keep'
+    }
+
+    if (action.kind === 'model') {
+      setStatus(null)
+      openModelSwitcher()
+      return 'clear'
+    }
+
+    if (action.kind === 'queue') {
+      queuePrompt(action.prompt)
+      return 'clear'
+    }
+
+    startPromptTurn(action.prompt)
+    return shouldClearComposerForSubmitAction(action) ? 'clear' : 'keep'
+  }
+
+  React.useEffect(() => {
+    if (bootstrappedRef.current) {
+      return
+    }
+
+    bootstrappedRef.current = true
+    if (initialPromptRef.current) {
+      submitPrompt(initialPromptRef.current, 'enter')
+    }
+  }, [])
+
+  const bindingSummary = formatSessionBinding(session)
+  const metadataBadges = resolveChatMetadataBadges(
+    {
+      provider: session.provider,
+      model: activeModel ?? session.providerOptions.model ?? input.codexDisplay.model,
+      reasoningEffort: activeReasoningEffort ?? input.codexDisplay.reasoningEffort,
+    },
+    input.redactedVault,
+  )
+
+  return {
+    activeModel,
+    activeReasoningEffort,
+    bindingSummary,
+    busy: turnState.phase === 'running',
+    cancelModelSwitcher,
+    composerValue,
+    confirmModelSwitcher,
+    editLastQueuedPrompt,
+    entries,
+    lastQueuedPrompt: promptQueueState.prompts.at(-1) ?? null,
+    latestSessionRef,
+    latestTurnsRef,
+    metadataBadges,
+    modelSwitcherState,
+    moveModelSwitcherSelection,
+    queuedPromptCount: promptQueueState.prompts.length,
+    session,
+    setComposerValue,
+    status,
+    submitPrompt,
+  }
+}
+
 export async function runAssistantChatWithInk(
   input: AssistantChatInput,
 ): Promise<AssistantChatResult> {
@@ -2815,115 +3795,16 @@ export async function runAssistantChatWithInk(
 
     const App = (): React.ReactElement => {
       const createElement = React.createElement
-      const { exit } = useApp()
       const [theme, setTheme] = React.useState(() => themeBaseline.theme)
-      const [session, setSession] = React.useState(resolved.session)
-      const [turns, setTurns] = React.useState(0)
-      const [entries, setEntries] = React.useState(seedChatEntries(transcriptEntries))
-      const [busy, setBusy] = React.useState(false)
-      const [status, setStatus] = React.useState<{
-        kind: 'error' | 'info' | 'success'
-        text: string
-      } | null>(null)
-      const [queuedPromptCount, setQueuedPromptCount] = React.useState(0)
-      const [lastQueuedPrompt, setLastQueuedPrompt] = React.useState<string | null>(null)
-      const [composerValue, setComposerValue] = React.useState('')
-      const initialActiveModel =
-        normalizeNullableString(input.model) ??
-        normalizeNullableString(selectedProviderDefaults?.model) ??
-        normalizeNullableString(resolved.session.providerOptions.model) ??
-        normalizeNullableString(codexDisplay.model)
-      const initialActiveReasoningEffort =
-        normalizeNullableString(input.reasoningEffort) ??
-        normalizeNullableString(selectedProviderDefaults?.reasoningEffort) ??
-        normalizeNullableString(resolved.session.providerOptions.reasoningEffort) ??
-        normalizeNullableString(codexDisplay.reasoningEffort)
-      const [activeModel, setActiveModel] = React.useState<string | null>(
-        initialActiveModel,
-      )
-      const [activeReasoningEffort, setActiveReasoningEffort] = React.useState<string | null>(
-        initialActiveReasoningEffort,
-      )
-      const [modelDiscovery, setModelDiscovery] =
-        React.useState<AssistantModelDiscoveryResult | null>(null)
-      const [modelSwitcherState, setModelSwitcherState] =
-        React.useState<ModelSwitcherState | null>(null)
-      const latestSessionRef = React.useRef(resolved.session)
-      const latestTurnsRef = React.useRef(0)
-      const initialPromptRef = React.useRef(normalizeNullableString(input.initialPrompt))
-      const bootstrappedRef = React.useRef(false)
-      const queuedPromptsRef = React.useRef<string[]>([])
-      const activeTurnAbortControllerRef = React.useRef<AbortController | null>(null)
-      const pauseRequestedRef = React.useRef(false)
-      const modelCatalog = resolveAssistantModelCatalog({
-        provider: session.provider,
-        baseUrl: session.providerOptions.baseUrl,
-        currentModel: activeModel,
-        currentReasoningEffort: activeReasoningEffort,
-        discovery: modelDiscovery,
-        headers: session.providerOptions.headers ?? null,
-        apiKeyEnv: session.providerOptions.apiKeyEnv,
-        oss: session.providerOptions.oss,
-        providerName: session.providerOptions.providerName,
+      const controller = useAssistantChatController({
+        codexDisplay,
+        defaults,
+        input,
+        redactedVault,
+        resolvedSession: resolved.session,
+        selectedProviderDefaults,
+        transcriptEntries,
       })
-
-      const syncQueuedPromptState = React.useCallback((queuedPrompts: readonly string[]) => {
-        setQueuedPromptCount(queuedPrompts.length)
-        setLastQueuedPrompt(
-          queuedPrompts.length > 0 ? queuedPrompts[queuedPrompts.length - 1] ?? null : null,
-        )
-      }, [])
-
-      React.useEffect(() => {
-        latestSessionRef.current = session
-      }, [session])
-
-      React.useEffect(() => {
-        latestTurnsRef.current = turns
-      }, [turns])
-
-      React.useEffect(() => {
-        let cancelled = false
-        const baseUrl = normalizeNullableString(session.providerOptions.baseUrl)
-
-        if (!modelCatalog.capabilities.supportsModelDiscovery || !baseUrl) {
-          setModelDiscovery((existing) => (existing === null ? existing : null))
-          return () => {
-            cancelled = true
-          }
-        }
-
-        void (async () => {
-          const nextDiscovery = await discoverAssistantProviderModels({
-            provider: session.provider,
-            baseUrl,
-            apiKeyEnv: session.providerOptions.apiKeyEnv,
-            headers: session.providerOptions.headers ?? null,
-            providerName: session.providerOptions.providerName,
-          })
-
-          if (cancelled) {
-            return
-          }
-
-          setModelDiscovery((existing) =>
-            assistantModelDiscoveryResultsEqual(existing, nextDiscovery)
-              ? existing
-              : nextDiscovery,
-          )
-        })()
-
-        return () => {
-          cancelled = true
-        }
-      }, [
-        modelCatalog.capabilities.supportsModelDiscovery,
-        session.provider,
-        session.providerOptions.apiKeyEnv,
-        session.providerOptions.baseUrl,
-        session.providerOptions.headers,
-        session.providerOptions.providerName,
-      ])
 
       React.useEffect(() => {
         if (process.platform !== 'darwin') {
@@ -2956,519 +3837,12 @@ export async function runAssistantChatWithInk(
               vault: redactedVault,
               startedAt,
               stoppedAt: new Date().toISOString(),
-              turns: latestTurnsRef.current,
-              session: latestSessionRef.current,
+              turns: controller.latestTurnsRef.current,
+              session: controller.latestSessionRef.current,
             }),
           )
         },
         [],
-      )
-
-      const openModelSwitcher = () => {
-        const reasoningOptions = resolveAssistantCatalogReasoningOptions(
-          modelCatalog.models[findAssistantModelOptionIndex(activeModel, modelCatalog.modelOptions)],
-        )
-        setModelSwitcherState({
-          models: modelCatalog.models,
-          mode: 'model',
-          modelIndex: findAssistantModelOptionIndex(
-            activeModel,
-            modelCatalog.modelOptions,
-          ),
-          reasoningIndex: findAssistantReasoningOptionIndex(
-            activeReasoningEffort,
-            reasoningOptions,
-          ),
-          modelOptions: modelCatalog.modelOptions,
-          reasoningOptions,
-        })
-      }
-
-      const moveModelSwitcherSelection = (delta: number) => {
-        setModelSwitcherState((previous) => {
-          if (!previous) {
-            return previous
-          }
-
-          if (previous.mode === 'model') {
-            const modelIndex = wrapPickerIndex(
-              previous.modelIndex + delta,
-              previous.modelOptions.length,
-            )
-            const reasoningOptions = resolveAssistantCatalogReasoningOptions(
-              previous.models[modelIndex],
-            )
-            return {
-              ...previous,
-              modelIndex,
-              reasoningIndex: findAssistantReasoningOptionIndex(
-                activeReasoningEffort,
-                reasoningOptions,
-              ),
-              reasoningOptions,
-            }
-          }
-
-          return {
-            ...previous,
-            reasoningIndex: wrapPickerIndex(
-              previous.reasoningIndex + delta,
-              previous.reasoningOptions.length,
-            ),
-          }
-        })
-      }
-
-      const cancelModelSwitcher = () => {
-        setModelSwitcherState((previous) => {
-          if (!previous) {
-            return previous
-          }
-
-          if (previous.mode === 'reasoning') {
-            return {
-              ...previous,
-              mode: 'model',
-            }
-          }
-
-          return null
-        })
-      }
-
-      const applyModelSwitcherSelection = (selection: ModelSwitcherState) => {
-        const nextModel =
-          selection.modelOptions[selection.modelIndex]?.value ??
-          activeModel ??
-          null
-        const nextReasoningEffort =
-          selection.reasoningOptions.length > 0
-            ? selection.reasoningOptions[selection.reasoningIndex]?.value ??
-              activeReasoningEffort ??
-              'medium'
-            : null
-        const selectedLabel = [
-          nextModel ?? 'the configured model',
-          normalizeNullableString(nextReasoningEffort),
-        ]
-          .filter((value): value is string => Boolean(value))
-          .join(' ')
-
-        setActiveModel(nextModel)
-        setActiveReasoningEffort(nextReasoningEffort)
-        setModelSwitcherState(null)
-        setStatus({
-          kind: 'info',
-          text: `Using ${selectedLabel}.`,
-        })
-
-        void (async () => {
-          try {
-            const updatedSession = await updateAssistantSessionOptions({
-              vault: input.vault,
-              sessionId: latestSessionRef.current.sessionId,
-              providerOptions: {
-                model: nextModel,
-                reasoningEffort: nextReasoningEffort,
-              },
-            })
-
-            latestSessionRef.current = updatedSession
-            setSession(updatedSession)
-
-            await saveAssistantOperatorDefaultsPatch(
-              buildAssistantProviderDefaultsPatch({
-                defaults,
-                provider: updatedSession.provider,
-                providerConfig: {
-                  ...updatedSession.providerOptions,
-                  model: nextModel,
-                  reasoningEffort: nextReasoningEffort,
-                },
-              }),
-            )
-          } catch (error) {
-            setStatus({
-              kind: 'error',
-              text:
-                error instanceof Error && error.message.trim().length > 0
-                  ? `Using ${selectedLabel} for now, but failed to save it for later chats: ${error.message}`
-                  : `Using ${selectedLabel} for now, but failed to save it for later chats.`,
-            })
-          }
-        })()
-      }
-
-      const confirmModelSwitcher = () => {
-        if (!modelSwitcherState) {
-          return
-        }
-
-        if (
-          modelSwitcherState.mode === 'model' &&
-          modelSwitcherState.reasoningOptions.length > 0
-        ) {
-          setModelSwitcherState({
-            ...modelSwitcherState,
-            mode: 'reasoning',
-          })
-          return
-        }
-
-        applyModelSwitcherSelection(modelSwitcherState)
-      }
-
-      const queuePrompt = (prompt: string) => {
-        const nextQueuedPrompts = [...queuedPromptsRef.current, prompt]
-        queuedPromptsRef.current = nextQueuedPrompts
-        syncQueuedPromptState(nextQueuedPrompts)
-      }
-
-      const dequeueQueuedPrompt = (): string | null => {
-        const [nextPrompt, ...remainingPrompts] = queuedPromptsRef.current
-        if (!nextPrompt) {
-          return null
-        }
-
-        queuedPromptsRef.current = remainingPrompts
-        syncQueuedPromptState(remainingPrompts)
-        return nextPrompt
-      }
-
-      const restoreQueuedPromptsIntoComposer = (): number => {
-        const queuedPrompts = queuedPromptsRef.current
-        if (queuedPrompts.length === 0) {
-          return 0
-        }
-
-        queuedPromptsRef.current = []
-        syncQueuedPromptState([])
-        setComposerValue((previous) =>
-          mergeComposerDraftWithQueuedPrompts(previous, queuedPrompts),
-        )
-        return queuedPrompts.length
-      }
-
-      const editLastQueuedPrompt = () => {
-        const queuedPrompts = queuedPromptsRef.current
-        const lastQueuedPrompt = queuedPrompts.at(-1)
-
-        if (!lastQueuedPrompt) {
-          return
-        }
-
-        const remainingPrompts = queuedPrompts.slice(0, -1)
-        queuedPromptsRef.current = remainingPrompts
-        syncQueuedPromptState(remainingPrompts)
-        setComposerValue((previous) =>
-          mergeComposerDraftWithQueuedPrompts(previous, [lastQueuedPrompt]),
-        )
-      }
-
-      const startPromptTurn = (prompt: string) => {
-        setEntries((previous: InkChatEntry[]) => [
-          ...previous,
-          {
-            kind: 'user',
-            text: prompt,
-          },
-        ])
-        setBusy(true)
-        setStatus(null)
-        pauseRequestedRef.current = false
-
-        const abortController = new AbortController()
-        activeTurnAbortControllerRef.current = abortController
-
-        const turnTracePrefix = `turn:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`
-
-        void (async () => {
-          let streamedAssistantEntryKey: string | null = null
-          let completedTurn = false
-          let interruptedTurn = false
-
-          const handleTraceEvent = (event: AssistantProviderTraceEvent) => {
-            const namespacedUpdates = namespaceTurnTraceUpdates(
-              event.updates,
-              turnTracePrefix,
-            )
-            if (namespacedUpdates.length === 0) {
-              return
-            }
-
-            for (const update of namespacedUpdates) {
-              if (update.kind === 'assistant' && update.streamKey) {
-                streamedAssistantEntryKey = streamedAssistantEntryKey ?? update.streamKey
-              }
-            }
-
-            setEntries((previous: InkChatEntry[]) =>
-              applyInkChatTraceUpdates(previous, namespacedUpdates),
-            )
-
-            const latestStatusUpdate = [...namespacedUpdates]
-              .reverse()
-              .find((update) => update.kind === 'error' || update.kind === 'status')
-
-            if (latestStatusUpdate) {
-              setStatus({
-                kind: latestStatusUpdate.kind === 'error' ? 'error' : 'info',
-                text: latestStatusUpdate.text,
-              })
-            }
-          }
-
-          try {
-            const result = await sendAssistantMessage({
-              ...input,
-              abortSignal: abortController.signal,
-              conversation: {
-                ...(input.conversation ?? {}),
-                sessionId: latestSessionRef.current.sessionId,
-              },
-              model: activeModel,
-              onProviderEvent: (event) => {
-                setEntries((previous: InkChatEntry[]) =>
-                  applyProviderProgressEventToEntries({
-                    entries: previous,
-                    event: namespaceProviderProgressEvent(event, turnTracePrefix),
-                  }),
-                )
-              },
-              onTraceEvent: handleTraceEvent,
-              prompt,
-              reasoningEffort: activeReasoningEffort,
-              sessionSnapshot: latestSessionRef.current,
-              showThinkingTraces: true,
-            })
-
-            completedTurn = true
-            latestSessionRef.current = result.session
-            setSession(result.session)
-            if (result.status === 'blocked') {
-              setEntries((previous: InkChatEntry[]) => [
-                ...previous,
-                {
-                  kind: 'status',
-                  text:
-                    result.blocked?.message ??
-                    'Assistant turn was blocked by the canonical write guard.',
-                },
-              ])
-              setStatus({
-                kind: 'info',
-                text:
-                  result.blocked?.message ??
-                  'Assistant turn was blocked by the canonical write guard.',
-              })
-              return
-            }
-
-            setTurns((previous: number) => previous + 1)
-            setEntries((previous: InkChatEntry[]) =>
-              streamedAssistantEntryKey
-                ? applyInkChatTraceUpdates(previous, [
-                    {
-                      kind: 'assistant',
-                      mode: 'replace',
-                      streamKey: streamedAssistantEntryKey,
-                      text: result.response,
-                    },
-                  ])
-                : [
-                    ...previous,
-                    {
-                      kind: 'assistant',
-                      text: result.response,
-                    },
-                  ],
-            )
-            setStatus(
-              result.delivery
-                ? {
-                    kind: 'success',
-                    text: `Delivered over ${result.delivery.channel} to ${result.delivery.target}.`,
-                  }
-                : result.deliveryError
-                  ? {
-                      kind: 'error',
-                      text: `Response saved locally, but delivery failed: ${result.deliveryError.message}`,
-                    }
-                  : null,
-            )
-          } catch (error) {
-            const recoveredSession = extractRecoveredAssistantSession(error)
-            if (recoveredSession) {
-              latestSessionRef.current = recoveredSession
-              setSession(recoveredSession)
-            }
-
-            if (isAssistantProviderInterruptedError(error)) {
-              interruptedTurn = true
-              return
-            }
-
-            const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
-            const errorPresentation = resolveAssistantTurnErrorPresentation({
-              error,
-              restoredQueuedPromptCount,
-            })
-            setEntries((previous: InkChatEntry[]) => [
-              ...previous,
-              errorPresentation.entry,
-            ])
-            setStatus(errorPresentation.status)
-            if (errorPresentation.persistTranscriptError) {
-              void appendAssistantTranscriptEntries(
-                input.vault,
-                latestSessionRef.current.sessionId,
-                [
-                  {
-                    kind: 'error',
-                    text: errorPresentation.entry.text,
-                  },
-                ],
-              ).catch(() => {})
-            }
-          } finally {
-            activeTurnAbortControllerRef.current = null
-            setEntries((previous: InkChatEntry[]) =>
-              finalizePendingInkChatTraces(previous, turnTracePrefix),
-            )
-            const pauseRequested = pauseRequestedRef.current
-            pauseRequestedRef.current = false
-            setBusy(false)
-
-            if (interruptedTurn) {
-              const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
-              setStatus({
-                kind: 'info',
-                text:
-                  restoredQueuedPromptCount > 0
-                    ? 'Paused current turn. Queued follow-ups are back in the composer.'
-                    : 'Paused current turn.',
-              })
-              return
-            }
-
-            if (completedTurn && pauseRequested) {
-              const restoredQueuedPromptCount = restoreQueuedPromptsIntoComposer()
-              setStatus({
-                kind: 'info',
-                text:
-                  restoredQueuedPromptCount > 0
-                    ? 'Stopped after the current turn. Queued follow-ups are back in the composer.'
-                    : 'Stopped after the current turn.',
-              })
-              return
-            }
-
-            if (completedTurn) {
-              const nextQueuedPrompt = dequeueQueuedPrompt()
-              if (nextQueuedPrompt) {
-                queueMicrotask(() => {
-                  startPromptTurn(nextQueuedPrompt)
-                })
-              }
-            }
-          }
-        })()
-      }
-
-      const requestPause = () => {
-        if (
-          !busy ||
-          modelSwitcherState ||
-          pauseRequestedRef.current ||
-          !activeTurnAbortControllerRef.current
-        ) {
-          return
-        }
-
-        pauseRequestedRef.current = true
-        setStatus({
-          kind: 'info',
-          text:
-            queuedPromptsRef.current.length > 0
-              ? 'Pausing current turn. Queued follow-ups will return to the composer.'
-              : 'Pausing current turn...',
-        })
-        activeTurnAbortControllerRef.current.abort()
-      }
-
-      useInput(
-        (_input: string, key: Key) => {
-          if (!key.escape) {
-            return
-          }
-
-          requestPause()
-        },
-        {
-          isActive: busy && modelSwitcherState === null,
-        },
-      )
-
-      const submitPrompt = (
-        rawValue: string,
-        mode: ComposerSubmitMode,
-      ): ComposerSubmitDisposition => {
-        const action = resolveChatSubmitAction(rawValue, {
-          busy,
-          trigger: mode,
-        })
-
-        if (action.kind === 'ignore') {
-          return 'keep'
-        }
-
-        if (action.kind === 'exit') {
-          exit()
-          return 'keep'
-        }
-
-        if (action.kind === 'session') {
-          setStatus({
-            kind: 'info',
-            text: `session ${latestSessionRef.current.sessionId}`,
-          })
-          return 'keep'
-        }
-
-        if (action.kind === 'model') {
-          setStatus(null)
-          openModelSwitcher()
-          return 'clear'
-        }
-
-        if (action.kind === 'queue') {
-          queuePrompt(action.prompt)
-          return 'clear'
-        }
-
-        startPromptTurn(action.prompt)
-        return shouldClearComposerForSubmitAction(action) ? 'clear' : 'keep'
-      }
-
-      React.useEffect(() => {
-        if (bootstrappedRef.current) {
-          return
-        }
-
-        bootstrappedRef.current = true
-        if (initialPromptRef.current) {
-          submitPrompt(initialPromptRef.current, 'enter')
-        }
-      }, [])
-
-      const bindingSummary = formatSessionBinding(session)
-      const metadataBadges = resolveChatMetadataBadges(
-        {
-          provider: session.provider,
-          model: activeModel ?? session.providerOptions.model ?? codexDisplay.model,
-          reasoningEffort: activeReasoningEffort ?? codexDisplay.reasoningEffort,
-        },
-        redactedVault,
       )
 
       return createElement(
@@ -3476,64 +3850,64 @@ export async function runAssistantChatWithInk(
         {
           value: theme,
         },
-        createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            paddingX: ASSISTANT_CHAT_VIEW_PADDING_X,
-            paddingY: 1,
-            width: '100%',
-          },
-          createElement(ChatTranscriptFeed, {
-            bindingSummary,
-            busy,
-            entries,
-            sessionId: session.sessionId,
-          }),
           createElement(
             Box,
             {
               flexDirection: 'column',
+              paddingX: ASSISTANT_CHAT_VIEW_PADDING_X,
+              paddingY: 1,
               width: '100%',
             },
-            createElement(ChatStatus, {
-              busy: shouldShowBusyStatus({
-                busy,
-                entries,
+            createElement(ChatTranscriptFeed, {
+              bindingSummary: controller.bindingSummary,
+              busy: controller.busy,
+              entries: controller.entries,
+              sessionId: controller.session.sessionId,
+            }),
+            createElement(
+              Box,
+              {
+                flexDirection: 'column',
+                width: '100%',
+              },
+              createElement(ChatStatus, {
+                busy: shouldShowBusyStatus({
+                  busy: controller.busy,
+                  entries: controller.entries,
+                }),
+                status: controller.status,
               }),
-              status,
-            }),
-            createElement(QueuedFollowUpStatus, {
-              latestPrompt: lastQueuedPrompt,
-              queuedPromptCount,
-            }),
-            modelSwitcherState
-              ? createElement(ModelSwitcher, {
-                  currentModel: activeModel,
-                  currentReasoningEffort: activeReasoningEffort,
-                  mode: modelSwitcherState.mode,
-                  modelIndex: modelSwitcherState.modelIndex,
-                  modelOptions: modelSwitcherState.modelOptions,
-                  onCancel: cancelModelSwitcher,
-                  onConfirm: confirmModelSwitcher,
-                  onMove: moveModelSwitcherSelection,
-                  reasoningIndex: modelSwitcherState.reasoningIndex,
-                  reasoningOptions: modelSwitcherState.reasoningOptions,
-                })
-              : null,
-            createElement(ChatComposer, {
-              entryCount: entries.length,
-              modelSwitcherActive: modelSwitcherState !== null,
-              onChange: setComposerValue,
-              onEditLastQueuedPrompt: editLastQueuedPrompt,
-              onSubmit: submitPrompt,
-              value: composerValue,
-            }),
-            createElement(ChatFooter, {
-              badges: metadataBadges,
-            }),
+              createElement(QueuedFollowUpStatus, {
+                latestPrompt: controller.lastQueuedPrompt,
+                queuedPromptCount: controller.queuedPromptCount,
+              }),
+              controller.modelSwitcherState
+                ? createElement(ModelSwitcher, {
+                    currentModel: controller.activeModel,
+                    currentReasoningEffort: controller.activeReasoningEffort,
+                    mode: controller.modelSwitcherState.mode,
+                    modelIndex: controller.modelSwitcherState.modelIndex,
+                    modelOptions: controller.modelSwitcherState.modelOptions,
+                    onCancel: controller.cancelModelSwitcher,
+                    onConfirm: controller.confirmModelSwitcher,
+                    onMove: controller.moveModelSwitcherSelection,
+                    reasoningIndex: controller.modelSwitcherState.reasoningIndex,
+                    reasoningOptions: controller.modelSwitcherState.reasoningOptions,
+                  })
+                : null,
+              createElement(ChatComposer, {
+                entryCount: controller.entries.length,
+                modelSwitcherActive: controller.modelSwitcherState !== null,
+                onChange: controller.setComposerValue,
+                onEditLastQueuedPrompt: controller.editLastQueuedPrompt,
+                onSubmit: controller.submitPrompt,
+                value: controller.composerValue,
+              }),
+              createElement(ChatFooter, {
+                badges: controller.metadataBadges,
+              }),
+            ),
           ),
-        ),
       )
     }
 
