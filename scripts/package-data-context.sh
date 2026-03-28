@@ -31,6 +31,8 @@ Options:
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: output-packages)
   --name <prefix>            Output filename prefix (default: murph-data-bundle)
+  --docs / --no-docs         Accepted as no-op compatibility flags
+  --tests / --no-tests       Accepted as no-op compatibility flags
   --with-assistant-state     Include the matching assistant-state bucket (default)
   --no-assistant-state       Exclude assistant-state files
   -h, --help                 Show this help message
@@ -244,6 +246,10 @@ while [[ $# -gt 0 ]]; do
       }
       prefix="$2"
       shift 2
+      ;;
+    --docs|--no-docs|--with-docs|--no-tests|--tests|--with-tests)
+      # review-gpt forwards docs/tests packaging toggles; data bundles do not use them.
+      shift
       ;;
     --with-assistant-state)
       include_assistant_state=1

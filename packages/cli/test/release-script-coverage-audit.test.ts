@@ -258,6 +258,8 @@ describe('monorepo release flow coverage audit', () => {
           outputRoot,
           '--name',
           'murph-test-data',
+          '--no-docs',
+          '--no-tests',
         ],
         {
           cwd: repoRoot,
