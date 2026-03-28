@@ -190,6 +190,68 @@ interface ExecutedAssistantProviderTurnResult extends AssistantProviderTurnResul
   session: AssistantSession
 }
 
+type AssistantProviderFailoverState = Awaited<
+  ReturnType<typeof readAssistantFailoverState>
+>
+
+interface AssistantProviderTurnExecutionPlan {
+  input: AssistantMessageInput
+  memoryTurnEnv: NodeJS.ProcessEnv
+  primaryRoute: ResolvedAssistantFailoverRoute | null
+  routes: readonly ResolvedAssistantFailoverRoute[]
+  sharedPlan: AssistantTurnSharedPlan
+  turnId: string
+}
+
+interface AssistantProviderAttemptPlan {
+  attemptCount: number
+  primaryRouteCooldownFailover: boolean
+  remainingRoutes: readonly ResolvedAssistantFailoverRoute[]
+  route: ResolvedAssistantFailoverRoute
+  routePlan: AssistantRouteTurnPlan
+  session: AssistantSession
+}
+
+type AssistantProviderAttemptOutcome =
+  | {
+      kind: 'blocked'
+      error: unknown
+      failoverState: AssistantProviderFailoverState
+      session: AssistantSession
+    }
+  | {
+      kind: 'failed_terminal'
+      error: unknown
+      failoverState: AssistantProviderFailoverState
+      session: AssistantSession
+    }
+  | {
+      kind: 'retry_next_route'
+      failoverState: AssistantProviderFailoverState
+      session: AssistantSession
+    }
+  | {
+      kind: 'succeeded'
+      failoverState: AssistantProviderFailoverState
+      result: ExecutedAssistantProviderTurnResult
+    }
+
+type AssistantProviderTurnRecoveryOutcome =
+  | {
+      kind: 'blocked'
+      error: unknown
+      session: AssistantSession
+    }
+  | {
+      kind: 'failed_terminal'
+      error: unknown
+      session: AssistantSession
+    }
+  | {
+      kind: 'succeeded'
+      providerTurn: ExecutedAssistantProviderTurnResult
+    }
+
 type AssistantDeliveryOutcome =
   | {
       kind: 'failed'
@@ -297,6 +359,65 @@ function buildAssistantCanonicalWriteBlockedResult(input: {
           : null,
     }),
   })
+}
+
+async function finalizeBlockedAssistantTurn(input: {
+  error: unknown
+  prompt: string
+  response: string | null
+  session: AssistantSession
+  turnId: string
+  vault: string
+}): Promise<AssistantAskResult> {
+  const blockedResult = buildAssistantCanonicalWriteBlockedResult({
+    error: input.error,
+    prompt: input.prompt,
+    session: input.session,
+    vault: input.vault,
+  })
+  if (!blockedResult) {
+    throw input.error
+  }
+
+  const blockedAt = new Date().toISOString()
+  const blockedError = blockedResult.blocked
+    ? {
+        code: blockedResult.blocked.code,
+        message: blockedResult.blocked.message,
+      }
+    : {
+        code: 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
+        message: 'Assistant turn was blocked by the canonical write guard.',
+      }
+
+  await runAssistantTurnBestEffort(() =>
+    finalizeAssistantTurnReceipt({
+      vault: input.vault,
+      turnId: input.turnId,
+      status: 'blocked',
+      deliveryDisposition: 'blocked',
+      error: blockedError,
+      response: input.response,
+      completedAt: blockedAt,
+    }),
+  )
+
+  await runAssistantTurnBestEffort(() =>
+    recordAssistantDiagnosticEvent({
+      vault: input.vault,
+      component: 'assistant',
+      kind: 'turn.blocked',
+      level: 'warn',
+      message: blockedError.message,
+      code: blockedError.code,
+      sessionId: blockedResult.session.sessionId,
+      turnId: input.turnId,
+      data: blockedResult.blocked,
+      at: blockedAt,
+    }),
+  )
+
+  return blockedResult
 }
 
 export function buildResolveAssistantSessionInput(
@@ -411,8 +532,7 @@ export async function sendAssistantMessage(
 
       try {
         const userTurn = await persistUserTurn(input, resolved, sharedPlan, receipt.turnId)
-        const providerResult = await executeProviderTurnWithRecovery({
-          defaults,
+        const providerOutcome = await executeProviderTurnWithRecovery({
           input,
           routes,
           plan: sharedPlan,
@@ -420,6 +540,21 @@ export async function sendAssistantMessage(
           turnCreatedAt: userTurn.turnCreatedAt,
           turnId: userTurn.turnId,
         })
+        if (providerOutcome.kind === 'blocked') {
+          return finalizeBlockedAssistantTurn({
+            error: providerOutcome.error,
+            prompt: input.prompt,
+            response: responseText,
+            session: providerOutcome.session,
+            turnId: receipt.turnId,
+            vault: input.vault,
+          })
+        }
+        if (providerOutcome.kind === 'failed_terminal') {
+          throw providerOutcome.error
+        }
+
+        const providerResult = providerOutcome.providerTurn
         responseText = providerResult.response
         const session = await persistAssistantTurnAndSession({
           input,
@@ -472,45 +607,14 @@ export async function sendAssistantMessage(
         })
 
         if (blockedResult) {
-          const blockedAt = new Date().toISOString()
-          const blockedError = blockedResult.blocked
-            ? {
-                code: blockedResult.blocked.code,
-                message: blockedResult.blocked.message,
-              }
-            : {
-                code: 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED',
-                message: 'Assistant turn was blocked by the canonical write guard.',
-              }
-
-          await runAssistantTurnBestEffort(() =>
-            finalizeAssistantTurnReceipt({
-              vault: input.vault,
-              turnId: receipt.turnId,
-              status: 'blocked',
-              deliveryDisposition: 'blocked',
-              error: blockedError,
-              response: responseText,
-              completedAt: blockedAt,
-            }),
-          )
-
-          await runAssistantTurnBestEffort(() =>
-            recordAssistantDiagnosticEvent({
-              vault: input.vault,
-              component: 'assistant',
-              kind: 'turn.blocked',
-              level: 'warn',
-              message: blockedError.message,
-              code: blockedError.code,
-              sessionId: blockedResult.session.sessionId,
-              turnId: receipt.turnId,
-              data: blockedResult.blocked,
-              at: blockedAt,
-            }),
-          )
-
-          return blockedResult
+          return finalizeBlockedAssistantTurn({
+            error,
+            prompt: input.prompt,
+            response: responseText,
+            session: blockedResult.session,
+            turnId: receipt.turnId,
+            vault: input.vault,
+          })
         }
 
         const normalizedError = normalizeAssistantDeliveryError(error)
@@ -1007,218 +1111,342 @@ async function recordProviderFailoverApplied(input: {
 }
 
 async function executeProviderTurnWithRecovery(input: {
-  defaults: AssistantOperatorDefaults | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
   resolvedSession: AssistantSession
   routes: readonly ResolvedAssistantFailoverRoute[]
   turnCreatedAt: string
   turnId: string
-}): Promise<ExecutedAssistantProviderTurnResult> {
-  const primaryRoute = input.routes[0] ?? null
+}): Promise<AssistantProviderTurnRecoveryOutcome> {
+  const executionPlan = buildAssistantProviderTurnExecutionPlan(input)
   let failoverState = await readAssistantFailoverState(input.input.vault)
   let workingSession = input.resolvedSession
-  let attemptCount = 0
-  let lastError: unknown = null
   const attemptedRouteIds = new Set<string>()
-  const memoryTurnEnv = createAssistantMemoryTurnContextEnv({
-    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-    sessionId: workingSession.sessionId,
-    sourcePrompt: input.input.prompt,
-    turnId: `${workingSession.sessionId}:${input.turnCreatedAt}`,
-    vault: input.input.vault,
-  })
+  let nextAttemptCount = 1
 
-  while (attemptedRouteIds.size < input.routes.length) {
-    const remainingRoutes = prioritizeAssistantFailoverRoutes(
-      input.routes.filter((route) => !attemptedRouteIds.has(route.routeId)),
+  while (attemptedRouteIds.size < executionPlan.routes.length) {
+    const attemptPlan = await resolveAssistantProviderAttemptPlan({
+      attemptCount: nextAttemptCount,
+      attemptedRouteIds,
+      executionPlan,
       failoverState,
-    )
-    const route = remainingRoutes[0] ?? null
-    if (!route) {
+      session: workingSession,
+    })
+    if (!attemptPlan) {
       break
     }
 
-    attemptCount += 1
-    attemptedRouteIds.add(route.routeId)
+    attemptedRouteIds.add(attemptPlan.route.routeId)
+    nextAttemptCount = attemptPlan.attemptCount + 1
 
-    if (attemptCount === 1 && primaryRoute && route.routeId !== primaryRoute.routeId) {
-      await recordProviderCooldownFailoverApplied({
-        primaryRoute,
-        route,
-        sessionId: workingSession.sessionId,
-        turnId: input.turnId,
-        vault: input.input.vault,
-      })
-    }
-
-    const attemptAt = new Date().toISOString()
-    await recordProviderAttemptStarted({
-      attemptCount,
-      at: attemptAt,
-      route,
-      sessionId: workingSession.sessionId,
-      turnId: input.turnId,
-      vault: input.input.vault,
+    const attemptOutcome = await executeAssistantProviderAttempt({
+      attemptPlan,
+      executionPlan,
+      failoverState,
     })
 
-    try {
-      const routePlan = await resolveAssistantRouteTurnPlan({
-        input: input.input,
-        route,
-        session: workingSession,
-        sharedPlan: input.plan,
-      })
-      maybeThrowInjectedAssistantFault({
-        component: 'provider',
-        fault: 'provider',
-        message: 'Injected assistant provider failure.',
-      })
-      const result = await executeWithCanonicalWriteGuard({
-        enabled: route.provider === 'codex-cli',
-        vaultRoot: input.input.vault,
-        execute: () =>
-          executeAssistantProviderTurn({
-            abortSignal: input.input.abortSignal,
-            provider: route.provider,
-            workingDirectory: routePlan.workingDirectory,
-            configOverrides: routePlan.configOverrides,
-            env: {
-              ...routePlan.cliEnv,
-              ...memoryTurnEnv,
-            },
-            userPrompt: input.input.prompt,
-            continuityContext: routePlan.continuityContext,
-            systemPrompt: routePlan.systemPrompt,
-            sessionContext: routePlan.sessionContext
-              ? {
-                  binding: workingSession.binding,
-                }
-              : undefined,
-            resumeProviderSessionId:
-              attemptCount === 1
-                ? routePlan.resumeProviderSessionId
-                : route.provider === workingSession.provider
-                  ? workingSession.providerSessionId
-                  : null,
-            codexCommand:
-              route.codexCommand ??
-              input.input.codexCommand ??
-              undefined,
-            model: route.providerOptions.model,
-            reasoningEffort: route.providerOptions.reasoningEffort,
-            sandbox: route.providerOptions.sandbox,
-            approvalPolicy: route.providerOptions.approvalPolicy,
-            baseUrl: route.providerOptions.baseUrl,
-            apiKeyEnv: route.providerOptions.apiKeyEnv,
-            providerName: route.providerOptions.providerName,
-            headers: route.providerOptions.headers,
-            conversationMessages: routePlan.conversationMessages,
-            onEvent: input.input.onProviderEvent ?? undefined,
-            profile: route.providerOptions.profile,
-            oss: route.providerOptions.oss,
-            onTraceEvent: input.input.onTraceEvent,
-            showThinkingTraces: input.input.showThinkingTraces ?? false,
-          }),
-      })
+    failoverState = attemptOutcome.failoverState
 
-      failoverState = await recordAssistantFailoverRouteSuccess({
-        vault: input.input.vault,
-        route,
-        at: new Date().toISOString(),
-      })
-      await recordProviderAttemptSucceeded({
-        attemptCount,
-        route,
-        turnId: input.turnId,
-        vault: input.input.vault,
-      })
-
-      return {
-        ...result,
-        attemptCount,
-        providerOptions: serializeAssistantProviderSessionOptions(
-          route.providerOptions,
-        ),
-        route,
-        session: workingSession,
-      }
-    } catch (error) {
-      lastError = error
-      const errorCode = readAssistantErrorCode(error)
-      const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
-        error,
-        provider: route.provider,
-        providerOptions: route.providerOptions,
-        providerState:
-          route.provider === 'codex-cli'
-            ? writeAssistantCodexPromptVersion(
-                workingSession.providerState,
-                CURRENT_CODEX_PROMPT_VERSION,
-              )
-            : null,
-        session: workingSession,
-        vault: input.input.vault,
-      })
-      if (recoveredSession) {
-        workingSession = recoveredSession
-      }
-      attachRecoveredAssistantSession(error, recoveredSession)
-      const shouldRecordRouteFailure = shouldRecordAssistantRouteFailure(errorCode)
-      if (shouldRecordRouteFailure) {
-        failoverState = await recordAssistantFailoverRouteFailure({
-          error,
-          route,
-          vault: input.input.vault,
-        })
-      }
-      const cooldownUntil = shouldRecordRouteFailure
-        ? getAssistantFailoverCooldownUntil({
-            route,
-            state: failoverState,
-          })
-        : null
-      const detail = errorMessage(error)
-
-      await recordProviderAttemptFailed({
-        attemptCount,
-        cooldownUntil,
-        detail,
-        errorCode,
-        route,
-        sessionId: workingSession.sessionId,
-        turnId: input.turnId,
-        vault: input.input.vault,
-      })
-
-      if (!shouldAttemptAssistantProviderFailover({
-        abortSignal: input.input.abortSignal,
-        error,
-      })) {
-        throw error
-      }
-
-      const remainingCandidates = prioritizeAssistantFailoverRoutes(
-        input.routes.filter((candidate) => !attemptedRouteIds.has(candidate.routeId)),
-        failoverState,
-      )
-      const nextRoute = remainingCandidates[0] ?? null
-      if (!nextRoute) {
-        throw error
-      }
-
-      await recordProviderFailoverApplied({
-        errorCode,
-        fromRoute: route,
-        sessionId: workingSession.sessionId,
-        toRoute: nextRoute,
-        turnId: input.turnId,
-        vault: input.input.vault,
-      })
+    switch (attemptOutcome.kind) {
+      case 'succeeded':
+        return {
+          kind: 'succeeded',
+          providerTurn: attemptOutcome.result,
+        }
+      case 'retry_next_route':
+        workingSession = attemptOutcome.session
+        break
+      case 'blocked':
+        return {
+          kind: 'blocked',
+          error: attemptOutcome.error,
+          session: attemptOutcome.session,
+        }
+      case 'failed_terminal':
+        return {
+          kind: 'failed_terminal',
+          error: attemptOutcome.error,
+          session: attemptOutcome.session,
+        }
     }
   }
 
-  throw (lastError ?? new Error('Assistant provider routes were exhausted.'))
+  return {
+    kind: 'failed_terminal',
+    error: new Error('Assistant provider routes were exhausted.'),
+    session: workingSession,
+  }
+}
+
+function buildAssistantProviderTurnExecutionPlan(input: {
+  input: AssistantMessageInput
+  plan: AssistantTurnSharedPlan
+  resolvedSession: AssistantSession
+  routes: readonly ResolvedAssistantFailoverRoute[]
+  turnCreatedAt: string
+  turnId: string
+}): AssistantProviderTurnExecutionPlan {
+  return {
+    input: input.input,
+    memoryTurnEnv: createAssistantMemoryTurnContextEnv({
+      allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+      sessionId: input.resolvedSession.sessionId,
+      sourcePrompt: input.input.prompt,
+      turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
+      vault: input.input.vault,
+    }),
+    primaryRoute: input.routes[0] ?? null,
+    routes: input.routes,
+    sharedPlan: input.plan,
+    turnId: input.turnId,
+  }
+}
+
+async function resolveAssistantProviderAttemptPlan(input: {
+  attemptCount: number
+  attemptedRouteIds: ReadonlySet<string>
+  executionPlan: AssistantProviderTurnExecutionPlan
+  failoverState: AssistantProviderFailoverState
+  session: AssistantSession
+}): Promise<AssistantProviderAttemptPlan | null> {
+  const prioritizedRoutes = prioritizeAssistantFailoverRoutes(
+    input.executionPlan.routes.filter(
+      (route) => !input.attemptedRouteIds.has(route.routeId),
+    ),
+    input.failoverState,
+  )
+  const route = prioritizedRoutes[0] ?? null
+  if (!route) {
+    return null
+  }
+
+  return {
+    attemptCount: input.attemptCount,
+    primaryRouteCooldownFailover:
+      input.attemptCount === 1 &&
+      input.executionPlan.primaryRoute !== null &&
+      route.routeId !== input.executionPlan.primaryRoute.routeId,
+    remainingRoutes: prioritizedRoutes.slice(1),
+    route,
+    routePlan: await resolveAssistantRouteTurnPlan({
+      input: input.executionPlan.input,
+      route,
+      session: input.session,
+      sharedPlan: input.executionPlan.sharedPlan,
+    }),
+    session: input.session,
+  }
+}
+
+async function executeAssistantProviderAttempt(input: {
+  attemptPlan: AssistantProviderAttemptPlan
+  executionPlan: AssistantProviderTurnExecutionPlan
+  failoverState: AssistantProviderFailoverState
+}): Promise<AssistantProviderAttemptOutcome> {
+  const { attemptPlan, executionPlan } = input
+
+  if (attemptPlan.primaryRouteCooldownFailover && executionPlan.primaryRoute) {
+    await recordProviderCooldownFailoverApplied({
+      primaryRoute: executionPlan.primaryRoute,
+      route: attemptPlan.route,
+      sessionId: attemptPlan.session.sessionId,
+      turnId: executionPlan.turnId,
+      vault: executionPlan.input.vault,
+    })
+  }
+
+  const attemptAt = new Date().toISOString()
+  await recordProviderAttemptStarted({
+    attemptCount: attemptPlan.attemptCount,
+    at: attemptAt,
+    route: attemptPlan.route,
+    sessionId: attemptPlan.session.sessionId,
+    turnId: executionPlan.turnId,
+    vault: executionPlan.input.vault,
+  })
+
+  try {
+    maybeThrowInjectedAssistantFault({
+      component: 'provider',
+      fault: 'provider',
+      message: 'Injected assistant provider failure.',
+    })
+    const result = await executeWithCanonicalWriteGuard({
+      enabled: attemptPlan.route.provider === 'codex-cli',
+      vaultRoot: executionPlan.input.vault,
+      execute: () =>
+        executeAssistantProviderTurn({
+          abortSignal: executionPlan.input.abortSignal,
+          provider: attemptPlan.route.provider,
+          workingDirectory: attemptPlan.routePlan.workingDirectory,
+          configOverrides: attemptPlan.routePlan.configOverrides,
+          env: {
+            ...attemptPlan.routePlan.cliEnv,
+            ...executionPlan.memoryTurnEnv,
+          },
+          userPrompt: executionPlan.input.prompt,
+          continuityContext: attemptPlan.routePlan.continuityContext,
+          systemPrompt: attemptPlan.routePlan.systemPrompt,
+          sessionContext: attemptPlan.routePlan.sessionContext
+            ? {
+                binding: attemptPlan.session.binding,
+              }
+            : undefined,
+          resumeProviderSessionId:
+            attemptPlan.attemptCount === 1
+              ? attemptPlan.routePlan.resumeProviderSessionId
+              : attemptPlan.route.provider === attemptPlan.session.provider
+                ? attemptPlan.session.providerSessionId
+                : null,
+          codexCommand:
+            attemptPlan.route.codexCommand ??
+            executionPlan.input.codexCommand ??
+            undefined,
+          model: attemptPlan.route.providerOptions.model,
+          reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
+          sandbox: attemptPlan.route.providerOptions.sandbox,
+          approvalPolicy: attemptPlan.route.providerOptions.approvalPolicy,
+          baseUrl: attemptPlan.route.providerOptions.baseUrl,
+          apiKeyEnv: attemptPlan.route.providerOptions.apiKeyEnv,
+          providerName: attemptPlan.route.providerOptions.providerName,
+          headers: attemptPlan.route.providerOptions.headers,
+          conversationMessages: attemptPlan.routePlan.conversationMessages,
+          onEvent: executionPlan.input.onProviderEvent ?? undefined,
+          profile: attemptPlan.route.providerOptions.profile,
+          oss: attemptPlan.route.providerOptions.oss,
+          onTraceEvent: executionPlan.input.onTraceEvent,
+          showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
+        }),
+    })
+
+    const nextFailoverState = await recordAssistantFailoverRouteSuccess({
+      vault: executionPlan.input.vault,
+      route: attemptPlan.route,
+      at: new Date().toISOString(),
+    })
+    await recordProviderAttemptSucceeded({
+      attemptCount: attemptPlan.attemptCount,
+      route: attemptPlan.route,
+      turnId: executionPlan.turnId,
+      vault: executionPlan.input.vault,
+    })
+
+    return {
+      kind: 'succeeded',
+      failoverState: nextFailoverState,
+      result: {
+        ...result,
+        attemptCount: attemptPlan.attemptCount,
+        providerOptions: serializeAssistantProviderSessionOptions(
+          attemptPlan.route.providerOptions,
+        ),
+        route: attemptPlan.route,
+        session: attemptPlan.session,
+      },
+    }
+  } catch (error) {
+    const errorCode = readAssistantErrorCode(error)
+    const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
+      error,
+      provider: attemptPlan.route.provider,
+      providerOptions: attemptPlan.route.providerOptions,
+      providerState:
+        attemptPlan.route.provider === 'codex-cli'
+          ? writeAssistantCodexPromptVersion(
+              attemptPlan.session.providerState,
+              CURRENT_CODEX_PROMPT_VERSION,
+            )
+          : null,
+      session: attemptPlan.session,
+      vault: executionPlan.input.vault,
+    })
+    const session = recoveredSession ?? attemptPlan.session
+    attachRecoveredAssistantSession(error, recoveredSession)
+
+    let nextFailoverState = input.failoverState
+    const shouldRecordRouteFailure = shouldRecordAssistantRouteFailure(errorCode)
+    if (shouldRecordRouteFailure) {
+      nextFailoverState = await recordAssistantFailoverRouteFailure({
+        error,
+        route: attemptPlan.route,
+        vault: executionPlan.input.vault,
+      })
+    }
+    const cooldownUntil = shouldRecordRouteFailure
+      ? getAssistantFailoverCooldownUntil({
+          route: attemptPlan.route,
+          state: nextFailoverState,
+        })
+      : null
+
+    await recordProviderAttemptFailed({
+      attemptCount: attemptPlan.attemptCount,
+      cooldownUntil,
+      detail: errorMessage(error),
+      errorCode,
+      route: attemptPlan.route,
+      sessionId: session.sessionId,
+      turnId: executionPlan.turnId,
+      vault: executionPlan.input.vault,
+    })
+
+    const nextRoute =
+      prioritizeAssistantFailoverRoutes(
+        attemptPlan.remainingRoutes,
+        nextFailoverState,
+      )[0] ?? null
+    const outcomeKind = classifyAssistantProviderAttemptFailure({
+      abortSignal: executionPlan.input.abortSignal,
+      error,
+      nextRoute,
+    })
+
+    if (outcomeKind === 'retry_next_route' && nextRoute) {
+      await recordProviderFailoverApplied({
+        errorCode,
+        fromRoute: attemptPlan.route,
+        sessionId: session.sessionId,
+        toRoute: nextRoute,
+        turnId: executionPlan.turnId,
+        vault: executionPlan.input.vault,
+      })
+
+      return {
+        kind: 'retry_next_route',
+        failoverState: nextFailoverState,
+        session,
+      }
+    }
+
+    return {
+      kind: outcomeKind,
+      error,
+      failoverState: nextFailoverState,
+      session,
+    }
+  }
+}
+
+function classifyAssistantProviderAttemptFailure(input: {
+  abortSignal?: AbortSignal
+  error: unknown
+  nextRoute: ResolvedAssistantFailoverRoute | null
+}): 'blocked' | 'failed_terminal' | 'retry_next_route' {
+  if (readAssistantErrorCode(input.error) === 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED') {
+    return 'blocked'
+  }
+
+  if (
+    !shouldAttemptAssistantProviderFailover({
+      abortSignal: input.abortSignal,
+      error: input.error,
+    }) ||
+    input.nextRoute === null
+  ) {
+    return 'failed_terminal'
+  }
+
+  return 'retry_next_route'
 }
 
 async function persistAssistantTurnAndSession(input: {
