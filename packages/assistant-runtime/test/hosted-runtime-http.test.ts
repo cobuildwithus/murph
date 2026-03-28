@@ -23,20 +23,20 @@ afterEach(() => {
 
 test("hosted device-sync snapshot tolerates non-JSON error bodies and applies the hosted timeout", async () => {
   const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-  global.fetch = vi.fn(async (_input, init) =>
+  const fetchMock = vi.fn(async (_input, init) =>
     new Response("<html>bad gateway</html>", {
       status: 502,
       headers: {
         "content-type": "text/html",
       },
     }));
+  global.fetch = fetchMock;
 
   await assert.rejects(
     () =>
       fetchHostedDeviceSyncRuntimeSnapshot({
-        env: {
-          HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://hosted.example.test",
-        },
+        baseUrl: "https://hosted.example.test",
+        internalToken: "internal-token",
         timeoutMs: 9_000,
         userId: "member_123",
       }),
@@ -44,18 +44,22 @@ test("hosted device-sync snapshot tolerates non-JSON error bodies and applies th
   );
 
   assert.equal(timeoutSpy.mock.calls[0]?.[0], 9_000);
-  assert.equal(new Headers(global.fetch.mock.calls[0]?.[1]?.headers).get("authorization"), null);
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
+    "Bearer internal-token",
+  );
 });
 
 test("hosted share payload fetch tolerates non-JSON error bodies and applies the hosted timeout", async () => {
   const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-  global.fetch = vi.fn(async () =>
+  const fetchMock = vi.fn(async () =>
     new Response("<html>service unavailable</html>", {
       status: 503,
       headers: {
         "content-type": "text/html",
       },
     }));
+  global.fetch = fetchMock;
 
   await assert.rejects(
     () =>
@@ -72,8 +76,13 @@ test("hosted share payload fetch tolerates non-JSON error bodies and applies the
         },
         runtime: {
           commitTimeoutMs: 12_000,
-          sharePackBaseUrl: "https://share.example.test",
-          sharePackToken: null,
+          webControlPlane: {
+            deviceSyncRuntimeBaseUrl: null,
+            internalToken: "share-token",
+            schedulerToken: null,
+            shareBaseUrl: "https://share.example.test",
+            shareToken: "share-token",
+          },
         },
         vaultRoot: "/tmp/share-vault",
       }),
@@ -81,7 +90,10 @@ test("hosted share payload fetch tolerates non-JSON error bodies and applies the
   );
 
   assert.equal(timeoutSpy.mock.calls[0]?.[0], 12_000);
-  assert.equal(new Headers(global.fetch.mock.calls[0]?.[1]?.headers).get("authorization"), null);
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
+    "Bearer share-token",
+  );
 });
 
 test("hosted email send worker tolerates non-JSON error bodies and applies the hosted timeout", async () => {

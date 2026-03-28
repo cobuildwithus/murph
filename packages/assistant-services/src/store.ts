@@ -1,12 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
   assistantAutomationStateSchema,
   type AssistantAutomationState,
 } from "murph";
-import { resolveAssistantStatePaths } from "@murph/runtime-state";
+import {
+  resolveAssistantStatePaths,
+  writeJsonFileAtomic,
+} from "@murph/runtime-state";
 
 const ASSISTANT_AUTOMATION_STATE_VERSION = 2;
 
@@ -57,12 +59,4 @@ function isMissingFileError(error: unknown): boolean {
     && "code" in error
     && error.code === "ENOENT",
   );
-}
-
-async function writeJsonFileAtomic(filePath: string, value: unknown): Promise<void> {
-  const directory = path.dirname(filePath);
-  const tempPath = path.join(directory, `.${path.basename(filePath)}.${randomUUID()}.tmp`);
-
-  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await rename(tempPath, filePath);
 }

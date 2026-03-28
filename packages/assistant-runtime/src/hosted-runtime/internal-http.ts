@@ -1,4 +1,4 @@
-import { readHostedRunnerCommitTimeoutMs } from "./callbacks.ts";
+import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
 
 export interface HostedJsonHttpResponse {
   payload: unknown;

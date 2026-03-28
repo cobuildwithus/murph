@@ -7,6 +7,7 @@ import {
 import type {
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDispatchRequest,
+  HostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 
 import {
@@ -14,10 +15,10 @@ import {
   fetchHostedDeviceSyncRuntimeSnapshot,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
-  type HostedDeviceSyncRuntimeConnectionSnapshot,
-  type HostedDeviceSyncRuntimeConnectionUpdate,
-  type HostedDeviceSyncRuntimeSnapshotResponse,
-  type HostedDeviceSyncRuntimeTokenBundle,
+  type HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
+  type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
+  type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
 } from "./hosted-device-sync-control-plane.ts";
 
 export interface HostedDeviceSyncRuntimeSyncState {
@@ -29,13 +30,23 @@ export interface HostedDeviceSyncRuntimeSyncState {
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
-  env: Readonly<Record<string, string>>;
   secret: string;
   service: DeviceSyncService;
   timeoutMs: number | null;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
+  if (!input.webControlPlane.deviceSyncRuntimeBaseUrl || !input.webControlPlane.internalToken) {
+    return {
+      hostedToLocalAccountIds: new Map(),
+      localToHostedAccountIds: new Map(),
+      observedTokenVersions: new Map(),
+      snapshot: null,
+    };
+  }
+
   const snapshot = await fetchHostedDeviceSyncRuntimeSnapshot({
-    env: input.env,
+    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+    internalToken: input.webControlPlane.internalToken,
     timeoutMs: input.timeoutMs,
     userId: input.dispatch.event.userId,
   });
@@ -57,48 +68,23 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
   for (const entry of snapshot.connections) {
     observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
-    const stored = input.service.store.hydrateHostedAccount({
-      connectedAt: entry.connection.connectedAt,
-      displayName: entry.connection.displayName ?? null,
-      externalAccountId: entry.connection.externalAccountId,
-      lastErrorCode: entry.connection.lastErrorCode ?? null,
-      lastErrorMessage: entry.connection.lastErrorMessage ?? null,
-      lastSyncCompletedAt: entry.connection.lastSyncCompletedAt ?? null,
-      lastSyncErrorAt: entry.connection.lastSyncErrorAt ?? null,
-      lastSyncStartedAt: entry.connection.lastSyncStartedAt ?? null,
-      lastWebhookAt: entry.connection.lastWebhookAt ?? null,
-      metadata: entry.connection.metadata,
-      nextReconcileAt: entry.connection.nextReconcileAt ?? null,
-      provider: entry.connection.provider,
-      scopes: entry.connection.scopes,
-      status: entry.connection.status,
-      ...(entry.tokenBundle
-        ? {
-            tokens: {
-              accessToken: entry.tokenBundle.accessToken,
-              accessTokenEncrypted: codec.encrypt(entry.tokenBundle.accessToken),
-              accessTokenExpiresAt: entry.tokenBundle.accessTokenExpiresAt ?? undefined,
-              refreshToken: entry.tokenBundle.refreshToken ?? undefined,
-              refreshTokenEncrypted: entry.tokenBundle.refreshToken
-                ? codec.encrypt(entry.tokenBundle.refreshToken)
-                : null,
-            },
-          }
-        : {}),
-      ...(entry.connection.status === "disconnected"
-        ? {
-            tokenCleartextPlaceholder: {
-              accessTokenEncrypted: codec.encrypt(""),
-            },
-          }
-        : {}),
-    });
+    const existing = input.service.store.getAccountByExternalAccount(
+      entry.connection.provider,
+      entry.connection.externalAccountId,
+    );
+    const stored = input.service.store.hydrateHostedAccount(
+      buildHostedAccountHydrationInput({
+        codec,
+        entry,
+        existing,
+      }),
+    );
 
     if (!stored) {
       continue;
     }
 
-    if (entry.connection.status === "disconnected") {
+    if (stored.status === "disconnected" && existing?.status !== "disconnected") {
       input.service.store.markPendingJobsDeadForAccount(
         stored.id,
         now,
@@ -129,13 +115,17 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
-  env: Readonly<Record<string, string>>;
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
   timeoutMs: number | null;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<void> {
   if (!input.state.snapshot) {
+    return;
+  }
+
+  if (!input.webControlPlane.deviceSyncRuntimeBaseUrl || !input.webControlPlane.internalToken) {
     return;
   }
 
@@ -166,7 +156,8 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   }
 
   await applyHostedDeviceSyncRuntimeUpdates({
-    env: input.env,
+    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+    internalToken: input.webControlPlane.internalToken,
     occurredAt: input.dispatch.occurredAt,
     timeoutMs: input.timeoutMs,
     updates,
@@ -323,6 +314,9 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     && (baselineLastErrorCode !== null || baselineLastErrorMessage !== null)
   ) {
     update.clearError = true;
+    if (baselineConnection?.lastSyncErrorAt !== null) {
+      update.lastSyncErrorAt = null;
+    }
   } else {
     if (localLastErrorCode !== baselineLastErrorCode) {
       update.lastErrorCode = localLastErrorCode;
@@ -364,11 +358,197 @@ function equalStringArrays(left: readonly string[], right: readonly string[]): b
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function buildHostedAccountHydrationInput(input: {
+  codec: ReturnType<typeof createSecretCodec>;
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot;
+  existing: StoredDeviceSyncAccount | null;
+}): {
+  connectedAt: string;
+  displayName: string | null;
+  externalAccountId: string;
+  hostedObservedTokenVersion: number | null;
+  hostedObservedUpdatedAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncCompletedAt: string | null;
+  lastSyncErrorAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastWebhookAt: string | null;
+  metadata: Record<string, unknown>;
+  nextReconcileAt: string | null;
+  provider: string;
+  scopes: string[];
+  status: StoredDeviceSyncAccount["status"];
+  tokens?: {
+    accessToken: string;
+    accessTokenEncrypted: string;
+    accessTokenExpiresAt?: string;
+    refreshToken?: string | null;
+    refreshTokenEncrypted?: string | null;
+  };
+} {
+  const hostedConnection = input.entry.connection;
+  const hostedTokenVersion = input.entry.tokenBundle?.tokenVersion ?? null;
+  const hostedUpdatedAt = hostedConnection.updatedAt ?? null;
+  const localHasPendingHostedChanges = hasLocalPendingHostedChanges(input.existing);
+  const hostedConnectionAdvanced = hasHostedConnectionAdvanced(input.existing, hostedUpdatedAt);
+  const hostedTokenAdvanced = hasHostedTokenAdvanced(input.existing, hostedTokenVersion);
+  const useHostedConnectionState = !input.existing || !localHasPendingHostedChanges || hostedConnectionAdvanced;
+  const useHostedTokens =
+    hostedConnection.status === "disconnected"
+      ? useHostedConnectionState
+      : !input.existing || !localHasPendingHostedChanges || hostedTokenAdvanced;
+
+  return {
+    connectedAt: hostedConnection.connectedAt,
+    displayName: useHostedConnectionState
+      ? hostedConnection.displayName ?? null
+      : input.existing?.displayName ?? null,
+    externalAccountId: hostedConnection.externalAccountId,
+    hostedObservedTokenVersion: hostedTokenVersion,
+    hostedObservedUpdatedAt: hostedUpdatedAt,
+    lastErrorCode: useHostedConnectionState
+      ? hostedConnection.lastErrorCode ?? null
+      : input.existing?.lastErrorCode ?? null,
+    lastErrorMessage: useHostedConnectionState
+      ? hostedConnection.lastErrorMessage ?? null
+      : input.existing?.lastErrorMessage ?? null,
+    lastSyncCompletedAt: mergeMonotonicTimestamp(
+      input.existing?.lastSyncCompletedAt ?? null,
+      hostedConnection.lastSyncCompletedAt ?? null,
+      localHasPendingHostedChanges,
+    ),
+    lastSyncErrorAt:
+      useHostedConnectionState
+      && hostedConnection.lastErrorCode === null
+      && hostedConnection.lastErrorMessage === null
+      && hostedConnection.lastSyncErrorAt === null
+        ? null
+        : mergeMonotonicTimestamp(
+            input.existing?.lastSyncErrorAt ?? null,
+            hostedConnection.lastSyncErrorAt ?? null,
+            localHasPendingHostedChanges,
+          ),
+    lastSyncStartedAt: mergeMonotonicTimestamp(
+      input.existing?.lastSyncStartedAt ?? null,
+      hostedConnection.lastSyncStartedAt ?? null,
+      localHasPendingHostedChanges,
+    ),
+    lastWebhookAt: mergeMonotonicTimestamp(
+      input.existing?.lastWebhookAt ?? null,
+      hostedConnection.lastWebhookAt ?? null,
+      localHasPendingHostedChanges,
+    ),
+    metadata: useHostedConnectionState
+      ? { ...hostedConnection.metadata }
+      : { ...(input.existing?.metadata ?? {}) },
+    nextReconcileAt: mergeNextReconcileAt(
+      input.existing?.nextReconcileAt ?? null,
+      hostedConnection.nextReconcileAt ?? null,
+      localHasPendingHostedChanges,
+    ),
+    provider: hostedConnection.provider,
+    scopes: useHostedConnectionState
+      ? [...hostedConnection.scopes]
+      : [...(input.existing?.scopes ?? [])],
+    status: useHostedConnectionState
+      ? hostedConnection.status
+      : input.existing?.status ?? hostedConnection.status,
+    ...(useHostedTokens && input.entry.tokenBundle
+      ? {
+          tokens: {
+            accessToken: input.entry.tokenBundle.accessToken,
+            accessTokenEncrypted: input.codec.encrypt(input.entry.tokenBundle.accessToken),
+            accessTokenExpiresAt: input.entry.tokenBundle.accessTokenExpiresAt ?? undefined,
+            refreshToken: input.entry.tokenBundle.refreshToken ?? undefined,
+            refreshTokenEncrypted: input.entry.tokenBundle.refreshToken
+              ? input.codec.encrypt(input.entry.tokenBundle.refreshToken)
+              : null,
+          },
+        }
+      : {}),
+  };
+}
+
 function equalJsonRecords(
   left: Record<string, unknown>,
   right: Record<string, unknown>,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function hasLocalPendingHostedChanges(account: StoredDeviceSyncAccount | null): boolean {
+  if (!account?.hostedObservedUpdatedAt) {
+    return false;
+  }
+
+  return Date.parse(account.updatedAt) > Date.parse(account.hostedObservedUpdatedAt);
+}
+
+function hasHostedConnectionAdvanced(
+  account: StoredDeviceSyncAccount | null,
+  hostedUpdatedAt: string | null,
+): boolean {
+  if (!hostedUpdatedAt) {
+    return true;
+  }
+
+  if (!account?.hostedObservedUpdatedAt) {
+    return true;
+  }
+
+  return Date.parse(hostedUpdatedAt) > Date.parse(account.hostedObservedUpdatedAt);
+}
+
+function hasHostedTokenAdvanced(
+  account: StoredDeviceSyncAccount | null,
+  hostedTokenVersion: number | null,
+): boolean {
+  if (hostedTokenVersion === null) {
+    return false;
+  }
+
+  if (account?.hostedObservedTokenVersion === null || account?.hostedObservedTokenVersion === undefined) {
+    return true;
+  }
+
+  return hostedTokenVersion > account.hostedObservedTokenVersion;
+}
+
+function mergeMonotonicTimestamp(
+  localValue: string | null,
+  hostedValue: string | null,
+  preserveLocalAheadState: boolean,
+): string | null {
+  if (!preserveLocalAheadState) {
+    return hostedValue;
+  }
+
+  return latestIsoTimestamp(localValue, hostedValue);
+}
+
+function mergeNextReconcileAt(
+  localValue: string | null,
+  hostedValue: string | null,
+  preserveLocalAheadState: boolean,
+): string | null {
+  if (!preserveLocalAheadState) {
+    return hostedValue;
+  }
+
+  return latestIsoTimestamp(localValue, hostedValue);
+}
+
+function latestIsoTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) >= Date.parse(right) ? left : right;
 }
 
 function assignMonotonicTimestampUpdate(
