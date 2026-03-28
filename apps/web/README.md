@@ -15,6 +15,7 @@ This app is intentionally separate from `packages/web`:
 - per-user connection ownership mapping
 - encrypted provider-token escrow
 - durable `execution_outbox` records for Cloudflare-bound hosted execution intents
+- immutable hosted AI usage rows imported after successful hosted commits, with optional downstream Stripe token metering
 - local-agent pairing plus sparse signal/token routes for hosted integrations
 - internal runner snapshot/apply APIs for hosted device-sync state hydration and reconciliation
 
@@ -83,6 +84,11 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_CONTROL_TOKEN` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
 - `CRON_SECRET` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
 
+Optional hosted AI usage metering:
+
+- `HOSTED_AI_USAGE_STRIPE_METER_EVENT_NAME`
+- `HOSTED_AI_USAGE_STRIPE_BATCH_LIMIT`
+
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
 Development fallback only:
@@ -131,6 +137,7 @@ pnpm --dir apps/web prisma:migrate:deploy
 - `pnpm --dir apps/web test` now includes a cold-boot `next dev` smoke that boots under `apps/web/.next-smoke`, waits for the hosted app to boot, and then repeats `GET /`, `HEAD /`, and `GET /` before the production build step so smoke never deletes the interactive `apps/web/.next-dev` cache.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
 - Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`.
+- Hosted AI usage metering is wired through `apps/web/vercel.json` as a 5-minute Vercel cron targeting `/api/internal/hosted-execution/usage/cron`.
 - Hosted Stripe reconciliation is wired through the same `apps/web/vercel.json` file as a 1-minute Vercel cron targeting `/api/internal/hosted-onboarding/stripe/cron`.
 - Production deployments need `CRON_SECRET` set so Vercel's cron `Authorization: Bearer ...` header can authenticate both internal cron routes.
 
@@ -173,8 +180,11 @@ Hosted internal runner routes:
 
 - `POST /api/internal/device-sync/runtime/snapshot`
 - `POST /api/internal/device-sync/runtime/apply`
+- `POST /api/internal/hosted-execution/usage/record`
+- `GET /api/internal/hosted-execution/usage/cron`
 
 These routes are internal-only server-to-server seams for the Cloudflare runner. They let the runner hydrate escrowed device-sync connections before a one-shot pass and reconcile status/token changes back into Postgres afterward.
+The hosted AI usage record route imports immutable per-attempt usage rows after a hosted commit succeeds, and the optional usage cron later sends total-token meter events to Stripe while skipping member-supplied API-key runs.
 
 ## Hosted onboarding routes
 

@@ -120,6 +120,23 @@ export interface AssistantProviderTurnExecutionInput {
   workingDirectory: string
 }
 
+export interface AssistantProviderUsage {
+  apiKeyEnv: string | null
+  baseUrl: string | null
+  cacheWriteTokens: number | null
+  cachedInputTokens: number | null
+  inputTokens: number | null
+  outputTokens: number | null
+  providerMetadataJson: unknown | null
+  providerName: string | null
+  providerRequestId: string | null
+  rawUsageJson: unknown | null
+  reasoningTokens: number | null
+  requestedModel: string | null
+  servedModel: string | null
+  totalTokens: number | null
+}
+
 export interface AssistantProviderTurnExecutionResult {
   provider: AssistantChatProvider
   providerSessionId: string | null
@@ -127,6 +144,7 @@ export interface AssistantProviderTurnExecutionResult {
   response: string
   stderr: string
   stdout: string
+  usage?: AssistantProviderUsage | null
 }
 
 interface AssistantProviderDefinition {
@@ -250,6 +268,10 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
         stderr: result.stderr,
         stdout: result.stdout,
         rawEvents: result.jsonEvents,
+        usage: extractCodexAssistantProviderUsage({
+          providerConfig,
+          rawEvents: result.jsonEvents,
+        }),
       }
     },
     resolveLabel(config) {
@@ -397,6 +419,10 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
         stderr: '',
         stdout: '',
         rawEvents: [],
+        usage: extractOpenAICompatibleAssistantProviderUsage({
+          providerConfig,
+          result,
+        }),
       }
     },
     resolveLabel(config) {
@@ -406,6 +432,224 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
       return []
     },
   },
+}
+
+function extractOpenAICompatibleAssistantProviderUsage(input: {
+  providerConfig: Extract<AssistantProviderConfig, { provider: 'openai-compatible' }>
+  result: unknown
+}): AssistantProviderUsage {
+  const resultRecord = readAssistantProviderRecord(input.result)
+  const usageRecord =
+    readAssistantProviderRecord(resultRecord?.totalUsage) ??
+    readAssistantProviderRecord(resultRecord?.usage)
+  const providerMetadata = readAssistantProviderRecord(resultRecord?.providerMetadata)
+  const rawRecord = readAssistantProviderRecord(resultRecord?.raw)
+  const responseRecord = readAssistantProviderRecord(resultRecord?.response)
+  const requestRecord = readAssistantProviderRecord(resultRecord?.request)
+  const inputTokens =
+    readAssistantProviderInteger(
+      usageRecord,
+      'inputTokens',
+      'promptTokens',
+      'prompt_tokens',
+      'input_tokens',
+    ) ??
+    readAssistantProviderInteger(rawRecord, 'inputTokens', 'promptTokens')
+  const outputTokens =
+    readAssistantProviderInteger(
+      usageRecord,
+      'outputTokens',
+      'completionTokens',
+      'completion_tokens',
+      'output_tokens',
+    ) ??
+    readAssistantProviderInteger(rawRecord, 'outputTokens', 'completionTokens')
+
+  return {
+    apiKeyEnv: input.providerConfig.apiKeyEnv,
+    baseUrl: input.providerConfig.baseUrl,
+    cacheWriteTokens: readAssistantProviderInteger(
+      usageRecord,
+      'cacheWriteTokens',
+      'cache_write_tokens',
+    ),
+    cachedInputTokens: readAssistantProviderInteger(
+      usageRecord,
+      'cachedInputTokens',
+      'cached_input_tokens',
+    ),
+    inputTokens,
+    outputTokens,
+    providerMetadataJson: providerMetadata ?? null,
+    providerName: input.providerConfig.providerName,
+    providerRequestId: readAssistantProviderString(
+      responseRecord?.requestId,
+      responseRecord?.id,
+      requestRecord?.id,
+      rawRecord?.id,
+    ),
+    rawUsageJson:
+      usageRecord
+      ?? readAssistantProviderRecord(resultRecord?.usage)
+      ?? rawRecord
+      ?? null,
+    reasoningTokens: readAssistantProviderInteger(
+      usageRecord,
+      'reasoningTokens',
+      'reasoning_tokens',
+    ),
+    requestedModel: input.providerConfig.model,
+    servedModel: readAssistantProviderString(
+      responseRecord?.modelId,
+      responseRecord?.model,
+      rawRecord?.model,
+      providerMetadata?.model,
+    ) ?? input.providerConfig.model,
+    totalTokens:
+      readAssistantProviderInteger(usageRecord, 'totalTokens', 'total_tokens')
+      ?? resolveAssistantProviderTotalTokens({
+        inputTokens,
+        outputTokens,
+      }),
+  }
+}
+
+function extractCodexAssistantProviderUsage(input: {
+  providerConfig: Extract<AssistantProviderConfig, { provider: 'codex-cli' }>
+  rawEvents: readonly unknown[]
+}): AssistantProviderUsage {
+  const completionEvent = findAssistantCodexCompletionEvent(input.rawEvents)
+  const completionRecord = completionEvent ? readAssistantProviderRecord(completionEvent) : null
+  const usageRecord =
+    readAssistantProviderRecord(completionRecord?.usage) ??
+    readAssistantProviderRecord(readAssistantProviderRecord(completionRecord?.turn)?.usage) ??
+    readAssistantProviderRecord(readAssistantProviderRecord(completionRecord?.metrics)?.usage) ??
+    null
+  const inputTokens = readAssistantProviderInteger(
+    usageRecord ?? completionRecord,
+    'inputTokens',
+    'input_tokens',
+  )
+  const outputTokens = readAssistantProviderInteger(
+    usageRecord ?? completionRecord,
+    'outputTokens',
+    'output_tokens',
+  )
+
+  return {
+    apiKeyEnv: input.providerConfig.apiKeyEnv,
+    baseUrl: input.providerConfig.baseUrl,
+    cacheWriteTokens: readAssistantProviderInteger(
+      usageRecord ?? completionRecord,
+      'cacheWriteTokens',
+      'cache_write_tokens',
+    ),
+    cachedInputTokens: readAssistantProviderInteger(
+      usageRecord ?? completionRecord,
+      'cachedInputTokens',
+      'cached_input_tokens',
+    ),
+    inputTokens,
+    outputTokens,
+    providerMetadataJson: completionRecord ?? null,
+    providerName: input.providerConfig.providerName,
+    providerRequestId: readAssistantProviderString(
+      completionRecord?.request_id,
+      completionRecord?.requestId,
+      completionRecord?.id,
+    ),
+    rawUsageJson: usageRecord ?? completionRecord ?? null,
+    reasoningTokens: readAssistantProviderInteger(
+      usageRecord ?? completionRecord,
+      'reasoningTokens',
+      'reasoning_tokens',
+    ),
+    requestedModel: input.providerConfig.model,
+    servedModel: readAssistantProviderString(
+      completionRecord?.model,
+      completionRecord?.model_id,
+      completionRecord?.modelId,
+    ) ?? input.providerConfig.model,
+    totalTokens:
+      readAssistantProviderInteger(usageRecord ?? completionRecord, 'totalTokens', 'total_tokens')
+      ?? resolveAssistantProviderTotalTokens({
+        inputTokens,
+        outputTokens,
+      }),
+  }
+}
+
+function findAssistantCodexCompletionEvent(
+  rawEvents: readonly unknown[],
+): Record<string, unknown> | null {
+  for (let index = rawEvents.length - 1; index >= 0; index -= 1) {
+    const record = readAssistantProviderRecord(rawEvents[index])
+    const eventType = readAssistantProviderString(record?.type, record?.event)
+
+    if (eventType === 'turn.completed' || eventType === 'turn/completed') {
+      return record ?? null
+    }
+  }
+
+  return null
+}
+
+function readAssistantProviderRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  return value as Record<string, unknown>
+}
+
+function readAssistantProviderString(
+  ...values: unknown[]
+): string | null {
+  for (const value of values) {
+    if (typeof value !== 'string') {
+      continue
+    }
+
+    const normalized = value.trim()
+
+    if (normalized.length > 0) {
+      return normalized
+    }
+  }
+
+  return null
+}
+
+function readAssistantProviderInteger(
+  record: Record<string, unknown> | null | undefined,
+  ...keys: string[]
+): number | null {
+  if (!record) {
+    return null
+  }
+
+  for (const key of keys) {
+    const value = record[key]
+
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 0) {
+      return value
+    }
+  }
+
+  return null
+}
+
+function resolveAssistantProviderTotalTokens(input: {
+  inputTokens: number | null
+  outputTokens: number | null
+}): number | null {
+  if (input.inputTokens === null && input.outputTokens === null) {
+    return null
+  }
+
+  return (input.inputTokens ?? 0) + (input.outputTokens ?? 0)
 }
 
 function resolveAssistantProviderDefinition(

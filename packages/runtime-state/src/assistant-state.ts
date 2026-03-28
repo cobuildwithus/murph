@@ -26,6 +26,8 @@ export interface AssistantStatePaths {
   statusPath: string;
   transcriptsDirectory: string;
   turnsDirectory: string;
+  usageDirectory: string;
+  usagePendingDirectory: string;
 }
 
 export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePaths {
@@ -36,6 +38,7 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   const cronDirectory = path.join(rootPath, "cron");
   const diagnosticsDirectory = path.join(rootPath, "diagnostics");
   const receiptsDirectory = path.join(rootPath, "receipts");
+  const usageDirectory = path.join(rootPath, "usage");
 
   return {
     absoluteVaultRoot,
@@ -60,5 +63,7 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     // Keep the newer timeline-oriented helper name aligned with the existing
     // receipts directory so in-flight receipt-based tooling stays compatible.
     turnsDirectory: receiptsDirectory,
+    usageDirectory,
+    usagePendingDirectory: path.join(usageDirectory, "pending"),
   };
 }

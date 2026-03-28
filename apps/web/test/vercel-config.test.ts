@@ -16,4 +16,17 @@ describe("apps/web vercel config", () => {
       schedule: "*/1 * * * *",
     });
   });
+
+  it("schedules the hosted AI usage cron route", () => {
+    const configPath = path.resolve(process.cwd(), "apps/web/vercel.json");
+    const raw = readFileSync(configPath, "utf8");
+    const config = JSON.parse(raw) as {
+      crons?: Array<{ path?: string; schedule?: string }>;
+    };
+
+    expect(config.crons).toContainEqual({
+      path: "/api/internal/hosted-execution/usage/cron",
+      schedule: "*/5 * * * *",
+    });
+  });
 });

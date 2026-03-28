@@ -6,6 +6,7 @@ import type {
   HostedExecutionSharePackResponse,
   HostedExecutionShareReference,
 } from "./contracts.ts";
+import { HOSTED_EXECUTION_PROXY_HOSTS } from "./callback-hosts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
   parseHostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -14,9 +15,19 @@ import {
 } from "./parsers.ts";
 import {
   buildHostedExecutionSharePayloadPath,
+  HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
 } from "./routes.ts";
+
+export interface HostedExecutionAiUsageRecordRequest {
+  usage: readonly Record<string, unknown>[];
+}
+
+export interface HostedExecutionAiUsageRecordResponse {
+  recorded: number;
+  usageIds: string[];
+}
 
 export async function fetchHostedExecutionDeviceSyncRuntimeSnapshot(input: {
   baseUrl: string;
@@ -70,6 +81,28 @@ export async function applyHostedExecutionDeviceSyncRuntimeUpdates(input: {
   });
 }
 
+export async function recordHostedExecutionAiUsage(input: {
+  baseUrl: string;
+  fetchImpl?: typeof fetch;
+  internalToken?: string | null;
+  timeoutMs?: number | null;
+  usage: HostedExecutionAiUsageRecordRequest["usage"];
+}): Promise<HostedExecutionAiUsageRecordResponse> {
+  return requestHostedExecutionWebControlPlaneJson({
+    body: {
+      usage: [...input.usage],
+    } satisfies HostedExecutionAiUsageRecordRequest,
+    fetchImpl: input.fetchImpl,
+    label: "Hosted AI usage record",
+    method: "POST",
+    parse: parseHostedExecutionAiUsageRecordResponse,
+    path: HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+    timeoutMs: input.timeoutMs ?? null,
+    token: input.internalToken,
+    url: input.baseUrl,
+  });
+}
+
 export async function fetchHostedExecutionSharePack(input: {
   baseUrl: string;
   fetchImpl?: typeof fetch;
@@ -89,8 +122,35 @@ export async function fetchHostedExecutionSharePack(input: {
   });
 }
 
+function parseHostedExecutionAiUsageRecordResponse(
+  value: unknown,
+): HostedExecutionAiUsageRecordResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Hosted AI usage record response must be a JSON object.");
+  }
+
+  const recorded = (value as { recorded?: unknown }).recorded;
+  const usageIds = (value as { usageIds?: unknown }).usageIds;
+
+  if (typeof recorded !== "number" || !Number.isInteger(recorded) || recorded < 0) {
+    throw new TypeError("Hosted AI usage record response recorded count must be a non-negative integer.");
+  }
+
+  if (!Array.isArray(usageIds) || usageIds.some((entry) => typeof entry !== "string")) {
+    throw new TypeError("Hosted AI usage record response usageIds must be a string array.");
+  }
+
+  return {
+    recorded,
+    usageIds: usageIds.slice() as string[],
+  };
+}
+
 function requireHostedExecutionWebControlBaseUrl(value: string): string {
-  const normalized = normalizeHostedExecutionBaseUrl(value);
+  const normalized = normalizeHostedExecutionBaseUrl(value, {
+    allowHttpHosts: Object.values(HOSTED_EXECUTION_PROXY_HOSTS),
+    allowHttpLocalhost: true,
+  });
 
   if (!normalized) {
     throw new TypeError("Hosted web control-plane baseUrl must be configured.");

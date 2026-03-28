@@ -3,6 +3,8 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH =
   "/api/internal/device-sync/runtime/snapshot";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH =
   "/api/internal/device-sync/runtime/apply";
+export const HOSTED_EXECUTION_AI_USAGE_RECORD_PATH =
+  "/api/internal/hosted-execution/usage/record";
 
 export function buildHostedExecutionUserStatusPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/status`;
