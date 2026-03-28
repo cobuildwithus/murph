@@ -4,7 +4,7 @@ import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murph/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
-  ensureHostedWebhookSubscriptionsForRuntimeSnapshot: vi.fn(),
+  ensureHostedWebhookAdminUpkeepForRuntimeSnapshot: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -36,14 +36,14 @@ describe("hosted device-sync internal routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.HOSTED_EXECUTION_INTERNAL_TOKEN = "internal-token";
-    mocks.ensureHostedWebhookSubscriptionsForRuntimeSnapshot.mockResolvedValue(undefined);
+    mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot.mockResolvedValue(undefined);
   });
 
   it("binds snapshot requests to the trusted hosted execution user at the route boundary", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      ensureHostedWebhookSubscriptionsForRuntimeSnapshot:
-        mocks.ensureHostedWebhookSubscriptionsForRuntimeSnapshot,
+      ensureHostedWebhookAdminUpkeepForRuntimeSnapshot:
+        mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot,
       store: {
         codec: {
           decrypt: vi.fn(),
@@ -83,7 +83,7 @@ describe("hosted device-sync internal routes", () => {
         userId: "member_123",
       },
     }));
-    expect(mocks.ensureHostedWebhookSubscriptionsForRuntimeSnapshot).toHaveBeenCalledWith({
+    expect(mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot).toHaveBeenCalledWith({
       provider: "oura",
       userId: "member_123",
     });
@@ -91,8 +91,8 @@ describe("hosted device-sync internal routes", () => {
 
   it("rejects snapshot bodies whose userId conflicts with the trusted hosted execution user header", async () => {
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
-      ensureHostedWebhookSubscriptionsForRuntimeSnapshot:
-        mocks.ensureHostedWebhookSubscriptionsForRuntimeSnapshot,
+      ensureHostedWebhookAdminUpkeepForRuntimeSnapshot:
+        mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot,
       store: {
         prisma: {
           deviceConnection: {
@@ -123,7 +123,7 @@ describe("hosted device-sync internal routes", () => {
         message: "userId must match the authenticated hosted execution user.",
       },
     });
-    expect(mocks.ensureHostedWebhookSubscriptionsForRuntimeSnapshot).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot).not.toHaveBeenCalled();
   });
 
   it("binds apply requests to the trusted hosted execution user at the route boundary", async () => {

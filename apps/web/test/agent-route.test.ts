@@ -1,14 +1,22 @@
-import { deviceSyncError } from "@murph/device-syncd";
+import {
+  createOuraDeviceSyncProvider,
+  deviceSyncError,
+} from "@murph/device-syncd";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
+  deviceSyncEnv: {
+    ouraWebhookVerificationToken: "verify-token" as string | null,
+  },
   exportTokenBundle: vi.fn(),
   handleWebhook: vi.fn(),
   listSignals: vi.fn(),
   refreshTokenBundle: vi.fn(),
   requireAgentSession: vi.fn(),
-  resolveWebhookVerificationChallenge: vi.fn(),
+  webhookRegistry: {
+    get: vi.fn(),
+  },
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -41,13 +49,15 @@ describe("hosted device-sync agent and webhook routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.deviceSyncEnv.ouraWebhookVerificationToken = "verify-token";
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      env: mocks.deviceSyncEnv,
       exportTokenBundle: mocks.exportTokenBundle,
       handleWebhook: mocks.handleWebhook,
       listSignals: mocks.listSignals,
+      registry: mocks.webhookRegistry,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
-      resolveWebhookVerificationChallenge: mocks.resolveWebhookVerificationChallenge,
     });
     mocks.requireAgentSession.mockResolvedValue({
       id: "dsa_current",
@@ -68,7 +78,14 @@ describe("hosted device-sync agent and webhook routes", () => {
         },
       ],
     });
-    mocks.resolveWebhookVerificationChallenge.mockReturnValue(null);
+    mocks.webhookRegistry.get.mockImplementation((provider: string) =>
+      provider === "oura"
+        ? createOuraDeviceSyncProvider({
+            clientId: "oura-client-id",
+            clientSecret: "oura-client-secret",
+          })
+        : undefined
+    );
   });
 
   it("rejects export-token-bundle when the bearer token has expired", async () => {
@@ -172,20 +189,62 @@ describe("hosted device-sync agent and webhook routes", () => {
   });
 
   it("returns Oura webhook verification challenges as JSON", async () => {
-    mocks.resolveWebhookVerificationChallenge.mockReturnValue("oura-challenge-token");
-
     const response = await webhookRoute.GET(
-      new Request("https://example.test/api/device-sync/webhooks/oura?challenge=1"),
+      new Request(
+        "https://example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=oura-challenge-token",
+      ),
       {
         params: Promise.resolve({ provider: "oura" }),
       },
     );
 
-    expect(mocks.resolveWebhookVerificationChallenge).toHaveBeenCalledWith("oura");
+    expect(mocks.webhookRegistry.get).toHaveBeenCalledWith("oura");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
     await expect(response.json()).resolves.toEqual({
       challenge: "oura-challenge-token",
+    });
+  });
+
+  it("keeps hosted webhook verification token mismatch behavior aligned with the shared Oura helper", async () => {
+    const response = await webhookRoute.GET(
+      new Request(
+        "https://example.test/api/device-sync/webhooks/oura?verification_token=wrong-token&challenge=oura-challenge-token",
+      ),
+      {
+        params: Promise.resolve({ provider: "oura" }),
+      },
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "OURA_WEBHOOK_VERIFICATION_FAILED",
+        message: "Oura webhook verification token did not match the configured verification token.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("keeps hosted webhook verification missing-token behavior aligned with the shared Oura helper", async () => {
+    mocks.deviceSyncEnv.ouraWebhookVerificationToken = null;
+
+    const response = await webhookRoute.GET(
+      new Request(
+        "https://example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=oura-challenge-token",
+      ),
+      {
+        params: Promise.resolve({ provider: "oura" }),
+      },
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "OURA_WEBHOOK_VERIFICATION_TOKEN_MISSING",
+        message: "Oura webhook verification requires OURA_WEBHOOK_VERIFICATION_TOKEN.",
+        retryable: false,
+      },
     });
   });
 });

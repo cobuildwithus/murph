@@ -195,6 +195,17 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   const ownerId = await input.store.getConnectionOwnerId(input.account.id);
 
   if (!ownerId) {
+    if (input.webhook.traceId) {
+      console.warn("Closing hosted device-sync webhook trace without an owner mapping.", {
+        connectionId: input.account.id,
+        provider: input.account.provider,
+        traceId: input.webhook.traceId,
+      });
+      await input.store.prisma.$transaction(async (tx) => {
+        await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId!, tx);
+      });
+    }
+
     return;
   }
 
