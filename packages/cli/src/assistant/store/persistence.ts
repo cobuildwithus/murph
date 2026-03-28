@@ -9,6 +9,7 @@ import {
   type AssistantAutomationState,
   type AssistantSession,
   type AssistantTranscriptEntry,
+  parseAssistantSessionRecord,
 } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 import {
@@ -18,6 +19,7 @@ import {
 import {
   isMissingFileError,
   normalizeNullableString,
+  writeTextFileAtomic,
   writeJsonFileAtomic,
 } from '../shared.js'
 import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
@@ -64,7 +66,7 @@ export async function readAssistantSession(input: {
   try {
     const raw = await readFile(sessionPath, 'utf8')
     return normalizeAssistantSessionSnapshot(
-      assistantSessionSchema.parse(JSON.parse(raw) as unknown),
+      parseAssistantSessionRecord(JSON.parse(raw) as unknown),
     )
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -163,6 +165,23 @@ export async function appendTranscriptEntries(
   await appendFile(transcriptPath, serialized, 'utf8')
 }
 
+export async function replaceTranscriptEntries(
+  paths: AssistantStatePaths,
+  sessionId: string,
+  entries: readonly AssistantTranscriptEntry[],
+): Promise<void> {
+  const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
+  const serialized =
+    entries.length > 0
+      ? `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`
+      : ''
+
+  await mkdir(path.dirname(transcriptPath), {
+    recursive: true,
+  })
+  await writeTextFileAtomic(transcriptPath, serialized)
+}
+
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await access(filePath)
@@ -179,14 +198,29 @@ async function pathExists(filePath: string): Promise<boolean> {
 function normalizeAssistantSessionForWrite(
   session: AssistantSession,
 ): AssistantSession {
-  return normalizeAssistantSessionSnapshot({
+  const normalized = normalizeAssistantSessionSnapshot({
     ...session,
     providerOptions: serializeAssistantProviderSessionOptions({
       provider: session.provider,
       ...session.providerOptions,
     }),
-    providerState: session.providerState,
+    providerBinding: session.providerBinding
+      ? {
+          ...session.providerBinding,
+          providerOptions: serializeAssistantProviderSessionOptions({
+            provider: session.providerBinding.provider,
+            ...session.providerBinding.providerOptions,
+          }),
+        }
+      : null,
   })
+
+  const {
+    providerSessionId: _providerSessionId,
+    providerState: _providerState,
+    ...persisted
+  } = normalized
+  return persisted
 }
 
 export async function persistResolvedSession(
@@ -206,12 +240,14 @@ export async function persistResolvedSession(
     return session
   }
 
-  const updated = assistantSessionSchema.parse({
+  const updated = parseAssistantSessionRecord(
+    normalizeAssistantSessionForWrite({
     ...session,
     alias: input.alias ?? session.alias,
     binding: nextBinding,
     updatedAt: new Date().toISOString(),
-  })
+    }),
+  )
   await writeAssistantSession(paths, updated)
   await synchronizeAssistantIndexes(paths, updated, session)
   return updated

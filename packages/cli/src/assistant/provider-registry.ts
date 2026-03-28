@@ -1,8 +1,11 @@
 import { generateText } from 'ai'
 import type {
+  AssistantApprovalPolicy,
   AssistantChatProvider,
+  AssistantSandbox,
   AssistantSessionBinding,
 } from '../assistant-cli-contracts.js'
+import { getAssistantBindingContextLines } from './bindings.js'
 import {
   executeCodexPrompt,
   type CodexProgressEvent,
@@ -51,11 +54,53 @@ export interface AssistantProviderCapabilities {
   supportsReasoningEffort: boolean
 }
 
+export interface AssistantProviderTraits {
+  resumeKeyMode: 'none' | 'provider-session-id'
+  sessionMode: 'stateful' | 'stateless'
+  transcriptContextMode: 'local-transcript' | 'provider-session'
+  workspaceMode: 'direct-cli' | 'none'
+}
+
 export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
+
+export interface AssistantProviderTurnInput {
+  abortSignal?: AbortSignal
+  approvalPolicy?: AssistantApprovalPolicy | null
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  codexCommand?: string | null
+  configOverrides?: readonly string[]
+  continuityContext?: string | null
+  conversationMessages?: ReadonlyArray<{
+    content: string
+    role: 'assistant' | 'user'
+  }>
+  env?: NodeJS.ProcessEnv
+  headers?: Record<string, string> | null
+  model?: string | null
+  onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
+  onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  oss?: boolean | null
+  profile?: string | null
+  prompt?: string | null
+  provider?: AssistantChatProvider | null
+  providerName?: string | null
+  reasoningEffort?: string | null
+  resumeProviderSessionId?: string | null
+  sandbox?: AssistantSandbox | null
+  sessionContext?: {
+    binding?: AssistantSessionBinding | null
+  }
+  showThinkingTraces?: boolean
+  systemPrompt?: string | null
+  userPrompt?: string | null
+  workingDirectory: string
+}
 
 export interface AssistantProviderTurnExecutionInput {
   abortSignal?: AbortSignal
   configOverrides?: readonly string[]
+  continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
     content: string
     role: 'assistant' | 'user'
@@ -63,7 +108,7 @@ export interface AssistantProviderTurnExecutionInput {
   env?: NodeJS.ProcessEnv
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
-  prompt: string
+  prompt?: string | null
   providerConfig: AssistantProviderConfig
   resumeProviderSessionId?: string | null
   sessionContext?: {
@@ -86,6 +131,7 @@ export interface AssistantProviderTurnExecutionResult {
 
 interface AssistantProviderDefinition {
   capabilities: AssistantProviderCapabilities
+  traits: AssistantProviderTraits
   discoverModels(input: {
     config: AssistantProviderConfig
     env?: NodeJS.ProcessEnv
@@ -95,7 +141,6 @@ interface AssistantProviderDefinition {
   ): Promise<AssistantProviderTurnExecutionResult>
   resolveLabel(config: AssistantProviderConfig): string
   resolveStaticModels(config: AssistantProviderConfig): readonly AssistantCatalogModel[]
-  shouldUseLocalTranscriptContext: boolean
 }
 
 const DEFAULT_CODEX_MODEL_CAPABILITIES: AssistantModelCapabilities = {
@@ -155,6 +200,12 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
       supportsModelDiscovery: false,
       supportsReasoningEffort: true,
     },
+    traits: {
+      resumeKeyMode: 'provider-session-id',
+      sessionMode: 'stateful',
+      transcriptContextMode: 'provider-session',
+      workspaceMode: 'direct-cli',
+    },
     async discoverModels() {
       return {
         models: [],
@@ -185,7 +236,7 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
         onTraceEvent: input.onTraceEvent,
         oss: providerConfig.oss,
         profile: providerConfig.profile ?? undefined,
-        prompt: input.prompt,
+        prompt: resolveAssistantProviderPrompt(input),
         reasoningEffort: providerConfig.reasoningEffort ?? undefined,
         resumeSessionId: input.resumeProviderSessionId,
         sandbox: providerConfig.sandbox ?? undefined,
@@ -207,13 +258,18 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
     resolveStaticModels() {
       return DEFAULT_CODEX_MODELS
     },
-    shouldUseLocalTranscriptContext: false,
   },
   'openai-compatible': {
     capabilities: {
       supportsDirectCliExecution: false,
       supportsModelDiscovery: true,
       supportsReasoningEffort: false,
+    },
+    traits: {
+      resumeKeyMode: 'none',
+      sessionMode: 'stateless',
+      transcriptContextMode: 'local-transcript',
+      workspaceMode: 'none',
     },
     async discoverModels(input) {
       const providerConfig = input.config
@@ -328,7 +384,7 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
       const result = await generateText({
         abortSignal: input.abortSignal,
         maxRetries: OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
-        messages: normalizeConversationMessages(input.conversationMessages),
+        messages: buildAssistantProviderMessages(input),
         model: resolveAssistantLanguageModel(languageModelSpec),
         system: normalizeNullableString(input.systemPrompt) ?? undefined,
         timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
@@ -349,7 +405,6 @@ const ASSISTANT_PROVIDER_DEFINITIONS: Record<
     resolveStaticModels() {
       return []
     },
-    shouldUseLocalTranscriptContext: true,
   },
 }
 
@@ -364,6 +419,14 @@ export function resolveAssistantProviderCapabilities(
 ): AssistantProviderCapabilities {
   return {
     ...resolveAssistantProviderDefinition(provider).capabilities,
+  }
+}
+
+export function resolveAssistantProviderTraits(
+  provider: AssistantChatProvider,
+): AssistantProviderTraits {
+  return {
+    ...resolveAssistantProviderDefinition(provider).traits,
   }
 }
 
@@ -407,10 +470,37 @@ export async function executeAssistantProviderTurnWithDefinition(
   )
 }
 
+export async function executeAssistantProviderTurn(
+  input: AssistantProviderTurnInput,
+): Promise<AssistantProviderTurnExecutionResult> {
+  const providerConfig = normalizeAssistantProviderConfig(input)
+
+  return await executeAssistantProviderTurnWithDefinition({
+    abortSignal: input.abortSignal,
+    configOverrides: input.configOverrides,
+    continuityContext: input.continuityContext,
+    conversationMessages: input.conversationMessages,
+    env: input.env,
+    onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
+    prompt: input.prompt,
+    providerConfig,
+    resumeProviderSessionId: input.resumeProviderSessionId,
+    sessionContext: input.sessionContext,
+    showThinkingTraces: input.showThinkingTraces,
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    workingDirectory: input.workingDirectory,
+  })
+}
+
 export function shouldUseAssistantLocalTranscriptContext(
   provider: AssistantChatProvider,
 ): boolean {
-  return resolveAssistantProviderDefinition(provider).shouldUseLocalTranscriptContext
+  return (
+    resolveAssistantProviderDefinition(provider).traits.transcriptContextMode ===
+    'local-transcript'
+  )
 }
 
 export function createCatalogModel(input: {
@@ -506,6 +596,82 @@ function normalizeConversationMessages(
       content: message.content.trim(),
     }))
     .filter((message) => message.content.length > 0)
+}
+
+function resolveAssistantProviderPrompt(
+  input: AssistantProviderTurnExecutionInput,
+): string {
+  const explicitPrompt = normalizeNullableString(input.prompt)
+  if (explicitPrompt) {
+    return explicitPrompt
+  }
+
+  const userPrompt = normalizeNullableString(input.userPrompt)
+  if (!userPrompt) {
+    throw new Error(
+      'Assistant provider turns require either prompt or userPrompt.',
+    )
+  }
+
+  const systemPrompt = normalizeNullableString(input.systemPrompt)
+  const contextLines =
+    input.sessionContext?.binding
+      ? getAssistantBindingContextLines(input.sessionContext.binding)
+      : []
+
+  return [
+    systemPrompt,
+    contextLines.length > 0
+      ? `Conversation context:\n${contextLines.join('\n')}`
+      : null,
+    normalizeNullableString(input.continuityContext),
+    `User message:\n${userPrompt}`,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n\n')
+}
+
+function buildAssistantProviderMessages(
+  input: AssistantProviderTurnExecutionInput,
+): Array<{
+  content: string
+  role: 'assistant' | 'user'
+}> {
+  const messages = normalizeConversationMessages(input.conversationMessages)
+  const prompt = normalizeNullableString(input.prompt)
+  if (prompt) {
+    messages.push({
+      role: 'user',
+      content: prompt,
+    })
+    return messages
+  }
+
+  const userPrompt = normalizeNullableString(input.userPrompt)
+  if (!userPrompt) {
+    throw new Error(
+      'Assistant provider turns require either prompt or userPrompt.',
+    )
+  }
+
+  const sessionContextLines =
+    input.sessionContext?.binding
+      ? getAssistantBindingContextLines(input.sessionContext.binding)
+      : []
+  const continuityContext = normalizeNullableString(input.continuityContext)
+  const userParts = [
+    sessionContextLines.length > 0
+      ? `Conversation context:\n${sessionContextLines.join('\n')}`
+      : null,
+    continuityContext,
+    userPrompt,
+  ].filter((part): part is string => Boolean(part))
+
+  messages.push({
+    role: 'user',
+    content: userParts.join('\n\n'),
+  })
+  return messages
 }
 
 function mergeCodexConfigOverrides(input: {
