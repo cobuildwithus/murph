@@ -1,0 +1,355 @@
+import { describe, expect, it } from "vitest";
+
+import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+
+type MutableOAuthSession = {
+  state: string;
+  userId: string | null;
+  provider: string;
+  returnTo: string | null;
+  metadataJson: Record<string, unknown>;
+  createdAt: Date;
+  expiresAt: Date;
+};
+
+type MutableConnectionSecret = {
+  connectionId: string;
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted: string | null;
+  tokenVersion: number;
+  keyVersion: string;
+};
+
+type MutableConnectionRecord = {
+  id: string;
+  userId: string;
+  provider: string;
+  externalAccountId: string;
+  displayName: string | null;
+  status: "active" | "reauthorization_required" | "disconnected";
+  scopes: string[];
+  accessTokenExpiresAt: Date | null;
+  metadataJson: Record<string, unknown>;
+  connectedAt: Date;
+  lastWebhookAt: Date | null;
+  lastSyncStartedAt: Date | null;
+  lastSyncCompletedAt: Date | null;
+  lastSyncErrorAt: Date | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  nextReconcileAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  secret: MutableConnectionSecret | null;
+};
+
+describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
+  it("consumes and deletes an unexpired oauth state record", async () => {
+    const sessions = new Map<string, MutableOAuthSession>([
+      [
+        "state-123",
+        {
+          state: "state-123",
+          userId: "user-123",
+          provider: "oura",
+          returnTo: "https://example.test/return",
+          metadataJson: {
+            ownerId: "user-123",
+            source: "browser",
+          },
+          createdAt: new Date("2026-03-25T00:00:00.000Z"),
+          expiresAt: new Date("2026-03-25T01:00:00.000Z"),
+        },
+      ],
+    ]);
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceOauthSession: {
+          findUnique: async ({ where }: { where: { state: string } }) => cloneOAuthSession(sessions.get(where.state) ?? null),
+          delete: async ({ where }: { where: { state: string } }) => {
+            sessions.delete(where.state);
+            return undefined;
+          },
+        },
+        $transaction: async <TResult>(
+          callback: (transaction: {
+            deviceOauthSession: {
+              findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
+              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+            };
+          }) => Promise<TResult>,
+        ) =>
+          callback({
+            deviceOauthSession: {
+              findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
+              delete: async ({ where }) => {
+                sessions.delete(where.state);
+                return undefined;
+              },
+            },
+          }),
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => value,
+        decrypt: (value: string) => value,
+      },
+    });
+
+    await expect(store.consumeOAuthState("state-123", "2026-03-25T00:30:00.000Z")).resolves.toEqual({
+      state: "state-123",
+      provider: "oura",
+      returnTo: "https://example.test/return",
+      metadata: {
+        ownerId: "user-123",
+        source: "browser",
+      },
+      createdAt: "2026-03-25T00:00:00.000Z",
+      expiresAt: "2026-03-25T01:00:00.000Z",
+    });
+    expect(sessions.has("state-123")).toBe(false);
+  });
+
+  it("deletes an expired oauth state and returns null", async () => {
+    const sessions = new Map<string, MutableOAuthSession>([
+      [
+        "state-expired",
+        {
+          state: "state-expired",
+          userId: "user-123",
+          provider: "oura",
+          returnTo: null,
+          metadataJson: {},
+          createdAt: new Date("2026-03-25T00:00:00.000Z"),
+          expiresAt: new Date("2026-03-25T00:05:00.000Z"),
+        },
+      ],
+    ]);
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: {
+            deviceOauthSession: {
+              findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
+              delete: ({ where }: { where: { state: string } }) => Promise<void>;
+            };
+          }) => Promise<TResult>,
+        ) =>
+          callback({
+            deviceOauthSession: {
+              findUnique: async ({ where }) => cloneOAuthSession(sessions.get(where.state) ?? null),
+              delete: async ({ where }) => {
+                sessions.delete(where.state);
+                return undefined;
+              },
+            },
+          }),
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => value,
+        decrypt: (value: string) => value,
+      },
+    });
+
+    await expect(store.consumeOAuthState("state-expired", "2026-03-25T00:30:00.000Z")).resolves.toBeNull();
+    expect(sessions.has("state-expired")).toBe(false);
+  });
+});
+
+describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+  it("returns the decrypted hosted token bundle for the owning user", async () => {
+    const connection = createConnectionRecord();
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findFirst: async () => cloneConnection(connection),
+        },
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => `enc:${value}`,
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+      },
+    });
+
+    await expect(store.getConnectionBundleForUser("user-123", "dsc_123")).resolves.toEqual({
+      userId: "user-123",
+      account: expect.objectContaining({
+        id: "dsc_123",
+        provider: "oura",
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+      }),
+      tokenVersion: 4,
+      keyVersion: "v1",
+    });
+  });
+
+  it("disconnects the connection inside the transaction and removes the hosted secret bundle", async () => {
+    const connection = createConnectionRecord();
+
+    const tx = {
+      deviceConnection: {
+        findFirst: async () => cloneConnection(connection),
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          applyConnectionUpdate(connection, data);
+          connection.secret = null;
+          return cloneConnection(connection);
+        },
+      },
+      deviceConnectionSecret: {
+        deleteMany: async () => {
+          connection.secret = null;
+          return { count: 1 };
+        },
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => `enc:${value}`,
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+      },
+    });
+
+    await expect(
+      store.markConnectionDisconnected({
+        connectionId: "dsc_123",
+        userId: "user-123",
+        now: "2026-03-25T02:00:00.000Z",
+        errorCode: "REMOTE_DISCONNECT",
+        errorMessage: "Provider revoked access",
+      }),
+    ).resolves.toMatchObject({
+      id: "dsc_123",
+      status: "disconnected",
+      accessTokenExpiresAt: null,
+      nextReconcileAt: null,
+      lastErrorCode: "REMOTE_DISCONNECT",
+      lastErrorMessage: "Provider revoked access",
+    });
+
+    expect(connection.secret).toBeNull();
+    expect(connection.status).toBe("disconnected");
+    expect(connection.accessTokenExpiresAt).toBeNull();
+    expect(connection.nextReconcileAt).toBeNull();
+  });
+});
+
+function createConnectionRecord(): MutableConnectionRecord {
+  return {
+    id: "dsc_123",
+    userId: "user-123",
+    provider: "oura",
+    externalAccountId: "acct_123",
+    displayName: "Oura ring",
+    status: "active",
+    scopes: ["daily"],
+    accessTokenExpiresAt: new Date("2026-03-25T04:00:00.000Z"),
+    metadataJson: {
+      region: "us",
+    },
+    connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: new Date("2026-03-25T05:00:00.000Z"),
+    createdAt: new Date("2026-03-25T00:00:00.000Z"),
+    updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+    secret: {
+      connectionId: "dsc_123",
+      accessTokenEncrypted: "enc:access-token",
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 4,
+      keyVersion: "v1",
+    },
+  };
+}
+
+function applyConnectionUpdate(connection: MutableConnectionRecord, data: Record<string, unknown>): void {
+  if ("status" in data && isConnectionStatus(data.status)) {
+    connection.status = data.status;
+  }
+
+  if ("accessTokenExpiresAt" in data) {
+    connection.accessTokenExpiresAt = data.accessTokenExpiresAt instanceof Date ? new Date(data.accessTokenExpiresAt) : null;
+  }
+
+  if ("nextReconcileAt" in data) {
+    connection.nextReconcileAt = data.nextReconcileAt instanceof Date ? new Date(data.nextReconcileAt) : null;
+  }
+
+  if ("lastSyncErrorAt" in data) {
+    connection.lastSyncErrorAt = data.lastSyncErrorAt instanceof Date ? new Date(data.lastSyncErrorAt) : null;
+  }
+
+  if ("lastErrorCode" in data) {
+    connection.lastErrorCode = data.lastErrorCode === null || typeof data.lastErrorCode === "string" ? data.lastErrorCode : connection.lastErrorCode;
+  }
+
+  if ("lastErrorMessage" in data) {
+    connection.lastErrorMessage =
+      data.lastErrorMessage === null || typeof data.lastErrorMessage === "string"
+        ? data.lastErrorMessage
+        : connection.lastErrorMessage;
+  }
+
+  if ("updatedAt" in data && data.updatedAt instanceof Date) {
+    connection.updatedAt = new Date(data.updatedAt);
+  }
+}
+
+function cloneOAuthSession(record: MutableOAuthSession | null): MutableOAuthSession | null {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    ...record,
+    metadataJson: { ...record.metadataJson },
+    createdAt: new Date(record.createdAt),
+    expiresAt: new Date(record.expiresAt),
+  };
+}
+
+function cloneConnection(record: MutableConnectionRecord): MutableConnectionRecord {
+  return {
+    ...record,
+    scopes: [...record.scopes],
+    metadataJson: { ...record.metadataJson },
+    accessTokenExpiresAt: cloneDate(record.accessTokenExpiresAt),
+    connectedAt: new Date(record.connectedAt),
+    lastWebhookAt: cloneDate(record.lastWebhookAt),
+    lastSyncStartedAt: cloneDate(record.lastSyncStartedAt),
+    lastSyncCompletedAt: cloneDate(record.lastSyncCompletedAt),
+    lastSyncErrorAt: cloneDate(record.lastSyncErrorAt),
+    nextReconcileAt: cloneDate(record.nextReconcileAt),
+    createdAt: new Date(record.createdAt),
+    updatedAt: new Date(record.updatedAt),
+    secret: record.secret
+      ? {
+          ...record.secret,
+        }
+      : null,
+  };
+}
+
+function cloneDate(value: Date | null): Date | null {
+  return value ? new Date(value) : null;
+}
+
+function isConnectionStatus(value: unknown): value is MutableConnectionRecord["status"] {
+  return value === "active" || value === "reauthorization_required" || value === "disconnected";
+}
