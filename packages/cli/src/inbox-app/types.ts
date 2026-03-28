@@ -363,7 +363,7 @@ export interface InboxRuntimeModule {
     host?: string
     path?: string
     port?: number
-    webhookSecret?: string | null
+    webhookSecret: string
     downloadAttachments?: boolean
   }): PollConnector
   createTelegramBotApiPollDriver(input: {

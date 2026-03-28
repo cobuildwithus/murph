@@ -84,7 +84,7 @@ export async function toLinqChatMessage(input: {
     actor: {
       id: normalizeTextValue(data.from),
       displayName: null,
-      isSelf: Boolean(data.is_from_me),
+      isSelf: data.is_from_me,
     },
     occurredAt: toIsoTimestamp(receivedAt ?? createdAt ?? new Date()),
     receivedAt: receivedAt

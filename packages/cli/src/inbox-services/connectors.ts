@@ -69,15 +69,25 @@ export async function instantiateConnector(input: {
       })
     }
     case 'linq': {
+      const webhookSecret = requireLinqWebhookSecret(input.linqWebhookSecret)
       return inboxd.createLinqWebhookConnector({
         id: input.connector.id,
         accountId: input.connector.accountId,
         host: input.connector.options.linqWebhookHost ?? undefined,
         path: input.connector.options.linqWebhookPath ?? undefined,
         port: input.connector.options.linqWebhookPort ?? undefined,
-        webhookSecret: input.linqWebhookSecret ?? null,
+        webhookSecret,
         downloadAttachments: true,
       })
     }
   }
+}
+
+function requireLinqWebhookSecret(value: string | null | undefined): string {
+  const normalized = typeof value === 'string' ? value.trim() : ''
+  if (!normalized) {
+    throw new Error('Linq webhook secret is required before the local Linq listener can start.')
+  }
+
+  return normalized
 }

@@ -10,6 +10,7 @@ import {
 const DEFAULT_LINQ_WEBHOOK_HOST = '0.0.0.0'
 const DEFAULT_LINQ_WEBHOOK_PATH = '/linq-webhook'
 const DEFAULT_LINQ_WEBHOOK_PORT = 8789
+const DEFAULT_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 250
 
 export interface LinqWebhookConnectorOptions {
   id?: string
@@ -18,8 +19,9 @@ export interface LinqWebhookConnectorOptions {
   host?: string
   path?: string
   port?: number
-  webhookSecret?: string | null
+  webhookSecret: string
   downloadAttachments?: boolean
+  attachmentDownloadTimeoutMs?: number | null
   fetchImplementation?: typeof globalThis.fetch
 }
 
@@ -30,10 +32,11 @@ export function createLinqWebhookConnector({
   host = DEFAULT_LINQ_WEBHOOK_HOST,
   path = DEFAULT_LINQ_WEBHOOK_PATH,
   port = DEFAULT_LINQ_WEBHOOK_PORT,
-  webhookSecret = null,
+  webhookSecret,
   downloadAttachments = true,
+  attachmentDownloadTimeoutMs = DEFAULT_LINQ_ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
   fetchImplementation = globalThis.fetch?.bind(globalThis),
-}: LinqWebhookConnectorOptions = {}): PollConnector {
+}: LinqWebhookConnectorOptions): PollConnector {
   const normalizedSource = normalizeRequiredString(source, 'Linq source')
   const normalizedAccountId = normalizeNullableString(accountId)
   const normalizedHost = normalizeRequiredString(host, 'Linq webhook host')
@@ -93,10 +96,11 @@ export function createLinqWebhookConnector({
             webhookSecret: normalizedSecret,
             accountId: normalizedAccountId,
             source: normalizedSource,
-            emit,
-            downloadDriver,
-            signal,
-          })
+          emit,
+          downloadDriver,
+          attachmentDownloadTimeoutMs,
+          signal,
+        })
         } catch (error) {
           respondJson(response, 500, {
             ok: false,
@@ -151,6 +155,7 @@ async function handleLinqWebhookRequest(input: {
   source: string
   emit: EmitCapture
   downloadDriver: LinqAttachmentDownloadDriver | null
+  attachmentDownloadTimeoutMs: number | null
   signal: AbortSignal
 }): Promise<void> {
   const method = normalizeNullableString(input.request.method)?.toUpperCase() ?? 'GET'
@@ -226,7 +231,7 @@ async function handleLinqWebhookRequest(input: {
       defaultAccountId: input.accountId,
       downloadDriver: input.downloadDriver,
       signal: input.signal,
-      attachmentDownloadTimeoutMs: 0,
+      attachmentDownloadTimeoutMs: input.attachmentDownloadTimeoutMs,
     })
   } catch (error) {
     respondJson(input.response, error instanceof TypeError ? 400 : 500, {

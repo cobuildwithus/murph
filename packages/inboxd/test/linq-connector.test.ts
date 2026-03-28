@@ -81,6 +81,37 @@ test("normalizeLinqWebhookEvent builds direct chat captures and hydrates downloa
   assert.equal(capture.raw.event_type, "message.received");
 });
 
+test("normalizeLinqWebhookEvent falls back to created_at when received_at is missing", async () => {
+  const capture = await normalizeLinqWebhookEvent({
+    event: {
+      api_version: "v3",
+      event_id: "evt_missing_received_at",
+      created_at: "2026-03-24T10:00:05.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_missing_received_at",
+        from: "+15551234567",
+        recipient_phone: "+15557654321",
+        is_from_me: false,
+        service: "SMS",
+        message: {
+          id: "msg_missing_received_at",
+          parts: [
+            {
+              type: "text",
+              value: "Fallback timestamp",
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(capture.externalId, "linq:msg_missing_received_at");
+  assert.equal(capture.occurredAt, "2026-03-24T10:00:05.000Z");
+  assert.equal(capture.receivedAt, "2026-03-24T10:00:05.000Z");
+});
+
 test("createLinqWebhookConnector accepts signed webhook requests and emits captures", async () => {
   const port = await reservePort();
   const controller = new AbortController();
@@ -193,7 +224,7 @@ test("createLinqWebhookConnector fails closed before starting when the webhook s
         host: "127.0.0.1",
         path: "/hooks/linq",
         port: 9911,
-        webhookSecret: null,
+        webhookSecret: null as unknown as string,
       }),
     /Linq webhook secret is required/u,
   );
@@ -294,6 +325,7 @@ test("createLinqWebhookConnector acknowledges webhooks promptly even when attach
     path: "/hooks/linq",
     port,
     webhookSecret: "secret-123",
+    attachmentDownloadTimeoutMs: 25,
     fetchImplementation: async (_url, init) =>
       new Promise<Response>((_resolve, reject) => {
         init?.signal?.addEventListener(
@@ -358,7 +390,7 @@ test("createLinqWebhookConnector acknowledges webhooks promptly even when attach
 
     const response = await Promise.race([
       responsePromise,
-      delay(200).then(() => {
+      delay(500).then(() => {
         throw new Error("Timed out waiting for Linq webhook response.");
       }),
     ]);

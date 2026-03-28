@@ -17,7 +17,7 @@ export interface LinqMessageReceivedData {
   chat_id: string
   from: string
   recipient_phone?: string | null
-  received_at: string
+  received_at?: string | null
   is_from_me: boolean
   service?: 'iMessage' | 'SMS' | 'RCS' | string | null
   message: LinqIncomingMessage

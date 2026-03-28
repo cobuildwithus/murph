@@ -83,7 +83,7 @@ test('instantiateConnector delegates Linq webhook options through the connector 
     id?: string
     path?: string
     port?: number
-    webhookSecret?: string | null
+    webhookSecret?: string
   } | null = null
 
   const connector = await instantiateConnector({
@@ -108,7 +108,7 @@ test('instantiateConnector delegates Linq webhook options through the connector 
           id?: string
           path?: string
           port?: number
-          webhookSecret?: string | null
+          webhookSecret: string
         }) {
           received = options
           return {
@@ -152,6 +152,45 @@ test('instantiateConnector delegates Linq webhook options through the connector 
     port: 9911,
     webhookSecret: 'secret-123',
   })
+})
+
+test('instantiateConnector fails closed for Linq when the local webhook secret is missing', async () => {
+  let created = false
+
+  await assert.rejects(
+    () =>
+      instantiateConnector({
+        connector: {
+          id: 'linq:default',
+          source: 'linq',
+          enabled: true,
+          accountId: 'default',
+          options: {
+            linqWebhookHost: '127.0.0.1',
+            linqWebhookPath: '/hooks/linq',
+            linqWebhookPort: 9911,
+          },
+        },
+        linqWebhookSecret: null,
+        async loadInbox() {
+          return {
+            createLinqWebhookConnector() {
+              created = true
+              throw new Error('unreachable')
+            },
+          } as any
+        },
+        async loadImessageDriver() {
+          throw new Error('unreachable')
+        },
+        async loadTelegramDriver() {
+          throw new Error('unreachable')
+        },
+      }),
+    /local Linq listener can start/u,
+  )
+
+  assert.equal(created, false)
 })
 
 test('instantiateConnector delegates Telegram polling through the explicit takeover transport mode', async () => {

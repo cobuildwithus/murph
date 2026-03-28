@@ -236,6 +236,9 @@ export class PrismaLinqControlPlaneStore {
 
   private async findBindingsByCanonicalRecipientPhone(recipientPhone: string): Promise<LinqBindingPrismaRecord[]> {
     const canonicalRecipientPhone = normalizeCanonicalRecipientPhone(recipientPhone);
+    // Historical rows may store either legacy or canonical phone formats, and webhook
+    // history points at the original binding ids, so this remains an explicit full scan
+    // until the lane can safely introduce a canonical indexed column/backfill.
     const records = await this.prisma.linqRecipientBinding.findMany({
       orderBy: [
         {
