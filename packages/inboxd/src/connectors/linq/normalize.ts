@@ -122,10 +122,7 @@ async function buildLinqAttachments(
       continue
     }
 
-    const data =
-      downloadDriver && normalizeTextValue(part.url ?? null)
-        ? await downloadDriver.downloadUrl(part.url!, signal)
-        : null
+    const data = await downloadLinqAttachmentBestEffort(part, downloadDriver, signal)
     const fileName = normalizeTextValue(part.filename ?? null) ?? inferAttachmentFileName(part)
     const mime = normalizeTextValue(part.mime_type ?? null)
 
@@ -140,6 +137,24 @@ async function buildLinqAttachments(
   }
 
   return attachments
+}
+
+async function downloadLinqAttachmentBestEffort(
+  part: LinqMediaPart,
+  downloadDriver: LinqAttachmentDownloadDriver | null,
+  signal?: AbortSignal,
+): Promise<Uint8Array | null> {
+  const url = normalizeTextValue(part.url ?? null)
+  if (!downloadDriver || !url) {
+    return null
+  }
+
+  try {
+    return await downloadDriver.downloadUrl(url, signal)
+  } catch {
+    // Keep webhook acceptance tied to capture persistence, not best-effort media fetches.
+    return null
+  }
 }
 
 function buildLinqThreadTitle(data: LinqMessageReceivedData): string | null {

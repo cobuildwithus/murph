@@ -362,9 +362,9 @@ const runLinqDoctorChecks: DoctorStrategy = async (
           'webhook-secret',
           'A Linq webhook signing secret was found in the local environment.',
         )
-      : warnCheck(
+      : failCheck(
           'webhook-secret',
-          'No Linq webhook signing secret is configured; unsigned webhooks will be accepted until LINQ_WEBHOOK_SECRET is set.',
+          `Linq webhook delivery requires LINQ_WEBHOOK_SECRET. ${SETUP_RUNTIME_ENV_NOTICE}`,
         ),
   )
 

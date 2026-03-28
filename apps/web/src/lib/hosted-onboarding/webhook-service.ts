@@ -8,8 +8,7 @@ import {
   parseHostedLinqWebhookEvent,
 } from "./linq";
 import {
-  getHostedOnboardingEnvironment,
-  requireHostedOnboardingStripeConfig,
+  requireHostedOnboardingStripeClient,
 } from "./runtime";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import { runHostedWebhookWithReceipt } from "./webhook-receipts";
@@ -34,17 +33,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   prisma?: PrismaClient;
   signal?: AbortSignal;
 }): Promise<HostedOnboardingLinqWebhookResponse> {
+  assertHostedLinqWebhookSignature({
+    payload: input.rawBody,
+    signature: input.signature,
+    timestamp: input.timestamp,
+  });
+
   const prisma = input.prisma ?? getPrisma();
-  const environment = getHostedOnboardingEnvironment();
-
-  if (environment.linqWebhookSecret) {
-    assertHostedLinqWebhookSignature({
-      payload: input.rawBody,
-      signature: input.signature,
-      timestamp: input.timestamp,
-    });
-  }
-
   const event = parseHostedLinqWebhookEvent(input.rawBody);
   return runHostedWebhookWithReceipt({
     duplicateResponse: {
@@ -56,10 +51,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       eventType: event.event_type,
     },
     handlers: createHostedWebhookReceiptHandlers(),
-    plan: () =>
+    plan: (transaction) =>
       planHostedOnboardingLinqWebhook({
         event,
-        prisma,
+        prisma: transaction as PrismaClient,
       }),
     prisma,
     signal: input.signal,
@@ -88,9 +83,9 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       updateId: update.update_id,
     },
     handlers: createHostedWebhookReceiptHandlers(),
-    plan: () =>
+    plan: (transaction) =>
       planHostedOnboardingTelegramWebhook({
-        prisma,
+        prisma: transaction as PrismaClient,
         update,
       }),
     prisma,
@@ -105,7 +100,7 @@ export async function handleHostedStripeWebhook(input: {
   prisma?: PrismaClient;
 }): Promise<HostedStripeWebhookResponse> {
   const prisma = input.prisma ?? getPrisma();
-  const { stripe, webhookSecret } = requireHostedOnboardingStripeConfig();
+  const { stripe, webhookSecret } = requireHostedOnboardingStripeClient();
 
   if (!webhookSecret) {
     throw hostedOnboardingError({
@@ -141,10 +136,10 @@ export async function handleHostedStripeWebhook(input: {
       type: event.type,
     },
     handlers: createHostedWebhookReceiptHandlers(),
-    plan: () =>
+    plan: (transaction) =>
       planHostedStripeWebhook({
         event,
-        prisma,
+        prisma: transaction as PrismaClient,
       }),
     prisma,
     source: "stripe",
@@ -154,7 +149,7 @@ export async function handleHostedStripeWebhook(input: {
 function constructStripeWebhookEvent(input: {
   rawBody: string;
   signature: string;
-  stripe: ReturnType<typeof requireHostedOnboardingStripeConfig>["stripe"];
+  stripe: ReturnType<typeof requireHostedOnboardingStripeClient>["stripe"];
   webhookSecret: string;
 }): Stripe.Event {
   try {

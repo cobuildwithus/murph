@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
+  fetch: vi.fn(),
   getPrisma: vi.fn(),
   verifyAndParseLinqWebhookRequest: vi.fn(),
   requireLinqMessageReceivedEvent: vi.fn(),
@@ -41,14 +42,28 @@ const REMOVED_LINQ_WEBHOOK_SECRET_ALIAS = ["HEALTHY", "BOB", "LINQ", "WEBHOOK", 
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {
     linqControlPlane = await import("../src/lib/linq/control-plane");
+    vi.stubGlobal("fetch", mocks.fetch);
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.LINQ_API_BASE_URL = "https://linq.example.test/api/partner/v3";
+    process.env.LINQ_API_TOKEN = "linq-token";
     delete process.env.LINQ_WEBHOOK_SECRET;
     delete process.env[REMOVED_LINQ_WEBHOOK_SECRET_ALIAS];
     mocks.getPrisma.mockReturnValue({});
     mocks.store.getBindingByRecipientPhone.mockResolvedValue(null);
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        phone_numbers: [
+          {
+            phone_number: "+15557654321",
+          },
+        ],
+      }),
+    });
   });
 
   it("requires LINQ_WEBHOOK_SECRET and ignores the removed branded alias", async () => {
@@ -79,7 +94,7 @@ describe("HostedLinqControlPlane", () => {
       trace_id: "trace_123",
       data: {
         chat_id: "chat_123",
-        recipient_phone: "+15557654321",
+        recipient_phone: "15557654321",
         message: {
           id: "msg_123",
         },
@@ -149,6 +164,96 @@ describe("HostedLinqControlPlane", () => {
     expect(mocks.store.listBindingsForUser).toHaveBeenCalledWith("user-123");
   });
 
+  it("verifies browser binding claims against the configured Linq account inventory", async () => {
+    const authControlPlane = {
+      assertBrowserMutationOrigin: vi.fn(),
+      requireAuthenticatedUser: vi.fn().mockResolvedValue({
+        id: "user-123",
+      }),
+    };
+
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
+    mocks.store.upsertBinding.mockResolvedValue({
+      id: "linqb_123",
+      userId: "user-123",
+      recipientPhone: "+15557654321",
+      label: "Primary",
+      createdAt: "2026-03-25T10:00:00.000Z",
+      updatedAt: "2026-03-25T10:00:00.000Z",
+    });
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/bindings", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.upsertBinding({
+      recipientPhone: "+1 (555) 765-4321",
+      label: "Primary",
+    })).resolves.toEqual({
+      binding: {
+        id: "linqb_123",
+        userId: "user-123",
+        recipientPhone: "+15557654321",
+        label: "Primary",
+        createdAt: "2026-03-25T10:00:00.000Z",
+        updatedAt: "2026-03-25T10:00:00.000Z",
+      },
+    });
+
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      new URL("phonenumbers", "https://linq.example.test/api/partner/v3/"),
+      expect.objectContaining({
+        headers: {
+          authorization: "Bearer linq-token",
+        },
+        method: "GET",
+      }),
+    );
+    expect(mocks.store.upsertBinding).toHaveBeenCalledWith({
+      userId: "user-123",
+      recipientPhone: "+15557654321",
+      label: "Primary",
+    });
+  });
+
+  it("rejects binding claims for recipient phones the configured Linq account does not control", async () => {
+    const authControlPlane = {
+      assertBrowserMutationOrigin: vi.fn(),
+      requireAuthenticatedUser: vi.fn().mockResolvedValue({
+        id: "user-123",
+      }),
+    };
+
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
+    mocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        phone_numbers: [
+          {
+            phone_number: "+15550001111",
+          },
+        ],
+      }),
+    });
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/bindings", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.upsertBinding({
+      recipientPhone: "+15557654321",
+    })).rejects.toMatchObject({
+      code: "LINQ_BINDING_RECIPIENT_UNVERIFIED",
+      httpStatus: 403,
+    });
+    expect(mocks.store.upsertBinding).not.toHaveBeenCalled();
+  });
+
   it("queues only sparse routing fields for hosted webhook events", async () => {
     process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
     const event = {
@@ -160,7 +265,7 @@ describe("HostedLinqControlPlane", () => {
       data: {
         chat_id: "chat_123",
         from: "+15550001111",
-        recipient_phone: "+15557654321",
+        recipient_phone: "15557654321",
         received_at: "2026-03-25T10:00:05.000Z",
         is_from_me: false,
         message: {

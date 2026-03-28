@@ -4,6 +4,7 @@ import {
   buildHostedInviteReply,
   parseHostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
+  resolveHostedLinqOccurredAt,
   summarizeHostedLinqMessage,
 } from "./linq";
 import {
@@ -86,7 +87,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
             eventId: input.event.event_id,
             linqEvent: input.event as unknown as Record<string, unknown>,
             normalizedPhoneNumber,
-            occurredAt: input.event.created_at,
+            occurredAt: resolveHostedLinqOccurredAt(messageEvent),
             userId: existingMember.id,
           }),
         }),
@@ -135,6 +136,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
           activeSubscription: member.billingStatus === HostedBillingStatus.active,
           joinUrl,
         }),
+        replyToMessageId: summary.messageId,
         sourceEventId: input.event.event_id,
       }),
     ],

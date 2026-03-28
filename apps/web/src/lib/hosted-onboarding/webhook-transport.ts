@@ -2,6 +2,8 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { sendHostedLinqChatMessage } from "./linq";
+import { maybeIssueHostedRevnetForStripeInvoice } from "./stripe-revnet-issuance";
+import { buildHostedWebhookReceiptLeaseWriteData } from "./webhook-receipt-store";
 import type {
   HostedWebhookDispatchEnqueueInput,
   HostedWebhookReceiptPersistenceClient,
@@ -62,6 +64,7 @@ async function enqueueHostedWebhookDispatchEffectWithTransaction(
       },
     },
     data: {
+      ...buildHostedWebhookReceiptLeaseWriteData(input.nextStatus),
       payloadJson: input.nextPayloadJson,
     },
   });
@@ -72,9 +75,14 @@ async function enqueueHostedWebhookDispatchEffectWithTransaction(
 async function performHostedWebhookSideEffect(
   effect: HostedWebhookSideEffect,
   options: {
+    prisma: PrismaClient;
     signal?: AbortSignal;
-  } = {},
-): Promise<{ dispatched: true } | { chatId: string | null; messageId: string | null }> {
+  },
+): Promise<
+  | { dispatched: true }
+  | { chatId: string | null; messageId: string | null }
+  | { handled: true }
+> {
   switch (effect.kind) {
     case "hosted_execution_dispatch":
       throw new Error("Hosted execution dispatch effects must be queued through the execution outbox.");
@@ -82,8 +90,34 @@ async function performHostedWebhookSideEffect(
       return sendHostedLinqChatMessage({
         chatId: effect.payload.chatId,
         message: effect.payload.message,
+        replyToMessageId: effect.payload.replyToMessageId,
         signal: options.signal,
       });
+    case "revnet_invoice_issue": {
+      const member = await options.prisma.hostedMember.findUnique({
+        where: {
+          id: effect.payload.memberId,
+        },
+      });
+
+      if (!member) {
+        return { handled: true };
+      }
+
+      await maybeIssueHostedRevnetForStripeInvoice({
+        invoice: {
+          amount_paid: effect.payload.amountPaid,
+          charge: effect.payload.chargeId,
+          currency: effect.payload.currency,
+          id: effect.payload.invoiceId,
+          payment_intent: effect.payload.paymentIntentId,
+        } as never,
+        member,
+        prisma: options.prisma,
+      });
+
+      return { handled: true };
+    }
     default:
       throw new Error(`Unsupported hosted webhook side effect kind: ${JSON.stringify(effect)}`);
   }

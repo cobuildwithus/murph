@@ -81,6 +81,37 @@ test("verifyAndParseLinqWebhookRequest rejects invalid signatures", () => {
   );
 });
 
+test("verifyAndParseLinqWebhookRequest requires a configured webhook secret", () => {
+  const payload = JSON.stringify({
+    api_version: "v3",
+    event_id: "evt_missing_secret",
+    created_at: "2026-03-25T10:00:00.000Z",
+    event_type: "message.received",
+    data: {
+      chat_id: "chat_missing_secret",
+      from: "+15550000000",
+      recipient_phone: "+15559999999",
+      received_at: "2026-03-25T09:59:59.000Z",
+      is_from_me: false,
+      service: "SMS",
+      message: {
+        id: "msg_missing_secret",
+        parts: [],
+      },
+    },
+  });
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {},
+        rawBody: payload,
+        webhookSecret: null,
+      }),
+    /Linq webhook secret is required/u,
+  );
+});
+
 function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
   const signature = createHmac("sha256", secret)
     .update(`${timestamp}.${payload}`)

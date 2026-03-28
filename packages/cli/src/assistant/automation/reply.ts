@@ -8,6 +8,7 @@ import {
   isAssistantProviderConnectionLostError,
   isAssistantProviderStalledError,
 } from '../provider-turn-recovery.js'
+import { listAssistantTurnReceipts } from '../receipts.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
 import { sendAssistantMessage } from '../service.js'
 import {
@@ -15,7 +16,9 @@ import {
   resolveAssistantSession,
 } from '../store.js'
 import {
+  assistantAutoReplyGroupOutcomeArtifactExists,
   assistantChatReplyArtifactExists,
+  writeAssistantAutoReplyGroupOutcomeArtifact,
   writeAssistantChatDeferredArtifacts,
   writeAssistantChatErrorArtifacts,
   writeAssistantChatResultArtifacts,
@@ -43,6 +46,8 @@ import {
 } from './shared.js'
 
 const SELF_AUTHORED_ECHO_WINDOW_MS = 10 * 60 * 1000
+const AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY = 'autoReplyCaptureId'
+const AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY = 'autoReplyCaptureIds'
 
 export interface AssistantAutoReplyGroupContext {
   captureCount: number
@@ -377,6 +382,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       details: 'assistant provider turn started',
     })
     const result = await executeAssistantAutoReply({
+      captureIds: input.context.captureIds,
       deliveryDispatchMode: input.deliveryDispatchMode,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:
@@ -448,6 +454,13 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
         )
       }
 
+      await writeAssistantAutoReplyGroupOutcomeArtifact({
+        captureIds: input.context.captureIds,
+        outcome: 'result',
+        recordedAt: delivery.sentAt,
+        result: input.outcome.artifact.result,
+        vault: input.vault,
+      })
       await writeAssistantChatResultArtifacts({
         captureIds: input.context.captureIds,
         respondedAt: delivery.sentAt,
@@ -456,14 +469,23 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
       })
       return
     }
-    case 'deferred':
+    case 'deferred': {
+      const queuedAt = new Date().toISOString()
+      await writeAssistantAutoReplyGroupOutcomeArtifact({
+        captureIds: input.context.captureIds,
+        outcome: 'deferred',
+        recordedAt: queuedAt,
+        result: input.outcome.artifact.result,
+        vault: input.vault,
+      })
       await writeAssistantChatDeferredArtifacts({
         captureIds: input.context.captureIds,
-        queuedAt: new Date().toISOString(),
+        queuedAt,
         result: input.outcome.artifact.result,
         vault: input.vault,
       })
       return
+    }
     case 'error':
       await writeAssistantChatErrorArtifacts({
         captureIds: input.context.captureIds,
@@ -681,6 +703,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
     return createAdvancingSkipDecision('capture is self-authored')
   }
 
+  const existingGroupOutcome = await assistantAutoReplyGroupOutcomeArtifactExists(
+    input.vault,
+    input.group.firstCaptureId,
+  )
   const existingArtifact = await Promise.all(
     input.group.captureIds.map((captureId) =>
       assistantChatReplyArtifactExists(input.vault, captureId),
@@ -689,6 +715,14 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const existingArtifactStatus = classifyAssistantAutoReplyGroupArtifactStatus(
     existingArtifact,
   )
+  if (existingGroupOutcome) {
+    if (existingArtifactStatus === 'partial') {
+      return createDeferredSkipDecision(
+        'assistant reply artifacts are incomplete; will retry this capture after reply artifacts are rebuilt.',
+      )
+    }
+    return createAdvancingSkipDecision('assistant reply already handled')
+  }
   if (existingArtifactStatus === 'complete') {
     return createAdvancingSkipDecision('assistant reply already exists')
   }
@@ -707,6 +741,10 @@ async function evaluateAssistantAutoReplyGroup(input: {
   const primaryCapture = shownGroup[0]?.capture
   if (!primaryCapture) {
     return { kind: 'ignore' }
+  }
+
+  if (await assistantAutoReplyHandledByTurnReceipt(input.vault, input.group.captureIds)) {
+    return createAdvancingSkipDecision('assistant reply already handled')
   }
 
   const channelAdapter = getAssistantChannelAdapter(primaryCapture.source)
@@ -763,6 +801,7 @@ async function loadAssistantAutoReplyCaptures(input: {
 }
 
 async function executeAssistantAutoReply(input: {
+  captureIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
@@ -787,6 +826,11 @@ async function executeAssistantAutoReply(input: {
       prompt: input.prompt,
       deliverResponse: true,
       deliveryDispatchMode: input.deliveryDispatchMode,
+      deliveryReplyToMessageId: readLinqReplyToMessageId(input.primaryCapture),
+      receiptMetadata: {
+        [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: input.replyCaptureId,
+        [AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]: input.captureIds.join(','),
+      },
       turnTrigger: 'automation-auto-reply',
       maxSessionAgeMs: input.maxSessionAgeMs,
       onProviderEvent: watchdog.onProviderEvent,
@@ -801,6 +845,19 @@ async function executeAssistantAutoReply(input: {
   } finally {
     watchdog.dispose()
   }
+}
+
+function readLinqReplyToMessageId(capture: InboxShowResult['capture']): string | null {
+  if (capture.source !== 'linq') {
+    return null
+  }
+
+  const externalId = normalizeNullableString(capture.externalId)
+  if (!externalId?.startsWith('linq:')) {
+    return null
+  }
+
+  return normalizeNullableString(externalId.slice('linq:'.length))
 }
 
 function resolveAssistantAutoReplySendResult(input: {
@@ -884,6 +941,39 @@ function createAdvancingSkipDecision(
     reason,
     stopScanning: false,
   }
+}
+
+async function assistantAutoReplyHandledByTurnReceipt(
+  vault: string,
+  captureIds: readonly string[],
+): Promise<boolean> {
+  const primaryCaptureId = captureIds[0]
+  if (!primaryCaptureId) {
+    return false
+  }
+
+  const recentReceipts = await listAssistantTurnReceipts(vault, 200)
+  return recentReceipts.some((receipt) => {
+    if (!(receipt.status === 'completed' || receipt.status === 'deferred')) {
+      return false
+    }
+
+    const startedEvent = receipt.timeline.find((event) => event.kind === 'turn.started')
+    if (!startedEvent) {
+      return false
+    }
+
+    if (startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY] === primaryCaptureId) {
+      return true
+    }
+
+    const groupedCaptureIds = startedEvent.metadata[AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+
+    return groupedCaptureIds?.includes(primaryCaptureId) ?? false
+  })
 }
 
 function createDeferredSkipDecision(
