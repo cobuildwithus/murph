@@ -644,6 +644,59 @@ test("genetic variants are stored in markdown registries and can link to family 
   assert.ok(geneticOperations.every((operation) => operation.status === "committed"));
 });
 
+test("family and genetics updates clear normalized links without breaking patch semantics", async () => {
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-clear-links");
+  await initializeVault({ vaultRoot });
+
+  const relatedVariantId = "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
+  const familyMember = await upsertFamilyMember({
+    vaultRoot,
+    title: "Mother",
+    relationship: "mother",
+    relatedVariantIds: [relatedVariantId],
+  });
+  const variant = await upsertGeneticVariant({
+    vaultRoot,
+    gene: "APOE",
+    title: "APOE e4 allele",
+    sourceFamilyMemberIds: [familyMember.record.familyMemberId],
+  });
+
+  const clearedFamilyMember = await upsertFamilyMember({
+    vaultRoot,
+    familyMemberId: familyMember.record.familyMemberId,
+    relatedVariantIds: [],
+  });
+  const clearedVariant = await upsertGeneticVariant({
+    vaultRoot,
+    variantId: variant.record.variantId,
+    sourceFamilyMemberIds: [],
+    note: "Cleared source links without resupplying gene.",
+  });
+  const readFamilyRecord = await readFamilyMember({
+    vaultRoot,
+    familyMemberId: familyMember.record.familyMemberId,
+  });
+  const readVariantRecord = await readGeneticVariant({
+    vaultRoot,
+    variantId: variant.record.variantId,
+  });
+
+  assert.equal(clearedFamilyMember.created, false);
+  assert.equal(clearedVariant.created, false);
+  assert.equal(readFamilyRecord.relationship, "mother");
+  assert.equal(readFamilyRecord.relatedVariantIds, undefined);
+  assert.deepEqual(readFamilyRecord.links, []);
+  assert.match(readFamilyRecord.markdown, /## Related Variants[\s\S]*- none/);
+  assert.doesNotMatch(readFamilyRecord.markdown, new RegExp(relatedVariantId));
+  assert.equal(readVariantRecord.gene, "APOE");
+  assert.equal(readVariantRecord.sourceFamilyMemberIds, undefined);
+  assert.deepEqual(readVariantRecord.links, []);
+  assert.equal(readVariantRecord.note, "Cleared source links without resupplying gene.");
+  assert.match(readVariantRecord.markdown, /## Source Family Members[\s\S]*- none/);
+  assert.doesNotMatch(readVariantRecord.markdown, new RegExp(familyMember.record.familyMemberId));
+});
+
 test("genetic registry upserts reject conflicting variant ids and slugs", async () => {
   const vaultRoot = await makeTempDirectory("murph-genetics-conflict");
   await initializeVault({ vaultRoot });

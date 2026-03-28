@@ -793,6 +793,186 @@ test.sequential("condition and allergy upsert validate payloads through the shar
   }
 });
 
+test.sequential("condition, allergy, and family patch upserts preserve omitted create-only fields", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const conditionCreatePath = path.join(vaultRoot, "condition-create.json");
+  const conditionPatchPath = path.join(vaultRoot, "condition-patch.json");
+  const allergyCreatePath = path.join(vaultRoot, "allergy-create.json");
+  const allergyPatchPath = path.join(vaultRoot, "allergy-patch.json");
+  const familyCreatePath = path.join(vaultRoot, "family-create.json");
+  const familyPatchPath = path.join(vaultRoot, "family-patch.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+
+    await writeFile(
+      conditionCreatePath,
+      JSON.stringify({
+        title: "Migraine",
+        clinicalStatus: "active",
+      }),
+      "utf8",
+    );
+    const conditionCreated = await runCli<{
+      conditionId: string;
+    }>([
+      "condition",
+      "upsert",
+      "--input",
+      `@${conditionCreatePath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const conditionId = requireData(conditionCreated).conditionId;
+
+    await writeFile(
+      conditionPatchPath,
+      JSON.stringify({
+        conditionId,
+        note: "Patch update preserved the title.",
+      }),
+      "utf8",
+    );
+    const conditionPatched = await runCli([
+      "condition",
+      "upsert",
+      "--input",
+      `@${conditionPatchPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const conditionShown = await runCli<{
+      entity: {
+        data: Record<string, unknown>;
+      };
+    }>([
+      "condition",
+      "show",
+      conditionId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    await writeFile(
+      allergyCreatePath,
+      JSON.stringify({
+        title: "Peanut allergy",
+        substance: "Peanut",
+      }),
+      "utf8",
+    );
+    const allergyCreated = await runCli<{
+      allergyId: string;
+    }>([
+      "allergy",
+      "upsert",
+      "--input",
+      `@${allergyCreatePath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const allergyId = requireData(allergyCreated).allergyId;
+
+    await writeFile(
+      allergyPatchPath,
+      JSON.stringify({
+        allergyId,
+        note: "Patch update preserved the substance.",
+      }),
+      "utf8",
+    );
+    const allergyPatched = await runCli([
+      "allergy",
+      "upsert",
+      "--input",
+      `@${allergyPatchPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const allergyShown = await runCli<{
+      entity: {
+        data: Record<string, unknown>;
+      };
+    }>([
+      "allergy",
+      "show",
+      allergyId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    await writeFile(
+      familyCreatePath,
+      JSON.stringify({
+        title: "Mother",
+        relationship: "mother",
+      }),
+      "utf8",
+    );
+    const familyCreated = await runCli<{
+      familyMemberId: string;
+    }>([
+      "family",
+      "upsert",
+      "--input",
+      `@${familyCreatePath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const familyMemberId = requireData(familyCreated).familyMemberId;
+
+    await writeFile(
+      familyPatchPath,
+      JSON.stringify({
+        familyMemberId,
+        note: "Patch update preserved the relationship.",
+      }),
+      "utf8",
+    );
+    const familyPatched = await runCli([
+      "family",
+      "upsert",
+      "--input",
+      `@${familyPatchPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const familyShown = await runCli<{
+      entity: {
+        data: Record<string, unknown>;
+      };
+    }>([
+      "family",
+      "show",
+      familyMemberId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(conditionCreated.ok, true);
+    assert.equal(conditionPatched.ok, true);
+    assert.equal(conditionShown.ok, true);
+    assert.equal(requireData(conditionShown).entity.data.title, "Migraine");
+    assert.equal(requireData(conditionShown).entity.data.note, "Patch update preserved the title.");
+
+    assert.equal(allergyCreated.ok, true);
+    assert.equal(allergyPatched.ok, true);
+    assert.equal(allergyShown.ok, true);
+    assert.equal(requireData(allergyShown).entity.data.title, "Peanut allergy");
+    assert.equal(requireData(allergyShown).entity.data.substance, "Peanut");
+    assert.equal(requireData(allergyShown).entity.data.note, "Patch update preserved the substance.");
+
+    assert.equal(familyCreated.ok, true);
+    assert.equal(familyPatched.ok, true);
+    assert.equal(familyShown.ok, true);
+    assert.equal(requireData(familyShown).entity.data.title, "Mother");
+    assert.equal(requireData(familyShown).entity.data.relationship, "mother");
+    assert.equal(requireData(familyShown).entity.data.note, "Patch update preserved the relationship.");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family.json");
