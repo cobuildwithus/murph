@@ -1054,6 +1054,36 @@ test("assessment imports append contract-shaped records and emit intake audits",
   assert.equal(validation.valid, true);
 });
 
+test("assessment projection drops legacy flat profile blobs after the hard cutover", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const assessmentPath = await writeExternalFile(
+    sourceRoot,
+    "legacy-intake.json",
+    JSON.stringify({
+      profile: {
+        summary: "Legacy flat summary",
+        topGoalIds: ["goal_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+      },
+    }),
+  );
+
+  const imported = await importAssessmentResponse({
+    vaultRoot,
+    sourcePath: assessmentPath,
+    assessmentType: "intake",
+    questionnaireSlug: "legacy-intake",
+  });
+  const projected = await projectAssessmentResponse({
+    vaultRoot,
+    assessmentId: imported.assessment.id,
+  });
+
+  assert.equal(projected.profileSnapshots.length, 0);
+});
+
 test("ensureJournalDay rethrows non-file-exists write failures", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
