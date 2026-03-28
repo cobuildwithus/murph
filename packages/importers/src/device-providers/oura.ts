@@ -640,8 +640,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           externalRef: makeExternalRef("session", sessionId, version),
           fields: stripUndefined({
             activityType: sessionType,
-            startAt,
-            endAt,
             durationMinutes,
           }),
         }),
@@ -698,8 +696,6 @@ export function normalizeOuraSnapshot(snapshot: OuraSnapshotInput): NormalizedDe
           externalRef: makeExternalRef("workout", workoutId, version),
           fields: stripUndefined({
             activityType,
-            startAt,
-            endAt,
             durationMinutes,
             distanceKm,
           }),
