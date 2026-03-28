@@ -52,20 +52,64 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("normalizes legacy AgentMail and ffmpeg aliases onto canonical keys", () => {
-    expect(applyHostedUserEnvUpdate({
+  it("rejects removed AgentMail and ffmpeg alias keys", () => {
+    expect(() => applyHostedUserEnvUpdate({
       current: {},
       update: {
         env: {
           AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
           PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
         },
         mode: "replace",
       },
+    })).toThrow(/not allowed/u);
+  });
+
+  it("accepts canonical AgentMail and ffmpeg keys but rejects unknown prefixed keys", () => {
+    expect(applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          AGENTMAIL_API_KEY: "agentmail-secret",
+          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
+          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+        },
+        mode: "replace",
+      },
     })).toEqual({
-      AGENTMAIL_BASE_URL: "https://legacy-mail.example.test/v0",
+      AGENTMAIL_API_KEY: "agentmail-secret",
+      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
     });
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          AGENTMAIL_TIMEOUT_MS: "5000",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          FFMPEG_THREADS: "2",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
   });
 
   it("rejects dangerous env names", () => {

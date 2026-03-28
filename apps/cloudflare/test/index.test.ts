@@ -5,7 +5,6 @@ import {
   parseHostedEmailThreadTarget,
   type HostedExecutionDispatchRequest,
 } from "@murph/runtime-state";
-import { encryptHostedBundle } from "../src/crypto.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
@@ -117,12 +116,12 @@ describe("cloudflare worker routes", () => {
     }));
   });
 
-  it("accepts signed dispatch through the /internal/events alias", async () => {
+  it("accepts signed dispatch through the canonical internal dispatch route", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_123");
-    const request = await createSignedDispatchRequest("/internal/events", dispatch);
+    const request = await createSignedDispatchRequest("/internal/dispatch", dispatch);
 
     const response = await worker.fetch(
       request,
@@ -132,6 +131,18 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+  });
+
+  it("keeps the removed internal events alias hidden from signed dispatch callers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const stub = createUserRunnerStub();
+    const request = await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias"));
+
+    const response = await worker.fetch(request, createWorkerEnv(stub));
+
+    expect(response.status).toBe(404);
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
   it("rejects stale, malformed, and future signed dispatch requests", async () => {
@@ -398,7 +409,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("persists side-effect journal records through the canonical route and reads them back through the legacy alias", async () => {
+  it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
     const env = createWorkerEnv();
     const response = await callRunnerOutbound(
       new Request("http://side-effects.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
@@ -442,7 +453,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("falls back to fingerprint side-effect records across the legacy alias and canonical route", async () => {
+  it("falls back to fingerprint side-effect records across the outbox and side-effects routes", async () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
@@ -479,45 +490,6 @@ describe("cloudflare worker routes", () => {
         },
         effectId: "outbox_a",
         intentId: "outbox_a",
-        kind: "assistant.delivery",
-      },
-    });
-  });
-
-  it("reads legacy side-effect journal objects through the canonical route after the transient prefix move", async () => {
-    const env = createWorkerEnv();
-    const legacyRecord = {
-      delivery: createOutboxDelivery(),
-      effectId: "outbox_legacy",
-      fingerprint: "dedupe_legacy",
-      intentId: "outbox_legacy",
-      kind: "assistant.delivery" as const,
-      recordedAt: "2026-03-26T12:00:05.000Z",
-    };
-    const envelope = await encryptHostedBundle({
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-      plaintext: new TextEncoder().encode(JSON.stringify(legacyRecord)),
-    });
-
-    await env.BUNDLES.put(
-      "users/member_123/outbox-deliveries/by-intent/outbox_legacy.json",
-      JSON.stringify(envelope),
-    );
-
-    const response = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_legacy?kind=assistant.delivery&fingerprint=dedupe_legacy", {
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      effectId: "outbox_legacy",
-      record: {
-        effectId: "outbox_legacy",
-        fingerprint: "dedupe_legacy",
         kind: "assistant.delivery",
       },
     });
@@ -987,7 +959,7 @@ describe("cloudflare worker routes", () => {
 
   it("preserves hidden not-found responses for wrong methods on worker routes that were never public", async () => {
     const dispatchResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/events", {
+      new Request("https://runner.example.test/internal/dispatch", {
         method: "GET",
       }),
       createWorkerEnv(),

@@ -1,8 +1,3 @@
-const LEGACY_RUNNER_ENV_ALIASES = {
-  AGENTMAIL_API_BASE_URL: "AGENTMAIL_BASE_URL",
-  PARSER_FFMPEG_PATH: "FFMPEG_COMMAND",
-} as const;
-
 const EXACT_ALLOWED_ENV_KEYS = new Set<string>([
   "AGENTMAIL_API_KEY",
   "AGENTMAIL_BASE_URL",
@@ -35,10 +30,8 @@ const EXACT_ALLOWED_ENV_KEYS = new Set<string>([
 ]);
 
 const ALLOWED_ENV_PREFIXES = [
-  "AGENTMAIL_",
   "ANTHROPIC_",
   "DEVICE_SYNC_",
-  "FFMPEG_",
   "GOOGLE_",
   "GROQ_",
   "LINQ_",
@@ -60,10 +53,9 @@ const ALLOWED_ENV_PREFIXES = [
 export function buildHostedRunnerContainerEnv(
   source: Readonly<Record<string, unknown>>,
 ): Record<string, string> {
-  const normalizedSource = normalizeRunnerEnvSource(source);
   const values: Record<string, string> = {};
 
-  for (const [key, value] of Object.entries(normalizedSource)) {
+  for (const [key, value] of Object.entries(source)) {
     if (typeof value !== "string" || value.length === 0 || !shouldForwardRunnerEnv(key)) {
       continue;
     }
@@ -81,21 +73,4 @@ export function buildHostedRunnerContainerEnv(
 function shouldForwardRunnerEnv(key: string): boolean {
   return EXACT_ALLOWED_ENV_KEYS.has(key)
     || ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
-}
-
-function normalizeRunnerEnvSource(
-  source: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> {
-  const normalized: Record<string, unknown> = { ...source };
-
-  for (const [legacyKey, canonicalKey] of Object.entries(LEGACY_RUNNER_ENV_ALIASES)) {
-    const canonicalValue = normalized[canonicalKey];
-    const legacyValue = normalized[legacyKey];
-    if (typeof canonicalValue !== "string" || canonicalValue.length === 0) {
-      normalized[canonicalKey] = legacyValue;
-    }
-    delete normalized[legacyKey];
-  }
-
-  return normalized;
 }

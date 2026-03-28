@@ -182,9 +182,9 @@ test("hosted execution bundles keep only assistant state and operator config ins
   }
 });
 
-test("hosted execution restore ignores legacy vault runtime roots in agent-state bundles", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-"));
-  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-restore-"));
+test("hosted execution restore rejects legacy vault-runtime roots in incoming agent-state bundles", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-root-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-root-restore-"));
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
@@ -192,54 +192,31 @@ test("hosted execution restore ignores legacy vault runtime roots in agent-state
     const operatorHomeRoot = path.join(workspaceRoot, "home");
     await mkdir(vaultRoot, { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
-    await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
     await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
-    await writeFile(
-      path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"),
-      "{\"schema\":\"murph.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
-    );
 
     const bundles = await snapshotHostedExecutionContext({
       operatorHomeRoot,
       vaultRoot,
     });
-    assert.ok(bundles.agentStateBundle);
-
-    let legacyAgentStateBundle = bundles.agentStateBundle;
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      legacyAgentStateBundle = writeHostedBundleTextFile({
-        bytes: legacyAgentStateBundle,
-        kind: "agent-state",
-        path: artifact.relativePath,
-        root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
-        text: artifact.contents,
-      });
-    }
-
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: legacyAgentStateBundle,
-      vaultBundle: bundles.vaultBundle,
-      workspaceRoot: restoreRoot,
+    const agentStateBundleWithLegacyRoot = writeHostedBundleTextFile({
+      bytes: bundles.agentStateBundle,
+      kind: "agent-state",
+      path: "device-syncd/control-token",
+      root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
+      text: "legacy-token\n",
     });
 
-    assert.equal(
-      await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      "{\"autoReplyChannels\":[\"linq\"]}\n",
-    );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
-      "{\"schema\":\"cfg\"}\n",
-    );
     await assert.rejects(
-      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
+      restoreHostedExecutionContext({
+        agentStateBundle: agentStateBundleWithLegacyRoot,
+        vaultBundle: bundles.vaultBundle,
+        workspaceRoot: restoreRoot,
+      }),
+      /Hosted bundle root "vault-runtime" is not mapped for restore\./u,
     );
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      await assert.rejects(
-        readFile(path.join(restored.vaultRoot, ".runtime", artifact.relativePath), "utf8"),
-      );
-    }
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });

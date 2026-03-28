@@ -35,7 +35,7 @@ Current worker bindings read directly by `src/index.ts`:
 
 Current worker env/config names read directly by `src/env.ts`:
 
-- required secret: `HOSTED_EXECUTION_SIGNING_SECRET` (the worker also accepts the historical alias `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`)
+- required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - required secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes; missing values now fail those routes closed instead of leaving them open
 - required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server and native container invoke path; missing values now fail closed instead of silently skipping auth
@@ -54,7 +54,6 @@ Current worker routes:
 - `GET /health` returns a lightweight health payload and does not require the runtime secrets to be present
 - `GET /` returns the service banner payload
 - `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
-- `POST /internal/events` is an alias for the same signed internal dispatch contract
 - `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
@@ -138,7 +137,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production rollout. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
 - Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys still require a direct `wrangler deploy`, and the rollout helper now refuses gradual mode when the rendered config introduces a newer Durable Object migration tag than the currently allowed gradual-deploy set.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
-- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `AGENTMAIL_BASE_URL`, `FFMPEG_COMMAND`, `PADDLEOCR_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH`. Local render/deploy helpers still normalize the older AgentMail and ffmpeg aliases on input so existing staging settings do not break during the cleanup pass.
+- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `AGENTMAIL_BASE_URL`, `FFMPEG_COMMAND`, `PADDLEOCR_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH`.
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
 - The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
 - The repo now ships `apps/cloudflare/r2-bundles-lifecycle.json` plus `pnpm --dir apps/cloudflare r2:lifecycle:apply` so the configured bundles buckets can expire transient execution journals and committed side-effect journal objects under `transient/execution-journal/` and `transient/side-effects/` after 30 days.

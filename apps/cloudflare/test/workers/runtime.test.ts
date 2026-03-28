@@ -62,7 +62,7 @@ describe("cloudflare worker runtime suite", () => {
 
     const dispatch = createDispatch("evt_signed_runtime");
     const response = await exports.default.fetch(
-      await createSignedDispatchRequest("/internal/events", dispatch),
+      await createSignedDispatchRequest("/internal/dispatch", dispatch),
     );
 
     expect(response.status).toBe(200);
@@ -94,6 +94,26 @@ describe("cloudflare worker runtime suite", () => {
     await expect(readBundleText(payload.status.bundleRefs.vault)).resolves.toBe(
       `vault:${dispatch.eventId}`,
     );
+  });
+
+  it("keeps the removed internal events alias hidden in the Workers runtime", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const userId = "member_removed_alias";
+
+    const response = await exports.default.fetch(
+      await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias", userId)),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(getUserRunnerStub(userId).bootstrapUser(userId)).resolves.toEqual({
+      userId,
+    });
+    await expect(getUserRunnerStub(userId).status()).resolves.toMatchObject({
+      lastEventId: null,
+      pendingEventCount: 0,
+      userId,
+    });
   });
 
   it("supports direct Durable Object RPC and alarm execution inside the Workers runtime", async () => {
@@ -164,6 +184,66 @@ describe("cloudflare worker runtime suite", () => {
     });
     await expect(getUserRunnerStub(userId).clearUserEnv()).resolves.toEqual({
       configuredUserEnvKeys: [],
+      userId,
+    });
+  });
+
+  it("rejects removed and unknown hosted user env keys at the worker control boundary", async () => {
+    const userId = "member_control_env_reject";
+
+    const rejectedResponse = await exports.default.fetch(
+      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+        body: JSON.stringify({
+          env: {
+            AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+            AGENTMAIL_TIMEOUT_MS: "5000",
+            FFMPEG_THREADS: "2",
+            PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+          },
+          mode: "merge",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+    );
+
+    expect(rejectedResponse.status).toBe(400);
+    await expect(rejectedResponse.json()).resolves.toEqual({
+      error: "Hosted user env key is not allowed: AGENTMAIL_API_BASE_URL",
+    });
+    await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: [],
+      userId,
+    });
+
+    const acceptedResponse = await exports.default.fetch(
+      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+        body: JSON.stringify({
+          env: {
+            AGENTMAIL_API_KEY: "agentmail-secret",
+            AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
+            FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+          },
+          mode: "merge",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+    );
+
+    expect(acceptedResponse.status).toBe(200);
+    await expect(acceptedResponse.json()).resolves.toEqual({
+      configuredUserEnvKeys: [
+        "AGENTMAIL_API_KEY",
+        "AGENTMAIL_BASE_URL",
+        "FFMPEG_COMMAND",
+      ],
       userId,
     });
   });

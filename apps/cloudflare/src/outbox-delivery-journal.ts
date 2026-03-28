@@ -31,24 +31,24 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 }): HostedExecutionSideEffectJournalStore {
   return {
     async read(query) {
-      const byEffect = await readRecordAtKeys(input, effectRecordReadKeys(query.userId, query.effectId));
+      const byEffect = await readRecordAtKey(input, effectRecordKey(query.userId, query.effectId));
 
       if (byEffect) {
         return byEffect;
       }
 
-      return readRecordAtKeys(
+      return readRecordAtKey(
         input,
-        fingerprintRecordReadKeys(query.userId, query.kind, query.fingerprint),
+        fingerprintRecordKey(query.userId, query.kind, query.fingerprint),
       );
     },
 
     async write(writeInput) {
       const record = parseHostedExecutionSideEffectRecord(writeInput.record);
-      await writeRecordAtKey(input, effectRecordWriteKey(writeInput.userId, record.effectId), record);
+      await writeRecordAtKey(input, effectRecordKey(writeInput.userId, record.effectId), record);
       await writeRecordAtKey(
         input,
-        fingerprintRecordWriteKey(writeInput.userId, record.kind, record.fingerprint),
+        fingerprintRecordKey(writeInput.userId, record.kind, record.fingerprint),
         record,
       );
       return record;
@@ -56,29 +56,21 @@ export function createHostedExecutionSideEffectJournalStore(input: {
   };
 }
 
-async function readRecordAtKeys(
+async function readRecordAtKey(
   input: {
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
   },
-  keys: readonly string[],
+  key: string,
 ): Promise<HostedExecutionSideEffectRecord | null> {
-  for (const key of keys) {
-    const record = await readEncryptedR2Json({
-      bucket: input.bucket,
-      cryptoKey: input.key,
-      key,
-      parse(value) {
-        return parseHostedExecutionSideEffectRecord(value);
-      },
-    });
-
-    if (record) {
-      return record;
-    }
-  }
-
-  return null;
+  return readEncryptedR2Json({
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    key,
+    parse(value) {
+      return parseHostedExecutionSideEffectRecord(value);
+    },
+  });
 }
 
 async function writeRecordAtKey(
@@ -99,19 +91,11 @@ async function writeRecordAtKey(
   });
 }
 
-function effectRecordWriteKey(userId: string, effectId: string): string {
+function effectRecordKey(userId: string, effectId: string): string {
   return `transient/side-effects/by-effect/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
 }
 
-function effectRecordReadKeys(userId: string, effectId: string): string[] {
-  return [
-    effectRecordWriteKey(userId, effectId),
-    `users/${encodeURIComponent(userId)}/side-effects/by-effect/${encodeURIComponent(effectId)}.json`,
-    legacyIntentRecordObjectKey(userId, effectId),
-  ];
-}
-
-function fingerprintRecordWriteKey(
+function fingerprintRecordKey(
   userId: string,
   kind: HostedExecutionSideEffectRecord["kind"],
   fingerprint: string,
@@ -119,28 +103,6 @@ function fingerprintRecordWriteKey(
   return `transient/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}/${encodeURIComponent(userId)}.json`;
 }
 
-function fingerprintRecordReadKeys(
-  userId: string,
-  kind: HostedExecutionSideEffectRecord["kind"],
-  fingerprint: string,
-): string[] {
-  return [
-    fingerprintRecordWriteKey(userId, kind, fingerprint),
-    `users/${encodeURIComponent(userId)}/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}.json`,
-    ...(kind === "assistant.delivery"
-      ? [legacyDedupeRecordObjectKey(userId, fingerprint)]
-      : []),
-  ];
-}
-
 function hashFingerprint(kind: string, fingerprint: string): string {
   return createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex");
-}
-
-function legacyIntentRecordObjectKey(userId: string, intentId: string): string {
-  return `users/${encodeURIComponent(userId)}/outbox-deliveries/by-intent/${encodeURIComponent(intentId)}.json`;
-}
-
-function legacyDedupeRecordObjectKey(userId: string, dedupeKey: string): string {
-  return `users/${encodeURIComponent(userId)}/outbox-deliveries/by-dedupe/${createHash("sha256").update(dedupeKey).digest("hex")}.json`;
 }

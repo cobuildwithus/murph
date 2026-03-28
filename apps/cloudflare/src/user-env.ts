@@ -34,10 +34,8 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
 ] as const;
 
 const DEFAULT_ALLOWED_USER_ENV_PREFIXES = [
-  "AGENTMAIL_",
   "ANTHROPIC_",
   "DEVICE_SYNC_",
-  "FFMPEG_",
   "GOOGLE_",
   "GOOGLE_GENERATIVE_AI_",
   "GROQ_",
@@ -89,10 +87,6 @@ export interface HostedUserEnvUpdate {
 
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
-const HOSTED_USER_ENV_ALIASES = {
-  AGENTMAIL_API_BASE_URL: "AGENTMAIL_BASE_URL",
-  PARSER_FFMPEG_PATH: "FFMPEG_COMMAND",
-} as const;
 
 export function decodeHostedUserEnvPayload(
   payload: Uint8Array | ArrayBuffer | null,
@@ -129,7 +123,7 @@ export function applyHostedUserEnvUpdate(input: {
     const normalizedKey = normalizeHostedUserEnvKey(key);
 
     if (!isHostedUserEnvKeyAllowed(normalizedKey, input.source)) {
-      throw new Error(`Hosted user env key is not allowed: ${key}`);
+      throw new TypeError(`Hosted user env key is not allowed: ${key}`);
     }
 
     if (rawValue === null) {
@@ -263,10 +257,10 @@ function normalizeHostedUserEnvKey(key: string): string {
   const normalized = key.trim().toUpperCase();
 
   if (!normalized || !/^[A-Z0-9_]+$/u.test(normalized)) {
-    throw new Error(`Hosted user env key is invalid: ${key}`);
+    throw new TypeError(`Hosted user env key is invalid: ${key}`);
   }
 
-  return HOSTED_USER_ENV_ALIASES[normalized as keyof typeof HOSTED_USER_ENV_ALIASES] ?? normalized;
+  return normalized;
 }
 
 function normalizeHostedUserEnvValue(value: string, key: string): string | null {
@@ -277,7 +271,7 @@ function normalizeHostedUserEnvValue(value: string, key: string): string | null 
   }
 
   if (normalized.includes("\u0000")) {
-    throw new Error(`Hosted user env value for ${key} contains invalid null bytes.`);
+    throw new TypeError(`Hosted user env value for ${key} contains invalid null bytes.`);
   }
 
   return normalized;

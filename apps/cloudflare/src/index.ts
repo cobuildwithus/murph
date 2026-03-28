@@ -132,7 +132,7 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     async handle(context) {
       return handleSignedDispatchRoute(context);
     },
-    match: matchExactPath("/internal/dispatch", "/internal/events"),
+    match: matchExactPath("/internal/dispatch"),
     methods: ["POST"],
   },
   {

@@ -78,8 +78,8 @@ Optional tuning variables:
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `basic`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
 - `CF_CONTAINER_MAX_INSTANCES` (default `50`)
-- `CF_CONTAINER_SLEEP_AFTER` (default `5m`, rendered into the Worker as `HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER`)
 - `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
+- `HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER` (default `5m`)
 - `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
 - `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
@@ -103,11 +103,6 @@ Optional non-secret provider/toolchain variables to expose through the worker an
 - `PDFTOTEXT_COMMAND`
 - `PADDLEOCR_COMMAND`
 - `WHISPER_COMMAND`
-
-Legacy deploy inputs are only normalized where the mapping is exact:
-
-- `AGENTMAIL_API_BASE_URL` still maps to `AGENTMAIL_BASE_URL` during local config rendering and in the GitHub Actions workflow
-- `PARSER_FFMPEG_PATH` still maps to `FFMPEG_COMMAND` during local config rendering and in the GitHub Actions workflow
 
 ### Required environment secrets
 
@@ -174,7 +169,7 @@ export CF_WORKER_NAME=hosted-runner-staging
 export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=basic
-export CF_CONTAINER_SLEEP_AFTER=5m
+export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=5m
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...

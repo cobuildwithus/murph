@@ -54,35 +54,25 @@ export function createHostedExecutionJournalStore(input: {
 }): HostedExecutionJournalStore {
   return {
     async deleteCommittedResult(userId, eventId) {
-      for (const key of committedResultObjectKeys(userId, eventId)) {
-        await input.bucket.delete?.(key);
-      }
+      await input.bucket.delete?.(committedResultObjectKey(userId, eventId));
     },
 
     async readCommittedResult(userId, eventId) {
-      for (const key of committedResultObjectKeys(userId, eventId)) {
-        const result = await readEncryptedR2Json({
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          key,
-          parse(value) {
-            return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
-          },
-        });
-
-        if (result) {
-          return result;
-        }
-      }
-
-      return null;
+      return readEncryptedR2Json({
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: committedResultObjectKey(userId, eventId),
+        parse(value) {
+          return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
+        },
+      });
     },
 
     async writeCommittedResult(userId, eventId, value) {
       await writeEncryptedR2Json({
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: committedResultPrimaryObjectKey(userId, eventId),
+        key: committedResultObjectKey(userId, eventId),
         keyId: input.keyId,
         value,
       });
@@ -233,19 +223,8 @@ async function writeCommittedBundle(input: {
   };
 }
 
-function committedResultPrimaryObjectKey(userId: string, eventId: string): string {
+function committedResultObjectKey(userId: string, eventId: string): string {
   return `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
-}
-
-function committedResultLegacyObjectKey(userId: string, eventId: string): string {
-  return `users/${encodeURIComponent(userId)}/execution-journal/${encodeURIComponent(eventId)}.json`;
-}
-
-function committedResultObjectKeys(userId: string, eventId: string): string[] {
-  return [
-    committedResultPrimaryObjectKey(userId, eventId),
-    committedResultLegacyObjectKey(userId, eventId),
-  ];
 }
 
 function normalizeHostedExecutionCommittedResult(

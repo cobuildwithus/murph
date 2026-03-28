@@ -45,8 +45,17 @@ describe("readHostedExecutionEnvironment", () => {
     expect(() =>
       readHostedExecutionEnvironment({
         [REMOVED_BUNDLE_KEY_ALIAS]: Buffer.alloc(32, 9).toString("base64"),
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       } as Record<string, string>),
     ).toThrow(/HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY/u);
+  });
+
+  it("does not accept the removed Cloudflare signing-secret alias", () => {
+    expect(() =>
+      readHostedExecutionEnvironment({
+        HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
+      } as Record<string, string>),
+    ).toThrow(/HOSTED_EXECUTION_SIGNING_SECRET/u);
   });
 });

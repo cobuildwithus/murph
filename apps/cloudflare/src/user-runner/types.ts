@@ -72,35 +72,6 @@ export interface RunnerStateRecord {
   userId: string;
 }
 
-export interface LegacyPendingDispatchRecord {
-  attempts: number;
-  availableAt: string;
-  dispatch: HostedExecutionDispatchRequest;
-  enqueuedAt: string;
-  lastError: string | null;
-}
-
-export interface LegacyUserRunnerRecord {
-  activated: boolean;
-  backpressuredEventIds: string[];
-  bundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
-  consumedEventExpirations: Record<string, string>;
-  inFlight: boolean;
-  lastError: string | null;
-  lastEventId: string | null;
-  lastRunAt: string | null;
-  nextWakeAt: string | null;
-  pendingEvents: LegacyPendingDispatchRecord[];
-  poisonedEventIds: string[];
-  recentEventIds: string[];
-  retryingEventId: string | null;
-  userId: string;
-}
-
-export const LEGACY_STATE_STORAGE_KEY = "state";
 export const CONSUMED_EVENT_TTL_MS = 7 * 24 * 60 * 60_000;
 export const MAX_BACKPRESSURED_EVENT_IDS = 16;
 export const MAX_PENDING_EVENTS = 64;

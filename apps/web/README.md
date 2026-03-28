@@ -81,12 +81,6 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_CONTROL_TOKEN` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
 - `CRON_SECRET` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
 
-Cloudflare compatibility aliases still work:
-
-- `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
-- `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
-- `HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS`
-
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
 Development fallback only:

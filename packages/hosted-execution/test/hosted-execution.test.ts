@@ -101,12 +101,9 @@ describe("@murph/hosted-execution", () => {
     ).resolves.toBe(false);
   });
 
-  it("prefers generic hosted dispatch env names but falls back to Cloudflare compatibility aliases", () => {
+  it("reads hosted dispatch env from the canonical names", () => {
     expect(
       readHostedExecutionDispatchEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "compat-secret",
-        HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "45000",
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
         HOSTED_EXECUTION_SIGNING_SECRET: "secret",
         HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "15000",
@@ -116,27 +113,11 @@ describe("@murph/hosted-execution", () => {
       dispatchUrl: "https://dispatch.example.test",
       signingSecret: "secret",
     });
-
-    expect(
-      readHostedExecutionDispatchEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "compat-secret",
-        HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "45000",
-        HOSTED_EXECUTION_DISPATCH_URL: "   ",
-        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
-        HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "   ",
-      }),
-    ).toEqual({
-      dispatchTimeoutMs: 45_000,
-      dispatchUrl: "https://compat.example.test",
-      signingSecret: "compat-secret",
-    });
   });
 
   it("reads hosted control env from the shared dispatch base and control token", () => {
     expect(
       readHostedExecutionControlEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
@@ -147,22 +128,21 @@ describe("@murph/hosted-execution", () => {
 
     expect(
       readHostedExecutionControlEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
         HOSTED_EXECUTION_DISPATCH_URL: "   ",
         HOSTED_EXECUTION_CONTROL_TOKEN: "   ",
       }),
     ).toEqual({
-      baseUrl: "https://compat.example.test",
+      baseUrl: null,
       controlToken: null,
     });
   });
 
-  it("reads hosted worker env defaults and legacy signing-secret alias", () => {
+  it("reads hosted worker env defaults from the canonical signing-secret name", () => {
     expect(
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
         HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       }),
     ).toEqual({
       allowedUserEnvKeys: "OPENAI_API_KEY",
@@ -260,14 +240,13 @@ describe("@murph/hosted-execution", () => {
     });
   });
 
-  it("falls back to the legacy worker signing-secret alias when the preferred value is blank", () => {
-    expect(
+  it("does not accept the removed Cloudflare signing-secret alias", () => {
+    expect(() =>
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
-        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
-      }).dispatchSigningSecret,
-    ).toBe("dispatch-secret");
+      } as Record<string, string>),
+    ).toThrow(/HOSTED_EXECUTION_SIGNING_SECRET/u);
   });
 
   it("builds stable encoded user control paths", () => {

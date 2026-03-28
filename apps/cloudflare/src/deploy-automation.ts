@@ -49,21 +49,6 @@ const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
   "INSTALL_PADDLEOCR",
 ] as const;
 
-const HOSTED_WORKER_VAR_ALIASES = {
-  AGENTMAIL_BASE_URL: [
-    "AGENTMAIL_BASE_URL",
-    "AGENTMAIL_API_BASE_URL",
-  ],
-  FFMPEG_COMMAND: [
-    "FFMPEG_COMMAND",
-    "PARSER_FFMPEG_PATH",
-  ],
-  HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: [
-    "CF_CONTAINER_SLEEP_AFTER",
-    "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
-  ],
-} as const;
-
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_CONTAINER_INSTANCE_TYPE = "basic";
 const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
@@ -301,12 +286,7 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
   const normalized: Record<string, string | undefined> = {};
 
   for (const key of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
-    const aliasKeys = HOSTED_WORKER_VAR_ALIASES[key as keyof typeof HOSTED_WORKER_VAR_ALIASES];
-    const resolved = aliasKeys
-      ? aliasKeys
-          .map((aliasKey) => normalizeString(source[aliasKey]))
-          .find((value): value is string => value !== null)
-      : normalizeString(source[key]);
+    const resolved = normalizeString(source[key]);
     normalized[key] = resolved
       ?? (key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER" ? DEFAULT_CONTAINER_SLEEP_AFTER : undefined);
   }

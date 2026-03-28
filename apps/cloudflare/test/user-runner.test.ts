@@ -104,50 +104,6 @@ describe("HostedUserRunner", () => {
     );
   });
 
-  it("normalizes legacy committed execution journal records missing finalizedAt", async () => {
-    const journalStore = createHostedExecutionJournalStore({
-      bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
-    });
-    const envelope = await encryptHostedBundle({
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
-      plaintext: new TextEncoder().encode(JSON.stringify({
-        bundleRefs: {
-          agentState: null,
-          vault: null,
-        },
-        committedAt: "2026-03-27T00:00:00.000Z",
-        eventId: "evt_legacy",
-        result: {
-          eventsHandled: 1,
-          summary: "legacy",
-        },
-      })),
-    });
-
-    await bucket.api.put(
-      "users/member_123/execution-journal/evt_legacy.json",
-      JSON.stringify(envelope),
-    );
-
-    await expect(journalStore.readCommittedResult("member_123", "evt_legacy")).resolves.toEqual({
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      committedAt: "2026-03-27T00:00:00.000Z",
-      eventId: "evt_legacy",
-      finalizedAt: null,
-      result: {
-        eventsHandled: 1,
-        summary: "legacy",
-      },
-      sideEffects: [],
-    });
-  });
-
   it("dispatches work through the runner endpoint and persists encrypted bundles", async () => {
     const resultPayload = {
       bundles: {
@@ -278,21 +234,12 @@ describe("HostedUserRunner", () => {
         });
       }),
     );
-    await storage.state.storage.put("state", {
+    seedRunnerQueueState(storage, {
       activated: true,
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
       lastError: null,
       lastEventId: "evt_seed_wake",
       lastRunAt: "2026-03-26T11:59:00.000Z",
       nextWakeAt: "2026-03-26T12:00:05.000Z",
-      pendingEvents: [],
-      poisonedEventIds: [],
-      recentEventIds: [],
-      retryingEventId: null,
       userId: "member_123",
     });
     const runner = new HostedUserRunner(storage.state, environment, bucket.api);
@@ -698,41 +645,6 @@ describe("HostedUserRunner", () => {
     expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
     expect(final.retryingEventId).toBeNull();
     expect(final.lastError).toContain("HTTP 503");
-  });
-
-  it("normalizes legacy durable-object state that predates replay and backpressure tracking", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url, init) => createCommittedRunnerSuccessResponse({
-        bucket,
-        environment,
-        init,
-      })),
-    );
-    await storage.state.storage.put("state", {
-      activated: false,
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
-      lastError: null,
-      lastEventId: null,
-      lastRunAt: null,
-      nextWakeAt: null,
-      pendingEvents: [],
-      poisonedEventIds: [],
-      recentEventIds: [],
-      retryingEventId: null,
-      userId: "member_123",
-    });
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-
-    await expect(runner.dispatch(createDispatch("evt_legacy"))).resolves.toMatchObject({
-      backpressuredEventIds: [],
-      lastEventId: "evt_legacy",
-      pendingEventCount: 0,
-    });
   });
 
   it("backpressures new overflow events instead of evicting the oldest pending work", async () => {
@@ -1145,17 +1057,10 @@ describe("HostedUserRunner", () => {
       eventId: "evt_ack_lost",
       occurredAt: "2026-03-26T12:20:00.000Z",
     };
-    await storage.state.storage.put("state", {
+    seedRunnerQueueState(storage, {
       activated: false,
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
       lastError: "timeout",
       lastEventId: dispatch.eventId,
-      lastRunAt: null,
-      nextWakeAt: null,
       pendingEvents: [
         {
           attempts: 1,
@@ -1165,8 +1070,6 @@ describe("HostedUserRunner", () => {
           lastError: "timeout",
         },
       ],
-      poisonedEventIds: [],
-      recentEventIds: [],
       retryingEventId: dispatch.eventId,
       userId: dispatch.event.userId,
     });
@@ -1261,65 +1164,6 @@ describe("HostedUserRunner", () => {
     );
   });
 
-  it("treats a committed journal entry as authoritative even after recent-event cache rollover", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-    const dispatch = {
-      event: {
-        kind: "assistant.cron.tick" as const,
-        reason: "manual" as const,
-        userId: "member_123",
-      },
-      eventId: "evt_committed_only",
-      occurredAt: "2026-03-26T12:25:00.000Z",
-    };
-    await storage.state.storage.put("state", {
-      activated: false,
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
-      lastError: null,
-      lastEventId: "older_event",
-      lastRunAt: "2026-03-26T12:24:00.000Z",
-      nextWakeAt: null,
-      pendingEvents: [],
-      poisonedEventIds: [],
-      recentEventIds: Array.from({ length: 64 }, (_, index) => `older_event_${index}`),
-      retryingEventId: null,
-      userId: dispatch.event.userId,
-    });
-    await persistHostedExecutionCommit({
-      bucket: bucket.api,
-      currentBundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      eventId: dispatch.eventId,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
-      payload: {
-        bundles: {
-          agentState: Buffer.from("agent-state").toString("base64"),
-          vault: Buffer.from("vault").toString("base64"),
-        },
-        result: {
-          eventsHandled: 1,
-          summary: "ok",
-        },
-      },
-      userId: dispatch.event.userId,
-    });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const status = await runner.dispatch(dispatch);
-
-    expect(status.pendingEventCount).toBe(0);
-    expect(status.lastError).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("keeps replay suppression after a durable-object restart", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
@@ -1392,68 +1236,6 @@ describe("HostedUserRunner", () => {
     });
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
-
-  it("backfills legacy replay state once without refreshing the stored expiry on later reads", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
-    await storage.state.storage.put("state", {
-      activated: false,
-      bundleRefs: {
-        agentState: null,
-        vault: null,
-      },
-      inFlight: false,
-      lastError: null,
-      lastEventId: "evt_legacy",
-      lastRunAt: null,
-      nextWakeAt: null,
-      pendingEvents: [],
-      poisonedEventIds: ["evt_poisoned_legacy"],
-      recentEventIds: ["evt_legacy"],
-      retryingEventId: null,
-      userId: "member_123",
-    });
-    const fetchSpy = vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
-      bucket,
-      environment,
-      init,
-    }));
-    vi.stubGlobal("fetch", fetchSpy);
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
-
-    await runner.status("member_123");
-    const firstExpiry = (
-      storage.state.storage.sql?.exec<{ expires_at: string | null }>(
-        "SELECT expires_at FROM consumed_events WHERE event_id = ?",
-        "evt_legacy",
-      ).toArray()[0]?.expires_at ?? null
-    );
-
-    expect(firstExpiry).not.toBeNull();
-
-    vi.setSystemTime(new Date("2026-03-26T12:10:00.000Z"));
-    await runner.status("member_123");
-    const rereadExpiry = (
-      storage.state.storage.sql?.exec<{ expires_at: string | null }>(
-        "SELECT expires_at FROM consumed_events WHERE event_id = ?",
-        "evt_legacy",
-      ).toArray()[0]?.expires_at ?? null
-    );
-
-    expect(rereadExpiry).toBe(firstExpiry);
-
-    await runner.dispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_123",
-      },
-      eventId: "evt_legacy",
-      occurredAt: "2026-03-26T12:10:00.000Z",
-    });
-
-    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("clears stale poisoned status after TTL expiry and a successful replay", async () => {
@@ -1768,6 +1550,112 @@ function createStorage() {
   };
 
   return storage;
+}
+
+function seedRunnerQueueState(
+  storage: ReturnType<typeof createStorage>,
+  input: {
+    activated?: boolean;
+    backpressuredEventIds?: string[];
+    inFlight?: boolean;
+    lastError?: string | null;
+    lastEventId?: string | null;
+    lastRunAt?: string | null;
+    nextWakeAt?: string | null;
+    pendingEvents?: Array<{
+      attempts: number;
+      availableAt: string;
+      dispatch: {
+        event: Record<string, unknown>;
+        eventId: string;
+        occurredAt: string;
+      };
+      enqueuedAt: string;
+      lastError: string | null;
+    }>;
+    poisonedEvents?: Array<{
+      eventId: string;
+      lastError: string;
+      poisonedAt: string;
+    }>;
+    retryingEventId?: string | null;
+    userId: string;
+  },
+): void {
+  const sql = storage.state.storage.sql;
+  if (!sql) {
+    throw new Error("Test storage.sql is required.");
+  }
+
+  sql.exec("DELETE FROM pending_events");
+  sql.exec("DELETE FROM consumed_events");
+  sql.exec("DELETE FROM poisoned_events");
+  sql.exec("DELETE FROM runner_meta");
+
+  sql.exec(
+    `INSERT INTO runner_meta (
+      singleton,
+      user_id,
+      activated,
+      in_flight,
+      last_error,
+      last_event_id,
+      last_run_at,
+      next_wake_at,
+      retrying_event_id,
+      backpressured_event_ids_json,
+      agent_state_bundle_ref_json,
+      vault_bundle_ref_json,
+      agent_state_bundle_version,
+      vault_bundle_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    1,
+    input.userId,
+    input.activated ? 1 : 0,
+    input.inFlight ? 1 : 0,
+    input.lastError ?? null,
+    input.lastEventId ?? null,
+    input.lastRunAt ?? null,
+    input.nextWakeAt ?? null,
+    input.retryingEventId ?? null,
+    JSON.stringify(input.backpressuredEventIds ?? []),
+    null,
+    null,
+    0,
+    0,
+  );
+
+  for (const pendingEvent of input.pendingEvents ?? []) {
+    sql.exec(
+      `INSERT INTO pending_events (
+        event_id,
+        dispatch_json,
+        attempts,
+        available_at,
+        enqueued_at,
+        last_error
+      ) VALUES (?, ?, ?, ?, ?, ?)`,
+      pendingEvent.dispatch.eventId,
+      JSON.stringify(pendingEvent.dispatch),
+      pendingEvent.attempts,
+      pendingEvent.availableAt,
+      pendingEvent.enqueuedAt,
+      pendingEvent.lastError,
+    );
+  }
+
+  for (const poisonedEvent of input.poisonedEvents ?? []) {
+    sql.exec(
+      `INSERT INTO poisoned_events (
+        event_id,
+        poisoned_at,
+        last_error
+      ) VALUES (?, ?, ?)`,
+      poisonedEvent.eventId,
+      poisonedEvent.poisonedAt,
+      poisonedEvent.lastError,
+    );
+  }
 }
 
 function countRunnerContainerCalls(
