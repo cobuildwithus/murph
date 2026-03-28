@@ -1118,6 +1118,113 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("imports a hosted share through the worker proxy without exposing a runner share token", async () => {
+    const previousHostedExecutionInternalToken = process.env.HOSTED_EXECUTION_INTERNAL_TOKEN;
+    const previousHostedShareInternalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN;
+    process.env.HOSTED_EXECUTION_INTERNAL_TOKEN = "worker-control-token";
+    delete process.env.HOSTED_SHARE_INTERNAL_TOKEN;
+
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-source-"));
+    cleanupPaths.push(sourceVaultRoot);
+    await initializeVault({ vaultRoot: sourceVaultRoot });
+
+    const supplement = await upsertProtocolItem({
+      vaultRoot: sourceVaultRoot,
+      title: "Magnesium glycinate",
+      kind: "supplement",
+      group: "supplement",
+      startedOn: "2026-03-01",
+    });
+    const food = await upsertFood({
+      vaultRoot: sourceVaultRoot,
+      title: "Proxy Smoothie",
+      kind: "smoothie",
+      attachedProtocolIds: [supplement.record.protocolId],
+      autoLogDaily: {
+        time: "08:00",
+      },
+    });
+    const pack = await buildSharePackFromVault({
+      vaultRoot: sourceVaultRoot,
+      foods: [{ id: food.record.foodId }],
+      includeAttachedProtocols: true,
+      logMeal: {
+        food: { id: food.record.foodId },
+      },
+    });
+    const fetchSpy = vi.fn(async (url: string | URL) => {
+      if (String(url) !== "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload?shareCode=share_code_proxy") {
+        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      }
+
+      return new Response(JSON.stringify({
+        pack,
+        shareId: "share_proxy_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    try {
+      const activation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_proxy",
+          },
+          eventId: "evt_activation_share_proxy",
+          occurredAt: "2026-03-26T12:25:00.000Z",
+        },
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            kind: "vault.share.accepted",
+            share: {
+              shareCode: "share_code_proxy",
+              shareId: "share_proxy_123",
+            },
+            userId: "member_proxy",
+          },
+          eventId: "evt_share_proxy_123",
+          occurredAt: "2026-03-26T12:30:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Proxy Smoothie");
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload?shareCode=share_code_proxy",
+        expect.objectContaining({
+          headers: {},
+          method: "GET",
+        }),
+      );
+      expect(importedFood).toBeDefined();
+      expect(importedFood?.attachedProtocolIds?.length).toBe(1);
+      expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKEN", previousHostedExecutionInternalToken);
+      restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKEN", previousHostedShareInternalToken);
+    }
+  });
+
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {
     const result = await runHostedExecutionJob({
       bundles: {

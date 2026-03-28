@@ -1,5 +1,6 @@
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { createHostedExecutionJournalStore, type HostedExecutionJournalStore } from "../execution-journal.js";
+import { HostedBundleGarbageCollector } from "../bundle-gc.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
 import { RunnerScheduler } from "./runner-scheduler.js";
 import type { RunnerStateRecord } from "./types.js";
@@ -14,6 +15,7 @@ export class RunnerCommitRecovery {
     private readonly queueStore: RunnerQueueStore,
     private readonly scheduler: RunnerScheduler,
     private readonly journalStore: HostedExecutionJournalStore,
+    private readonly garbageCollector: HostedBundleGarbageCollector,
   ) {}
 
   async readCommittedDispatch(
@@ -67,7 +69,13 @@ export class RunnerCommitRecovery {
     userId: string,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
+    const previousBundleRefs = (await this.queueStore.readBundleState()).bundleRefs;
     await this.queueStore.applyCommittedDispatch(committed);
+    await this.cleanupBundleTransitionBestEffort({
+      nextBundleRefs: committed.bundleRefs,
+      previousBundleRefs,
+      userId,
+    });
     return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
   }
 
@@ -75,7 +83,13 @@ export class RunnerCommitRecovery {
     userId: string,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
+    const previousBundleRefs = (await this.queueStore.readBundleState()).bundleRefs;
     await this.queueStore.syncCommittedBundles(committed);
+    await this.cleanupBundleTransitionBestEffort({
+      nextBundleRefs: committed.bundleRefs,
+      previousBundleRefs,
+      userId,
+    });
     return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
   }
 
@@ -96,6 +110,18 @@ export class RunnerCommitRecovery {
       input.committed.result.nextWakeAt ?? null,
     );
   }
+
+  private async cleanupBundleTransitionBestEffort(input: {
+    nextBundleRefs: HostedExecutionCommittedResult["bundleRefs"];
+    previousBundleRefs: HostedExecutionCommittedResult["bundleRefs"];
+    userId: string;
+  }): Promise<void> {
+    try {
+      await this.garbageCollector.cleanupBundleTransition(input);
+    } catch {
+      // Best-effort cleanup only; do not fail committed-result recovery.
+    }
+  }
 }
 
 export function createRunnerCommitRecovery(input: {
@@ -113,6 +139,11 @@ export function createRunnerCommitRecovery(input: {
       key: input.bundleEncryptionKey,
       keyId: input.bundleEncryptionKeyId,
     }),
+    new HostedBundleGarbageCollector(
+      input.bucket,
+      input.bundleEncryptionKey,
+      input.bundleEncryptionKeyId,
+    ),
   );
 }
 

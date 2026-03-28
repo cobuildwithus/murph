@@ -14,6 +14,7 @@ import {
   createHostedUserEnvStore,
   type R2BucketLike,
 } from "../bundle-store.js";
+import { HostedBundleGarbageCollector } from "../bundle-gc.js";
 import {
   applyHostedUserEnvUpdate,
   decodeHostedUserEnvPayload,
@@ -31,13 +32,21 @@ import {
 const BUNDLE_SWAP_RETRY_LIMIT = 4;
 
 export class RunnerBundleSync {
+  private readonly garbageCollector: HostedBundleGarbageCollector;
+
   constructor(
     private readonly bucket: R2BucketLike,
     private readonly bundleEncryptionKey: Uint8Array,
     private readonly bundleEncryptionKeyId: string,
     private readonly queueStore: RunnerQueueStore,
     private readonly userEnvSource: Readonly<Record<string, string | undefined>>,
-  ) {}
+  ) {
+    this.garbageCollector = new HostedBundleGarbageCollector(
+      bucket,
+      bundleEncryptionKey,
+      bundleEncryptionKeyId,
+    );
+  }
 
   async readBundlesForRunner(userId: string): Promise<HostedExecutionRunnerResult["bundles"]> {
     const store = this.createBundleStore();
@@ -121,6 +130,11 @@ export class RunnerBundleSync {
       });
 
       if (swapped.applied) {
+        await this.cleanupBundleTransitionBestEffort({
+          nextBundleRefs,
+          previousBundleRefs: bundleState.bundleRefs,
+          userId,
+        });
         return swapped.record;
       }
 
@@ -193,5 +207,23 @@ export class RunnerBundleSync {
       ...ref,
       size: ref.size ?? plaintext.byteLength,
     };
+  }
+
+  private async cleanupBundleTransitionBestEffort(input: {
+    nextBundleRefs: {
+      agentState: HostedExecutionBundleRef | null;
+      vault: HostedExecutionBundleRef | null;
+    };
+    previousBundleRefs: {
+      agentState: HostedExecutionBundleRef | null;
+      vault: HostedExecutionBundleRef | null;
+    };
+    userId: string;
+  }): Promise<void> {
+    try {
+      await this.garbageCollector.cleanupBundleTransition(input);
+    } catch {
+      // Best-effort cleanup only; do not fail successful bundle swaps.
+    }
   }
 }

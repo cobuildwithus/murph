@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   decodeHostedBundleBase64,
+  materializeHostedExecutionArtifacts,
   restoreHostedExecutionContext,
 } from "@murph/runtime-state";
 import type {
@@ -13,7 +14,6 @@ import type {
 
 import {
   commitHostedExecutionResult,
-  readHostedRunnerCommitTimeoutMs,
   resumeHostedCommittedExecution,
 } from "./hosted-runtime/callbacks.ts";
 import { createHostedArtifactResolver } from "./hosted-runtime/artifacts.ts";
@@ -60,12 +60,15 @@ export async function runHostedAssistantRuntimeJobInProcess(
 
   try {
     const incomingVaultBundle = decodeHostedBundleBase64(input.request.bundles.vault);
+    const artifactResolver = createHostedArtifactResolver({
+      baseUrl: runtime.artifactsBaseUrl,
+      timeoutMs: runtime.commitTimeoutMs,
+    });
+    const materializedArtifactPaths = new Set<string>();
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: decodeHostedBundleBase64(input.request.bundles.agentState),
-      artifactResolver: createHostedArtifactResolver({
-        baseUrl: runtime.artifactsBaseUrl,
-        timeoutMs: runtime.commitTimeoutMs,
-      }),
+      artifactResolver,
+      shouldRestoreArtifact: () => false,
       vaultBundle: incomingVaultBundle,
       workspaceRoot,
     });
@@ -85,6 +88,28 @@ export async function runHostedAssistantRuntimeJobInProcess(
         const committedExecution = input.request.resume?.committedResult
           ? resumeHostedCommittedExecution(input.request)
           : await executeHostedDispatchForCommit({
+              artifactMaterializer: incomingVaultBundle
+                ? async (relativePaths) => {
+                    const pendingPaths = [...new Set(relativePaths)]
+                      .filter((relativePath) => !materializedArtifactPaths.has(relativePath));
+                    if (pendingPaths.length === 0) {
+                      return;
+                    }
+
+                    await materializeHostedExecutionArtifacts({
+                      artifactResolver,
+                      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+                        root === "vault" && pendingPaths.includes(artifactPath)
+                      ),
+                      vaultBundle: incomingVaultBundle,
+                      workspaceRoot,
+                    });
+                    for (const relativePath of pendingPaths) {
+                      materializedArtifactPaths.add(relativePath);
+                    }
+                  }
+                : null,
+              materializedArtifactPaths,
               request: input.request,
               restored,
               runtime,
@@ -104,6 +129,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
         return await completeHostedExecutionAfterCommit({
           commit: input.request.commit ?? null,
           dispatch: input.request.dispatch,
+          materializedArtifactPaths,
           runtime,
           restored,
           committedExecution,

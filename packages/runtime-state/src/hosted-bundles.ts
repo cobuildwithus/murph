@@ -2,14 +2,16 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
-import { resolveAssistantStatePaths } from "./assistant-state.ts";
+import { resolveAssistantStatePaths } from "./assistant-state.js";
 import {
+  materializeHostedBundleArtifacts,
   restoreHostedBundleRoots,
   snapshotHostedBundleRoots,
   type HostedBundleArtifactRef,
+  type HostedBundleArtifactRestoreFilter,
   type HostedBundleArtifactRestoreInput,
   type HostedBundleArtifactSnapshotInput,
-} from "./hosted-bundle.ts";
+} from "./hosted-bundle.js";
 
 const WORKSPACE_ASSISTANT_ROOT = "assistant-state";
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
@@ -27,6 +29,7 @@ export type HostedWorkspaceArtifactResolver = (
 export async function snapshotHostedExecutionContext(input: {
   artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
   operatorHomeRoot?: string | null;
+  preservedArtifacts?: readonly HostedBundleArtifactRestoreInput[];
   vaultRoot: string;
 }): Promise<{
   agentStateBundle: null;
@@ -54,6 +57,7 @@ export async function snapshotHostedExecutionContext(input: {
         })()
       : undefined,
     kind: "vault",
+    preservedArtifacts: input.preservedArtifacts,
     roots: [
       {
         root: vaultRoot,
@@ -95,6 +99,7 @@ export async function snapshotHostedExecutionContext(input: {
 export async function restoreHostedExecutionContext(input: {
   agentStateBundle?: Uint8Array | ArrayBuffer | null;
   artifactResolver?: HostedWorkspaceArtifactResolver;
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
   vaultBundle?: Uint8Array | ArrayBuffer | null;
   workspaceRoot: string;
 }): Promise<{
@@ -121,6 +126,7 @@ export async function restoreHostedExecutionContext(input: {
         [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
         vault: vaultRoot,
       },
+      shouldRestoreArtifact: input.shouldRestoreArtifact,
     });
   }
 
@@ -141,6 +147,38 @@ export async function restoreHostedExecutionContext(input: {
     operatorHomeRoot,
     vaultRoot,
   };
+}
+
+export async function materializeHostedExecutionArtifacts(input: {
+  artifactResolver: HostedWorkspaceArtifactResolver;
+  vaultBundle?: Uint8Array | ArrayBuffer | null;
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+  workspaceRoot: string;
+}): Promise<void> {
+  if (!input.vaultBundle) {
+    return;
+  }
+
+  const workspaceRoot = path.resolve(input.workspaceRoot);
+  const vaultRoot = path.join(workspaceRoot, "vault");
+  const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const operatorHomeRoot = path.join(workspaceRoot, "home");
+
+  await mkdir(vaultRoot, { recursive: true });
+  await mkdir(assistantStateRoot, { recursive: true });
+  await mkdir(operatorHomeRoot, { recursive: true });
+
+  await materializeHostedBundleArtifacts({
+    artifactResolver: input.artifactResolver,
+    bytes: input.vaultBundle,
+    expectedKind: "vault",
+    roots: {
+      [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
+      [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
+      vault: vaultRoot,
+    },
+    shouldRestoreArtifact: input.shouldRestoreArtifact,
+  });
 }
 
 function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {

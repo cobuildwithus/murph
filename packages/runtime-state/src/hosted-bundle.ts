@@ -36,6 +36,10 @@ export interface HostedBundleArtifactSnapshotInput {
 
 export interface HostedBundleArtifactRestoreInput extends HostedBundleArtifactLocation {}
 
+export type HostedBundleArtifactRestoreFilter = (
+  input: HostedBundleArtifactRestoreInput,
+) => boolean | Promise<boolean>;
+
 interface HostedBundleArchiveInlineFile {
   contentsBase64: string;
   path: string;
@@ -70,6 +74,7 @@ export interface HostedBundleRestoreRootMap {
 export async function snapshotHostedBundleRoots(input: {
   externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
+  preservedArtifacts?: readonly HostedBundleArtifactLocation[];
   roots: readonly HostedBundleSnapshotRootInput[];
 }): Promise<Uint8Array | null> {
   const files: HostedBundleArchiveFile[] = [];
@@ -99,6 +104,21 @@ export async function snapshotHostedBundleRoots(input: {
     return null;
   }
 
+  const includedPaths = new Set(files.map((file) => `${file.root}:${file.path}`));
+  for (const artifact of input.preservedArtifacts ?? []) {
+    const preservedPathKey = `${artifact.root}:${normalizeBundlePath(artifact.path)}`;
+    if (includedPaths.has(preservedPathKey)) {
+      continue;
+    }
+
+    files.push({
+      artifact: artifact.ref,
+      path: normalizeBundlePath(artifact.path),
+      root: artifact.root,
+    });
+    includedPaths.add(preservedPathKey);
+  }
+
   return serializeHostedBundleArchive({
     files,
     kind: input.kind,
@@ -112,6 +132,62 @@ export async function restoreHostedBundleRoots(input: {
   expectedKind: HostedExecutionBundleKind;
   ignoredRoots?: readonly string[];
   roots: HostedBundleRestoreRootMap;
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+}): Promise<void> {
+  await restoreHostedBundleArchiveFiles({
+    ...input,
+    includeInlineFiles: true,
+  });
+}
+
+export async function materializeHostedBundleArtifacts(input: {
+  artifactResolver: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
+  bytes: Uint8Array | ArrayBuffer;
+  expectedKind: HostedExecutionBundleKind;
+  ignoredRoots?: readonly string[];
+  roots: HostedBundleRestoreRootMap;
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+}): Promise<void> {
+  await restoreHostedBundleArchiveFiles({
+    ...input,
+    includeInlineFiles: false,
+  });
+}
+
+export function hasHostedBundleArtifactPath(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  expectedKind: HostedExecutionBundleKind;
+  path: string;
+  root: string;
+}): boolean {
+  if (!input.bytes) {
+    return false;
+  }
+
+  const archive = parseHostedBundleArchive(input.bytes);
+
+  if (archive.kind !== input.expectedKind) {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected ${input.expectedKind}, got ${archive.kind}.`,
+    );
+  }
+
+  const normalizedPath = normalizeBundlePath(input.path);
+  return archive.files.some((entry) => (
+    isHostedBundleArtifactEntry(entry)
+    && entry.root === input.root
+    && entry.path === normalizedPath
+  ));
+}
+
+async function restoreHostedBundleArchiveFiles(input: {
+  artifactResolver?: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
+  bytes: Uint8Array | ArrayBuffer;
+  expectedKind: HostedExecutionBundleKind;
+  ignoredRoots?: readonly string[];
+  roots: HostedBundleRestoreRootMap;
+  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
+  includeInlineFiles: boolean;
 }): Promise<void> {
   const archive = parseHostedBundleArchive(input.bytes);
   const ignoredRoots = new Set(input.ignoredRoots ?? []);
@@ -133,16 +209,31 @@ export async function restoreHostedBundleRoots(input: {
       throw new Error(`Hosted bundle root "${file.root}" is not mapped for restore.`);
     }
 
+    if (!isHostedBundleArtifactEntry(file) && !input.includeInlineFiles) {
+      continue;
+    }
+
     const absolutePath = resolveHostedBundleRestorePath(root, file.path);
-    await mkdir(path.dirname(absolutePath), { recursive: true });
 
     if (isHostedBundleArtifactEntry(file)) {
+      const shouldRestore = input.shouldRestoreArtifact
+        ? await input.shouldRestoreArtifact({
+            path: file.path,
+            ref: file.artifact,
+            root: file.root,
+          })
+        : true;
+      if (!shouldRestore) {
+        continue;
+      }
+
       if (!input.artifactResolver) {
         throw new Error(
           `Hosted bundle artifact ${file.root}:${file.path} requires an artifact resolver.`,
         );
       }
 
+      await mkdir(path.dirname(absolutePath), { recursive: true });
       const resolved = await input.artifactResolver({
         path: file.path,
         ref: file.artifact,
@@ -162,6 +253,7 @@ export async function restoreHostedBundleRoots(input: {
       continue;
     }
 
+    await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
   }
 }

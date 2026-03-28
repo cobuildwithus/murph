@@ -9,7 +9,9 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   HOSTED_BUNDLE_SCHEMA,
+  hasHostedBundleArtifactPath,
   listHostedBundleArtifacts,
+  materializeHostedExecutionArtifacts,
   readHostedBundleTextFile,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
@@ -230,6 +232,88 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "stdout.log"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution can defer artifact materialization until a targeted restore request", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-lazy-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-lazy-restore-"));
+  const artifacts = new Map<string, Uint8Array>();
+  const resolvedHashes: string[] = [];
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "inbox", "example", "scan.pdf");
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    assert.equal(
+      hasHostedBundleArtifactPath({
+        bytes: snapshot.vaultBundle,
+        expectedKind: "vault",
+        path: "raw/inbox/example/scan.pdf",
+        root: "vault",
+      }),
+      true,
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        resolvedHashes.push(ref.sha256);
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error(`Missing artifact ${ref.sha256}.`);
+        }
+
+        return bytes;
+      },
+      shouldRestoreArtifact: () => false,
+      vaultBundle: snapshot.vaultBundle,
+      workspaceRoot: restoreRoot,
+    });
+
+    await assert.rejects(
+      readFile(path.join(restored.vaultRoot, "raw", "inbox", "example", "scan.pdf")),
+    );
+    assert.deepEqual(resolvedHashes, []);
+
+    await materializeHostedExecutionArtifacts({
+      artifactResolver: async ({ ref }) => {
+        resolvedHashes.push(ref.sha256);
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error(`Missing artifact ${ref.sha256}.`);
+        }
+
+        return bytes;
+      },
+      shouldRestoreArtifact: ({ path: artifactPath, root }) => (
+        root === "vault" && artifactPath === "raw/inbox/example/scan.pdf"
+      ),
+      vaultBundle: snapshot.vaultBundle,
+      workspaceRoot: restoreRoot,
+    });
+
+    await expect(
+      readFile(path.join(restored.vaultRoot, "raw", "inbox", "example", "scan.pdf")),
+    ).resolves.toEqual(Buffer.from("pdf-binary-artifact\n", "utf8"));
+    assert.equal(resolvedHashes.length, 1);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });

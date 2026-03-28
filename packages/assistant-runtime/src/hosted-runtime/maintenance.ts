@@ -246,7 +246,7 @@ export async function runHostedDeviceSyncPass(
     }
 
     return {
-      nextWakeAt: service.getNextWakeAt(dispatch.occurredAt),
+      nextWakeAt: service.getNextWakeAt(),
       processedJobs,
       skipped: false,
     };

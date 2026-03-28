@@ -18,6 +18,7 @@ export interface HostedBundleStore {
 }
 
 export interface HostedArtifactStore {
+  deleteArtifact(sha256: string): Promise<void>;
   readArtifact(sha256: string): Promise<Uint8Array | null>;
   writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
 }
@@ -42,6 +43,7 @@ export function createHostedBundleStore(input: {
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
+        expectedKeyId: input.keyId,
         key: ref.key,
       });
     },
@@ -74,10 +76,15 @@ export function createHostedArtifactStore(input: {
   userId: string;
 }): HostedArtifactStore {
   return {
+    async deleteArtifact(sha256) {
+      await input.bucket.delete?.(artifactObjectKey(input.userId, sha256));
+    },
+
     async readArtifact(sha256) {
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
+        expectedKeyId: input.keyId,
         key: artifactObjectKey(input.userId, sha256),
       });
     },
@@ -113,6 +120,7 @@ export function createHostedUserEnvStore(input: {
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
+        expectedKeyId: input.keyId,
         key: userEnvObjectKey(userId),
       });
     },
@@ -129,11 +137,11 @@ export function createHostedUserEnvStore(input: {
   };
 }
 
-function bundleObjectKey(kind: HostedExecutionBundleKind, hash: string): string {
+export function bundleObjectKey(kind: HostedExecutionBundleKind, hash: string): string {
   return `bundles/${kind}/${hash}.bundle.json`;
 }
 
-function artifactObjectKey(userId: string, sha256: string): string {
+export function artifactObjectKey(userId: string, sha256: string): string {
   return `users/${encodeURIComponent(userId)}/artifacts/${sha256}.artifact.bin`;
 }
 
