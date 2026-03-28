@@ -79,6 +79,7 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
 - `HOSTED_EXECUTION_CONTROL_TOKEN` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
+- `CRON_SECRET` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
 
 Cloudflare compatibility aliases still work:
 
@@ -133,6 +134,7 @@ pnpm --dir apps/web prisma:migrate:deploy
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
 - `pnpm --dir apps/web test` now includes a cold-boot `next dev` smoke that boots under `apps/web/.next-smoke`, waits for the hosted app to boot, and then repeats `GET /`, `HEAD /`, and `GET /` before the production build step so smoke never deletes the interactive `apps/web/.next-dev` cache.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
+- Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`. Production deployments need `CRON_SECRET` set so Vercel's cron `Authorization: Bearer ...` header can authenticate that route.
 
 ## Main routes
 
