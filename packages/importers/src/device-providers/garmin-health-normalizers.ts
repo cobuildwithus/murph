@@ -8,6 +8,7 @@ import {
   asObjectArray,
   firstDayKeyFromPaths,
   firstIdentifierFromPaths,
+  firstInstantFromPaths,
   firstIsoFromPaths,
   firstNumberFromPaths,
   firstStringFromPaths,
@@ -19,6 +20,7 @@ import {
   normalizePositiveIntegerMinutes,
   pushGarminArtifact,
   secondsToMinutes,
+  synthesizeUtcStartOfDay,
 } from "./garmin-helpers.ts";
 
 import type {
@@ -46,6 +48,52 @@ interface GarminObservationSpec {
 interface GarminCalendarBucketContext {
   dayKey?: string;
   timeZone?: string;
+}
+
+function resolveGarminCalendarBucketTiming(
+  record: PlainObject,
+  importedAt: string,
+  options: {
+    instantPaths: readonly string[];
+    dayKeyPaths: readonly string[];
+    timeZonePaths: readonly string[];
+  },
+): { recordedAt: string; bucketContext: GarminCalendarBucketContext } {
+  const dayKey = firstDayKeyFromPaths(record, options.dayKeyPaths);
+  const timeZone = firstTimeZoneFromPaths(record, options.timeZonePaths);
+  const instant = firstInstantFromPaths(record, options.instantPaths);
+
+  if (instant) {
+    return {
+      recordedAt: instant,
+      bucketContext: {
+        dayKey,
+        timeZone,
+      },
+    };
+  }
+
+  const synthesizedRecordedAt =
+    dayKey && timeZone
+      ? synthesizeUtcStartOfDay(dayKey, timeZone)
+      : undefined;
+
+  if (synthesizedRecordedAt) {
+    return {
+      recordedAt: synthesizedRecordedAt,
+      bucketContext: {
+        dayKey,
+        timeZone,
+      },
+    };
+  }
+
+  return {
+    recordedAt: firstIsoFromPaths(record, options.dayKeyPaths) ?? importedAt,
+    bucketContext: {
+      dayKey,
+    },
+  };
 }
 
 function pushGarminObservation(
@@ -383,24 +431,13 @@ export function normalizeGarminDailySummaries(
     const summaryId =
       firstIdentifierFromPaths(summary, ["summaryId", "id", "calendarDate", "day", "date", "summaryDate"]) ??
       `daily-summary-${context.events.length + 1}`;
-    const bucketContext = {
-      dayKey: firstDayKeyFromPaths(summary, ["calendarDate", "day", "date", "summaryDate"]),
-      timeZone: firstTimeZoneFromPaths(summary, ["timeZone", "timezone", "time_zone"]),
-    } satisfies GarminCalendarBucketContext;
-    const recordedAt =
-      firstIsoFromPaths(summary, [
-        "timestamp",
-        "summaryTimestamp",
-        "recordedAt",
-        "updatedAt",
-        "calendarDate",
-        "day",
-        "date",
-        "summaryDate",
-      ]) ??
-      context.importedAt;
+    const { recordedAt, bucketContext } = resolveGarminCalendarBucketTiming(summary, context.importedAt, {
+      instantPaths: ["timestamp", "summaryTimestamp", "recordedAt", "updatedAt"],
+      dayKeyPaths: ["calendarDate", "day", "date", "summaryDate"],
+      timeZonePaths: ["timeZone", "timezone", "time_zone"],
+    });
     const version =
-      firstIsoFromPaths(summary, ["updatedAt", "summaryTimestamp", "timestamp"]) ??
+      firstInstantFromPaths(summary, ["updatedAt", "summaryTimestamp", "timestamp", "recordedAt"]) ??
       recordedAt;
     const role = `daily-summary:${summaryId}`;
 
@@ -781,15 +818,13 @@ export function normalizeGarminWomenHealth(
     const resourceId =
       firstIdentifierFromPaths(record, ["recordId", "id", "calendarDate", "date", "recordedAt"]) ??
       `women-health-${context.events.length + 1}`;
-    const bucketContext = {
-      dayKey: firstDayKeyFromPaths(record, ["calendarDate", "date"]),
-      timeZone: firstTimeZoneFromPaths(record, ["timeZone", "timezone", "time_zone"]),
-    } satisfies GarminCalendarBucketContext;
-    const recordedAt =
-      firstIsoFromPaths(record, ["recordedAt", "timestamp", "calendarDate", "date"]) ??
-      context.importedAt;
+    const { recordedAt, bucketContext } = resolveGarminCalendarBucketTiming(record, context.importedAt, {
+      instantPaths: ["recordedAt", "timestamp", "updatedAt"],
+      dayKeyPaths: ["calendarDate", "date"],
+      timeZonePaths: ["timeZone", "timezone", "time_zone"],
+    });
     const version =
-      firstIsoFromPaths(record, ["updatedAt", "recordedAt", "timestamp"]) ??
+      firstInstantFromPaths(record, ["updatedAt", "recordedAt", "timestamp"]) ??
       recordedAt;
     const role = `women-health:${resourceId}`;
 

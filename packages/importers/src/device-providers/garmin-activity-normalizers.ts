@@ -85,25 +85,21 @@ function nextActivityFileRole(
   };
 }
 
-function nextActivityFileDescriptorRole(
+function nextActivityFileDescriptorFileName(
   activityId: string | undefined,
   format: string,
-  rawArtifacts: readonly DeviceRawArtifactPayload[],
+  role: string,
   anonymousCount: number,
-): { role: string; fileName: string } {
-  const baseRole = activityId
-    ? `activity-file-descriptor:${activityId}:${format}`
-    : `activity-file-descriptor:unknown:${format}`;
-  const ordinal = rawArtifacts.filter((artifact) => artifact.role.startsWith(baseRole)).length + 1;
-  const role = ordinal === 1 ? baseRole : `${baseRole}-${ordinal}`;
-  const baseFileName = activityId
-    ? `${activityId}-${format}-descriptor`
-    : `activity-file-${anonymousCount || rawArtifacts.length + 1}-${format}-descriptor`;
+): string {
+  if (!activityId) {
+    return `activity-file-${anonymousCount || 1}-${format}-descriptor.json`;
+  }
 
-  return {
-    role,
-    fileName: ordinal === 1 ? `${baseFileName}.json` : `${baseFileName}-${ordinal}.json`,
-  };
+  const match = role.match(/-(\d+)$/);
+  const ordinal = match ? Number(match[1]) : 1;
+  const baseFileName = `${activityId}-${format}-descriptor`;
+
+  return ordinal === 1 ? `${baseFileName}.json` : `${baseFileName}-${ordinal}.json`;
 }
 
 export function normalizeGarminActivityFiles(
@@ -131,7 +127,6 @@ export function normalizeGarminActivityFiles(
       (isStructuredGarminPayload(extractedContent) && format !== "json");
 
     if (descriptorOnly) {
-      const descriptor = nextActivityFileDescriptorRole(activityId, format, rawArtifacts, anonymousCount);
       const descriptorMetadata = stripEmptyObject({
         activityId,
         intendedFileType: format,
@@ -149,14 +144,21 @@ export function normalizeGarminActivityFiles(
 
       pushGarminArtifact(
         rawArtifacts,
-        descriptor.role,
-        descriptor.fileName,
+        role,
+        nextActivityFileDescriptorFileName(activityId, format, role, anonymousCount),
         file,
         {
           mediaType: "application/json",
           metadata: descriptorMetadata,
         },
       );
+
+      if (activityId) {
+        const roles = activityFileRoles.get(activityId) ?? [];
+        roles.push(role);
+        activityFileRoles.set(activityId, roles);
+      }
+
       continue;
     }
 
