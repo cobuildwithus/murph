@@ -2,6 +2,7 @@ import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import {
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
+  type HostedEmailSendRequest,
   type HostedExecutionSideEffectRecord,
 } from "@murph/assistant-runtime";
 
@@ -9,7 +10,6 @@ import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommitPayload,
-  HostedExecutionCommittedResult,
   HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
 import { json, readJsonObject } from "./json.ts";
@@ -19,51 +19,15 @@ import {
   readHostedEmailRawMessage,
   sendHostedEmailMessage,
 } from "./hosted-email.ts";
+import type {
+  WorkerCurrentBundleRefs,
+  WorkerEnvironmentContract,
+  WorkerUserRunnerStubLike,
+} from "./worker-contracts.ts";
 
-interface RunnerOutboundUserRunnerStubLike {
-  bootstrapUser?(userId: string): Promise<{ userId: string }>;
-  commit(input: {
-    eventId: string;
-    payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
-    };
-  }): Promise<HostedExecutionCommittedResult>;
-  finalizeCommit(input: {
-    eventId: string;
-    payload: HostedExecutionFinalizePayload;
-  }): Promise<HostedExecutionCommittedResult>;
-}
+type RunnerOutboundUserRunnerStubLike = WorkerUserRunnerStubLike;
 
-interface RunnerOutboundDurableObjectNamespaceLike {
-  getByName(name: string): RunnerOutboundUserRunnerStubLike;
-}
-
-export interface RunnerOutboundEnvironmentSource extends Readonly<Record<string, unknown>> {
-  BUNDLES: import("./bundle-store.ts").R2BucketLike;
-  HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
-  HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
-  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
-  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
-  HOSTED_EXECUTION_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
-  HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
-  HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
-  HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
-  HOSTED_EXECUTION_SIGNING_SECRET?: string;
-  HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
-  HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
-  HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
-  HOSTED_EMAIL_DEFAULT_SUBJECT?: string;
-  HOSTED_EMAIL_DOMAIN?: string;
-  HOSTED_EMAIL_FROM_ADDRESS?: string;
-  HOSTED_EMAIL_LOCAL_PART?: string;
-  HOSTED_EMAIL_SIGNING_SECRET?: string;
-  USER_RUNNER: RunnerOutboundDurableObjectNamespaceLike;
-}
+export interface RunnerOutboundEnvironmentSource extends WorkerEnvironmentContract {}
 
 export async function handleRunnerOutboundRequest(
   request: Request,
@@ -217,12 +181,7 @@ async function handleRunnerEmailSendRequest(input: {
   });
 }
 
-function parseHostedEmailSendRequest(value: Record<string, unknown>): {
-  identityId: string | null;
-  message: string;
-  target: string;
-  targetKind: "explicit" | "participant" | "thread";
-} {
+function parseHostedEmailSendRequest(value: Record<string, unknown>): HostedEmailSendRequest {
   const targetKind = value.targetKind;
   if (targetKind !== "explicit" && targetKind !== "participant" && targetKind !== "thread") {
     throw new TypeError("targetKind must be explicit, participant, or thread.");
@@ -379,10 +338,7 @@ async function resolveRunnerOutboundUserRunnerStub(
 }
 
 function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
-  currentBundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
+  currentBundleRefs: WorkerCurrentBundleRefs;
 } {
   const bundles = requireRecord(payload.bundles, "bundles");
   const result = requireRecord(payload.result, "result");
@@ -415,10 +371,7 @@ function parseHostedExecutionFinalizeRequest(
   };
 }
 
-function readCommittedBundleRefs(value: unknown): {
-  agentState: HostedExecutionBundleRef | null;
-  vault: HostedExecutionBundleRef | null;
-} {
+function readCommittedBundleRefs(value: unknown): WorkerCurrentBundleRefs {
   const record = requireRecord(value, "currentBundleRefs");
 
   return {

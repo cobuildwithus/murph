@@ -5,7 +5,6 @@ import {
   buildHostedExecutionEmailMessageReceivedDispatch,
   parseHostedExecutionDispatchRequest,
   readHostedEmailCapabilities,
-  type HostedExecutionBundleRef,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
@@ -15,8 +14,6 @@ import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } f
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommittedResult,
-  HostedExecutionCommitPayload,
-  HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
 import { json, readJsonObject } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
@@ -35,25 +32,18 @@ import {
   HostedUserRunner,
   type DurableObjectStateLike,
 } from "./user-runner.ts";
+import type {
+  WorkerEnvironmentContract,
+  WorkerUserRunnerCommitInput,
+  WorkerUserRunnerFinalizeInput,
+  WorkerUserRunnerStubLike,
+} from "./worker-contracts.ts";
 
-interface UserRunnerDurableObjectStubLike {
+interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
   clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  commit(input: {
-    eventId: string;
-    payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
-    };
-  }): Promise<HostedExecutionCommittedResult>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
-  finalizeCommit(input: {
-    eventId: string;
-    payload: HostedExecutionFinalizePayload;
-  }): Promise<HostedExecutionCommittedResult>;
   getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
   status(): Promise<HostedExecutionUserStatus>;
   updateUserEnv(
@@ -61,33 +51,8 @@ interface UserRunnerDurableObjectStubLike {
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
 }
 
-interface DurableObjectNamespaceLike {
-  getByName(name: string): UserRunnerDurableObjectStubLike;
-}
-
-interface WorkerEnvironmentSource extends Readonly<Record<string, unknown>> {
-  BUNDLES: import("./bundle-store.ts").R2BucketLike;
-  HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
-  HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
-  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
-  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
-  HOSTED_EXECUTION_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
-  HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
-  HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
-  HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
-  HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
-  HOSTED_EXECUTION_SIGNING_SECRET?: string;
-  HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
-  HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
-  HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
-  HOSTED_EMAIL_DEFAULT_SUBJECT?: string;
-  HOSTED_EMAIL_DOMAIN?: string;
-  HOSTED_EMAIL_FROM_ADDRESS?: string;
-  HOSTED_EMAIL_LOCAL_PART?: string;
-  HOSTED_EMAIL_SIGNING_SECRET?: string;
+interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
   RUNNER_CONTAINER: import("./runner-container.ts").HostedExecutionContainerNamespaceLike;
-  USER_RUNNER: DurableObjectNamespaceLike;
 }
 
 type RouteParams = Readonly<Record<string, string>>;
@@ -237,22 +202,11 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.dispatchWithOutcome(input);
   }
 
-  async commit(input: {
-    eventId: string;
-    payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
-    };
-  }): Promise<HostedExecutionCommittedResult> {
+  async commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult> {
     return this.runner.commit(input);
   }
 
-  async finalizeCommit(input: {
-    eventId: string;
-    payload: HostedExecutionFinalizePayload;
-  }): Promise<HostedExecutionCommittedResult> {
+  async finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult> {
     return this.runner.finalizeCommit(input);
   }
 

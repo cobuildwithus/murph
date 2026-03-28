@@ -8,6 +8,7 @@ import {
   type HostedEmailThreadTarget,
 } from "@murph/runtime-state";
 import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
+import type { HostedEmailSendRequest } from "@murph/assistant-runtime";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import {
@@ -59,13 +60,6 @@ export interface HostedEmailWorkerRequest {
   rawSize?: number;
   setReject?(reason: string): void;
   to: string;
-}
-
-export interface HostedEmailSendRequest {
-  identityId: string | null;
-  message: string;
-  target: string;
-  targetKind: "explicit" | "participant" | "thread";
 }
 
 const HOSTED_EMAIL_THREAD_ROUTE_SCHEMA = "murph.hosted-email-thread-route.v1";

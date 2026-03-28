@@ -1,0 +1,63 @@
+import type { HostedExecutionBundleRef } from "@murph/runtime-state";
+
+import type { R2BucketLike } from "./bundle-store.ts";
+import type {
+  HostedExecutionCommitPayload,
+  HostedExecutionCommittedResult,
+  HostedExecutionFinalizePayload,
+} from "./execution-journal.ts";
+
+export interface WorkerCurrentBundleRefs {
+  agentState: HostedExecutionBundleRef | null;
+  vault: HostedExecutionBundleRef | null;
+}
+
+export interface WorkerUserRunnerCommitInput {
+  eventId: string;
+  payload: HostedExecutionCommitPayload & {
+    currentBundleRefs: WorkerCurrentBundleRefs;
+  };
+}
+
+export interface WorkerUserRunnerFinalizeInput {
+  eventId: string;
+  payload: HostedExecutionFinalizePayload;
+}
+
+export interface WorkerUserRunnerStubLike {
+  bootstrapUser?(userId: string): Promise<{ userId: string }>;
+  commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
+  finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult>;
+}
+
+export interface WorkerUserRunnerNamespaceLike<
+  TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
+> {
+  getByName(name: string): TStub;
+}
+
+export interface WorkerEnvironmentContract<
+  TStub extends WorkerUserRunnerStubLike = WorkerUserRunnerStubLike,
+> extends Readonly<Record<string, unknown>> {
+  BUNDLES: R2BucketLike;
+  HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
+  HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
+  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
+  HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID?: string;
+  HOSTED_EXECUTION_CONTROL_TOKEN?: string;
+  HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS?: string;
+  HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS?: string;
+  HOSTED_EXECUTION_RETRY_DELAY_MS?: string;
+  HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
+  HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
+  HOSTED_EXECUTION_SIGNING_SECRET?: string;
+  HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
+  HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
+  HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
+  HOSTED_EMAIL_DEFAULT_SUBJECT?: string;
+  HOSTED_EMAIL_DOMAIN?: string;
+  HOSTED_EMAIL_FROM_ADDRESS?: string;
+  HOSTED_EMAIL_LOCAL_PART?: string;
+  HOSTED_EMAIL_SIGNING_SECRET?: string;
+  USER_RUNNER: WorkerUserRunnerNamespaceLike<TStub>;
+}
