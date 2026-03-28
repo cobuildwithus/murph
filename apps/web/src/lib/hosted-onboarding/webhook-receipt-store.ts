@@ -2,14 +2,16 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { hostedOnboardingError } from "./errors";
 import {
-  buildHostedWebhookProcessingReceipt,
-  mergeHostedWebhookSideEffects,
   readHostedWebhookReceiptState,
-  replaceHostedWebhookReceiptState,
-  serializeHostedWebhookReceiptError,
-  serializeHostedWebhookReceiptState,
   toHostedWebhookReceiptJsonInput,
 } from "./webhook-receipt-codec";
+import {
+  claimHostedWebhookReceipt,
+  completeHostedWebhookReceipt,
+  failHostedWebhookReceipt,
+  queueHostedWebhookReceiptSideEffects as queueHostedWebhookReceiptStateSideEffects,
+  toHostedWebhookReceiptClaim,
+} from "./webhook-receipt-transitions";
 import type {
   HostedWebhookEventPayload,
   HostedWebhookReceiptClaim,
@@ -24,7 +26,7 @@ export async function recordHostedWebhookReceipt(input: {
   source: string;
 }): Promise<HostedWebhookReceiptClaim | null> {
   const now = new Date();
-  const receipt = buildHostedWebhookProcessingReceipt({
+  const receipt = claimHostedWebhookReceipt({
     eventPayload: input.eventPayload,
     receivedAt: now,
   });
@@ -62,11 +64,8 @@ export async function queueHostedWebhookReceiptSideEffects(input: {
   return updateHostedWebhookReceiptClaim({
     claimedReceipt: input.claimedReceipt,
     eventId: input.eventId,
-    mutate(currentState) {
-      return replaceHostedWebhookReceiptState(currentState, {
-        sideEffects: mergeHostedWebhookSideEffects(currentState.sideEffects, input.desiredSideEffects),
-      });
-    },
+    mutate: (currentState) =>
+      queueHostedWebhookReceiptStateSideEffects(currentState, input.desiredSideEffects),
     prisma: input.prisma,
     source: input.source,
   });
@@ -119,10 +118,7 @@ export async function updateHostedWebhookReceiptClaim(input: {
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const nextState = input.mutate(currentClaim.state);
-    const nextClaim: HostedWebhookReceiptClaim = {
-      payloadJson: serializeHostedWebhookReceiptState(nextState),
-      state: nextState,
-    };
+    const nextClaim = toHostedWebhookReceiptClaim(nextState);
     const updatedReceipt = await input.prisma.hostedWebhookReceipt.updateMany({
       where: {
         source: input.source,
@@ -193,7 +189,7 @@ async function reclaimHostedWebhookReceipt(
     });
 
     if (!existingReceipt) {
-      const receipt = buildHostedWebhookProcessingReceipt({
+      const receipt = claimHostedWebhookReceipt({
         eventPayload: input.eventPayload,
         receivedAt,
       });
@@ -222,7 +218,7 @@ async function reclaimHostedWebhookReceipt(
       return null;
     }
 
-    const nextReceipt = buildHostedWebhookProcessingReceipt({
+    const nextReceipt = claimHostedWebhookReceipt({
       eventPayload: input.eventPayload,
       previousState: existingState,
       receivedAt,
@@ -266,21 +262,17 @@ async function updateHostedWebhookReceiptStatus(input: {
   await updateHostedWebhookReceiptClaim({
     claimedReceipt: input.claimedReceipt,
     eventId: input.eventId,
-    mutate(currentState) {
-      return replaceHostedWebhookReceiptState(currentState, {
-        completedAt: input.status === "completed" ? receivedAt : null,
-        eventPayload: {
-          ...currentState.eventPayload,
-          ...input.eventPayload,
-        },
-        lastError:
-          input.status === "failed"
-            ? serializeHostedWebhookReceiptError(input.error)
-            : null,
-        lastReceivedAt: receivedAt,
-        status: input.status,
-      });
-    },
+    mutate: (currentState) =>
+      input.status === "completed"
+        ? completeHostedWebhookReceipt(currentState, {
+            completedAt: receivedAt,
+            eventPayload: input.eventPayload,
+          })
+        : failHostedWebhookReceipt(currentState, {
+            error: input.error,
+            eventPayload: input.eventPayload,
+            failedAt: receivedAt,
+          }),
     prisma: input.prisma,
     source: input.source,
   });

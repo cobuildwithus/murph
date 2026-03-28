@@ -1,13 +1,7 @@
 import { hostedOnboardingError } from "./errors";
 import {
-  getHostedWebhookSideEffect,
-  markHostedWebhookSideEffectSent,
   readHostedWebhookReceiptState,
-  replaceHostedWebhookReceiptState,
-  replaceHostedWebhookSideEffects,
   requireHostedWebhookDispatchEffectDispatch,
-  serializeHostedWebhookReceiptState,
-  serializeHostedWebhookSideEffectError,
   toHostedWebhookReceiptJsonInput,
 } from "./webhook-receipt-codec";
 import {
@@ -17,6 +11,13 @@ import {
   recordHostedWebhookReceipt,
   updateHostedWebhookReceiptClaim,
 } from "./webhook-receipt-store";
+import {
+  getHostedWebhookSideEffect,
+  markHostedWebhookReceiptSideEffectFailed,
+  markHostedWebhookReceiptSideEffectSent,
+  startHostedWebhookReceiptSideEffect,
+  toHostedWebhookReceiptClaim,
+} from "./webhook-receipt-transitions";
 import type {
   HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
@@ -112,16 +113,8 @@ async function drainHostedWebhookReceiptSideEffects(input: {
     currentClaim = await updateHostedWebhookReceiptClaim({
       claimedReceipt: currentClaim,
       eventId: input.eventId,
-      mutate(currentState) {
-        return replaceHostedWebhookReceiptState(currentState, {
-          sideEffects: replaceHostedWebhookSideEffects(currentState.sideEffects, queuedEffect.effectId, (effect) => ({
-            ...effect,
-            attemptCount: effect.attemptCount + 1,
-            lastAttemptAt: startedAt,
-            lastError: null,
-          })),
-        });
-      },
+      mutate: (currentState) =>
+        startHostedWebhookReceiptSideEffect(currentState, queuedEffect.effectId, startedAt),
       prisma: input.prisma,
       source: input.source,
     });
@@ -149,13 +142,8 @@ async function drainHostedWebhookReceiptSideEffects(input: {
       currentClaim = await updateHostedWebhookReceiptClaim({
         claimedReceipt: currentClaim,
         eventId: input.eventId,
-        mutate(currentState) {
-          return replaceHostedWebhookReceiptState(currentState, {
-            sideEffects: replaceHostedWebhookSideEffects(currentState.sideEffects, effect.effectId, (currentEffect) =>
-              markHostedWebhookSideEffectSent(currentEffect, result, sentAt),
-            ),
-          });
-        },
+        mutate: (currentState) =>
+          markHostedWebhookReceiptSideEffectSent(currentState, effect.effectId, result, sentAt),
         prisma: input.prisma,
         source: input.source,
       });
@@ -170,15 +158,8 @@ async function drainHostedWebhookReceiptSideEffects(input: {
       currentClaim = await updateHostedWebhookReceiptClaim({
         claimedReceipt: currentClaim,
         eventId: input.eventId,
-        mutate(currentState) {
-          return replaceHostedWebhookReceiptState(currentState, {
-            sideEffects: replaceHostedWebhookSideEffects(currentState.sideEffects, effect.effectId, (currentEffect) => ({
-              ...currentEffect,
-              lastError: serializeHostedWebhookSideEffectError(error),
-              status: "pending",
-            })),
-          });
-        },
+        mutate: (currentState) =>
+          markHostedWebhookReceiptSideEffectFailed(currentState, effect.effectId, error),
         prisma: input.prisma,
         source: input.source,
       });
@@ -201,17 +182,14 @@ async function markHostedWebhookDispatchEffectQueued(input: {
   let currentClaim = input.claimedReceipt;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const nextState = replaceHostedWebhookReceiptState(currentClaim.state, {
-      sideEffects: replaceHostedWebhookSideEffects(
-        currentClaim.state.sideEffects,
+    const nextClaim = toHostedWebhookReceiptClaim(
+      markHostedWebhookReceiptSideEffectSent(
+        currentClaim.state,
         input.dispatchEffect.effectId,
-        (currentEffect) => markHostedWebhookSideEffectSent(currentEffect, { dispatched: true }, input.sentAt),
+        { dispatched: true },
+        input.sentAt,
       ),
-    });
-    const nextClaim: HostedWebhookReceiptClaim = {
-      payloadJson: serializeHostedWebhookReceiptState(nextState),
-      state: nextState,
-    };
+    );
     const updatedCount = await input.enqueueDispatchEffect({
       dispatch: requireHostedWebhookDispatchEffectDispatch(input.dispatchEffect),
       eventId: input.eventId,
