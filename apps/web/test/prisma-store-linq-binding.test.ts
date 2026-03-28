@@ -161,6 +161,60 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     );
   });
 
+  it("falls back to a compatibility scan for punctuation-formatted legacy rows", async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        createBindingRecord({
+          id: "linqb_punctuated",
+          label: "Legacy punctuation",
+          recipientPhone: "+1 (555) 765-4321",
+          userId: "user-123",
+        }),
+      ]);
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          findMany,
+        },
+      } as never,
+    });
+
+    await expect(store.getBindingByRecipientPhone("+15557654321")).resolves.toEqual(
+      expect.objectContaining({
+        id: "linqb_punctuated",
+        label: "Legacy punctuation",
+        recipientPhone: "+15557654321",
+        userId: "user-123",
+      }),
+    );
+    expect(findMany).toHaveBeenNthCalledWith(1, {
+      where: {
+        recipientPhone: {
+          in: ["+15557654321", "15557654321"],
+        },
+      },
+      orderBy: [
+        {
+          createdAt: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    });
+    expect(findMany).toHaveBeenNthCalledWith(2, {
+      orderBy: [
+        {
+          createdAt: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    });
+  });
+
   it("updates the preferred canonical row when the same user already has legacy and canonical duplicates", async () => {
     const records = [
       createBindingRecord({
