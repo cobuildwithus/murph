@@ -117,6 +117,13 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
+      "usage.worker": {
+        method: "usageWorker",
+        params: {
+          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          userId: "member_123",
+        },
+      },
     });
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/__internal/run",

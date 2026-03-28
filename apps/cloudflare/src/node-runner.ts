@@ -7,6 +7,7 @@ import {
 import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedEmailCapabilities,
   type HostedExecutionWebControlPlaneEnvironment,
@@ -23,6 +24,8 @@ const HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL =
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL;
 const HOSTED_RUNNER_SHARE_PACK_BASE_URL =
   DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL;
+const HOSTED_RUNNER_USAGE_BASE_URL =
+  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL;
 
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
@@ -96,6 +99,7 @@ export async function runHostedExecutionJob(
       deviceSyncRuntimeBaseUrl: HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
       shareBaseUrl: callbackBaseUrls?.sharePackBaseUrl ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
       shareToken: callbackBaseUrls?.sharePackToken ?? null,
+      usageBaseUrl: HOSTED_RUNNER_USAGE_BASE_URL,
       ...(callbackBaseUrls?.webControlPlane ?? {}),
     },
   };

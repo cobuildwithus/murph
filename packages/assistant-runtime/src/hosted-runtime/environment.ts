@@ -138,6 +138,7 @@ function normalizeHostedExecutionWebControlPlaneConfig(
     }),
     shareToken: normalizeHostedExecutionString(value?.shareToken),
     usageBaseUrl: normalizeHostedExecutionBaseUrl(value?.usageBaseUrl, {
+      allowHttpHosts: [HOSTED_EXECUTION_PROXY_HOSTS.usage],
       allowHttpLocalhost: true,
     }),
   };

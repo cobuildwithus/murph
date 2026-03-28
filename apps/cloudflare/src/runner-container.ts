@@ -72,7 +72,8 @@ type RunnerOutboundHandlerName =
   | "deviceSyncWorker"
   | "emailWorker"
   | "outboxWorker"
-  | "sharePackWorker";
+  | "sharePackWorker"
+  | "usageWorker";
 
 const RUNNER_OUTBOUND_HOSTS = {
   [HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts]: "artifactsWorker",
@@ -82,6 +83,7 @@ const RUNNER_OUTBOUND_HOSTS = {
   [HOSTED_EXECUTION_CALLBACK_HOSTS.outbox]: "outboxWorker",
   [HOSTED_EXECUTION_PROXY_HOSTS.sharePack]: "sharePackWorker",
   [HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects]: "outboxWorker",
+  [HOSTED_EXECUTION_PROXY_HOSTS.usage]: "usageWorker",
 } as const satisfies Record<string, RunnerOutboundHandlerName>;
 
 export class RunnerContainer extends Container {
@@ -92,6 +94,7 @@ export class RunnerContainer extends Container {
     emailWorker: createRunnerOutboundHandler(),
     outboxWorker: createRunnerOutboundHandler(),
     sharePackWorker: createRunnerOutboundHandler(),
+    usageWorker: createRunnerOutboundHandler(),
   };
 
   defaultPort = RUNNER_PORT;

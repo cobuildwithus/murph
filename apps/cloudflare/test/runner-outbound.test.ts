@@ -142,6 +142,60 @@ describe("handleRunnerOutboundRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("proxies hosted AI usage writes through the worker control token", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      recorded: 1,
+      usageIds: ["usage_123"],
+    }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://usage.worker/api/internal/hosted-execution/usage/record", {
+        body: JSON.stringify({
+          usage: [
+            {
+              usageId: "usage_123",
+            },
+          ],
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("https://web.example.test/api/internal/hosted-execution/usage/record"),
+      expect.objectContaining({
+        body: JSON.stringify({
+          usage: [
+            {
+              usageId: "usage_123",
+            },
+          ],
+        }),
+        headers: expect.objectContaining({
+          authorization: "Bearer internal-token",
+          "content-type": "application/json; charset=utf-8",
+          "x-hosted-execution-user-id": "member_123",
+        }),
+        method: "POST",
+      }),
+    );
+  });
+
   it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {
     const response = await handleRunnerOutboundRequest(
       new Request("http://side-effects.worker/effects/outbox_123", {

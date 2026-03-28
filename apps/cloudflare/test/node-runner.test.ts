@@ -11,10 +11,12 @@ import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
+  listPendingAssistantUsageRecords,
   parseHostedEmailThreadTarget,
   resolveAssistantStatePaths,
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
+  writePendingAssistantUsageRecord,
 } from "@murph/runtime-state";
 import { assistantOutboxIntentSchema } from "murph";
 
@@ -1260,6 +1262,128 @@ describe("runHostedExecutionJob", () => {
     await expect(
       readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     ).rejects.toThrow();
+  });
+
+  it("exports pending hosted AI usage through the worker proxy without exposing the internal web token", async () => {
+    const previousHostedExecutionInternalToken = process.env.HOSTED_EXECUTION_INTERNAL_TOKEN;
+    process.env.HOSTED_EXECUTION_INTERNAL_TOKEN = "worker-control-token";
+
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_usage_proxy",
+        },
+        eventId: "evt_activation_usage_proxy",
+        occurredAt: "2026-03-29T10:00:00.000Z",
+      },
+    });
+    const activationWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-usage-proxy-seed-"));
+    cleanupPaths.push(activationWorkspaceRoot);
+    const restoredActivation = await restoreHostedExecutionContext({
+      agentStateBundle: decodeHostedBundleBase64(activation.bundles.agentState),
+      vaultBundle: Buffer.from(activation.bundles.vault!, "base64"),
+      workspaceRoot: activationWorkspaceRoot,
+    });
+    await writePendingAssistantUsageRecord({
+      record: {
+        apiKeyEnv: null,
+        attemptCount: 1,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: null,
+        inputTokens: 10,
+        memberId: "member_usage_proxy",
+        occurredAt: "2026-03-29T10:05:00.000Z",
+        outputTokens: 4,
+        provider: "codex-cli",
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        providerSessionId: "sess_usage_proxy",
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: "gpt-5.4",
+        routeId: "primary",
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.4",
+        sessionId: "asst_usage_proxy",
+        totalTokens: 14,
+        turnId: "turn_usage_proxy",
+        usageId: "turn_usage_proxy.attempt-1",
+      },
+      vault: restoredActivation.vaultRoot,
+    });
+    const snapshot = await snapshotHostedExecutionContext({
+      operatorHomeRoot: restoredActivation.operatorHomeRoot,
+      vaultRoot: restoredActivation.vaultRoot,
+    });
+    const fetchSpy = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url) !== "http://usage.worker/api/internal/hosted-execution/usage/record") {
+        throw new Error(`Unexpected fetch URL: ${String(url)}`);
+      }
+
+      expect(new Headers(init?.headers).get("authorization")).toBeNull();
+
+      return new Response(JSON.stringify({
+        recorded: 1,
+        usageIds: ["turn_usage_proxy.attempt-1"],
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
+          vault: encodeHostedBundleBase64(snapshot.vaultBundle),
+        },
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_usage_proxy",
+          },
+          eventId: "evt_usage_proxy_export",
+          occurredAt: "2026-03-29T10:06:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-usage-proxy-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "http://usage.worker/api/internal/hosted-execution/usage/record",
+        expect.objectContaining({
+          headers: {
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+      );
+      const usageRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
+      expect(typeof usageRequest?.body).toBe("string");
+      expect(String(usageRequest?.body)).toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");
+      await expect(listPendingAssistantUsageRecords({
+        vault: restored.vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKEN", previousHostedExecutionInternalToken);
+    }
   });
 
   it("restores the prior process env after per-user overrides are applied", async () => {
