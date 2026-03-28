@@ -3934,6 +3934,62 @@ test('sendAssistantMessage does not fail over on interrupted provider errors tha
   )
 })
 
+test('sendAssistantMessage preserves the terminal provider error when all failover routes are exhausted', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-failover-exhausted-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockRejectedValueOnce(
+      new VaultCliError('ASSISTANT_PRIMARY_FAILED', 'Primary route failed.', {
+        retryable: true,
+      }),
+    )
+    .mockRejectedValueOnce(
+      new VaultCliError('ASSISTANT_BACKUP_FAILED', 'Backup route failed.', {
+        retryable: true,
+      }),
+    )
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:failover-exhausted',
+      prompt: 'hello',
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      failoverRoutes: [
+        {
+          name: 'backup',
+          provider: 'openai-compatible',
+          codexCommand: null,
+          model: 'gpt-oss:7b',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          cooldownMs: null,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: null,
+          providerName: null,
+        },
+      ],
+    }),
+    (error: any) => {
+      assert.equal(error.code, 'ASSISTANT_BACKUP_FAILED')
+      assert.equal(error.message, 'Backup route failed.')
+      assert.equal(error.message.includes('routes were exhausted'), false)
+      return true
+    },
+  )
+
+  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+})
+
 test('sendAssistantMessage restores a missing local transcript snapshot for openai-compatible sessions before retrying the turn', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-restore-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -4080,4 +4136,70 @@ test('sendAssistantMessage refuses session-only restore for openai-compatible se
   )
 
   assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+})
+
+test('sendAssistantMessage accepts an explicitly empty transcript snapshot for openai-compatible session restore', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-restore-empty-transcript-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:openai-restore-empty',
+    provider: 'openai-compatible',
+    model: 'gpt-oss:20b',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+  })
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+
+  await rm(path.join(statePaths.sessionsDirectory, `${created.session.sessionId}.json`), {
+    force: true,
+  })
+  await rm(path.join(statePaths.transcriptsDirectory, `${created.session.sessionId}.jsonl`), {
+    force: true,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'Recovered from empty transcript.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    prompt: 'Keep going.',
+    sessionId: created.session.sessionId,
+    sessionSnapshot: created.session,
+    transcriptSnapshot: [],
+  })
+
+  assert.equal(result.session.sessionId, created.session.sessionId)
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.deepEqual(firstCall?.conversationMessages, [])
+
+  const transcript = await listAssistantTranscriptEntries(
+    vaultRoot,
+    created.session.sessionId,
+  )
+  assert.deepEqual(
+    transcript.map((entry) => ({
+      kind: entry.kind,
+      text: entry.text,
+    })),
+    [
+      {
+        kind: 'user',
+        text: 'Keep going.',
+      },
+      {
+        kind: 'assistant',
+        text: 'Recovered from empty transcript.',
+      },
+    ],
+  )
 })
