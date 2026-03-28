@@ -41,8 +41,10 @@ import {
 type AuditLikeRecord = {
   action?: string;
   commandName?: string;
+  targetIds?: string[];
   changes?: Array<{
     op?: string;
+    path?: string;
   }>;
 };
 
@@ -365,6 +367,52 @@ test("markdown registry helpers keep provider and recipe rename writes on the sh
     { action: "recipe_upsert", commandName: "core.upsertRecipe", op: "create" },
     { action: "recipe_upsert", commandName: "core.upsertRecipe", op: "update" },
   ]);
+  assert.deepEqual(
+    auditRecords
+      .filter(
+        (record): record is AuditLikeRecord =>
+          typeof record === "object" &&
+          record !== null &&
+          (record as AuditLikeRecord).action === "provider_upsert",
+      )
+      .map((record) => ({
+        path: record.changes?.[0]?.path,
+        targetId: record.targetIds?.[0],
+      })),
+    [
+      {
+        path: "bank/providers/northwest-labs.md",
+        targetId: provider.providerId,
+      },
+      {
+        path: "bank/providers/northwest-labs-west.md",
+        targetId: provider.providerId,
+      },
+    ],
+  );
+  assert.deepEqual(
+    auditRecords
+      .filter(
+        (record): record is AuditLikeRecord =>
+          typeof record === "object" &&
+          record !== null &&
+          (record as AuditLikeRecord).action === "recipe_upsert",
+      )
+      .map((record) => ({
+        path: record.changes?.[0]?.path,
+        targetId: record.targetIds?.[0],
+      })),
+    [
+      {
+        path: "bank/recipes/tahini-salmon-bowl.md",
+        targetId: recipe.record.recipeId,
+      },
+      {
+        path: "bank/recipes/usual-tahini-salmon-bowl.md",
+        targetId: recipe.record.recipeId,
+      },
+    ],
+  );
   assert.equal(operations.filter((operation) => operation.operationType === "provider_upsert").length, 2);
   assert.equal(operations.filter((operation) => operation.operationType === "recipe_upsert").length, 2);
   assert.ok(operations.every((operation) => operation.status === "committed"));
@@ -408,6 +456,11 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
     vaultRoot,
     recipeId: recipe.record.recipeId,
   });
+  const operations = await Promise.all(
+    (await listWriteOperationMetadataPaths(vaultRoot)).map((relativePath) =>
+      readStoredWriteOperation(vaultRoot, relativePath),
+    ),
+  );
 
   assert.equal(deletedProvider.providerId, provider.providerId);
   assert.equal(deletedProvider.deleted, true);
@@ -446,6 +499,58 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
         recipeId: recipe.record.recipeId,
       }),
     (error: unknown) => error instanceof VaultError && error.code === "VAULT_RECIPE_MISSING",
+  );
+  assert.deepEqual(
+    operations
+      .filter((operation) => operation.operationType === "provider_delete")
+      .map((operation) => ({
+        status: operation.status,
+        actions: operation.actions.map((action) => ({
+          kind: action.kind,
+          state: action.state,
+          effect: action.effect,
+          targetRelativePath: action.targetRelativePath,
+        })),
+      })),
+    [
+      {
+        status: "committed",
+        actions: [
+          {
+            kind: "delete",
+            state: "applied",
+            effect: "delete",
+            targetRelativePath: deletedProvider.relativePath,
+          },
+        ],
+      },
+    ],
+  );
+  assert.deepEqual(
+    operations
+      .filter((operation) => operation.operationType === "recipe_delete")
+      .map((operation) => ({
+        status: operation.status,
+        actions: operation.actions.map((action) => ({
+          kind: action.kind,
+          state: action.state,
+          effect: action.effect,
+          targetRelativePath: action.targetRelativePath,
+        })),
+      })),
+    [
+      {
+        status: "committed",
+        actions: [
+          {
+            kind: "delete",
+            state: "applied",
+            effect: "delete",
+            targetRelativePath: deletedRecipe.relativePath,
+          },
+        ],
+      },
+    ],
   );
 });
 
