@@ -831,7 +831,6 @@ export function createExplicitHealthQueryServices(
       const records = await query.listAssessments(input.vault, {
         from: input.from,
         to: input.to,
-        status: input.status,
         limit: input.limit,
       });
 
@@ -840,7 +839,6 @@ export function createExplicitHealthQueryServices(
         {
           from: input.from,
           to: input.to,
-          status: input.status,
           limit: input.limit ?? 50,
         },
         records.map((record) => toAssessmentReadEntity(record)),

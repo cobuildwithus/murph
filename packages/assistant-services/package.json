@@ -69,6 +69,7 @@
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
   },
   "dependencies": {
+    "@murph/runtime-state": "workspace:*",
     "murph": "workspace:*"
   },
   "engines": {

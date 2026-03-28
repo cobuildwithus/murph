@@ -32,9 +32,11 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   env: Readonly<Record<string, string>>;
   secret: string;
   service: DeviceSyncService;
+  timeoutMs: number | null;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
   const snapshot = await fetchHostedDeviceSyncRuntimeSnapshot({
     env: input.env,
+    timeoutMs: input.timeoutMs,
     userId: input.dispatch.event.userId,
   });
   const hostedToLocalAccountIds = new Map<string, string>();
@@ -55,79 +57,58 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
   for (const entry of snapshot.connections) {
     observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
-    const existing = input.service.store.getAccountByExternalAccount(
-      entry.connection.provider,
-      entry.connection.externalAccountId,
-    );
+    const stored = input.service.store.hydrateHostedAccount({
+      connectedAt: entry.connection.connectedAt,
+      displayName: entry.connection.displayName ?? null,
+      externalAccountId: entry.connection.externalAccountId,
+      lastErrorCode: entry.connection.lastErrorCode ?? null,
+      lastErrorMessage: entry.connection.lastErrorMessage ?? null,
+      lastSyncCompletedAt: entry.connection.lastSyncCompletedAt ?? null,
+      lastSyncErrorAt: entry.connection.lastSyncErrorAt ?? null,
+      lastSyncStartedAt: entry.connection.lastSyncStartedAt ?? null,
+      lastWebhookAt: entry.connection.lastWebhookAt ?? null,
+      metadata: entry.connection.metadata,
+      nextReconcileAt: entry.connection.nextReconcileAt ?? null,
+      provider: entry.connection.provider,
+      scopes: entry.connection.scopes,
+      status: entry.connection.status,
+      ...(entry.tokenBundle
+        ? {
+            tokens: {
+              accessToken: entry.tokenBundle.accessToken,
+              accessTokenEncrypted: codec.encrypt(entry.tokenBundle.accessToken),
+              accessTokenExpiresAt: entry.tokenBundle.accessTokenExpiresAt ?? undefined,
+              refreshToken: entry.tokenBundle.refreshToken ?? undefined,
+              refreshTokenEncrypted: entry.tokenBundle.refreshToken
+                ? codec.encrypt(entry.tokenBundle.refreshToken)
+                : null,
+            },
+          }
+        : {}),
+      ...(entry.connection.status === "disconnected"
+        ? {
+            tokenCleartextPlaceholder: {
+              accessTokenEncrypted: codec.encrypt(""),
+            },
+          }
+        : {}),
+    });
 
-    if (entry.tokenBundle) {
-      const tokens = {
-        accessToken: entry.tokenBundle.accessToken,
-        accessTokenEncrypted: codec.encrypt(entry.tokenBundle.accessToken),
-        accessTokenExpiresAt: entry.tokenBundle.accessTokenExpiresAt ?? undefined,
-        refreshToken: entry.tokenBundle.refreshToken ?? undefined,
-        refreshTokenEncrypted: entry.tokenBundle.refreshToken
-          ? codec.encrypt(entry.tokenBundle.refreshToken)
-          : null,
-      };
-      const stored = existing
-        ? (() => {
-            const patched = input.service.store.patchAccount(existing.id, {
-              clearErrors:
-                entry.connection.status === "active"
-                && entry.connection.lastErrorCode === null
-                && entry.connection.lastErrorMessage === null,
-              displayName: entry.connection.displayName ?? null,
-              metadata: entry.connection.metadata,
-              nextReconcileAt: entry.connection.nextReconcileAt ?? null,
-              scopes: entry.connection.scopes,
-              status: entry.connection.status,
-            });
-            return input.service.store.updateAccountTokens(patched.id, tokens) ?? patched;
-          })()
-        : input.service.store.upsertAccount({
-            connectedAt: entry.connection.connectedAt,
-            displayName: entry.connection.displayName ?? null,
-            externalAccountId: entry.connection.externalAccountId,
-            metadata: entry.connection.metadata,
-            nextReconcileAt: entry.connection.nextReconcileAt ?? null,
-            provider: entry.connection.provider,
-            scopes: entry.connection.scopes,
-            status: entry.connection.status,
-            tokens,
-          });
-      hostedToLocalAccountIds.set(entry.connection.id, stored.id);
-      localToHostedAccountIds.set(stored.id, entry.connection.id);
-      continue;
-    }
-
-    if (!existing) {
+    if (!stored) {
       continue;
     }
 
     if (entry.connection.status === "disconnected") {
-      input.service.store.disconnectAccount(existing.id, now);
       input.service.store.markPendingJobsDeadForAccount(
-        existing.id,
+        stored.id,
         now,
         "HOSTED_CONTROL_PLANE_DISCONNECTED",
         "Hosted control plane marked the device-sync connection as disconnected.",
       );
-      hostedToLocalAccountIds.set(entry.connection.id, existing.id);
-      localToHostedAccountIds.set(existing.id, entry.connection.id);
-      continue;
     }
 
-    const patched = input.service.store.patchAccount(existing.id, {
-      clearErrors: entry.connection.status === "active",
-      displayName: entry.connection.displayName ?? null,
-      metadata: entry.connection.metadata,
-      nextReconcileAt: entry.connection.nextReconcileAt ?? null,
-      scopes: entry.connection.scopes,
-      status: entry.connection.status,
-    });
-    hostedToLocalAccountIds.set(entry.connection.id, patched.id);
-    localToHostedAccountIds.set(patched.id, entry.connection.id);
+    hostedToLocalAccountIds.set(entry.connection.id, stored.id);
+    localToHostedAccountIds.set(stored.id, entry.connection.id);
   }
 
   if (input.dispatch.event.kind === "device-sync.wake") {
@@ -152,6 +133,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
+  timeoutMs: number | null;
 }): Promise<void> {
   if (!input.state.snapshot) {
     return;
@@ -186,6 +168,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   await applyHostedDeviceSyncRuntimeUpdates({
     env: input.env,
     occurredAt: input.dispatch.occurredAt,
+    timeoutMs: input.timeoutMs,
     updates,
     userId: input.dispatch.event.userId,
   });
@@ -329,33 +312,31 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     update.tokenBundle = tokenBundle;
   }
 
-  if (input.account.status === "active" && (baselineConnection?.lastErrorCode || baselineConnection?.lastErrorMessage)) {
+  const localLastErrorCode = input.account.lastErrorCode ?? null;
+  const localLastErrorMessage = input.account.lastErrorMessage ?? null;
+  const baselineLastErrorCode = baselineConnection?.lastErrorCode ?? null;
+  const baselineLastErrorMessage = baselineConnection?.lastErrorMessage ?? null;
+
+  if (
+    localLastErrorCode === null
+    && localLastErrorMessage === null
+    && (baselineLastErrorCode !== null || baselineLastErrorMessage !== null)
+  ) {
     update.clearError = true;
   } else {
-    if (input.account.lastErrorCode && input.account.lastErrorCode !== baselineConnection?.lastErrorCode) {
-      update.lastErrorCode = input.account.lastErrorCode;
+    if (localLastErrorCode !== baselineLastErrorCode) {
+      update.lastErrorCode = localLastErrorCode;
     }
 
-    if (input.account.lastErrorMessage && input.account.lastErrorMessage !== baselineConnection?.lastErrorMessage) {
-      update.lastErrorMessage = input.account.lastErrorMessage;
+    if (localLastErrorMessage !== baselineLastErrorMessage) {
+      update.lastErrorMessage = localLastErrorMessage;
     }
   }
 
-  if (input.account.lastWebhookAt && input.account.lastWebhookAt !== baselineConnection?.lastWebhookAt) {
-    update.lastWebhookAt = input.account.lastWebhookAt;
-  }
-
-  if (input.account.lastSyncStartedAt && input.account.lastSyncStartedAt !== baselineConnection?.lastSyncStartedAt) {
-    update.lastSyncStartedAt = input.account.lastSyncStartedAt;
-  }
-
-  if (input.account.lastSyncCompletedAt && input.account.lastSyncCompletedAt !== baselineConnection?.lastSyncCompletedAt) {
-    update.lastSyncCompletedAt = input.account.lastSyncCompletedAt;
-  }
-
-  if (input.account.lastSyncErrorAt && input.account.lastSyncErrorAt !== baselineConnection?.lastSyncErrorAt) {
-    update.lastSyncErrorAt = input.account.lastSyncErrorAt;
-  }
+  assignMonotonicTimestampUpdate(update, "lastWebhookAt", input.account.lastWebhookAt, baselineConnection?.lastWebhookAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastSyncStartedAt", input.account.lastSyncStartedAt, baselineConnection?.lastSyncStartedAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastSyncCompletedAt", input.account.lastSyncCompletedAt, baselineConnection?.lastSyncCompletedAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastSyncErrorAt", input.account.lastSyncErrorAt, baselineConnection?.lastSyncErrorAt ?? null);
 
   return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
 }
@@ -388,6 +369,23 @@ function equalJsonRecords(
   right: Record<string, unknown>,
 ): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function assignMonotonicTimestampUpdate(
+  update: HostedDeviceSyncRuntimeConnectionUpdate,
+  key: "lastWebhookAt" | "lastSyncStartedAt" | "lastSyncCompletedAt" | "lastSyncErrorAt",
+  localValue: string | null,
+  baselineValue: string | null,
+): void {
+  if (!localValue) {
+    return;
+  }
+
+  if (baselineValue && Date.parse(localValue) <= Date.parse(baselineValue)) {
+    return;
+  }
+
+  update[key] = localValue;
 }
 
 function hostedJobHintToDeviceSyncJobInput(

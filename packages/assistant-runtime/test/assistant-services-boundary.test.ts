@@ -10,11 +10,20 @@ import {
   saveAssistantSelfDeliveryTarget,
 } from "@murph/assistant-services/operator-config";
 import {
+  readAssistantAutomationState as readHostedAssistantAutomationState,
+  saveAssistantAutomationState as saveHostedAssistantAutomationState,
+} from "@murph/assistant-services/store";
+import {
   readOperatorConfig,
   resolveAssistantSelfDeliveryTarget as resolveCliAssistantSelfDeliveryTarget,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from "murph/operator-config";
+import { assistantAutomationStateSchema } from "murph";
+import {
+  readAssistantAutomationState as readCliAssistantAutomationState,
+  saveAssistantAutomationState as saveCliAssistantAutomationState,
+} from "murph/assistant/store";
 
 test("assistant-services publishes the hosted boundary entrypoints needed by assistant-runtime", async () => {
   const packageManifest = JSON.parse(
@@ -196,5 +205,41 @@ test("assistant-services operator-config rewrites schema-invalid assistant defau
     );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("assistant-services automation state stays CLI-readable in both directions", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "assistant-services-boundary-vault-"));
+
+  try {
+    const initial = await readHostedAssistantAutomationState(vaultRoot);
+    assert.equal(initial.autoReplyPrimed, true);
+    assert.deepEqual(initial.autoReplyChannels, []);
+
+    const hostedSaved = await saveHostedAssistantAutomationState(
+      vaultRoot,
+      assistantAutomationStateSchema.parse({
+        ...initial,
+        autoReplyChannels: ["email"],
+        autoReplyBacklogChannels: ["email"],
+        autoReplyPrimed: false,
+        updatedAt: "2026-03-28T11:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual(await readCliAssistantAutomationState(vaultRoot), hostedSaved);
+
+    const cliSaved = await saveCliAssistantAutomationState(
+      vaultRoot,
+      assistantAutomationStateSchema.parse({
+        ...hostedSaved,
+        preferredChannels: ["telegram"],
+        updatedAt: "2026-03-28T12:00:00.000Z",
+      }),
+    );
+
+    assert.deepEqual(await readHostedAssistantAutomationState(vaultRoot), cliSaved);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
   }
 });

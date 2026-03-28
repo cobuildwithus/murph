@@ -8,6 +8,7 @@ import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
   HostedExecutionSideEffect,
+  HostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 
 export interface HostedExecutionCommitCallback {
@@ -24,10 +25,9 @@ export interface HostedAssistantRuntimeConfig {
   emailBaseUrl?: string | null;
   forwardedEnv?: Readonly<Record<string, string>>;
   outboxBaseUrl?: string | null;
-  sharePackBaseUrl?: string | null;
-  sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
   userEnv?: Readonly<Record<string, string>>;
+  webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
 }
 
 export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerRequest {
@@ -57,10 +57,9 @@ export interface NormalizedHostedAssistantRuntimeConfig {
   commitTimeoutMs: number | null;
   emailBaseUrl: string;
   forwardedEnv: Record<string, string>;
-  sharePackBaseUrl: string | null;
-  sharePackToken: string | null;
   sideEffectsBaseUrl: string;
   userEnv: Record<string, string>;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }
 
 export interface HostedCommittedExecutionState {
@@ -85,6 +84,10 @@ export interface HostedMaintenanceMetrics {
   nextWakeAt: string | null;
   parserProcessed: number;
 }
+
+export type HostedWorkspaceArtifactMaterializer = (
+  relativePaths: readonly string[],
+) => Promise<void>;
 
 export type HostedDispatchEvent = HostedExecutionDispatchRequest["event"];
 export type HostedRestoredExecutionContext = Awaited<ReturnType<typeof restoreHostedExecutionContext>>;

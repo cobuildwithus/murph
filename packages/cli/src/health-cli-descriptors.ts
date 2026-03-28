@@ -205,7 +205,7 @@ function buildStatusFilteredRegistryDescriptorExtension(
 const checkedHealthEntityDescriptorExtensions = {
   assessment: {
     query: {
-      genericListFilterCapabilities: ["date-range", "status"],
+      genericListFilterCapabilities: ["date-range"],
       listServiceMethod: "listAssessments",
       notFoundLabel: "assessment",
       runtimeListMethod: "listAssessments",

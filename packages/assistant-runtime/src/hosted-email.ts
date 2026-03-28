@@ -1,3 +1,8 @@
+import {
+  fetchHostedJsonResponse,
+  summarizeHostedJsonErrorBody,
+} from "./hosted-runtime/internal-http.ts";
+
 const HOSTED_RUNNER_EMAIL_BASE_URL = "http://email.worker";
 
 export interface HostedEmailSendRequest {
@@ -5,6 +10,7 @@ export interface HostedEmailSendRequest {
   message: string;
   target: string;
   targetKind: "explicit" | "participant" | "thread";
+  timeoutMs?: number | null;
 }
 
 export function normalizeHostedEmailBaseUrl(value: string | null | undefined): string {
@@ -22,6 +28,7 @@ export function buildHostedRunnerEmailSendUrl(baseUrl: string): URL {
 
 export function createHostedEmailChannelDependencies(input: {
   emailBaseUrl: string;
+  timeoutMs?: number | null;
 }): {
   sendEmail: (input: HostedEmailSendRequest) => Promise<{ target: string } | void>
 } {
@@ -29,6 +36,7 @@ export function createHostedEmailChannelDependencies(input: {
     sendEmail: async (sendInput) => sendHostedEmailOverWorker({
       ...sendInput,
       emailBaseUrl: input.emailBaseUrl,
+      timeoutMs: sendInput.timeoutMs ?? input.timeoutMs ?? null,
     }),
   };
 }
@@ -41,52 +49,64 @@ export async function sendHostedEmailOverWorker(input: HostedEmailSendRequest & 
     }
   | void
 > {
-  const response = await fetch(buildHostedRunnerEmailSendUrl(input.emailBaseUrl).toString(), {
-    body: JSON.stringify({
-      identityId: input.identityId,
-      message: input.message,
-      target: input.target,
-      targetKind: input.targetKind,
-    }),
-    headers: {
-      "content-type": "application/json; charset=utf-8",
+  const { payload, response, text } = await fetchHostedJsonResponse({
+    description: "Hosted email send worker",
+    timeoutMs: input.timeoutMs ?? null,
+    url: buildHostedRunnerEmailSendUrl(input.emailBaseUrl).toString(),
+    init: {
+      body: JSON.stringify({
+        identityId: input.identityId,
+        message: input.message,
+        target: input.target,
+        targetKind: input.targetKind,
+      }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
     },
-    method: "POST",
   });
 
   if (!response.ok) {
-    throw await createHostedEmailDeliveryError(response);
+    throw createHostedEmailDeliveryError(response.status, payload, text);
   }
 
-  const payload = await response.json() as {
+  const parsedPayload = payload as {
     ok?: boolean;
     target?: unknown;
   };
-  const target = typeof payload.target === "string" && payload.target.trim().length > 0
-    ? payload.target.trim()
+  const target = typeof parsedPayload.target === "string" && parsedPayload.target.trim().length > 0
+    ? parsedPayload.target.trim()
     : null;
 
   return target ? { target } : undefined;
 }
 
-async function createHostedEmailDeliveryError(response: Response): Promise<Error & {
+function createHostedEmailDeliveryError(
+  status: number,
+  payload: unknown,
+  text: string,
+): Error & {
   code: string;
   retryable: boolean;
-}> {
-  let message = `Hosted email send worker returned HTTP ${response.status}.`;
+} {
+  let message = `Hosted email send worker returned HTTP ${status}.`;
+  const errorText =
+    payload && typeof payload === "object" && "error" in payload
+      ? typeof payload.error === "string" && payload.error.trim().length > 0
+        ? payload.error.trim()
+        : null
+      : summarizeHostedJsonErrorBody(payload, text);
 
-  try {
-    const payload = await response.json() as { error?: unknown };
-    if (typeof payload.error === "string" && payload.error.trim().length > 0) {
-      message = payload.error.trim();
-    }
-  } catch {}
+  if (errorText) {
+    message = errorText;
+  }
 
   const error = new Error(message) as Error & {
     code: string;
     retryable: boolean;
   };
   error.code = "HOSTED_EMAIL_DELIVERY_FAILED";
-  error.retryable = response.status >= 500 || response.status === 429;
+  error.retryable = status >= 500 || status === 429;
   return error;
 }
