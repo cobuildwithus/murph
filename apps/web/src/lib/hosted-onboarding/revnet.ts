@@ -157,6 +157,39 @@ export async function submitHostedRevnetPayment(input: {
   };
 }
 
+export async function readHostedRevnetPaymentReceipt(input: {
+  chainId?: number;
+  payTxHash: Hex;
+}): Promise<{ status: "reverted" | "success" } | null> {
+  const config = requireHostedRevnetConfig();
+  const publicClient = createPublicClient({
+    transport: http(config.rpcUrl),
+  });
+  const chainId = input.chainId ?? config.chainId;
+
+  await assertHostedRevnetRpcChain({
+    chainId,
+    publicClient,
+    rpcUrl: config.rpcUrl,
+  });
+
+  try {
+    const receipt = await publicClient.getTransactionReceipt({
+      hash: input.payTxHash,
+    });
+
+    return {
+      status: receipt.status === "success" ? "success" : "reverted",
+    };
+  } catch (error) {
+    if (String(error instanceof Error ? error.message : error).toLowerCase().includes("not found")) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 export function requireHostedRevnetConfig(): HostedRevnetConfig {
   const environment = getHostedOnboardingEnvironment();
 

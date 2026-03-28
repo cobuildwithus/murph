@@ -37,6 +37,7 @@ type HostedRevnetIssuanceRecord = Pick<
   | "projectId"
   | "status"
   | "stripeChargeId"
+  | "stripeInvoiceId"
   | "stripePaymentIntentId"
   | "terminalAddress"
   | "updatedAt"
@@ -95,19 +96,11 @@ export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   member: HostedMember;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
-  const eligibility = loadHostedRevnetIssuanceEligibility(input);
+  const issuance = await ensureHostedRevnetIssuanceForStripeInvoice(input);
 
-  if (eligibility.kind === "skip") {
+  if (!issuance) {
     return;
   }
-
-  let issuance = await findOrCreateHostedRevnetIssuance(eligibility);
-  issuance = await patchHostedRevnetIssuanceStripeReferencesIfNeeded({
-    chargeId: eligibility.chargeId,
-    issuance,
-    paymentIntentId: eligibility.paymentIntentId,
-    prisma: eligibility.prisma,
-  });
 
   const submissionState = loadHostedRevnetIssuanceSubmissionState(issuance);
 
@@ -116,10 +109,10 @@ export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   }
 
   const claimState = await claimHostedRevnetIssuanceSubmission({
-    idempotencyKey: eligibility.idempotencyKey,
-    invoiceId: eligibility.invoiceId,
+    idempotencyKey: issuance.idempotencyKey,
+    invoiceId: issuance.stripeInvoiceId,
     issuance: submissionState.issuance,
-    prisma: eligibility.prisma,
+    prisma: input.prisma,
   });
 
   if (claimState.kind === "skip") {
@@ -128,8 +121,92 @@ export async function maybeIssueHostedRevnetForStripeInvoice(input: {
 
   await submitAndPersistHostedRevnetIssuance({
     issuance: claimState.issuance,
+    prisma: input.prisma,
+  });
+}
+
+export async function ensureHostedRevnetIssuanceForStripeInvoice(input: {
+  invoice: Stripe.Invoice;
+  member: HostedMember;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<HostedRevnetIssuanceRecord | null> {
+  const eligibility = loadHostedRevnetIssuanceEligibility(input);
+
+  if (eligibility.kind === "skip") {
+    return null;
+  }
+
+  let issuance = await findOrCreateHostedRevnetIssuance(eligibility);
+  return patchHostedRevnetIssuanceStripeReferencesIfNeeded({
+    chargeId: eligibility.chargeId,
+    issuance,
+    paymentIntentId: eligibility.paymentIntentId,
     prisma: eligibility.prisma,
   });
+}
+
+export async function drainHostedRevnetIssuanceSubmissionQueue(input: {
+  limit?: number;
+  prisma: PrismaClient;
+}): Promise<string[]> {
+  const submittedIssuanceIds: string[] = [];
+  const issuances = await input.prisma.hostedRevnetIssuance.findMany({
+    where: {
+      payTxHash: null,
+      OR: [
+        {
+          status: HostedRevnetIssuanceStatus.pending,
+        },
+        {
+          status: HostedRevnetIssuanceStatus.failed,
+        },
+      ],
+    },
+    orderBy: [
+      {
+        createdAt: "asc",
+      },
+    ],
+    take: input.limit ?? 25,
+  });
+
+  for (const issuance of issuances) {
+    const submissionState = loadHostedRevnetIssuanceSubmissionState(issuance);
+
+    if (submissionState.kind === "skip") {
+      continue;
+    }
+
+    const claimState = await claimHostedRevnetIssuanceSubmission({
+      idempotencyKey: issuance.idempotencyKey,
+      invoiceId: issuance.stripeInvoiceId,
+      issuance: submissionState.issuance,
+      prisma: input.prisma,
+    });
+
+    if (claimState.kind === "skip") {
+      continue;
+    }
+
+    try {
+      await submitAndPersistHostedRevnetIssuance({
+        issuance: claimState.issuance,
+        prisma: input.prisma,
+      });
+      submittedIssuanceIds.push(claimState.issuance.id);
+    } catch (error) {
+      if (
+        isHostedOnboardingError(error) &&
+        error.code === REVNET_ISSUANCE_RECORDING_FAILED_CODE
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  return submittedIssuanceIds;
 }
 
 function buildHostedRevnetPaymentMemo(issuanceId: string): string {

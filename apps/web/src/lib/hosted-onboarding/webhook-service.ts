@@ -8,7 +8,7 @@ import {
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import {
-  requireHostedOnboardingStripeClient,
+  requireHostedStripeWebhookVerificationConfig,
 } from "./runtime";
 import { recordHostedStripeEvent } from "./stripe-event-queue";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
@@ -21,10 +21,13 @@ import {
   planHostedOnboardingTelegramWebhook,
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
-import {
-  type HostedStripeWebhookResponse,
-} from "./webhook-provider-stripe";
 import { createHostedWebhookReceiptHandlers } from "./webhook-transport";
+
+export type HostedStripeWebhookResponse = {
+  duplicate?: boolean;
+  ok: true;
+  type: string;
+};
 
 export async function handleHostedOnboardingLinqWebhook(input: {
   rawBody: string;
@@ -101,7 +104,7 @@ export async function handleHostedStripeWebhook(input: {
   prisma?: PrismaClient;
 }): Promise<HostedStripeWebhookResponse> {
   const prisma = input.prisma ?? getPrisma();
-  const { stripe, webhookSecret } = requireHostedOnboardingStripeClient();
+  const { stripe, webhookSecret } = requireHostedStripeWebhookVerificationConfig();
 
   if (!webhookSecret) {
     throw hostedOnboardingError({
@@ -141,7 +144,7 @@ export async function handleHostedStripeWebhook(input: {
 function constructStripeWebhookEvent(input: {
   rawBody: string;
   signature: string;
-  stripe: ReturnType<typeof requireHostedOnboardingStripeClient>["stripe"];
+  stripe: ReturnType<typeof requireHostedStripeWebhookVerificationConfig>["stripe"];
   webhookSecret: string;
 }): Stripe.Event {
   try {

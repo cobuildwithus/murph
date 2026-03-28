@@ -1,5 +1,6 @@
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { normalizeNullableString, parseInteger } from "../device-sync/shared";
+import { readLinqEnvironment } from "../linq/env";
 
 export interface HostedOnboardingEnvironment {
   encryptionKey: Buffer;
@@ -29,7 +30,6 @@ export interface HostedOnboardingEnvironment {
   telegramWebhookSecret: string | null;
 }
 
-const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
 type HostedOnboardingEnvSource = Readonly<Record<string, string | undefined>>;
 
 export function readHostedOnboardingEnvironment(
@@ -48,6 +48,7 @@ export function readHostedOnboardingEnvironment(
   const stripeBillingMode = readBillingMode(
     readEnv(source, ["HOSTED_ONBOARDING_STRIPE_BILLING_MODE"]),
   );
+  const linq = readLinqEnvironment(source as NodeJS.ProcessEnv);
   const revnet = readHostedRevnetEnvironment(source);
 
   if (revnet.enabled && stripeBillingMode !== "subscription") {
@@ -65,11 +66,9 @@ export function readHostedOnboardingEnvironment(
       "HOSTED_ONBOARDING_INVITE_TTL_HOURS",
     ),
     isProduction: (source.NODE_ENV ?? "development") === "production",
-    linqApiBaseUrl: normalizeBaseUrl(
-      readEnv(source, ["LINQ_API_BASE_URL"]),
-    ) ?? DEFAULT_LINQ_API_BASE_URL,
-    linqApiToken: readEnv(source, ["LINQ_API_TOKEN"]),
-    linqWebhookSecret: readEnv(source, ["LINQ_WEBHOOK_SECRET"]),
+    linqApiBaseUrl: linq.apiBaseUrl,
+    linqApiToken: linq.apiToken,
+    linqWebhookSecret: linq.webhookSecret,
     privyAppId: readEnv(source, ["NEXT_PUBLIC_PRIVY_APP_ID"]),
     privyVerificationKey: readEnv(source, ["PRIVY_VERIFICATION_KEY"]),
     publicBaseUrl,

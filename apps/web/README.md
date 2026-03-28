@@ -130,7 +130,9 @@ pnpm --dir apps/web prisma:migrate:deploy
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
 - `pnpm --dir apps/web test` now includes a cold-boot `next dev` smoke that boots under `apps/web/.next-smoke`, waits for the hosted app to boot, and then repeats `GET /`, `HEAD /`, and `GET /` before the production build step so smoke never deletes the interactive `apps/web/.next-dev` cache.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
-- Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`. Production deployments need `CRON_SECRET` set so Vercel's cron `Authorization: Bearer ...` header can authenticate that route.
+- Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`.
+- Hosted Stripe reconciliation is wired through the same `apps/web/vercel.json` file as a 1-minute Vercel cron targeting `/api/internal/hosted-onboarding/stripe/cron`.
+- Production deployments need `CRON_SECRET` set so Vercel's cron `Authorization: Bearer ...` header can authenticate both internal cron routes.
 
 ## Main routes
 
@@ -198,18 +200,22 @@ The onboarding lane is intentionally thin:
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres
 - Privy handles phone OTP, auto-creates the embedded wallet for users who do not already have one, the browser gates continuation off Privy's SDK user state instead of parsing JWTs itself, and the backend locally verifies the Privy identity token from the `privy-id-token` cookie before creating the hosted session cookie
-- checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari
-- optional hosted RevNet issuance can submit an inline onchain payment from `invoice.paid` after Stripe succeeds, using invoice-level Postgres idempotency plus stored tx hashes to prevent duplicate issuance
+- checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, but the hosted app now reuses one open checkout attempt per member and sends Stripe idempotency keys for customer/session creation so retries do not mint parallel customers or subscriptions
+- Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then the hosted Stripe reconciler applies billing state, checkout completion/expiry, and optional RevNet work out of band instead of doing expensive API or chain work inline in the webhook request
+- in subscription mode, `invoice.paid` is now the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` just completes the local checkout attempt plus attaches Stripe ids
+- optional hosted RevNet issuance can submit an onchain payment during queued Stripe reconciliation after `invoice.paid`, using invoice-level Postgres idempotency plus stored tx hashes to prevent duplicate issuance and failing closed for operator repair if a tx broadcast succeeds but the write-back does not
 - a bootstrap secret is generated and encrypted at rest now, leaving vault/key-management work for the next step
 - hosted share links can now store an encrypted one-time share pack for foods, recipes, and supplement/protocol records, optionally issuing or reusing a phone-bound invite so `/join/:inviteCode?share=...` can import the shared bundle after activation
 - once a member is active, hosted onboarding, hosted share acceptance, and hosted device-sync wakes write signed internal execution intents to the shared Postgres `execution_outbox` in the same transaction as their control-plane state changes instead of synchronously depending on `apps/cloudflare`
 - a best-effort drain still runs after commit, but Cloudflare delivery retries and dedupe now converge through the outbox row instead of request/response coupling
-- hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, while hosted execution side effects are marked sent once their outbox row is durable so a retried webhook only redrains still-pending non-outbox effects
-- the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq replies use the webhook receipt side-effect journal, and inline RevNet issuance uses invoice-owned idempotency state
+- hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
+- the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, queued Stripe facts use the hosted Stripe event reconciler, and RevNet issuance uses invoice-owned idempotency state
+- Stripe customer/subscription/invoice entitlement writes now carry a latest-applied billing event marker so out-of-order webhook delivery cannot regress a later cancellation, pause, or unpaid state back to active
+- subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access by suspending the member and revoking live hosted sessions until manual recovery or a newer fresh Stripe success event restores entitlement
 
 Current RevNet MVP assumptions:
 
 - RevNet issuance is only enabled when `HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription`.
 - The configured treasury key must already control a wallet funded on the target chain.
-- The Stripe webhook waits for the configured number of confirmations before dispatching member activation.
+- Stripe webhook ingress no longer activates access inline; the queued reconciler may submit RevNet from `invoice.paid`, and RevNet-backed subscription activation now waits for confirmed issuance rather than raw `invoice.paid`.
 - Chargebacks, disputes, and refunds are not clawed back onchain in this MVP; instead the Stripe webhook suspends hosted access, revokes live hosted sessions, and halts future activation or RevNet issuance until manual review.

@@ -7,6 +7,7 @@ export type {
   HostedWebhookPlan,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptHandlers,
+  HostedWebhookReceiptPersistenceClient,
   HostedWebhookReceiptState,
   HostedWebhookSideEffect,
   HostedWebhookSideEffectResult,

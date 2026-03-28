@@ -1,6 +1,5 @@
 import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
 import {
-  HostedBillingCheckoutStatus,
   HostedBillingMode,
   HostedBillingStatus,
   HostedMemberStatus,
@@ -20,10 +19,15 @@ import {
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 import {
+  createHostedBillingAttempt,
+  findOpenHostedBillingAttempt,
+  supersedeOpenHostedBillingAttempts,
+} from "./billing-attempts";
+import {
   requireHostedOnboardingPublicBaseUrl,
-  requireHostedOnboardingStripeConfig,
+  requireHostedStripeCheckoutConfig,
 } from "./runtime";
-import { generateHostedCheckoutId, normalizeNullableString } from "./shared";
+import { normalizeNullableString } from "./shared";
 import {
   buildStripeCancelUrl,
   buildStripeSuccessUrl,
@@ -82,7 +86,7 @@ export async function createHostedBillingCheckout(input: {
     linkedAccounts,
     requireWalletAddress: isHostedOnboardingRevnetEnabled(),
   });
-  const { billingMode, priceId, stripe } = requireHostedOnboardingStripeConfig();
+  const { billingMode, priceId, stripe } = requireHostedStripeCheckoutConfig();
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
   const customerId = await ensureHostedStripeCustomer({
     memberId: invite.member.id,
@@ -92,19 +96,12 @@ export async function createHostedBillingCheckout(input: {
     stripe,
   });
   const mode = billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription;
-  const reusableCheckout = typeof prisma.hostedBillingCheckout.findFirst === "function"
-    ? await prisma.hostedBillingCheckout.findFirst({
-      where: {
-        memberId: invite.member.id,
-        mode,
-        priceId,
-        status: HostedBillingCheckoutStatus.open,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    })
-    : null;
+  const reusableCheckout = await findOpenHostedBillingAttempt({
+    memberId: invite.member.id,
+    mode,
+    priceId,
+    prisma,
+  });
 
   if (reusableCheckout?.checkoutUrl) {
     await prisma.hostedMember.update({
@@ -188,19 +185,21 @@ export async function createHostedBillingCheckout(input: {
 
   try {
     await runHostedBillingCheckoutTransaction(prisma, async (transaction) => {
-      await transaction.hostedBillingCheckout.create({
-        data: {
-          id: generateHostedCheckoutId(),
-          memberId: invite.member.id,
-          inviteId: invite.id,
-          stripeCheckoutSessionId: checkoutSession.id,
-          stripeCustomerId: customerId,
-          stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
-          priceId,
-          mode,
-          status: HostedBillingCheckoutStatus.open,
-          checkoutUrl: checkoutSession.url,
-        },
+      await supersedeOpenHostedBillingAttempts({
+        inviteId: invite.id,
+        memberId: invite.member.id,
+        prisma: transaction,
+      });
+      await createHostedBillingAttempt({
+        checkoutUrl: checkoutSession.url!,
+        inviteId: invite.id,
+        memberId: invite.member.id,
+        mode,
+        priceId,
+        prisma: transaction,
+        stripeCheckoutSessionId: checkoutSession.id,
+        stripeCustomerId: customerId,
+        stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
       });
       await transaction.hostedMember.update({
         where: {
@@ -219,19 +218,12 @@ export async function createHostedBillingCheckout(input: {
       throw error;
     }
 
-    const concurrentOpenCheckout = typeof prisma.hostedBillingCheckout.findFirst === "function"
-      ? await prisma.hostedBillingCheckout.findFirst({
-        where: {
-          memberId: invite.member.id,
-          mode,
-          priceId,
-          status: HostedBillingCheckoutStatus.open,
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
-      })
-      : null;
+    const concurrentOpenCheckout = await findOpenHostedBillingAttempt({
+      memberId: invite.member.id,
+      mode,
+      priceId,
+      prisma,
+    });
 
     if (concurrentOpenCheckout?.checkoutUrl) {
       await prisma.hostedMember.update({

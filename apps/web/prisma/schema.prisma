@@ -168,6 +168,14 @@ enum HostedBillingCheckoutStatus {
   completed
   expired
   failed
+  superseded
+}
+
+enum HostedStripeEventStatus {
+  pending
+  processing
+  completed
+  failed
 }
 
 enum HostedRevnetIssuanceStatus {
@@ -202,6 +210,8 @@ model HostedMember {
   stripeCustomerId             String?             @unique @map("stripe_customer_id")
   stripeSubscriptionId         String?             @unique @map("stripe_subscription_id")
   stripeLatestCheckoutSessionId String?            @map("stripe_latest_checkout_session_id")
+  stripeLatestBillingEventCreatedAt DateTime?      @map("stripe_latest_billing_event_created_at")
+  stripeLatestBillingEventId  String?              @map("stripe_latest_billing_event_id")
   linqChatId                   String?             @map("linq_chat_id")
   telegramUserId               String?             @unique @map("telegram_user_id")
   telegramUsername             String?             @map("telegram_username")
@@ -282,6 +292,7 @@ model HostedBillingCheckout {
   createdAt               DateTime                    @default(now()) @map("created_at")
   completedAt             DateTime?                   @map("completed_at")
   expiredAt               DateTime?                   @map("expired_at")
+  supersededAt            DateTime?                   @map("superseded_at")
   member                  HostedMember                @relation(fields: [memberId], references: [id], onDelete: Cascade)
   invite                  HostedInvite?               @relation(fields: [inviteId], references: [id], onDelete: SetNull)
 
@@ -290,6 +301,36 @@ model HostedBillingCheckout {
   @@index([stripeCustomerId])
   @@index([stripeSubscriptionId])
   @@map("hosted_billing_checkout")
+}
+
+model HostedStripeEvent {
+  eventId             String                 @id @map("event_id")
+  type                String
+  stripeCreatedAt     DateTime               @map("stripe_created_at")
+  receivedAt          DateTime               @map("received_at")
+  status              HostedStripeEventStatus @default(pending)
+  attemptCount        Int                    @default(0) @map("attempt_count")
+  claimExpiresAt      DateTime?              @map("claim_expires_at")
+  processedAt         DateTime?              @map("processed_at")
+  lastErrorCode       String?                @map("last_error_code")
+  lastErrorMessage    String?                @map("last_error_message")
+  customerId          String?                @map("customer_id")
+  subscriptionId      String?                @map("subscription_id")
+  invoiceId           String?                @map("invoice_id")
+  checkoutSessionId   String?                @map("checkout_session_id")
+  chargeId            String?                @map("charge_id")
+  paymentIntentId     String?                @map("payment_intent_id")
+  payloadJson         Json                   @map("payload_json")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+
+  @@index([status, stripeCreatedAt, createdAt])
+  @@index([claimExpiresAt])
+  @@index([customerId, stripeCreatedAt])
+  @@index([subscriptionId, stripeCreatedAt])
+  @@index([invoiceId, stripeCreatedAt])
+  @@index([checkoutSessionId, stripeCreatedAt])
+  @@map("hosted_stripe_event")
 }
 
 model HostedRevnetIssuance {
@@ -352,8 +393,10 @@ model HostedWebhookReceipt {
   source          String
   eventId         String   @map("event_id")
   firstReceivedAt DateTime @map("first_received_at")
+  claimExpiresAt  DateTime? @map("claim_expires_at")
   payloadJson     Json?    @map("payload_json")
   createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@id([source, eventId])
   @@index([firstReceivedAt])
