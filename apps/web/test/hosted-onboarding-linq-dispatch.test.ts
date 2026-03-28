@@ -355,6 +355,56 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid message.received timestamps before journaling or side effects", async () => {
+    const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
+    const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const hostedMemberFindUnique = vi.fn().mockResolvedValue(null);
+    const prisma = {
+      hostedWebhookReceipt: {
+        create: hostedWebhookReceiptCreate,
+        updateMany: hostedWebhookReceiptUpdateMany,
+      },
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+    } as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: "msg_123",
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+          recipient_phone: "+15550000000",
+          received_at: "not-a-timestamp",
+          service: "sms",
+        },
+        event_id: "evt_invalid_received_at",
+        event_type: "message.received",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("received_at must be a valid timestamp");
+
+    expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
+    expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("prefers received_at when building active-member dispatch metadata", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
     const transactionClient = {

@@ -78,7 +78,7 @@ export function parseLinqWebhookEvent(rawBody: Buffer | Uint8Array | ArrayBuffer
   const eventType = normalizeRequiredString(record.event_type, 'Linq webhook event_type')
 
   return {
-    api_version: apiVersion as LinqWebhookEvent['api_version'],
+    api_version: apiVersion,
     event_id: eventId,
     created_at: createdAt,
     event_type: eventType,

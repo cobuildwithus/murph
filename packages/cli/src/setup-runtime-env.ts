@@ -11,6 +11,7 @@ import {
 const TELEGRAM_TOKEN_KEYS = ['TELEGRAM_BOT_TOKEN'] as const
 const EMAIL_API_KEY_KEYS = ['AGENTMAIL_API_KEY'] as const
 const LINQ_TOKEN_KEYS = ['LINQ_API_TOKEN'] as const
+const LINQ_WEBHOOK_SECRET_KEYS = ['LINQ_WEBHOOK_SECRET'] as const
 const WHOOP_CLIENT_ID_KEYS = ['WHOOP_CLIENT_ID'] as const
 const WHOOP_CLIENT_SECRET_KEYS = ['WHOOP_CLIENT_SECRET'] as const
 const WHOOP_CLIENT_KEY_GROUPS = [WHOOP_CLIENT_ID_KEYS, WHOOP_CLIENT_SECRET_KEYS] as const
@@ -94,7 +95,10 @@ export function resolveSetupChannelMissingEnv(
         ? []
         : [TELEGRAM_TOKEN_KEYS[0]]
     case 'linq':
-      return hasAnyEnv(env, LINQ_TOKEN_KEYS) ? [] : [LINQ_TOKEN_KEYS[0]]
+      return [
+        ...(hasAnyEnv(env, LINQ_TOKEN_KEYS) ? [] : [LINQ_TOKEN_KEYS[0]]),
+        ...(hasAnyEnv(env, LINQ_WEBHOOK_SECRET_KEYS) ? [] : [LINQ_WEBHOOK_SECRET_KEYS[0]]),
+      ]
     case 'email':
       return hasAnyEnv(env, EMAIL_API_KEY_KEYS)
         ? []
@@ -157,14 +161,14 @@ export function describeSetupChannelStatus(
         ? {
             badge: 'ready',
             detail:
-              'Linq API token is available for inbound webhook verification and outbound chat delivery in the current environment.',
+              'Linq API token and webhook secret are available for local webhook verification and outbound chat delivery in the current environment.',
             missingEnv,
             ready: true,
           }
         : {
-            badge: 'needs token',
+            badge: 'needs env',
             detail:
-              'Add LINQ_API_TOKEN to the current environment to enable the Linq channel.',
+              'Add LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET to the current environment to enable the Linq channel.',
             missingEnv,
             ready: false,
           }

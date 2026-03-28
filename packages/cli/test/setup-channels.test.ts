@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { test, vi } from 'vitest'
 import { readAssistantAutomationState } from '../src/assistant-state.js'
 import { createSetupAgentmailSelectionResolver } from '../src/setup-agentmail.js'
 import { configureSetupChannels } from '../src/setup-services/channels.js'
@@ -263,6 +263,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
       dryRun: false,
       env: {
         LINQ_API_TOKEN: 'linq-token',
+        LINQ_WEBHOOK_SECRET: 'linq-secret',
       },
       inboxServices: {
         async bootstrap() {
@@ -339,6 +340,52 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, ['linq'])
     assert.deepEqual(automationState.preferredChannels, ['linq'])
+  } finally {
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test('configureSetupChannels leaves Linq unconfigured until both the API token and webhook secret are present', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-linq-missing-secret-'))
+
+  try {
+    const doctor = vi.fn()
+    const sourceAdd = vi.fn()
+    const configured = await configureSetupChannels({
+      channels: ['linq'],
+      dryRun: false,
+      env: {
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      inboxServices: {
+        async bootstrap() {
+          throw new Error('bootstrap should not be called in this test')
+        },
+        doctor,
+        sourceAdd,
+        async sourceList() {
+          return {
+            vault,
+            configPath: '.runtime/inboxd/config.json',
+            connectors: [],
+          }
+        },
+      },
+      requestId: null,
+      steps: [],
+      vault,
+    })
+
+    assert.equal(configured[0]?.channel, 'linq')
+    assert.equal(configured[0]?.configured, false)
+    assert.equal(configured[0]?.autoReply, false)
+    assert.deepEqual(configured[0]?.missingEnv, ['LINQ_WEBHOOK_SECRET'])
+    assert.match(configured[0]?.detail ?? '', /LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET/u)
+    assert.equal(doctor.mock.calls.length, 0)
+    assert.equal(sourceAdd.mock.calls.length, 0)
+
+    const automationState = await readAssistantAutomationState(vault)
+    assert.deepEqual(automationState.autoReplyChannels, [])
   } finally {
     await rm(vault, { recursive: true, force: true })
   }

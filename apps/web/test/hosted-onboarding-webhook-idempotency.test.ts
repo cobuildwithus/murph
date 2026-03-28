@@ -711,9 +711,18 @@ describe("hosted onboarding webhook retry safety", () => {
     );
   });
 
-  it("allows a Linq invite reply webhook to retry after a Linq send failure", async () => {
+  it("allows a Linq invite reply webhook to retry after a retryable Linq 429 send failure", async () => {
+    const retryableRateLimitError = Object.assign(
+      new Error("Linq outbound reply failed with HTTP 429."),
+      {
+        code: "LINQ_SEND_FAILED",
+        httpStatus: 502,
+        name: "HostedOnboardingError",
+        retryable: true,
+      },
+    );
     mocks.sendHostedLinqChatMessage
-      .mockRejectedValueOnce(new Error("linq unavailable"))
+      .mockRejectedValueOnce(retryableRateLimitError)
       .mockResolvedValueOnce({
         chatId: "chat_123",
         messageId: "out_msg_123",
@@ -783,8 +792,10 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).rejects.toMatchObject({
-      message: "linq unavailable",
-      name: "Error",
+      code: "LINQ_SEND_FAILED",
+      message: "Linq outbound reply failed with HTTP 429.",
+      name: "HostedOnboardingError",
+      retryable: true,
     });
 
     const firstAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
@@ -831,8 +842,8 @@ describe("hosted onboarding webhook retry safety", () => {
             },
             lastError: {
               code: null,
-              message: "linq unavailable",
-              name: "Error",
+              message: "Linq outbound reply failed with HTTP 429.",
+              name: "HostedOnboardingError",
               retryable: null,
             },
             lastReceivedAt: expect.any(String),
@@ -849,9 +860,9 @@ describe("hosted onboarding webhook retry safety", () => {
                 lastAttemptAt: expect.any(String),
                 lastError: {
                   code: null,
-                  message: "linq unavailable",
-                  name: "Error",
-                  retryable: null,
+                  message: "Linq outbound reply failed with HTTP 429.",
+                  name: "HostedOnboardingError",
+                  retryable: true,
                 },
                 message: expect.any(String),
                 replyToMessageId: "msg_123",

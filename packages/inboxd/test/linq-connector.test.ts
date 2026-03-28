@@ -314,6 +314,105 @@ test("createLinqWebhookConnector still accepts a webhook when attachment downloa
   }
 });
 
+test("createLinqWebhookConnector waits for successful attachment downloads that resolve within the timeout", async () => {
+  const port = await reservePort();
+  const controller = new AbortController();
+  const emitted: InboundCapture[] = [];
+  let resolveDownload: ((response: Response) => void) | null = null;
+  let downloadStarted = false;
+  let emitCalled = false;
+
+  const connector = createLinqWebhookConnector({
+    accountId: "default",
+    host: "127.0.0.1",
+    path: "/hooks/linq",
+    port,
+    webhookSecret: "secret-123",
+    attachmentDownloadTimeoutMs: 100,
+    fetchImplementation: vi.fn(async (_url, _init) => {
+      downloadStarted = true;
+      return await new Promise<Response>((resolve) => {
+        resolveDownload = resolve;
+      });
+    }),
+  });
+
+  const watchPromise = connector.watch(
+    null,
+    async (capture) => {
+      emitCalled = true;
+      emitted.push(capture);
+      return createPersistedCapture(capture);
+    },
+    controller.signal,
+  );
+
+  try {
+    const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
+    await waitForWebhookListener(listenerUrl);
+
+    const payload = JSON.stringify({
+      api_version: "v3",
+      event_id: "evt_delayed_download",
+      created_at: "2026-03-24T11:00:05.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_delayed_download",
+        from: "+15550001111",
+        recipient_phone: "+15559990000",
+        received_at: "2026-03-24T11:00:00.000Z",
+        is_from_me: false,
+        service: "iMessage",
+        message: {
+          id: "msg_delayed_download",
+          parts: [
+            {
+              type: "media",
+              url: "https://cdn.example.test/att_2.pdf",
+              attachment_id: "att_2",
+              filename: "summary.pdf",
+              mime_type: "application/pdf",
+            },
+          ],
+        },
+      },
+    });
+    const timestamp = "1711278000";
+    const responsePromise = fetch(listenerUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+        "x-webhook-timestamp": timestamp,
+      },
+      body: payload,
+    });
+
+    await vi.waitFor(() => {
+      assert.equal(downloadStarted, true);
+    });
+    await delay(25);
+    assert.equal(emitCalled, false);
+
+    resolveDownload?.({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      text: async () => "",
+      arrayBuffer: async () => Uint8Array.from([4, 3, 2, 1]).buffer,
+    } as Response);
+
+    const response = await responsePromise;
+    assert.equal(response.status, 202);
+    assert.equal(emitted.length, 1);
+    assert.deepEqual(Array.from(emitted[0]?.attachments[0]?.data ?? []), [4, 3, 2, 1]);
+  } finally {
+    controller.abort();
+    await watchPromise;
+    await connector.close?.();
+  }
+});
+
 test("createLinqWebhookConnector acknowledges webhooks promptly even when attachment downloads hang", async () => {
   const port = await reservePort();
   const controller = new AbortController();

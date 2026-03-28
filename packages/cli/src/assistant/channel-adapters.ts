@@ -27,6 +27,7 @@ import {
 } from '../telegram-runtime.ts'
 import {
   resolveLinqApiToken,
+  resolveLinqWebhookSecret,
   sendLinqChatMessage,
   type LinqFetch,
 } from '../linq-runtime.ts'
@@ -80,8 +81,13 @@ interface LinqRuntimeDependencies {
 }
 
 export interface AssistantChannelDependencies {
-  sendImessage?: (input: { message: string; target: string }) => Promise<void>
+  sendImessage?: (input: {
+    idempotencyKey?: string | null
+    message: string
+    target: string
+  }) => Promise<void>
   sendTelegram?: (input: {
+    idempotencyKey?: string | null
     message: string
     target: string
   }) => Promise<
@@ -90,8 +96,14 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
-  sendLinq?: (input: { message: string; replyToMessageId?: string | null; target: string }) => Promise<void>
+  sendLinq?: (input: {
+    idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  }) => Promise<void>
   sendEmail?: (input: {
+    idempotencyKey?: string | null
     identityId: string | null
     message: string
     target: string
@@ -118,9 +130,11 @@ export interface AssistantChannelAdapter {
     deliveryTarget?: string | null
   }) => AssistantBindingDelivery | null
   isReadyForSetup: (env: NodeJS.ProcessEnv) => boolean
+  supportsIdempotencyKey: boolean
   send: (input: {
     bindingDelivery: AssistantBindingDelivery | null
     explicitTarget: string | null
+    idempotencyKey?: string | null
     identityId: string | null
     message: string
     replyToMessageId?: string | null
@@ -136,9 +150,11 @@ interface AssistantChannelAdapterSpec {
   channel: AssistantChannelName
   inferBindingDelivery: AssistantChannelAdapter['inferBindingDelivery']
   isReadyForSetup: AssistantChannelAdapter['isReadyForSetup']
+  supportsIdempotencyKey: boolean
   sendMessage: (input: {
     candidate: AssistantDeliveryCandidate
     dependencies: AssistantChannelDependencies
+    idempotencyKey?: string | null
     identityId: string | null
     message: string
     replyToMessageId?: string | null
@@ -251,6 +267,7 @@ export function resolveImessageDeliveryCandidates(input: {
 
 export async function sendImessageMessage(
   input: {
+    idempotencyKey?: string | null
     message: string
     target: string
   },
@@ -285,6 +302,7 @@ export async function sendImessageMessage(
 
 export async function sendTelegramMessage(
   input: {
+    idempotencyKey?: string | null
     message: string
     target: string
   },
@@ -295,6 +313,7 @@ export async function sendTelegramMessage(
 
 export async function sendLinqMessage(
   input: {
+    idempotencyKey?: string | null
     message: string
     replyToMessageId?: string | null
     target: string
@@ -325,6 +344,7 @@ export async function sendLinqMessage(
 
 async function sendTelegramMessageDetailed(
   input: {
+    idempotencyKey?: string | null
     message: string
     target: string
   },
@@ -378,6 +398,7 @@ async function sendTelegramMessageDetailed(
 
 export async function sendEmailMessage(
   input: {
+    idempotencyKey?: string | null
     identityId: string
     message: string
     target: string
@@ -455,11 +476,13 @@ const IMESSAGE_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   isReadyForSetup() {
     return true
   },
+  supportsIdempotencyKey: false,
   targetRequiredMessage:
     'iMessage delivery requires an explicit target or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, message }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, message }) {
     const send = dependencies.sendImessage ?? sendImessageMessage
     await send({
+      idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       message,
     })
@@ -481,11 +504,13 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   isReadyForSetup(env) {
     return resolveTelegramBotToken(env) !== null
   },
+  supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, message }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, message }) {
     const send = dependencies.sendTelegram ?? sendTelegramMessage
     const delivered = await send({
+      idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       message,
     })
@@ -508,13 +533,15 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     })
   },
   isReadyForSetup(env) {
-    return resolveLinqApiToken(env) !== null
+    return resolveLinqApiToken(env) !== null && resolveLinqWebhookSecret(env) !== null
   },
+  supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Linq delivery requires an explicit chat id or a stored thread binding.',
-  async sendMessage({ candidate, dependencies, message, replyToMessageId }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
     await send({
+      idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       message,
       replyToMessageId: replyToMessageId ?? null,
@@ -537,9 +564,10 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   isReadyForSetup(env) {
     return resolveAgentmailApiKey(env) !== null
   },
+  supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, identityId, message }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message }) {
     const send = dependencies.sendEmail ?? sendEmailMessage
     if (!identityId && !dependencies.sendEmail) {
       throw new VaultCliError(
@@ -548,6 +576,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       )
     }
     const delivered = await send({
+      idempotencyKey: idempotencyKey ?? null,
       identityId: identityId!,
       target: candidate.target,
       targetKind: candidate.kind,
@@ -911,14 +940,17 @@ function createAssistantChannelAdapter(
     canAutoReply: spec.canAutoReply,
     inferBindingDelivery: spec.inferBindingDelivery,
     isReadyForSetup: spec.isReadyForSetup,
+    supportsIdempotencyKey: spec.supportsIdempotencyKey,
     async send(input, dependencies) {
       const candidate = resolveRequiredDeliveryCandidate(
         input,
         spec.targetRequiredMessage,
       )
+      const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
       const delivered = await spec.sendMessage({
         candidate,
         dependencies,
+        idempotencyKey,
         identityId: normalizeOptionalText(input.identityId),
         message: input.message,
         replyToMessageId: normalizeOptionalText(input.replyToMessageId),
@@ -926,6 +958,7 @@ function createAssistantChannelAdapter(
 
       return assistantChannelDeliverySchema.parse({
         channel: spec.channel,
+        idempotencyKey,
         target: readDeliveredTarget(delivered) ?? candidate.target,
         targetKind: candidate.kind,
         sentAt: new Date().toISOString(),
