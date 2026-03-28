@@ -116,6 +116,7 @@ export type {
 } from "./connectors/linq/connector.ts";
 export {
   normalizeLinqWebhookEvent,
+  parseCanonicalLinqMessageReceivedEvent,
   requireLinqMessageReceivedEvent,
   toLinqChatMessage,
 } from "./connectors/linq/normalize.ts";

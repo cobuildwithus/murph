@@ -113,6 +113,64 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       }),
     ]);
   });
+
+  it("returns the preferred canonical row when the same user has legacy and canonical duplicates", async () => {
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          findMany: vi.fn().mockResolvedValue([
+            createBindingRecord({
+              id: "linqb_legacy",
+              label: "Legacy",
+              recipientPhone: "15557654321",
+              userId: "user-123",
+            }),
+            createBindingRecord({
+              id: "linqb_canonical",
+              label: "Canonical",
+              recipientPhone: "+15557654321",
+              userId: "user-123",
+            }),
+          ]),
+        },
+      } as never,
+    });
+
+    await expect(store.getBindingByRecipientPhone("+1 (555) 765-4321")).resolves.toEqual(
+      expect.objectContaining({
+        id: "linqb_canonical",
+        label: "Canonical",
+        recipientPhone: "+15557654321",
+        userId: "user-123",
+      }),
+    );
+  });
+
+  it("rejects read-path conflicts when canonicalized duplicates belong to different users", async () => {
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          findMany: vi.fn().mockResolvedValue([
+            createBindingRecord({
+              id: "linqb_legacy_user_a",
+              recipientPhone: "15557654321",
+              userId: "user-123",
+            }),
+            createBindingRecord({
+              id: "linqb_canonical_user_b",
+              recipientPhone: "+15557654321",
+              userId: "user-999",
+            }),
+          ]),
+        },
+      } as never,
+    });
+
+    await expect(store.getBindingByRecipientPhone("+15557654321")).rejects.toMatchObject({
+      code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
+      httpStatus: 409,
+    });
+  });
 });
 
 function createBindingRecord(input: {
