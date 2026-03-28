@@ -1420,6 +1420,279 @@ test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture
   assert.deepEqual(stateProgress, [])
 })
 
+test('scanAssistantAutomationOnce preserves other enabled channels while draining email backlog', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-backlog-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-email-backlog',
+      response: 'email backlog reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'chat-imessage',
+      response: 'imessage reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => {
+    const channel = input.channel ?? input.session?.binding?.channel
+    const actorId = input.actorId ?? input.session?.binding?.actorId
+    const threadId = input.threadId ?? input.session?.binding?.threadId
+    const threadIsDirect =
+      input.threadIsDirect ?? input.session?.binding?.threadIsDirect ?? true
+
+    return {
+      message: input.message,
+      session: {
+        schema: 'murph.assistant-session.v2',
+        sessionId: input.sessionId,
+        provider: 'codex-cli',
+        providerSessionId: threadId,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+        alias: null,
+        binding: {
+          conversationKey: `channel:${channel}|thread:${threadId}`,
+          channel,
+          identityId: null,
+          actorId,
+          threadId,
+          threadIsDirect,
+          delivery: {
+            kind: channel === 'imessage' ? 'participant' : 'thread',
+            target: actorId,
+          },
+        },
+        createdAt: '2026-03-18T00:00:00.000Z',
+        updatedAt: '2026-03-18T00:00:01.000Z',
+        lastTurnAt: '2026-03-18T00:00:01.000Z',
+        turnCount: 1,
+      },
+      delivery: {
+        channel,
+        target: actorId,
+        targetKind: channel === 'imessage' ? 'participant' : 'thread',
+        sentAt:
+          channel === 'imessage'
+            ? '2026-03-18T09:05:30.000Z'
+            : '2026-03-18T09:00:30.000Z',
+        messageLength: input.message.length,
+      },
+    }
+  })
+
+  const emailBacklogCapture = {
+    captureId: 'cap-email-backlog',
+    source: 'email',
+    accountId: 'self',
+    externalId: 'ext-email-backlog',
+    threadId: 'thread-email-backlog',
+    threadTitle: 'Backlog thread',
+    actorId: 'backlog@example.com',
+    actorName: 'Backlog User',
+    actorIsSelf: false,
+    occurredAt: '2026-03-18T09:00:00Z',
+    receivedAt: null,
+    text: 'Please follow up on this older email.',
+    attachmentCount: 0,
+    envelopePath: 'raw/inbox/email-backlog.json',
+    eventId: 'evt-email-backlog',
+    promotions: [],
+  }
+  const imessageCapture = {
+    captureId: 'cap-imessage-new',
+    source: 'imessage',
+    accountId: 'self',
+    externalId: 'ext-imessage-new',
+    threadId: 'chat-imessage',
+    threadTitle: null,
+    actorId: '+15550001111',
+    actorName: 'New Texter',
+    actorIsSelf: false,
+    occurredAt: '2026-03-18T09:05:00Z',
+    receivedAt: null,
+    text: 'Can you answer this after the email backlog?',
+    attachmentCount: 0,
+    envelopePath: 'raw/inbox/imessage-new.json',
+    eventId: 'evt-imessage-new',
+    promotions: [],
+  }
+
+  let state: Parameters<typeof scanAssistantAutomationOnce>[0]['state'] = {
+    inboxScanCursor: null,
+    autoReplyScanCursor: null,
+    autoReplyChannels: ['email', 'imessage'],
+    autoReplyBacklogChannels: ['email'],
+    autoReplyPrimed: false,
+  }
+  const stateProgress: Array<{
+    autoReplyBacklogChannels: string[]
+    autoReplyPrimed: boolean
+    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
+  }> = []
+
+  const inboxServices = {
+    async list(input: any) {
+      if (input.afterCaptureId === 'cap-email-backlog') {
+        return {
+          items: [imessageCapture],
+        }
+      }
+
+      return {
+        items: [emailBacklogCapture, imessageCapture],
+      }
+    },
+    async show(input: any) {
+      if (input.captureId === emailBacklogCapture.captureId) {
+        return {
+          capture: {
+            captureId: emailBacklogCapture.captureId,
+            source: 'email',
+            threadTitle: 'Backlog thread',
+            threadId: 'thread-email-backlog',
+            threadIsDirect: true,
+            actorId: 'backlog@example.com',
+            actorName: 'Backlog User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            text: 'Please follow up on this older email.',
+            attachments: [],
+          },
+        }
+      }
+
+      assert.equal(input.captureId, imessageCapture.captureId)
+      return {
+        capture: {
+          captureId: imessageCapture.captureId,
+          source: 'imessage',
+          threadTitle: null,
+          threadId: 'chat-imessage',
+          threadIsDirect: true,
+          actorId: '+15550001111',
+          actorName: 'New Texter',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:05:00Z',
+          text: 'Can you answer this after the email backlog?',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  async function runScan() {
+    return scanAssistantAutomationOnce({
+      inboxServices,
+      state,
+      vault: vaultRoot,
+      async onStateProgress(next) {
+        state = {
+          ...state,
+          ...next,
+        }
+        stateProgress.push({
+          autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
+          autoReplyPrimed: next.autoReplyPrimed,
+          autoReplyScanCursor: next.autoReplyScanCursor,
+        })
+      },
+    })
+  }
+
+  const first = await runScan()
+  assert.deepEqual(first.routing, {
+    considered: 0,
+    failed: 0,
+    noAction: 0,
+    routed: 0,
+    skipped: 0,
+  })
+  assert.equal(first.replies.failed, 0)
+  assert.equal(first.replies.replied, 1)
+  assert.equal(
+    first.replies.considered,
+    first.replies.replied + first.replies.skipped,
+  )
+  assert.equal(first.replies.considered >= 1, true)
+  assert.deepEqual(stateProgress[0], {
+    autoReplyBacklogChannels: ['email'],
+    autoReplyPrimed: true,
+    autoReplyScanCursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-email-backlog',
+    },
+  })
+
+  const second = await runScan()
+  assert.deepEqual(second, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 0,
+      failed: 0,
+      replied: 0,
+      skipped: 0,
+    },
+  })
+  assert.deepEqual(stateProgress[1], {
+    autoReplyBacklogChannels: [],
+    autoReplyPrimed: true,
+    autoReplyScanCursor: {
+      occurredAt: '2026-03-18T09:00:00Z',
+      captureId: 'cap-email-backlog',
+    },
+  })
+
+  const third = await runScan()
+  assert.deepEqual(third, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 1,
+      failed: 0,
+      replied: 1,
+      skipped: 0,
+    },
+  })
+  assert.deepEqual(stateProgress[2], {
+    autoReplyBacklogChannels: [],
+    autoReplyPrimed: true,
+    autoReplyScanCursor: {
+      occurredAt: '2026-03-18T09:05:00Z',
+      captureId: 'cap-imessage-new',
+    },
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
+})
+
 test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred groups and retries them before later captures', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-reply-defer-'))
   const vaultRoot = path.join(parent, 'vault')
