@@ -4,7 +4,7 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import {
   INBOX_DB_RELATIVE_PATH,
   SEARCH_DB_RELATIVE_PATH,
@@ -12,6 +12,8 @@ import {
 
 import {
   ID_FAMILY_REGISTRY,
+  buildOverviewMetrics,
+  buildOverviewWeeklyStats,
   buildExportPack,
   isQueryableLookupId,
   buildTimeline,
@@ -27,8 +29,12 @@ import {
   readVault,
   rebuildSqliteSearchIndex,
   searchVault,
+  searchVaultSafe,
   searchVaultRuntime,
+  summarizeCurrentOverviewProfile,
   summarizeDailySamples,
+  summarizeOverviewExperiments,
+  summarizeRecentOverviewJournals,
 } from "../src/index.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
@@ -803,6 +809,321 @@ test("searchVault includes sample rows when the caller scopes by sample record t
   assert.equal(result.hits[0]?.recordId, "smp_glucose_01");
   assert.equal(result.hits[0]?.recordType, "sample");
   assert.equal(result.hits[0]?.stream, "glucose");
+});
+
+test("overview selectors move cleanly onto the query read model", () => {
+  const vault = createEmptyReadModel();
+  const goal = createRecord({
+    id: "goal_sleep_01",
+    recordType: "goal",
+    sourcePath: "bank/goals/protect-sleep.md",
+    title: "Protect sleep consistency",
+  });
+  const currentProfile = createRecord({
+    id: "profile_current_01",
+    recordType: "current_profile",
+    sourcePath: "bank/profile/current.md",
+    occurredAt: "2026-03-12T14:00:00Z",
+    title: "Current Profile",
+    body: "# Current Profile\n- Sleep steadier and the evening routine is holding.",
+    data: {},
+  });
+  const latestSnapshot = createRecord({
+    id: "psnap_01",
+    recordType: "profile_snapshot",
+    sourcePath: "ledger/profile-snapshots/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T13:55:00Z",
+    data: {
+      profile: {
+        topGoalIds: ["goal_sleep_01"],
+      },
+    },
+  });
+  const journalNewer = createRecord({
+    id: "journal:2026-03-12",
+    recordType: "journal",
+    sourcePath: "journal/2026/2026-03-12.md",
+    date: "2026-03-12",
+    title: "March 12",
+    tags: ["recovery"],
+    body: "# March 12\nSteadier sleep after the lighter dinner.",
+  });
+  const journalOlder = createRecord({
+    id: "journal:2026-03-10",
+    recordType: "journal",
+    sourcePath: "journal/2026/2026-03-10.md",
+    date: "2026-03-10",
+    title: "March 10",
+    body: "Earlier note.",
+  });
+  const activeExperiment = createRecord({
+    id: "exp_sleep_reset_01",
+    recordType: "experiment",
+    sourcePath: "bank/experiments/sleep-reset.md",
+    occurredAt: "2026-03-01T00:00:00Z",
+    date: "2026-03-01",
+    experimentSlug: "sleep-reset",
+    title: "Sleep Reset",
+    status: "active",
+    tags: ["sleep"],
+    body: "# Sleep Reset\nTracking sleep consistency.",
+  });
+  const completedExperiment = createRecord({
+    id: "exp_completed_01",
+    recordType: "experiment",
+    sourcePath: "bank/experiments/completed.md",
+    occurredAt: "2026-03-15T00:00:00Z",
+    date: "2026-03-15",
+    experimentSlug: "completed",
+    title: "Completed Trial",
+    status: "completed",
+    body: "Finished and documented.",
+  });
+
+  vault.currentProfile = currentProfile;
+  vault.profileSnapshots = [latestSnapshot];
+  vault.goals = [goal];
+  vault.journalEntries = [journalOlder, journalNewer];
+  vault.experiments = [completedExperiment, activeExperiment];
+  vault.records = [
+    goal,
+    currentProfile,
+    latestSnapshot,
+    journalOlder,
+    journalNewer,
+    completedExperiment,
+    activeExperiment,
+  ];
+
+  assert.deepEqual(
+    buildOverviewMetrics(vault).map((metric) => [metric.label, metric.value]),
+    [
+      ["records", 7],
+      ["events", 0],
+      ["samples", 0],
+      ["journal days", 2],
+      ["experiments", 2],
+      ["registries", 1],
+    ],
+  );
+  assert.deepEqual(summarizeCurrentOverviewProfile(vault), {
+    id: "profile_current_01",
+    recordedAt: "2026-03-12T14:00:00Z",
+    summary: "Sleep steadier and the evening routine is holding.",
+    title: "Current Profile",
+    topGoals: [
+      {
+        id: "goal_sleep_01",
+        title: "Protect sleep consistency",
+      },
+    ],
+  });
+  assert.deepEqual(
+    summarizeRecentOverviewJournals(vault).map((entry) => ({
+      date: entry.date,
+      summary: entry.summary,
+      title: entry.title,
+    })),
+    [
+      {
+        date: "2026-03-12",
+        summary: "Steadier sleep after the lighter dinner.",
+        title: "March 12",
+      },
+      {
+        date: "2026-03-10",
+        summary: "Earlier note.",
+        title: "March 10",
+      },
+    ],
+  );
+  assert.deepEqual(
+    summarizeOverviewExperiments(vault).map((entry) => ({
+      status: entry.status,
+      title: entry.title,
+    })),
+    [
+      {
+        status: "active",
+        title: "Sleep Reset",
+      },
+      {
+        status: "completed",
+        title: "Completed Trial",
+      },
+    ],
+  );
+});
+
+test("buildOverviewWeeklyStats keeps same-stream units separate across timezone week windows", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-23T23:30:00.000Z"));
+
+  try {
+    const vault = createEmptyReadModel();
+    const currentHours = createSampleRecord({
+      id: "smp_sleep_hours_current",
+      occurredAt: "2026-03-23T21:00:00.000Z",
+      date: "2026-03-24",
+      stream: "sleep",
+      sourcePath: "ledger/samples/sleep/2026/2026-03.jsonl",
+      data: {
+        value: 8,
+        unit: "hrs",
+      },
+    });
+    const currentMinutes = createSampleRecord({
+      id: "smp_sleep_minutes_current",
+      occurredAt: "2026-03-23T22:00:00.000Z",
+      date: "2026-03-24",
+      stream: "sleep",
+      sourcePath: "ledger/samples/sleep/2026/2026-03.jsonl",
+      data: {
+        value: 480,
+        unit: "min",
+      },
+    });
+    const previousHours = createSampleRecord({
+      id: "smp_sleep_hours_previous",
+      occurredAt: "2026-03-16T21:00:00.000Z",
+      date: "2026-03-17",
+      stream: "sleep",
+      sourcePath: "ledger/samples/sleep/2026/2026-03.jsonl",
+      data: {
+        value: 7,
+        unit: "hrs",
+      },
+    });
+    const previousMinutes = createSampleRecord({
+      id: "smp_sleep_minutes_previous",
+      occurredAt: "2026-03-16T22:00:00.000Z",
+      date: "2026-03-17",
+      stream: "sleep",
+      sourcePath: "ledger/samples/sleep/2026/2026-03.jsonl",
+      data: {
+        value: 420,
+        unit: "min",
+      },
+    });
+
+    vault.samples = [
+      currentHours,
+      currentMinutes,
+      previousHours,
+      previousMinutes,
+    ];
+
+    assert.deepEqual(buildOverviewWeeklyStats(vault, "Australia/Melbourne"), [
+      {
+        currentWeekAvg: 8,
+        deltaPercent: ((8 - 7) / 7) * 100,
+        previousWeekAvg: 7,
+        stream: "sleep",
+        unit: "hrs",
+      },
+      {
+        currentWeekAvg: 480,
+        deltaPercent: ((480 - 420) / 420) * 100,
+        previousWeekAvg: 420,
+        stream: "sleep",
+        unit: "min",
+      },
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("buildOverviewWeeklyStats returns null delta when previous week avg is zero", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-03-23T23:30:00.000Z"));
+
+  try {
+    const vault = createEmptyReadModel();
+    const currentWeek = createSampleRecord({
+      id: "smp_sleep_hours_current_nonzero",
+      occurredAt: "2026-03-23T21:00:00.000Z",
+      date: "2026-03-24",
+      stream: "sleep",
+      sourcePath: "ledger/samples/sleep/2026/2026-03.jsonl",
+      data: {
+        value: 8,
+        unit: "hrs",
+      },
+    });
+    const previousWeek = createSampleRecord({
+      id: "smp_sleep_hours_previous_zero",
+      occurredAt: "2026-03-16T21:00:00.000Z",
+      date: "2026-03-17",
+      stream: "sleep",
+      sourcePath: "ledger/samples/sleep/2026/2026-03.jsonl",
+      data: {
+        value: 0,
+        unit: "hrs",
+      },
+    });
+
+    vault.samples = [currentWeek, previousWeek];
+
+    assert.deepEqual(buildOverviewWeeklyStats(vault, "Australia/Melbourne"), [
+      {
+        currentWeekAvg: 8,
+        deltaPercent: null,
+        previousWeekAvg: 0,
+        stream: "sleep",
+        unit: "hrs",
+      },
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("searchVaultSafe omits raw path terms and path fields by construction", () => {
+  const vault = createEmptyReadModel();
+  const pathOnly = createRecord({
+    id: "evt_quiet_probe",
+    recordType: "event",
+    sourcePath: "bank/experiments/path-only-token-probe.md",
+    occurredAt: "2026-03-12T09:00:00Z",
+    date: "2026-03-12",
+    kind: "note",
+    title: "Quiet Probe",
+    body: "Ordinary notes without the filename token.",
+    data: {
+      documentPath: "raw/documents/path-only-token-probe.pdf",
+    },
+  });
+  const visible = createRecord({
+    id: "evt_recovery_probe",
+    recordType: "event",
+    sourcePath: "ledger/events/2026/2026-03.jsonl",
+    occurredAt: "2026-03-12T10:00:00Z",
+    date: "2026-03-12",
+    kind: "note",
+    title: "Recovery Probe",
+    body: "Post-run sleep steadier after stretching.",
+  });
+
+  vault.events = [pathOnly, visible];
+  vault.records = [pathOnly, visible];
+
+  const fullSearch = searchVault(vault, "path-only-token-probe", {
+    includeSamples: true,
+  });
+  const safePathSearch = searchVaultSafe(vault, "path-only-token-probe", {
+    includeSamples: true,
+  });
+  const safeBodySearch = searchVaultSafe(vault, "post-run", {
+    includeSamples: true,
+  });
+
+  assert.equal(fullSearch.total, 1);
+  assert.equal(safePathSearch.total, 0);
+  assert.equal(safeBodySearch.total, 1);
+  assert.equal(safeBodySearch.hits[0]?.recordId, "evt_recovery_probe");
+  assert.equal("path" in (safeBodySearch.hits[0] ?? {}), false);
+  assert.equal("citation" in (safeBodySearch.hits[0] ?? {}), false);
 });
 
 test("buildTimeline merges journals, events, and daily sample summaries into a descending feed", () => {
@@ -1845,6 +2166,7 @@ function createRecord(
     occurredAt: overrides.occurredAt ?? null,
     date: overrides.date ?? null,
     kind: overrides.kind ?? overrides.recordType,
+    status: overrides.status ?? null,
     stream: overrides.stream ?? null,
     experimentSlug: overrides.experimentSlug ?? null,
     title: overrides.title ?? null,
@@ -1852,6 +2174,7 @@ function createRecord(
     data: overrides.data ?? {},
     body: overrides.body ?? null,
     frontmatter: overrides.frontmatter ?? null,
+    relatedIds: overrides.relatedIds,
   };
 }
 

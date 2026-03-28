@@ -29,8 +29,25 @@ export {
   isQueryableLookupId,
 } from "./id-families.ts";
 export {
+  buildOverviewMetrics,
+  buildOverviewWeeklyStats,
+  summarizeCurrentOverviewProfile,
+  summarizeOverviewExperiments,
+  summarizeRecentOverviewJournals,
+} from "./overview.ts";
+export type {
+  OverviewExperiment,
+  OverviewGoal,
+  OverviewJournalEntry,
+  OverviewMetric,
+  OverviewProfile,
+  OverviewWeeklyStat,
+} from "./overview.ts";
+export {
   searchVault,
+  searchVaultSafe,
 } from "./search.ts";
+export type { SafeSearchHit, SafeSearchResult } from "./search.ts";
 export {
   getSqliteSearchStatus,
   rebuildSqliteSearchIndex,

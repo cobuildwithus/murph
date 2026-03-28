@@ -164,6 +164,28 @@ test("loadVaultOverview reports missing config when no vault root is set", async
   assert.match(result.suggestedCommand, /pnpm dev/);
 });
 
+test("loadVaultOverview returns null search for empty or whitespace-only query", async () => {
+  const vaultRoot = await createWebFixtureVault();
+
+  try {
+    const empty = await loadVaultOverview({
+      query: "",
+      vaultRoot,
+    });
+    const whitespace = await loadVaultOverview({
+      query: "   ",
+      vaultRoot,
+    });
+
+    assert.equal(empty.status, "ready");
+    assert.equal(empty.search, null);
+    assert.equal(whitespace.status, "ready");
+    assert.equal(whitespace.search, null);
+  } finally {
+    await destroyWebFixtureVault(vaultRoot);
+  }
+});
+
 test("loadVaultOverview summarizes a readable vault without leaking source paths", async () => {
   const vaultRoot = await createWebFixtureVault();
 

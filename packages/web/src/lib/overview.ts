@@ -1,20 +1,25 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
+import { normalizeIanaTimeZone } from "@murph/contracts";
 import {
-  addDaysToIsoDate,
-  extractIsoDatePrefix,
-  formatTimeZoneDateTimeParts,
-  normalizeIanaTimeZone,
-} from "@murph/contracts";
-import {
-  scoreSearchDocuments,
-  type SearchableDocument,
-} from "@murph/query/search";
-import {
+  buildOverviewMetrics,
+  buildOverviewWeeklyStats,
   buildTimeline,
   readVaultTolerant,
+  searchVaultSafe,
+  summarizeCurrentOverviewProfile,
   summarizeDailySamples,
+  summarizeOverviewExperiments,
+  summarizeRecentOverviewJournals,
+  type OverviewExperiment as QueryOverviewExperiment,
+  type OverviewGoal as QueryOverviewGoal,
+  type OverviewJournalEntry as QueryOverviewJournalEntry,
+  type OverviewMetric as QueryOverviewMetric,
+  type OverviewProfile as QueryOverviewProfile,
+  type OverviewWeeklyStat as QueryOverviewWeeklyStat,
+  type SafeSearchHit,
+  type SafeSearchResult,
 } from "@murph/query";
 
 import {
@@ -24,58 +29,18 @@ import {
   resolveConfiguredVaultRoot,
 } from "./vault";
 
-type VaultReadModel = Awaited<ReturnType<typeof readVaultTolerant>>;
-type VaultRecordModel = VaultReadModel["records"][number];
 type TimelineItem = ReturnType<typeof buildTimeline>[number];
 
 export const DEFAULT_SAMPLE_LIMIT = 6;
 export const DEFAULT_TIMELINE_LIMIT = 8;
 const DEFAULT_SEARCH_LIMIT = 6;
 
-export interface OverviewMetric {
-  label: string;
-  note: string;
-  value: number;
-}
-
-export interface OverviewProfile {
-  id: string;
-  recordedAt: string | null;
-  summary: string | null;
-  title: string;
-  topGoals: OverviewGoal[];
-}
-
-export interface OverviewGoal {
-  id: string;
-  title: string;
-}
-
-export interface OverviewJournalEntry {
-  date: string;
-  id: string;
-  summary: string | null;
-  tags: string[];
-  title: string;
-}
-
-export interface OverviewExperiment {
-  id: string;
-  slug: string | null;
-  startedOn: string | null;
-  status: string | null;
-  summary: string | null;
-  tags: string[];
-  title: string;
-}
-
-export interface OverviewWeeklyStat {
-  currentWeekAvg: number | null;
-  deltaPercent: number | null;
-  previousWeekAvg: number | null;
-  stream: string;
-  unit: string | null;
-}
+export type OverviewMetric = QueryOverviewMetric;
+export type OverviewProfile = QueryOverviewProfile;
+export type OverviewGoal = QueryOverviewGoal;
+export type OverviewJournalEntry = QueryOverviewJournalEntry;
+export type OverviewExperiment = QueryOverviewExperiment;
+export type OverviewWeeklyStat = QueryOverviewWeeklyStat;
 
 export interface OverviewSampleSummary {
   averageValue: number | null;
@@ -101,14 +66,10 @@ export interface OverviewSearchResult {
   total: number;
 }
 
-export interface OverviewSearchHit {
-  date: string | null;
-  kind: string | null;
-  recordId: string;
-  recordType: VaultRecordModel["recordType"];
-  snippet: string;
-  title: string | null;
-}
+export type OverviewSearchHit = Pick<
+  SafeSearchHit,
+  "date" | "kind" | "recordId" | "recordType" | "snippet" | "title"
+>;
 
 export interface ReadyOverview {
   currentProfile: OverviewProfile | null;
@@ -204,11 +165,11 @@ export async function loadVaultOverview(
     ) ?? "UTC";
 
     return {
-      currentProfile: summarizeCurrentProfile(vault),
-      experiments: summarizeExperiments(vault),
+      currentProfile: summarizeCurrentOverviewProfile(vault),
+      experiments: summarizeOverviewExperiments(vault),
       generatedAt: new Date().toISOString(),
-      metrics: buildMetrics(vault),
-      recentJournals: summarizeRecentJournals(vault),
+      metrics: buildOverviewMetrics(vault),
+      recentJournals: summarizeRecentOverviewJournals(vault),
       sampleSummaries: summarizeDailySamples(vault)
         .slice(-sampleLimit)
         .reverse()
@@ -219,10 +180,18 @@ export async function loadVaultOverview(
           stream: summary.stream,
           unit: summary.unit,
         })),
-      search: query.length > 0 ? searchVaultSafely(vault, query) : null,
+      search:
+        query.length > 0
+          ? mapSafeSearchResult(
+              searchVaultSafe(vault, query, {
+                includeSamples: true,
+                limit: DEFAULT_SEARCH_LIMIT,
+              }),
+            )
+          : null,
       status: "ready",
       timeZone,
-      weeklyStats: buildWeeklyStats(vault, timeZone),
+      weeklyStats: buildOverviewWeeklyStats(vault, timeZone),
       timeline: buildTimeline(vault, {
         includeDailySampleSummaries: true,
         includeProfileSnapshots: true,
@@ -240,206 +209,7 @@ export async function loadVaultOverview(
   }
 }
 
-function buildMetrics(vault: VaultReadModel): OverviewMetric[] {
-  const registryCount =
-    vault.goals.length +
-    vault.conditions.length +
-    vault.allergies.length +
-    vault.protocols.length +
-    vault.familyMembers.length +
-    vault.geneticVariants.length;
-
-  return [
-    {
-      label: "records",
-      note: "Canonical read model rows",
-      value: vault.records.length,
-    },
-    {
-      label: "events",
-      note: "Ledger event entries",
-      value: vault.events.length,
-    },
-    {
-      label: "samples",
-      note: "Recorded measurements",
-      value: vault.samples.length,
-    },
-    {
-      label: "journal days",
-      note: "Human review pages",
-      value: vault.journalEntries.length,
-    },
-    {
-      label: "experiments",
-      note: "Tracked investigations",
-      value: vault.experiments.length,
-    },
-    {
-      label: "registries",
-      note: "Goals, conditions, family, genetics",
-      value: registryCount,
-    },
-  ];
-}
-
-function summarizeCurrentProfile(vault: VaultReadModel): OverviewProfile | null {
-  const current = vault.currentProfile;
-  if (!current) {
-    return null;
-  }
-
-  const currentData = isRecord(current.data) ? current.data : null;
-  const currentProfileData = isRecord(getRecordField(currentData, "profile"))
-    ? getRecordField(currentData, "profile")
-    : null;
-  const latestSnapshotProfile = isRecord(getRecordField(getLatestProfileSnapshot(vault)?.data, "profile"))
-    ? getRecordField(getLatestProfileSnapshot(vault)?.data, "profile")
-    : null;
-  const topGoalIds = extractStringArray(
-    getRecordField(currentData, "topGoalIds"),
-    getRecordField(currentProfileData, "topGoalIds"),
-    getRecordField(latestSnapshotProfile, "topGoalIds"),
-  );
-
-  return {
-    id: current.displayId,
-    recordedAt: current.occurredAt,
-    summary: summarizeText(current.body),
-    title: current.title ?? current.displayId,
-    topGoals: resolveGoals(vault, topGoalIds),
-  };
-}
-
-function summarizeRecentJournals(vault: VaultReadModel): OverviewJournalEntry[] {
-  return [...vault.journalEntries]
-    .sort((left, right) => compareLatestStrings(right.date ?? right.occurredAt, left.date ?? left.occurredAt))
-    .slice(0, 3)
-    .map((entry) => ({
-      date: entry.date ?? extractDate(entry.occurredAt),
-      id: entry.displayId,
-      summary: summarizeText(entry.body),
-      tags: compactStrings(entry.tags),
-      title: entry.title ?? entry.displayId,
-    }));
-}
-
-function buildWeeklyStats(vault: VaultReadModel, timeZone: string): OverviewWeeklyStat[] {
-  const now = new Date();
-  const todayStr = formatTimeZoneDateTimeParts(now, timeZone).dayKey;
-  const dayOfWeek = formatTimeZoneDateTimeParts(now, timeZone).dayOfWeek;
-  const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const thisWeekStart = addDaysToIsoDate(todayStr, -mondayOffset);
-  const lastWeekStart = addDaysToIsoDate(thisWeekStart, -7);
-
-  const thisWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
-  const lastWeekSamples = new Map<string, { stream: string; unit: string | null; values: number[] }>();
-
-  for (const sample of vault.samples) {
-    const sampleDate = sample.date ?? extractDate(sample.occurredAt);
-    const stream = sample.stream;
-    const rawValue = sample.data?.value;
-    const numericValue = typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null;
-    if (!stream || numericValue === null) continue;
-
-    const rawUnit = sample.data?.unit;
-    const unit = typeof rawUnit === "string" && rawUnit.trim() ? rawUnit.trim() : null;
-
-    let bucket: Map<string, { stream: string; unit: string | null; values: number[] }> | null = null;
-    if (sampleDate >= thisWeekStart && sampleDate <= todayStr) {
-      bucket = thisWeekSamples;
-    } else if (sampleDate >= lastWeekStart && sampleDate < thisWeekStart) {
-      bucket = lastWeekSamples;
-    }
-
-    if (!bucket) continue;
-
-    const key = buildWeeklyStatKey(stream, unit);
-    const existing = bucket.get(key);
-    if (existing) {
-      existing.values.push(numericValue);
-    } else {
-      bucket.set(key, { stream, unit, values: [numericValue] });
-    }
-  }
-
-  const allStreams = new Set([...thisWeekSamples.keys(), ...lastWeekSamples.keys()]);
-  const stats: OverviewWeeklyStat[] = [];
-
-  for (const key of allStreams) {
-    const thisWeek = thisWeekSamples.get(key);
-    const lastWeek = lastWeekSamples.get(key);
-    const stream = thisWeek?.stream ?? lastWeek?.stream;
-
-    if (!stream) {
-      continue;
-    }
-
-    const currentAvg = thisWeek ? thisWeek.values.reduce((a, b) => a + b, 0) / thisWeek.values.length : null;
-    const previousAvg = lastWeek ? lastWeek.values.reduce((a, b) => a + b, 0) / lastWeek.values.length : null;
-
-    let deltaPercent: number | null = null;
-    if (currentAvg !== null && previousAvg !== null && previousAvg !== 0) {
-      deltaPercent = ((currentAvg - previousAvg) / Math.abs(previousAvg)) * 100;
-    }
-
-    stats.push({
-      currentWeekAvg: currentAvg,
-      deltaPercent,
-      previousWeekAvg: previousAvg,
-      stream,
-      unit: thisWeek?.unit ?? lastWeek?.unit ?? null,
-    });
-  }
-
-  return stats.sort((a, b) =>
-    a.stream === b.stream
-      ? (a.unit ?? "").localeCompare(b.unit ?? "")
-      : a.stream.localeCompare(b.stream),
-  );
-}
-
-function buildWeeklyStatKey(stream: string, unit: string | null): string {
-  return `${stream}:${unit ?? ""}`;
-}
-
-function summarizeExperiments(vault: VaultReadModel): OverviewExperiment[] {
-  const sortedExperiments = [...vault.experiments].sort((left, right) =>
-    compareLatestStrings(right.occurredAt ?? right.date, left.occurredAt ?? left.date),
-  );
-  const prioritizedExperiments = [
-    ...sortedExperiments.filter((entry) => isActiveExperimentStatus(entry.status)),
-    ...sortedExperiments.filter((entry) => !isActiveExperimentStatus(entry.status)),
-  ];
-
-  return prioritizedExperiments.slice(0, 6).map((entry) => ({
-      id: entry.displayId,
-      slug: entry.experimentSlug,
-      startedOn: entry.date ?? extractDate(entry.occurredAt),
-      status: entry.status ?? null,
-      summary: summarizeText(entry.body),
-      tags: compactStrings(entry.tags),
-      title: entry.title ?? entry.displayId,
-    }));
-}
-
-function isActiveExperimentStatus(status: string | null | undefined): boolean {
-  return status?.trim().toLowerCase() === "active";
-}
-
-function searchVaultSafely(
-  vault: VaultReadModel,
-  query: string,
-): OverviewSearchResult {
-  const result = scoreSearchDocuments(
-    vault.records.map(buildSafeSearchDocument),
-    query,
-    {
-      includeSamples: true,
-      limit: DEFAULT_SEARCH_LIMIT,
-    },
-  );
-
+function mapSafeSearchResult(result: SafeSearchResult): OverviewSearchResult {
   return {
     hits: result.hits.map((hit) => ({
       date: hit.date,
@@ -452,63 +222,6 @@ function searchVaultSafely(
     query: result.query,
     total: result.total,
   };
-}
-
-function buildSafeSearchDocument(record: VaultRecordModel): SearchableDocument {
-  return {
-    aliasIds: record.lookupIds,
-    bodyText: compactStrings([record.body]).join("\n").trim(),
-    date: record.date,
-    experimentSlug: record.experimentSlug,
-    kind: record.kind,
-    occurredAt: record.occurredAt,
-    path: null,
-    recordId: record.displayId,
-    recordType: record.recordType,
-    stream: record.stream,
-    structuredText: compactStrings([
-      record.displayId,
-      record.primaryLookupId,
-      ...record.lookupIds,
-      ...(record.relatedIds ?? []),
-    ]).join("\n"),
-    tags: record.tags,
-    tagsText: compactStrings(record.tags).join(" "),
-    title: record.title,
-    titleText: compactStrings([
-      record.title,
-      record.kind,
-      record.status ?? null,
-      record.stream,
-      record.experimentSlug,
-    ]).join(" · "),
-  };
-}
-
-function compactStrings(values: readonly (string | null | undefined)[]): string[] {
-  return values.filter((value): value is string => typeof value === "string" && value.length > 0);
-}
-
-function resolveGoals(vault: VaultReadModel, goalIds: readonly string[]): OverviewGoal[] {
-  const goalLookup = new Map<string, VaultReadModel["goals"][number]>();
-
-  for (const goal of vault.goals) {
-    const lookupIds = [goal.displayId, goal.primaryLookupId, ...goal.lookupIds];
-    for (const lookupId of lookupIds) {
-      if (lookupId) {
-        goalLookup.set(lookupId, goal);
-      }
-    }
-  }
-
-  return goalIds.map((goalId) => {
-    const goal = goalLookup.get(goalId);
-
-    return {
-      id: goalId,
-      title: goal?.title ?? goalId,
-    };
-  });
 }
 
 function toOverviewTimelineEntry(
@@ -531,26 +244,6 @@ function toOverviewTimelineEntry(
   };
 }
 
-function summarizeText(value: string | null): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => !/^#{1,6}\s+/u.test(line))
-    .map((line) => line.replace(/^[-*+]\s+/u, "").trim())
-    .filter((line) => line.length > 0)
-    .join(" ");
-
-  if (!normalized) {
-    return null;
-  }
-
-  return normalized.length <= 180 ? normalized : `${normalized.slice(0, 177)}...`;
-}
-
 function clampLimit(value: number | undefined, fallback: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return fallback;
@@ -569,25 +262,6 @@ function getRecordField(record: unknown, key: string): unknown {
   }
 
   return record[key];
-}
-
-function extractStringArray(...values: unknown[]): string[] {
-  let fallback: string[] | null = null;
-
-  for (const value of values) {
-    if (Array.isArray(value)) {
-      const strings = value.filter((entry): entry is string => typeof entry === "string");
-      if (fallback === null) {
-        fallback = strings;
-      }
-
-      if (strings.length > 0) {
-        return strings;
-      }
-    }
-  }
-
-  return fallback ?? [];
 }
 
 async function assertVaultRootReadable(vaultRoot: string): Promise<void> {
@@ -610,27 +284,4 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-function getLatestProfileSnapshot(vault: VaultReadModel): VaultReadModel["profileSnapshots"][number] | null {
-  let latest: VaultReadModel["profileSnapshots"][number] | null = null;
-
-  for (const snapshot of vault.profileSnapshots) {
-    if (
-      latest === null ||
-      compareLatestStrings(snapshot.occurredAt, latest.occurredAt) > 0
-    ) {
-      latest = snapshot;
-    }
-  }
-
-  return latest;
-}
-
-function compareLatestStrings(left: string | null | undefined, right: string | null | undefined): number {
-  return (left ?? "").localeCompare(right ?? "");
-}
-
-function extractDate(value: string | null | undefined): string {
-  return extractIsoDatePrefix(value) ?? "Undated";
 }

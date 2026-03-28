@@ -71,6 +71,41 @@ export interface SearchDocument extends SearchableDocument {
 }
 
 export function materializeSearchDocument(record: VaultRecord): SearchDocument {
+  return buildSearchDocument(record, {
+    includeStructuredPayload: true,
+    includeSourcePathTerms: true,
+    path: record.sourcePath,
+  }) as SearchDocument;
+}
+
+export function materializeSafeSearchDocument(record: VaultRecord): SearchableDocument {
+  return buildSearchDocument(record, {
+    includeStructuredPayload: false,
+    includeSourcePathTerms: false,
+    path: null,
+  });
+}
+
+export function materializeSearchDocuments(
+  records: readonly VaultRecord[],
+): SearchDocument[] {
+  return records.map(materializeSearchDocument);
+}
+
+export function materializeSafeSearchDocuments(
+  records: readonly VaultRecord[],
+): SearchableDocument[] {
+  return records.map(materializeSafeSearchDocument);
+}
+
+function buildSearchDocument(
+  record: VaultRecord,
+  options: {
+    includeStructuredPayload: boolean;
+    includeSourcePathTerms: boolean;
+    path: string | null;
+  },
+): SearchableDocument {
   const titleText = compactStrings([
     record.title,
     record.kind,
@@ -83,12 +118,15 @@ export function materializeSearchDocument(record: VaultRecord): SearchDocument {
   const structuredText = compactStrings([
     record.displayId,
     record.primaryLookupId,
-    record.sourcePath,
-    record.sourceFile,
+    ...(options.includeSourcePathTerms ? [record.sourcePath, record.sourceFile] : []),
     ...record.lookupIds,
     ...(record.relatedIds ?? []),
-    safeJsonStringify(record.data),
-    record.frontmatter ? safeJsonStringify(record.frontmatter) : null,
+    ...(options.includeStructuredPayload
+      ? [
+          safeJsonStringify(record.data),
+          record.frontmatter ? safeJsonStringify(record.frontmatter) : null,
+        ]
+      : []),
   ]).join("\n");
 
   return {
@@ -102,18 +140,12 @@ export function materializeSearchDocument(record: VaultRecord): SearchDocument {
     date: record.date,
     experimentSlug: record.experimentSlug,
     tags: record.tags,
-    path: record.sourcePath,
+    path: options.path,
     titleText,
     bodyText,
     tagsText,
     structuredText,
   };
-}
-
-export function materializeSearchDocuments(
-  records: readonly VaultRecord[],
-): SearchDocument[] {
-  return records.map(materializeSearchDocument);
 }
 
 export function filterSearchDocuments<TDocument extends SearchableDocument>(
