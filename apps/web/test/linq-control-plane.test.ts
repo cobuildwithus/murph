@@ -272,6 +272,39 @@ describe("HostedLinqControlPlane", () => {
     expect(mocks.store.upsertBinding).not.toHaveBeenCalled();
   });
 
+  it("fails hosted recipient verification when the Linq phone-number probe returns a non-OK response", async () => {
+    const authControlPlane = {
+      assertBrowserMutationOrigin: vi.fn(),
+      requireAuthenticatedUser: vi.fn().mockResolvedValue({
+        id: "user-123",
+      }),
+    };
+
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
+    mocks.fetch.mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+      text: async () => "",
+    });
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/bindings", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.upsertBinding({
+      recipientPhone: "+15557654321",
+    })).rejects.toMatchObject({
+      code: "LINQ_BINDING_PROBE_FAILED",
+      httpStatus: 502,
+      message: "Linq recipient verification failed with HTTP 503.",
+      retryable: true,
+    });
+    expect(mocks.store.upsertBinding).not.toHaveBeenCalled();
+  });
+
   it("queues only sparse routing fields for hosted webhook events", async () => {
     process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
     const event = {

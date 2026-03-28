@@ -10,9 +10,9 @@ vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   enqueueHostedExecutionOutbox: mocks.enqueueHostedExecutionOutbox,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
-    "@/src/lib/hosted-onboarding/linq",
+vi.mock("../src/lib/hosted-onboarding/linq", async () => {
+  const actual = await vi.importActual<typeof import("../src/lib/hosted-onboarding/linq")>(
+    "../src/lib/hosted-onboarding/linq",
   );
 
   return {
@@ -169,13 +169,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         }),
       }),
     );
-    const persistedLinqEvent = receiptWrites.at(-1)?.data &&
-      typeof receiptWrites.at(-1)?.data === "object" &&
-      "payloadJson" in (receiptWrites.at(-1)?.data as Record<string, unknown>)
-      ? (((((receiptWrites.at(-1)?.data as Record<string, unknown>).payloadJson as Record<string, unknown>)
-          .receiptState as Record<string, unknown>).sideEffects as Array<Record<string, unknown>>)[0]
-          ?.payload as Record<string, unknown>)?.linqEvent as Record<string, unknown> | undefined
-      : undefined;
+    const persistedLinqEvent = readPersistedLinqDispatchEvent(receiptWrites.at(-1));
     expect(persistedLinqEvent?.data).not.toHaveProperty("extra_field");
     expect((persistedLinqEvent?.data as { message?: Record<string, unknown> } | undefined)?.message).not.toHaveProperty(
       "extra_message_field",
@@ -527,4 +521,32 @@ function withPrismaTransaction<
   };
   prismaWithTransaction.$transaction = transaction;
   return prismaWithTransaction;
+}
+
+function readPersistedLinqDispatchEvent(
+  receiptWrite: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  const data =
+    receiptWrite?.data && typeof receiptWrite.data === "object"
+      ? (receiptWrite.data as Record<string, unknown>)
+      : null;
+  const payloadJson =
+    data?.payloadJson && typeof data.payloadJson === "object"
+      ? (data.payloadJson as Record<string, unknown>)
+      : null;
+  const receiptState =
+    payloadJson?.receiptState && typeof payloadJson.receiptState === "object"
+      ? (payloadJson.receiptState as Record<string, unknown>)
+      : null;
+  const sideEffect = Array.isArray(receiptState?.sideEffects)
+    ? (receiptState.sideEffects[0] as Record<string, unknown> | undefined)
+    : undefined;
+  const payload =
+    sideEffect?.payload && typeof sideEffect.payload === "object"
+      ? (sideEffect.payload as Record<string, unknown>)
+      : null;
+
+  return payload?.linqEvent && typeof payload.linqEvent === "object"
+    ? (payload.linqEvent as Record<string, unknown>)
+    : undefined;
 }
