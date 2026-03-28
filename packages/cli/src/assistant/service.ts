@@ -2319,10 +2319,7 @@ async function restoreMissingAssistantSessionSnapshot(input: {
   }
 
   const normalizedSnapshot = normalizeRestoredAssistantSessionSnapshot(snapshot)
-  const transcriptSnapshot =
-    input.input.transcriptSnapshot && input.input.transcriptSnapshot.length > 0
-      ? input.input.transcriptSnapshot
-      : null
+  const transcriptSnapshot = input.input.transcriptSnapshot ?? null
   const transcriptExists = readAssistantSessionNotFoundTranscriptExists(input.error)
 
   if (

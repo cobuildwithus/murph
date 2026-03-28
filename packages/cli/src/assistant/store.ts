@@ -150,15 +150,15 @@ export async function resolveAssistantSession(
 
     const now = resolveTimestamp(input.now)
     const providerOptions = normalizeProviderOptions(input)
-  const session = assistantSessionSchema.parse({
-    schema: ASSISTANT_STATE_SCHEMA,
-    sessionId: createAssistantSessionId(),
-    provider: input.provider ?? 'codex-cli',
-    providerOptions,
-    providerBinding: null,
-    alias: manualAlias,
-    binding: createAssistantBinding(bindingInputFromLocator(input)),
-    createdAt: now,
+    const session = assistantSessionSchema.parse({
+      schema: ASSISTANT_STATE_SCHEMA,
+      sessionId: createAssistantSessionId(),
+      provider: input.provider ?? 'codex-cli',
+      providerOptions,
+      providerBinding: null,
+      alias: manualAlias,
+      binding: createAssistantBinding(bindingInputFromLocator(input)),
+      createdAt: now,
       updatedAt: now,
       lastTurnAt: null,
       turnCount: 0,
@@ -240,11 +240,10 @@ export async function restoreAssistantSessionSnapshot(
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const parsedSession = await saveAssistantSessionAtPaths(paths, input.session)
-    const transcriptEntries = parseAssistantTranscriptEntries(
-      input.transcriptEntries ?? [],
-    )
-
-    if (transcriptEntries.length > 0) {
+    if (input.transcriptEntries !== undefined && input.transcriptEntries !== null) {
+      const transcriptEntries = parseAssistantTranscriptEntries(
+        input.transcriptEntries,
+      )
       await replaceTranscriptEntries(
         paths,
         parsedSession.sessionId,
