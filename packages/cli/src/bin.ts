@@ -91,14 +91,14 @@ async function actionMain(): Promise<void> {
       if (launchAction !== null) {
         if (launchAction === 'assistant-run') {
           process.stderr.write(
-            '\nStarting Healthy Bob assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n',
+            '\nStarting Murph assistant automation. Leave this terminal open while channel auto-reply is active for iMessage, Telegram, and/or email. Press Ctrl+C to stop.\n\n',
           )
           await cli.serve(['assistant', 'run', '--vault', launchVault])
           return
         }
 
         process.stderr.write(
-          '\nOpening Healthy Bob assistant chat. Type /exit to quit.\n\n',
+          '\nOpening Murph assistant chat. Type /exit to quit.\n\n',
         )
         await cli.serve(['assistant', 'chat', '--vault', launchVault])
       }

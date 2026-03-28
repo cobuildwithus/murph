@@ -7,7 +7,7 @@ import {
   defaultDeviceProviderAdapters,
   importDeviceProviderSnapshot,
 } from "./device-providers/index.ts";
-import { importMeal } from "./meal-importer.ts";
+import { addMeal } from "./meal-importer.ts";
 import { createSamplePresetRegistry } from "./preset-registry.ts";
 
 import type { DeviceProviderRegistry } from "./device-providers/index.ts";
@@ -22,7 +22,7 @@ let defaultCorePortPromise: Promise<unknown> | null = null
 
 async function loadDefaultCorePort() {
   if (!defaultCorePortPromise) {
-    defaultCorePortPromise = import("@healthybob/core")
+    defaultCorePortPromise = import("@murph/core")
   }
 
   return defaultCorePortPromise
@@ -68,8 +68,8 @@ export function createImporters({
     importDocument(input: unknown) {
       return importDocument(input, { corePort: writer });
     },
-    importMeal(input: unknown) {
-      return importMeal(input, { corePort: writer });
+    addMeal(input: unknown) {
+      return addMeal(input, { corePort: writer });
     },
     importAssessmentResponse(input: unknown) {
       return importAssessmentResponse(input, { corePort: writer });

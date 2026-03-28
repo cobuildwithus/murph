@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@healthybob/contracts";
+import { extractIsoDatePrefix } from "@murph/contracts";
 
 import type { VaultRecord, VaultRecordType } from "./model.ts";
 
@@ -42,7 +42,7 @@ export interface SearchHit {
 }
 
 export interface SearchResult {
-  format: "healthybob.search.v1";
+  format: "murph.search.v1";
   query: string;
   total: number;
   hits: SearchHit[];
@@ -178,7 +178,7 @@ export function scoreSearchDocuments(
 
   if (terms.length === 0) {
     return {
-      format: "healthybob.search.v1",
+      format: "murph.search.v1",
       query: normalizedQuery,
       total: 0,
       hits: [],
@@ -193,7 +193,7 @@ export function scoreSearchDocuments(
   const limit = normalizeLimit(filters.limit);
 
   return {
-    format: "healthybob.search.v1",
+    format: "murph.search.v1",
     query: normalizedQuery,
     total: scoredHits.length,
     hits: scoredHits.slice(0, limit),

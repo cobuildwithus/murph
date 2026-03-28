@@ -283,7 +283,7 @@ export function createSetupWizardCompletionController(): SetupWizardCompletionCo
       exited = true
       if (submittedResult === null) {
         settled = true
-        rejectPromise(new Error('Healthy Bob setup wizard exited unexpectedly.'))
+        rejectPromise(new Error('Murph setup wizard exited unexpectedly.'))
         return
       }
 
@@ -334,7 +334,7 @@ export async function runSetupWizard(
       ? [...input.initialWearables]
       : getDefaultSetupWizardWearables(),
   )
-  const commandName = input.commandName ?? 'healthybob'
+  const commandName = input.commandName ?? 'murph'
   const completion = createSetupWizardCompletionController()
 
   let instance:
@@ -543,7 +543,7 @@ export async function runSetupWizard(
     useInput((value, key) => {
       if ((key.ctrl && value === 'c') || value.toLowerCase() === 'q') {
         completion.fail(
-          new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
+          new VaultCliError('setup_cancelled', 'Murph setup was cancelled.'),
         )
         exit()
         return
@@ -557,7 +557,7 @@ export async function runSetupWizard(
 
         if (key.escape) {
           completion.fail(
-            new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
+            new VaultCliError('setup_cancelled', 'Murph setup was cancelled.'),
           )
           exit()
         }
@@ -704,7 +704,7 @@ export async function runSetupWizard(
         paddingX: 1,
         paddingY: 1,
       },
-      createElement(Text, null, 'Healthy Bob onboarding'),
+      createElement(Text, null, 'Murph onboarding'),
       createElement(Text, null, formatSetupWizardStepper(step, includePublicUrlStep)),
       createElement(Text, null, ''),
       createElement(Text, null, `Vault: ${input.vault}`),
@@ -795,7 +795,7 @@ export async function runSetupWizard(
             createElement(
               Text,
               null,
-              'This screen is informational only. Healthy Bob does not save a public URL mode yet.',
+              'This screen is informational only. Murph does not save a public URL mode yet.',
             ),
             createElement(Text, null, ''),
             createElement(
@@ -835,11 +835,11 @@ export async function runSetupWizard(
               null,
               selectedNeedsEnv.length > 0
                 ? selectedScheduledUpdates.length > 0
-                  ? 'Healthy Bob will prompt for missing runtime credentials next, then finish setup, leave the selected scheduled updates for explicit later installation, and open any ready wearable connect flows.'
-                  : 'Healthy Bob will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
+                  ? 'Murph will prompt for missing runtime credentials next, then finish setup, leave the selected scheduled updates for explicit later installation, and open any ready wearable connect flows.'
+                  : 'Murph will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
                 : selectedScheduledUpdates.length > 0
-                  ? 'Healthy Bob will finish setup, leave the selected scheduled updates for explicit later installation, and open any selected wearable connect flows that are ready.'
-                  : 'Healthy Bob will finish setup and open any selected wearable connect flows that are ready.',
+                  ? 'Murph will finish setup, leave the selected scheduled updates for explicit later installation, and open any selected wearable connect flows that are ready.'
+                  : 'Murph will finish setup and open any selected wearable connect flows that are ready.',
             ),
             createElement(Text, null, ''),
             createElement(
@@ -879,7 +879,7 @@ export async function runSetupWizard(
   }
 
   if (!instance) {
-    completion.fail(new Error('Healthy Bob setup wizard failed to initialize.'))
+    completion.fail(new Error('Murph setup wizard failed to initialize.'))
   }
 
   return await completion.waitForResult()
@@ -1139,7 +1139,7 @@ export function describeSetupWizardPublicUrlStrategyChoice(input: {
     return 'Expose the local callback and webhook routes through a tunnel instead of deploying hosted ingress first.'
   }
 
-  return 'Expose the local Linq webhook through a tunnel. Healthy Bob does not provide a hosted Linq ingress yet.'
+  return 'Expose the local Linq webhook through a tunnel. Murph does not provide a hosted Linq ingress yet.'
 }
 
 function describeSetupWizardPublicUrlSummary(input: {

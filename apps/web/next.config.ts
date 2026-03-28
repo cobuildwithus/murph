@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
 import {
-  createWorkspaceSourcePackageNames,
-  resolveWorkspaceSourceEntries as resolveWorkspaceSourceEntriesFromMap,
+  HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
 } from "../../config/workspace-source-resolution";
+import { resolveHostedWebDistDir } from "./next-artifacts";
 
 interface StaticHeader {
   key: string;
@@ -31,26 +31,7 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@healthybob/contracts": "../../packages/contracts/src/index.ts",
-  "@healthybob/hosted-execution": "../../packages/hosted-execution/src/index.ts",
-  "@healthybob/runtime-state": "../../packages/runtime-state/src/index.ts",
-  "@healthybob/core": "../../packages/core/src/index.ts",
-  "@healthybob/importers": "../../packages/importers/src/index.ts",
-  "@healthybob/inboxd": "../../packages/inboxd/src/index.ts",
-  "@healthybob/device-syncd": "../../packages/device-syncd/src/index.ts",
-} as const;
-
-export const WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
-  WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
-);
-
-export function resolveWorkspaceSourceEntries(appDir: string): Record<string, string> {
-  return resolveWorkspaceSourceEntriesFromMap(
-    appDir,
-    WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
-  );
-}
+export const WORKSPACE_SOURCE_PACKAGE_NAMES = HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 
 export function resolvePrivyBaseDomainOrigin(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -173,23 +154,28 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
   };
 }
 
-const nextConfig: NextConfig = {
-  outputFileTracingRoot: path.resolve(appDir, "../.."),
-  transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
-  turbopack: buildHostedWebTurbopackConfig(),
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  headers: async () => [
-    {
-      source: HOSTED_WEB_HEADER_SOURCE,
-      headers: buildHostedWebSecurityHeaders(process.env),
+export function buildHostedWebNextConfig(phase: string): NextConfig {
+  return {
+    distDir: resolveHostedWebDistDir(phase, process.env),
+    outputFileTracingRoot: path.resolve(appDir, "../.."),
+    transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
+    turbopack: buildHostedWebTurbopackConfig(),
+    typescript: {
+      ignoreBuildErrors: true,
     },
-  ],
-  webpack: (config) => installOptionalModuleFallbacks(config),
-};
+    headers: async () => [
+      {
+        source: HOSTED_WEB_HEADER_SOURCE,
+        headers: buildHostedWebSecurityHeaders(process.env),
+      },
+    ],
+    webpack: (config) => installOptionalModuleFallbacks(config),
+  };
+}
 
-export default nextConfig;
+export default function nextConfig(phase: string): NextConfig {
+  return buildHostedWebNextConfig(phase);
+}
 
 function uniqueSources(sources: readonly (string | null | undefined)[]): string[] {
   return [...new Set(sources.filter((value): value is string => Boolean(value)))];

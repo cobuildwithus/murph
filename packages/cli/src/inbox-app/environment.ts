@@ -47,15 +47,15 @@ function createParserRuntimeUnavailableError(
     cause instanceof Error
       ? {
           cause: cause.message,
-          packages: ['@healthybob/inboxd', '@healthybob/parsers'],
+          packages: ['@murph/inboxd', '@murph/parsers'],
         }
       : {
-          packages: ['@healthybob/inboxd', '@healthybob/parsers'],
+          packages: ['@murph/inboxd', '@murph/parsers'],
         }
 
   return new VaultCliError(
     'runtime_unavailable',
-    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @healthybob/inboxd and @healthybob/parsers.`,
+    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @murph/inboxd and @murph/parsers.`,
     details,
   )
 }
@@ -83,16 +83,16 @@ export function createInboxAppEnvironment(
   const getEnvironment = dependencies.getEnvironment ?? (() => process.env)
   const loadCore =
     dependencies.loadCoreModule ??
-    (() => loadRuntimeModule<CoreRuntimeModule>('@healthybob/core'))
+    (() => loadRuntimeModule<CoreRuntimeModule>('@murph/core'))
   const loadImporters =
     dependencies.loadImportersModule ??
-    (() => loadRuntimeModule<ImportersFactoryRuntimeModule>('@healthybob/importers'))
+    (() => loadRuntimeModule<ImportersFactoryRuntimeModule>('@murph/importers'))
   const loadInbox =
     dependencies.loadInboxModule ??
-    (() => loadRuntimeModule<InboxRuntimeModule>('@healthybob/inboxd'))
+    (() => loadRuntimeModule<InboxRuntimeModule>('@murph/inboxd'))
   const loadParsers =
     dependencies.loadParsersModule ??
-    (() => loadRuntimeModule<ParsersRuntimeModule>('@healthybob/parsers'))
+    (() => loadRuntimeModule<ParsersRuntimeModule>('@murph/parsers'))
   const loadQuery =
     dependencies.loadQueryModule ??
     (() => loadQueryRuntime())
@@ -322,7 +322,7 @@ export function createInboxAppEnvironment(
       if (inboxes.length > 1) {
         throw new VaultCliError(
           'INBOX_EMAIL_ACCOUNT_SELECTION_REQUIRED',
-          'AgentMail rejected inbox creation for this API key, but multiple existing inboxes are available. Rerun with --account <inbox_id> to choose one, or use `healthybob onboard` to select an inbox interactively.',
+          'AgentMail rejected inbox creation for this API key, but multiple existing inboxes are available. Rerun with --account <inbox_id> to choose one, or use `murph onboard` to select an inbox interactively.',
           { inboxCount: inboxes.length },
         )
       }
@@ -341,7 +341,7 @@ export function createInboxAppEnvironment(
       ) {
         throw new VaultCliError(
           'INBOX_EMAIL_SCOPED_KEY_ACCOUNT_REQUIRED',
-          'AgentMail rejected both inbox creation and inbox discovery for this API key. This key may be scoped to an existing inbox. Rerun with --account <inbox_id> (often the inbox email address), or use `healthybob onboard`.',
+          'AgentMail rejected both inbox creation and inbox discovery for this API key. This key may be scoped to an existing inbox. Rerun with --account <inbox_id> (often the inbox email address), or use `murph onboard`.',
         )
       }
 
@@ -414,7 +414,7 @@ export function createInboxAppEnvironment(
         unavailableMessage: 'The iMessage inbox connector requires macOS.',
         permissionCode: 'INBOX_IMESSAGE_PERMISSION_REQUIRED',
         permissionMessage:
-          `The iMessage inbox connector requires read access to ~/${IMESSAGE_MESSAGES_DB_RELATIVE_PATH}. Grant Full Disk Access to the terminal or app running Healthy Bob, fully restart it, and retry.`,
+          `The iMessage inbox connector requires read access to ~/${IMESSAGE_MESSAGES_DB_RELATIVE_PATH}. Grant Full Disk Access to the terminal or app running Murph, fully restart it, and retry.`,
       },
     )
   }

@@ -1,7 +1,7 @@
 import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 

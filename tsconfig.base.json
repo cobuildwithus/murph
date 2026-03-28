@@ -16,77 +16,104 @@
     "incremental": true,
     "skipLibCheck": true,
     "paths": {
-      "@healthybob/contracts": [
+      "@murph/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@healthybob/contracts/generated/*": [
+      "@murph/contracts/generated/*": [
         "packages/contracts/generated/*"
       ],
-      "@healthybob/contracts/*": [
+      "@murph/contracts/*": [
         "packages/contracts/src/*"
       ],
-      "@healthybob/hosted-execution": [
+      "@murph/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
-      "@healthybob/hosted-execution/*": [
+      "@murph/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
-      "@healthybob/runtime-state": [
+      "@murph/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
-      "@healthybob/runtime-state/*": [
+      "@murph/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],
-      "@healthybob/core": [
+      "@murph/core": [
         "packages/core/src/index.ts"
       ],
-      "@healthybob/core/*": [
+      "@murph/core/*": [
         "packages/core/src/*"
       ],
-      "@healthybob/importers": [
+      "@murph/importers": [
         "packages/importers/src/index.ts"
       ],
-      "@healthybob/importers/*": [
+      "@murph/importers/*": [
         "packages/importers/src/*"
       ],
-      "@healthybob/query": [
+      "@murph/query": [
         "packages/query/src/index.ts"
       ],
-      "@healthybob/query/*": [
+      "@murph/query/*": [
         "packages/query/src/*"
       ],
-      "@healthybob/inboxd": [
+      "@murph/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
-      "@healthybob/inboxd/*": [
+      "@murph/inboxd/connectors/email/normalize-parsed": [
+        "packages/inboxd/src/connectors/email/normalize-parsed.ts"
+      ],
+      "@murph/inboxd/connectors/email/parsed": [
+        "packages/inboxd/src/connectors/email/parsed.ts"
+      ],
+      "@murph/inboxd/*": [
         "packages/inboxd/src/*"
       ],
-      "@healthybob/parsers": [
+      "@murph/parsers": [
         "packages/parsers/src/index.ts"
       ],
-      "@healthybob/parsers/*": [
+      "@murph/parsers/*": [
         "packages/parsers/src/*"
       ],
-      "@healthybob/assistant-runtime": [
+      "@murph/assistant-runtime": [
         "packages/assistant-runtime/src/index.ts"
       ],
-      "@healthybob/assistant-runtime/*": [
+      "@murph/assistant-runtime/*": [
         "packages/assistant-runtime/src/*"
       ],
-      "healthybob": [
+      "murph": [
         "packages/cli/src/index.ts"
       ],
-      "@healthybob/cli": [
-        "packages/cli/src/index.ts"
+      "murph/inbox-services": [
+        "packages/cli/src/inbox-services.ts"
       ],
-      "@healthybob/cli/*": [
-        "packages/cli/src/*"
+      "murph/vault-cli-services": [
+        "packages/cli/src/vault-cli-services.ts"
       ],
-      "@healthybob/device-syncd": [
+      "murph/assistant/automation": [
+        "packages/cli/src/assistant/automation.ts"
+      ],
+      "murph/assistant/cron": [
+        "packages/cli/src/assistant/cron.ts"
+      ],
+      "murph/assistant/outbox": [
+        "packages/cli/src/assistant/outbox.ts"
+      ],
+      "murph/assistant/status": [
+        "packages/cli/src/assistant/status.ts"
+      ],
+      "murph/assistant/store": [
+        "packages/cli/src/assistant/store.ts"
+      ],
+      "@murph/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],
-      "@healthybob/device-syncd/*": [
+      "@murph/device-syncd/*": [
         "packages/device-syncd/src/*"
+      ],
+      "@murph/assistant-services": [
+        "packages/assistant-services/src/index.ts"
+      ],
+      "@murph/assistant-services/*": [
+        "packages/assistant-services/src/*"
       ]
     },
     "types": [

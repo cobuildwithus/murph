@@ -54,7 +54,7 @@ export async function stopAssistantAutomation(input: {
   if (initial.state === 'unlocked') {
     throw new VaultCliError(
       'ASSISTANT_AUTOMATION_NOT_RUNNING',
-      'Healthy Bob assistant automation is not currently running for this vault.',
+      'Murph assistant automation is not currently running for this vault.',
     )
   }
 
@@ -81,7 +81,7 @@ export async function stopAssistantAutomation(input: {
   if (typeof initial.pid !== 'number') {
     throw new VaultCliError(
       'ASSISTANT_AUTOMATION_STOP_FAILED',
-      'Healthy Bob could not stop assistant automation because the active run lock did not include a PID.',
+      'Murph could not stop assistant automation because the active run lock did not include a PID.',
       {
         command: initial.command,
       },
@@ -102,13 +102,13 @@ export async function stopAssistantAutomation(input: {
   const terminatedResult = await maybeBuildStopResult({
     lock: afterTerminate,
     message:
-      'Healthy Bob stopped the assistant automation loop.',
+      'Murph stopped the assistant automation loop.',
     now,
     paths,
     resultBase,
     stopMethod: 'signal',
     staleMessage:
-      'Assistant automation stopped but left a stale run lock, so Healthy Bob cleared it.',
+      'Assistant automation stopped but left a stale run lock, so Murph cleared it.',
   })
   if (terminatedResult) {
     return terminatedResult
@@ -117,7 +117,7 @@ export async function stopAssistantAutomation(input: {
   if (afterTerminate.state === 'active' && afterTerminate.pid !== initial.pid) {
     throw new VaultCliError(
       'ASSISTANT_AUTOMATION_RESTARTED',
-      'Assistant automation restarted under a different PID while Healthy Bob was stopping the original process.',
+      'Assistant automation restarted under a different PID while Murph was stopping the original process.',
       {
         expectedPid: initial.pid,
         pid: afterTerminate.pid,
@@ -137,13 +137,13 @@ export async function stopAssistantAutomation(input: {
   const forcedResult = await maybeBuildStopResult({
     lock: afterForceKill,
     message:
-      'Healthy Bob force-killed the assistant automation loop after it ignored SIGTERM.',
+      'Murph force-killed the assistant automation loop after it ignored SIGTERM.',
     now,
     paths,
     resultBase,
     stopMethod: 'force-kill',
     staleMessage:
-      'Healthy Bob force-killed the assistant automation loop and cleared the stale run lock.',
+      'Murph force-killed the assistant automation loop and cleared the stale run lock.',
   })
   if (forcedResult) {
     return forcedResult

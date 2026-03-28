@@ -14,8 +14,8 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
 
-const ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA = 'healthybob.assistant-diagnostic-event.v1'
-const ASSISTANT_DIAGNOSTIC_SNAPSHOT_SCHEMA = 'healthybob.assistant-diagnostics.v1'
+const ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA = 'murph.assistant-diagnostic-event.v1'
+const ASSISTANT_DIAGNOSTIC_SNAPSHOT_SCHEMA = 'murph.assistant-diagnostics.v1'
 const RECENT_WARNING_LIMIT = 12
 
 export function createEmptyAssistantDiagnosticsCounters(): AssistantDiagnosticsCounters {

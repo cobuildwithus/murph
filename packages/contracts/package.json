@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/contracts",
+  "name": "@murph/contracts",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

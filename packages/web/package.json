@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/web",
+  "name": "@murph/web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,13 +12,13 @@
     "dev": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts dev",
     "build": "pnpm build:app",
     "start": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts start",
-    "typecheck": "tsc -p tsconfig.json --pretty false",
+    "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts packages/web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config packages/web/vitest.config.ts --no-coverage --maxWorkers 1 && pnpm build:app"
   },
   "dependencies": {
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/query": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*",
+    "@murph/contracts": "workspace:*",
+    "@murph/query": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
     "@tailwindcss/postcss": "^4.2.1",
     "next": "^16.2.1",
     "next-themes": "^0.4.6",

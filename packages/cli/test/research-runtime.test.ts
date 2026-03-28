@@ -96,9 +96,9 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
       now: () => fixedNow,
       resolveAssistantDefaults: async () => null,
       resolveWorkspaceRoot: () => '/repo',
-      createTempDirectory: async () => '/tmp/healthybob-research-case',
+      createTempDirectory: async () => '/tmp/murph-research-case',
       readTextFile: async (filePath) => {
-        assert.equal(filePath, path.join('/tmp/healthybob-research-case', 'response.md'))
+        assert.equal(filePath, path.join('/tmp/murph-research-case', 'response.md'))
         return '## Findings\n\n- New evidence here.'
       },
       runProcess: async (input) => {
@@ -129,7 +129,7 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
       '--send',
       '--wait',
       '--response-file',
-      '/tmp/healthybob-research-case/response.md',
+      '/tmp/murph-research-case/response.md',
       '--prompt',
       'Research weekly cholesterol updates and emphasize practical interventions.',
       '--deep-research',
@@ -156,7 +156,7 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
     }),
     summary: 'Saved Deep Research note "Cholesterol weekly research roundup".',
   })
-  assert.equal(recorded.removedPath, '/tmp/healthybob-research-case')
+  assert.equal(recorded.removedPath, '/tmp/murph-research-case')
   assert.deepEqual(result, {
     vault: '/vaults/primary',
     mode: 'deep-research',
@@ -196,9 +196,11 @@ test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prom
         approvalPolicy: 'on-request',
         profile: null,
         oss: false,
+        selfDeliveryTargets: null,
         baseUrl: null,
         apiKeyEnv: null,
         providerName: null,
+        headers: null,
         account: {
           source: 'codex-auth-json',
           kind: 'account',
@@ -208,7 +210,7 @@ test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prom
         },
       }),
       resolveWorkspaceRoot: () => '/repo',
-      createTempDirectory: async () => '/tmp/healthybob-deepthink-case',
+      createTempDirectory: async () => '/tmp/murph-deepthink-case',
       readTextFile: async () => 'Answer text',
       runProcess: async (input) => {
         recordedArgs = [...input.args]
@@ -233,7 +235,7 @@ test('runDeepthinkPrompt targets GPT Pro defaults, derives a title from the prom
     '--send',
     '--wait',
     '--response-file',
-    '/tmp/healthybob-deepthink-case/response.md',
+    '/tmp/murph-deepthink-case/response.md',
     '--prompt',
     'Think through whether adding more zone-2 cardio is worth the tradeoff for recovery this month.',
     '--model',
@@ -279,9 +281,11 @@ test('runDeepthinkPrompt skips warnings when the saved assistant account is Pro'
         approvalPolicy: 'on-request',
         profile: null,
         oss: false,
+        selfDeliveryTargets: null,
         baseUrl: null,
         apiKeyEnv: null,
         providerName: null,
+        headers: null,
         account: {
           source: 'codex-auth-json',
           kind: 'account',
@@ -291,7 +295,7 @@ test('runDeepthinkPrompt skips warnings when the saved assistant account is Pro'
         },
       }),
       resolveWorkspaceRoot: () => '/repo',
-      createTempDirectory: async () => '/tmp/healthybob-deepthink-pro-case',
+      createTempDirectory: async () => '/tmp/murph-deepthink-pro-case',
       readTextFile: async () => 'Answer text',
       runProcess: async () => ({
         stdout: '',
@@ -323,9 +327,11 @@ test('runResearchPrompt warns on saved Free-tier accounts', async () => {
         approvalPolicy: 'on-request',
         profile: null,
         oss: false,
+        selfDeliveryTargets: null,
         baseUrl: null,
         apiKeyEnv: null,
         providerName: null,
+        headers: null,
         account: {
           source: 'codex-auth-json',
           kind: 'account',
@@ -335,7 +341,7 @@ test('runResearchPrompt warns on saved Free-tier accounts', async () => {
         },
       }),
       resolveWorkspaceRoot: () => '/repo',
-      createTempDirectory: async () => '/tmp/healthybob-research-free-case',
+      createTempDirectory: async () => '/tmp/murph-research-free-case',
       readTextFile: async () => 'Research response',
       runProcess: async () => ({
         stdout: '',
@@ -365,7 +371,7 @@ test('runResearchPrompt preserves multiline prompts when sending and saving rese
       now: () => new Date('2026-03-24T05:06:07.008Z'),
       resolveAssistantDefaults: async () => null,
       resolveWorkspaceRoot: () => '/repo',
-      createTempDirectory: async () => '/tmp/healthybob-multiline-case',
+      createTempDirectory: async () => '/tmp/murph-multiline-case',
       readTextFile: async () => 'Response body',
       runProcess: async (input) => {
         const promptIndex = input.args.indexOf('--prompt')
@@ -387,7 +393,7 @@ test('runResearchPrompt preserves multiline prompts when sending and saving rese
 })
 
 test('workspace root resolution finds the nearest package.json with review:gpt wired', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'healthybob-research-root-'))
+  const root = await mkdtemp(path.join(tmpdir(), 'murph-research-root-'))
 
   try {
     await mkdir(path.join(root, 'scripts'), { recursive: true })

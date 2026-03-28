@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.assessment-response.v1"
+      "const": "murph.assessment-response.v1"
     },
     "id": {
       "type": "string",
@@ -65,8 +65,8 @@
     "responses"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/assessment-response.schema.json",
-  "title": "Healthy Bob Assessment Response",
+  "$id": "@murph/contracts/assessment-response.schema.json",
+  "title": "Murph Assessment Response",
   "$defs": {
     "__schema0": {
       "anyOf": [

@@ -6,7 +6,7 @@ import {
   DEVICE_SYNC_SECRET_ENV,
   DEVICE_SYNC_SECRET_ENV_KEYS,
   resolveDeviceSyncRuntimePaths,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import {
   DEVICE_SYNC_HOST_ENV,
   DEVICE_SYNC_HOST_ENV_KEYS,
@@ -45,7 +45,7 @@ export function resolveDeviceSyncDaemonBinPath(
 }
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
-  return require.resolve('@healthybob/device-syncd')
+  return require.resolve('@murph/device-syncd')
 }
 
 export function buildManagedDeviceSyncEnvironment(input: {

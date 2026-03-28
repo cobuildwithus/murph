@@ -458,8 +458,8 @@ export const vaultMetadataSchema = withContractMetadata(
         .strict(),
     })
     .strict(),
-  "@healthybob/contracts/vault-metadata.schema.json",
-  "Healthy Bob Vault Metadata",
+  "@murph/contracts/vault-metadata.schema.json",
+  "Murph Vault Metadata",
 );
 
 export const eventRecordSchema = withContractMetadata(
@@ -558,8 +558,8 @@ export const eventRecordSchema = withContractMetadata(
       duration: boundedString(1, 120).optional(),
     }),
   ]),
-  "@healthybob/contracts/event-record.schema.json",
-  "Healthy Bob Event Record",
+  "@murph/contracts/event-record.schema.json",
+  "Murph Event Record",
 );
 
 export const sampleRecordSchema = withContractMetadata(
@@ -596,8 +596,8 @@ export const sampleRecordSchema = withContractMetadata(
       unit: z.literal("mg_dL"),
     }),
   ]),
-  "@healthybob/contracts/sample-record.schema.json",
-  "Healthy Bob Sample Record",
+  "@murph/contracts/sample-record.schema.json",
+  "Murph Sample Record",
 );
 
 export const auditRecordSchema = withContractMetadata(
@@ -623,8 +623,8 @@ export const auditRecordSchema = withContractMetadata(
       ),
     })
     .strict(),
-  "@healthybob/contracts/audit-record.schema.json",
-  "Healthy Bob Audit Record",
+  "@murph/contracts/audit-record.schema.json",
+  "Murph Audit Record",
 );
 
 export const coreFrontmatterSchema = withContractMetadata(
@@ -639,8 +639,8 @@ export const coreFrontmatterSchema = withContractMetadata(
       activeExperimentSlugs: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-core.schema.json",
-  "Healthy Bob CORE Frontmatter",
+  "@murph/contracts/frontmatter-core.schema.json",
+  "Murph CORE Frontmatter",
 );
 
 export const journalDayFrontmatterSchema = withContractMetadata(
@@ -653,8 +653,8 @@ export const journalDayFrontmatterSchema = withContractMetadata(
       sampleStreams: uniqueArray(z.enum(SAMPLE_STREAMS), { uniqueItems: true }),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-journal-day.schema.json",
-  "Healthy Bob Journal Day Frontmatter",
+  "@murph/contracts/frontmatter-journal-day.schema.json",
+  "Murph Journal Day Frontmatter",
 );
 
 export const experimentFrontmatterSchema = withContractMetadata(
@@ -672,8 +672,8 @@ export const experimentFrontmatterSchema = withContractMetadata(
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-experiment.schema.json",
-  "Healthy Bob Experiment Frontmatter",
+  "@murph/contracts/frontmatter-experiment.schema.json",
+  "Murph Experiment Frontmatter",
 );
 
 export const providerFrontmatterSchema = withContractMetadata(
@@ -694,8 +694,8 @@ export const providerFrontmatterSchema = withContractMetadata(
       aliases: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-provider.schema.json",
-  "Healthy Bob Provider Frontmatter",
+  "@murph/contracts/frontmatter-provider.schema.json",
+  "Murph Provider Frontmatter",
 );
 
 export const foodFrontmatterSchema = withContractMetadata(
@@ -729,8 +729,8 @@ export const foodFrontmatterSchema = withContractMetadata(
         .optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-food.schema.json",
-  "Healthy Bob Food Frontmatter",
+  "@murph/contracts/frontmatter-food.schema.json",
+  "Murph Food Frontmatter",
 );
 
 export const recipeFrontmatterSchema = withContractMetadata(
@@ -757,8 +757,8 @@ export const recipeFrontmatterSchema = withContractMetadata(
       relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-recipe.schema.json",
-  "Healthy Bob Recipe Frontmatter",
+  "@murph/contracts/frontmatter-recipe.schema.json",
+  "Murph Recipe Frontmatter",
 );
 
 export const workoutFormatFrontmatterSchema = withContractMetadata(
@@ -779,8 +779,8 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-workout-format.schema.json",
-  "Healthy Bob Workout Format Frontmatter",
+  "@murph/contracts/frontmatter-workout-format.schema.json",
+  "Murph Workout Format Frontmatter",
 );
 
 export const assessmentResponseSchema = withContractMetadata(
@@ -798,8 +798,8 @@ export const assessmentResponseSchema = withContractMetadata(
       relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/assessment-response.schema.json",
-  "Healthy Bob Assessment Response",
+  "@murph/contracts/assessment-response.schema.json",
+  "Murph Assessment Response",
 );
 
 export const rawImportManifestArtifactSchema = z
@@ -838,8 +838,8 @@ export const profileSnapshotSchema = withContractMetadata(
       profile: jsonObjectSchema,
     })
     .strict(),
-  "@healthybob/contracts/profile-snapshot.schema.json",
-  "Healthy Bob Profile Snapshot",
+  "@murph/contracts/profile-snapshot.schema.json",
+  "Murph Profile Snapshot",
 );
 
 export const profileCurrentFrontmatterSchema = withContractMetadata(
@@ -854,8 +854,8 @@ export const profileCurrentFrontmatterSchema = withContractMetadata(
       topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-profile-current.schema.json",
-  "Healthy Bob Profile Current Frontmatter",
+  "@murph/contracts/frontmatter-profile-current.schema.json",
+  "Murph Profile Current Frontmatter",
 );
 
 export const goalFrontmatterSchema = withContractMetadata(
@@ -881,8 +881,8 @@ export const goalFrontmatterSchema = withContractMetadata(
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-goal.schema.json",
-  "Healthy Bob Goal Frontmatter",
+  "@murph/contracts/frontmatter-goal.schema.json",
+  "Murph Goal Frontmatter",
 );
 
 export const conditionFrontmatterSchema = withContractMetadata(
@@ -904,8 +904,8 @@ export const conditionFrontmatterSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-condition.schema.json",
-  "Healthy Bob Condition Frontmatter",
+  "@murph/contracts/frontmatter-condition.schema.json",
+  "Murph Condition Frontmatter",
 );
 
 export const allergyFrontmatterSchema = withContractMetadata(
@@ -925,8 +925,8 @@ export const allergyFrontmatterSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-allergy.schema.json",
-  "Healthy Bob Allergy Frontmatter",
+  "@murph/contracts/frontmatter-allergy.schema.json",
+  "Murph Allergy Frontmatter",
 );
 
 export const protocolFrontmatterSchema = withContractMetadata(
@@ -966,8 +966,8 @@ export const protocolFrontmatterSchema = withContractMetadata(
       })
       .strict();
   })(),
-  "@healthybob/contracts/frontmatter-protocol.schema.json",
-  "Healthy Bob Protocol Frontmatter",
+  "@murph/contracts/frontmatter-protocol.schema.json",
+  "Murph Protocol Frontmatter",
 );
 
 export const familyMemberFrontmatterSchema = withContractMetadata(
@@ -985,8 +985,8 @@ export const familyMemberFrontmatterSchema = withContractMetadata(
       relatedVariantIds: uniqueArray(idSchema(ID_PREFIXES.variant), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-family-member.schema.json",
-  "Healthy Bob Family Member Frontmatter",
+  "@murph/contracts/frontmatter-family-member.schema.json",
+  "Murph Family Member Frontmatter",
 );
 
 export const geneticVariantFrontmatterSchema = withContractMetadata(
@@ -1005,8 +1005,8 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).optional(),
     })
     .strict(),
-  "@healthybob/contracts/frontmatter-genetic-variant.schema.json",
-  "Healthy Bob Genetic Variant Frontmatter",
+  "@murph/contracts/frontmatter-genetic-variant.schema.json",
+  "Murph Genetic Variant Frontmatter",
 );
 
 export type ExternalRef = z.infer<typeof externalRefSchema>;

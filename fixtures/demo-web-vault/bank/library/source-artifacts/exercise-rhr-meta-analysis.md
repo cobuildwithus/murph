@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.health-library.v1
+schemaVersion: murph.frontmatter.health-library.v1
 docType: health_library
 entityType: source_artifact
 slug: exercise-rhr-meta-analysis

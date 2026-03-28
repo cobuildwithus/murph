@@ -297,15 +297,15 @@ function createStubService(
   overrides: Partial<DeviceSyncService> = {},
 ): DeviceSyncService {
   return {
-    publicBaseUrl: "https://device-sync.healthybob.test/device-sync",
+    publicBaseUrl: "https://sync.example.test/device-sync",
     describeProviders() {
       return [
         {
           provider: "demo",
           callbackPath: "/oauth/demo/callback",
-          callbackUrl: "https://device-sync.healthybob.test/device-sync/oauth/demo/callback",
+          callbackUrl: "https://sync.example.test/device-sync/oauth/demo/callback",
           webhookPath: "/webhooks/demo",
-          webhookUrl: "https://device-sync.healthybob.test/device-sync/webhooks/demo",
+          webhookUrl: "https://sync.example.test/device-sync/webhooks/demo",
           supportsWebhooks: true,
           defaultScopes: ["offline", "read:data"],
         },
@@ -399,7 +399,7 @@ test("device sync http server redirects OAuth callback errors back to the origin
         httpStatus: 400,
         details: {
           provider: "demo",
-          returnTo: "https://app.healthybob.test/settings/devices?tab=wearables",
+          returnTo: "https://app.example.test/settings/devices?tab=wearables",
         },
       });
     },
@@ -430,13 +430,13 @@ test("device sync http server redirects OAuth callback errors back to the origin
     }
 
     const destination = new URL(location);
-    assert.equal(destination.origin, "https://app.healthybob.test");
+    assert.equal(destination.origin, "https://app.example.test");
     assert.equal(destination.pathname, "/settings/devices");
     assert.equal(destination.searchParams.get("tab"), "wearables");
     assert.equal(destination.searchParams.get("deviceSyncStatus"), "error");
     assert.equal(destination.searchParams.get("deviceSyncProvider"), "demo");
     assert.equal(destination.searchParams.get("deviceSyncError"), "OAUTH_CALLBACK_REJECTED");
-    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), "The user canceled the OAuth flow.");
+    assert.equal(destination.searchParams.get("deviceSyncErrorMessage"), null);
   } finally {
     await server.close();
   }
@@ -462,8 +462,10 @@ test("device sync http server serves the Oura webhook verification challenge on 
     );
 
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8");
-    assert.equal(await response.text(), "random-challenge");
+    assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.deepEqual(await response.json(), {
+      challenge: "random-challenge",
+    });
   } finally {
     await server.close();
   }

@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/raw/README.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the root-level assistant automation shorthand so installed `healthybob run` and `vault-cli run` remain covered by the frozen command surface."
+  "purpose": "Documents the root-level assistant automation shorthand so installed `murph run` and `vault-cli run` remain covered by the frozen command surface."
 }

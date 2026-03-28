@@ -2,7 +2,7 @@ import {
   contractIdMaxLength,
   GENETIC_VARIANT_LIMITS,
   ID_PREFIXES,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
@@ -150,31 +150,30 @@ export async function upsertGeneticVariant(
   const normalizedVariantId = normalizeId(input.variantId, "variantId", "var");
   const selectorSlug =
     (input.slug ? normalizeSlug(input.slug, "slug") : undefined) ??
-    (input.gene && (input.title ?? input.label)
-      ? normalizeSlug(undefined, "slug", `${input.gene}-${input.title ?? input.label}`)
+    (input.gene && input.title
+      ? normalizeSlug(undefined, "slug", `${input.gene}-${input.title}`)
       : undefined);
   const existingRecord = await geneticsRegistryApi.resolveExistingRecord({
     vaultRoot: input.vaultRoot,
     recordId: normalizedVariantId,
     slug: selectorSlug,
   });
-  const title = requireString(input.title ?? input.label ?? existingRecord?.title, "title", GENETIC_TITLE_MAX_LENGTH);
+  const title = requireString(input.title ?? existingRecord?.title, "title", GENETIC_TITLE_MAX_LENGTH);
   const gene = requireString(input.gene ?? existingRecord?.gene, "gene", GENETIC_GENE_MAX_LENGTH);
-  const sourceIdsInput = input.sourceFamilyMemberIds ?? input.familyMemberIds;
   const sourceFamilyMemberIds =
-    sourceIdsInput === undefined
+    input.sourceFamilyMemberIds === undefined
       ? existingRecord?.sourceFamilyMemberIds
       : validateSortedStringList(
-          sourceIdsInput,
+          input.sourceFamilyMemberIds,
           "sourceFamilyMemberIds",
           "familyMemberId",
           24,
           GENETIC_FAMILY_ID_MAX_LENGTH,
         );
   const note =
-    input.note === undefined && input.summary === undefined
+    input.note === undefined
       ? existingRecord?.note
-      : optionalString(input.note ?? input.summary, "note", GENETIC_NOTE_MAX_LENGTH);
+      : optionalString(input.note, "note", GENETIC_NOTE_MAX_LENGTH);
   return geneticsRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
     existingRecord,

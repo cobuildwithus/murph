@@ -68,6 +68,7 @@ jobs:
       CF_COMPATIBILITY_DATE: ${{ vars.CF_COMPATIBILITY_DATE }}
       CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || 'basic' }}
       CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES }}
+      HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: ${{ vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER }}
       CF_DEFAULT_ALARM_DELAY_MS: ${{ vars.CF_DEFAULT_ALARM_DELAY_MS }}
       CF_LOG_HEAD_SAMPLING_RATE: ${{ vars.CF_LOG_HEAD_SAMPLING_RATE }}
       CF_MAX_EVENT_ATTEMPTS: ${{ vars.CF_MAX_EVENT_ATTEMPTS }}
@@ -90,7 +91,6 @@ jobs:
       LINQ_API_BASE_URL: ${{ vars.LINQ_API_BASE_URL }}
       LINQ_API_TOKEN: ${{ secrets.LINQ_API_TOKEN }}
       LINQ_WEBHOOK_SECRET: ${{ secrets.LINQ_WEBHOOK_SECRET }}
-      AGENTMAIL_API_BASE_URL: ${{ vars.AGENTMAIL_API_BASE_URL }}
       AGENTMAIL_BASE_URL: ${{ vars.AGENTMAIL_BASE_URL }}
       AGENTMAIL_API_KEY: ${{ secrets.AGENTMAIL_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -107,13 +107,9 @@ jobs:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-      WHISPER_MODEL: ${{ vars.WHISPER_MODEL }}
-      WHISPER_MODEL_DIR: ${{ vars.WHISPER_MODEL_DIR }}
       WHISPER_MODEL_PATH: ${{ vars.WHISPER_MODEL_PATH }}
       WHISPER_COMMAND: ${{ vars.WHISPER_COMMAND }}
-      PADDLEOCR_MODEL_DIR: ${{ vars.PADDLEOCR_MODEL_DIR }}
       PADDLEOCR_COMMAND: ${{ vars.PADDLEOCR_COMMAND }}
-      PARSER_FFMPEG_PATH: ${{ vars.PARSER_FFMPEG_PATH }}
       FFMPEG_COMMAND: ${{ vars.FFMPEG_COMMAND }}
       PDFTOTEXT_COMMAND: ${{ vars.PDFTOTEXT_COMMAND }}
       INSTALL_PADDLEOCR: ${{ vars.INSTALL_PADDLEOCR || '0' }}
@@ -130,6 +126,11 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      - name: Validate required deploy environment
+        env:
+          HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
+        run: pnpm --dir apps/cloudflare deploy:preflight
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
@@ -172,7 +173,7 @@ jobs:
             echo "- Deployment mode: \`${{ inputs.deployment_mode }}\`"
             echo "- Gradual rollout percentage: \`${{ inputs.gradual_rollout_percentage }}\`"
             echo "- Worker name: \`${CF_WORKER_NAME}\`"
-            echo "- Worker URL: \`${CF_PUBLIC_BASE_URL}\`"
+            echo "- Worker URL: \`${CF_PUBLIC_BASE_URL:-not-set}\`"
             echo "- Container instance type: \`${CF_CONTAINER_INSTANCE_TYPE}\`"
             echo "- Native container image: Wrangler-built from \`Dockerfile.cloudflare-hosted-runner\` during deploy"
             echo "- Uploaded version id: \`${{ steps.rollout.outputs.uploaded_version_id || 'not-created' }}\`"

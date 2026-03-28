@@ -1,4 +1,4 @@
-import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "@healthybob/contracts";
+import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "@murph/contracts";
 
 export const FAMILY_MEMBER_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.familyMemberFrontmatter;
 export const FAMILY_MEMBER_DOC_TYPE = FRONTMATTER_DOC_TYPES.familyMember;
@@ -23,13 +23,10 @@ export interface UpsertFamilyMemberInput {
   familyMemberId?: string;
   slug?: string;
   title?: string;
-  name?: string;
   relationship?: string;
-  relation?: string;
   conditions?: string[];
   deceased?: boolean;
   note?: string;
-  summary?: string;
   relatedVariantIds?: string[];
 }
 
@@ -41,6 +38,6 @@ export interface UpsertFamilyMemberResult {
 
 export interface ReadFamilyMemberInput {
   vaultRoot: string;
-  memberId?: string;
+  familyMemberId?: string;
   slug?: string;
 }

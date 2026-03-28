@@ -110,7 +110,7 @@ const runRawSourceCli = runRawCli
 const DOCUMENT_MEAL_SCHEMA_TIMEOUT_MS = 45_000
 
 async function createVault(): Promise<string> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-doc-meal-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-doc-meal-'))
   const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
   assert.equal(initResult.ok, true)
   assert.equal(requireData(initResult).created, true)
@@ -292,7 +292,7 @@ test.sequential(
       assert.equal(requireData(manifest).lookupId, currentDocument.lookupId)
       assert.equal(requireData(manifest).kind, 'document')
       assert.match(requireData(manifest).manifestFile, /\/manifest\.json$/u)
-      assert.equal(requireData(manifest).manifest.schemaVersion, 'hb.raw-import-manifest.v1')
+      assert.equal(requireData(manifest).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
       assert.equal(requireData(manifest).manifest.importKind, 'document')
       assert.equal(requireData(manifest).manifest.importId, currentDocument.documentId)
       assert.equal(requireData(manifest).manifest.source, 'device')

@@ -123,26 +123,21 @@ export interface DeviceBatchImportPayload {
 
 export interface CanonicalWritePort {
   importDocument(payload: DocumentImportPayload): unknown;
-  importMeal(payload: MealImportPayload): unknown;
+  addMeal(payload: MealImportPayload): unknown;
   importSamples(payload: SampleImportPayload): unknown;
   importDeviceBatch(payload: DeviceBatchImportPayload): unknown;
 }
 
 export type CanonicalWriteMethod = keyof CanonicalWritePort;
 
-type CanonicalWriteAlias = CanonicalWriteMethod | "addMeal";
-type PortLike = Partial<Record<CanonicalWriteAlias, (...args: readonly unknown[]) => unknown>>;
+type PortLike = Partial<Record<CanonicalWriteMethod, (...args: readonly unknown[]) => unknown>>;
 
-const METHOD_ALIASES = Object.freeze({
-  importDocument: ["importDocument"],
-  importMeal: ["importMeal", "addMeal"],
-  importSamples: ["importSamples"],
-  importDeviceBatch: ["importDeviceBatch"],
-} satisfies Record<CanonicalWriteMethod, readonly CanonicalWriteAlias[]>);
-
-const DEFAULT_REQUIRED_METHODS = Object.freeze(
-  Object.keys(METHOD_ALIASES) as CanonicalWriteMethod[],
-);
+const DEFAULT_REQUIRED_METHODS = Object.freeze([
+  "importDocument",
+  "addMeal",
+  "importSamples",
+  "importDeviceBatch",
+] satisfies readonly CanonicalWriteMethod[]);
 
 export function assertCanonicalWritePort<T extends CanonicalWriteMethod>(
   port: unknown,
@@ -156,17 +151,9 @@ export function assertCanonicalWritePort<T extends CanonicalWriteMethod>(
   const resolvedPort = {} as Partial<CanonicalWritePort>;
 
   for (const method of requiredMethods) {
-    const aliases = METHOD_ALIASES[method];
-    const implementation = aliases.find((alias) => typeof candidatePort[alias] === "function");
-
-    if (!implementation) {
-      throw new TypeError(`corePort.${aliases.join(" or corePort.")} must be a function`);
-    }
-
-    const handler = candidatePort[implementation];
-
-    if (!handler) {
-      throw new TypeError(`corePort.${implementation} must be a function`);
+    const handler = candidatePort[method];
+    if (typeof handler !== "function") {
+      throw new TypeError(`corePort.${method} must be a function`);
     }
 
     resolvedPort[method] = handler.bind(port) as CanonicalWritePort[T];

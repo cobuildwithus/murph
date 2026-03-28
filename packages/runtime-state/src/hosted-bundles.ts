@@ -9,7 +9,6 @@ import {
 
 const AGENT_STATE_ASSISTANT_ROOT = "assistant-state";
 const AGENT_STATE_OPERATOR_HOME_ROOT = "operator-home";
-const LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT = "vault-runtime";
 
 export async function snapshotHostedExecutionContext(input: {
   operatorHomeRoot?: string | null;
@@ -81,7 +80,6 @@ export async function restoreHostedExecutionContext(input: {
     await restoreHostedBundleRoots({
       bytes: input.agentStateBundle,
       expectedKind: "agent-state",
-      ignoredRoots: [LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT],
       roots: {
         [AGENT_STATE_ASSISTANT_ROOT]: assistantStateRoot,
         [AGENT_STATE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
@@ -136,7 +134,7 @@ function buildHostedAgentStateRoots(input: {
 
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
   return (
-    relativePath === ".healthybob"
-    || relativePath === ".healthybob/config.json"
+    relativePath === ".murph"
+    || relativePath === ".murph/config.json"
   );
 }

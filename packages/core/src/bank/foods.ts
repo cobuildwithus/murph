@@ -1,4 +1,4 @@
-import type { FoodUpsertPayload } from "@healthybob/contracts";
+import type { FoodUpsertPayload } from "@murph/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";

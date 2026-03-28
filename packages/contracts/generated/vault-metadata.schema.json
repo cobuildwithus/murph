@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.vault.v1"
+      "const": "murph.vault.v1"
     },
     "vaultId": {
       "type": "string",
@@ -319,6 +319,6 @@
     "shards"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/vault-metadata.schema.json",
-  "title": "Healthy Bob Vault Metadata"
+  "$id": "@murph/contracts/vault-metadata.schema.json",
+  "title": "Murph Vault Metadata"
 }

@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/healthybob-release-check.XXXXXX")"
+temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-release-check.XXXXXX")"
 cleanup() {
   rm -rf "$temp_dir"
 }

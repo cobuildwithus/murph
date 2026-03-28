@@ -98,6 +98,14 @@ function toDateParameter(timestamp: string): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
+function toDateTimeParameter(timestamp: string): string {
+  return new Date(timestamp).toISOString();
+}
+
+function normalizeGrantedScopes(value: unknown): string[] {
+  return [...new Set(splitScopes(value).map((scope) => scope.replace(/^extapi:/u, "")))];
+}
+
 function buildDisplayName(personalInfo: Record<string, unknown>): string {
   const email = normalizeString(personalInfo.email);
   const accountId = normalizeIdentifier(personalInfo.id ?? personalInfo.user_id ?? personalInfo.userId);
@@ -118,7 +126,8 @@ function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthToke
 function buildOuraSignatureCandidates(timestamp: string, rawBody: Buffer, secret: string): string[] {
   const signatureBase = `${timestamp}${rawBody.toString("utf8")}`;
   const digest = createHmac("sha256", secret).update(signatureBase).digest();
-  return [digest.toString("hex"), digest.toString("base64"), digest.toString("base64url")];
+  const hex = digest.toString("hex");
+  return [hex, hex.toUpperCase(), digest.toString("base64"), digest.toString("base64url")];
 }
 
 function constantTimeMatchSignature(expectedCandidates: readonly string[], actual: string): boolean {
@@ -330,6 +339,32 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     };
   }
 
+  const HEARTRATE_CHUNK_MS = 30 * 24 * 60 * 60_000;
+
+  async function fetchOuraHeartRateInChunks(
+    api: { fetchPagedCollection(path: string, parameters: Record<string, string | null | undefined>): Promise<Record<string, unknown>[]> },
+    windowStart: string,
+    windowEnd: string,
+  ): Promise<Record<string, unknown>[]> {
+    const resolvedWindowStart = toDateTimeParameter(windowStart);
+    const resolvedWindowEnd = toDateTimeParameter(windowEnd);
+    const records: Record<string, unknown>[] = [];
+    let chunkStart = Date.parse(resolvedWindowStart);
+    const end = Date.parse(resolvedWindowEnd);
+
+    while (chunkStart < end) {
+      const chunkEnd = Math.min(chunkStart + HEARTRATE_CHUNK_MS, end);
+      const chunk = await api.fetchPagedCollection("/v2/usercollection/heartrate", {
+        start_datetime: new Date(chunkStart).toISOString(),
+        end_datetime: new Date(chunkEnd).toISOString(),
+      });
+      records.push(...chunk);
+      chunkStart = chunkEnd;
+    }
+
+    return records;
+  }
+
   async function executeWindowImport(
     context: ProviderJobContext,
     payload: Record<string, unknown>,
@@ -392,10 +427,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     }
 
     if (hasOuraScope(api.account, "heartrate")) {
-      snapshot.heartrate = await api.fetchPagedCollection("/v2/usercollection/heartrate", {
-        start_datetime: windowStart,
-        end_datetime: windowEnd,
-      });
+      snapshot.heartrate = await fetchOuraHeartRateInChunks(api, windowStart, windowEnd);
     }
 
     await context.importSnapshot(snapshot);
@@ -442,8 +474,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           }),
       });
 
-      const grantedScopesFromToken = splitScopes(tokenPayload.scope)
-        .map((scope) => scope.replace(/^extapi:/u, ""));
+      const grantedScopesFromToken = normalizeGrantedScopes(tokenPayload.scope);
       const grantedScopes =
         grantedScopesFromToken.length > 0
           ? grantedScopesFromToken
@@ -454,7 +485,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       if (!grantedScopes.includes("personal")) {
         throw deviceSyncError({
           code: "OURA_PERSONAL_SCOPE_REQUIRED",
-          message: "Oura connections require the personal scope so Healthy Bob can identify the account.",
+          message: "Oura connections require the personal scope so Murph can identify the account.",
           retryable: false,
           httpStatus: 400,
         });

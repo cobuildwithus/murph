@@ -1,4 +1,4 @@
-# @healthybob/hosted-web
+# @murph/hosted-web
 
 Hosted integration control plane for Vercel deployments.
 
@@ -78,12 +78,8 @@ Hosted onboarding extras:
 - `HOSTED_EXECUTION_DISPATCH_URL`
 - `HOSTED_EXECUTION_SIGNING_SECRET`
 - `HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS`
-
-Cloudflare compatibility aliases still work:
-
-- `HOSTED_EXECUTION_CLOUDFLARE_BASE_URL`
-- `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`
-- `HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS`
+- `HOSTED_EXECUTION_CONTROL_TOKEN` so `/settings` can sync a verified email into hosted user env and trigger a hosted run
+- `CRON_SECRET` so the deployed Vercel cron can authenticate `/api/internal/hosted-execution/outbox/cron`
 
 When you set `DEVICE_SYNC_PUBLIC_BASE_URL`, point it at the stable production project domain or a custom domain for the hosted app, for example `https://your-project.vercel.app/api/device-sync`. Do not use an ephemeral preview deployment URL as the long-lived provider callback or webhook base.
 
@@ -111,7 +107,7 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 ## Secret hygiene and rotation
 
 - Keep real hosted values in an untracked local `.env` for development or in the platform secret manager for deployed environments. The committed `.env.example` file must stay placeholder-only.
-- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env` or `.next` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files and filters blocked local residue from the bundle.
+- A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
 - Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
 - Treat a leaked raw clone/archive that included the local hosted `.env` the same way as a direct secret exposure.
 - Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane loads one active key at runtime.
@@ -125,6 +121,14 @@ Generate the client and apply migrations with Prisma:
 pnpm --dir apps/web prisma:generate
 pnpm --dir apps/web prisma:migrate:deploy
 ```
+
+## Local verification
+
+- `pnpm --dir apps/web dev` now keeps interactive Next dev artifacts under `apps/web/.next-dev`.
+- `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
+- `pnpm --dir apps/web test` now includes a cold-boot `next dev` smoke that boots under `apps/web/.next-smoke`, waits for the hosted app to boot, and then repeats `GET /`, `HEAD /`, and `GET /` before the production build step so smoke never deletes the interactive `apps/web/.next-dev` cache.
+- Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
+- Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`. Production deployments need `CRON_SECRET` set so Vercel's cron `Authorization: Bearer ...` header can authenticate that route.
 
 ## Main routes
 

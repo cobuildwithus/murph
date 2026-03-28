@@ -1,14 +1,19 @@
-import type { SharePack } from "@healthybob/contracts";
+import type { SharePack } from "@murph/contracts";
 
-export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hb-execution-signature";
-export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hb-execution-timestamp";
+export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
+export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
+
+export const HOSTED_EXECUTION_EVENT_KINDS = [
+  "member.activated",
+  "linq.message.received",
+  "email.message.received",
+  "assistant.cron.tick",
+  "device-sync.wake",
+  "vault.share.accepted",
+] as const;
 
 export type HostedExecutionEventKind =
-  | "member.activated"
-  | "linq.message.received"
-  | "assistant.cron.tick"
-  | "device-sync.wake"
-  | "vault.share.accepted";
+  (typeof HOSTED_EXECUTION_EVENT_KINDS)[number];
 
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
@@ -17,17 +22,23 @@ export interface HostedExecutionBaseEvent {
 
 export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBaseEvent {
   kind: "member.activated";
-  linqChatId: string | null;
-  normalizedPhoneNumber: string;
 }
 
 export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "linq.message.received";
-  linqChatId: string | null;
   linqEvent: Record<string, unknown>;
   normalizedPhoneNumber: string;
 }
 
+
+export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutionBaseEvent {
+  kind: "email.message.received";
+  envelopeFrom: string | null;
+  envelopeTo: string | null;
+  identityId: string;
+  rawMessageKey: string;
+  threadTarget: string | null;
+}
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";
   reason: "alarm" | "manual" | "device-sync";
@@ -35,25 +46,23 @@ export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBa
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
   kind: "device-sync.wake";
-  connectionId: string | null;
-  provider: string | null;
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
 }
 
-export interface HostedExecutionSharePackReference {
+export interface HostedExecutionShareReference {
   shareCode: string;
   shareId: string;
 }
 
-export interface HostedExecutionVaultShareAcceptedEvent
-  extends HostedExecutionBaseEvent, HostedExecutionSharePackReference {
+export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionBaseEvent {
   kind: "vault.share.accepted";
-  previewTitle: string | null;
+  share: HostedExecutionShareReference;
 }
 
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionLinqMessageReceivedEvent
+  | HostedExecutionEmailMessageReceivedEvent
   | HostedExecutionAssistantCronTickEvent
   | HostedExecutionDeviceSyncWakeEvent
   | HostedExecutionVaultShareAcceptedEvent;
@@ -110,6 +119,30 @@ export interface HostedExecutionUserStatus {
   userId: string;
 }
 
+export const HOSTED_EXECUTION_EVENT_DISPATCH_STATES = [
+  "queued",
+  "duplicate_pending",
+  "duplicate_consumed",
+  "backpressured",
+  "completed",
+  "poisoned",
+] as const;
+
+export type HostedExecutionEventDispatchState =
+  (typeof HOSTED_EXECUTION_EVENT_DISPATCH_STATES)[number];
+
+export interface HostedExecutionEventDispatchStatus {
+  eventId: string;
+  lastError: string | null;
+  state: HostedExecutionEventDispatchState;
+  userId: string;
+}
+
+export interface HostedExecutionDispatchResult {
+  event: HostedExecutionEventDispatchStatus;
+  status: HostedExecutionUserStatus;
+}
+
 export interface HostedExecutionUserEnvStatus {
   configuredUserEnvKeys: string[];
   userId: string;
@@ -120,6 +153,7 @@ export interface HostedExecutionUserEnvUpdate {
   mode: "merge" | "replace";
 }
 
-export interface HostedExecutionSharePackResponse extends HostedExecutionSharePackReference {
+export interface HostedExecutionSharePackResponse {
   pack: SharePack;
+  shareId: string;
 }

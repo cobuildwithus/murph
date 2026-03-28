@@ -1,7 +1,7 @@
 import {
   readHostedExecutionWorkerEnvironment,
   type HostedExecutionWorkerEnvironment,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import { decodeBase64Key } from "./base64.js";
 

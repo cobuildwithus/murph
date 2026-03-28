@@ -1,15 +1,15 @@
 import {
+  createDeviceSyncJsonRequester as createSharedDeviceSyncJsonRequester,
   DEFAULT_DEVICE_SYNC_BASE_URL,
   DEVICE_SYNC_BASE_URL_ENV,
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
   isDeviceSyncLocalControlPlaneError,
   normalizeDeviceSyncBaseUrl,
-  requestDeviceSyncJson as requestSharedDeviceSyncJson,
-  resolveDeviceSyncBaseUrl as resolveSharedDeviceSyncBaseUrl,
+  resolveDeviceSyncControlPlane as resolveSharedDeviceSyncControlPlane,
   resolveDeviceSyncControlToken as resolveSharedDeviceSyncControlToken,
   type DeviceSyncAccountRecord,
   type DeviceSyncProviderDescriptor,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 export {
   DEFAULT_DEVICE_SYNC_BASE_URL,
@@ -89,17 +89,14 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
 
   try {
     ({ baseUrl, controlToken } = resolveDeviceSyncControlPlane(env));
+    const requestJson = createDeviceSyncJsonRequester({
+      baseUrl,
+      fetchImpl,
+      controlToken,
+    });
     const [providerResult, accountResult] = await Promise.all([
-      requestDeviceSyncJson<{ providers: DeviceSyncProviderDescriptor[] }>(
-        baseUrl,
-        "/providers",
-        { fetchImpl, controlToken },
-      ),
-      requestDeviceSyncJson<{ accounts: DeviceSyncAccountRecord[] }>(
-        baseUrl,
-        "/accounts",
-        { fetchImpl, controlToken },
-      ),
+      requestJson<{ providers: DeviceSyncProviderDescriptor[] }>("/providers"),
+      requestJson<{ accounts: DeviceSyncAccountRecord[] }>("/accounts"),
     ]);
 
     return {
@@ -140,12 +137,12 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
         ? "Set DEVICE_SYNC_BASE_URL to a loopback URL such as http://127.0.0.1:8788 whenever DEVICE_SYNC_CONTROL_TOKEN is configured."
         : isAuthError
         ? "Set DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
-        : "Start the Healthy Bob-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
+        : "Start the Murph-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
       suggestedCommand: isLocalityError
         ? "DEVICE_SYNC_BASE_URL=http://127.0.0.1:8788 DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
         : isAuthError
         ? "DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
-        : "healthybob device daemon start --vault <your-vault>",
+        : "murph device daemon start --vault <your-vault>",
     };
   }
 }
@@ -162,14 +159,16 @@ export async function beginDeviceConnection(input: {
   authorizationUrl: string;
 }> {
   const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(input.env);
-
-  return await requestDeviceSyncJson(
+  const requestJson = createDeviceSyncJsonRequester({
     baseUrl,
+    fetchImpl: input.fetchImpl,
+    controlToken,
+  });
+
+  return await requestJson(
     `/providers/${encodeURIComponent(input.provider)}/connect`,
     {
       method: "POST",
-      fetchImpl: input.fetchImpl,
-      controlToken,
       body: JSON.stringify(
         input.returnTo ? { returnTo: input.returnTo } : {},
       ),
@@ -186,14 +185,16 @@ export async function reconcileDeviceAccount(input: {
   fetchImpl?: typeof fetch;
 }): Promise<{ account: DeviceSyncAccountRecord }> {
   const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(input.env);
-
-  return await requestDeviceSyncJson(
+  const requestJson = createDeviceSyncJsonRequester({
     baseUrl,
+    fetchImpl: input.fetchImpl,
+    controlToken,
+  });
+
+  return await requestJson(
     `/accounts/${encodeURIComponent(input.accountId)}/reconcile`,
     {
       method: "POST",
-      fetchImpl: input.fetchImpl,
-      controlToken,
     },
   );
 }
@@ -204,14 +205,16 @@ export async function disconnectDeviceAccount(input: {
   fetchImpl?: typeof fetch;
 }): Promise<{ account: DeviceSyncAccountRecord }> {
   const { baseUrl, controlToken } = resolveDeviceSyncControlPlane(input.env);
-
-  return await requestDeviceSyncJson(
+  const requestJson = createDeviceSyncJsonRequester({
     baseUrl,
+    fetchImpl: input.fetchImpl,
+    controlToken,
+  });
+
+  return await requestJson(
     `/accounts/${encodeURIComponent(input.accountId)}/disconnect`,
     {
       method: "POST",
-      fetchImpl: input.fetchImpl,
-      controlToken,
     },
   );
 }
@@ -222,16 +225,8 @@ function resolveDeviceSyncControlPlane(
   baseUrl: string;
   controlToken: string | null;
 } {
-  const controlToken = resolveSharedDeviceSyncControlToken({ env });
-
   try {
-    return {
-      baseUrl: resolveSharedDeviceSyncBaseUrl({
-        env,
-        controlToken,
-      }),
-      controlToken,
-    };
+    return resolveSharedDeviceSyncControlPlane({ env });
   } catch (error) {
     if (isDeviceSyncLocalControlPlaneError(error)) {
       throw new DeviceSyncWebError({
@@ -261,32 +256,25 @@ export function buildWebReturnTo(requestUrl: URL, fallbackPath = "/"): string {
   return new URL(fallbackPath, requestUrl.origin).toString();
 }
 
-async function requestDeviceSyncJson<TResponse>(
-  baseUrl: string,
-  path: string,
+function createDeviceSyncJsonRequester(
   input: {
-    method?: "GET" | "POST";
-    body?: string;
-    headers?: HeadersInit;
+    baseUrl: string;
     fetchImpl?: typeof fetch;
     controlToken?: string | null;
-  } = {},
-): Promise<TResponse> {
-  return await requestSharedDeviceSyncJson<TResponse>({
-    baseUrl,
-    path,
+  },
+) {
+  return createSharedDeviceSyncJsonRequester({
+    baseUrl: input.baseUrl,
     fetchImpl: input.fetchImpl,
     controlToken: input.controlToken ?? null,
-    request: {
-      method: input.method ?? "GET",
-      body: input.body,
-      headers: input.headers,
+    requestDefaults: {
+      method: "GET",
       cache: "no-store",
     },
     createUnavailableError: ({ cause }) =>
       new DeviceSyncWebError({
         code: "device_sync_unavailable",
-        message: `Device sync service is unavailable at ${baseUrl}.`,
+        message: `Device sync service is unavailable at ${input.baseUrl}.`,
         status: 503,
         cause,
       }),

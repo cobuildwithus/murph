@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import { openSqliteRuntimeDatabase } from '@healthybob/runtime-state'
+import { openSqliteRuntimeDatabase } from '@murph/runtime-state'
 import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
@@ -255,7 +255,7 @@ async function captureSingleCapture(input: {
 test.sequential(
   'inbox attachment commands expose stored metadata, parse status, and requeue support',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-attachments')
+    const fixture = await makeVaultFixture('murph-inbox-attachments')
     const services = createIntegratedInboxCliServices({
       enableJournalPromotion: true,
       getHomeDirectory: () => fixture.homeRoot,
@@ -439,7 +439,7 @@ test.sequential(
 test.sequential(
   'inbox journal and experiment-note promotions are idempotent',
   async () => {
-    const fixture = await makeVaultFixture('healthybob-inbox-journal-promotion')
+    const fixture = await makeVaultFixture('murph-inbox-journal-promotion')
     const services = createIntegratedInboxCliServices({
       enableJournalPromotion: true,
       getHomeDirectory: () => fixture.homeRoot,

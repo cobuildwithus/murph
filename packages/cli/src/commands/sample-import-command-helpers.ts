@@ -51,7 +51,7 @@ export async function importCsvSamples(options: ImportCsvSamplesOptions) {
 async function loadImportersRuntime(): Promise<ImportersRuntimeModule> {
   importersRuntimePromise ??= (async () => {
     try {
-      const runtime = await loadRuntimeModule<ImportersRuntimeModule>('@healthybob/importers')
+      const runtime = await loadRuntimeModule<ImportersRuntimeModule>('@murph/importers')
 
       if (
         typeof runtime.createImporters !== 'function' ||

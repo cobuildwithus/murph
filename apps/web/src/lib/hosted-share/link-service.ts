@@ -1,12 +1,7 @@
 import { HostedBillingStatus, Prisma, PrismaClient } from "@prisma/client";
-import { assertContract, sharePackSchema, type SharePack } from "@healthybob/contracts";
+import { assertContract, sharePackSchema, type SharePack } from "@murph/contracts";
 
 import { getPrisma } from "../prisma";
-import {
-  drainHostedExecutionOutboxBestEffort,
-  findHostedExecutionOutboxByEventId,
-  readHostedExecutionOutboxOutcome,
-} from "../hosted-execution/outbox";
 import {
   issueHostedInviteForPhone,
 } from "../hosted-onboarding/service";
@@ -18,7 +13,6 @@ import {
 import {
   buildHostedSharePreview,
   buildHostedShareUrl,
-  finalizeHostedShareAcceptance,
   findHostedShareLinkByCode,
   generateHostedShareCode,
   generateHostedShareId,
@@ -116,30 +110,7 @@ export async function buildHostedSharePageData(input: {
     };
   }
 
-  if (
-    record.acceptedByMemberId === input.sessionRecord?.member.id
-    && !record.consumedAt
-    && record.lastEventId
-  ) {
-    await drainHostedExecutionOutboxBestEffort({
-      context: `hosted-share page-data share=${input.shareCode}`,
-      eventIds: [record.lastEventId],
-      prisma,
-    });
-    const outboxRecord = await findHostedExecutionOutboxByEventId(record.lastEventId, prisma);
-
-    if (readHostedExecutionOutboxOutcome(outboxRecord) === "completed") {
-      await finalizeHostedShareAcceptance({
-        eventId: record.lastEventId,
-        memberId: input.sessionRecord?.member.id ?? null,
-        prisma,
-        shareCode: input.shareCode,
-      });
-      record = await requireHostedShareLink(input.shareCode, prisma);
-    }
-  }
-
-  const preview = readHostedSharePreview(record.previewJson, readHostedSharePack(record).pack);
+  const preview = readHostedSharePreview(record.previewJson, () => readHostedSharePack(record).pack);
   const now = new Date();
   const consumed = Boolean(record.consumedAt);
   const acceptedByCurrentMember = record.consumedByMemberId === input.sessionRecord?.member.id

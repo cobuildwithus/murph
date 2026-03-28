@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test, vi } from "vitest";
 
-import type { EventRecord, ExperimentEventRecord } from "@healthybob/contracts";
+import type { EventRecord, ExperimentEventRecord } from "@murph/contracts";
 
 vi.mock("../src/operations/canonical-write-lock.ts", () => ({
   acquireCanonicalWriteLock: async () => ({
@@ -65,7 +65,7 @@ test("public core exports include the high-level canonical mutation ports", () =
 });
 
 test("high-level core experiment and journal mutation ports preserve canonical behavior", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({
@@ -169,7 +169,7 @@ test("high-level core experiment and journal mutation ports preserve canonical b
 });
 
 test("high-level core provider, event, and summary mutation ports preserve canonical behavior", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const summary = await updateVaultSummary({
@@ -248,21 +248,28 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
 });
 
-test("high-level core experiment mutation ports keep legacy create coercion distinct from canonical update validation", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+test("high-level core experiment mutation ports reject invalid experiment statuses consistently", async () => {
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({
     vaultRoot,
     slug: "status-boundary",
     title: "Status Boundary",
-    status: "not-a-real-status",
+    status: "active",
   });
-  const experimentDocument = parseFrontmatterDocument(
-    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
-  );
 
-  assert.equal(experimentDocument.attributes.status, "active");
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot,
+        slug: "status-boundary-invalid",
+        title: "Status Boundary Invalid",
+        status: "not-a-real-status",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EXPERIMENT_STATUS_INVALID",
+  );
 
   await assert.rejects(
     () =>
@@ -277,7 +284,7 @@ test("high-level core experiment mutation ports keep legacy create coercion dist
 });
 
 test("helper-backed experiment mutation readers preserve exact invalid-frontmatter errors across callers", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({
@@ -338,7 +345,7 @@ test("helper-backed experiment mutation readers preserve exact invalid-frontmatt
 });
 
 test("high-level canonical mutation ports dedupe trimmed duplicate experiment and event lists", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({
@@ -390,7 +397,7 @@ test("high-level canonical mutation ports dedupe trimmed duplicate experiment an
 });
 
 test("helper-backed journal mutation readers preserve exact invalid-frontmatter errors across callers", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const appended = await appendJournal({
@@ -448,7 +455,7 @@ test("helper-backed journal mutation readers preserve exact invalid-frontmatter 
 });
 
 test("high-level core inbox promotion ports preserve journal and experiment-note idempotency", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-core-boundary");
+  const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({

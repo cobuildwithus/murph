@@ -4,6 +4,11 @@ export interface HostedExecutionDispatchEnvironment {
   signingSecret: string | null;
 }
 
+export interface HostedExecutionControlEnvironment {
+  baseUrl: string | null;
+  controlToken: string | null;
+}
+
 export interface HostedExecutionWorkerEnvironment {
   allowedUserEnvKeys: string | null;
   allowedUserEnvPrefixes: string | null;
@@ -24,30 +29,34 @@ export function readHostedExecutionDispatchEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionDispatchEnvironment {
   const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
-  const legacyDispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL);
   const signingSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET);
-  const legacySigningSecret = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET);
   const dispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS);
-  const legacyDispatchTimeout = normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS);
 
   return {
     dispatchTimeoutMs: parsePositiveInteger(
-      dispatchTimeout ?? legacyDispatchTimeout,
+      dispatchTimeout,
       30_000,
       "HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS",
     ),
-    dispatchUrl: dispatchUrl ?? legacyDispatchUrl,
-    signingSecret: signingSecret ?? legacySigningSecret,
+    dispatchUrl,
+    signingSecret,
+  };
+}
+
+export function readHostedExecutionControlEnvironment(
+  source: EnvSource = process.env,
+): HostedExecutionControlEnvironment {
+  const dispatchUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_EXECUTION_DISPATCH_URL);
+
+  return {
+    baseUrl: dispatchUrl,
+    controlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
   };
 }
 
 export function readHostedExecutionWorkerEnvironment(
   source: EnvSource = process.env,
 ): HostedExecutionWorkerEnvironment {
-  const dispatchSigningSecret =
-    normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET)
-    ?? normalizeHostedExecutionString(source.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET);
-
   return {
     allowedUserEnvKeys: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
     allowedUserEnvPrefixes: normalizeHostedExecutionString(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
@@ -65,7 +74,7 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS",
     ),
     dispatchSigningSecret: requireHostedExecutionString(
-      dispatchSigningSecret,
+      normalizeHostedExecutionString(source.HOSTED_EXECUTION_SIGNING_SECRET),
       "HOSTED_EXECUTION_SIGNING_SECRET",
     ),
     maxEventAttempts: parsePositiveInteger(

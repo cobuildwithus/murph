@@ -14,7 +14,7 @@ import {
 } from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "healthybob-importers-zod-"));
+  const directory = await mkdtemp(join(tmpdir(), "murph-importers-zod-"));
   const filePath = join(directory, name);
   await writeFile(filePath, contents);
   return filePath;
@@ -87,7 +87,6 @@ test("prepareDocumentImport parses and normalizes object input with zod", async 
   const payload = await prepareDocumentImport({
     filePath: `  ${filePath}  `,
     vaultRoot: "  canonical-vault  ",
-    vault: "  fixture-vault  ",
     title: "  Annual Labs  ",
     occurredAt: "2026-03-11T14:00:00-05:00",
     note: "  annual lab packet  ",
@@ -104,14 +103,13 @@ test("prepareDocumentImport parses and normalizes object input with zod", async 
   });
 });
 
-test("importAssessmentResponse prefers vaultRoot over vault and normalizes the payload", async () => {
+test("importAssessmentResponse normalizes the payload and ignores the removed vault alias", async () => {
   const filePath = await createTempFile("assessment.json", "{\"ok\":true}");
   let receivedPayload: Record<string, unknown> | undefined;
 
   const result = await importAssessmentResponse<{ ok: boolean }>(
     {
       filePath: `  ${filePath}  `,
-      vaultRoot: "  canonical-vault  ",
       vault: "  legacy-vault  ",
       title: "  Sleep Survey  ",
       occurredAt: "2026-03-11T14:00:00-05:00",
@@ -130,7 +128,6 @@ test("importAssessmentResponse prefers vaultRoot over vault and normalizes the p
 
   assert.deepEqual(result, { ok: true });
   assert.deepEqual(receivedPayload, {
-    vaultRoot: "canonical-vault",
     sourcePath: filePath,
     title: "Sleep Survey",
     occurredAt: "2026-03-11T19:00:00.000Z",

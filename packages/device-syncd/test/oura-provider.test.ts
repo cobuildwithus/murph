@@ -96,7 +96,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
 
   const connection = await provider.exchangeAuthorizationCode(
     {
-      callbackUrl: "https://healthybob.test/device-sync/oauth/oura/callback",
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
       now: "2026-03-16T10:00:00.000Z",
       grantedScopes: [],
     },
@@ -116,6 +116,45 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
     "https://api.ouraring.com/oauth/token",
     "https://api.ouraring.com/v2/usercollection/personal_info",
   ]);
+});
+
+test("Oura provider normalizes extapi-prefixed token scopes from token responses", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === "https://api.ouraring.com/oauth/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "extapi:personal extapi:daily extapi:heartrate",
+        });
+      }
+
+      if (url === "https://api.ouraring.com/v2/usercollection/personal_info") {
+        return createJsonResponse({
+          id: "oura-user-1",
+          email: "oura@example.com",
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const connection = await provider.exchangeAuthorizationCode(
+    {
+      callbackUrl: "https://sync.example.test/device-sync/oauth/oura/callback",
+      now: "2026-03-16T10:00:00.000Z",
+      grantedScopes: [],
+    },
+    "auth-code-1",
+  );
+
+  assert.deepEqual(connection.scopes, ["personal", "daily", "heartrate"]);
 });
 
 test("Oura provider requires a replacement refresh token during refresh", async () => {
@@ -284,6 +323,128 @@ test("Oura provider backfills snapshot windows with polling-friendly collection 
   assert.equal(provider.webhookPath, "/webhooks/oura");
 });
 
+test("Oura provider splits heartrate backfills into 30-day chunks", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?")) {
+        const search = new URL(url).searchParams;
+        const start = search.get("start_datetime");
+
+        return createJsonResponse({
+          data: start ? [{ timestamp: start, bpm: 64 }] : [],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["heartrate"]),
+    now: "2026-04-05T00:00:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return {
+        ok: true,
+      };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refresh should not be called in this test");
+    },
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("backfill", {
+      windowStart: "2026-01-01T00:00:00.000Z",
+      windowEnd: "2026-04-05T00:00:00.000Z",
+      includePersonalInfo: false,
+    }),
+  );
+
+  const heartrateRequests = requests
+    .filter((url) => url.startsWith("https://api.ouraring.com/v2/usercollection/heartrate?"))
+    .map((url) => {
+      const search = new URL(url).searchParams;
+      return {
+        start: search.get("start_datetime"),
+        end: search.get("end_datetime"),
+      };
+    });
+
+  assert.deepEqual(heartrateRequests, [
+    {
+      start: "2026-01-01T00:00:00.000Z",
+      end: "2026-01-31T00:00:00.000Z",
+    },
+    {
+      start: "2026-01-31T00:00:00.000Z",
+      end: "2026-03-02T00:00:00.000Z",
+    },
+    {
+      start: "2026-03-02T00:00:00.000Z",
+      end: "2026-04-01T00:00:00.000Z",
+    },
+    {
+      start: "2026-04-01T00:00:00.000Z",
+      end: "2026-04-05T00:00:00.000Z",
+    },
+  ]);
+  assert.deepEqual(importedSnapshots[0], {
+    accountId: "oura-user-1",
+    importedAt: "2026-04-05T00:00:00.000Z",
+    heartrate: [
+      { timestamp: "2026-01-01T00:00:00.000Z", bpm: 64 },
+      { timestamp: "2026-01-31T00:00:00.000Z", bpm: 64 },
+      { timestamp: "2026-03-02T00:00:00.000Z", bpm: 64 },
+      { timestamp: "2026-04-01T00:00:00.000Z", bpm: 64 },
+    ],
+  });
+});
+
+test("Oura provider rejects invalid heartrate window payloads", async () => {
+  let fetchCalled = false;
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async () => {
+      fetchCalled = true;
+      throw new Error("fetch should not be called for invalid window payloads");
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["heartrate"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot() {
+      throw new Error("invalid windows should not reach importSnapshot");
+    },
+    async refreshAccountTokens() {
+      throw new Error("refresh should not be called in this test");
+    },
+  };
+
+  await assert.rejects(
+    provider.executeJob(
+      context,
+      createJob("backfill", {
+        windowStart: "not-a-date",
+        windowEnd: "2026-03-16T00:00:00.000Z",
+        includePersonalInfo: false,
+      }),
+    ),
+    (error) => error instanceof RangeError,
+  );
+  assert.equal(fetchCalled, false);
+});
+
 test("Oura provider validates webhook signatures and turns notifications into reconcile hints", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -341,10 +502,44 @@ test("Oura provider validates webhook signatures and turns notifications into re
   assert.equal(parsed?.jobs[0]?.dedupeKey, `oura-webhook:${parsed?.traceId}`);
 });
 
+test("Oura provider accepts uppercase hexadecimal webhook signatures", async () => {
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "update",
+      data_type: "daily_sleep",
+      object_id: "daily-sleep-1",
+      user_id: "oura-user-1",
+      timestamp: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+  const timestamp = "2026-03-16T09:58:10.000Z";
+  const signature = createHmac("sha256", "oura-client-secret")
+    .update(`${timestamp}${rawBody.toString("utf8")}`)
+    .digest("hex")
+    .toUpperCase();
+
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: new Headers({
+      "x-oura-signature": signature,
+      "x-oura-timestamp": timestamp,
+    }),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.equal(parsed?.eventType, "update");
+  assert.equal(parsed?.payload?.dataType, "daily_sleep");
+});
+
 test("Oura webhook verification challenge helper returns the challenge only for the configured token", () => {
   const challenge = resolveOuraWebhookVerificationChallenge({
     url: new URL(
-      "https://sync.healthybob.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
+      "https://sync.example.test/api/device-sync/webhooks/oura?verification_token=verify-token&challenge=random-challenge",
     ),
     verificationToken: "verify-token",
   });
@@ -354,7 +549,7 @@ test("Oura webhook verification challenge helper returns the challenge only for 
     () =>
       resolveOuraWebhookVerificationChallenge({
         url: new URL(
-          "https://sync.healthybob.test/api/device-sync/webhooks/oura?verification_token=wrong&challenge=random-challenge",
+          "https://sync.example.test/api/device-sync/webhooks/oura?verification_token=wrong&challenge=random-challenge",
         ),
         verificationToken: "verify-token",
       }),

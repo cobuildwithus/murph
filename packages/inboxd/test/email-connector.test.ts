@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
+import {
+  createHostedEmailThreadTarget,
+  parseHostedEmailThreadTarget,
+  serializeHostedEmailThreadTarget,
+} from "@murph/runtime-state";
 
 import {
   createAgentmailApiPollDriver,
   createEmailPollConnector,
   normalizeAgentmailMessage,
+  normalizeParsedEmailMessage,
+  parseRawEmailMessage,
   type AgentmailFetch,
   type InboundCapture,
   type PersistedCapture,
@@ -23,14 +30,14 @@ function createPersistedCapture(capture: InboundCapture): PersistedCapture {
 
 test("normalizeAgentmailMessage builds direct email captures and hydrates downloadable attachments", async () => {
   const capture = await normalizeAgentmailMessage({
-    accountAddress: "healthybob@example.test",
+    accountAddress: "murph@example.test",
     message: {
       inbox_id: "inbox_123",
       thread_id: "thread_123",
       message_id: "msg_123",
       timestamp: "2026-03-22T10:00:00.000Z",
       from: "Alice Example <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       subject: "Lunch summary",
       extracted_text: "See attached.",
       attachments: [
@@ -73,7 +80,7 @@ test("normalizeAgentmailMessage keeps direct-thread detection when the inbox add
       thread_id: "thread_123",
       message_id: "msg_direct",
       from: "Alice Example <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       cc: [],
       bcc: [],
       text: "Ping",
@@ -85,14 +92,14 @@ test("normalizeAgentmailMessage keeps direct-thread detection when the inbox add
 
 test("normalizeAgentmailMessage prefers extracted reply content over full-thread text fallbacks", async () => {
   const capture = await normalizeAgentmailMessage({
-    accountAddress: "healthybob@example.test",
+    accountAddress: "murph@example.test",
     message: {
       inbox_id: "inbox_123",
       thread_id: "thread_123",
       message_id: "msg_extracted",
       from: "Alice Example <alice@example.test>",
-      to: ["healthybob@example.test"],
-      text: "Newest reply\n\nOn Mon, Healthy Bob wrote: quoted history",
+      to: ["murph@example.test"],
+      text: "Newest reply\n\nOn Mon, Murph wrote: quoted history",
       extracted_html: "<p>Newest reply</p>",
       html: "<div>Newest reply</div><blockquote>quoted history</blockquote>",
     },
@@ -111,7 +118,7 @@ test("createEmailPollConnector backfills unread AgentMail messages and marks the
       message_id: "msg_1",
       timestamp: "2026-03-22T10:00:00.000Z",
       from: "Alice <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       extracted_text: "first message",
     },
     {
@@ -120,12 +127,12 @@ test("createEmailPollConnector backfills unread AgentMail messages and marks the
       message_id: "msg_2",
       timestamp: "2026-03-22T10:05:00.000Z",
       from: "Alice <alice@example.test>",
-      to: ["healthybob@example.test"],
+      to: ["murph@example.test"],
       extracted_text: "second message",
     },
   ];
   const connector = createEmailPollConnector({
-    accountAddress: "healthybob@example.test",
+    accountAddress: "murph@example.test",
     accountId: "inbox_123",
     backfillLimit: 10,
     driver: {
@@ -143,7 +150,7 @@ test("createEmailPollConnector backfills unread AgentMail messages and marks the
               ? "2026-03-22T10:00:00.000Z"
               : "2026-03-22T10:05:00.000Z",
           from: "Alice <alice@example.test>",
-          to: ["healthybob@example.test"],
+          to: ["murph@example.test"],
           extracted_text: `${messageId} body`,
         };
       },
@@ -252,4 +259,96 @@ test("createAgentmailApiPollDriver uses the AgentMail API routes for unread mess
     "https://mail.example.test/v0/inboxes/inbox_123/messages/msg_1/attachments/att_1",
   );
   assert.equal(requests[2]?.url, "https://download.example.test/att_1");
+});
+
+
+test("parseRawEmailMessage parses multipart email and normalizeParsedEmailMessage preserves hosted thread targets", async () => {
+  const raw = [
+    'From: Alice Example <alice@example.test>',
+    'To: assistant@example.test',
+    'Cc: Bob Example <bob@example.test>',
+    'Subject: Weekly check-in',
+    'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+    'Message-ID: <msg_123@example.test>',
+    'In-Reply-To: <msg_122@example.test>',
+    'References: <msg_100@example.test> <msg_122@example.test>',
+    'Content-Type: multipart/mixed; boundary="boundary42"',
+    '',
+    '--boundary42',
+    'Content-Type: text/plain; charset="utf-8"',
+    '',
+    'Here is the latest update.',
+    '--boundary42',
+    'Content-Type: application/pdf; name="summary.pdf"',
+    'Content-Disposition: attachment; filename="summary.pdf"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from('pdf-data', 'utf8').toString('base64'),
+    '--boundary42--',
+    '',
+  ].join('\r\n');
+
+  const parsed = parseRawEmailMessage(raw);
+  assert.equal(parsed.messageId, '<msg_123@example.test>');
+  assert.equal(parsed.inReplyTo, '<msg_122@example.test>');
+  assert.deepEqual(parsed.references, ['<msg_100@example.test>', '<msg_122@example.test>']);
+  assert.equal(parsed.text, 'Here is the latest update.');
+  assert.equal(parsed.attachments.length, 1);
+  assert.equal(parsed.attachments[0]?.fileName, 'summary.pdf');
+
+  const threadTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
+    cc: ['bob@example.test'],
+    lastMessageId: '<msg_122@example.test>',
+    references: ['<msg_100@example.test>', '<msg_122@example.test>'],
+    replyAliasAddress: 'assistant+reply@example.test',
+    replyKey: 'reply_123',
+    subject: 'Weekly check-in',
+    to: ['alice@example.test'],
+  }));
+  const capture = await normalizeParsedEmailMessage({
+    accountAddress: 'assistant@example.test',
+    accountId: 'assistant@example.test',
+    message: parsed,
+    threadTarget,
+  });
+
+  assert.equal(capture.externalId, 'email:<msg_123@example.test>');
+  assert.equal(capture.thread.id, threadTarget);
+  assert.equal(capture.thread.title, 'Weekly check-in');
+  assert.equal(capture.thread.isDirect, false);
+  assert.equal(capture.actor.id, 'alice@example.test');
+  assert.equal(capture.actor.displayName, 'Alice Example');
+  assert.equal(capture.actor.isSelf, false);
+  assert.equal(capture.text, 'Here is the latest update.');
+  assert.equal(capture.attachments.length, 1);
+  assert.equal(capture.attachments[0]?.kind, 'document');
+  assert.equal(capture.attachments[0]?.fileName, 'summary.pdf');
+  assert.equal(capture.attachments[0]?.byteSize, 'pdf-data'.length);
+});
+
+test("normalizeParsedEmailMessage treats the hosted stable alias as self and prefers Reply-To for first-contact thread targets", async () => {
+  const raw = [
+    'From: Alice Example <alice@example.test>',
+    'Reply-To: Alice Replies <reply@example.test>, Team Replies <team@example.test>',
+    'To: assistant+u-member_123@mail.example.test',
+    'Subject: Hosted hello',
+    'Message-ID: <msg_alias_123@example.test>',
+    'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+    '',
+    'Hello from the hosted stable alias path.',
+    '',
+  ].join('\r\n');
+
+  const capture = await normalizeParsedEmailMessage({
+    accountAddress: 'assistant@mail.example.test',
+    accountId: 'assistant@mail.example.test',
+    message: parseRawEmailMessage(raw),
+    selfAddresses: ['assistant+u-member_123@mail.example.test'],
+  });
+  const threadTarget = parseHostedEmailThreadTarget(capture.thread.id);
+
+  assert.equal(capture.thread.isDirect, true);
+  assert.equal(capture.actor.id, 'alice@example.test');
+  assert.equal(threadTarget?.to[0], 'reply@example.test');
+  assert.deepEqual(threadTarget?.cc ?? [], ['team@example.test']);
 });

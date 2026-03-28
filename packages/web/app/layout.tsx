@@ -5,8 +5,8 @@ import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Healthy Bob Observatory",
-  description: "A local-only read surface over the Healthy Bob vault.",
+  title: "Murph Observatory",
+  description: "A local-only read surface over the Murph vault.",
 };
 
 export default function RootLayout({

@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createHostedExecutionSignature } from "../src/auth.js";
-import type { HostedExecutionDispatchRequest } from "@healthybob/runtime-state";
-import { encryptHostedBundle } from "../src/crypto.js";
-import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.js";
-import worker, { UserRunnerDurableObject } from "../src/index.js";
-import { handleRunnerOutboundRequest } from "../src/runner-outbound.js";
-import { createTestSqlStorage } from "./sql-storage.js";
+import { createHostedExecutionSignature } from "../src/auth.ts";
+import {
+  parseHostedEmailThreadTarget,
+  type HostedExecutionDispatchRequest,
+} from "@murph/runtime-state";
+import { writeEncryptedR2Json } from "../src/crypto.ts";
+import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
+import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
+import { createTestSqlStorage } from "./sql-storage.ts";
 
 describe("cloudflare worker routes", () => {
   afterEach(() => {
@@ -113,12 +116,12 @@ describe("cloudflare worker routes", () => {
     }));
   });
 
-  it("accepts signed dispatch through the /internal/events alias", async () => {
+  it("accepts signed dispatch through the canonical internal dispatch route", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const stub = createUserRunnerStub();
     const dispatch = createDispatch("evt_123");
-    const request = await createSignedDispatchRequest("/internal/events", dispatch);
+    const request = await createSignedDispatchRequest("/internal/dispatch", dispatch);
 
     const response = await worker.fetch(
       request,
@@ -126,8 +129,20 @@ describe("cloudflare worker routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(stub.dispatch).toHaveBeenCalledTimes(1);
-    expect(stub.dispatch).toHaveBeenCalledWith(dispatch);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledTimes(1);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(dispatch);
+  });
+
+  it("keeps the removed internal events alias hidden from signed dispatch callers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const stub = createUserRunnerStub();
+    const request = await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias"));
+
+    const response = await worker.fetch(request, createWorkerEnv(stub));
+
+    expect(response.status).toBe(404);
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
   it("rejects stale, malformed, and future signed dispatch requests", async () => {
@@ -209,9 +224,9 @@ describe("cloudflare worker routes", () => {
       ok: true,
     });
     expect(harness.bucket.keys()).toEqual([
+      "bundles/agent-state/ad36dc9bda6b1f6ed90262c98b5884c0284212b608662e5d6d2398c4c7915feb.bundle.json",
+      "bundles/vault/e6f0a1fbb43c89196dcfcbef85908f19ab4c5f7cc4f4c452284697757683d7ef.bundle.json",
       "transient/execution-journal/member_123/evt_commit.json",
-      "users/member_123/agent-state.bundle.json",
-      "users/member_123/vault.bundle.json",
     ]);
     const journalStore = createHostedExecutionJournalStore({
       bucket: harness.bucket.api,
@@ -394,7 +409,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("persists side-effect journal records through the canonical route and reads them back through the legacy alias", async () => {
+  it("persists side-effect journal records through the side-effects route and reads them back through the outbox route", async () => {
     const env = createWorkerEnv();
     const response = await callRunnerOutbound(
       new Request("http://side-effects.worker/effects/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
@@ -438,7 +453,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("falls back to fingerprint side-effect records across the legacy alias and canonical route", async () => {
+  it("falls back to fingerprint side-effect records across the outbox and side-effects routes", async () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
@@ -480,45 +495,6 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("reads legacy side-effect journal objects through the canonical route after the transient prefix move", async () => {
-    const env = createWorkerEnv();
-    const legacyRecord = {
-      delivery: createOutboxDelivery(),
-      effectId: "outbox_legacy",
-      fingerprint: "dedupe_legacy",
-      intentId: "outbox_legacy",
-      kind: "assistant.delivery" as const,
-      recordedAt: "2026-03-26T12:00:05.000Z",
-    };
-    const envelope = await encryptHostedBundle({
-      key: Buffer.alloc(32, 9),
-      keyId: "v1",
-      plaintext: new TextEncoder().encode(JSON.stringify(legacyRecord)),
-    });
-
-    await env.BUNDLES.put(
-      "users/member_123/outbox-deliveries/by-intent/outbox_legacy.json",
-      JSON.stringify(envelope),
-    );
-
-    const response = await callRunnerOutbound(
-      new Request("http://side-effects.worker/effects/outbox_legacy?kind=assistant.delivery&fingerprint=dedupe_legacy", {
-        method: "GET",
-      }),
-      env,
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      effectId: "outbox_legacy",
-      record: {
-        effectId: "outbox_legacy",
-        fingerprint: "dedupe_legacy",
-        kind: "assistant.delivery",
-      },
-    });
-  });
-
   it("forwards operator env and status routes to direct durable-object methods", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
@@ -528,8 +504,10 @@ describe("cloudflare worker routes", () => {
     const updateResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
         body: JSON.stringify({
+          env: {
+            OPENAI_API_KEY: "sk-test",
+          },
           mode: "merge",
-          OPENAI_API_KEY: "sk-test",
         }),
         headers: {
           authorization: "Bearer control-token",
@@ -540,7 +518,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(updateResponse.status).toBe(200);
-    expect(stub.updateUserEnv).toHaveBeenCalledWith("member_123", {
+    expect(stub.updateUserEnv).toHaveBeenCalledWith({
       env: {
         OPENAI_API_KEY: "sk-test",
       },
@@ -557,7 +535,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(envStatusResponse.status).toBe(200);
-    expect(stub.getUserEnvStatus).toHaveBeenCalledWith("member_123");
+    expect(stub.getUserEnvStatus).toHaveBeenCalledWith();
 
     const clearResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/env", {
@@ -569,7 +547,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(clearResponse.status).toBe(200);
-    expect(stub.clearUserEnv).toHaveBeenCalledWith("member_123");
+    expect(stub.clearUserEnv).toHaveBeenCalledWith();
 
     const statusResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/member_123/status", {
@@ -581,7 +559,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     expect(statusResponse.status).toBe(200);
-    expect(stub.status).toHaveBeenCalledWith("member_123");
+    expect(stub.status).toHaveBeenCalledWith();
   });
 
   it("fails closed on control routes when the worker control token is missing", async () => {
@@ -599,6 +577,328 @@ describe("cloudflare worker routes", () => {
       error: "Hosted execution control token is not configured.",
     });
     expect(stub.status).not.toHaveBeenCalled();
+  });
+
+
+  it("returns a stable hosted email address for a user through the control route", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const firstResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const secondResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(firstResponse.status).toBe(200);
+    expect(secondResponse.status).toBe(200);
+    const firstPayload = await firstResponse.json() as {
+      address: string;
+      identityId: string;
+      userId: string;
+    };
+    const secondPayload = await secondResponse.json() as typeof firstPayload;
+    expect(firstPayload.userId).toBe("member_123");
+    expect(firstPayload.identityId).toBe("assistant@mail.example.test");
+    expect(firstPayload.address).toContain("assistant+u-");
+    expect(firstPayload.address.endsWith("@mail.example.test")).toBe(true);
+    expect(secondPayload.address).toBe(firstPayload.address);
+  });
+
+  it("returns 503 from the hosted email address route when ingress is not configured", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted email ingress is not configured.",
+    });
+  });
+
+  it("returns 503 from the hosted email address route when a sender address is configured without a hosted email domain", async () => {
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      createWorkerEnv(createUserRunnerStub(), {
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted email ingress is not configured.",
+    });
+  });
+
+  it("routes inbound hosted email through the stable alias and stores the raw message for the runner", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const addressResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const { address } = await addressResponse.json() as { address: string };
+    const raw = [
+      'From: Alice Example <alice@example.test>',
+      `To: ${address}`,
+      'Subject: Hosted hello',
+      'Message-ID: <msg_123@example.test>',
+      'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+      '',
+      'Hello from the hosted email worker.',
+      '',
+    ].join('\r\n');
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: 'alice@example.test',
+      raw,
+      setReject,
+      to: address,
+    } as never, env as never);
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    const dispatch = stub.dispatch.mock.calls[0]?.[0] as HostedExecutionDispatchRequest;
+    const dispatchedEvent = dispatch.event as Extract<
+      HostedExecutionDispatchRequest["event"],
+      { kind: "email.message.received" }
+    >;
+    expect(dispatchedEvent.kind).toBe("email.message.received");
+    expect(dispatchedEvent.userId).toBe("member_123");
+    expect(dispatchedEvent.identityId).toBe("assistant@mail.example.test");
+    expect(dispatchedEvent.threadTarget).toBeNull();
+    expect(dispatchedEvent.rawMessageKey).toMatch(/^[0-9a-f]{32}$/u);
+    expect(dispatch.eventId).toBe(`email:${dispatchedEvent.rawMessageKey}`);
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://email.worker/messages/${dispatchedEvent.rawMessageKey}`, {
+        method: "GET",
+      }),
+      env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(readResponse.headers.get("content-type")).toBe("message/rfc822");
+    await expect(readResponse.text()).resolves.toBe(raw);
+  });
+
+  it("rejects inbound hosted email before route lookup when ingress is not configured", async () => {
+    const stub = createUserRunnerStub();
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "alice@example.test",
+      raw: "From: alice@example.test\r\nTo: assistant@example.test\r\n\r\nhello\r\n",
+      setReject,
+      to: "assistant@example.test",
+    } as never, createWorkerEnv(stub) as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email ingress is not configured.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("sends hosted email through email.worker and returns a canonical serialized thread target", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        expect(String(url)).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/acct_123/email/sending/send_raw",
+        );
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer cf-token");
+        const body = JSON.parse(String(init?.body)) as {
+          from: string;
+          mime_message: string;
+          recipients: string[];
+        };
+        expect(body.from).toBe("assistant@mail.example.test");
+        expect(body.recipients).toEqual(["user@example.test"]);
+        expect(body.mime_message).toContain("Reply-To: assistant+t-");
+        expect(body.mime_message).toContain("To: user@example.test");
+        return new Response(JSON.stringify({
+          result: {
+            queued: ["user@example.test"],
+          },
+          success: true,
+        }), { status: 200 });
+      }),
+    );
+
+    const response = await callRunnerOutbound(
+      new Request("http://email.worker/send", {
+        body: JSON.stringify({
+          identityId: "different@example.test",
+          message: "Hosted email hello.",
+          target: "user@example.test",
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      ok: boolean;
+      target: string;
+    };
+    expect(payload.ok).toBe(true);
+    const threadTarget = parseHostedEmailThreadTarget(payload.target);
+    expect(threadTarget).not.toBeNull();
+    expect(threadTarget?.to).toEqual(["user@example.test"]);
+    expect(threadTarget?.replyAliasAddress).toContain("assistant+t-");
+    expect(threadTarget?.replyAliasAddress?.endsWith("@mail.example.test")).toBe(true);
+    expect(threadTarget?.lastMessageId).toMatch(/^<hosted\./u);
+    expect(threadTarget?.subject).toBe("Murph update");
+  });
+
+  it("routes replies to a hosted send alias back through the configured sender identity", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({
+          result: {
+            queued: ["user@example.test"],
+          },
+          success: true,
+        }), { status: 200 })),
+    );
+
+    const sendResponse = await callRunnerOutbound(
+      new Request("http://email.worker/send", {
+        body: JSON.stringify({
+          identityId: "different@example.test",
+          message: "Hosted email hello.",
+          target: "user@example.test",
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    const sendPayload = await sendResponse.json() as {
+      ok: boolean;
+      target: string;
+    };
+    const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
+    const threadRouteKey = env.__bucketStore.keys().find((key) =>
+      key.startsWith("transient/hosted-email/threads/"),
+    );
+
+    expect(threadTarget?.replyAliasAddress).toBeTruthy();
+    if (!threadRouteKey || !threadTarget) {
+      throw new Error("Expected the hosted email thread route object to be written.");
+    }
+
+    await writeEncryptedR2Json({
+      bucket: env.BUNDLES,
+      cryptoKey: Buffer.alloc(32, 9),
+      key: threadRouteKey,
+      keyId: "v1",
+      value: {
+        identityId: "assistant@mail.example.test",
+        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
+        schema: "murph.hosted-email-thread-route.v1",
+        target: threadTarget,
+        updatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+
+    await worker.email?.({
+      from: "user@example.test",
+      raw: [
+        'From: user@example.test',
+        `To: ${threadTarget?.replyAliasAddress}`,
+        'Subject: Re: Murph update',
+        '',
+        'Replying to the hosted alias.',
+        '',
+      ].join('\r\n'),
+      to: threadTarget?.replyAliasAddress ?? "",
+    } as never, env as never);
+
+    expect(stub.dispatch).toHaveBeenCalledTimes(1);
+    expect(stub.dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received",
+        threadTarget: sendPayload.target,
+        userId: "member_123",
+      }),
+    }));
   });
 
   it("returns method and auth errors on protected routes in the same order as before", async () => {
@@ -659,7 +959,7 @@ describe("cloudflare worker routes", () => {
 
   it("preserves hidden not-found responses for wrong methods on worker routes that were never public", async () => {
     const dispatchResponse = await worker.fetch(
-      new Request("https://runner.example.test/internal/events", {
+      new Request("https://runner.example.test/internal/dispatch", {
         method: "GET",
       }),
       createWorkerEnv(),
@@ -710,8 +1010,14 @@ describe("cloudflare worker routes", () => {
 
     expect(overflowResponse.status).toBe(429);
     await expect(overflowResponse.json()).resolves.toMatchObject({
-      backpressuredEventIds: ["evt_overflow"],
-      poisonedEventIds: [],
+      event: {
+        eventId: "evt_overflow",
+        state: "backpressured",
+      },
+      status: {
+        backpressuredEventIds: ["evt_overflow"],
+        poisonedEventIds: [],
+      },
     });
 
     firstRun.resolve();
@@ -773,8 +1079,11 @@ function createWorkerEnv(
   userRunnerStub: UserRunnerStub = createUserRunnerStub(),
   overrides: Partial<Record<string, unknown>> = {},
 ) {
+  const bucketStore = createBucketStore();
+
   return {
-    BUNDLES: createBucketStore().api,
+    __bucketStore: bucketStore,
+    BUNDLES: bucketStore.api,
     HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
     HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
     RUNNER_CONTAINER: createStorage().runnerContainerNamespace,
@@ -1048,9 +1357,12 @@ type UserRunnerStub = ReturnType<typeof createUserRunnerStub>;
 
 function createUserRunnerStub() {
   return {
-    clearUserEnv: vi.fn(async (userId: string) => ({
-      configuredUserEnvKeys: [],
+    bootstrapUser: vi.fn(async (userId: string) => ({
       userId,
+    })),
+    clearUserEnv: vi.fn(async () => ({
+      configuredUserEnvKeys: [],
+      userId: "member_123",
     })),
     commit: vi.fn(async (input: {
       eventId: string;
@@ -1067,6 +1379,8 @@ function createUserRunnerStub() {
         summary: "ok",
       },
     })),
+    dispatchWithOutcome: vi.fn(async (input: HostedExecutionDispatchRequest) =>
+      buildDispatchResultFixture(input.event.userId, input.eventId)),
     dispatch: vi.fn(async (input: HostedExecutionDispatchRequest) => ({
       backpressuredEventIds: [],
       bundleRefs: {
@@ -1098,11 +1412,11 @@ function createUserRunnerStub() {
         summary: "ok",
       },
     })),
-    getUserEnvStatus: vi.fn(async (userId: string) => ({
+    getUserEnvStatus: vi.fn(async () => ({
       configuredUserEnvKeys: [],
-      userId,
+      userId: "member_123",
     })),
-    status: vi.fn(async (userId: string) => ({
+    status: vi.fn(async () => ({
       backpressuredEventIds: [],
       bundleRefs: {
         agentState: null,
@@ -1116,12 +1430,39 @@ function createUserRunnerStub() {
       pendingEventCount: 0,
       poisonedEventIds: [],
       retryingEventId: null,
-      userId,
+      userId: "member_123",
     })),
-    updateUserEnv: vi.fn(async (userId: string, update: { env: Record<string, string | null> }) => ({
+    updateUserEnv: vi.fn(async (update: { env: Record<string, string | null> }) => ({
       configuredUserEnvKeys: Object.keys(update.env).sort(),
-      userId,
+      userId: "member_123",
     })),
+  };
+}
+
+function buildDispatchResultFixture(userId: string, eventId: string) {
+  return {
+    event: {
+      eventId,
+      lastError: null,
+      state: "completed" as const,
+      userId,
+    },
+    status: {
+      backpressuredEventIds: [],
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId,
+    },
   };
 }
 
@@ -1144,8 +1485,8 @@ async function createSignedDispatchRequest(
     body: payload,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "x-hb-execution-signature": signature,
-      "x-hb-execution-timestamp": timestamp,
+      "x-hosted-execution-signature": signature,
+      "x-hosted-execution-timestamp": timestamp,
     },
     method: "POST",
   });

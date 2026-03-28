@@ -2,12 +2,12 @@
 
 ## Purpose
 
-This guide is the downstream integration reference for extending the Healthy Bob vault baseline without drifting away from the frozen contracts in `docs/contracts/` and the package boundaries in `ARCHITECTURE.md`.
+This guide is the downstream integration reference for extending the Murph vault baseline without drifting away from the frozen contracts in `docs/contracts/` and the package boundaries in `ARCHITECTURE.md`.
 
 ## Non-Negotiable Boundaries
 
 - Keep `vault-cli` as the only public command namespace in baseline.
-- Keep canonical vault writes inside `@healthybob/core` only.
+- Keep canonical vault writes inside `@murph/core` only.
 - Keep human-facing truth in Markdown (`CORE.md`, `journal/`, `bank/`).
 - Keep machine-facing truth in append-only JSONL ledgers (`ledger/events`, `ledger/samples`, `audit`).
 - Keep imported source artifacts immutable under `raw/`.
@@ -18,19 +18,19 @@ This guide is the downstream integration reference for extending the Healthy Bob
 
 | Package | Allowed to do | Must not do |
 | --- | --- | --- |
-| `@healthybob/contracts` | Define shared schemas, types, error codes, and generated contract artifacts | Reach into runtime filesystem behavior |
-| `@healthybob/core` | Bootstrap vaults, validate state, emit audit records, and perform canonical mutations | Expose an alternate public CLI namespace |
-| `@healthybob/importers` | Parse external inputs and prepare normalized payloads for core | Write canonical vault files directly |
-| `@healthybob/query` | Read canonical state and build derived export packs | Mutate vault state |
-| `@healthybob/cli` | Validate operator input, call package APIs, and format structured output | Bypass core for writes |
+| `@murph/contracts` | Define shared schemas, types, error codes, and generated contract artifacts | Reach into runtime filesystem behavior |
+| `@murph/core` | Bootstrap vaults, validate state, emit audit records, and perform canonical mutations | Expose an alternate public CLI namespace |
+| `@murph/importers` | Parse external inputs and prepare normalized payloads for core | Write canonical vault files directly |
+| `@murph/query` | Read canonical state and build derived export packs | Mutate vault state |
+| `@murph/cli` | Validate operator input, call package APIs, and format structured output | Bypass core for writes |
 
 ## Safe Extension Patterns
 
 ### Add a new record family or event kind
 
 1. Update the contract docs first.
-2. Add the shared schema/type surface in `@healthybob/contracts`.
-3. Add validation and canonical write handling in `@healthybob/core`.
+2. Add the shared schema/type surface in `@murph/contracts`.
+3. Add validation and canonical write handling in `@murph/core`.
 4. Add importer, query, and CLI support only after the shared contract exists.
 5. Add fixtures, smoke coverage, and release-note entries in the same change set.
 
@@ -40,15 +40,15 @@ If a proposed record cannot be represented as Markdown truth plus append-only JS
 
 1. Copy the original artifact into `raw/` using stable relative paths.
 2. Parse and normalize outside the canonical write path.
-3. Call `@healthybob/core` for any canonical record creation.
+3. Call `@murph/core` for any canonical record creation.
 4. Emit enough audit context to explain provenance and failure modes.
 
 Importers may prepare payloads, but they do not decide new canonical storage rules on their own.
 
 ### Add a new device/provider connector
 
-1. Model the provider behind a small adapter in `@healthybob/importers` that normalizes upstream payloads into shared device-batch payloads.
-2. Preserve immutable provider snapshots under `raw/integrations/<provider>/**` through `@healthybob/core`; do not write those files directly from importer code.
+1. Model the provider behind a small adapter in `@murph/importers` that normalizes upstream payloads into shared device-batch payloads.
+2. Preserve immutable provider snapshots under `raw/integrations/<provider>/**` through `@murph/core`; do not write those files directly from importer code.
 3. Attach upstream provenance with shared `externalRef` fields on canonical events/samples so retries dedupe by provider resource id, version, and optional facet.
 4. Keep provider secrets, OAuth tokens, and background sync state outside the vault; only immutable payload evidence and canonical normalized records belong in the vault.
 5. Avoid inventing unsupported time series. If the upstream API only exposes summaries, normalize summaries into baseline observations/samples instead of fabricating minute-level streams.
@@ -85,8 +85,8 @@ Storage and authority rules for the cutover:
 CLI and package-boundary rules for the cutover:
 
 - Keep the public surface payload-first. The planned noun pattern is `scaffold`, `upsert --input`, `show`, and `list`, with special cases for `intake import`, `intake project`, `profile current rebuild`, and `protocol stop`.
-- Keep canonical writes in `@healthybob/core` even when health nouns originate from `@healthybob/importers` or `@healthybob/cli`.
-- Keep `@healthybob/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
+- Keep canonical writes in `@murph/core` even when health nouns originate from `@murph/importers` or `@murph/cli`.
+- Keep `@murph/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
 - Do not introduce a generic "apply this assessment" mutation. The cutover plan keeps assessment projection separate from noun-specific writes so operators can review proposals before they become canonical state.
 
 Downstream follow-up stays blocked until the source lanes publish the frozen health contract:
@@ -109,7 +109,7 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 
 ## Red Flags
 
-- Direct filesystem writes from `@healthybob/cli`, `@healthybob/importers`, or `@healthybob/query`
+- Direct filesystem writes from `@murph/cli`, `@murph/importers`, or `@murph/query`
 - Canonical state stored outside the documented vault layout
 - Mutable artifacts under `raw/`
 - Assistant state written into the vault root
@@ -118,4 +118,4 @@ Downstream follow-up stays blocked until the source lanes publish the frozen hea
 
 ## Current Integration Status
 
-As of 2026-03-16, the contract fence covers canonical device/provider imports as well: `@healthybob/importers` can normalize provider payloads into a shared device-batch seam, while `@healthybob/core` persists immutable provider snapshots under `raw/integrations/**` plus append-only events/samples with explicit upstream provenance. The remaining integration gap is still the TypeScript CLI runtime: its source now delegates to real package functions, but this workspace still lacks the `incur` toolchain needed to execute or typecheck `vault-cli` end to end.
+As of 2026-03-16, the contract fence covers canonical device/provider imports as well: `@murph/importers` can normalize provider payloads into a shared device-batch seam, while `@murph/core` persists immutable provider snapshots under `raw/integrations/**` plus append-only events/samples with explicit upstream provenance. The remaining integration gap is still the TypeScript CLI runtime: its source now delegates to real package functions, but this workspace still lacks the `incur` toolchain needed to execute or typecheck `vault-cli` end to end.

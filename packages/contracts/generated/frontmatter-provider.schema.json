@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.provider.v1"
+      "const": "murph.frontmatter.provider.v1"
     },
     "docType": {
       "type": "string",
@@ -76,6 +76,6 @@
     "title"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-provider.schema.json",
-  "title": "Healthy Bob Provider Frontmatter"
+  "$id": "@murph/contracts/frontmatter-provider.schema.json",
+  "title": "Murph Provider Frontmatter"
 }

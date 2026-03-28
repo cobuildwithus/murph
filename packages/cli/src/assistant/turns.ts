@@ -18,7 +18,7 @@ import {
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
 
-const ASSISTANT_TURN_RECEIPT_SCHEMA = 'healthybob.assistant-turn-receipt.v1'
+const ASSISTANT_TURN_RECEIPT_SCHEMA = 'murph.assistant-turn-receipt.v1'
 const PROMPT_PREVIEW_LIMIT = 240
 const RESPONSE_PREVIEW_LIMIT = 320
 

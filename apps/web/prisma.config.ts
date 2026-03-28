@@ -3,7 +3,7 @@ import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
 const DATABASE_URL =
-  process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/healthybob_device_sync";
+  process.env.DATABASE_URL ?? "postgresql://postgres:postgres@localhost:5432/murph_device_sync";
 
 export default defineConfig({
   schema: "prisma/schema.prisma",

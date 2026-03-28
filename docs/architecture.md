@@ -1,8 +1,8 @@
-# Healthy Bob Baseline Architecture
+# Murph Baseline Architecture
 
 ## Purpose
 
-Healthy Bob stores durable health records in a file-native vault. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
+Murph stores durable health records in a file-native vault. Markdown remains the human-reviewable source of truth, derived machine-readable ledgers stay append-only, and all canonical writes flow through one core library.
 
 ## Target Repo Shape
 

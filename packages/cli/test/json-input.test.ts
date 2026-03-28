@@ -41,7 +41,7 @@ test('loadJsonInputObject surfaces the stdin hint when stdin is interactive', as
 })
 
 test.sequential('loadJsonInputObject keeps @- bound to a literal file path', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-json-input-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-json-input-'))
   const hyphenPath = path.join(tempRoot, '-')
 
   try {

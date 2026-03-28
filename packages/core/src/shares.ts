@@ -7,7 +7,7 @@ import {
   sharePackSchema,
   type SharePack,
   type SharePackEntity,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { generateRecordId } from "./ids.ts";
 import { addMeal } from "./public-mutations.ts";
@@ -198,7 +198,7 @@ export async function buildSharePackFromVault(
   const pack = assertContract(
     sharePackSchema,
     {
-      schemaVersion: "hb.share-pack.v1",
+      schemaVersion: "murph.share-pack.v1",
       title: normalizeRequiredTitle(input.title, entities),
       createdAt: new Date().toISOString(),
       entities,

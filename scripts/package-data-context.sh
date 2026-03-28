@@ -10,7 +10,7 @@ cd "$ROOT_DIR"
 
 format="zip"
 out_dir="$ROOT_DIR/output-packages"
-prefix="healthybob-data-bundle"
+prefix="murph-data-bundle"
 vault_path=""
 include_assistant_state=1
 
@@ -22,15 +22,15 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: package-data-context.sh [options]
 
-Create a ZIP bundle containing the selected Healthy Bob vault plus the matching
+Create a ZIP bundle containing the selected Murph vault plus the matching
 vault-scoped assistant-state directory.
 
 Options:
   --vault <path>             Vault root to package. Defaults to VAULT
-                             or the saved Healthy Bob default vault.
+                             or the saved Murph default vault.
   --zip                      Create only a .zip archive (default)
   --out-dir <dir>            Output directory (default: output-packages)
-  --name <prefix>            Output filename prefix (default: healthybob-data-bundle)
+  --name <prefix>            Output filename prefix (default: murph-data-bundle)
   --with-assistant-state     Include the matching assistant-state bucket (default)
   --no-assistant-state       Exclude assistant-state files
   -h, --help                 Show this help message
@@ -61,7 +61,7 @@ resolve_saved_default_vault() {
   local home_dir config_path
   home_dir="${HOME:-}"
   [[ -n "$home_dir" ]] || return 1
-  config_path="$home_dir/.healthybob/config.json"
+  config_path="$home_dir/.murph/config.json"
   [[ -f "$config_path" ]] || return 1
 
   node --input-type=module - "$config_path" "$home_dir" <<'EOF'
@@ -281,7 +281,7 @@ if [[ -z "$vault_path" ]]; then
 fi
 
 if [[ -z "$vault_path" ]]; then
-  echo "Error: missing vault path. Pass --vault, set VAULT, or save a default Healthy Bob vault first." >&2
+  echo "Error: missing vault path. Pass --vault, set VAULT, or save a default Murph vault first." >&2
   exit 1
 fi
 
@@ -317,7 +317,7 @@ total_file_count=$((vault_file_count + assistant_state_file_count + 1))
 
 cat > "$bundle_root/bundle-manifest.json" <<EOF
 {
-  "format": "healthybob.data-bundle.v1",
+  "format": "murph.data-bundle.v1",
   "generatedAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "includes": {
     "vault": true,

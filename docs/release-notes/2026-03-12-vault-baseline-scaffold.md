@@ -2,16 +2,16 @@
 
 ## Summary
 
-Established the Healthy Bob baseline scaffold for the file-native vault architecture, then reconciled the first downstream integration pass across the executable runtime packages.
+Established the Murph baseline scaffold for the file-native vault architecture, then reconciled the first downstream integration pass across the executable runtime packages.
 
 ## What changed
 
 - Froze the baseline package names:
-  - `@healthybob/contracts`
-  - `@healthybob/core`
-  - `@healthybob/cli`
-  - `@healthybob/importers`
-  - `@healthybob/query`
+  - `@murph/contracts`
+  - `@murph/core`
+  - `@murph/cli`
+  - `@murph/importers`
+  - `@murph/query`
 - Froze `vault-cli` as the only public command namespace for the baseline.
 - Documented the safe extension rules for package boundaries, canonical write authority, immutable `raw/`, append-only ledgers, and out-of-vault assistant state.
 - Added release-note scaffolding for future implementation-lane drops.

@@ -4,30 +4,30 @@ import {
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
   type AgentmailFetch,
-} from '../agentmail-runtime.js'
-import type { InboxShowResult } from '../inbox-cli-contracts.js'
+} from '../agentmail-runtime.ts'
+import type { InboxShowResult } from '../inbox-cli-contracts.ts'
 import {
   assistantBindingDeliverySchema,
   assistantChannelDeliverySchema,
   type AssistantBindingDelivery,
-} from '../assistant-cli-contracts.js'
-import type { ConversationRef } from './conversation-ref.js'
+} from '../assistant-cli-contracts.ts'
+import type { ConversationRef } from './conversation-ref.ts'
 import {
   ensureImessageMessagesDbReadable,
   mapImessageMessagesDbRuntimeError,
-} from '../imessage-readiness.js'
+} from '../imessage-readiness.ts'
 import {
   formatTelegramSendTarget,
   parseTelegramSendTarget,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
-} from '../telegram-runtime.js'
+} from '../telegram-runtime.ts'
 import {
   resolveLinqApiToken,
   sendLinqChatMessage,
   type LinqFetch,
-} from '../linq-runtime.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '../linq-runtime.ts'
+import { VaultCliError } from '../vault-cli-errors.ts'
 
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
@@ -89,11 +89,16 @@ export interface AssistantChannelDependencies {
   >
   sendLinq?: (input: { message: string; target: string }) => Promise<void>
   sendEmail?: (input: {
-    identityId: string
+    identityId: string | null
     message: string
     target: string
     targetKind: AssistantDeliveryCandidate['kind']
-  }) => Promise<void>
+  }) => Promise<
+    | {
+        target: string
+      }
+    | void
+  >
 }
 
 export interface AssistantDeliveryCandidate {
@@ -378,7 +383,7 @@ export async function sendEmailMessage(
   if (identityId.length === 0) {
     throw new VaultCliError(
       'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-      'Email delivery requires an AgentMail inbox identity.',
+      'Default email delivery requires an AgentMail inbox identity.',
     )
   }
 
@@ -427,7 +432,7 @@ export async function sendEmailMessage(
   await client.sendMessage({
     inboxId: identityId,
     to: target,
-    subject: input.subject?.trim() ? input.subject.trim() : 'Healthy Bob update',
+    subject: input.subject?.trim() ? input.subject.trim() : 'Murph update',
     text: input.message,
   })
 }
@@ -478,7 +483,7 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       message,
     })
     return {
-      target: normalizeOptionalText(delivered?.target) ?? candidate.target,
+      target: readDeliveredTarget(delivered) ?? candidate.target,
     }
   },
 })
@@ -528,18 +533,21 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     'Email delivery requires an explicit recipient or a stored delivery binding.',
   async sendMessage({ candidate, dependencies, identityId, message }) {
     const send = dependencies.sendEmail ?? sendEmailMessage
-    if (!identityId) {
+    if (!identityId && !dependencies.sendEmail) {
       throw new VaultCliError(
         'ASSISTANT_EMAIL_IDENTITY_REQUIRED',
-        'Email delivery requires an AgentMail inbox identity. Pass --identity or resume a session bound to an email inbox.',
+        'Email delivery requires a configured email sender identity. Pass --identity or resume a session already bound to email.',
       )
     }
-    await send({
-      identityId,
+    const delivered = await send({
+      identityId: identityId!,
       target: candidate.target,
       targetKind: candidate.kind,
       message,
     })
+    return {
+      target: readDeliveredTarget(delivered) ?? candidate.target,
+    }
   },
 })
 
@@ -871,6 +879,14 @@ async function waitForTelegramRetryDelay(
   await new Promise((resolve) => setTimeout(resolve, retryAfterMs))
 }
 
+function readDeliveredTarget(
+  delivered: { target?: string | null } | void,
+): string | null {
+  return delivered && typeof delivered === 'object'
+    ? normalizeOptionalText(delivered.target)
+    : null
+}
+
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message
@@ -901,7 +917,7 @@ function createAssistantChannelAdapter(
 
       return assistantChannelDeliverySchema.parse({
         channel: spec.channel,
-        target: normalizeOptionalText(delivered?.target) ?? candidate.target,
+        target: readDeliveredTarget(delivered) ?? candidate.target,
         targetKind: candidate.kind,
         sentAt: new Date().toISOString(),
         messageLength: input.message.length,

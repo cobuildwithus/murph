@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: $(basename "$0") <active-plan-path> \"commit message\" <file> [file ...]" >&2
+  exit 2
+}
+
+if [[ $# -lt 3 ]]; then
+  usage
+fi
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+plan_path="$1"
+shift
+commit_message="$1"
+shift
+
+case "$plan_path" in
+  agent-docs/exec-plans/active/*.md) ;;
+  *)
+    echo "Plan must be under agent-docs/exec-plans/active/: $plan_path" >&2
+    exit 1
+    ;;
+esac
+
+if [[ ! -f "$plan_path" ]]; then
+  echo "Plan file not found: $plan_path" >&2
+  exit 1
+fi
+
+completed_plan_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
+
+bash scripts/close-exec-plan.sh "$plan_path"
+
+commit_paths=("$completed_plan_path")
+if git ls-files --error-unmatch -- "$plan_path" >/dev/null 2>&1; then
+  commit_paths=("$plan_path" "$completed_plan_path")
+fi
+
+bash scripts/committer "$commit_message" "${commit_paths[@]}" "$@"

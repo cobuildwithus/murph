@@ -8,7 +8,7 @@ import { test } from "vitest";
 import {
   INBOX_DB_RELATIVE_PATH,
   SEARCH_DB_RELATIVE_PATH,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 import {
   ID_FAMILY_REGISTRY,
@@ -112,7 +112,7 @@ test(
     try {
       const vault = await readVault(vaultRoot);
 
-      assert.equal(vault.format, "healthybob.query.v1");
+      assert.equal(vault.format, "murph.query.v1");
       assert.equal(vault.metadata?.vaultId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
       assert.equal(vault.coreDocument?.displayId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
       assert.equal(vault.experiments.length, 1);
@@ -284,7 +284,7 @@ test("buildExportPack produces derived exports payloads without touching the vau
       generatedAt: "2026-03-12T15:00:00.000Z",
     });
 
-    assert.equal(pack.format, "healthybob.export-pack.v1");
+    assert.equal(pack.format, "murph.export-pack.v1");
     assert.equal(pack.basePath, "exports/packs/focus-pack");
     assert.equal(pack.manifest.recordCount, 0);
     assert.equal(pack.manifest.experimentCount, 1);
@@ -296,21 +296,21 @@ test("buildExportPack produces derived exports payloads without touching the vau
 
     const manifestFile = pack.files.find((file) => file.path.endsWith("manifest.json"));
     assert.ok(manifestFile);
-    assert.match(manifestFile.contents, /"format": "healthybob.export-pack.v1"/);
+    assert.match(manifestFile.contents, /"format": "murph.export-pack.v1"/);
     assert.match(manifestFile.contents, /"fileCount": 5/);
 
     const questionPackFile = pack.files.find((file) =>
       file.path.endsWith("question-pack.json"),
     );
     assert.ok(questionPackFile);
-    assert.match(questionPackFile.contents, /"format": "healthybob.question-pack.v1"/);
+    assert.match(questionPackFile.contents, /"format": "murph.question-pack.v1"/);
     assert.match(questionPackFile.contents, /low-carb experiment/);
 
     const assistantFile = pack.files.find((file) =>
       file.path.endsWith("assistant-context.md"),
     );
     assert.ok(assistantFile);
-    assert.match(assistantFile.contents, /Healthy Bob Export Pack/);
+    assert.match(assistantFile.contents, /Murph Export Pack/);
     assert.match(assistantFile.contents, /## Questions/);
     assert.match(assistantFile.contents, /Low Carb Trial/);
   } finally {
@@ -364,6 +364,9 @@ test("health registry queries prefer canonical fields and stable title ordering"
         "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
       ],
     );
+    assert.equal(family[1]?.title, "Mother");
+    assert.equal(family[1]?.relationship, "mother");
+    assert.equal(family[1]?.note, null);
     assert.deepEqual(family[0]?.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z400"]);
     assert.deepEqual(family[1]?.relatedVariantIds, []);
     assert.equal(family[1]?.updatedAt, "2026-03-12T09:00:00Z");
@@ -375,6 +378,7 @@ test("health registry queries prefer canonical fields and stable title ordering"
         "var_01JNW7YJ7MNE7M9Q2QWQK4Z401",
       ],
     );
+    assert.equal(genetics[0]?.title, "APOE e4 allele");
     assert.equal(genetics[1]?.updatedAt, "2026-03-12T11:00:00Z");
     assert.deepEqual(genetics[1]?.sourceFamilyMemberIds, ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
   } finally {
@@ -764,7 +768,7 @@ test("searchVault ranks body and structured matches while excluding raw samples 
     limit: 10,
   });
 
-  assert.equal(result.format, "healthybob.search.v1");
+  assert.equal(result.format, "murph.search.v1");
   assert.equal(result.total, 2);
   assert.deepEqual(
     result.hits.map((hit) => hit.recordId),
@@ -1332,7 +1336,7 @@ test("buildTimeline excludes records outside the requested date and experiment w
 });
 
 async function createFixtureVault(): Promise<string> {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-"));
 
   await mkdir(path.join(vaultRoot, "bank/experiments"), { recursive: true });
   await mkdir(path.join(vaultRoot, "bank/family"), { recursive: true });
@@ -1347,10 +1351,10 @@ async function createFixtureVault(): Promise<string> {
     path.join(vaultRoot, "vault.json"),
     JSON.stringify(
       {
-        schemaVersion: "hb.vault.v1",
+        schemaVersion: "murph.vault.v1",
         vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4K",
         createdAt: "2026-03-10T06:00:00Z",
-        title: "Healthy Bob Vault",
+        title: "Murph Vault",
         timezone: "America/New_York",
         idPolicy: {
           format: "prefix_ulid",
@@ -1392,14 +1396,17 @@ async function createFixtureVault(): Promise<string> {
   await writeFile(
     path.join(vaultRoot, "bank/family/mother.md"),
     `---
-schemaVersion: hb.frontmatter.family-member.v1
+schemaVersion: murph.frontmatter.family-member.v1
 docType: family_member
 familyMemberId: fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8
 slug: mother
 title: Mother
+name: Alias Mother
 relationship: mother
+relation: alias-mother
 familyMemberIds:
   - var_should_not_leak_from_wrong_field
+summary: Alias summary that should not leak
 updatedAt: 2026-03-12T09:00:00Z
 ---
 # Mother
@@ -1411,7 +1418,7 @@ Tracked for query ordering checks.
   await writeFile(
     path.join(vaultRoot, "bank/family/father.md"),
     `---
-schemaVersion: hb.frontmatter.family-member.v1
+schemaVersion: murph.frontmatter.family-member.v1
 docType: family_member
 familyMemberId: fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F9
 slug: father
@@ -1430,11 +1437,12 @@ Has a linked canonical variant id.
   await writeFile(
     path.join(vaultRoot, "bank/genetics/apoe-e4.md"),
     `---
-schemaVersion: hb.frontmatter.genetic-variant.v1
+schemaVersion: murph.frontmatter.genetic-variant.v1
 docType: genetic_variant
 variantId: var_01JNW7YJ7MNE7M9Q2QWQK4Z400
 slug: apoe-e4
 title: APOE e4 allele
+label: Alias APOE label
 gene: APOE
 significance: risk_factor
 sourceFamilyMemberIds:
@@ -1450,7 +1458,7 @@ Older genetics record.
   await writeFile(
     path.join(vaultRoot, "bank/genetics/mthfr-c677t.md"),
     `---
-schemaVersion: hb.frontmatter.genetic-variant.v1
+schemaVersion: murph.frontmatter.genetic-variant.v1
 docType: genetic_variant
 variantId: var_01JNW7YJ7MNE7M9Q2QWQK4Z401
 slug: mthfr-c677t
@@ -1470,7 +1478,7 @@ Newer genetics record.
   await writeFile(
     path.join(vaultRoot, "CORE.md"),
     `---
-schemaVersion: hb.frontmatter.core.v1
+schemaVersion: murph.frontmatter.core.v1
 docType: core
 vaultId: vault_01JNV40W8VFYQ2H7CMJY5A9R4K
 title: Core Health Context
@@ -1488,7 +1496,7 @@ Summary of baseline routines.
   await writeFile(
     path.join(vaultRoot, "bank/experiments/low-carb.md"),
     `---
-schemaVersion: hb.frontmatter.experiment.v1
+schemaVersion: murph.frontmatter.experiment.v1
 docType: experiment
 experimentId: exp_01JNV4EXP000000000000001
 slug: low-carb
@@ -1508,7 +1516,7 @@ Reduce breakfast carbs and observe glucose stability.
   await writeFile(
     path.join(vaultRoot, "journal/2026/2026-03-10.md"),
     `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-10
 eventIds:
@@ -1526,7 +1534,7 @@ Fasted longer than usual. Steady energy through the afternoon.
   await writeFile(
     path.join(vaultRoot, "journal/2026/2026-03-11.md"),
     `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-11
 eventIds:
@@ -1544,7 +1552,7 @@ Light walk and early bedtime.
     path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
     [
       JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: "evt_01JNV4MEAL000000000000001",
         kind: "meal",
         occurredAt: "2026-03-10T12:15:00Z",
@@ -1559,7 +1567,7 @@ Light walk and early bedtime.
         audioPaths: [],
       }),
       JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: "evt_01JNV4NOTE000000000000001",
         kind: "note",
         occurredAt: "2026-03-11T09:00:00Z",
@@ -1570,7 +1578,7 @@ Light walk and early bedtime.
         note: "Slept well and woke up rested.",
       }),
       JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: "evt_01JNV4DOC000000000000001",
         kind: "document",
         occurredAt: "2026-03-12T14:00:00Z",
@@ -1592,7 +1600,7 @@ Light walk and early bedtime.
     path.join(vaultRoot, "ledger/samples/glucose/2026/2026-03.jsonl"),
     [
       JSON.stringify({
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_01JNV4GLU000000000000001",
         stream: "glucose",
         recordedAt: "2026-03-10T08:00:00Z",
@@ -1603,7 +1611,7 @@ Light walk and early bedtime.
         unit: "mg_dL",
       }),
       JSON.stringify({
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_01JNV4GLU000000000000002",
         stream: "glucose",
         recordedAt: "2026-03-10T12:15:00Z",
@@ -1621,7 +1629,7 @@ Light walk and early bedtime.
     path.join(vaultRoot, "ledger/samples/heart_rate/2026/2026-03.jsonl"),
     [
       JSON.stringify({
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_01JNV4HR0000000000000001",
         stream: "heart_rate",
         recordedAt: "2026-03-10T08:30:00Z",
@@ -1632,7 +1640,7 @@ Light walk and early bedtime.
         unit: "bpm",
       }),
       JSON.stringify({
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_01JNV4HR0000000000000002",
         stream: "heart_rate",
         recordedAt: "2026-03-10T21:30:00Z",
@@ -1643,7 +1651,7 @@ Light walk and early bedtime.
         unit: "bpm",
       }),
       JSON.stringify({
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_01JNV4HR0000000000000003",
         stream: "heart_rate",
         recordedAt: "2026-03-11T08:30:00Z",
@@ -1661,7 +1669,7 @@ Light walk and early bedtime.
     path.join(vaultRoot, "audit/2026/2026-03.jsonl"),
     [
       JSON.stringify({
-        schemaVersion: "hb.audit.v1",
+        schemaVersion: "murph.audit.v1",
         id: "aud_01JNV4AUD000000000000001",
         action: "validate",
         status: "success",
@@ -1679,7 +1687,7 @@ Light walk and early bedtime.
 }
 
 async function createSparseVault(): Promise<string> {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-sparse-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-sparse-"));
 
   await mkdir(path.join(vaultRoot, "bank/experiments"), { recursive: true });
   await mkdir(path.join(vaultRoot, "journal/2026"), { recursive: true });
@@ -1689,7 +1697,7 @@ async function createSparseVault(): Promise<string> {
   await writeFile(
     path.join(vaultRoot, "bank/experiments/recovery-plan.md"),
     `---
-schemaVersion: hb.frontmatter.experiment.v1
+schemaVersion: murph.frontmatter.experiment.v1
 docType: experiment
 experiment_id: exp_01JNV4ALT000000000000001
 experiment_slug: recovery-plan
@@ -1705,7 +1713,7 @@ Hydration reset baseline.
   await writeFile(
     path.join(vaultRoot, "journal/2026/2026-03-09.md"),
     `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 day_key: 2026-03-09
 experiment_slug: recovery-plan
@@ -1723,7 +1731,7 @@ Steady energy through the afternoon.
   await writeFile(
     path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
     `${JSON.stringify({
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: "evt_01JNV4ALT000000000000001",
       kind: "note",
       occurred_at: "2026-03-09T09:15:00Z",
@@ -1738,7 +1746,7 @@ Steady energy through the afternoon.
   await writeFile(
     path.join(vaultRoot, "ledger/samples/glucose/2026/2026-03.jsonl"),
     `${JSON.stringify({
-      schemaVersion: "hb.sample.v1",
+      schemaVersion: "murph.sample.v1",
       recorded_at: "2026-03-09T10:00:00Z",
       day_key: "2026-03-09",
       source: "device",
@@ -1753,7 +1761,7 @@ Steady energy through the afternoon.
 
 function createEmptyReadModel(): Awaited<ReturnType<typeof readVault>> {
   return {
-    format: "healthybob.query.v1",
+    format: "murph.query.v1",
     vaultRoot: "/tmp/empty-vault",
     metadata: null,
     entities: [],
@@ -1868,7 +1876,7 @@ test("rebuildSqliteSearchIndex only materializes non-sample documents and search
     assert.equal(rebuilt.backend, "sqlite");
     assert.equal(rebuilt.exists, true);
     assert.equal(rebuilt.dbPath, SEARCH_DB_RELATIVE_PATH);
-    assert.equal(rebuilt.schemaVersion, "hb.search.v1");
+    assert.equal(rebuilt.schemaVersion, "murph.search.v1");
     assert.equal(rebuilt.documentCount, expectedDocumentCount);
     assert.equal(existsSync(runtimeDatabasePath), true);
 
@@ -1984,7 +1992,7 @@ test("getSqliteSearchStatus ignores an inbox runtime copy when the canonical sea
     await writeFile(
       journalPath,
       `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-10
 title: March 10
@@ -2038,7 +2046,7 @@ test("getSqliteSearchStatus stays false against a pre-existing inbox runtime db 
         SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name LIKE 'hb_search_%'
+          AND name LIKE 'murph_search_%'
         ORDER BY name ASC
       `)
       .all() as Array<{ name: string }>;
@@ -2086,15 +2094,15 @@ test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched 
         SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name LIKE 'hb_search_%'
+          AND name LIKE 'murph_search_%'
         ORDER BY name ASC
       `)
       .all() as Array<{ name: string }>;
     searchDatabase.close();
 
-    assert.equal(searchTables.some((table) => table.name === "hb_search_document"), true);
-    assert.equal(searchTables.some((table) => table.name === "hb_search_meta"), true);
-    assert.equal(searchTables.some((table) => table.name === "hb_search_fts"), true);
+    assert.equal(searchTables.some((table) => table.name === "murph_search_document"), true);
+    assert.equal(searchTables.some((table) => table.name === "murph_search_meta"), true);
+    assert.equal(searchTables.some((table) => table.name === "murph_search_fts"), true);
 
     const inboxStateDatabase = new DatabaseSync(runtimeDatabasePath, { readOnly: true });
     const inboxState = inboxStateDatabase
@@ -2105,7 +2113,7 @@ test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched 
         SELECT name
         FROM sqlite_master
         WHERE type = 'table'
-          AND name LIKE 'hb_search_%'
+          AND name LIKE 'murph_search_%'
         ORDER BY name ASC
       `)
       .all() as Array<{ name: string }>;
@@ -2139,7 +2147,7 @@ test("searchVaultRuntime auto switches from scan results to stale sqlite state a
     await writeFile(
       journalPath,
       `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-10
 title: March 10
@@ -2170,7 +2178,7 @@ Steady energy after electrolyte drink.
     await writeFile(
       journalPath,
       `---
-schemaVersion: hb.frontmatter.journal-day.v1
+schemaVersion: murph.frontmatter.journal-day.v1
 docType: journal_day
 dayKey: 2026-03-10
 title: March 10

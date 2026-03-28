@@ -1,10 +1,10 @@
-# Deploying the Cloudflare-hosted Healthy Bob execution plane
+# Deploying the Cloudflare-hosted Murph execution plane
 
 This document is the concrete deploy path for the current hosted architecture:
 
 - `apps/web` stays the public onboarding, billing, auth, and webhook control plane.
 - `apps/cloudflare` owns per-user orchestration, encrypted bundle persistence, and operator/internal control routes.
-- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, and per-run env injection before running the one-shot Healthy Bob job and calling back into the worker for commit/finalize/outbox durability.
+- `UserRunnerDurableObject` now orchestrates per-user work while a companion `RunnerContainer` class handles the native Cloudflare container lifecycle, startup readiness, and per-run env injection before running the one-shot Murph job and calling back into the worker for commit/finalize/outbox durability.
 
 This deploy flow intentionally keeps the local-first agent largely unchanged. The hosted layer wraps the same filesystem-oriented runtime instead of inventing a second persistence model.
 
@@ -14,6 +14,7 @@ This repo now includes:
 
 - `Dockerfile.cloudflare-hosted-runner`
 - `.dockerignore`
+- `apps/cloudflare/r2-bundles-lifecycle.json`
 - generated deploy artifacts under `apps/cloudflare/.deploy/`
 - a manual GitHub Actions deploy workflow at `.github/workflows/deploy-cloudflare-hosted.yml`
 - a rollout helper that can either:
@@ -22,7 +23,9 @@ This repo now includes:
 - scripts to render:
   - `wrangler.generated.jsonc`
   - `worker-secrets.json`
+- an R2 lifecycle helper that applies the checked-in transient cleanup rules to the configured bundles buckets
 - explicit Wrangler observability config for Workers Logs and Workers Traces
+- checked-in and generated Wrangler config that declares the four required runtime secrets through Wrangler's experimental `secrets.required` support
 - a smoke-test script that verifies worker health and, when configured with a user id, triggers one manual hosted run and waits for queue drain, `lastRunAt` advance, and durable bundle refs, pinned to the candidate version during gradual rollouts
 
 ## What it does not automate yet
@@ -35,11 +38,14 @@ This repo now includes:
 
 ## Prerequisites
 
-Before your first deploy, you still need to do three one-time setup tasks in Cloudflare:
+Before your first deploy, you still need to do four one-time setup tasks in Cloudflare:
 
 1. Create a Workers Paid account.
 2. Create the R2 buckets that will hold the encrypted hosted bundles.
-3. Decide the public Worker URL you want to use:
+3. Apply the repo's transient-object lifecycle rules to those buckets:
+   - `transient/execution-journal/` expires after 30 days
+   - `transient/side-effects/` expires after 30 days
+4. Decide the public Worker URL you want to use:
    - a `*.workers.dev` URL, or
    - a custom domain.
 
@@ -64,14 +70,16 @@ Set these in the selected GitHub environment as variables:
 - `CF_WORKER_NAME`
 - `CF_BUNDLES_BUCKET`
 - `CF_BUNDLES_PREVIEW_BUCKET`
+- `CF_PUBLIC_BASE_URL` for deploys that run the post-deploy smoke step; the GitHub workflow now fails early with a clear error when `deploy_worker=true` and this value is unset
 
 Optional tuning variables:
 
 - `CF_BUNDLE_KEY_ID` (default `v1`)
 - `CF_COMPATIBILITY_DATE` (default `2026-03-27`)
 - `CF_CONTAINER_INSTANCE_TYPE` (default `basic`; also accepts a custom JSON object with `vcpu`, `memory_mib`, and `disk_mb`)
-- `CF_CONTAINER_MAX_INSTANCES` (default `1000`)
+- `CF_CONTAINER_MAX_INSTANCES` (default `50`)
 - `INSTALL_PADDLEOCR` (default `0`, passed to Wrangler as a container `image_vars` build-time input)
+- `HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER` (default `5m`)
 - `CF_DEFAULT_ALARM_DELAY_MS` (default `21600000`)
 - `CF_LOG_HEAD_SAMPLING_RATE` (default `1`)
 - `CF_MAX_EVENT_ATTEMPTS` (default `3`)
@@ -86,16 +94,11 @@ Optional non-secret provider/toolchain variables to expose through the worker an
 
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
 - `LINQ_API_BASE_URL`
-- `AGENTMAIL_API_BASE_URL`
 - `AGENTMAIL_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
 - `TELEGRAM_API_BASE_URL`
 - `TELEGRAM_FILE_BASE_URL`
-- `WHISPER_MODEL`
-- `WHISPER_MODEL_DIR`
 - `WHISPER_MODEL_PATH`
-- `PADDLEOCR_MODEL_DIR`
-- `PARSER_FFMPEG_PATH`
 - `FFMPEG_COMMAND`
 - `PDFTOTEXT_COMMAND`
 - `PADDLEOCR_COMMAND`
@@ -111,6 +114,8 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN`
+
+The checked-in scaffold and rendered deploy config both declare those four names in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
 Both control tokens are treated as required runtime inputs now, not just deploy-time placeholders:
 
@@ -160,10 +165,11 @@ pnpm --dir apps/cloudflare test:workers
 Render the generated deploy artifacts from your shell environment:
 
 ```bash
-export CF_WORKER_NAME=healthybob-hosted-staging
-export CF_BUNDLES_BUCKET=healthybob-hosted-bundles-staging
-export CF_BUNDLES_PREVIEW_BUCKET=healthybob-hosted-bundles-staging-preview
+export CF_WORKER_NAME=hosted-runner-staging
+export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
+export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=basic
+export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=5m
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
@@ -171,6 +177,7 @@ export HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=...
 export CF_LOG_HEAD_SAMPLING_RATE=1
 export CF_TRACE_HEAD_SAMPLING_RATE=0.1
 
+pnpm --dir apps/cloudflare r2:lifecycle:apply
 pnpm --dir apps/cloudflare deploy:config:render
 pnpm --dir apps/cloudflare deploy:secrets:render
 ```
@@ -179,6 +186,8 @@ You should now have:
 
 - `apps/cloudflare/.deploy/wrangler.generated.jsonc`
 - `apps/cloudflare/.deploy/worker-secrets.json`
+
+`pnpm --dir apps/cloudflare r2:lifecycle:apply` reads `CF_BUNDLES_BUCKET` and `CF_BUNDLES_PREVIEW_BUCKET` from your environment and applies the checked-in `apps/cloudflare/r2-bundles-lifecycle.json` rules to whichever of those buckets are configured. The Wrangler command requires Cloudflare auth with R2 write access.
 
 ## Deploying the worker manually
 
@@ -246,7 +255,7 @@ pnpm --dir apps/cloudflare deploy:rollout -- --config ./.deploy/wrangler.generat
 Then smoke test the deployed worker:
 
 ```bash
-export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://healthybob-hosted-staging.example.workers.dev
+export HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL=https://hosted-runner-staging.example.workers.dev
 export HOSTED_EXECUTION_SMOKE_USER_ID=member_test_123
 export HOSTED_EXECUTION_SMOKE_VERSION_ID=<candidate-version-id>
 pnpm --dir apps/cloudflare deploy:smoke
@@ -255,6 +264,8 @@ pnpm --dir apps/cloudflare deploy:smoke
 If you do not want the script to trigger a manual hosted run, omit `HOSTED_EXECUTION_SMOKE_USER_ID`. If you are smoke testing a gradual rollout, set `HOSTED_EXECUTION_SMOKE_VERSION_ID` so the health check and manual run are pinned to the candidate version instead of the stable version. The smoke helper now polls `GET /internal/users/:id/status` after `POST /run` and fails if the queue never drains, `lastRunAt` does not advance, or no durable bundle refs exist.
 
 ## Using the GitHub Actions workflow
+
+The workflow expects the selected GitHub environment to supply `CF_WORKER_NAME`, `CF_BUNDLES_BUCKET`, `CF_BUNDLES_PREVIEW_BUCKET`, and `CF_PUBLIC_BASE_URL` for normal deploy-and-smoke runs. It now validates those variables before install/deploy work begins so a missing public URL fails with a direct message instead of surfacing later as a confusing smoke failure.
 
 The workflow is intentionally manual (`workflow_dispatch`) so you do not accidentally push a half-configured deploy.
 

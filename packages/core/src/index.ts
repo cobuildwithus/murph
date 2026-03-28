@@ -39,7 +39,6 @@ export {
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
-  importMeal,
   importSamples,
   initializeVault,
   linkJournalEventIds,
@@ -81,13 +80,17 @@ export {
   CANONICAL_WRITE_LOCK_DIRECTORY,
   CANONICAL_WRITE_LOCK_METADATA_PATH,
   inspectCanonicalWriteLock,
+  isProtectedCanonicalPath,
+  listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
+  readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
 } from "./operations/index.ts";
 export type {
   CanonicalWriteLockHandle,
   CanonicalWriteLockInspection,
   CanonicalWriteLockMetadata,
+  RecoverableStoredWriteOperation,
 } from "./operations/index.ts";
 export type { ResolvedVaultPath } from "./path-safety.ts";
 export {

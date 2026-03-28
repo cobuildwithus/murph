@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/query",
+  "name": "@murph/query",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -35,8 +35,8 @@
     "test": "pnpm --dir ../contracts build && pnpm --dir ../.. exec vitest run packages/query/test/query.test.ts packages/query/test/health-tail.test.ts --no-coverage"
   },
   "dependencies": {
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*",
+    "@murph/contracts": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
     "zod": "^4.3.6"
   },
   "engines": {

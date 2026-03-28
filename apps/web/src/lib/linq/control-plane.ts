@@ -9,7 +9,7 @@ import {
   requireLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
   type LinqWebhookEvent,
-} from "@healthybob/inboxd";
+} from "@murph/inboxd";
 
 export const HOSTED_LINQ_BASE_PATH = "/api/linq";
 export const HOSTED_LINQ_WEBHOOK_PATH = `${HOSTED_LINQ_BASE_PATH}/webhook`;

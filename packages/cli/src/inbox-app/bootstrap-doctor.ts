@@ -1,4 +1,4 @@
-import { resolveRuntimePaths } from '@healthybob/runtime-state'
+import { resolveRuntimePaths } from '@murph/runtime-state'
 import type {
   InboxConnectorConfig,
   InboxDoctorCheck,

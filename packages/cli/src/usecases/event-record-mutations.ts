@@ -1,7 +1,7 @@
 import {
   normalizeIanaTimeZone,
   normalizeStrictIsoTimestamp,
-} from '@healthybob/contracts'
+} from '@murph/contracts'
 import {
   loadQueryRuntime,
   type QueryVaultRecord,
@@ -323,7 +323,7 @@ function applyTemporalEditPolicy(input: {
 }
 
 async function loadEventMutationCoreRuntime(): Promise<EventMutationCoreRuntime> {
-  return loadRuntimeModule<EventMutationCoreRuntime>('@healthybob/core')
+  return loadRuntimeModule<EventMutationCoreRuntime>('@murph/core')
 }
 
 export async function editEventRecord(input: EditEventRecordInput) {

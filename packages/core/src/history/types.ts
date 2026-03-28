@@ -2,18 +2,18 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_SPECIMEN_TYPES,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import type { DateInput } from "../types.ts";
 
 export type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 export const HEALTH_HISTORY_KINDS = [
   "encounter",
@@ -46,7 +46,7 @@ export type BloodTestFastingStatus = (typeof BLOOD_TEST_FASTING_STATUSES)[number
 export type BloodTestSpecimenType = (typeof BLOOD_TEST_SPECIMEN_TYPES)[number];
 
 export interface HistoryEventBase {
-  schemaVersion: "hb.event.v1";
+  schemaVersion: "murph.event.v1";
   id: string;
   kind: HistoryEventKind;
   occurredAt: string;
@@ -150,7 +150,6 @@ export interface AppendTestHistoryEventInput extends HistoryEventDraftBase {
   testName: string;
   resultStatus?: TestResultStatus;
   summary?: string;
-  resultSummary?: string;
   testCategory?: string;
   specimenType?: string;
   labName?: string;
@@ -165,7 +164,6 @@ export interface AppendBloodTestInput extends HistoryEventDraftBase {
   testName: string;
   resultStatus?: TestResultStatus;
   summary?: string;
-  resultSummary?: string;
   specimenType?: BloodTestSpecimenType | string;
   labName?: string;
   labPanelId?: string;

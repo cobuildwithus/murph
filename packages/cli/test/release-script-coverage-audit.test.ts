@@ -35,7 +35,7 @@ function runNodeScript(...args: string[]) {
 
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
-    expect(rootPackageJson.name).toBe('healthybob-workspace')
+    expect(rootPackageJson.name).toBe('murph-workspace')
     expect(rootPackageJson.scripts?.['changelog:update']).toBe('bash scripts/update-changelog.sh')
     expect(rootPackageJson.scripts?.['release:notes']).toBe('bash scripts/generate-release-notes.sh')
     expect(rootPackageJson.scripts?.['release:check']).toBe('bash scripts/release-check.sh')
@@ -82,18 +82,18 @@ describe('monorepo release flow coverage audit', () => {
     }
 
     expect(summary.version).toBe('0.0.0')
-    expect(summary.primaryPackage?.name).toBe('healthybob')
+    expect(summary.primaryPackage?.name).toBe('murph')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
-      '@healthybob/contracts',
-      '@healthybob/hosted-execution',
-      '@healthybob/runtime-state',
-      '@healthybob/core',
-      '@healthybob/query',
-      '@healthybob/importers',
-      '@healthybob/device-syncd',
-      '@healthybob/inboxd',
-      '@healthybob/parsers',
-      'healthybob',
+      '@murph/contracts',
+      '@murph/hosted-execution',
+      '@murph/runtime-state',
+      '@murph/core',
+      '@murph/query',
+      '@murph/importers',
+      '@murph/device-syncd',
+      '@murph/inboxd',
+      '@murph/parsers',
+      'murph',
     ])
   })
 
@@ -192,12 +192,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(publishEmptyString.stderr).toContain('Missing value for --npm-tag.')
   })
 
-  it('keeps packages/cli publish-ready as healthybob without package-local release scripts', () => {
-    expect(cliPackageJson.name).toBe('healthybob')
+  it('keeps packages/cli publish-ready as murph without package-local release scripts', () => {
+    expect(cliPackageJson.name).toBe('murph')
     expect(cliPackageJson.files).toContain('CHANGELOG.md')
-    expect(cliPackageJson.bin?.healthybob).toBe('dist/bin.js')
+    expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
     expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
-    expect(cliPackageJson.dependencies?.['@healthybob/device-syncd']).toBe('workspace:*')
+    expect(cliPackageJson.dependencies?.['@murph/device-syncd']).toBe('workspace:*')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
@@ -218,7 +218,7 @@ describe('monorepo release flow coverage audit', () => {
   })
 
   it('packages the selected vault and matching assistant-state without runtime or export-pack residue', () => {
-    const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'healthybob-review-gpt-data-'))
+    const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-data-'))
     const vaultRoot = path.join(parentRoot, 'vault')
     const outputRoot = path.join(repoRoot, '.tmp-review-gpt-data')
 
@@ -255,7 +255,7 @@ describe('monorepo release flow coverage audit', () => {
           '--out-dir',
           outputRoot,
           '--name',
-          'healthybob-test-data',
+          'murph-test-data',
         ],
         {
           cwd: repoRoot,

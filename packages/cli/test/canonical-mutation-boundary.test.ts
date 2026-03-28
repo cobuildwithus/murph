@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
 
-import { openSqliteRuntimeDatabase } from "@healthybob/runtime-state";
+import { openSqliteRuntimeDatabase } from "@murph/runtime-state";
 import { createIntegratedInboxCliServices } from "../src/inbox-services.js";
 
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;
@@ -91,8 +91,8 @@ async function captureSingleCaptureId(input: {
 test.sequential(
   "inbox journal and experiment-note promotions only require high-level core mutation ports",
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-inbox-high-level-ports-vault-"));
-    const homeRoot = await mkdtemp(path.join(tmpdir(), "healthybob-inbox-high-level-ports-home-"));
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-inbox-high-level-ports-vault-"));
+    const homeRoot = await mkdtemp(path.join(tmpdir(), "murph-inbox-high-level-ports-home-"));
     const photoPath = path.join(vaultRoot, "meal-photo.jpg");
     const messagesDbPath = path.join(homeRoot, "Library", "Messages", "chat.db");
 

@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.workout-format.v1"
+      "const": "murph.frontmatter.workout-format.v1"
     },
     "docType": {
       "type": "string",
@@ -153,6 +153,6 @@
     "activityType"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-workout-format.schema.json",
-  "title": "Healthy Bob Workout Format Frontmatter"
+  "$id": "@murph/contracts/frontmatter-workout-format.schema.json",
+  "title": "Murph Workout Format Frontmatter"
 }

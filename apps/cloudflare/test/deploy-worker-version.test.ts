@@ -22,12 +22,12 @@ describe("runHostedWorkerDeployment", () => {
       configPath: "/tmp/wrangler.generated.jsonc",
       dependencies,
       env: {
-        CF_WORKER_NAME: "hb-worker",
+        CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
       },
       resultPath: "/tmp/deployment-result.json",
       secretsFilePath: "/tmp/worker-secrets.json",
-      workerName: "hb-worker",
+      workerName: "hosted-worker",
     })).rejects.toThrow(
       "Rendered Wrangler config includes unsupported Durable Object migration tag(s) `v3` for gradual versions/deployments. Use HOSTED_EXECUTION_DEPLOYMENT_MODE=direct for the migration rollout first.",
     );
@@ -72,7 +72,7 @@ describe("runHostedWorkerDeployment", () => {
       configPath: "/tmp/wrangler.generated.jsonc",
       dependencies,
       env: {
-        CF_WORKER_NAME: "hb-worker",
+        CF_WORKER_NAME: "hosted-worker",
         GITHUB_OUTPUT: "/tmp/github-output.txt",
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "gradual",
         HOSTED_EXECUTION_DEPLOY_VERSION_ID: "version-b",
@@ -81,7 +81,7 @@ describe("runHostedWorkerDeployment", () => {
       },
       resultPath: "/tmp/deployment-result.json",
       secretsFilePath: "/tmp/worker-secrets.json",
-      workerName: "hb-worker",
+      workerName: "hosted-worker",
     });
 
     expect(dependencies.uploadVersion).not.toHaveBeenCalled();
@@ -89,7 +89,7 @@ describe("runHostedWorkerDeployment", () => {
       configPath: "/tmp/wrangler.generated.jsonc",
       deploymentMessage: expect.stringContaining("rollout 10%"),
       versionSpecs: ["version-a@90", "version-b@10"],
-      workerName: "hb-worker",
+      workerName: "hosted-worker",
     });
     expect(result).toMatchObject({
       candidateVersionId: "version-b",
@@ -135,13 +135,13 @@ describe("runHostedWorkerDeployment", () => {
       configPath: "/tmp/wrangler.generated.jsonc",
       dependencies,
       env: {
-        CF_WORKER_NAME: "hb-worker",
+        CF_WORKER_NAME: "hosted-worker",
         GITHUB_OUTPUT: "/tmp/github-output.txt",
         HOSTED_EXECUTION_DEPLOYMENT_MODE: "direct",
       },
       resultPath: "/tmp/deployment-result.json",
       secretsFilePath: "/tmp/worker-secrets.json",
-      workerName: "hb-worker",
+      workerName: "hosted-worker",
     });
 
     expect(dependencies.deployDirect).toHaveBeenCalledWith({
@@ -150,7 +150,7 @@ describe("runHostedWorkerDeployment", () => {
       includeSecrets: true,
       secretsFilePath: "/tmp/worker-secrets.json",
       versionTag: expect.any(String),
-      workerName: "hb-worker",
+      workerName: "hosted-worker",
     });
     expect(dependencies.deployVersions).not.toHaveBeenCalled();
     expect(dependencies.uploadVersion).not.toHaveBeenCalled();

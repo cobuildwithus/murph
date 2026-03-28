@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.recipe.v1"
+      "const": "murph.frontmatter.recipe.v1"
     },
     "docType": {
       "type": "string",
@@ -119,6 +119,6 @@
     "status"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-recipe.schema.json",
-  "title": "Healthy Bob Recipe Frontmatter"
+  "$id": "@murph/contracts/frontmatter-recipe.schema.json",
+  "title": "Murph Recipe Frontmatter"
 }

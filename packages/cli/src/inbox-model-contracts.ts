@@ -66,7 +66,7 @@ export const inboxModelAttachmentBundleSchema = z.object({
 })
 
 export const inboxModelBundleSchema = z.object({
-  schema: z.literal('healthybob.inbox-model-bundle.v1'),
+  schema: z.literal('murph.inbox-model-bundle.v1'),
   captureId: z.string().min(1),
   eventId: z.string().min(1),
   source: z.string().min(1),
@@ -87,7 +87,7 @@ export const inboxModelBundleSchema = z.object({
 })
 
 export const assistantExecutionPlanSchema = z.object({
-  schema: z.literal('healthybob.assistant-plan.v1'),
+  schema: z.literal('murph.assistant-plan.v1'),
   summary: z.string().min(1),
   rationale: z.string().min(1),
   actions: z.array(assistantToolCallSchema).max(4),

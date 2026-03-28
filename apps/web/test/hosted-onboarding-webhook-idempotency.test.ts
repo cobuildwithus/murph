@@ -59,7 +59,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     revnetTerminalAddress: null,
     revnetTreasuryPrivateKey: null,
     revnetWeiPerStripeMinorUnit: null,
-    sessionCookieName: "hb_hosted_session",
+    sessionCookieName: "hosted_session",
     sessionTtlDays: 30,
     stripeBillingMode: "payment",
     stripePriceId: "price_123",
@@ -349,6 +349,7 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
   });
 
   it("completes a Stripe invoice webhook after durable updates queue activation dispatch", async () => {
@@ -484,7 +485,7 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to the legacy top-level invoice subscription field when parent subscription details are absent", async () => {
+  it("does not match members from the removed top-level invoice subscription field", async () => {
     mocks.stripeConstructEvent.mockReturnValue({
       data: {
         object: {
@@ -496,22 +497,7 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const findUnique = vi.fn().mockImplementation(({ where }: { where: Record<string, unknown> }) => {
-      if (where.stripeSubscriptionId === "sub_legacy_123") {
-        return Promise.resolve({
-          billingMode: HostedBillingMode.subscription,
-          billingStatus: HostedBillingStatus.past_due,
-          id: "member_123",
-          linqChatId: "chat_123",
-          normalizedPhoneNumber: "+15551234567",
-          stripeCustomerId: null,
-          stripeSubscriptionId: "sub_legacy_123",
-          status: HostedMemberStatus.active,
-        });
-      }
-
-      return Promise.resolve(null);
-    });
+    const findUnique = vi.fn().mockResolvedValue(null);
 
     const prisma: any = withPrismaTransaction({
       hostedInvite: {
@@ -547,11 +533,138 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    expect(findUnique).toHaveBeenCalledWith({
+    expect(findUnique).not.toHaveBeenCalledWith({
       where: {
         stripeSubscriptionId: "sub_legacy_123",
       },
     });
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("downgrades subscription members from invoice.payment_failed using parent subscription details", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          customer: null,
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+        },
+      },
+      id: "evt_stripe_invoice_failed_123",
+      type: "invoice.payment_failed",
+    });
+
+    const findUnique = vi.fn().mockImplementation(({ where }: { where: Record<string, unknown> }) => {
+      if (where.stripeSubscriptionId === "sub_123") {
+        return Promise.resolve({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: null,
+          stripeSubscriptionId: "sub_123",
+          status: HostedMemberStatus.active,
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+
+    const prisma: any = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique,
+        update: vi.fn().mockResolvedValue({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+          stripeCustomerId: null,
+          stripeSubscriptionId: "sub_123",
+          status: HostedMemberStatus.active,
+        }),
+      },
+    });
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_invoice_failed_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.payment_failed",
+    });
+
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: "sub_123",
+      },
+    });
+    expect(prisma.hostedMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          billingStatus: HostedBillingStatus.past_due,
+          stripeSubscriptionId: "sub_123",
+        }),
+      }),
+    );
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("does not match invoice.payment_failed members from the removed top-level invoice subscription field", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          customer: null,
+          subscription: "sub_legacy_123",
+        },
+      },
+      id: "evt_stripe_invoice_failed_legacy_123",
+      type: "invoice.payment_failed",
+    });
+
+    const findUnique = vi.fn().mockResolvedValue(null);
+
+    const prisma: any = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique,
+        update: vi.fn(),
+      },
+    });
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_invoice_failed_legacy_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      type: "invoice.payment_failed",
+    });
+
+    expect(findUnique).not.toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: "sub_legacy_123",
+      },
+    });
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("does not activate or mark the invite paid from checkout.session.completed when RevNet subscriptions are enabled", async () => {
@@ -766,23 +879,31 @@ describe("hosted onboarding webhook retry safety", () => {
             equals: failedReceiptPayload,
           },
         }),
-        data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
+      }),
+    );
+    expect(receiptCalls[0]?.data).toEqual(
+      expect.objectContaining({
+        payloadJson: expect.objectContaining({
+          eventPayload: {
+            eventType: "message.received",
+          },
+          receiptState: expect.objectContaining({
             attemptCount: 2,
             attemptId: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
             lastReceivedAt: expect.any(String),
-            sideEffects: [
-              buildDispatchSideEffect({
+            sideEffects: expect.arrayContaining([
+              expect.objectContaining({
                 attemptCount: 1,
-                eventId: "evt_123",
+                effectId: "dispatch:evt_123",
+                kind: "hosted_execution_dispatch",
                 lastAttemptAt: "2026-03-26T12:00:00.250Z",
+                result: {
+                  dispatched: true,
+                },
                 sentAt: "2026-03-26T12:00:00.400Z",
                 status: "sent",
               }),
-            ],
+            ]),
             status: "processing",
           }),
         }),
@@ -791,25 +912,44 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 2,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
+          payloadJson: expect.objectContaining({
             eventPayload: {
               eventType: "message.received",
             },
-            lastReceivedAt: expect.any(String),
-            sideEffects: [
-              buildDispatchSideEffect({
-                attemptCount: 1,
-                eventId: "evt_123",
-                lastAttemptAt: "2026-03-26T12:00:00.250Z",
-                sentAt: "2026-03-26T12:00:00.400Z",
-                status: "sent",
-              }),
-            ],
-            status: "completed",
+            receiptState: expect.objectContaining({
+              attemptCount: 2,
+              attemptId: expect.any(String),
+              completedAt: expect.any(String),
+              lastReceivedAt: expect.any(String),
+              sideEffects: expect.arrayContaining([
+                expect.objectContaining({
+                  attemptCount: 1,
+                  effectId: "dispatch:evt_123",
+                  kind: "hosted_execution_dispatch",
+                  lastAttemptAt: "2026-03-26T12:00:00.250Z",
+                  result: {
+                    dispatched: true,
+                  },
+                  sentAt: "2026-03-26T12:00:00.400Z",
+                  status: "sent",
+                }),
+              ]),
+              status: "completed",
+            }),
           }),
+        }),
+        where: expect.objectContaining({
+          payloadJson: {
+            equals: expect.objectContaining({
+              eventPayload: {
+                eventType: "message.received",
+              },
+              receiptState: expect.objectContaining({
+                attemptCount: 2,
+                status: "processing",
+              }),
+            }),
+          },
         }),
       }),
     );
@@ -1002,6 +1142,14 @@ describe("hosted onboarding webhook retry safety", () => {
     );
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
   });
 
   it("does not resend an already-sent Linq invite reply when reclaiming a failed receipt", async () => {
@@ -1194,92 +1342,12 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("treats completed legacy flat Linq receipts as duplicates without redispatching the event", async () => {
-    const prisma: any = {
-      hostedWebhookReceipt: {
-        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: buildLegacyWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: "attempt-1",
-            completedAt: "2026-03-26T12:00:00.000Z",
-            eventPayload: {
-              eventType: "message.received",
-            },
-            status: "completed",
-          }),
-        }),
-        updateMany: vi.fn(),
-      },
-      hostedMember: {
-        findUnique: vi.fn(),
-      },
-    };
-
-    await expect(
-      handleHostedOnboardingLinqWebhook({
-        prisma,
-        rawBody: buildLinqMessageWebhookBody(),
-        signature: null,
-        timestamp: null,
-      }),
-    ).resolves.toMatchObject({
-      duplicate: true,
-      ok: true,
-    });
-
-    expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-  });
-
   it("treats in-flight processing Linq receipts as duplicates without redispatching the event", async () => {
     const prisma: any = {
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
           payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: "attempt-processing",
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: "2026-03-26T12:00:00.000Z",
-            status: "processing",
-          }),
-        }),
-        updateMany: vi.fn(),
-      },
-      hostedMember: {
-        findUnique: vi.fn(),
-      },
-    };
-
-    await expect(
-      handleHostedOnboardingLinqWebhook({
-        prisma,
-        rawBody: buildLinqMessageWebhookBody(),
-        signature: null,
-        timestamp: null,
-      }),
-    ).resolves.toMatchObject({
-      duplicate: true,
-      ok: true,
-    });
-
-    expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-  });
-
-  it("treats in-flight legacy flat Linq receipts as duplicates without redispatching the event", async () => {
-    const prisma: any = {
-      hostedWebhookReceipt: {
-        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
-        findUnique: vi.fn().mockResolvedValue({
-          payloadJson: buildLegacyWebhookReceiptPayload({
             attemptCount: 1,
             attemptId: "attempt-processing",
             eventPayload: {
@@ -1358,16 +1426,17 @@ describe("hosted onboarding webhook retry safety", () => {
           },
         }),
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
+          payloadJson: expect.objectContaining({
             eventPayload: {
               eventType: "message.received",
-              strayLegacyField: "keep-me-if-possible",
             },
-            lastReceivedAt: expect.any(String),
-            sideEffects: [],
-            status: "processing",
+            receiptState: expect.objectContaining({
+              attemptCount: 1,
+              attemptId: expect.any(String),
+              lastReceivedAt: expect.any(String),
+              sideEffects: [],
+              status: "processing",
+            }),
           }),
         }),
       }),
@@ -1375,25 +1444,26 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 1,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
+          payloadJson: expect.objectContaining({
             eventPayload: {
               eventType: "message.received",
-              strayLegacyField: "keep-me-if-possible",
             },
-            lastReceivedAt: expect.any(String),
-            sideEffects: [
-              buildDispatchSideEffect({
-                attemptCount: 1,
-                eventId: "evt_123",
-                lastAttemptAt: expect.any(String),
-                sentAt: expect.any(String),
-                status: "sent",
-              }),
-            ],
-            status: "completed",
+            receiptState: expect.objectContaining({
+              attemptCount: 1,
+              attemptId: expect.any(String),
+              completedAt: expect.any(String),
+              lastReceivedAt: expect.any(String),
+              sideEffects: [
+                buildDispatchSideEffect({
+                  attemptCount: 1,
+                  eventId: "evt_123",
+                  lastAttemptAt: expect.any(String),
+                  sentAt: expect.any(String),
+                  status: "sent",
+                }),
+              ],
+              status: "completed",
+            }),
           }),
         }),
       }),
@@ -2248,13 +2318,75 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
-          payloadJson: buildLegacyWebhookReceiptPayload({
+          payloadJson: buildWebhookReceiptPayload({
             attemptCount: 1,
             attemptId: "attempt-1",
             completedAt: "2026-03-26T12:00:00.000Z",
             eventPayload: {
               type: "invoice.paid",
             },
+            sideEffects: [],
+            status: "completed",
+          }),
+        }),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+
+    await expect(
+      handleHostedStripeWebhook({
+        prisma,
+        rawBody: JSON.stringify({ id: "evt_stripe_123" }),
+        signature: "sig_123",
+      }),
+    ).resolves.toMatchObject({
+      duplicate: true,
+      ok: true,
+      type: "invoice.paid",
+    });
+
+    expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("treats completed Stripe receipts with minimized activation side effects as duplicates", async () => {
+    mocks.stripeConstructEvent.mockReturnValue({
+      data: {
+        object: {
+          customer: "cus_123",
+        },
+      },
+      id: "evt_stripe_123",
+      type: "invoice.paid",
+    });
+
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: buildWebhookReceiptPayload({
+            attemptCount: 1,
+            attemptId: "attempt-1",
+            completedAt: "2026-03-26T12:00:00.000Z",
+            eventPayload: {
+              type: "invoice.paid",
+            },
+            sideEffects: [
+              buildMemberActivationDispatchSideEffect({
+                attemptCount: 1,
+                lastAttemptAt: "2026-03-26T12:00:00.250Z",
+                sentAt: "2026-03-26T12:00:00.400Z",
+                sourceEventId: "evt_stripe_123",
+                sourceType: "stripe.invoice.paid",
+                status: "sent",
+              }),
+            ],
             status: "completed",
           }),
         }),
@@ -2356,35 +2488,6 @@ function buildWebhookReceiptPayload(input: {
   };
 }
 
-function buildLegacyWebhookReceiptPayload(input: {
-  attemptCount: number;
-  attemptId?: unknown;
-  completedAt?: unknown;
-  eventPayload: Record<string, unknown>;
-  lastError?: unknown;
-  lastReceivedAt?: unknown;
-  status: "completed" | "failed" | "processing";
-}) {
-  return {
-    ...input.eventPayload,
-    receiptAttemptCount: input.attemptCount,
-    receiptAttemptId: input.attemptId ?? "attempt-1",
-    receiptCompletedAt:
-      input.completedAt ??
-      (input.status === "completed" ? "2026-03-26T12:00:00.000Z" : null),
-    receiptLastError:
-      input.lastError ??
-      (input.status === "failed"
-        ? {
-          message: "Unknown hosted webhook failure.",
-          name: "UnknownError",
-        }
-        : null),
-    receiptLastReceivedAt: input.lastReceivedAt ?? "2026-03-26T12:00:00.000Z",
-    receiptStatus: input.status,
-  };
-}
-
 function makeActiveMember() {
   return {
     billingStatus: HostedBillingStatus.active,
@@ -2405,48 +2508,63 @@ function buildDispatchSideEffect(input: {
   sentAt?: unknown;
   status: "pending" | "sent";
 }) {
+  const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
+  const linqEvent = {
+    api_version: "v1",
+    created_at: occurredAt,
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "hello",
+          },
+        ],
+      },
+      received_at: "2026-03-26T12:00:00.000Z",
+      recipient_phone: "+15550000000",
+      service: "sms",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: null,
+  };
+
   return {
     attemptCount: input.attemptCount ?? 0,
     effectId: input.effectId ?? `dispatch:${input.eventId}`,
     kind: "hosted_execution_dispatch",
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
-    payload: {
-      dispatch: {
-        event: {
-          kind: "linq.message.received",
-          linqEvent: {
-            api_version: "v1",
-            created_at: "2026-03-26T12:00:00.000Z",
-            data: {
-              chat_id: "chat_123",
-              from: "+15551234567",
-              is_from_me: false,
-              message: {
-                id: "msg_123",
-                parts: [
-                  {
-                    type: "text",
-                    value: "hello",
-                  },
-                ],
-              },
-              received_at: "2026-03-26T12:00:00.000Z",
-              recipient_phone: "+15550000000",
-              service: "sms",
+    payload:
+      input.status === "sent"
+        ? {
+            schemaVersion: "murph.execution-outbox.ref.v1",
+            dispatchRef: {
+              eventId: input.eventId,
+              eventKind: "linq.message.received",
+              occurredAt,
+              userId: "member_123",
             },
-            event_id: "evt_123",
-            event_type: "message.received",
-            partner_id: null,
-            trace_id: null,
+            linqEvent,
+          }
+        : {
+            dispatch: {
+              event: {
+                kind: "linq.message.received",
+                linqEvent,
+                normalizedPhoneNumber: "+15551234567",
+                userId: "member_123",
+              },
+              eventId: input.eventId,
+              occurredAt,
+            },
           },
-          normalizedPhoneNumber: "+15551234567",
-          userId: "member_123",
-        },
-        eventId: input.eventId,
-        occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
-      },
-    },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
       input.sentAt ??
@@ -2471,6 +2589,7 @@ function buildMemberActivationDispatchSideEffect(input: {
   const eventId =
     input.effectId ??
     `dispatch:member.activated:${input.sourceType}:${memberId}:${input.sourceEventId}`;
+  const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
 
   return {
     attemptCount: input.attemptCount ?? 0,
@@ -2478,16 +2597,27 @@ function buildMemberActivationDispatchSideEffect(input: {
     kind: "hosted_execution_dispatch",
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
-    payload: {
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: memberId,
-        },
-        eventId: String(eventId).replace(/^dispatch:/u, ""),
-        occurredAt: input.occurredAt ?? "2026-03-26T12:00:00.000Z",
-      },
-    },
+    payload:
+      input.status === "sent"
+        ? {
+            schemaVersion: "murph.execution-outbox.ref.v1",
+            dispatchRef: {
+              eventId: String(eventId).replace(/^dispatch:/u, ""),
+              eventKind: "member.activated",
+              occurredAt,
+              userId: memberId,
+            },
+          }
+        : {
+            dispatch: {
+              event: {
+                kind: "member.activated",
+                userId: memberId,
+              },
+              eventId: String(eventId).replace(/^dispatch:/u, ""),
+              occurredAt,
+            },
+          },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
       input.sentAt ??

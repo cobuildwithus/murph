@@ -68,7 +68,7 @@ test("normalizeTelegramUpdate builds thread-aware captures and hydrates download
     },
     botUser: {
       id: 999,
-      username: "healthybob_bot",
+      username: "murph_bot",
     },
     downloadDriver: {
       async getFile(fileId) {
@@ -338,7 +338,7 @@ test("createTelegramPollConnector backfills in update order and emits Telegram u
     async getMe() {
       return {
         id: 999,
-        username: "healthybob_bot",
+        username: "murph_bot",
       };
     },
     async getMessages({ cursor }) {
@@ -480,7 +480,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
         getMeCalls += 1;
         return {
           id: 999,
-          username: "healthybob_bot",
+          username: "murph_bot",
         };
       },
       async getUpdates(input) {
@@ -532,7 +532,7 @@ test("createTelegramApiPollDriver delegates Bot API calls through the grammY Api
   });
 
   const bot = await driver.getMe();
-  assert.equal((bot as { username?: string }).username, "healthybob_bot");
+  assert.equal((bot as { username?: string }).username, "murph_bot");
 
   const updates = await driver.getMessages({
     cursor: { updateId: 42 },
@@ -577,7 +577,7 @@ test("createTelegramApiPollDriver retries transient polling failures before resu
       async getMe() {
         return {
           id: 999,
-          username: "healthybob_bot",
+          username: "murph_bot",
         };
       },
       async getUpdates() {
@@ -641,7 +641,7 @@ test("createTelegramApiPollDriver stops retrying fatal 4xx polling failures", as
       async getMe() {
         return {
           id: 999,
-          username: "healthybob_bot",
+          username: "murph_bot",
         };
       },
       async getUpdates() {
@@ -676,7 +676,7 @@ test("createTelegramPollConnector backfills page-by-page so cursors advance afte
   const connector = createTelegramPollConnector({
     driver: {
       async getMe() {
-        return { id: 999, username: "healthybob_bot" };
+        return { id: 999, username: "murph_bot" };
       },
       async getMessages({ cursor }) {
         seenCursors.push(cursor);
@@ -761,7 +761,7 @@ test("createTelegramPollConnector advances raw cursors even when a page emits no
   const connector = createTelegramPollConnector({
     driver: {
       async getMe() {
-        return { id: 999, username: "healthybob_bot" };
+        return { id: 999, username: "murph_bot" };
       },
       async getMessages({ cursor }) {
         seenCursors.push(cursor);
@@ -824,7 +824,7 @@ test("createTelegramPollConnector surfaces async polling failures from the watch
   const connector = createTelegramPollConnector({
     driver: {
       async getMe() {
-        return { id: 999, username: "healthybob_bot" };
+        return { id: 999, username: "murph_bot" };
       },
       async getMessages() {
         return {
@@ -878,7 +878,7 @@ test("createTelegramApiPollDriver reads local Bot API file paths directly", asyn
         async getMe() {
           return {
             id: 999,
-            username: "healthybob_bot",
+            username: "murph_bot",
           };
         },
         async getUpdates() {

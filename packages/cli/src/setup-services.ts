@@ -13,8 +13,10 @@ import {
 import { VaultCliError } from './vault-cli-errors.js'
 import { resolveEffectiveTopLevelToken } from './command-helpers.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
   readOperatorConfig,
+  resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
   type AssistantOperatorDefaults,
@@ -57,7 +59,6 @@ import {
 } from './setup-services/shell.js'
 import {
   assistantProviderConfigsEqual,
-  serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
 import {
   buildBaseFormulaSpecs,
@@ -193,9 +194,10 @@ export function createSetupServices(
     const whisperModel = input.whisperModel ?? 'base.en'
     const homeDirectory = path.resolve(getHomeDirectory())
     const cliBinPath = path.resolve(resolveCliBinPath())
+    const defaultToolchainRoot = path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY)
     const toolchainRoot = path.resolve(
       getCwd(),
-      input.toolchainRoot ?? path.join(homeDirectory, DEFAULT_TOOLCHAIN_DIRECTORY),
+      input.toolchainRoot ?? defaultToolchainRoot,
     )
     const notes: string[] = []
     const steps: SetupStepResult[] = []
@@ -205,7 +207,7 @@ export function createSetupServices(
     }
 
     log(
-      `Healthy Bob setup targeting ${redactHomePathInText(vault, homeDirectory)} on ${describeSetupHost(platform)} (${arch}).`,
+      `Murph setup targeting ${redactHomePathInText(vault, homeDirectory)} on ${describeSetupHost(platform)} (${arch}).`,
     )
 
     await ensureDirectoryStep({
@@ -426,7 +428,7 @@ export function createSetupServices(
   async function setupMacos(input: SetupInput): Promise<SetupResult> {
     const platform = getPlatform()
     if (platform !== 'darwin') {
-      throw unsupportedSetupPlatform(platform, 'Healthy Bob setup currently supports macOS only through setupMacos(). Use setupHost() for Linux support.')
+      throw unsupportedSetupPlatform(platform, 'Murph setup currently supports macOS only through setupMacos(). Use setupHost() for Linux support.')
     }
 
     return await setupHost(input)
@@ -1051,7 +1053,7 @@ function summarizeCommandFailure(
 
 function unsupportedSetupPlatform(
   platform: NodeJS.Platform,
-  message = 'Healthy Bob setup currently supports macOS and Linux only.',
+  message = 'Murph setup currently supports macOS and Linux only.',
 ): VaultCliError {
   return new VaultCliError('unsupported_platform', message, {
     platform,
@@ -1062,9 +1064,17 @@ function describeSetupHost(platform: NodeJS.Platform): string {
   return platform === 'darwin' ? 'macOS' : platform
 }
 
-export function detectSetupProgramName(argv0: string | undefined): string {
-  const baseName = path.basename(argv0 ?? '')
-  return baseName === 'healthybob' ? 'healthybob' : 'vault-cli'
+export function detectSetupProgramName(
+  argv0: string | undefined,
+  shimProgramName = process.env.SETUP_PROGRAM_NAME,
+): string {
+  const normalizedShimProgramName = shimProgramName?.trim().toLowerCase()
+  if (normalizedShimProgramName === 'murph') {
+    return 'murph'
+  }
+
+  const baseName = path.basename(argv0 ?? '').toLowerCase()
+  return baseName === 'murph' ? 'murph' : 'vault-cli'
 }
 
 export function isSetupInvocation(
@@ -1076,7 +1086,7 @@ export function isSetupInvocation(
     return true
   }
 
-  if (programName !== 'healthybob') {
+  if (programName !== 'murph') {
     return false
   }
 
@@ -1153,10 +1163,10 @@ async function ensureDefaultVaultSelection(input: {
         : 'completed'
   const detail =
     existingDefaultVault === nextDefaultVault
-      ? `Reusing ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+      ? `Reusing ${nextDefaultVault} as the default Murph vault for future CLI commands.`
       : input.dryRun
-        ? `Would save ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
-        : `Saved ${nextDefaultVault} as the default Healthy Bob vault for future CLI commands.`
+        ? `Would save ${nextDefaultVault} as the default Murph vault for future CLI commands.`
+        : `Saved ${nextDefaultVault} as the default Murph vault for future CLI commands.`
 
   if (!input.dryRun && existingDefaultVault !== nextDefaultVault) {
     await saveDefaultVaultConfig(input.vault, input.homeDirectory)
@@ -1240,9 +1250,30 @@ async function ensureAssistantDefaultSelection(input: {
 function assistantSelectionToOperatorDefaults(
   assistant: SetupConfiguredAssistant,
 ): Partial<AssistantOperatorDefaults> {
+  if (!assistant.provider) {
+    return {
+      provider: null,
+      account: assistant.account ?? null,
+    }
+  }
+
   return {
-    provider: assistant.provider,
-    ...serializeAssistantProviderOperatorDefaults(assistant),
+    ...buildAssistantProviderDefaultsPatch({
+      defaults: null,
+      provider: assistant.provider,
+      providerConfig: {
+        model: assistant.model,
+        reasoningEffort: assistant.reasoningEffort,
+        sandbox: assistant.sandbox,
+        approvalPolicy: assistant.approvalPolicy,
+        profile: assistant.profile,
+        oss: assistant.oss === true,
+        baseUrl: assistant.baseUrl,
+        apiKeyEnv: assistant.apiKeyEnv,
+        providerName: assistant.providerName,
+        headers: null,
+      },
+    }),
     account: assistant.account ?? null,
   }
 }
@@ -1251,10 +1282,29 @@ function assistantOperatorDefaultsMatch(
   existing: AssistantOperatorDefaults | null,
   next: Partial<AssistantOperatorDefaults>,
 ): boolean {
+  const nextProvider = next.provider ?? null
+  const nextProviderDefaults =
+    nextProvider && next.defaultsByProvider
+      ? next.defaultsByProvider[nextProvider] ?? null
+      : null
+
   return (
     normalizeNullableConfigField(existing?.provider) ===
-      normalizeNullableConfigField(next.provider) &&
-    assistantProviderConfigsEqual(existing, next) &&
+      normalizeNullableConfigField(nextProvider) &&
+    assistantProviderConfigsEqual(
+      existing?.provider
+        ? {
+            provider: existing.provider,
+            ...(resolveAssistantProviderDefaults(existing, existing.provider) ?? {}),
+          }
+        : null,
+      nextProvider
+        ? {
+            provider: nextProvider,
+            ...(nextProviderDefaults ?? {}),
+          }
+        : null,
+    ) &&
     JSON.stringify(existing?.account ?? null) ===
       JSON.stringify(next.account ?? null)
   )

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasHostedPrivyClientConfig,
   parseHostedSignupPhoneNumber,
+  resolveHostedInstallScriptUrl,
   resolveHostedPrivyClientAppId,
   resolveHostedSignupPhoneNumber,
 } from "@/src/lib/hosted-onboarding/landing";
@@ -30,6 +31,25 @@ describe("hosted onboarding landing helpers", () => {
     expect(resolveHostedPrivyClientAppId({} as NodeJS.ProcessEnv)).toBeNull();
     expect(hasHostedPrivyClientConfig(createProcessEnv({}))).toBe(false);
     expect(hasHostedPrivyClientConfig(createProcessEnv({ NEXT_PUBLIC_PRIVY_APP_ID: "cm_app_123" }))).toBe(true);
+  });
+
+  it("derives the hosted install-script URL from the public base URL", () => {
+    expect(resolveHostedInstallScriptUrl(createProcessEnv({}))).toBeNull();
+    expect(
+      resolveHostedInstallScriptUrl(
+        createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test" }),
+      ),
+    ).toBe("https://join.example.test/install.sh");
+    expect(
+      resolveHostedInstallScriptUrl(
+        createProcessEnv({ NEXT_PUBLIC_SITE_URL: "https://murph.example.test/app" }),
+      ),
+    ).toBe("https://murph.example.test/install.sh");
+    expect(
+      resolveHostedInstallScriptUrl(
+        createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "not-a-url" }),
+      ),
+    ).toBeNull();
   });
 });
 

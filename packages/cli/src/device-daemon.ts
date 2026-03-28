@@ -5,7 +5,7 @@ import {
   readFile,
   rm,
 } from 'node:fs/promises'
-import { writeTextFileAtomic } from '@healthybob/runtime-state'
+import { writeTextFileAtomic } from '@murph/runtime-state'
 
 import {
   DEVICE_SYNC_BASE_URL_ENV,
@@ -131,7 +131,7 @@ export async function getManagedDeviceSyncDaemonStatus(input: {
       'Stale device-sync daemon state found; recorded PID is no longer running.'
   } else if (healthy && !managed) {
     message =
-      'Device sync control plane is reachable at the target base URL, but it is not managed by this Healthy Bob vault.'
+      'Device sync control plane is reachable at the target base URL, but it is not managed by this Murph vault.'
   } else if (!healthy) {
     message = 'Device sync daemon is not running.'
   }
@@ -175,7 +175,7 @@ export async function startManagedDeviceSyncDaemon(input: {
         managed: true,
         running: true,
         healthy: true,
-        message: 'Healthy Bob is already managing the local device sync daemon.',
+        message: 'Murph is already managing the local device sync daemon.',
         started: false,
       })
     }
@@ -183,7 +183,7 @@ export async function startManagedDeviceSyncDaemon(input: {
     if (dependencies.isProcessAlive(state.pid) && !existingHealthy) {
       throw new VaultCliError(
         'DEVICE_SYNC_DAEMON_UNHEALTHY',
-        'The managed device sync daemon process is running but not healthy. Stop it with `healthybob device daemon stop --vault <path>` and retry.',
+        'The managed device sync daemon process is running but not healthy. Stop it with `murph device daemon stop --vault <path>` and retry.',
         { pid: state.pid, baseUrl },
       )
     }
@@ -201,14 +201,14 @@ export async function startManagedDeviceSyncDaemon(input: {
         running: true,
         healthy: true,
         message:
-          'A device sync control plane is already reachable at this base URL. Healthy Bob is using the explicitly configured token instead of taking ownership of that process.',
+          'A device sync control plane is already reachable at this base URL. Murph is using the explicitly configured token instead of taking ownership of that process.',
         started: false,
       })
     }
 
     throw new VaultCliError(
       'DEVICE_SYNC_DAEMON_CONFLICT',
-      'A device sync control plane is already reachable at this base URL, but Healthy Bob does not own it. Set DEVICE_SYNC_CONTROL_TOKEN to reuse it or stop the conflicting process first.',
+      'A device sync control plane is already reachable at this base URL, but Murph does not own it. Set DEVICE_SYNC_CONTROL_TOKEN to reuse it or stop the conflicting process first.',
       { baseUrl },
     )
   }
@@ -264,8 +264,8 @@ export async function startManagedDeviceSyncDaemon(input: {
     throw new VaultCliError(
       'DEVICE_SYNC_DAEMON_START_FAILED',
       startupLogSnippet
-        ? `Healthy Bob could not start the local device sync daemon: ${startupLogSnippet}`
-        : 'Healthy Bob could not start the local device sync daemon.',
+        ? `Murph could not start the local device sync daemon: ${startupLogSnippet}`
+        : 'Murph could not start the local device sync daemon.',
       { baseUrl, pid: child.pid },
     )
   }
@@ -279,7 +279,7 @@ export async function startManagedDeviceSyncDaemon(input: {
     running: true,
     healthy: true,
     message:
-      'Healthy Bob started and is now managing the local device sync daemon.',
+      'Murph started and is now managing the local device sync daemon.',
     started: true,
   })
 }
@@ -299,7 +299,7 @@ export async function stopManagedDeviceSyncDaemon(input: {
   if (state === null || state.baseUrl !== baseUrl) {
     throw new VaultCliError(
       'DEVICE_SYNC_NOT_RUNNING',
-      'Healthy Bob is not currently managing a device sync daemon for this vault and base URL.',
+      'Murph is not currently managing a device sync daemon for this vault and base URL.',
       { baseUrl },
     )
   }
@@ -349,7 +349,7 @@ export async function stopManagedDeviceSyncDaemon(input: {
     running: false,
     healthy: false,
     message:
-      'Healthy Bob stopped the managed local device sync daemon.',
+      'Murph stopped the managed local device sync daemon.',
     stopped: true,
   })
 }
@@ -422,7 +422,7 @@ function requireManagedVault(vault: string | null | undefined): string {
 
   throw new VaultCliError(
     'DEVICE_SYNC_VAULT_REQUIRED',
-    'Device sync daemon management needs a vault path. Pass `--vault <path>` or configure a default Healthy Bob vault first.',
+    'Device sync daemon management needs a vault path. Pass `--vault <path>` or configure a default Murph vault first.',
   )
 }
 
@@ -434,7 +434,7 @@ function assertLoopbackBaseUrl(baseUrl: string): void {
 
   throw new VaultCliError(
     'DEVICE_SYNC_REMOTE_BASE_URL_UNSUPPORTED',
-    'Healthy Bob can only manage loopback device sync daemons. Use a localhost base URL or manage remote control planes explicitly.',
+    'Murph can only manage loopback device sync daemons. Use a localhost base URL or manage remote control planes explicitly.',
     { baseUrl },
   )
 }

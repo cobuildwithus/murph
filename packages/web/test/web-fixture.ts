@@ -14,7 +14,7 @@ async function writeVaultFile(
 }
 
 export async function createWebFixtureVault(): Promise<string> {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-web-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-web-"));
 
   await writeVaultFile(
     vaultRoot,
@@ -86,7 +86,7 @@ Sleep felt steadier after a lighter dinner.
     vaultRoot,
     "bank/profile/current.md",
     `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
 snapshotId: psnap_web_01
 updatedAt: 2026-03-12T14:00:00Z
@@ -116,7 +116,7 @@ priority: 1
     vaultRoot,
     "ledger/events/2026/2026-03.jsonl",
     `${JSON.stringify({
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: "evt_web_01",
       kind: "encounter",
       occurredAt: "2026-03-12T09:30:00Z",
@@ -133,7 +133,7 @@ priority: 1
     "ledger/samples/glucose/2026/2026-03.jsonl",
     [
       {
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_glucose_01",
         stream: "glucose",
         occurredAt: "2026-03-12T07:00:00Z",
@@ -143,7 +143,7 @@ priority: 1
         source: "manual",
       },
       {
-        schemaVersion: "hb.sample.v1",
+        schemaVersion: "murph.sample.v1",
         id: "smp_glucose_02",
         stream: "glucose",
         occurredAt: "2026-03-12T19:10:00Z",
@@ -161,7 +161,7 @@ priority: 1
     vaultRoot,
     "ledger/assessments/2026/2026-03.jsonl",
     `${JSON.stringify({
-      schemaVersion: "hb.assessment-response.v1",
+      schemaVersion: "murph.assessment-response.v1",
       id: "asmt_web_01",
       assessmentType: "check-in",
       recordedAt: "2026-03-12T13:00:00Z",
@@ -179,7 +179,7 @@ priority: 1
     vaultRoot,
     "ledger/profile-snapshots/2026/2026-03.jsonl",
     `${JSON.stringify({
-      schemaVersion: "hb.profile-snapshot.v1",
+      schemaVersion: "murph.profile-snapshot.v1",
       id: "psnap_web_01",
       recordedAt: "2026-03-12T14:00:00Z",
       source: "assessment_projection",

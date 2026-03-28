@@ -15,7 +15,7 @@ import {
   initializeVault,
   validateVault,
   VaultError,
-} from "@healthybob/core";
+} from "@murph/core";
 import {
   ensureCliRuntimeArtifacts,
   repoRoot,
@@ -23,7 +23,7 @@ import {
 } from "./cli-test-helpers.js";
 
 async function makeVaultRoot(): Promise<string> {
-  return mkdtemp(path.join(tmpdir(), "healthybob-lock-test-"));
+  return mkdtemp(path.join(tmpdir(), "murph-lock-test-"));
 }
 
 async function holdCanonicalWriteLock(vaultRoot: string) {

@@ -128,7 +128,7 @@ export function createSetupAgentmailPrompter(input: {
   return {
     async chooseInbox(context) {
       stderr.write(
-        '\nHealthy Bob found multiple AgentMail inboxes for this API key:\n',
+        '\nMurph found multiple AgentMail inboxes for this API key:\n',
       )
       context.inboxes.forEach((inbox, index) => {
         const display =
@@ -200,7 +200,7 @@ async function promptForLine(input: {
     const cancel = () => {
       readline.close()
       reject(
-        new VaultCliError('setup_cancelled', 'Healthy Bob setup was cancelled.'),
+        new VaultCliError('setup_cancelled', 'Murph setup was cancelled.'),
       )
     }
 

@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@healthybob/contracts";
+import { extractIsoDatePrefix } from "@murph/contracts";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -43,7 +43,7 @@ export interface VaultRecord {
 }
 
 export interface VaultReadModel {
-  format: "healthybob.query.v1";
+  format: "murph.query.v1";
   vaultRoot: string;
   metadata: QueryRecordData | null;
   entities: CanonicalEntity[];
@@ -208,7 +208,7 @@ async function readVaultWithHealthMode(
   const geneticVariants = recordsOfType(records, "genetics");
 
   return {
-    format: "healthybob.query.v1",
+    format: "murph.query.v1",
     vaultRoot,
     metadata,
     entities,

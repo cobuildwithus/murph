@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/runtime-state",
+  "name": "@murph/runtime-state",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -31,6 +31,6 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "@healthybob/hosted-execution": "workspace:*"
+    "@murph/hosted-execution": "workspace:*"
   }
 }

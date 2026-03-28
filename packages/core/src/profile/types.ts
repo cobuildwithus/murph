@@ -1,9 +1,9 @@
 import type { UnknownRecord } from "../types.ts";
 
-export const PROFILE_SNAPSHOT_SCHEMA_VERSION = "hb.profile-snapshot.v1";
+export const PROFILE_SNAPSHOT_SCHEMA_VERSION = "murph.profile-snapshot.v1";
 export const PROFILE_SNAPSHOT_LEDGER_DIRECTORY = "ledger/profile-snapshots";
 export const PROFILE_CURRENT_DOCUMENT_PATH = "bank/profile/current.md";
-export const PROFILE_CURRENT_SCHEMA_VERSION = "hb.frontmatter.profile-current.v1";
+export const PROFILE_CURRENT_SCHEMA_VERSION = "murph.frontmatter.profile-current.v1";
 export const PROFILE_CURRENT_DOC_TYPE = "profile_current";
 
 export const PROFILE_SNAPSHOT_SOURCES = ["assessment_projection", "manual", "derived"] as const;

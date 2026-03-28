@@ -5,8 +5,8 @@ import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
   type HostedExecutionSharePackResponse,
-} from "@healthybob/hosted-execution";
-import { assertContract, sharePackSchema, type SharePack } from "@healthybob/contracts";
+} from "@murph/hosted-execution";
+import { assertContract, sharePackSchema, type SharePack } from "@murph/contracts";
 
 import {
   getHostedOnboardingSecretCodec,
@@ -77,17 +77,19 @@ export function readHostedSharePack(record: {
 
 export function readHostedSharePreview(
   previewJson: unknown,
-  fallbackPack: SharePack,
+  fallbackPack: SharePack | (() => SharePack),
 ): HostedSharePreview {
   if (previewJson && typeof previewJson === "object" && !Array.isArray(previewJson)) {
     try {
       return JSON.parse(JSON.stringify(previewJson)) as HostedSharePreview;
     } catch {
-      return buildHostedSharePreview(fallbackPack);
+      return buildHostedSharePreview(
+        typeof fallbackPack === "function" ? fallbackPack() : fallbackPack,
+      );
     }
   }
 
-  return buildHostedSharePreview(fallbackPack);
+  return buildHostedSharePreview(typeof fallbackPack === "function" ? fallbackPack() : fallbackPack);
 }
 
 export async function readHostedSharePackByReference(input: {
@@ -107,7 +109,6 @@ export async function readHostedSharePackByReference(input: {
 
   return {
     pack: readHostedSharePack(record).pack,
-    shareCode: input.shareCode,
     shareId: input.shareId,
   };
 }
@@ -192,13 +193,17 @@ export function buildHostedShareAcceptanceDispatch(input: {
   acceptedAt: string;
   eventId: string;
   memberId: string;
-  pack: SharePack;
+  shareCode: string;
+  shareId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionVaultShareAcceptedDispatch({
     eventId: input.eventId,
     memberId: input.memberId,
     occurredAt: input.acceptedAt,
-    pack: input.pack,
+    share: {
+      shareCode: input.shareCode,
+      shareId: input.shareId,
+    },
   });
 }
 

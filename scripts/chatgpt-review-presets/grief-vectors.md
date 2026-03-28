@@ -1,4 +1,4 @@
-Healthy Bob does not have an onchain griefing model, but liveness still matters.
+Murph does not have an onchain griefing model, but liveness still matters.
 
 Review for:
 - denial-of-service style workflows

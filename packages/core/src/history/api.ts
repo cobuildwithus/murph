@@ -5,12 +5,12 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
   eventRecordSchema,
   safeParseContract,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
 import { VaultError } from "../errors.ts";
@@ -42,16 +42,20 @@ import {
 } from "./types.ts";
 
 import type {
+  AdverseEffectHistoryEventRecord,
   AppendBloodTestInput,
   AppendBloodTestResult,
   AppendHistoryEventInput,
   AppendHistoryEventResult,
   BloodTestHistoryEventRecord,
+  EncounterHistoryEventRecord,
+  ExposureHistoryEventRecord,
   HistoryEventKind,
   HistoryEventOrder,
   HistoryEventRecord,
   HistoryEventSource,
   ListHistoryEventsInput,
+  ProcedureHistoryEventRecord,
   ReadHistoryEventInput,
   ReadHistoryEventResult,
   TestHistoryEventRecord,
@@ -62,16 +66,44 @@ const HISTORY_KIND_SET = new Set<HistoryEventKind>(HEALTH_HISTORY_KINDS);
 const BLOOD_TEST_RESULT_COMPARATORS = ["<", "<=", ">", ">="] as const;
 const KNOWN_BLOOD_TEST_SPECIMEN_TYPES = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
 
-type HistoryNormalizationMode = "build" | "parse";
 type HistorySourceRecord = Record<string, unknown>;
 
-type NonTestHistoryEventKind = Exclude<HistoryEventKind, "test">;
-
-interface HistoryFieldDefinition<TValue> {
-  sources?: Partial<Record<HistoryNormalizationMode, readonly string[]>>;
-  defaults?: Partial<Record<HistoryNormalizationMode, unknown>>;
-  normalize: (value: unknown, fieldName: string) => TValue;
-}
+type EncounterHistoryFields = Pick<
+  EncounterHistoryEventRecord,
+  "encounterType" | "location" | "providerId"
+>;
+type ProcedureHistoryFields = Pick<
+  ProcedureHistoryEventRecord,
+  "procedure" | "status"
+>;
+type TestHistoryFields = Pick<
+  TestHistoryEventRecord,
+  | "testName"
+  | "resultStatus"
+  | "summary"
+  | "testCategory"
+  | "specimenType"
+  | "labName"
+  | "labPanelId"
+  | "collectedAt"
+  | "reportedAt"
+  | "fastingStatus"
+  | "results"
+>;
+type AdverseEffectHistoryFields = Pick<
+  AdverseEffectHistoryEventRecord,
+  "substance" | "effect" | "severity"
+>;
+type ExposureHistoryFields = Pick<
+  ExposureHistoryEventRecord,
+  "exposureType" | "substance" | "duration"
+>;
+type HistoryKindFields =
+  | EncounterHistoryFields
+  | ProcedureHistoryFields
+  | TestHistoryFields
+  | AdverseEffectHistoryFields
+  | ExposureHistoryFields;
 
 function normalizeBaseEvent(
   input: AppendHistoryEventInput,
@@ -83,7 +115,7 @@ function normalizeBaseEvent(
   const timeZone = normalizeTimeZone(input.timeZone ?? fallbackTimeZone);
 
   return {
-    schemaVersion: "hb.event.v1" as const,
+    schemaVersion: "murph.event.v1" as const,
     id: eventId,
     kind: input.kind,
     occurredAt,
@@ -278,162 +310,139 @@ function inferTestResultStatus(
   return undefined;
 }
 
-const HISTORY_KIND_DEFINITIONS = {
-  encounter: {
-    encounterType: {
-      normalize: (value, fieldName) => requireString(value, fieldName, 120),
-    },
-    location: {
-      normalize: (value, fieldName) => optionalString(value, fieldName, 160),
-    },
-    providerId: {
-      normalize: (value, fieldName) => optionalString(value, fieldName, 80),
-    },
-  },
-  procedure: {
-    procedure: {
-      normalize: (value, fieldName) => requireString(value, fieldName, 160),
-    },
-    status: {
-      defaults: {
-        build: "completed",
-        parse: "completed",
-      },
-      normalize: (value, fieldName) => optionalEnum(value, PROCEDURE_STATUSES, fieldName) ?? "completed",
-    },
-  },
-  adverse_effect: {
-    substance: {
-      normalize: (value, fieldName) => requireString(value, fieldName, 160),
-    },
-    effect: {
-      normalize: (value, fieldName) => requireString(value, fieldName, 240),
-    },
-    severity: {
-      defaults: {
-        build: "moderate",
-        parse: "moderate",
-      },
-      normalize: (value, fieldName) =>
-        optionalEnum(value, ADVERSE_EFFECT_SEVERITIES, fieldName) ?? "moderate",
-    },
-  },
-  exposure: {
-    exposureType: {
-      defaults: {
-        build: "unspecified",
-        parse: "unspecified",
-      },
-      normalize: (value, fieldName) => requireString(value, fieldName, 120),
-    },
-    substance: {
-      normalize: (value, fieldName) => requireString(value, fieldName, 160),
-    },
-    duration: {
-      normalize: (value, fieldName) => optionalString(value, fieldName, 120),
-    },
-  },
-} as const satisfies Record<
-  NonTestHistoryEventKind,
-  Record<string, HistoryFieldDefinition<unknown>>
->;
-
-function readHistoryFieldValue(
+function normalizeEncounterHistoryFields(
   source: HistorySourceRecord,
-  aliases: readonly string[],
-  fallback: unknown,
-): unknown {
-  for (const alias of aliases) {
-    const value = source[alias];
+): EncounterHistoryFields {
+  return stripUndefined({
+    encounterType: requireString(source.encounterType, "encounterType", 120),
+    location: optionalString(source.location, "location", 160),
+    providerId: optionalString(source.providerId, "providerId", 80),
+  });
+}
 
-    if (value !== undefined && value !== null) {
-      return value;
-    }
-  }
-
-  return fallback;
+function normalizeProcedureHistoryFields(
+  source: HistorySourceRecord,
+): ProcedureHistoryFields {
+  return stripUndefined({
+    procedure: requireString(source.procedure, "procedure", 160),
+    status: optionalEnum(source.status, PROCEDURE_STATUSES, "status") ?? "completed",
+  });
 }
 
 function normalizeTestHistoryFields(
   source: HistorySourceRecord,
-  mode: HistoryNormalizationMode,
-): TestHistoryEventRecord {
-  const summaryAliases = mode === "build" ? ["summary", "resultSummary"] : ["summary", "resultSummary"];
+): TestHistoryFields {
   const results = normalizeBloodTestResults(
-    readHistoryFieldValue(source, ["results"], undefined),
+    source.results,
     "results",
   );
   const testCategory = normalizeToken(
-    readHistoryFieldValue(source, ["testCategory"], undefined),
+    source.testCategory,
     "testCategory",
     64,
   );
   const specimenType = normalizeToken(
-    readHistoryFieldValue(source, ["specimenType"], undefined),
+    source.specimenType,
     "specimenType",
     64,
   );
   const inferredResultStatus = inferTestResultStatus(results);
   const resultStatus =
-    optionalEnum(
-      readHistoryFieldValue(source, ["resultStatus"], undefined),
-      TEST_STATUSES,
-      "resultStatus",
-    ) ??
-    inferredResultStatus ??
-    "unknown";
+    optionalEnum(source.resultStatus, TEST_STATUSES, "resultStatus") ?? inferredResultStatus ?? "unknown";
 
   return stripUndefined({
-    kind: "test",
-    testName: requireString(readHistoryFieldValue(source, ["testName"], undefined), "testName", 160),
+    testName: requireString(source.testName, "testName", 160),
     resultStatus,
-    summary: optionalString(readHistoryFieldValue(source, summaryAliases, undefined), "summary", 1000),
+    summary: optionalString(source.summary, "summary", 1000),
     testCategory,
     specimenType,
-    labName: optionalString(readHistoryFieldValue(source, ["labName"], undefined), "labName", 160),
-    labPanelId: optionalString(readHistoryFieldValue(source, ["labPanelId"], undefined), "labPanelId", 120),
-    collectedAt: normalizeOptionalTimestamp(
-      readHistoryFieldValue(source, ["collectedAt"], undefined),
-      "collectedAt",
-    ),
-    reportedAt: normalizeOptionalTimestamp(
-      readHistoryFieldValue(source, ["reportedAt"], undefined),
-      "reportedAt",
-    ),
-    fastingStatus: optionalEnum(
-      readHistoryFieldValue(source, ["fastingStatus"], undefined),
-      BLOOD_TEST_FASTING_STATUSES,
-      "fastingStatus",
-    ),
+    labName: optionalString(source.labName, "labName", 160),
+    labPanelId: optionalString(source.labPanelId, "labPanelId", 120),
+    collectedAt: normalizeOptionalTimestamp(source.collectedAt, "collectedAt"),
+    reportedAt: normalizeOptionalTimestamp(source.reportedAt, "reportedAt"),
+    fastingStatus: optionalEnum(source.fastingStatus, BLOOD_TEST_FASTING_STATUSES, "fastingStatus"),
     results,
-  }) as TestHistoryEventRecord;
+  });
+}
+
+function normalizeAdverseEffectHistoryFields(
+  source: HistorySourceRecord,
+): AdverseEffectHistoryFields {
+  return stripUndefined({
+    substance: requireString(source.substance, "substance", 160),
+    effect: requireString(source.effect, "effect", 240),
+    severity: optionalEnum(source.severity, ADVERSE_EFFECT_SEVERITIES, "severity") ?? "moderate",
+  });
+}
+
+function normalizeExposureHistoryFields(
+  source: HistorySourceRecord,
+): ExposureHistoryFields {
+  return stripUndefined({
+    exposureType: requireString(source.exposureType ?? "unspecified", "exposureType", 120),
+    substance: requireString(source.substance, "substance", 160),
+    duration: optionalString(source.duration, "duration", 120),
+  });
 }
 
 function normalizeHistoryKindFields(
   kind: HistoryEventKind,
   source: HistorySourceRecord,
-  mode: HistoryNormalizationMode,
-): Record<string, unknown> {
-  if (kind === "test") {
-    return normalizeTestHistoryFields(source, mode) as unknown as Record<string, unknown>;
+): HistoryKindFields {
+  switch (kind) {
+    case "encounter":
+      return normalizeEncounterHistoryFields(source);
+    case "procedure":
+      return normalizeProcedureHistoryFields(source);
+    case "test":
+      return normalizeTestHistoryFields(source);
+    case "adverse_effect":
+      return normalizeAdverseEffectHistoryFields(source);
+    case "exposure":
+      return normalizeExposureHistoryFields(source);
   }
+}
 
-  const definition = HISTORY_KIND_DEFINITIONS[kind] as Record<
-    string,
-    HistoryFieldDefinition<unknown>
-  >;
-  const normalized: Record<string, unknown> = {};
-
-  for (const [recordKey, fieldDefinition] of Object.entries(definition)) {
-    const aliases = fieldDefinition.sources?.[mode] ?? [recordKey];
-    const fallback = fieldDefinition.defaults?.[mode];
-    normalized[recordKey] = fieldDefinition.normalize(
-      readHistoryFieldValue(source, aliases, fallback),
-      recordKey,
-    );
+function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFields {
+  switch (input.kind) {
+    case "encounter":
+      return normalizeEncounterHistoryFields({
+        encounterType: input.encounterType,
+        location: input.location,
+        providerId: input.providerId,
+      });
+    case "procedure":
+      return normalizeProcedureHistoryFields({
+        procedure: input.procedure,
+        status: input.status,
+      });
+    case "test":
+      return normalizeTestHistoryFields({
+        testName: input.testName,
+        resultStatus: input.resultStatus,
+        summary: input.summary,
+        testCategory: input.testCategory,
+        specimenType: input.specimenType,
+        labName: input.labName,
+        labPanelId: input.labPanelId,
+        collectedAt: input.collectedAt,
+        reportedAt: input.reportedAt,
+        fastingStatus: input.fastingStatus,
+        results: input.results,
+      });
+    case "adverse_effect":
+      return normalizeAdverseEffectHistoryFields({
+        substance: input.substance,
+        effect: input.effect,
+        severity: input.severity,
+      });
+    case "exposure":
+      return normalizeExposureHistoryFields({
+        exposureType: input.exposureType,
+        substance: input.substance,
+        duration: input.duration,
+      });
   }
-
-  return stripUndefined(normalized);
 }
 
 function buildHistoryEventRecord(
@@ -448,7 +457,7 @@ function buildHistoryEventRecord(
   const record = stripUndefined({
     ...baseRecord,
     kind: input.kind,
-    ...normalizeHistoryKindFields(input.kind, input as unknown as HistorySourceRecord, "build"),
+    ...buildHistoryKindFields(input),
   });
   const result = safeParseContract(eventRecordSchema, record);
 
@@ -476,7 +485,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   }
 
   const baseRecord = {
-    schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as "hb.event.v1",
+    schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as "murph.event.v1",
     id: requireString(value.id, "id", 64),
     kind: value.kind as HistoryEventKind,
     occurredAt: normalizeTimestamp(value.occurredAt as string, "occurredAt"),
@@ -493,7 +502,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   const record = stripUndefined({
     ...baseRecord,
     kind,
-    ...normalizeHistoryKindFields(kind, value, "parse"),
+    ...normalizeHistoryKindFields(kind, value),
   });
   const result = safeParseContract(eventRecordSchema, record);
 

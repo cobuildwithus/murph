@@ -13,7 +13,7 @@ if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
 fi
 
 log() {
-  printf '[healthybob-setup] %s\n' "$*"
+  printf '[murph-setup] %s\n' "$*"
 }
 
 host_os="$(uname -s)"
@@ -73,14 +73,14 @@ ensure_pnpm() {
 }
 
 print_linux_install_summary() {
-  log 'Healthy Bob Linux setup will install or reuse:'
-  printf '  - Node >= %s (from PATH when available, otherwise an isolated download under ~/.healthybob/bootstrap)\n' "$required_node"
+  log 'Murph Linux setup will install or reuse:'
+  printf '  - Node >= %s (from PATH when available, otherwise an isolated download under ~/.murph/bootstrap)\n' "$required_node"
   printf '  - pnpm@%s via corepack\n' "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
-  printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model through the Healthy Bob Linux toolchain setup'
+  printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
   printf '%s\n' '  - PaddleX OCR on Linux x86_64 unless you pass --skip-ocr'
-  printf '%s\n' '  - the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
-  printf '%s\n' '  - iMessage remains macOS-only; Linux setup keeps the rest of Healthy Bob available for server or VM deployments'
+  printf '%s\n' '  - the final Murph setup flow: vault bootstrap, default vault config, user-level murph/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
+  printf '%s\n' '  - iMessage remains macOS-only; Linux setup keeps the rest of Murph available for server or VM deployments'
 }
 
 normalize_linux_arch() {
@@ -117,7 +117,7 @@ download_file() {
 
 bootstrap_linux_node() {
   local home_dir="${HOME:-$repo_root}"
-  local bootstrap_root="${home_dir}/.healthybob/bootstrap"
+  local bootstrap_root="${home_dir}/.murph/bootstrap"
   local linux_arch
   linux_arch="$(normalize_linux_arch)" || {
     printf 'scripts/setup-host.sh currently supports Linux x64 and arm64 only.\n' >&2
@@ -172,7 +172,7 @@ print_linux_dry_run_plan() {
   log 'Dry run requested. This wrapper will not modify the machine or workspace.'
   print_linux_install_summary
   printf '%s\n' 'Planned wrapper steps:'
-  printf '1. Reuse Node >= %s from PATH when available, or download Node %s under ~/.healthybob/bootstrap.\n' "$required_node" "$required_node"
+  printf '1. Reuse Node >= %s from PATH when available, or download Node %s under ~/.murph/bootstrap.\n' "$required_node" "$required_node"
   printf '2. Activate pnpm@%s through corepack.\n' "$pnpm_version"
   printf '%s\n' '3. Install workspace dependencies with `corepack pnpm install`.'
   printf '%s\n' '4. Build the workspace with `corepack pnpm build`.'
@@ -202,10 +202,10 @@ case "$host_os" in
     log 'Installing workspace dependencies...'
     corepack pnpm install
 
-    log 'Building Healthy Bob packages...'
+    log 'Building Murph packages...'
     corepack pnpm build
 
-    log 'Running Healthy Bob host setup...'
+    log 'Running Murph host setup...'
     node packages/cli/dist/bin.js onboard "$@"
     ;;
   *)

@@ -5,11 +5,19 @@ import { usePrivy, useUpdateEmail, useUser } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
 
 import {
-  extractHostedPrivyEmailAccount,
+  isHostedPrivyEmailAccountVerified,
+  type HostedPrivyEmailAccount,
   resolveHostedPrivyLinkedAccounts,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import { HostedPrivyProvider } from "../hosted-onboarding/privy-provider";
+import {
+  isValidEmailAddress,
+  normalizeComparableEmail,
+  normalizeEmailAddress,
+  resolveHostedEmailSettingsDisplayState,
+  syncHostedVerifiedEmailAddress,
+} from "./hosted-email-settings-helpers";
 
 interface HostedEmailSettingsProps {
   expectedPrivyUserId: string;
@@ -32,24 +40,32 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
   const [dialogOpen, setDialogOpen] = useState(false);
   const [emailAddress, setEmailAddress] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSyncingEmailRoute, setIsSyncingEmailRoute] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [pendingEmailAddress, setPendingEmailAddress] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [verifiedEmailOverride, setVerifiedEmailOverride] = useState<HostedPrivyEmailAccount | null>(null);
 
   const linkedAccounts = resolveHostedPrivyLinkedAccounts(user);
-  const currentEmail = extractHostedPrivyEmailAccount(linkedAccounts);
-  const normalizedCurrentEmail = normalizeComparableEmail(currentEmail?.address ?? null);
+  const displayState = resolveHostedEmailSettingsDisplayState({
+    linkedAccounts,
+    verifiedEmailOverride,
+  });
+  const effectiveCurrentEmail = displayState.currentEmail;
+  const effectiveVerifiedEmail = displayState.currentVerifiedEmail;
+  const normalizedCurrentEmail = displayState.normalizedCurrentEmail;
   const canManageEmail = ready && authenticated && user?.id === expectedPrivyUserId;
   const isLoadingAuthenticatedUser = ready && authenticated && !user;
   const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
   const isSubmittingCode = state.status === "submitting-code";
+  const isBusy = isSendingCode || isSubmittingCode || isSyncingEmailRoute;
 
   useEffect(() => {
-    if (!emailAddress && currentEmail?.address) {
-      setEmailAddress(currentEmail.address);
+    if (!emailAddress && effectiveCurrentEmail?.address) {
+      setEmailAddress(effectiveCurrentEmail.address);
     }
-  }, [currentEmail?.address, emailAddress]);
+  }, [effectiveCurrentEmail?.address, emailAddress]);
 
   useEffect(() => {
     if (isAwaitingCode || isSubmittingCode) {
@@ -86,7 +102,10 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       return;
     }
 
-    if (normalizeComparableEmail(nextEmailAddress) === normalizedCurrentEmail) {
+    if (
+      normalizeComparableEmail(nextEmailAddress) === normalizedCurrentEmail
+      && isHostedPrivyEmailAccountVerified(effectiveCurrentEmail)
+    ) {
       setErrorMessage("That email address is already linked to this account.");
       return;
     }
@@ -125,6 +144,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
 
   async function handleVerifyCode() {
     setErrorMessage(null);
+    setSuccessMessage(null);
 
     const normalizedCode = code.trim();
 
@@ -133,26 +153,53 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       return;
     }
 
+    let verifiedEmailAddress: string | null = null;
+
     try {
       const result = await verifyCode({ code: normalizedCode });
       const nextUser = result?.user ?? user;
-      const nextEmail = extractHostedPrivyEmailAccount(resolveHostedPrivyLinkedAccounts(nextUser));
+      const nextEmail = resolveHostedEmailSettingsDisplayState({
+        linkedAccounts: resolveHostedPrivyLinkedAccounts(nextUser),
+      }).currentVerifiedEmail;
+
+      verifiedEmailAddress = nextEmail?.address ?? pendingEmailAddress ?? normalizeEmailAddress(emailAddress);
 
       setCode("");
       setDialogOpen(false);
       setPendingEmailAddress(null);
-      setSuccessMessage(
-        nextEmail?.address
-          ? `Email verified: ${nextEmail.address}`
-          : pendingEmailAddress
-            ? `Email verified: ${pendingEmailAddress}`
-            : "Email verified.",
-      );
-      setEmailAddress(nextEmail?.address ?? pendingEmailAddress ?? emailAddress);
-      void refreshUser().catch(() => null);
+      setEmailAddress(verifiedEmailAddress ?? emailAddress);
+
+      if (verifiedEmailAddress) {
+        setVerifiedEmailOverride({
+          address: verifiedEmailAddress,
+          verifiedAt: nextEmail?.verifiedAt ?? Math.trunc(Date.now() / 1000),
+        });
+      }
+
+      await refreshUser().catch(() => null);
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
+      return;
     }
+
+    if (!verifiedEmailAddress) {
+      setSuccessMessage("Email verified.");
+      return;
+    }
+
+    await syncVerifiedEmailAddress(verifiedEmailAddress, "verify");
+  }
+
+  async function handleSyncVerifiedEmail() {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!effectiveVerifiedEmail?.address) {
+      setErrorMessage("Verify an email address before you try to sync it.");
+      return;
+    }
+
+    await syncVerifiedEmailAddress(effectiveVerifiedEmail.address, "resync");
   }
 
   async function handleLogout() {
@@ -168,6 +215,21 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
     }
   }
 
+  async function syncVerifiedEmailAddress(verifiedEmailAddress: string, mode: "resync" | "verify") {
+    setIsSyncingEmailRoute(true);
+
+    try {
+      const syncPresentation = await syncHostedVerifiedEmailAddress({
+        mode,
+        verifiedEmailAddress,
+      });
+      setSuccessMessage(syncPresentation.successMessage);
+      setErrorMessage(syncPresentation.errorMessage);
+    } finally {
+      setIsSyncingEmailRoute(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       {successMessage ? (
@@ -179,6 +241,12 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       {errorMessage ? (
         <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
           {errorMessage}
+        </div>
+      ) : null}
+
+      {isSyncingEmailRoute ? (
+        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
+          Finishing the hosted email connection and updating your assistant.
         </div>
       ) : null}
 
@@ -209,11 +277,34 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       ) : (
         <>
           <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-            <strong className="text-stone-900">{currentEmail ? "Current verified email" : "No email linked yet"}</strong>
+            <strong className="text-stone-900">
+              {!effectiveCurrentEmail
+                ? "No email linked yet"
+                : isHostedPrivyEmailAccountVerified(effectiveCurrentEmail)
+                  ? "Current verified email"
+                  : "Current email"}
+            </strong>
             <p className="mt-1">
-              {currentEmail?.address ?? "Add an email address and we will verify it with a one-time code before saving it."}
+              {effectiveCurrentEmail?.address
+                ?? "Add an email address and we will verify it with a one-time code before saving it."}
             </p>
           </div>
+
+          {effectiveVerifiedEmail ? (
+            <div className="flex flex-wrap items-center gap-3 rounded border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-600">
+              <span>
+                Use this to retry the hosted assistant sync without requesting another verification code.
+              </span>
+              <button
+                type="button"
+                onClick={handleSyncVerifiedEmail}
+                disabled={isBusy}
+                className={secondaryButtonClasses}
+              >
+                {isSyncingEmailRoute ? "Syncing..." : "Sync current verified email"}
+              </button>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
             <div className="space-y-2">
@@ -238,10 +329,16 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
             <button
               type="button"
               onClick={handleSendCode}
-              disabled={isSendingCode || isSubmittingCode}
+              disabled={isBusy}
               className={primaryButtonClasses}
             >
-              {isSendingCode ? "Sending code..." : currentEmail ? "Send new code" : "Send code"}
+              {isSyncingEmailRoute
+                ? "Syncing..."
+                : isSendingCode
+                  ? "Sending code..."
+                  : effectiveCurrentEmail
+                    ? "Send new code"
+                    : "Send code"}
             </button>
           </div>
 
@@ -253,7 +350,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={() => setDialogOpen(true)}
-                disabled={isSubmittingCode}
+                disabled={isBusy}
                 className={secondaryButtonClasses}
               >
                 Enter code
@@ -261,7 +358,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={handleResendCode}
-                disabled={isSendingCode || isSubmittingCode}
+                disabled={isBusy}
                 className={secondaryButtonClasses}
               >
                 {isSendingCode ? "Sending code..." : "Resend code"}
@@ -328,7 +425,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={handleVerifyCode}
-                disabled={isSendingCode || isSubmittingCode}
+                disabled={isBusy}
                 className={primaryButtonClasses}
               >
                 {isSubmittingCode ? "Verifying..." : "Verify email"}
@@ -336,7 +433,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
               <button
                 type="button"
                 onClick={handleResendCode}
-                disabled={isSendingCode || isSubmittingCode}
+                disabled={isBusy}
                 className={secondaryButtonClasses}
               >
                 {isSendingCode ? "Sending code..." : "Resend code"}
@@ -347,24 +444,6 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSetti
       </Dialog.Root>
     </div>
   );
-}
-
-function normalizeEmailAddress(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized ? normalized : null;
-}
-
-function normalizeComparableEmail(value: string | null | undefined): string | null {
-  const normalized = normalizeEmailAddress(value);
-  return normalized ? normalized.toLowerCase() : null;
-}
-
-function isValidEmailAddress(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value);
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {

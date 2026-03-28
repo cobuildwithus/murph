@@ -44,16 +44,16 @@ describe("resolveSmokeWorkerBaseUrl", () => {
 describe("buildVersionOverrideHeaders", () => {
   it("formats the Cloudflare version override header when the worker name and version id are present", () => {
     expect(buildVersionOverrideHeaders({
-      CF_WORKER_NAME: "hb-worker",
+      CF_WORKER_NAME: "hosted-worker",
       HOSTED_EXECUTION_SMOKE_VERSION_ID: "version-123",
     })).toEqual({
-      "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+      "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
     });
   });
 
   it("returns undefined when no candidate version id is configured", () => {
     expect(buildVersionOverrideHeaders({
-      CF_WORKER_NAME: "hb-worker",
+      CF_WORKER_NAME: "hosted-worker",
     })).toBeUndefined();
   });
 
@@ -123,7 +123,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl,
       log() {},
       source: {
-        CF_WORKER_NAME: "hb-worker",
+        CF_WORKER_NAME: "hosted-worker",
         HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
         HOSTED_EXECUTION_SMOKE_STATUS_POLL_INTERVAL_MS: "1",
         HOSTED_EXECUTION_SMOKE_STATUS_TIMEOUT_MS: "100",
@@ -137,7 +137,7 @@ describe("runSmokeHostedDeploy", () => {
       {
         body: undefined,
         headers: {
-          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
         },
         method: undefined,
         url: "https://worker.example.test/health",
@@ -145,7 +145,7 @@ describe("runSmokeHostedDeploy", () => {
       {
         body: undefined,
         headers: {
-          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer control-token",
         },
         method: undefined,
@@ -154,7 +154,7 @@ describe("runSmokeHostedDeploy", () => {
       {
         body: "{}",
         headers: {
-          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer control-token",
           "content-type": "application/json; charset=utf-8",
         },
@@ -164,7 +164,7 @@ describe("runSmokeHostedDeploy", () => {
       {
         body: undefined,
         headers: {
-          "Cloudflare-Workers-Version-Overrides": "hb-worker=\"version-123\"",
+          "Cloudflare-Workers-Version-Overrides": "hosted-worker=\"version-123\"",
           authorization: "Bearer control-token",
         },
         method: undefined,

@@ -2,10 +2,10 @@ import {
   describeLookupConstraint as describeQueryLookupConstraint,
   inferIdEntityKind as inferQueryIdEntityKind,
   isQueryableLookupId as isQueryableQueryLookupId,
-} from '@healthybob/query'
+} from '@murph/query'
 import { loadRuntimeModule } from './runtime-import.js'
 
-type QueryModule = typeof import('@healthybob/query')
+type QueryModule = typeof import('@murph/query')
 
 export type QueryRuntimeModule = Pick<
   QueryModule,
@@ -79,5 +79,5 @@ export {
 }
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
-  return loadRuntimeModule<QueryRuntimeModule>('@healthybob/query')
+  return loadRuntimeModule<QueryRuntimeModule>('@murph/query')
 }

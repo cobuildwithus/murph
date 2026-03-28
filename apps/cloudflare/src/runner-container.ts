@@ -2,10 +2,10 @@ import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
-import { json, readJsonObject } from "./json.js";
-import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.js";
+import { json, readJsonObject } from "./json.ts";
+import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
 const RUNNER_PING_ENDPOINT = "container/health";
@@ -14,6 +14,7 @@ const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_INVOKE_URL = "https://runner.internal/internal/invoke";
 const RUNNER_DESTROY_URL = "https://runner.internal/internal/destroy";
+const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
 
 export class HostedExecutionConfigurationError extends Error {
   constructor(message: string) {
@@ -49,6 +50,10 @@ export interface HostedExecutionContainerNamespaceLike {
 
 type RunnerOutboundHandlerContext = OutboundHandlerContext<{ userId?: unknown } | undefined>;
 
+interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unknown>> {
+  HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
+}
+
 export class RunnerContainer extends Container {
   static override outboundHandlers = {
     async commitWorker(
@@ -73,13 +78,29 @@ export class RunnerContainer extends Container {
         requireString(ctx.params?.userId, "ctx.params.userId"),
       );
     },
+    async emailWorker(
+      request: Request,
+      env: unknown,
+      ctx: RunnerOutboundHandlerContext,
+    ): Promise<Response> {
+      return handleRunnerOutboundRequest(
+        request,
+        env as RunnerOutboundEnvironmentSource,
+        requireString(ctx.params?.userId, "ctx.params.userId"),
+      );
+    },
   };
 
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  // Keep idle retention short so drained runner instances do not linger between bursts.
-  sleepAfter = "1m";
+  // Keep instances warm across short bursts, but let deploy config tune the idle window explicitly.
+  sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
+
+  constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
+    super(state as never, env as never);
+    this.sleepAfter = readContainerSleepAfter(env);
+  }
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -188,6 +209,12 @@ export class RunnerContainer extends Container {
           userId,
         },
       },
+      "email.worker": {
+        method: "emailWorker",
+        params: {
+          userId,
+        },
+      },
     });
   }
 
@@ -251,6 +278,13 @@ export async function destroyHostedExecutionContainer(input: {
   } catch {
     // best-effort cleanup only
   }
+}
+
+function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): string {
+  const configured = typeof source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER === "string"
+    ? source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER.trim()
+    : "";
+  return configured.length > 0 ? configured : DEFAULT_CONTAINER_SLEEP_AFTER;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

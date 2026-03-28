@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
 snapshotId: psnap_demo_02
 updatedAt: 2026-03-13T20:30:00Z

@@ -69,7 +69,7 @@ function selectAuditMetadata(records: unknown[], action: string): Array<{
 }
 
 test("goals support multiple active records and preserve relationships in markdown registries", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-goals");
+  const vaultRoot = await makeTempDirectory("murph-goals");
   await initializeVault({ vaultRoot });
 
   const primary = await upsertGoal({
@@ -146,7 +146,7 @@ test("goals support multiple active records and preserve relationships in markdo
 });
 
 test("goal id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-goal-resolution");
+  const vaultRoot = await makeTempDirectory("murph-goal-resolution");
   await initializeVault({ vaultRoot });
 
   const first = await upsertGoal({
@@ -199,7 +199,7 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
 });
 
 test("providers and recipes use first-class markdown registry reads without changing selector behavior", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-provider-recipe-registry");
+  const vaultRoot = await makeTempDirectory("murph-provider-recipe-registry");
   await initializeVault({ vaultRoot });
 
   const createdProvider = await upsertProvider({
@@ -301,7 +301,7 @@ test("providers and recipes use first-class markdown registry reads without chan
 });
 
 test("food, provider, and recipe deletes remove the markdown registry record cleanly", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-bank-deletes");
+  const vaultRoot = await makeTempDirectory("murph-bank-deletes");
   await initializeVault({ vaultRoot });
 
   const provider = await upsertProvider({
@@ -380,7 +380,7 @@ test("food, provider, and recipe deletes remove the markdown registry record cle
 });
 
 test("providers surface renamed slug and frontmatter validation codes", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-provider-errors");
+  const vaultRoot = await makeTempDirectory("murph-provider-errors");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -420,7 +420,7 @@ test("providers surface renamed slug and frontmatter validation codes", async ()
 });
 
 test("foods use first-class markdown registry reads for regular meals and staples", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-food-registry");
+  const vaultRoot = await makeTempDirectory("murph-food-registry");
   await initializeVault({ vaultRoot });
 
   const createdFood = await upsertFood({
@@ -528,7 +528,7 @@ test("foods use first-class markdown registry reads for regular meals and staple
 });
 
 test("food and recipe text-list normalization preserves validation messages and clear semantics", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-bank-text-list-validation");
+  const vaultRoot = await makeTempDirectory("murph-bank-text-list-validation");
   await initializeVault({ vaultRoot });
 
   const createdFood = await upsertFood({
@@ -653,7 +653,7 @@ test("food and recipe text-list normalization preserves validation messages and 
 });
 
 test("workout formats use first-class markdown registry reads for repeated sessions", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-workout-format-registry");
+  const vaultRoot = await makeTempDirectory("murph-workout-format-registry");
   await initializeVault({ vaultRoot });
 
   const createdFormat = await upsertWorkoutFormat({
@@ -777,7 +777,7 @@ test("workout formats use first-class markdown registry reads for repeated sessi
 });
 
 test("conditions and allergies are stored as deterministic markdown registry pages", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-conditions");
+  const vaultRoot = await makeTempDirectory("murph-conditions");
   await initializeVault({ vaultRoot });
 
   const goal = await upsertGoal({
@@ -884,7 +884,7 @@ test("conditions and allergies are stored as deterministic markdown registry pag
 });
 
 test("condition and allergy id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-condition-allergy-resolution");
+  const vaultRoot = await makeTempDirectory("murph-condition-allergy-resolution");
   await initializeVault({ vaultRoot });
 
   const firstCondition = await upsertCondition({
@@ -975,7 +975,7 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
 });
 
 test("protocols support medication and supplement groups plus stop handling", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-protocols");
+  const vaultRoot = await makeTempDirectory("murph-protocols");
   await initializeVault({ vaultRoot });
 
   const medication = await upsertProtocolItem({
@@ -1113,7 +1113,7 @@ test("protocols support medication and supplement groups plus stop handling", as
 });
 
 test("protocol reads with conflicting protocolId and slug currently return the first sorted selector match", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-protocol-read-conflict");
+  const vaultRoot = await makeTempDirectory("murph-protocol-read-conflict");
   await initializeVault({ vaultRoot });
 
   const medication = await upsertProtocolItem({
@@ -1144,7 +1144,7 @@ test("protocol reads with conflicting protocolId and slug currently return the f
 });
 
 test("protocol reads reject ambiguous slugs across groups unless group is supplied", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-protocol-read-ambiguous-slug");
+  const vaultRoot = await makeTempDirectory("murph-protocol-read-ambiguous-slug");
   await initializeVault({ vaultRoot });
 
   await upsertProtocolItem({
@@ -1189,7 +1189,7 @@ test("protocol reads reject ambiguous slugs across groups unless group is suppli
 });
 
 test("protocol upserts reject ambiguous slugs across groups unless protocolId or group is supplied", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-protocol-upsert-ambiguous-slug");
+  const vaultRoot = await makeTempDirectory("murph-protocol-upsert-ambiguous-slug");
   await initializeVault({ vaultRoot });
 
   await upsertProtocolItem({

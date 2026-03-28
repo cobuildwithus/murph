@@ -1,7 +1,7 @@
-export const HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
+export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
+const LEGACY_HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
-  "AGENTMAIL_API_BASE_URL",
   "AGENTMAIL_API_KEY",
   "AGENTMAIL_BASE_URL",
   "ANTHROPIC_API_KEY",
@@ -19,8 +19,6 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "OURA_CLIENT_ID",
   "OURA_CLIENT_SECRET",
   "PADDLEOCR_COMMAND",
-  "PADDLEOCR_MODEL_DIR",
-  "PARSER_FFMPEG_PATH",
   "PDFTOTEXT_COMMAND",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
@@ -29,8 +27,6 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "TELEGRAM_WEBHOOK_SECRET",
   "TOGETHER_API_KEY",
   "WHISPER_COMMAND",
-  "WHISPER_MODEL",
-  "WHISPER_MODEL_DIR",
   "WHISPER_MODEL_PATH",
   "WHOOP_CLIENT_ID",
   "WHOOP_CLIENT_SECRET",
@@ -38,10 +34,8 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
 ] as const;
 
 const DEFAULT_ALLOWED_USER_ENV_PREFIXES = [
-  "AGENTMAIL_",
   "ANTHROPIC_",
   "DEVICE_SYNC_",
-  "FFMPEG_",
   "GOOGLE_",
   "GOOGLE_GENERATIVE_AI_",
   "GROQ_",
@@ -75,6 +69,7 @@ const DISALLOWED_USER_ENV_KEYS = new Set([
 
 const DISALLOWED_USER_ENV_PREFIXES = [
   "CF_",
+  "HOSTED_EMAIL_",
   "HOSTED_EXECUTION_",
   "WRANGLER_",
 ];
@@ -128,7 +123,7 @@ export function applyHostedUserEnvUpdate(input: {
     const normalizedKey = normalizeHostedUserEnvKey(key);
 
     if (!isHostedUserEnvKeyAllowed(normalizedKey, input.source)) {
-      throw new Error(`Hosted user env key is not allowed: ${key}`);
+      throw new TypeError(`Hosted user env key is not allowed: ${key}`);
     }
 
     if (rawValue === null) {
@@ -232,7 +227,11 @@ function parseHostedUserEnvConfig(
 ): HostedUserEnvConfig {
   const parsed = JSON.parse(text) as Partial<HostedUserEnvConfig>;
 
-  if (parsed.schema !== HOSTED_USER_ENV_SCHEMA || !parsed.env || typeof parsed.env !== "object") {
+  if (
+    (parsed.schema !== HOSTED_USER_ENV_SCHEMA && parsed.schema !== LEGACY_HOSTED_USER_ENV_SCHEMA)
+    || !parsed.env
+    || typeof parsed.env !== "object"
+  ) {
     throw new Error("Hosted user env config is invalid.");
   }
 
@@ -258,7 +257,7 @@ function normalizeHostedUserEnvKey(key: string): string {
   const normalized = key.trim().toUpperCase();
 
   if (!normalized || !/^[A-Z0-9_]+$/u.test(normalized)) {
-    throw new Error(`Hosted user env key is invalid: ${key}`);
+    throw new TypeError(`Hosted user env key is invalid: ${key}`);
   }
 
   return normalized;
@@ -272,7 +271,7 @@ function normalizeHostedUserEnvValue(value: string, key: string): string | null 
   }
 
   if (normalized.includes("\u0000")) {
-    throw new Error(`Hosted user env value for ${key} contains invalid null bytes.`);
+    throw new TypeError(`Hosted user env value for ${key} contains invalid null bytes.`);
   }
 
   return normalized;

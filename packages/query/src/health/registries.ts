@@ -6,7 +6,7 @@ import {
   type HealthEntityKind,
   type HealthEntityRegistryProjectionHelpers,
   type HealthEntitySortBehavior,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   applyLimit,
   asObject,
@@ -632,11 +632,11 @@ export function familyRecordFromEntity(entity: CanonicalEntity): FamilyQueryReco
 
   return {
     ...base,
-    relationship: firstString(base.attributes, ["relationship", "relation"]),
+    relationship: firstString(base.attributes, ["relationship"]),
     deceased: firstBoolean(base.attributes, ["deceased"]),
     conditions: readRegistryStrings(base.attributes, ["conditions"]),
     relatedVariantIds: readRegistryStrings(base.attributes, ["relatedVariantIds"]),
-    note: firstString(base.attributes, ["note", "summary", "notes"]),
+    note: firstString(base.attributes, ["note"]),
     lineage: firstString(base.attributes, ["lineage"]),
     updatedAt: firstString(base.attributes, ["updatedAt"]),
   };
@@ -656,8 +656,8 @@ export function geneticsRecordFromEntity(
     zygosity: firstString(base.attributes, ["zygosity"]),
     significance: firstString(base.attributes, ["significance"]),
     inheritance: firstString(base.attributes, ["inheritance"]),
-    sourceFamilyMemberIds: readRegistryStrings(base.attributes, ["sourceFamilyMemberIds", "familyMemberIds"]),
-    note: firstString(base.attributes, ["note", "summary", "actionability", "notes"]),
+    sourceFamilyMemberIds: readRegistryStrings(base.attributes, ["sourceFamilyMemberIds"]),
+    note: firstString(base.attributes, ["note"]),
     updatedAt: firstString(base.attributes, ["updatedAt"]),
   };
 }

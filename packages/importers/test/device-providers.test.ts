@@ -181,7 +181,7 @@ test("prepareDeviceProviderSnapshotImport normalizes WHOOP snapshots into canoni
 test("prepareDeviceProviderSnapshotImport normalizes Oura snapshots into canonical device payloads", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "oura",
-    vault: "fixture-vault",
+    vaultRoot: "fixture-vault",
     snapshot: {
       accountId: "oura-user-1",
       importedAt: "2026-03-16T10:00:00.000Z",
@@ -429,6 +429,7 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
 test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "oura",
+    vaultRoot: "fixture-vault",
     snapshot: {
       accountId: 202,
       dailyActivity: [
@@ -554,7 +555,7 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
 test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canonical device payloads", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
-    vault: "fixture-vault",
+    vaultRoot: "fixture-vault",
     snapshot: {
       accountId: "garmin-user-1",
       importedAt: "2026-03-16T11:00:00.000Z",
@@ -756,9 +757,37 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   assert.equal(activityFile?.metadata?.checksum, "abc123");
 });
 
+test("prepareDeviceProviderSnapshotImport rounds fractional integer sample streams", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "garmin",
+    snapshot: {
+      accountId: "garmin-user-1",
+      importedAt: "2026-03-16T11:00:00.000Z",
+      epochSummaries: [
+        {
+          epochId: "epoch-1",
+          timestamp: "2026-03-15T12:00:00.000Z",
+          heartRate: 64.6,
+          steps: 42.6,
+          respirationRate: 13.9,
+        },
+      ],
+    },
+  });
+
+  assert.ok(payload.samples?.some((sample) => sample.stream === "heart_rate" && sample.sample.value === 65));
+  assert.ok(payload.samples?.some((sample) => sample.stream === "steps" && sample.sample.value === 43));
+  assert.ok(
+    payload.samples?.some(
+      (sample) => sample.stream === "respiratory_rate" && sample.sample.value === 13.9,
+    ),
+  );
+});
+
 test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, aliases, and string numerics", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
+    vaultRoot: "fixture-vault",
     snapshot: {
       importedAt: "2026-03-16T12:00:00.000Z",
       profile: {
@@ -972,7 +1001,7 @@ test("importDeviceProviderSnapshot delegates normalized device batches to core",
   assert.ok(calls[0]?.rawArtifacts?.some((artifact) => artifact.role === "recovery:sleep-2"));
 });
 
-test("importDeviceProviderSnapshot strips snapshot input fields before delegating to core and falls back from blank vaultRoot", async () => {
+test("importDeviceProviderSnapshot strips snapshot input fields before delegating to core and omits blank vaultRoot", async () => {
   const registry = createDeviceProviderRegistry();
   const calls: DeviceBatchImportPayload[] = [];
 
@@ -1002,7 +1031,6 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
     {
       provider: "polar",
       vaultRoot: "   ",
-      vault: "fixture-vault",
       snapshot: {
         importedAt: "2026-03-16T12:05:00.000Z",
       },
@@ -1020,7 +1048,6 @@ test("importDeviceProviderSnapshot strips snapshot input fields before delegatin
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], {
-    vaultRoot: "fixture-vault",
     provider: "polar",
     accountId: "polar-user-2",
     source: "device",

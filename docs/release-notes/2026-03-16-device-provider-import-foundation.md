@@ -2,13 +2,13 @@
 
 ## Summary
 
-Runtime-visible package seam plus contract/docs update for normalized device/provider imports. This change adds a provider-agnostic device-batch write path in `@healthybob/core`, a registry-based adapter seam in `@healthybob/importers`, and a WHOOP-first normalizer that can be followed by Garmin/Oura-style adapters.
+Runtime-visible package seam plus contract/docs update for normalized device/provider imports. This change adds a provider-agnostic device-batch write path in `@murph/core`, a registry-based adapter seam in `@murph/importers`, and a WHOOP-first normalizer that can be followed by Garmin/Oura-style adapters.
 
 ## What changed
 
 - Added shared `externalRef` provenance for canonical event and sample records so normalized device/provider imports can carry upstream `system`, `resourceType`, `resourceId`, optional `version`, and optional `facet` metadata.
 - Added `core.importDeviceBatch(...)` plus inline raw-payload staging so API snapshots can be persisted immutably under `raw/integrations/<provider>/YYYY/MM/<transformId>/` with manifests and audit coverage.
-- Added a provider registry/import seam in `@healthybob/importers` and a WHOOP-first adapter that maps sleeps, recoveries, cycles, and workouts into baseline `sleep_session`, `activity_session`, `observation`, `hrv`, `respiratory_rate`, and `temperature` records without fabricating unsupported minute-level streams.
+- Added a provider registry/import seam in `@murph/importers` and a WHOOP-first adapter that maps sleeps, recoveries, cycles, and workouts into baseline `sleep_session`, `activity_session`, `observation`, `hrv`, `respiratory_rate`, and `temperature` records without fabricating unsupported minute-level streams.
 - Updated architecture/contract/safe-extension docs to reserve `raw/integrations/**` and document the composable provider-adapter pattern.
 
 ## Verification

@@ -1,4 +1,4 @@
-import { ALL_VAULT_RECORD_TYPES } from '@healthybob/query'
+import { ALL_VAULT_RECORD_TYPES } from '@murph/query'
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
 import {

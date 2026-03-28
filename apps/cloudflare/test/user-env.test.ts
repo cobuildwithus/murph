@@ -52,6 +52,66 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
+  it("rejects removed AgentMail and ffmpeg alias keys", () => {
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+  });
+
+  it("accepts canonical AgentMail and ffmpeg keys but rejects unknown prefixed keys", () => {
+    expect(applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          AGENTMAIL_API_KEY: "agentmail-secret",
+          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
+          FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+        },
+        mode: "replace",
+      },
+    })).toEqual({
+      AGENTMAIL_API_KEY: "agentmail-secret",
+      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
+      FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+    });
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          AGENTMAIL_TIMEOUT_MS: "5000",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          FFMPEG_THREADS: "2",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+  });
+
   it("rejects dangerous env names", () => {
     expect(() => applyHostedUserEnvUpdate({
       current: {},
@@ -91,6 +151,20 @@ describe("hosted user env helpers", () => {
       HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "CUSTOM_API_KEY",
     })).toEqual({
       CUSTOM_API_KEY: "custom-secret",
+    });
+  });
+
+  it("still reads the legacy hosted user env schema", () => {
+    const payload = new TextEncoder().encode(JSON.stringify({
+      env: {
+        OPENAI_API_KEY: "sk-user",
+      },
+      schema: "healthybob.hosted-user-env.v1",
+      updatedAt: "2026-03-26T12:00:00.000Z",
+    }));
+
+    expect(decodeHostedUserEnvPayload(payload)).toEqual({
+      OPENAI_API_KEY: "sk-user",
     });
   });
 });

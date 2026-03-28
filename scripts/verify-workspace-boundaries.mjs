@@ -1,26 +1,30 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const failures = [];
 
-await verifyTypecheckScripts();
-await verifyTypecheckTsconfigs();
-await verifyTsconfigPathMappings();
-await verifyWorkspaceImports();
+export async function main() {
+  const failures = [];
 
-if (failures.length > 0) {
-  console.error("Workspace boundary verification failed:");
-  for (const failure of failures) {
-    console.error(`- ${failure}`);
+  await verifyTypecheckScripts(failures);
+  await verifyTypecheckTsconfigs(failures);
+  await verifyTsconfigPathMappings(failures);
+  await verifyWorkspaceImports(failures);
+
+  if (failures.length > 0) {
+    console.error("Workspace boundary verification failed:");
+    for (const failure of failures) {
+      console.error(`- ${failure}`);
+    }
+    process.exitCode = 1;
+    return;
   }
-  process.exitCode = 1;
-} else {
+
   console.log("Workspace boundary verification passed.");
 }
 
-async function verifyTypecheckScripts() {
+async function verifyTypecheckScripts(failures) {
   const packageJsonPaths = await findFiles(["packages", "apps"], (filePath) =>
     path.basename(filePath) === "package.json",
   );
@@ -40,7 +44,7 @@ async function verifyTypecheckScripts() {
   }
 }
 
-async function verifyTypecheckTsconfigs() {
+async function verifyTypecheckTsconfigs(failures) {
   const tsconfigPaths = await findFiles(["packages", "apps"], (filePath) =>
     path.basename(filePath) === "tsconfig.typecheck.json",
   );
@@ -56,7 +60,7 @@ async function verifyTypecheckTsconfigs() {
   }
 }
 
-async function verifyTsconfigPathMappings() {
+async function verifyTsconfigPathMappings(failures) {
   const tsconfigPaths = await findFiles([".", "packages", "apps"], (filePath) =>
     /^tsconfig(\.[^.]+)?\.json$/u.test(path.basename(filePath)),
   );
@@ -76,10 +80,11 @@ async function verifyTsconfigPathMappings() {
 
         const resolvedTarget = path.resolve(path.dirname(tsconfigPath), target);
         const targetMember = findWorkspaceMember(resolvedTarget);
-        const pointsAtSiblingBuildArtifact =
-          targetMember !== null &&
-          targetMember !== configMember &&
-          /[\\/](dist|\.test-dist|\.next)[\\/]/u.test(resolvedTarget);
+        const pointsAtSiblingBuildArtifact = isSiblingBuildArtifactPath(
+          configMember,
+          targetMember,
+          resolvedTarget,
+        );
 
         if (pointsAtSiblingBuildArtifact) {
           failures.push(
@@ -91,8 +96,11 @@ async function verifyTsconfigPathMappings() {
   }
 }
 
-async function verifyWorkspaceImports() {
+async function verifyWorkspaceImports(failures) {
   const exportedSpecifiersByPackage = await buildExportedSpecifiersByPackage();
+  const workspacePackageNames = [...exportedSpecifiersByPackage.keys()].sort(
+    (left, right) => right.length - left.length,
+  );
   const sourceLikeFiles = await findFiles(["packages", "apps", "e2e", "config"], (filePath) =>
     /\.[cm]?[jt]sx?$/u.test(filePath),
   );
@@ -114,11 +122,13 @@ async function verifyWorkspaceImports() {
         continue;
       }
 
-      if (!specifier.startsWith("@healthybob/")) {
+      const packageName = workspacePackageNames.find(
+        (name) => specifier === name || specifier.startsWith(`${name}/`),
+      );
+      if (!packageName) {
         continue;
       }
 
-      const packageName = specifier.split("/").slice(0, 2).join("/");
       const allowedPatterns = exportedSpecifiersByPackage.get(packageName);
 
       if (!allowedPatterns) {
@@ -146,7 +156,7 @@ async function buildExportedSpecifiersByPackage() {
   for (const packageJsonPath of packageJsonPaths) {
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
 
-    if (typeof packageJson.name !== "string" || !packageJson.name.startsWith("@healthybob/")) {
+    if (typeof packageJson.name !== "string") {
       continue;
     }
 
@@ -205,6 +215,18 @@ function findWorkspaceMember(filePath) {
   return null;
 }
 
+export function isWorkspaceBuildArtifactPath(filePath) {
+  return /[\\/](dist|\.test-dist|\.next|\.next-dev|\.next-smoke)[\\/]/u.test(filePath);
+}
+
+export function isSiblingBuildArtifactPath(configMember, targetMember, resolvedTarget) {
+  return (
+    targetMember !== null &&
+    targetMember !== configMember &&
+    isWorkspaceBuildArtifactPath(resolvedTarget)
+  );
+}
+
 async function findFiles(searchRoots, predicate) {
   const files = [];
   const seenDirectories = new Set();
@@ -250,11 +272,13 @@ async function findFilesRecursive(directoryPath, predicate) {
   return files;
 }
 
-function shouldSkipDirectory(name) {
+export function shouldSkipDirectory(name) {
   return (
     name === "node_modules" ||
     name === "dist" ||
     name === ".next" ||
+    name === ".next-dev" ||
+    name === ".next-smoke" ||
     name === ".test-dist" ||
     name === ".git" ||
     name === "coverage"
@@ -272,4 +296,8 @@ async function pathExists(targetPath) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  await main();
 }

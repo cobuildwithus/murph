@@ -53,16 +53,16 @@ const tsconfigTypecheck = JSON.parse(
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
 
 assert(
-  packageJson.name === 'healthybob',
-  'package.json must keep the published package name healthybob.',
+  packageJson.name === 'murph',
+  'package.json must keep the published package name murph.',
 )
 assert(
   packageJson.private === false,
   'package.json must be marked publishable (private: false).',
 )
 assert(
-  packageJson.dependencies?.['@healthybob/device-syncd'] === 'workspace:*',
-  'package.json must depend on @healthybob/device-syncd so the published healthybob package installs the managed device daemon.',
+  packageJson.dependencies?.['@murph/device-syncd'] === 'workspace:*',
+  'package.json must depend on @murph/device-syncd so the published murph package installs the managed device daemon.',
 )
 assert(
   packageJson.main === './dist/index.js',
@@ -81,8 +81,13 @@ assert(
   'package.json must expose vault-cli from dist/bin.js.',
 )
 assert(
-  packageJson.bin?.healthybob === 'dist/bin.js',
-  'package.json must expose healthybob from dist/bin.js as the setup alias.',
+  packageJson.bin?.murph === 'dist/bin.js',
+  'package.json must expose murph from dist/bin.js as the setup alias.',
+)
+assert(
+  JSON.stringify(Object.keys(packageJson.bin ?? {}).sort()) ===
+    JSON.stringify(['murph', 'vault-cli']),
+  'package.json must expose only the murph and vault-cli binaries.',
 )
 assert(
   packageJson.exports?.['.']?.default === './dist/index.js',
@@ -94,8 +99,8 @@ assert(
 )
 assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===
-    'https://github.com/cobuildwithus/healthybob',
-  'package.json repository.url must stay pinned to the Healthy Bob repository.',
+    'https://github.com/cobuildwithus/murph',
+  'package.json repository.url must stay pinned to the Murph repository.',
 )
 assert(
   packageJson.scripts?.build &&

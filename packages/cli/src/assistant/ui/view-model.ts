@@ -3,8 +3,6 @@ import type {
   AssistantTranscriptEntry,
 } from '../../assistant-cli-contracts.js'
 import {
-  DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
-  DEFAULT_ASSISTANT_REASONING_OPTIONS,
   findAssistantCatalogModelOptionIndex,
   findAssistantCatalogReasoningOptionIndex,
   resolveAssistantProviderCapabilities,
@@ -106,12 +104,6 @@ export const CHAT_STARTER_SUGGESTIONS = [
 export function shouldShowChatComposerGuidance(entryCount: number): boolean {
   return entryCount === 0
 }
-
-export const CHAT_MODEL_OPTIONS: readonly AssistantModelOption[] =
-  DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS
-
-export const CHAT_REASONING_OPTIONS: readonly AssistantReasoningOption[] =
-  DEFAULT_ASSISTANT_REASONING_OPTIONS
 
 export const CHAT_SLASH_COMMANDS: readonly AssistantSlashCommand[] = [
   {
@@ -293,14 +285,14 @@ function resolveInkTraceKind(
 
 export function findAssistantModelOptionIndex(
   model: string | null,
-  options: readonly AssistantModelOption[] = CHAT_MODEL_OPTIONS,
+  options: readonly AssistantModelOption[],
 ): number {
   return findAssistantCatalogModelOptionIndex(model, options)
 }
 
 export function findAssistantReasoningOptionIndex(
   reasoningEffort: string | null,
-  options: readonly AssistantReasoningOption[] = CHAT_REASONING_OPTIONS,
+  options: readonly AssistantReasoningOption[],
 ): number {
   return findAssistantCatalogReasoningOptionIndex(reasoningEffort, options)
 }

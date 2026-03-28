@@ -2,7 +2,7 @@ import {
   contractIdMaxLength,
   FAMILY_MEMBER_LIMITS,
   ID_PREFIXES,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
@@ -150,15 +150,15 @@ export async function upsertFamilyMember(
   const normalizedFamilyMemberId = normalizeId(input.familyMemberId, "familyMemberId", "fam");
   const selectorSlug =
     (input.slug ? normalizeSlug(input.slug, "slug") : undefined) ??
-    (input.title ?? input.name ? normalizeSlug(undefined, "slug", input.title ?? input.name) : undefined);
+    (input.title ? normalizeSlug(undefined, "slug", input.title) : undefined);
   const existingRecord = await familyRegistryApi.resolveExistingRecord({
     vaultRoot: input.vaultRoot,
     recordId: normalizedFamilyMemberId,
     slug: selectorSlug,
   });
-  const title = requireString(input.title ?? input.name ?? existingRecord?.title, "title", FAMILY_TITLE_MAX_LENGTH);
+  const title = requireString(input.title ?? existingRecord?.title, "title", FAMILY_TITLE_MAX_LENGTH);
   const relationship = requireString(
-    input.relationship ?? input.relation ?? existingRecord?.relationship,
+    input.relationship ?? existingRecord?.relationship,
     "relationship",
     FAMILY_RELATIONSHIP_MAX_LENGTH,
   );
@@ -173,9 +173,9 @@ export async function upsertFamilyMember(
           FAMILY_CONDITION_MAX_LENGTH,
         );
   const note =
-    input.note === undefined && input.summary === undefined
+    input.note === undefined
       ? existingRecord?.note
-      : optionalString(input.note ?? input.summary, "note", FAMILY_NOTE_MAX_LENGTH);
+      : optionalString(input.note, "note", FAMILY_NOTE_MAX_LENGTH);
   const relatedVariantIds =
     input.relatedVariantIds === undefined
       ? existingRecord?.relatedVariantIds
@@ -221,10 +221,10 @@ export async function listFamilyMembers(vaultRoot: string): Promise<FamilyMember
 
 export async function readFamilyMember({
   vaultRoot,
-  memberId,
+  familyMemberId,
   slug,
 }: ReadFamilyMemberInput): Promise<FamilyMemberRecord> {
-  const normalizedFamilyMemberId = normalizeId(memberId, "memberId", "fam");
+  const normalizedFamilyMemberId = normalizeId(familyMemberId, "familyMemberId", "fam");
   const normalizedSlug = slug ? normalizeSlug(slug, "slug") : undefined;
   return familyRegistryApi.readRecord({
     vaultRoot,

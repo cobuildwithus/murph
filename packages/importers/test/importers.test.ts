@@ -4,24 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import * as coreRuntime from "@healthybob/core";
+import * as coreRuntime from "@murph/core";
 import type {
   DocumentImportPayload,
   MealImportPayload,
   SampleImportPayload,
 } from "../src/index.ts";
 import {
+  addMeal,
   createSamplePresetRegistry,
   importCsvSamples,
   importDocument,
-  importMeal,
   parseDelimitedRows,
   prepareCsvSampleImport,
   prepareMealImport,
 } from "../src/index.ts";
 
 async function createTempFile(name: string, contents: string): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "healthybob-importers-"));
+  const directory = await mkdtemp(join(tmpdir(), "murph-importers-"));
   const filePath = join(directory, name);
   await writeFile(filePath, contents);
   return filePath;
@@ -82,12 +82,12 @@ test("importDocument delegates a core-shaped document payload", async () => {
   assert.equal(documentPayload.note, "annual lab packet");
 });
 
-test("importMeal validates attachments and maps to addMeal-compatible input", async () => {
+test("addMeal validates attachments and maps to addMeal-compatible input", async () => {
   const photoPath = await createTempFile("dinner.jpg", "image-placeholder");
   const audioPath = await createTempFile("dinner-note.m4a", "audio-placeholder");
   const { calls, corePort } = createCorePortSpy();
 
-  await importMeal(
+  await addMeal(
     {
       photoPath,
       audioPath,
@@ -106,10 +106,10 @@ test("importMeal validates attachments and maps to addMeal-compatible input", as
   assert.equal(mealPayload.note, "salmon and rice");
 });
 
-test("importMeal accepts text-only meal notes without requiring a photo", async () => {
+test("addMeal accepts text-only meal notes without requiring a photo", async () => {
   const { calls, corePort } = createCorePortSpy();
 
-  await importMeal(
+  await addMeal(
     {
       note: "soup",
     },
@@ -123,12 +123,12 @@ test("importMeal accepts text-only meal notes without requiring a photo", async 
   assert.equal(mealPayload.note, "soup");
 });
 
-test("importMeal rejects requests without a photo, audio note, or meal note", async () => {
+test("addMeal rejects requests without a photo, audio note, or meal note", async () => {
   const { corePort } = createCorePortSpy();
 
   await assert.rejects(
     () =>
-      importMeal(
+      addMeal(
         {
         },
         { corePort },
@@ -219,15 +219,14 @@ test("parseDelimitedRows handles quoted commas", () => {
   ]);
 });
 
-test("importMeal accepts vault aliases and rejects directory photo paths", async () => {
+test("addMeal keeps canonical vaultRoot and ignores the removed vault alias", async () => {
   const photoPath = await createTempFile("breakfast.jpg", "image-placeholder");
-  const photoDirectory = await mkdtemp(join(tmpdir(), "healthybob-importers-photo-"));
+  const photoDirectory = await mkdtemp(join(tmpdir(), "murph-importers-photo-"));
   const { calls, corePort } = createCorePortSpy();
 
-  await importMeal(
+  await addMeal(
     {
       photoPath,
-      vaultRoot: "canonical-vault",
       vault: "fixture-vault",
       note: "  oatmeal  ",
     },
@@ -236,13 +235,13 @@ test("importMeal accepts vault aliases and rejects directory photo paths", async
 
   const [mealPayload] = calls.meals;
   assert.ok(mealPayload);
-  assert.equal(mealPayload.vaultRoot, "canonical-vault");
+  assert.equal(mealPayload.vaultRoot, undefined);
   assert.equal(mealPayload.audioPath, undefined);
   assert.equal(mealPayload.note, "oatmeal");
 
   await assert.rejects(
     () =>
-      importMeal(
+      addMeal(
         {
           photoPath: photoDirectory,
         },
@@ -252,7 +251,7 @@ test("importMeal accepts vault aliases and rejects directory photo paths", async
   );
 });
 
-test("importCsvSamples handles vault aliases, escaped quotes, and CRLF rows", async () => {
+test("importCsvSamples ignores the removed vault alias and still handles escaped quotes and CRLF rows", async () => {
   const filePath = await createTempFile(
     "sleep.csv",
     [
@@ -279,7 +278,7 @@ test("importCsvSamples handles vault aliases, escaped quotes, and CRLF rows", as
 
   const [samplePayload] = calls.samples;
   assert.ok(samplePayload);
-  assert.equal(samplePayload.vaultRoot, "fixture-vault");
+  assert.equal(samplePayload.vaultRoot, undefined);
   assert.equal(samplePayload.samples.length, 2);
 
   const escapedRows = parseDelimitedRows(
@@ -357,12 +356,12 @@ test("importDocument accepts a narrow core port with only the called export", as
   assert.equal(result, "visit-note.txt");
 });
 
-test("prepareMealImport accepts the vault alias and omits missing audio", async () => {
+test("prepareMealImport requires canonical vaultRoot and omits missing audio", async () => {
   const photoPath = await createTempFile("breakfast.jpg", "image-placeholder");
 
   const payload = await prepareMealImport({
     photoPath,
-    vault: "/tmp/example-vault",
+    vaultRoot: "/tmp/example-vault",
     note: "  eggs and fruit  ",
   });
 
@@ -374,7 +373,7 @@ test("prepareMealImport accepts the vault alias and omits missing audio", async 
 
 test("prepareMealImport accepts note-only meal input", async () => {
   const payload = await prepareMealImport({
-    vault: "/tmp/example-vault",
+    vaultRoot: "/tmp/example-vault",
     note: "  eggs and fruit  ",
   });
 
@@ -449,7 +448,7 @@ test("parseDelimitedRows rejects malformed delimiters and unterminated quoted fi
 });
 
 test("importDocument with the real core runtime writes an immutable raw manifest sidecar", async () => {
-  const vaultRoot = await mkdtemp(join(tmpdir(), "healthybob-vault-"));
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
   const filePath = await createTempFile("labs.pdf", "pdf-placeholder");
 
   await coreRuntime.initializeVault({ vaultRoot });
@@ -489,7 +488,7 @@ test("importDocument with the real core runtime writes an immutable raw manifest
 });
 
 test("importCsvSamples with the real core runtime writes a batch manifest with row provenance", async () => {
-  const vaultRoot = await mkdtemp(join(tmpdir(), "healthybob-vault-"));
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-vault-"));
   const filePath = await createTempFile(
     "heart-rate.csv",
     [

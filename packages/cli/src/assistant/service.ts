@@ -27,6 +27,7 @@ import {
 } from '../chat-provider.js'
 import {
   resolveAssistantOperatorDefaults,
+  resolveAssistantProviderDefaults,
   type AssistantOperatorDefaults,
 } from '../operator-config.js'
 import {
@@ -72,7 +73,9 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
+  compactAssistantProviderConfigInput,
   mergeAssistantProviderConfigs,
+  mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import {
@@ -81,10 +84,16 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import {
+  normalizeAssistantSessionSnapshot,
+  readAssistantCodexPromptVersion,
+  writeAssistantCodexPromptVersion,
+} from './provider-state.js'
+import {
   executeWithCanonicalWriteGuard,
   isAssistantCanonicalWriteBlockedError,
 } from './canonical-write-guard.js'
 import { resolveAssistantProviderWorkingDirectory } from './provider-workspace.js'
+import { shouldUseAssistantLocalTranscriptContext } from './provider-registry.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import { withAssistantTurnLock } from './turn-lock.js'
 
@@ -100,6 +109,7 @@ interface AssistantSessionResolutionFields {
   baseUrl?: string | null
   channel?: string | null
   conversation?: ConversationRef | null
+  headers?: Record<string, string> | null
   identityId?: string | null
   model?: string | null
   maxSessionAgeMs?: number | null
@@ -293,7 +303,16 @@ export function buildResolveAssistantSessionInput(
   input: AssistantSessionResolutionFields,
   defaults: AssistantOperatorDefaults | null,
 ): ResolveAssistantSessionInput {
-  const providerConfig = mergeAssistantProviderConfigs(input, defaults)
+  const inferredProvider = mergeAssistantProviderConfigs(defaults, input).provider
+  const providerDefaults = resolveAssistantProviderDefaults(defaults, inferredProvider)
+  const providerConfig = mergeAssistantProviderConfigsForProvider(
+    inferredProvider,
+    providerDefaults ? { provider: inferredProvider, ...providerDefaults } : null,
+    compactAssistantProviderConfigInput({
+      provider: inferredProvider,
+      ...input,
+    }),
+  )
   const sessionId = input.conversation?.sessionId ?? input.sessionId
   const alias = input.conversation?.alias ?? input.alias
   const channel = input.conversation?.channel ?? input.channel
@@ -332,7 +351,7 @@ export function buildResolveAssistantSessionInput(
           : directness === 'group'
             ? false
             : undefined,
-    provider: input.provider ?? defaults?.provider ?? undefined,
+    provider: providerConfig.provider,
     model: providerConfig.model,
     sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox) ?? 'workspace-write',
     approvalPolicy: providerConfig.approvalPolicy ?? 'on-request',
@@ -341,6 +360,8 @@ export function buildResolveAssistantSessionInput(
     baseUrl: providerConfig.baseUrl,
     apiKeyEnv: providerConfig.apiKeyEnv,
     providerName: providerConfig.providerName,
+    headers:
+      providerConfig.provider === 'openai-compatible' ? providerConfig.headers : null,
     reasoningEffort: providerConfig.reasoningEffort,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }
@@ -548,15 +569,24 @@ export async function updateAssistantSessionOptions(input: {
     createIfMissing: false,
   })
 
+  const providerConfig = mergeAssistantProviderConfigsForProvider(
+    session.session.provider,
+    {
+      provider: session.session.provider,
+      ...session.session.providerOptions,
+    },
+    {
+      provider: session.session.provider,
+      ...input.providerOptions,
+    },
+  )
+
   return saveAssistantSession(input.vault, {
     ...session.session,
-    providerOptions: {
-      ...session.session.providerOptions,
-      ...input.providerOptions,
-      sandbox: clampVaultBoundAssistantSandbox(
-        input.providerOptions.sandbox ?? session.session.providerOptions.sandbox,
-      ) ?? null,
-    },
+    providerOptions: serializeAssistantProviderSessionOptions({
+      ...providerConfig,
+      sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox),
+    }),
     updatedAt: new Date().toISOString(),
   })
 }
@@ -589,19 +619,29 @@ function resolveAssistantTurnRoutes(
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
-  const provider = input.provider ?? resolved.session.provider ?? defaults?.provider
-  const mergedProviderConfig = mergeAssistantProviderConfigs(
-    input,
-    resolved.session.providerOptions,
+  const provider = mergeAssistantProviderConfigs(
     defaults,
-  )
+    { provider: resolved.session.provider, ...resolved.session.providerOptions },
+    input,
+  ).provider
+  const providerDefaults = resolveAssistantProviderDefaults(defaults, provider)
   const providerOptions = serializeAssistantProviderSessionOptions(
-    {
-      ...mergedProviderConfig,
-      sandbox: clampVaultBoundAssistantSandbox(mergedProviderConfig.sandbox),
-    },
+    mergeAssistantProviderConfigsForProvider(
+      provider,
+      providerDefaults ? { provider, ...providerDefaults } : null,
+      { provider, ...resolved.session.providerOptions },
+      compactAssistantProviderConfigInput({
+        provider,
+        ...input,
+        sandbox: clampVaultBoundAssistantSandbox(input.sandbox),
+      }),
+    ),
   )
-  const executionConfig = mergeAssistantProviderConfigs(input, defaults)
+  const executionConfig = mergeAssistantProviderConfigsForProvider(
+    provider,
+    providerDefaults ? { provider, ...providerDefaults } : null,
+    compactAssistantProviderConfigInput({ provider, ...input }),
+  )
   return buildAssistantFailoverRoutes({
     backups: input.failoverRoutes ?? defaults?.failoverRoutes ?? null,
     codexCommand: executionConfig.codexCommand,
@@ -636,7 +676,9 @@ async function resolveAssistantRouteTurnPlan(input: {
     shouldResetCodexProviderSession
   const shouldInjectFirstTurnOnboarding =
     input.input.enableFirstTurnOnboarding === true && input.session.turnCount === 0
-  const conversationMessages = shouldUseLocalTranscriptContext(input.route.provider)
+  const conversationMessages = shouldUseAssistantLocalTranscriptContext(
+    input.route.provider,
+  )
     ? removeTrailingCurrentUserPrompt(
         await loadAssistantConversationMessages({
           limit: 20,
@@ -1062,7 +1104,6 @@ async function executeProviderTurnWithRecovery(input: {
             codexCommand:
               route.codexCommand ??
               input.input.codexCommand ??
-              input.defaults?.codexCommand ??
               undefined,
             model: route.providerOptions.model,
             reasoningEffort: route.providerOptions.reasoningEffort,
@@ -1071,6 +1112,7 @@ async function executeProviderTurnWithRecovery(input: {
             baseUrl: route.providerOptions.baseUrl,
             apiKeyEnv: route.providerOptions.apiKeyEnv,
             providerName: route.providerOptions.providerName,
+            headers: route.providerOptions.headers,
             conversationMessages: routePlan.conversationMessages,
             onEvent: input.input.onProviderEvent ?? undefined,
             profile: route.providerOptions.profile,
@@ -1105,11 +1147,16 @@ async function executeProviderTurnWithRecovery(input: {
       lastError = error
       const errorCode = readAssistantErrorCode(error)
       const recoveredSession = await recoverAssistantSessionAfterProviderFailure({
-        codexPromptVersion:
-          route.provider === 'codex-cli' ? CURRENT_CODEX_PROMPT_VERSION : null,
         error,
         provider: route.provider,
         providerOptions: route.providerOptions,
+        providerState:
+          route.provider === 'codex-cli'
+            ? writeAssistantCodexPromptVersion(
+                workingSession.providerState,
+                CURRENT_CODEX_PROMPT_VERSION,
+              )
+            : null,
         session: workingSession,
         vault: input.input.vault,
       })
@@ -1224,9 +1271,12 @@ async function persistAssistantTurnAndSession(input: {
       previousProvider: input.session.provider,
       previousProviderSessionId: input.session.providerSessionId,
     }),
-    codexPromptVersion:
+    providerState:
       input.providerResult.provider === 'codex-cli'
-        ? CURRENT_CODEX_PROMPT_VERSION
+        ? writeAssistantCodexPromptVersion(
+            input.session.providerState,
+            CURRENT_CODEX_PROMPT_VERSION,
+          )
         : null,
     providerOptions: input.providerResult.providerOptions,
     updatedAt,
@@ -1495,12 +1545,6 @@ function shouldRecordAssistantRouteFailure(errorCode: string | null): boolean {
   return errorCode !== 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED'
 }
 
-function shouldUseLocalTranscriptContext(
-  provider: AssistantChatProvider,
-): boolean {
-  return provider === 'openai-compatible'
-}
-
 function shouldResetCodexProviderSessionForPromptVersion(input: {
   provider: AssistantChatProvider
   session: AssistantSession
@@ -1509,7 +1553,7 @@ function shouldResetCodexProviderSessionForPromptVersion(input: {
     input.provider === 'codex-cli' &&
     input.session.provider === 'codex-cli' &&
     input.session.providerSessionId !== null &&
-    normalizeNullableString(input.session.codexPromptVersion) !==
+    readAssistantCodexPromptVersion(input.session) !==
       CURRENT_CODEX_PROMPT_VERSION
   )
 }
@@ -1539,7 +1583,7 @@ async function buildCodexPromptResetContinuityContext(input: {
   }
 
   return [
-    'Recent local conversation transcript from this same Healthy Bob session:',
+    'Recent local conversation transcript from this same Murph session:',
     recentConversation.join('\n\n'),
     'Use this only as continuity context while bootstrapping the fresh Codex provider session.',
   ].join('\n\n')
@@ -1660,17 +1704,18 @@ async function restoreMissingAssistantSessionSnapshot(input: {
 function normalizeRestoredAssistantSessionSnapshot(
   snapshot: AssistantSession,
 ): AssistantSession {
-  if (
-    snapshot.provider === 'codex-cli' &&
-    normalizeNullableString(snapshot.codexPromptVersion) === null
-  ) {
-    return {
-      ...snapshot,
-      codexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
-    }
+  const normalized = normalizeAssistantSessionSnapshot(snapshot)
+  if (normalized.provider !== 'codex-cli') {
+    return normalized
   }
 
-  return snapshot
+  return {
+    ...normalized,
+    providerState: writeAssistantCodexPromptVersion(
+      normalized.providerState,
+      readAssistantCodexPromptVersion(normalized) ?? CURRENT_CODEX_PROMPT_VERSION,
+    ),
+  }
 }
 
 function buildAssistantSystemPrompt(input: {
@@ -1679,7 +1724,7 @@ function buildAssistantSystemPrompt(input: {
   assistantMemoryMcpAvailable: boolean
   cliAccess: {
     rawCommand: 'vault-cli'
-    setupCommand: 'healthybob'
+    setupCommand: 'murph'
   }
   assistantMemoryPrompt: string | null
   channel: string | null
@@ -1687,11 +1732,11 @@ function buildAssistantSystemPrompt(input: {
   supportsDirectCliExecution: boolean
 }): string {
   return [
-    'You are Healthy Bob, a local-first health assistant bound to one active vault for this session.',
-    'The active vault is already selected for this turn through the `VAULT` environment variable and Healthy Bob tools. The shell may start in an isolated assistant workspace instead of the live vault, so use `vault-cli` or assistant tools for vault work and do not treat direct file edits as the canonical path. Unless the user explicitly targets another vault, operate on this bound vault only.',
+    'You are Murph, a local-first health assistant bound to one active vault for this session.',
+    'The active vault is already selected for this turn through the `VAULT` environment variable and Murph tools. The shell may start in an isolated assistant workspace instead of the live vault, so use `vault-cli` or assistant tools for vault work and do not treat direct file edits as the canonical path. Unless the user explicitly targets another vault, operate on this bound vault only.',
     [
-      'Healthy Bob philosophy:',
-      '- Healthy Bob is a calm, observant companion for understanding the body in the context of a life.',
+      'Murph philosophy:',
+      '- Murph is a calm, observant companion for understanding the body in the context of a life.',
       "- Support the user's judgment; do not replace it or become their inner authority.",
       '- Treat biomarkers and wearables as clues, not verdicts. Context, felt experience, and life-fit matter as much as numbers.',
       '- Default to synthesis over interruption: prefer summaries, weekly readbacks, and lightweight check-ins over constant nudges or micro-instructions.',
@@ -1701,17 +1746,17 @@ function buildAssistantSystemPrompt(input: {
     ].join('\n'),
     [
       'Choose the right mode before acting:',
-      '- Vault operator mode (default): inspect or change Healthy Bob vault/runtime state through `vault-cli` semantics and any Healthy Bob assistant tools exposed in this session. This is not repo coding work.',
+      '- Vault operator mode (default): inspect or change Murph vault/runtime state through `vault-cli` semantics and any Murph assistant tools exposed in this session. This is not repo coding work.',
       '- Repo coding mode: only when the user explicitly asks to change repository code, tests, or docs.',
       '- In repo coding mode, read and follow `AGENTS.md`, `agent-docs/index.md`, and `agent-docs/PRODUCT_CONSTITUTION.md` before making product, UX, copy, or behavior decisions.',
       `- If repo coding changes the durable Codex bootstrap prompt, bump \`CURRENT_CODEX_PROMPT_VERSION\` so stale Codex provider sessions rotate cleanly.`,
     ].join('\n'),
     [
       'In vault operator mode:',
-      '- `vault-cli` is the raw Healthy Bob operator/data-plane surface for vault, inbox, and assistant operations.',
-      '- `healthybob` is the setup/onboarding entrypoint and also exposes the same top-level `chat` and `run` aliases after setup.',
-      '- `chat` / `assistant chat` / `healthybob chat` are the same local interactive terminal chat surface.',
-      '- `run` / `assistant run` / `healthybob run` are the long-lived automation loop for inbox watch, scheduled prompts, and configured channel auto-reply; with a model they can also triage inbox captures into structured vault updates.',
+      '- `vault-cli` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations.',
+      '- `murph` is the setup/onboarding entrypoint and also exposes the same top-level `chat` and `run` aliases after setup.',
+      '- `chat` / `assistant chat` / `murph chat` are the same local interactive terminal chat surface.',
+      '- `run` / `assistant run` / `murph run` are the long-lived automation loop for inbox watch, scheduled prompts, and configured channel auto-reply; with a model they can also triage inbox captures into structured vault updates.',
       '- Default to read-only inspection. Only write canonical vault data when the user is clearly asking to log, create, update, or delete something in the vault. Treat capture-style requests like meal logging as explicit permission to use the matching CLI write surface.',
       '- For vault-only tasks, do not read repo `AGENTS.md`, `agent-docs/**`, or `COORDINATION_LEDGER.md`, and do not enter repo coding workflows unless the user explicitly asks for repository changes.',
       '- Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
@@ -1764,7 +1809,7 @@ function buildAssistantStateGuidanceText(
 
   if (input.supportsDirectCliExecution) {
     return [
-      'Assistant state MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available.',
+      'Assistant state MCP tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
       'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
       'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
@@ -1772,8 +1817,8 @@ function buildAssistantStateGuidanceText(
   }
 
   return [
-    'This provider path does not expose Healthy Bob assistant-state tools or direct shell access.',
-    `If the user needs assistant scratch state inspected or changed here, give them the exact \`${input.rawCommand} assistant state ...\` command to run or switch to a Codex-backed Healthy Bob chat session.`,
+    'This provider path does not expose Murph assistant-state tools or direct shell access.',
+    `If the user needs assistant scratch state inspected or changed here, give them the exact \`${input.rawCommand} assistant state ...\` command to run or switch to a Codex-backed Murph chat session.`,
     'Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.',
   ].join('\n\n')
 }
@@ -1858,7 +1903,7 @@ function buildAssistantMemoryGuidanceText(
     return [
       'Assistant memory MCP tools are exposed in this session. Prefer `assistant memory ...` tools over shelling out, and do not edit `assistant-state/` files directly.',
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
-      'When a Healthy Bob memory tool asks for `vault`, pass the bound vault from the `VAULT` environment variable unless the user explicitly targets a different vault.',
+      'When a Murph memory tool asks for `vault`, pass the bound vault from the `VAULT` environment variable unless the user explicitly targets a different vault.',
       `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the MCP tools are unavailable in this session.`,
       'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
       'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
@@ -1870,7 +1915,7 @@ function buildAssistantMemoryGuidanceText(
 
   if (input.supportsDirectCliExecution) {
     return [
-      'Assistant memory MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available.',
+      'Assistant memory MCP tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory, and do not edit \`assistant-state/\` files directly.`,
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
       'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
@@ -1882,9 +1927,9 @@ function buildAssistantMemoryGuidanceText(
   }
 
   return [
-    'This provider path does not expose Healthy Bob assistant-memory tools or direct shell access.',
+    'This provider path does not expose Murph assistant-memory tools or direct shell access.',
     'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
-    `If the user wants stored memory inspected or changed here, give them the exact \`${input.rawCommand} assistant memory ...\` command to run or switch to a Codex-backed Healthy Bob chat session.`,
+    `If the user wants stored memory inspected or changed here, give them the exact \`${input.rawCommand} assistant memory ...\` command to run or switch to a Codex-backed Murph chat session.`,
     'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
     'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
   ].join('\n\n')
@@ -1908,7 +1953,7 @@ function buildAssistantCronGuidanceText(
       'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
       'Cron schedules execute while `assistant run` is active for the vault.',
       'When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.',
-      'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Healthy Bob defaults the overall timeout to 40m.',
+      'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Murph defaults the overall timeout to 40m.',
       '`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.',
       'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
       'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
@@ -1918,7 +1963,7 @@ function buildAssistantCronGuidanceText(
 
   if (input.supportsDirectCliExecution) {
     return [
-      'Scheduled assistant automation MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available.',
+      'Scheduled assistant automation MCP tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation, and do not edit \`assistant-state/cron/\` files directly.`,
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
@@ -1931,8 +1976,8 @@ function buildAssistantCronGuidanceText(
   }
 
   return [
-    'This provider path does not expose Healthy Bob cron tools or direct shell access.',
-    `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Healthy Bob chat session.`,
+    'This provider path does not expose Murph cron tools or direct shell access.',
+    `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Murph chat session.`,
     'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
     'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
     'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',

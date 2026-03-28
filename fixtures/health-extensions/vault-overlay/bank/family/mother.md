@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.family-member.v1
+schemaVersion: murph.frontmatter.family-member.v1
 docType: family_member
 familyMemberId: fam_01JNV44J4HH2F9H5S0VRZ4QJEB
 slug: mother

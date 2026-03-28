@@ -1,4 +1,4 @@
-name: Healthy Bob Host Support
+name: Murph Host Support
 
 on:
   pull_request:

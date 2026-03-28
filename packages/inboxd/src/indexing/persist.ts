@@ -9,7 +9,7 @@ import {
   toLocalDayKey,
   type AuditRecord,
   type EventRecord,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   acquireCanonicalWriteLock,
   applyCanonicalWriteBatch,
@@ -20,7 +20,7 @@ import {
   readJsonlRecords,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
-} from "@healthybob/core";
+} from "@murph/core";
 
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.ts";
 import {
@@ -53,7 +53,7 @@ export interface PersistRawCaptureInput {
 }
 
 export interface StoredCaptureEnvelope {
-  schema: "healthybob.inbox-envelope.v1";
+  schema: "murph.inbox-envelope.v1";
   captureId: string;
   eventId: string;
   storedAt: string;
@@ -217,7 +217,7 @@ export async function persistRawCapture({
     targetRelativePath: storedCapture.envelopePath,
     content: `${JSON.stringify(
       {
-        schema: "healthybob.inbox-envelope.v1",
+        schema: "murph.inbox-envelope.v1",
         captureId,
         eventId,
         storedAt,
@@ -501,7 +501,7 @@ function buildInboxCaptureEventRecord(input: {
   const timeZone = input.timeZone ?? "UTC";
 
   return assertContract<EventRecord>(eventRecordSchema, {
-    schemaVersion: "hb.event.v1",
+    schemaVersion: "murph.event.v1",
     id: input.eventId,
     occurredAt: input.inbound.occurredAt,
     recordedAt: input.stored.storedAt,
@@ -535,7 +535,7 @@ function buildInboxCaptureAuditRecord(input: {
   );
 
   return assertContract<AuditRecord>(auditRecordSchema, {
-    schemaVersion: "hb.audit.v1",
+    schemaVersion: "murph.audit.v1",
     id: input.auditId,
     action: "intake_import",
     status: "success",

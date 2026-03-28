@@ -1,0 +1,37 @@
+{
+  "name": "@murph/assistant-services",
+  "version": "0.0.0",
+  "private": false,
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cobuildwithus/murph"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "rimraf dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+  },
+  "dependencies": {
+    "murph": "workspace:*"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

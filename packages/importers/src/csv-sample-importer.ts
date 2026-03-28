@@ -14,7 +14,6 @@ import {
   normalizeRequiredString,
   normalizeTimestamp,
   readUtf8File,
-  resolveVaultRootAlias,
   stripEmptyObject,
   stripUndefined,
 } from "./shared.ts";
@@ -22,7 +21,6 @@ import {
 export interface CsvSampleImportInput {
   filePath: string;
   vaultRoot?: string;
-  vault?: string;
   presetId?: string;
   source?: string;
   stream?: string;
@@ -114,7 +112,7 @@ export async function prepareCsvSampleImport(
   }
 
   return stripUndefined({
-    vaultRoot: normalizeOptionalString(resolveVaultRootAlias(request), "vaultRoot"),
+    vaultRoot: normalizeOptionalString(request.vaultRoot, "vaultRoot"),
     stream,
     unit,
     source: config.source,

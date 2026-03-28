@@ -1,12 +1,12 @@
 import type {
   ExperimentFrontmatter,
   ExperimentStatus,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   EXPERIMENT_STATUSES,
   experimentFrontmatterSchema,
   safeParseContract,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { FRONTMATTER_SCHEMA_VERSIONS, ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
@@ -30,7 +30,7 @@ import {
   validateContract,
 } from "./shared.ts";
 
-import type { ExperimentEventRecord } from "@healthybob/contracts";
+import type { ExperimentEventRecord } from "@murph/contracts";
 import type { DateInput, FrontmatterObject, UnknownRecord } from "../types.ts";
 
 export interface CreateExperimentInput {
@@ -94,14 +94,6 @@ function normalizeExperimentHypothesis(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-// Preserve the legacy create/idempotency behavior: unknown statuses still normalize
-// to "active" here, while update flows use requireExperimentStatus for strict validation.
-function coerceExperimentStatus(value: unknown): ExperimentStatus {
-  return typeof value === "string" && EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)
-    ? (value as ExperimentStatus)
-    : "active";
-}
-
 function requireExperimentStatus(value: unknown): ExperimentStatus {
   if (typeof value !== "string" || !EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)) {
     throw new VaultError("EXPERIMENT_STATUS_INVALID", "Experiment status is invalid.");
@@ -122,7 +114,7 @@ function toExperimentComparableAttributes(
 ): UnknownRecord {
   return compactObject({
     slug: frontmatterString(attributes as FrontmatterObject, "slug").trim(),
-    status: coerceExperimentStatus((attributes as FrontmatterObject).status),
+    status: requireExperimentStatus((attributes as FrontmatterObject).status),
     title: frontmatterString(attributes as FrontmatterObject, "title").trim(),
     startedOn: frontmatterString(attributes as FrontmatterObject, "startedOn").trim(),
     hypothesis: normalizeExperimentHypothesis((attributes as FrontmatterObject).hypothesis),
@@ -205,7 +197,7 @@ export async function createExperiment({
   const startedDay = toLocalDayKey(startedOn, vault.metadata.timezone ?? defaultTimeZone(), "startedOn");
   const relativePath = `${VAULT_LAYOUT.experimentsDirectory}/${safeSlug}.md`;
   const normalizedTitle = String(title ?? safeSlug).trim();
-  const normalizedStatus = coerceExperimentStatus(status);
+  const normalizedStatus = requireExperimentStatus(status);
   const normalizedHypothesis = normalizeExperimentHypothesis(hypothesis);
   const comparableAttributes = toExperimentComparableAttributes({
     slug: safeSlug,

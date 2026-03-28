@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { getEventListeners } from 'node:events'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,11 +10,11 @@ import {
   listWriteOperationMetadataPaths,
   readJsonlRecords,
   updateVaultSummary,
-} from '@healthybob/core'
+} from '@murph/core'
 import {
   createInboxPipeline,
   openInboxRuntime,
-} from '@healthybob/inboxd'
+} from '@murph/inboxd'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const serviceMocks = vi.hoisted(() => ({
@@ -67,6 +68,8 @@ import {
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
+const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =
+  'MURPH_CANONICAL_WRITE_GUARD_RECEIPT_DIR'
 
 afterEach(async () => {
   await Promise.all(
@@ -94,6 +97,70 @@ async function findNewOperationMetadataPath(
   ).find((relativePath) => !existingPaths.has(relativePath))
   assert.ok(operationRelativePath)
   return operationRelativePath
+}
+
+async function findGuardReceiptRoot(): Promise<string> {
+  const receiptRoot = process.env[CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV]
+  assert.equal(typeof receiptRoot, 'string')
+  assert.ok(receiptRoot)
+  return receiptRoot
+}
+
+async function writeGuardReceipt(input: {
+  operationId: string
+  createdAt: string
+  updatedAt: string
+  actions: Array<
+    | {
+        kind: 'delete'
+        targetRelativePath: string
+      }
+    | {
+        kind: 'jsonl_append' | 'text_write'
+        targetRelativePath: string
+        payload: string
+      }
+  >
+}): Promise<void> {
+  const receiptRoot = await findGuardReceiptRoot()
+  const payloadDirectory = path.join(receiptRoot, input.operationId)
+  await mkdir(payloadDirectory, { recursive: true })
+
+  const actions = await Promise.all(
+    input.actions.map(async (action, index) => {
+      if (action.kind === 'delete') {
+        return action
+      }
+
+      const payloadFileName = `${String(index).padStart(4, '0')}.${action.kind === 'text_write' ? 'txt' : 'jsonl'}`
+      const payloadRelativePath = `${input.operationId}/${payloadFileName}`
+      await writeFile(path.join(receiptRoot, payloadRelativePath), action.payload, 'utf8')
+      return {
+        kind: action.kind,
+        targetRelativePath: action.targetRelativePath,
+        payloadRelativePath,
+        committedPayloadReceipt: {
+          sha256: createHash('sha256').update(action.payload).digest('hex'),
+          byteLength: Buffer.byteLength(action.payload),
+        },
+      }
+    }),
+  )
+
+  await writeFile(
+    path.join(receiptRoot, `${input.operationId}.json`),
+    `${JSON.stringify(
+      {
+        schemaVersion: 'murph.write-operation-guard-receipt.v1',
+        operationId: input.operationId,
+        createdAt: input.createdAt,
+        updatedAt: input.updatedAt,
+        actions,
+      },
+      null,
+      2,
+    )}\n`,
+  )
 }
 
 async function waitForPredicate(
@@ -160,14 +227,24 @@ function assertBlockedAssistantResult(
 test('buildResolveAssistantSessionInput keeps locator shaping and operator default fallbacks stable', () => {
   const defaults = {
     provider: 'codex-cli' as const,
-    codexCommand: '/opt/bin/codex',
-    model: 'gpt-5.4-mini',
-    reasoningEffort: 'high',
+    defaultsByProvider: {
+      'codex-cli': {
+        codexCommand: '/opt/bin/codex',
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'high',
+        sandbox: 'workspace-write' as const,
+        approvalPolicy: 'on-request' as const,
+        profile: 'ops',
+        oss: true,
+        baseUrl: null,
+        apiKeyEnv: null,
+        providerName: null,
+        headers: null,
+      },
+    },
     identityId: 'assistant:primary',
-    sandbox: 'workspace-write' as const,
-    approvalPolicy: 'on-request' as const,
-    profile: 'ops',
-    oss: true,
+    failoverRoutes: null,
+    account: null,
     selfDeliveryTargets: null,
   }
 
@@ -201,6 +278,7 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       baseUrl: null,
       apiKeyEnv: null,
       providerName: null,
+      headers: null,
       reasoningEffort: 'high',
     },
   )
@@ -243,13 +321,14 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       baseUrl: null,
       apiKeyEnv: null,
       providerName: null,
+      headers: null,
       reasoningEffort: 'low',
     },
   )
 })
 
 test('sendAssistantMessage treats null provider-option inputs as fallbacks to saved operator defaults', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-provider-defaults-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-provider-defaults-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -272,10 +351,21 @@ test('sendAssistantMessage treats null provider-option inputs as fallbacks to sa
   try {
     await saveAssistantOperatorDefaultsPatch({
       provider: 'openai-compatible',
-      model: 'gpt-oss:20b',
-      baseUrl: 'http://127.0.0.1:11434/v1',
-      apiKeyEnv: 'OLLAMA_API_KEY',
-      providerName: 'ollama',
+      defaultsByProvider: {
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'gpt-oss:20b',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: null,
+        },
+      },
     })
 
     await sendAssistantMessage({
@@ -300,7 +390,7 @@ test('sendAssistantMessage treats null provider-option inputs as fallbacks to sa
 })
 
 test('sendAssistantMessage gives the first provider turn direct CLI guidance, PATH access, bound memory context, and capability-aware assistant tool guidance', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -358,7 +448,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(path.relative(vaultRoot, expectedWorkspace), /^\.\.(?:[\\/]|$)/u)
   assert.match(firstCall?.systemPrompt ?? '', /bound to one active vault/u)
   assert.match(firstCall?.systemPrompt ?? '', /isolated assistant workspace/u)
-  assert.match(firstCall?.systemPrompt ?? '', /Healthy Bob philosophy:/u)
+  assert.match(firstCall?.systemPrompt ?? '', /Murph philosophy:/u)
   assert.match(firstCall?.systemPrompt ?? '', /calm, observant companion/u)
   assert.match(firstCall?.systemPrompt ?? '', /Support the user's judgment; do not replace it/u)
   assert.match(firstCall?.systemPrompt ?? '', /numbers\./u)
@@ -370,8 +460,8 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     firstCall?.systemPrompt ?? '',
     /read and follow `AGENTS\.md`, `agent-docs\/index\.md`, and `agent-docs\/PRODUCT_CONSTITUTION\.md`/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /healthybob chat/u)
-  assert.match(firstCall?.systemPrompt ?? '', /healthybob run/u)
+  assert.match(firstCall?.systemPrompt ?? '', /murph chat/u)
+  assert.match(firstCall?.systemPrompt ?? '', /murph run/u)
   assert.match(firstCall?.systemPrompt ?? '', /Start with the smallest relevant context/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
@@ -395,11 +485,11 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /use the matching `vault-cli` write surface so the write follows Healthy Bob's intended validation and audit path/u,
+    /use the matching `vault-cli` write surface so the write follows Murph's intended validation and audit path/u,
   )
   assert.match(
     firstCall?.systemPrompt ?? '',
-    /Direct Healthy Bob CLI execution is available in this session/u,
+    /Direct Murph CLI execution is available in this session/u,
   )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli <command> --help/u)
   assert.match(
@@ -446,7 +536,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     firstCall?.systemPrompt ?? '',
     /Cron prompts may explicitly tell you to use the research tool/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /healthybob/u)
+  assert.match(firstCall?.systemPrompt ?? '', /murph/u)
   assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))
   assert.equal(turnContext?.sourcePrompt, 'Inspect the vault with the CLI.')
@@ -467,7 +557,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   } else {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Assistant state MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available/u,
+      /Assistant state MCP tools are not exposed in this session, but direct Murph CLI execution is available/u,
     )
   }
   if (memoryMcpExposed) {
@@ -475,7 +565,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   } else {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Assistant memory MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available/u,
+      /Assistant memory MCP tools are not exposed in this session, but direct Murph CLI execution is available/u,
     )
   }
   if (cronMcpExposed) {
@@ -486,7 +576,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   } else {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Scheduled assistant automation MCP tools are not exposed in this session, but direct Healthy Bob CLI execution is available/u,
+      /Scheduled assistant automation MCP tools are not exposed in this session, but direct Murph CLI execution is available/u,
     )
   }
   assert.equal(
@@ -508,7 +598,7 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
 })
 
 test('sendAssistantMessage reuses the same isolated provider workspace across repeated turns in one session', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-workspace-reuse-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-workspace-reuse-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -559,7 +649,7 @@ test('sendAssistantMessage reuses the same isolated provider workspace across re
 })
 
 test('sendAssistantMessage preserves nested in-vault working directories inside the isolated workspace', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nested-working-dir-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-nested-working-dir-'))
   const vaultRoot = path.join(parent, 'vault')
   const nestedWorkingDirectory = path.join(vaultRoot, 'notes', 'daily')
   cleanupPaths.push(parent)
@@ -607,7 +697,7 @@ test('sendAssistantMessage preserves nested in-vault working directories inside 
 })
 
 test('sendAssistantMessage keeps the requested working directory for non-shell providers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nonshell-working-dir-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-nonshell-working-dir-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -649,7 +739,7 @@ test('sendAssistantMessage keeps the requested working directory for non-shell p
 })
 
 test('sendAssistantMessage keeps an outside-vault working directory for direct-CLI providers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-external-working-dir-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-external-working-dir-'))
   const vaultRoot = path.join(parent, 'vault')
   const externalRoot = path.join(parent, 'repo')
   cleanupPaths.push(parent)
@@ -691,7 +781,7 @@ test('sendAssistantMessage keeps an outside-vault working directory for direct-C
 })
 
 test('sendAssistantMessage clamps vault-bound danger-full-access requests back to workspace-write', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-sandbox-clamp-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-sandbox-clamp-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -719,7 +809,7 @@ test('sendAssistantMessage clamps vault-bound danger-full-access requests back t
 })
 
 test('sendAssistantMessage serializes concurrent provider turns per vault', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-turn-lock-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -790,7 +880,7 @@ test('sendAssistantMessage serializes concurrent provider turns per vault', asyn
 })
 
 test('sendAssistantMessage aborts while waiting for the vault turn lock', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-abort-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-turn-lock-abort-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -852,7 +942,7 @@ test('sendAssistantMessage aborts while waiting for the vault turn lock', async 
 })
 
 test('sendAssistantMessage removes the prior-turn abort listener once the queue advances', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-listeners-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-turn-lock-listeners-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -909,7 +999,7 @@ test('sendAssistantMessage removes the prior-turn abort listener once the queue 
 })
 
 test('sendAssistantMessage retries after an externally held vault turn lock clears', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-external-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-turn-lock-external-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -954,7 +1044,7 @@ test('sendAssistantMessage retries after an externally held vault turn lock clea
 })
 
 test('sendAssistantMessage aborts while polling for an externally held vault turn lock', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-turn-lock-external-abort-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-turn-lock-external-abort-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -995,7 +1085,7 @@ test('sendAssistantMessage aborts while polling for an externally held vault tur
 })
 
 test('sendAssistantMessage adds no-citations formatting guidance for outbound channel replies only', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-channel-formatting-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-channel-formatting-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1069,7 +1159,7 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
 
 
 test('sendAssistantMessage writes a system receipt for provider and delivery milestones', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-receipts-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-receipts-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1142,7 +1232,7 @@ test('sendAssistantMessage writes a system receipt for provider and delivery mil
 })
 
 test('sendAssistantMessage replays the local transcript for OpenAI-compatible sessions and keeps provider session ids local-only', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-openai-compatible-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-compatible-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -1202,15 +1292,15 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.equal(firstCall?.resumeProviderSessionId, null)
     assert.equal(secondCall?.resumeProviderSessionId, null)
     assert.equal(secondCall?.provider, 'openai-compatible')
-    assert.match(firstCall?.systemPrompt ?? '', /You are Healthy Bob/u)
-    assert.match(secondCall?.systemPrompt ?? '', /You are Healthy Bob/u)
+    assert.match(firstCall?.systemPrompt ?? '', /You are Murph/u)
+    assert.match(secondCall?.systemPrompt ?? '', /You are Murph/u)
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /does not expose Healthy Bob assistant-memory tools or direct shell access/u,
+      /does not expose Murph assistant-memory tools or direct shell access/u,
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /does not expose Healthy Bob cron tools or direct shell access/u,
+      /does not expose Murph cron tools or direct shell access/u,
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
@@ -1218,7 +1308,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Healthy Bob chat session/u,
+      /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Murph chat session/u,
     )
     assert.doesNotMatch(
       firstCall?.systemPrompt ?? '',
@@ -1282,7 +1372,7 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
 })
 
 test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-version change while keeping local transcript continuity', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-codex-prompt-version-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-codex-prompt-version-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1307,7 +1397,11 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
     ...resolved.session,
     provider: 'codex-cli',
     providerSessionId: 'thread-stale-codex',
-    codexPromptVersion: '2026-03-20.1',
+    providerState: {
+      codexCli: {
+        promptVersion: '2026-03-20.1',
+      },
+    },
     updatedAt: '2026-03-26T00:00:00.000Z',
     lastTurnAt: '2026-03-26T00:00:00.000Z',
     turnCount: 2,
@@ -1332,7 +1426,7 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
   assert.equal(call?.resumeProviderSessionId, null)
   assert.match(
     call?.continuityContext ?? '',
-    /Recent local conversation transcript from this same Healthy Bob session/u,
+    /Recent local conversation transcript from this same Murph session/u,
   )
   assert.match(call?.continuityContext ?? '', /User: Old question about dinner\./u)
   assert.match(call?.continuityContext ?? '', /Assistant: Old answer about dinner\./u)
@@ -1341,12 +1435,15 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
     /bootstrapping the fresh Codex provider session/u,
   )
   assert.equal(result.session.providerSessionId, 'thread-fresh-codex')
-  assert.equal(result.session.codexPromptVersion, CURRENT_CODEX_PROMPT_VERSION)
+  assert.equal(
+    result.session.providerState?.codexCli?.promptVersion,
+    CURRENT_CODEX_PROMPT_VERSION,
+  )
   assert.equal(result.session.turnCount, 3)
 })
 
 test('sendAssistantMessage onboarding persists answered slots and asks only for missing items in later new sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-partial-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-partial-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1408,7 +1505,7 @@ test('sendAssistantMessage onboarding persists answered slots and asks only for 
 })
 
 test('sendAssistantMessage suppresses onboarding once name, tone, and goals are already answered', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-complete-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-complete-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1455,7 +1552,7 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
 })
 
 test('sendAssistantMessage asks for optional name and tone only once even when later new sessions still need onboarding', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-onboarding-optional-once-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-optional-once-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1511,7 +1608,7 @@ test('sendAssistantMessage asks for optional name and tone only once even when l
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-provider-switch-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-provider-switch-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1585,7 +1682,7 @@ function requireTurnContext(env: NodeJS.ProcessEnv | undefined) {
 }
 
 test('sendAssistantMessage loads only explicit assistant-written core memory into fresh sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-memory-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1655,7 +1752,7 @@ test('sendAssistantMessage loads only explicit assistant-written core memory int
 })
 
 test('sendAssistantMessage no longer auto-persists memory without explicit assistant upserts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-no-auto-memory-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-no-auto-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1696,7 +1793,7 @@ test('sendAssistantMessage no longer auto-persists memory without explicit assis
 })
 
 test('sendAssistantMessage bootstraps only the latest mutable long-term memory written through assistant memory upserts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-upsert-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-upsert-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1822,7 +1919,7 @@ test('sendAssistantMessage bootstraps only the latest mutable long-term memory w
 })
 
 test('sendAssistantMessage can persist selected health context into assistant memory for private future sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-sensitive-memory-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-sensitive-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1879,7 +1976,7 @@ test('sendAssistantMessage can persist selected health context into assistant me
 })
 
 test('sendAssistantMessage blocks health-memory upserts in non-private assistant contexts', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-group-health-memory-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-group-health-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1942,7 +2039,7 @@ test('sendAssistantMessage blocks health-memory upserts in non-private assistant
 
 
 test('sendAssistantMessage forwards provider progress callbacks to the provider turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-progress-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-progress-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -1970,7 +2067,7 @@ test('sendAssistantMessage forwards provider progress callbacks to the provider 
 })
 
 test('sendAssistantMessage recreates a missing local session from the live session snapshot and retries the turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-session-restore-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-session-restore-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2044,7 +2141,7 @@ test('sendAssistantMessage recreates a missing local session from the live sessi
 })
 
 test('sendAssistantMessage preserves a recovered provider session id after a resumable provider failure', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-recoverable-error-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-recoverable-error-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2088,7 +2185,7 @@ test('sendAssistantMessage preserves a recovered provider session id after a res
 })
 
 test('sendAssistantMessage does not persist a recovered provider session id for non-retryable provider failures', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-nonretryable-error-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-nonretryable-error-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2125,7 +2222,7 @@ test('sendAssistantMessage does not persist a recovered provider session id for 
 })
 
 test('sendAssistantMessage rolls back unauthorized direct canonical vault edits and fails the turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-guard-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-guard-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2177,7 +2274,7 @@ test('sendAssistantMessage rolls back unauthorized direct canonical vault edits 
 })
 
 test('sendAssistantMessage allows committed audited canonical writes from core mutation paths', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-allow-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-allow-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2214,7 +2311,7 @@ test('sendAssistantMessage allows committed audited canonical writes from core m
 })
 
 test('sendAssistantMessage allows concurrent inbox canonical writes that go through audited core write operations', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-inbox-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-inbox-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2296,7 +2393,7 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
 })
 
 test('sendAssistantMessage preserves canonical writes from operations staged before the guard snapshot and committed during the provider turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-staged-before-snapshot-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-staged-before-snapshot-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2314,7 +2411,7 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
     metadataPath,
     `${JSON.stringify(
       {
-        schemaVersion: 'hb.write-operation.v1',
+        schemaVersion: 'murph.write-operation.v1',
         operationId,
         operationType: 'assistant_guard_staged_before_snapshot_test',
         summary: 'Commit a pre-staged canonical write during the guarded provider turn',
@@ -2345,7 +2442,7 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
       metadataPath,
       `${JSON.stringify(
         {
-          schemaVersion: 'hb.write-operation.v1',
+          schemaVersion: 'murph.write-operation.v1',
           operationId,
           operationType: 'assistant_guard_staged_before_snapshot_test',
           summary: 'Commit a pre-staged canonical write during the guarded provider turn',
@@ -2362,7 +2459,10 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
               overwrite: true,
               allowExistingMatch: false,
               allowRaw: false,
-              committedPayloadBase64: Buffer.from(committedContent).toString('base64'),
+              committedPayloadReceipt: {
+                sha256: createHash('sha256').update(committedContent).digest('hex'),
+                byteLength: Buffer.byteLength(committedContent),
+              },
             },
           ],
         },
@@ -2370,6 +2470,18 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
         2,
       )}\n`,
     )
+    await writeGuardReceipt({
+      operationId,
+      createdAt: '2026-03-27T00:00:00.000Z',
+      updatedAt: '2026-03-27T00:00:01.000Z',
+      actions: [
+        {
+          kind: 'text_write',
+          targetRelativePath,
+          payload: committedContent,
+        },
+      ],
+    })
 
     return {
       provider: 'codex-cli',
@@ -2393,7 +2505,7 @@ test('sendAssistantMessage preserves canonical writes from operations staged bef
 })
 
 test('sendAssistantMessage restores the committed canonical content when a provider tampers with the same file after an audited write', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-tamper-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-tamper-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2445,7 +2557,7 @@ test('sendAssistantMessage restores the committed canonical content when a provi
 
 test('sendAssistantMessage blocks on malformed write-operation metadata and still rolls back later direct tampering', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-service-canonical-bad-operation-metadata-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-bad-operation-metadata-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2508,7 +2620,7 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
     paths: [targetRelativePath],
   })
 
-  assert.equal(await readFile(targetPath, 'utf8'), committedContent)
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
@@ -2518,9 +2630,9 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
   assert.equal(session.session.providerSessionId, null)
 })
 
-test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead of being treated like no payload', async () => {
+test('sendAssistantMessage blocks when committed payload receipt metadata is missing', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-service-canonical-missing-committed-payload-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-missing-committed-payload-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2558,7 +2670,7 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
     assert.ok(Array.isArray(operation.actions))
     operation.actions?.forEach((action) => {
       if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
-        delete action.committedPayloadBase64
+        delete action.committedPayloadReceipt
       }
     })
     await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
@@ -2580,9 +2692,9 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
   })
 
   assertBlockedAssistantResult(result, {
-    actionKind: 'text_write',
-    guardFailureReason: 'invalid_committed_payload',
-    guardFailureTargetPath: targetRelativePath,
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailureTargetPath: null,
     guardFailurePathPattern: /^\.runtime\/operations\/op_/u,
     paths: [targetRelativePath],
   })
@@ -2597,9 +2709,9 @@ test('sendAssistantMessage blocks when committedPayloadBase64 is missing instead
   assert.equal(session.session.providerSessionId, null)
 })
 
-test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and still rolls back later direct tampering', async () => {
+test('sendAssistantMessage blocks when the trusted guard payload copy is missing', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-service-canonical-noncanonical-payload-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-missing-guard-receipt-payload-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2630,28 +2742,29 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
       vaultRoot,
       existingOperationPaths,
     )
-    const operationPath = path.join(vaultRoot, operationRelativePath)
-    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+    const operation = JSON.parse(
+      await readFile(path.join(vaultRoot, operationRelativePath), 'utf8'),
+    ) as {
+      operationId: string
+    }
+    const receiptRoot = await findGuardReceiptRoot()
+    const receiptPath = path.join(receiptRoot, `${operation.operationId}.json`)
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as {
       actions?: Array<Record<string, unknown>>
     }
-    assert.ok(Array.isArray(operation.actions))
-    operation.actions?.forEach((action) => {
-      if (
+    const payloadRelativePath = receipt.actions?.find(
+      (action) =>
         action.kind === 'text_write' &&
         action.targetRelativePath === targetRelativePath &&
-        typeof action.committedPayloadBase64 === 'string'
-      ) {
-        action.committedPayloadBase64 = action.committedPayloadBase64.endsWith('=')
-          ? action.committedPayloadBase64.replace(/=+$/u, '')
-          : `${action.committedPayloadBase64}\n`
-      }
-    })
-    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+        typeof action.payloadRelativePath === 'string',
+    )?.payloadRelativePath
+    assert.equal(typeof payloadRelativePath, 'string')
+    await rm(path.join(receiptRoot, payloadRelativePath as string), { force: true })
     await writeFile(targetPath, 'tampered-after-noncanonical-payload\n')
 
     return {
       provider: 'codex-cli',
-      providerSessionId: 'thread-noncanonical-committed-payload',
+      providerSessionId: 'thread-missing-guard-receipt-payload',
       response: 'assistant reply',
       stderr: '',
       stdout: '',
@@ -2661,7 +2774,7 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:canonical-noncanonical-committed-payload',
+    alias: 'chat:canonical-missing-guard-receipt-payload',
     prompt: 'Update the vault title.',
   })
 
@@ -2677,15 +2790,15 @@ test('sendAssistantMessage blocks on non-canonical committedPayloadBase64 and st
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'chat:canonical-noncanonical-committed-payload',
+    alias: 'chat:canonical-missing-guard-receipt-payload',
   })
   assert.equal(session.session.turnCount, 0)
   assert.equal(session.session.providerSessionId, null)
 })
 
-test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossible non-UTF-8 write bytes', async () => {
+test('sendAssistantMessage blocks when the trusted guard payload copy no longer matches its receipt digest', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-service-canonical-binary-payload-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-mismatched-guard-receipt-payload-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2716,21 +2829,32 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
       vaultRoot,
       existingOperationPaths,
     )
-    const operationPath = path.join(vaultRoot, operationRelativePath)
-    const operation = JSON.parse(await readFile(operationPath, 'utf8')) as {
+    const operation = JSON.parse(
+      await readFile(path.join(vaultRoot, operationRelativePath), 'utf8'),
+    ) as {
+      operationId: string
+    }
+    const receiptRoot = await findGuardReceiptRoot()
+    const receiptPath = path.join(receiptRoot, `${operation.operationId}.json`)
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8')) as {
       actions?: Array<Record<string, unknown>>
     }
-    assert.ok(Array.isArray(operation.actions))
-    operation.actions?.forEach((action) => {
-      if (action.kind === 'text_write' && action.targetRelativePath === targetRelativePath) {
-        action.committedPayloadBase64 = '/w=='
-      }
-    })
-    await writeFile(operationPath, `${JSON.stringify(operation, null, 2)}\n`)
+    const payloadRelativePath = receipt.actions?.find(
+      (action) =>
+        action.kind === 'text_write' &&
+        action.targetRelativePath === targetRelativePath &&
+        typeof action.payloadRelativePath === 'string',
+    )?.payloadRelativePath
+    assert.equal(typeof payloadRelativePath, 'string')
+    await writeFile(
+      path.join(receiptRoot, payloadRelativePath as string),
+      'tampered-receipt-copy\n',
+      'utf8',
+    )
 
     return {
       provider: 'codex-cli',
-      providerSessionId: 'thread-binary-committed-payload',
+      providerSessionId: 'thread-mismatched-guard-receipt-payload',
       response: 'assistant reply',
       stderr: '',
       stdout: '',
@@ -2740,7 +2864,7 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
 
   const result = await sendAssistantMessage({
     vault: vaultRoot,
-    alias: 'chat:canonical-binary-committed-payload',
+    alias: 'chat:canonical-mismatched-guard-receipt-payload',
     prompt: 'Update the vault title.',
   })
 
@@ -2756,14 +2880,292 @@ test('sendAssistantMessage blocks when committedPayloadBase64 decodes to impossi
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
-    alias: 'chat:canonical-binary-committed-payload',
+    alias: 'chat:canonical-mismatched-guard-receipt-payload',
   })
   assert.equal(session.session.turnCount, 0)
   assert.equal(session.session.providerSessionId, null)
 })
 
+test('sendAssistantMessage blocks rogue guard receipts that have no matching operation metadata file', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-rogue-guard-receipt-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/rogue-receipt-target.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const operationId = 'op_fake_guard_receipt_without_metadata'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(targetPath), { recursive: true })
+    await writeFile(targetPath, 'provider direct write\n', 'utf8')
+    await writeGuardReceipt({
+      operationId,
+      createdAt: '2026-03-28T00:00:00.000Z',
+      updatedAt: '2026-03-28T00:00:01.000Z',
+      actions: [
+        {
+          kind: 'text_write',
+          targetRelativePath,
+          payload: 'provider direct write\n',
+        },
+      ],
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-rogue-guard-receipt',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:rogue-guard-receipt',
+    prompt: 'Try to authorize a direct write with a rogue guard receipt.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailurePathPattern: /^op_fake_guard_receipt_without_metadata\.json$/u,
+    paths: [targetRelativePath],
+  })
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+})
+
+test('sendAssistantMessage blocks brand-new fake committed metadata from authorizing direct bank writes', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-fake-committed-metadata-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/fake-provider-write.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const operationId = 'op_fake_provider_write'
+  const metadataPath = path.join(vaultRoot, `.runtime/operations/${operationId}.json`)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(metadataPath), { recursive: true })
+    await writeFile(targetPath, 'provider direct write\n')
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'murph.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_fake_metadata_test',
+          summary: 'Synthetic committed metadata should not authorize writes.',
+          status: 'committed',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:01.000Z',
+          occurredAt: '2026-03-28T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath,
+              stageRelativePath: `.runtime/operations/${operationId}/payloads/0000.txt`,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+              committedPayloadReceipt: {
+                sha256: createHash('sha256').update('provider direct write\n').digest('hex'),
+                byteLength: Buffer.byteLength('provider direct write\n'),
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-fake-committed-metadata',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:fake-committed-metadata',
+    prompt: 'Write directly to the bank file.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailureTargetPath: null,
+    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_provider_write\.json$/u,
+    paths: [targetRelativePath],
+  })
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+})
+
+test('sendAssistantMessage does not create raw files from smuggled protected target paths in fake metadata', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-smuggled-target-path-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const smuggledTargetPath = 'bank/../raw/evil.md'
+  const rawTargetPath = path.join(vaultRoot, 'raw', 'evil.md')
+  const operationId = 'op_fake_smuggled_target'
+  const metadataPath = path.join(vaultRoot, `.runtime/operations/${operationId}.json`)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(metadataPath), { recursive: true })
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'murph.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_smuggled_target_test',
+          summary: 'Smuggled target paths must not be normalized into raw writes.',
+          status: 'committed',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:01.000Z',
+          occurredAt: '2026-03-28T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath: smuggledTargetPath,
+              stageRelativePath: `.runtime/operations/${operationId}/payloads/0000.txt`,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+              committedPayloadReceipt: {
+                sha256: createHash('sha256').update('smuggled\n').digest('hex'),
+                byteLength: Buffer.byteLength('smuggled\n'),
+              },
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-smuggled-target-path',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:smuggled-target-path',
+    prompt: 'Use fake metadata to smuggle a raw write.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_smuggled_target\.json$/u,
+    paths: [],
+  })
+  await assert.rejects(readFile(rawTargetPath, 'utf8'), /ENOENT/u)
+})
+
+test('sendAssistantMessage ignores attacker-controlled stage paths when committed payload receipts are absent', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-stage-path-without-receipt-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/stage-path-should-not-authorize.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const attackerPayloadRelativePath = 'raw/inbox/captures/cap_fake/attachments/1/evil.txt'
+  const attackerPayloadPath = path.join(vaultRoot, attackerPayloadRelativePath)
+  const operationId = 'op_fake_stage_path_without_receipt'
+  const metadataPath = path.join(vaultRoot, `.runtime/operations/${operationId}.json`)
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(attackerPayloadPath), { recursive: true })
+    await mkdir(path.dirname(metadataPath), { recursive: true })
+    await writeFile(attackerPayloadPath, 'attacker-controlled payload\n', 'utf8')
+    await writeFile(targetPath, 'provider direct write\n', 'utf8')
+    await writeFile(
+      metadataPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 'murph.write-operation.v1',
+          operationId,
+          operationType: 'assistant_guard_stage_path_without_receipt_test',
+          summary: 'Missing receipts must not fall back to stageRelativePath.',
+          status: 'committed',
+          createdAt: '2026-03-28T00:00:00.000Z',
+          updatedAt: '2026-03-28T00:00:01.000Z',
+          occurredAt: '2026-03-28T00:00:00.000Z',
+          actions: [
+            {
+              kind: 'text_write',
+              state: 'applied',
+              targetRelativePath,
+              stageRelativePath: attackerPayloadRelativePath,
+              overwrite: true,
+              allowExistingMatch: false,
+              allowRaw: false,
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    )
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-stage-path-without-receipt',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:stage-path-without-receipt',
+    prompt: 'Try to preserve a direct write with fake stage metadata.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureCode: 'OPERATION_INVALID',
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailurePathPattern: /^\.runtime\/operations\/op_fake_stage_path_without_receipt\.json$/u,
+    paths: [targetRelativePath],
+  })
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+  assert.equal(await readFile(attackerPayloadPath, 'utf8'), 'attacker-controlled payload\n')
+})
+
 test('sendAssistantMessage prefers the canonical write guard error when the provider both writes directly and throws', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-provider-error-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-provider-error-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2805,7 +3207,7 @@ test('sendAssistantMessage prefers the canonical write guard error when the prov
 })
 
 test('sendAssistantMessage preserves a recovered provider session on blocked canonical-write turns', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-recoverable-error-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-recoverable-error-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2859,7 +3261,7 @@ test('sendAssistantMessage preserves a recovered provider session on blocked can
 })
 
 test('sendAssistantMessage reconstructs audited ledger appends and rolls back later shard tampering', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-append-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-append-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2913,7 +3315,7 @@ test('sendAssistantMessage reconstructs audited ledger appends and rolls back la
 
 test('sendAssistantMessage preserves large audited protected text writes after later tampering', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-service-canonical-large-text-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-large-text-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -2963,7 +3365,7 @@ test('sendAssistantMessage preserves large audited protected text writes after l
 
 test('sendAssistantMessage preserves large audited protected jsonl appends after later tampering', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-service-canonical-large-append-'),
+    path.join(tmpdir(), 'murph-assistant-service-canonical-large-append-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -3021,7 +3423,7 @@ test('sendAssistantMessage preserves large audited protected jsonl appends after
 })
 
 test('sendAssistantMessage preserves audited protected deletes', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-delete-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-delete-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -3075,7 +3477,7 @@ test('sendAssistantMessage preserves audited protected deletes', async () => {
 })
 
 test('sendAssistantMessage does not fail over or start cooldown when the canonical write guard blocks a provider turn', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-service-canonical-no-failover-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-canonical-no-failover-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 

@@ -1,4 +1,4 @@
-import type { ProtocolUpsertPayload } from "@healthybob/contracts";
+import type { ProtocolUpsertPayload } from "@murph/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";

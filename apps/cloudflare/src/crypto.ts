@@ -1,11 +1,16 @@
 import { decodeBase64, encodeBase64 } from "./base64.js";
 
+const HOSTED_CIPHER_SCHEMA = "murph.hosted-cipher.v1";
+const LEGACY_HOSTED_CIPHER_SCHEMA = "healthybob.hosted-cipher.v1";
+
+type HostedCipherSchema = typeof HOSTED_CIPHER_SCHEMA | typeof LEGACY_HOSTED_CIPHER_SCHEMA;
+
 export interface HostedCipherEnvelope {
   algorithm: "AES-GCM";
   ciphertext: string;
   iv: string;
   keyId: string;
-  schema: "healthybob.hosted-cipher.v1";
+  schema: HostedCipherSchema;
 }
 
 export async function encryptHostedBundle(input: {
@@ -31,7 +36,7 @@ export async function encryptHostedBundle(input: {
     ciphertext: encodeBase64(ciphertext),
     iv: encodeBase64(iv),
     keyId: input.keyId,
-    schema: "healthybob.hosted-cipher.v1",
+    schema: HOSTED_CIPHER_SCHEMA,
   };
 }
 
@@ -39,7 +44,7 @@ export async function decryptHostedBundle(input: {
   envelope: HostedCipherEnvelope;
   key: Uint8Array;
 }): Promise<Uint8Array> {
-  if (input.envelope.schema !== "healthybob.hosted-cipher.v1" || input.envelope.algorithm !== "AES-GCM") {
+  if (!isSupportedHostedCipherSchema(input.envelope.schema) || input.envelope.algorithm !== "AES-GCM") {
     throw new Error("Hosted bundle envelope is invalid.");
   }
 
@@ -143,4 +148,8 @@ async function importAesKey(keyBytes: Uint8Array): Promise<CryptoKey> {
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
+function isSupportedHostedCipherSchema(value: string): value is HostedCipherSchema {
+  return value === HOSTED_CIPHER_SCHEMA || value === LEGACY_HOSTED_CIPHER_SCHEMA;
 }

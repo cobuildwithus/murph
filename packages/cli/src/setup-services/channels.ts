@@ -31,7 +31,7 @@ const TELEGRAM_SETUP_ACCOUNT_ID = 'bot'
 const LINQ_SETUP_CONNECTOR_ID = 'linq:default'
 const LINQ_SETUP_ACCOUNT_ID = 'default'
 const EMAIL_SETUP_CONNECTOR_ID = 'email:agentmail'
-const EMAIL_SETUP_DISPLAY_NAME = 'Healthy Bob'
+const EMAIL_SETUP_DISPLAY_NAME = 'Murph'
 const SETUP_CHANNEL_ORDER = [
   'imessage',
   'telegram',
@@ -249,7 +249,7 @@ const CHANNEL_SPECS = {
     title: 'iMessage channel',
     stepId: 'channel-imessage',
     runtimeUnavailableMessage:
-      'Healthy Bob setup cannot configure iMessage because the inbox source management services are unavailable in this build.',
+      'Murph setup cannot configure iMessage because the inbox source management services are unavailable in this build.',
     readiness: {
       kind: 'always-ready',
     },
@@ -313,7 +313,7 @@ const CHANNEL_SPECS = {
     title: 'Telegram channel',
     stepId: 'channel-telegram',
     runtimeUnavailableMessage:
-      'Healthy Bob setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
+      'Murph setup cannot configure Telegram because the inbox source management services are unavailable in this build.',
     readiness: {
       fallbackReason: 'Telegram readiness probe failed',
       kind: 'doctor-probe',
@@ -387,7 +387,7 @@ const CHANNEL_SPECS = {
     title: 'Linq channel',
     stepId: 'channel-linq',
     runtimeUnavailableMessage:
-      'Healthy Bob setup cannot configure Linq because the inbox source management services are unavailable in this build.',
+      'Murph setup cannot configure Linq because the inbox source management services are unavailable in this build.',
     readiness: {
       fallbackReason: 'Linq readiness probe failed',
       kind: 'doctor-probe',
@@ -461,7 +461,7 @@ const CHANNEL_SPECS = {
     title: 'Email channel',
     stepId: 'channel-email',
     runtimeUnavailableMessage:
-      'Healthy Bob setup cannot configure email because the inbox source management services are unavailable in this build.',
+      'Murph setup cannot configure email because the inbox source management services are unavailable in this build.',
     readiness: {
       fallbackReason: 'Email readiness probe failed',
       kind: 'doctor-probe',

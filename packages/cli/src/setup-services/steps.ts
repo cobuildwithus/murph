@@ -6,7 +6,7 @@ import type {
   WhisperModel,
 } from '../setup-cli-contracts.js'
 
-export const DEFAULT_TOOLCHAIN_DIRECTORY = path.join('.healthybob', 'toolchain')
+export const DEFAULT_TOOLCHAIN_DIRECTORY = path.join('.murph', 'toolchain')
 export const DEFAULT_USER_BIN_DIRECTORY = path.join('.local', 'bin')
 export const PADDLEX_VENV_NAME = 'paddlex-ocr'
 export const PADDLEX_REQUIREMENT = 'paddlex[ocr]'
@@ -77,7 +77,7 @@ export function buildBaseFormulaSpecs(): ToolRequirementSpec[] {
         missingPlanDetail:
           'Would reuse ffmpeg from PATH when available, or install the ffmpeg package via apt-get for audio/video normalization.',
         missingStepDetail:
-          'ffmpeg was not found on PATH and Healthy Bob could not install it automatically. Install ffmpeg manually or rerun setup with apt/sudo access.',
+          'ffmpeg was not found on PATH and Murph could not install it automatically. Install ffmpeg manually or rerun setup with apt/sudo access.',
         title: 'ffmpeg',
       },
       macos: {
@@ -97,7 +97,7 @@ export function buildBaseFormulaSpecs(): ToolRequirementSpec[] {
         missingPlanDetail:
           'Would reuse pdftotext from PATH when available, or install poppler-utils via apt-get for PDF parsing.',
         missingStepDetail:
-          'pdftotext was not found on PATH and Healthy Bob could not install it automatically. Install poppler-utils manually or rerun setup with apt/sudo access.',
+          'pdftotext was not found on PATH and Murph could not install it automatically. Install poppler-utils manually or rerun setup with apt/sudo access.',
         title: 'pdftotext',
       },
       macos: {
@@ -117,7 +117,7 @@ export function buildBaseFormulaSpecs(): ToolRequirementSpec[] {
         missingPlanDetail:
           'Would reuse whisper.cpp from PATH when available, or install the whisper-cpp package via apt-get for local transcription.',
         missingStepDetail:
-          'whisper.cpp was not found on PATH and Healthy Bob could not install it automatically. Install whisper.cpp manually or rerun setup with apt/sudo access.',
+          'whisper.cpp was not found on PATH and Murph could not install it automatically. Install whisper.cpp manually or rerun setup with apt/sudo access.',
         title: 'whisper.cpp',
       },
       macos: {
@@ -144,7 +144,7 @@ export function buildPythonFormulaSpec(): Omit<ToolRequirementSpec, 'key'> {
       missingPlanDetail:
         'Would reuse Python 3 with venv support from PATH when available, or install python3 plus python3-venv via apt-get for OCR tooling.',
       missingStepDetail:
-        'Python 3 with venv support was not found on PATH and Healthy Bob could not install it automatically.',
+        'Python 3 with venv support was not found on PATH and Murph could not install it automatically.',
       reuseDetail: (command) => `Reusing Python 3 from ${command} for OCR tooling.`,
       title: 'Python 3',
     },

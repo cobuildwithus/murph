@@ -1,7 +1,7 @@
 import {
   isVaultError,
   resolveVaultPathOnDisk,
-} from '@healthybob/core'
+} from '@murph/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   inferEntityKind,

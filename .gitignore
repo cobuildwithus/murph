@@ -4,6 +4,8 @@ coverage/
 .DS_Store
 .turbo/
 .next/
+.next-dev/
+.next-smoke/
 .agents/
 .claude/
 .windsurf/
@@ -15,6 +17,9 @@ coverage/
 *.tsbuildinfo
 .test-dist/
 .codex-runs/
+.codex-audit/
+.codex-simplify-audit.txt
+.codex-worktrees/
 .codex-worker-prompts/
 assistant-state/
 audit-packages/

@@ -14,14 +14,14 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, contents:
 }
 
 test("food registry queries expose regular foods by id, slug, and status", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-foods-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-foods-"));
 
   try {
     await writeVaultFile(
       vaultRoot,
       "bank/foods/regular-acai-bowl.md",
       `---
-schemaVersion: hb.frontmatter.food.v1
+schemaVersion: murph.frontmatter.food.v1
 docType: food
 foodId: food_01JNV422Y2M5ZBV64ZP4N1DRB1
 slug: regular-acai-bowl
@@ -55,7 +55,7 @@ autoLogDaily:
       vaultRoot,
       "bank/foods/purely-elizabeth-granola.md",
       `---
-schemaVersion: hb.frontmatter.food.v1
+schemaVersion: murph.frontmatter.food.v1
 docType: food
 foodId: food_01JNV4R0R1DVH1YP8KQQD5GQ7X
 slug: purely-elizabeth-granola

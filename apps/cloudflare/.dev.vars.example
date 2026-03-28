@@ -24,6 +24,17 @@ HOSTED_EXECUTION_RUNNER_TIMEOUT_MS=60000
 # AGENTMAIL_API_KEY=...
 # TELEGRAM_BOT_TOKEN=...
 
+# Optional hosted email bridge settings for Cloudflare Email Routing + Email Sending.
+# Keep these as operator-level Worker vars/secrets rather than per-user env overrides.
+# HOSTED_EMAIL_DOMAIN=mail.example.test
+# HOSTED_EMAIL_LOCAL_PART=assistant
+# HOSTED_EMAIL_FROM_ADDRESS=assistant@mail.example.test
+# HOSTED_EMAIL_SIGNING_SECRET=replace-me-with-a-random-email-routing-secret
+# HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
+# HOSTED_EMAIL_CLOUDFLARE_API_TOKEN=your-cloudflare-api-token-with-email-sending-access
+# HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL=https://api.cloudflare.com/client/v4
+# HOSTED_EMAIL_DEFAULT_SUBJECT=Murph update
+
 # Optional allowlist extensions for encrypted per-user runner env overrides.
 # Keep these in sync with the native container runtime when you extend the allowlist.
 # HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS=OPENAI_API_KEY,AGENTMAIL_API_KEY,TELEGRAM_BOT_TOKEN

@@ -221,7 +221,7 @@ test('formatAssistantRunEventForTerminal shows daemon failure details by default
 })
 
 test('assistant memory path resolver exposes only the memory path subset', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-paths-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-paths-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -244,7 +244,7 @@ test('assistant memory path resolver exposes only the memory path subset', async
 test.sequential(
   'assistant session list and show expose assistant-state metadata through the CLI',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot)
     cleanupPaths.push(parent)
@@ -303,7 +303,7 @@ test.sequential(
 test.sequential(
   'assistant session list and show redact HOME-based vault and state paths',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cli-home-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cli-home-'))
     const homeRoot = path.join(parent, 'home')
     const vaultRoot = path.join(homeRoot, 'vault')
     await mkdir(vaultRoot, {
@@ -352,7 +352,7 @@ test.sequential(
 test.sequential(
   'assistant commands use the saved default vault when --vault is omitted and still allow explicit overrides',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-default-vault-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-default-vault-'))
     const homeRoot = path.join(parent, 'home')
     const defaultVaultRoot = path.join(homeRoot, 'default-vault')
     const overrideVaultRoot = path.join(homeRoot, 'override-vault')
@@ -412,7 +412,7 @@ test.sequential(
 test.sequential(
   'assistant cron add/list/show/status/disable/enable/remove expose typed scheduler records through the CLI',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -526,7 +526,7 @@ test.sequential(
 test.sequential(
   'assistant cron state binding options are optional and validated',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-state-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-state-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -611,7 +611,7 @@ test.sequential(
 test.sequential(
   'assistant state list/show/put/patch/delete expose typed scratchpad documents through the CLI',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-state-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -708,7 +708,7 @@ test.sequential(
 test.sequential(
   'assistant cron preset list/show/install expose built-in templates and materialize jobs through the CLI',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-cron-preset-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-preset-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -825,7 +825,7 @@ test.sequential(
 test.sequential(
   'assistant self-target commands manage local saved outbound routes without needing a vault',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-self-target-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-target-cli-'))
     const homeRoot = path.join(parent, 'home')
     await mkdir(homeRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -858,7 +858,7 @@ test.sequential(
       }),
     )
 
-    assert.equal(setResult.configPath, '~/.healthybob/config.json')
+    assert.equal(setResult.configPath, '~/.murph/config.json')
     assert.equal(setResult.target.channel, 'telegram')
     assert.equal(setResult.target.participantId, 'saved-chat')
     assert.equal(setResult.target.sourceThreadId, 'saved-chat')
@@ -889,7 +889,7 @@ test.sequential(
 
     const config = await readOperatorConfig(homeRoot)
     assert.equal(config?.assistant?.selfDeliveryTargets?.telegram?.sourceThreadId, 'saved-chat')
-    assert.equal(resolveOperatorConfigPath(homeRoot).endsWith(path.join('.healthybob', 'config.json')), true)
+    assert.equal(resolveOperatorConfigPath(homeRoot).endsWith(path.join('.murph', 'config.json')), true)
 
     const cleared = requireData(
       await runCli<{
@@ -917,7 +917,7 @@ test.sequential(
 test.sequential(
   'assistant memory search/get/upsert/forget expose typed memory records through the CLI',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -1044,7 +1044,7 @@ test.sequential(
 test.sequential(
   'assistant memory CLI commands honor the bound assistant turn context',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-turn-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-turn-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -1129,7 +1129,7 @@ test.sequential(
 test.sequential(
   'assistant memory CLI upserts canonical identity and tone memories from a compound bound turn',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-compound-cli-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-compound-cli-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -1396,7 +1396,7 @@ function commandSchemaShapeKeys(
 test.sequential(
   'assistant memory search falls back to the assistant-bound vault env when --vault is omitted',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-memory-env-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-memory-env-'))
     const vaultRoot = path.join(parent, 'vault')
     await mkdir(vaultRoot, { recursive: true })
     cleanupPaths.push(parent)
@@ -1428,7 +1428,7 @@ test('root chat prints only a resume hint after a human TTY session exits', asyn
   assert.equal(result.stdout, '')
   assert.equal(
     result.stderr,
-    'Resume chat by typing: healthybob chat --session "asst_human"\n',
+    'Resume chat by typing: murph chat --session "asst_human"\n',
   )
   assert.deepEqual(runtimeMocks.runAssistantChat.mock.calls, [
     [
@@ -1475,7 +1475,7 @@ test('root chat keeps explicit machine-readable output intact', async () => {
 test.sequential(
   'assistant model defaults persist in operator config without disturbing the default vault',
   async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-config-'))
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-config-'))
     const homeRoot = path.join(parent, 'home')
     const vaultRoot = path.join(homeRoot, 'default-vault')
     cleanupPaths.push(parent)
@@ -1484,8 +1484,22 @@ test.sequential(
     await saveDefaultVaultConfig(vaultRoot, homeRoot)
     await saveAssistantOperatorDefaultsPatch(
       {
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'xhigh',
+        provider: 'codex-cli',
+        defaultsByProvider: {
+          'codex-cli': {
+            codexCommand: null,
+            model: 'gpt-5.4-mini',
+            reasoningEffort: 'xhigh',
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: null,
+            apiKeyEnv: null,
+            providerName: null,
+            headers: null,
+          },
+        },
       },
       homeRoot,
     )
@@ -1493,8 +1507,11 @@ test.sequential(
     const config = await readOperatorConfig(homeRoot)
     assert.ok(config)
     assert.equal(config.defaultVault, path.join('~', 'default-vault'))
-    assert.equal(config.assistant?.model, 'gpt-5.4-mini')
-    assert.equal(config.assistant?.reasoningEffort, 'xhigh')
+    assert.equal(config.assistant?.defaultsByProvider?.['codex-cli']?.model, 'gpt-5.4-mini')
+    assert.equal(
+      config.assistant?.defaultsByProvider?.['codex-cli']?.reasoningEffort,
+      'xhigh',
+    )
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )
@@ -1518,7 +1535,7 @@ function createMockChatResult(sessionId: string) {
     stoppedAt: '2026-03-17T23:21:22.167Z',
     turns: 0,
     session: {
-      schema: 'healthybob.assistant-session.v2' as const,
+      schema: 'murph.assistant-session.v2' as const,
       sessionId,
       provider: 'codex-cli' as const,
       providerSessionId: null,

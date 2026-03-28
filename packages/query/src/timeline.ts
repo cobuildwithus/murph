@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@healthybob/contracts";
+import { extractIsoDatePrefix } from "@murph/contracts";
 
 import { listRecords, type VaultReadModel, type VaultRecord } from "./model.ts";
 import {

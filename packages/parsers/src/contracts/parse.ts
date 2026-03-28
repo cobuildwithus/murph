@@ -57,7 +57,7 @@ export interface ProviderRunResult {
 }
 
 export interface ParserOutput {
-  schema: "healthybob.parser-output.v1";
+  schema: "murph.parser-output.v1";
   providerId: string;
   artifact: ParserArtifactSummary;
   text: string;

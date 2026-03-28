@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.health-library.v1
+schemaVersion: murph.frontmatter.health-library.v1
 docType: health_library
 entityType: protocol_variant
 slug: earlier-last-meal-3h-before-bed
