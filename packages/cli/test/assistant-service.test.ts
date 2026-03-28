@@ -1521,6 +1521,131 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
   assert.equal(result.session.turnCount, 3)
 })
 
+test('sendAssistantMessage cold-starts when a saved provider binding is missing explicit resume route metadata', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-legacy-binding-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:legacy-binding',
+    provider: 'codex-cli',
+  })
+  await appendAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId, [
+    {
+      kind: 'user',
+      text: 'Old question about lunch.',
+    },
+    {
+      kind: 'assistant',
+      text: 'Old answer about lunch.',
+    },
+  ])
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'codex-cli',
+    providerBinding: {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-legacy-binding',
+      providerOptions: resolved.session.providerOptions,
+      providerState: {
+        codexCli: null,
+      },
+    },
+    updatedAt: '2026-03-26T00:00:00.000Z',
+    lastTurnAt: '2026-03-26T00:00:00.000Z',
+    turnCount: 2,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-fresh-after-legacy-binding',
+    response: 'Fresh reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:legacy-binding',
+    prompt: 'What should I eat today?',
+  })
+
+  const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(call?.resumeProviderSessionId, null)
+  assert.equal(
+    result.session.providerSessionId,
+    'thread-fresh-after-legacy-binding',
+  )
+})
+
+test('sendAssistantMessage cold-starts when a saved provider binding is missing explicit resume workspace metadata', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-legacy-workspace-binding-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:legacy-workspace-binding',
+    provider: 'codex-cli',
+  })
+  const expectedWorkingDirectory = path.join(
+    resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
+    'workspaces',
+    resolved.session.sessionId,
+  )
+  const [primaryRoute] = buildAssistantFailoverRoutes({
+    provider: 'codex-cli',
+    providerOptions: resolved.session.providerOptions,
+    defaults: null,
+    codexCommand: null,
+  })
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'codex-cli',
+    providerBinding: {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-legacy-workspace-binding',
+      providerOptions: resolved.session.providerOptions,
+      providerState: {
+        codexCli: null,
+        resumeRouteId: primaryRoute!.routeId,
+      },
+    },
+    updatedAt: '2026-03-26T00:00:00.000Z',
+    lastTurnAt: '2026-03-26T00:00:00.000Z',
+    turnCount: 0,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-fresh-after-legacy-workspace-binding',
+    response: 'Fresh reply.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:legacy-workspace-binding',
+    prompt: 'What should I eat today?',
+  })
+
+  const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(call?.resumeProviderSessionId, null)
+  assert.equal(call?.workingDirectory, expectedWorkingDirectory)
+  assert.equal(
+    result.session.providerSessionId,
+    'thread-fresh-after-legacy-workspace-binding',
+  )
+})
+
 test('sendAssistantMessage onboarding persists answered slots and asks only for missing items in later new sessions', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-partial-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -2309,6 +2434,76 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
     'thread-resume-1',
+  )
+})
+
+test('sendAssistantMessage does not resume a recovered provider session after the working directory changes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-recoverable-workdir-'))
+  const vaultRoot = path.join(parent, 'vault')
+  const alternateWorkingDirectory = path.join(parent, 'alternate-workdir')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await mkdir(alternateWorkingDirectory, { recursive: true })
+
+  serviceMocks.executeAssistantProviderTurn
+    .mockRejectedValueOnce(
+      new VaultCliError(
+        'ASSISTANT_CODEX_CONNECTION_LOST',
+        'Codex CLI lost its connection while waiting for the model.',
+        {
+          connectionLost: true,
+          providerSessionId: 'thread-recover-default-workdir',
+          retryable: true,
+        },
+      ),
+    )
+    .mockResolvedValueOnce({
+      provider: 'codex-cli',
+      providerSessionId: 'thread-fresh-workdir',
+      response: 'Started fresh.',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    })
+
+  await assert.rejects(
+    sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:recoverable-workdir-change',
+      prompt: 'hello',
+    }),
+    /lost its connection/u,
+  )
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:recoverable-workdir-change',
+  })
+  const recovery = await readAssistantProviderRouteRecovery(
+    vaultRoot,
+    resolved.session.sessionId,
+  )
+  assert.equal(
+    recovery?.routes[0]?.providerSessionId,
+    'thread-recover-default-workdir',
+  )
+
+  const retried = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:recoverable-workdir-change',
+    prompt: 'retry somewhere else',
+    workingDirectory: alternateWorkingDirectory,
+  })
+
+  assert.equal(retried.session.providerSessionId, 'thread-fresh-workdir')
+  assert.equal(
+    serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
+    null,
+  )
+  assert.equal(
+    serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.workingDirectory,
+    alternateWorkingDirectory,
   )
 })
 
