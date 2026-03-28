@@ -98,6 +98,14 @@ function toDateParameter(timestamp: string): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
+function toDateTimeParameter(timestamp: string): string {
+  return new Date(timestamp).toISOString();
+}
+
+function normalizeGrantedScopes(value: unknown): string[] {
+  return [...new Set(splitScopes(value).map((scope) => scope.replace(/^extapi:/u, "")))];
+}
+
 function buildDisplayName(personalInfo: Record<string, unknown>): string {
   const email = normalizeString(personalInfo.email);
   const accountId = normalizeIdentifier(personalInfo.id ?? personalInfo.user_id ?? personalInfo.userId);
@@ -338,9 +346,11 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     windowStart: string,
     windowEnd: string,
   ): Promise<Record<string, unknown>[]> {
+    const resolvedWindowStart = toDateTimeParameter(windowStart);
+    const resolvedWindowEnd = toDateTimeParameter(windowEnd);
     const records: Record<string, unknown>[] = [];
-    let chunkStart = new Date(windowStart).getTime();
-    const end = new Date(windowEnd).getTime();
+    let chunkStart = Date.parse(resolvedWindowStart);
+    const end = Date.parse(resolvedWindowEnd);
 
     while (chunkStart < end) {
       const chunkEnd = Math.min(chunkStart + HEARTRATE_CHUNK_MS, end);
@@ -464,8 +474,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           }),
       });
 
-      const grantedScopesFromToken = splitScopes(tokenPayload.scope)
-        .map((scope) => scope.replace(/^extapi:/u, ""));
+      const grantedScopesFromToken = normalizeGrantedScopes(tokenPayload.scope);
       const grantedScopes =
         grantedScopesFromToken.length > 0
           ? grantedScopesFromToken

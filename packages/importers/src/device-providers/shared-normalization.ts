@@ -83,6 +83,8 @@ export interface DeletionObservationOptions {
 
 export type NormalizedDeviceBatchOptions = Omit<NormalizedDeviceBatch, "source">;
 
+const INTEGER_SAMPLE_STREAMS = new Set(["heart_rate", "steps"]);
+
 export function asPlainObject(value: unknown): PlainObject | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
@@ -265,8 +267,7 @@ export function pushSample(
     return;
   }
 
-  const INTEGER_STREAMS = new Set(["heart_rate", "steps"]);
-  const resolvedValue = INTEGER_STREAMS.has(options.stream) ? Math.round(numeric) : numeric;
+  const resolvedValue = INTEGER_SAMPLE_STREAMS.has(options.stream) ? Math.round(numeric) : numeric;
 
   const sample: DeviceSampleValuePayload = {
     recordedAt: options.recordedAt,
