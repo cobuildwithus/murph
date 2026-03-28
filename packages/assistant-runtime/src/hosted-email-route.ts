@@ -1,15 +1,15 @@
 import {
-  readHostedVerifiedEmailFromEnv,
-} from "@murph/runtime-state";
-import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
+  resolveAssistantSelfDeliveryTarget,
+  saveAssistantSelfDeliveryTarget,
+} from "@murph/assistant-services/operator-config";
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "murph/assistant/store";
+} from "@murph/assistant-services/store";
 import {
-  resolveAssistantSelfDeliveryTarget,
-  saveAssistantSelfDeliveryTarget,
-} from "murph/operator-config";
+  readHostedVerifiedEmailFromEnv,
+} from "@murph/runtime-state";
+import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
 
 type HostedEmailSelfTargetStatus =
   | "missing-sender-identity"

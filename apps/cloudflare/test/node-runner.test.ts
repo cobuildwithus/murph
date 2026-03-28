@@ -18,29 +18,28 @@ import { assistantOutboxIntentSchema } from "murph";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
-  drainAssistantOutbox: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("murph/assistant/automation", async () => {
-  const actual = await vi.importActual<typeof import("murph/assistant/automation")>(
-    "murph/assistant/automation",
-  );
-  return {
-    ...actual,
-    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
-      hostedCliMocks.runAssistantAutomation(...args),
-  };
-});
-
-vi.mock("murph/assistant/outbox", async () => {
-  const actual = await vi.importActual<typeof import("murph/assistant/outbox")>(
-    "murph/assistant/outbox",
+vi.mock("@murph/assistant-services/outbox", async () => {
+  const actual = await vi.importActual<typeof import("@murph/assistant-services/outbox")>(
+    "@murph/assistant-services/outbox",
   );
   return {
     ...actual,
     dispatchAssistantOutboxIntent: (...args: Parameters<typeof actual.dispatchAssistantOutboxIntent>) =>
       hostedCliMocks.dispatchAssistantOutboxIntent(...args),
+  };
+});
+
+vi.mock("@murph/assistant-services/automation", async () => {
+  const actual = await vi.importActual<typeof import("@murph/assistant-services/automation")>(
+    "@murph/assistant-services/automation",
+  );
+  return {
+    ...actual,
+    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
+      hostedCliMocks.runAssistantAutomation(...args),
   };
 });
 
@@ -58,16 +57,16 @@ describe("runHostedExecutionJob", () => {
     vi.restoreAllMocks();
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actualAutomation = await vi.importActual<typeof import("murph/assistant/automation")>(
-      "murph/assistant/automation",
+    const actualOutbox = await vi.importActual<typeof import("@murph/assistant-services/outbox")>(
+      "@murph/assistant-services/outbox",
     );
-    const actualOutbox = await vi.importActual<typeof import("murph/assistant/outbox")>(
-      "murph/assistant/outbox",
+    const actualAutomation = await vi.importActual<typeof import("@murph/assistant-services/automation")>(
+      "@murph/assistant-services/automation",
     );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
       actualOutbox.dispatchAssistantOutboxIntent(input));
-    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actualAutomation.runAssistantAutomation(input));
-    hostedCliMocks.drainAssistantOutbox.mockReset();
+    hostedCliMocks.runAssistantAutomation.mockImplementation((input) =>
+      actualAutomation.runAssistantAutomation(input));
   });
 
   afterEach(async () => {
@@ -193,6 +192,77 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
       restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
       restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("persists hosted Telegram captures from webhook-style dispatches", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_telegram_ingress",
+        },
+        eventId: "evt_activation_telegram_ingress",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const result = await runHostedExecutionJob({
+      bundles: activation.bundles,
+      dispatch: {
+        event: {
+          kind: "telegram.message.received",
+          telegramUpdate: {
+            message: {
+              chat: {
+                id: 123,
+                type: "private",
+              },
+              date: 1_774_522_600,
+              from: {
+                first_name: "Alice",
+                id: 456,
+              },
+              message_id: 1,
+              text: "hello from Telegram",
+            },
+            update_id: 321,
+          },
+          userId: "member_telegram_ingress",
+        },
+        eventId: "telegram:update:321",
+        occurredAt: "2026-03-26T12:05:00.000Z",
+      },
+    });
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-ingress-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const runtime = await openInboxRuntime({
+      vaultRoot: restored.vaultRoot,
+    });
+
+    try {
+      await rebuildRuntimeFromVault({
+        runtime,
+        vaultRoot: restored.vaultRoot,
+      });
+      const capture = runtime.listCaptures({ limit: 1 })[0];
+
+      expect(result.result.summary).toContain("Persisted Telegram capture");
+      expect(capture?.actor.id).toBe("456");
+      expect(capture?.text).toBe("hello from Telegram");
+      expect(capture?.thread.isDirect).toBe(true);
+      expect(capture?.thread.id).toContain("123");
+    } finally {
+      runtime.close();
     }
   });
 
@@ -478,6 +548,78 @@ describe("runHostedExecutionJob", () => {
       setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
+    }
+  });
+
+  it("persists hosted Telegram captures through the hosted runtime event seam", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_telegram",
+        },
+        eventId: "evt_activation_telegram",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const result = await runHostedExecutionJob({
+      bundles: activation.bundles,
+      dispatch: {
+        event: {
+          kind: "telegram.message.received",
+          telegramUpdate: {
+            update_id: 123,
+            message: {
+              chat: {
+                first_name: "Alice",
+                id: 456,
+                type: "private",
+              },
+              date: 1_711_620_000,
+              from: {
+                first_name: "Alice",
+                id: 456,
+                is_bot: false,
+              },
+              message_id: 789,
+              text: "Hello from hosted Telegram.",
+            },
+          },
+          userId: "member_telegram",
+        },
+        eventId: "evt_telegram",
+        occurredAt: "2026-03-26T12:05:00.000Z",
+      },
+    });
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-"));
+    cleanupPaths.push(workspaceRoot);
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+      workspaceRoot,
+    });
+    const runtime = await openInboxRuntime({
+      vaultRoot: restored.vaultRoot,
+    });
+
+    try {
+      await rebuildRuntimeFromVault({
+        runtime,
+        vaultRoot: restored.vaultRoot,
+      });
+      const capture = runtime.listCaptures({ limit: 1 })[0];
+
+      expect(result.result.summary).toContain("Persisted Telegram capture");
+      expect(capture?.source).toBe("telegram");
+      expect(capture?.externalId).toBe("update:123");
+      expect(capture?.text).toBe("Hello from hosted Telegram.");
+    } finally {
+      runtime.close();
     }
   });
 

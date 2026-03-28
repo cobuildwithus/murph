@@ -1,0 +1,88 @@
+import { importSharePackIntoVault } from "@murph/core";
+import {
+  restoreHostedExecutionContext,
+} from "@murph/runtime-state";
+import type {
+  HostedExecutionBundleRef,
+  HostedExecutionDispatchRequest,
+  HostedExecutionRunnerRequest,
+  HostedExecutionRunnerResult,
+  HostedExecutionSideEffect,
+} from "@murph/hosted-execution";
+
+export interface HostedExecutionCommitCallback {
+  bundleRefs: {
+    agentState: HostedExecutionBundleRef | null;
+    vault: HostedExecutionBundleRef | null;
+  };
+}
+
+export interface HostedAssistantRuntimeConfig {
+  commitBaseUrl?: string | null;
+  commitTimeoutMs?: number | null;
+  emailBaseUrl?: string | null;
+  forwardedEnv?: Readonly<Record<string, string>>;
+  outboxBaseUrl?: string | null;
+  sharePackBaseUrl?: string | null;
+  sharePackToken?: string | null;
+  sideEffectsBaseUrl?: string | null;
+  userEnv?: Readonly<Record<string, string>>;
+}
+
+export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerRequest {
+  commit?: HostedExecutionCommitCallback | null;
+  resume?: {
+    committedResult: {
+      result: HostedExecutionRunnerResult["result"];
+      sideEffects: HostedExecutionSideEffect[];
+    };
+  } | null;
+}
+
+export interface HostedAssistantRuntimeJobInput {
+  request: HostedAssistantRuntimeJobRequest;
+  runtime?: HostedAssistantRuntimeConfig;
+}
+
+export interface HostedBootstrapResult {
+  emailAutoReplyEnabled: boolean;
+  telegramAutoReplyEnabled: boolean;
+  vaultCreated: boolean;
+}
+
+export interface NormalizedHostedAssistantRuntimeConfig {
+  commitBaseUrl: string;
+  commitTimeoutMs: number | null;
+  emailBaseUrl: string;
+  forwardedEnv: Record<string, string>;
+  sharePackBaseUrl: string | null;
+  sharePackToken: string | null;
+  sideEffectsBaseUrl: string;
+  userEnv: Record<string, string>;
+}
+
+export interface HostedCommittedExecutionState {
+  committedResult: HostedExecutionRunnerResult;
+  committedSideEffects: HostedExecutionSideEffect[];
+}
+
+export type HostedShareImportResult = Awaited<ReturnType<typeof importSharePackIntoVault>>;
+
+export interface HostedDispatchEffect {
+  shareImportResult: HostedShareImportResult | null;
+  shareImportTitle: string | null;
+}
+
+export interface HostedDispatchExecutionMetrics extends HostedDispatchEffect {
+  bootstrapResult: HostedBootstrapResult | null;
+}
+
+export interface HostedMaintenanceMetrics {
+  deviceSyncProcessed: number;
+  deviceSyncSkipped: boolean;
+  nextWakeAt: string | null;
+  parserProcessed: number;
+}
+
+export type HostedDispatchEvent = HostedExecutionDispatchRequest["event"];
+export type HostedRestoredExecutionContext = Awaited<ReturnType<typeof restoreHostedExecutionContext>>;
