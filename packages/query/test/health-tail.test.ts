@@ -10,6 +10,8 @@ import {
   getVaultEntities,
   listBloodTests,
   listEntities,
+  listHistoryEvents,
+  listProfileSnapshots,
   listRecords,
   listSupplementCompounds,
   listSupplements,
@@ -26,6 +28,12 @@ import { collectCanonicalEntities } from "../src/health/canonical-collector.ts";
 import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";
 import { listAssessments } from "../src/health/assessments.ts";
+import {
+  currentProfileRecordFromEntity,
+  selectAssessmentRecords,
+  selectHistoryRecords,
+  selectProfileSnapshotRecords,
+} from "../src/health/projections.ts";
 import type { VaultReadModel, VaultRecord } from "../src/model.ts";
 
 async function writeVaultFile(
@@ -574,6 +582,85 @@ snapshotId psnap_health_01
     assert.equal(current.snapshotId, "psnap_health_01");
     assert.deepEqual(current.topGoalIds, ["goal_sleep_01"]);
     assert.equal(current.markdown, null);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("dedicated health readers stay aligned with the shared canonical collector selectors", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    const collected = await collectCanonicalEntities(vaultRoot, {
+      mode: "strict-async",
+    });
+
+    assert.deepEqual(
+      await listAssessments(vaultRoot),
+      selectAssessmentRecords(collected.assessments),
+    );
+    assert.deepEqual(
+      await listHistoryEvents(vaultRoot),
+      selectHistoryRecords(collected.history),
+    );
+    assert.deepEqual(
+      await listProfileSnapshots(vaultRoot),
+      selectProfileSnapshotRecords(collected.profileSnapshots),
+    );
+    assert.deepEqual(
+      await readCurrentProfile(vaultRoot),
+      collected.currentProfile
+        ? currentProfileRecordFromEntity(
+            collected.currentProfile,
+            collected.markdownByPath.get(collected.currentProfile.path) ??
+              collected.currentProfile.body,
+          )
+        : null,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("strict narrow health readers ignore malformed unrelated registry markdown", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+    includeAlternateRecords: true,
+  });
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/genetics/broken.md",
+      `---
+schemaVersion: hv/genetics@v1
+variantId: var_broken
+slug broken-frontmatter
+---
+# Broken
+`,
+    );
+
+    assert.deepEqual(
+      (await listAssessments(vaultRoot)).map((record) => record.id),
+      ["asmt_health_01", "asmt_health_00", "asmt_health_before", "asmt_health_missing_date", "asmt_health_undated"],
+    );
+    assert.deepEqual(
+      (await listHistoryEvents(vaultRoot)).map((record) => record.id),
+      ["evt_health_01"],
+    );
+    assert.deepEqual(
+      (await listProfileSnapshots(vaultRoot)).map((record) => record.id),
+      ["psnap_health_01", "psnap_health_00", "psnap_health_missing_date"],
+    );
+    assert.equal((await readCurrentProfile(vaultRoot))?.snapshotId, "psnap_health_01");
+    await assert.rejects(
+      () => readVault(vaultRoot),
+      /Failed to parse frontmatter at bank\/genetics\/broken\.md:/,
+    );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

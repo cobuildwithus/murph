@@ -1,15 +1,18 @@
 import { extractIsoDatePrefix } from "@murph/contracts";
 
-import {
-  type CanonicalEntity,
-} from "./canonical-entities.ts";
+import { type CanonicalEntity } from "./canonical-entities.ts";
 import type { ParseFailure } from "./health/loaders.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import {
   compareByOccurredAtDescThenId,
   compareByRecordedOrImportedAtDescThenId,
 } from "./health/comparators.ts";
-import { firstObject, firstString, firstStringArray } from "./health/shared.ts";
+import {
+  assessmentRecordFromEntity,
+  currentProfileRecordFromEntity,
+  historyRecordFromEntity,
+  profileSnapshotRecordFromEntity,
+} from "./health/projections.ts";
 
 import type { FrontmatterObject } from "./health/shared.ts";
 import type {
@@ -27,65 +30,34 @@ export interface ExportPackHealthReadResult {
   failures: ParseFailure[];
 }
 
-function assessmentRecordFromEntity(
-  entity: CanonicalEntity,
-): ExportPackAssessmentRecord | null {
-  if (entity.family !== "assessment") {
-    return null;
-  }
-
-  return {
-    id: entity.entityId,
-    title: entity.title,
-    assessmentType: firstString(entity.attributes, ["assessmentType"]),
-    recordedAt: firstString(entity.attributes, ["recordedAt", "occurredAt", "importedAt"]),
-    importedAt: firstString(entity.attributes, ["importedAt"]),
-    source: firstString(entity.attributes, ["source"]),
-    sourcePath: firstString(entity.attributes, ["rawPath", "sourcePath"]),
-    questionnaireSlug: firstString(entity.attributes, ["questionnaireSlug"]),
-    relatedIds: entity.relatedIds,
-    responses: firstObject(entity.attributes, ["responses", "response"]) ?? {},
-    relativePath: entity.path,
-  };
-}
-
-function profileSnapshotRecordFromEntity(
+function exportPackProfileSnapshotRecordFromEntity(
   entity: CanonicalEntity,
 ): ExportPackProfileSnapshotRecord | null {
-  if (entity.family !== "profile_snapshot") {
+  const record = profileSnapshotRecordFromEntity(entity);
+  if (!record) {
     return null;
   }
 
-  return {
-    id: entity.entityId,
-    recordedAt: firstString(entity.attributes, ["recordedAt", "capturedAt"]),
-    source: firstString(entity.attributes, ["source"]),
-    sourceAssessmentIds: firstStringArray(entity.attributes, ["sourceAssessmentIds"]),
-    sourceEventIds: firstStringArray(entity.attributes, ["sourceEventIds"]),
-    profile: firstObject(entity.attributes, ["profile"]) ?? {},
-    relativePath: entity.path,
-  };
+  const {
+    capturedAt: _capturedAt,
+    status: _status,
+    summary: _summary,
+    ...exportRecord
+  } = record;
+  return exportRecord;
 }
 
-function historyRecordFromEntity(
+function exportPackHistoryRecordFromEntity(
   entity: CanonicalEntity,
 ): ExportPackHistoryRecord | null {
-  if (entity.family !== "history" || !entity.occurredAt || !entity.title) {
+  const record = historyRecordFromEntity(entity);
+  if (!record) {
     return null;
   }
 
   return {
-    id: entity.entityId,
-    kind: entity.kind,
-    occurredAt: entity.occurredAt,
-    recordedAt: firstString(entity.attributes, ["recordedAt"]),
-    source: firstString(entity.attributes, ["source"]),
-    title: entity.title,
-    status: entity.status,
-    tags: entity.tags,
-    relatedIds: entity.relatedIds,
-    relativePath: entity.path,
-    data: entity.attributes,
+    ...record,
+    kind: record.kind,
   };
 }
 
@@ -93,19 +65,14 @@ function currentProfileFromEntity(
   entity: CanonicalEntity,
   markdown: string | null,
 ): ExportPackCurrentProfile | null {
-  if (entity.family !== "current_profile") {
+  const currentProfile = currentProfileRecordFromEntity(entity, markdown);
+  if (!currentProfile) {
     return null;
   }
 
+  const { id: _id, ...record } = currentProfile;
   return {
-    snapshotId: firstString(entity.attributes, ["snapshotId"]),
-    updatedAt: firstString(entity.attributes, ["updatedAt"]),
-    sourceAssessmentIds: firstStringArray(entity.attributes, ["sourceAssessmentIds"]),
-    sourceEventIds: firstStringArray(entity.attributes, ["sourceEventIds"]),
-    topGoalIds: firstStringArray(entity.attributes, ["topGoalIds"]),
-    relativePath: entity.path,
-    markdown,
-    body: entity.body,
+    ...record,
   };
 }
 
@@ -162,12 +129,12 @@ export function readHealthContext(
         .filter((entry) => matchesDateWindow(entry.recordedAt ?? entry.importedAt, filters))
         .sort(compareByRecordedOrImportedAtDescThenId),
       profileSnapshots: collected.profileSnapshots
-        .map(profileSnapshotRecordFromEntity)
+        .map(exportPackProfileSnapshotRecordFromEntity)
         .filter((entry): entry is ExportPackProfileSnapshotRecord => entry !== null)
         .filter((entry) => matchesDateWindow(entry.recordedAt, filters))
         .sort(compareSnapshots),
       historyEvents: collected.history
-        .map(historyRecordFromEntity)
+        .map(exportPackHistoryRecordFromEntity)
         .filter((entry): entry is ExportPackHistoryRecord => entry !== null)
         .filter((entry) => matchesDateWindow(entry.occurredAt, filters))
         .sort(compareByOccurredAtDescThenId),

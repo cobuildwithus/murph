@@ -1,8 +1,6 @@
 import {
   compareCanonicalEntities,
-  fallbackCurrentProfileEntity,
   projectAssessmentEntity,
-  projectCurrentProfileEntity,
   projectHistoryEntity,
   projectProfileSnapshotEntity,
   projectRegistryEntity,
@@ -10,9 +8,15 @@ import {
   type CanonicalEntityFamily,
 } from "../canonical-entities.ts";
 import {
-  readJsonlRecordOutcomes,
-  readJsonlRecordOutcomesSync,
-  readJsonlRecords,
+  readCurrentProfileCollectionAsync,
+  readCurrentProfileCollectionSync,
+  readJsonlEntitiesStrict,
+  readJsonlEntitiesTolerant,
+  readJsonlEntitiesTolerantSync,
+  type CurrentProfileCollection,
+  type EntityCollection,
+} from "./entity-slices.ts";
+import {
   readMarkdownDocument,
   readMarkdownDocumentOutcome,
   readMarkdownDocumentOutcomeSync,
@@ -21,7 +25,6 @@ import {
   readOptionalMarkdownDocumentOutcomeSync,
   walkRelativeFiles,
   walkRelativeFilesSync,
-  type JsonlRecordOutcome,
   type MarkdownDocumentOutcome,
   type ParseFailure,
 } from "./loaders.ts";
@@ -36,12 +39,7 @@ import {
   type RegistryMarkdownRecord,
 } from "./registries.ts";
 import {
-  resolveCurrentProfileDocument,
-  resolveCurrentProfileSnapshot,
-  type CurrentProfileDocumentOutcome,
-  type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.ts";
-import { firstString } from "./shared.ts";
 import type { MarkdownDocumentRecord } from "./shared.ts";
 
 type RegistryFamily = Extract<
@@ -64,11 +62,6 @@ interface RegistryCollectorConfig {
   toRecord: (document: MarkdownDocumentRecord) => RegistryMarkdownRecord | null;
 }
 
-interface EntityCollection {
-  entities: CanonicalEntity[];
-  failures: ParseFailure[];
-}
-
 interface RegistryCollections {
   goals: CanonicalEntity[];
   conditions: CanonicalEntity[];
@@ -81,16 +74,6 @@ interface RegistryCollections {
 interface RegistryCollectionResult {
   collections: RegistryCollections;
   failures: ParseFailure[];
-}
-
-interface CurrentProfileCollection {
-  entity: CanonicalEntity | null;
-  failures: ParseFailure[];
-}
-
-interface CurrentProfileDocumentResolutionInput {
-  documentOutcome: CurrentProfileDocumentOutcome<CanonicalEntity, ParseFailure>;
-  markdown: string | null;
 }
 
 type RegistryDocumentRead = MarkdownDocumentRecord | MarkdownDocumentOutcome;
@@ -413,61 +396,6 @@ function buildCanonicalHealthCollection(input: {
   };
 }
 
-async function readJsonlEntitiesStrict(
-  vaultRoot: string,
-  relativeRoot: string,
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): Promise<CanonicalEntity[]> {
-  return (await readJsonlRecords(vaultRoot, relativeRoot))
-    .map((entry) => project(entry.value, entry.relativePath))
-    .filter((entity): entity is CanonicalEntity => entity !== null)
-    .sort(compareCanonicalEntities);
-}
-
-async function readJsonlEntitiesTolerant(
-  vaultRoot: string,
-  relativeRoot: string,
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): Promise<EntityCollection> {
-  return projectJsonlOutcomes(
-    await readJsonlRecordOutcomes(vaultRoot, relativeRoot),
-    project,
-  );
-}
-
-function readJsonlEntitiesTolerantSync(
-  vaultRoot: string,
-  relativeRoot: string,
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): EntityCollection {
-  return projectJsonlOutcomes(readJsonlRecordOutcomesSync(vaultRoot, relativeRoot), project);
-}
-
-function projectJsonlOutcomes(
-  outcomes: JsonlRecordOutcome[],
-  project: (value: unknown, relativePath: string) => CanonicalEntity | null,
-): EntityCollection {
-  const entities: CanonicalEntity[] = [];
-  const failures: ParseFailure[] = [];
-
-  for (const outcome of outcomes) {
-    if (!outcome.ok) {
-      failures.push(outcome);
-      continue;
-    }
-
-    const entity = project(outcome.value, outcome.relativePath);
-    if (entity) {
-      entities.push(entity);
-    }
-  }
-
-  return {
-    entities: entities.sort(compareCanonicalEntities),
-    failures,
-  };
-}
-
 function createEmptyRegistryCollections(): RegistryCollections {
   return {
     goals: [],
@@ -612,123 +540,4 @@ function readRegistryEntitiesSync(
     entities: entities.sort(compareCanonicalEntities),
     failures,
   };
-}
-
-async function readCurrentProfileCollectionAsync(
-  vaultRoot: string,
-  profileSnapshots: CanonicalEntity[],
-  markdownByPath: Map<string, string>,
-  readDocument: AsyncCurrentProfileDocumentReader,
-): Promise<CurrentProfileCollection> {
-  return resolveCurrentProfileCollection(
-    profileSnapshots,
-    markdownByPath,
-    await readDocument(vaultRoot, "bank/profile/current.md"),
-  );
-}
-
-function readCurrentProfileCollectionSync(
-  vaultRoot: string,
-  profileSnapshots: CanonicalEntity[],
-  markdownByPath: Map<string, string>,
-  readDocument: SyncCurrentProfileDocumentReader,
-): CurrentProfileCollection {
-  return resolveCurrentProfileCollection(
-    profileSnapshots,
-    markdownByPath,
-    readDocument(vaultRoot, "bank/profile/current.md"),
-  );
-}
-
-function resolveCurrentProfileCollection(
-  profileSnapshots: CanonicalEntity[],
-  markdownByPath: Map<string, string>,
-  currentProfileDocumentInput: MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
-): CurrentProfileCollection {
-  const resolution = resolveCurrentProfileSnapshot(
-    profileSnapshots,
-    canonicalProfileSnapshotSortFields,
-    fallbackCurrentProfileEntity,
-  );
-  const currentProfileDocument = buildCurrentProfileDocumentResolutionInput(
-    currentProfileDocumentInput,
-  );
-  const resolvedCurrentProfile = resolveCurrentProfileDocument(
-    resolution,
-    currentProfileDocument.documentOutcome,
-    currentProfileSnapshotId,
-    buildCurrentProfileRetainOptions(markdownByPath, currentProfileDocument.markdown),
-  );
-
-  return {
-    entity: resolvedCurrentProfile.currentProfile,
-    failures: resolvedCurrentProfile.failures,
-  };
-}
-
-function buildCurrentProfileDocumentResolutionInput(
-  input: MarkdownDocumentRecord | MarkdownDocumentOutcome | null,
-): CurrentProfileDocumentResolutionInput {
-  if (!input) {
-    return {
-      documentOutcome: { status: "missing" },
-      markdown: null,
-    };
-  }
-
-  if ("ok" in input) {
-    if (!input.ok) {
-      return {
-        documentOutcome: {
-          status: "parse-failed",
-          failure: input,
-        },
-        markdown: null,
-      };
-    }
-
-    return buildCurrentProfileDocumentResolutionInput(input.document);
-  }
-
-  return {
-    documentOutcome: {
-      status: "ok",
-      currentProfile: projectCurrentProfileEntity(input),
-    },
-    markdown: input.markdown,
-  };
-}
-
-function buildCurrentProfileRetainOptions(
-  markdownByPath: Map<string, string>,
-  markdown: string | null,
-):
-  | {
-      retainDocumentCurrentProfile: (currentProfile: CanonicalEntity) => void;
-    }
-  | undefined {
-  if (!markdown) {
-    return undefined;
-  }
-
-  return {
-    retainDocumentCurrentProfile: (currentProfile) => {
-      markdownByPath.set(currentProfile.path, markdown);
-    },
-  };
-}
-
-function canonicalProfileSnapshotSortFields(
-  snapshot: CanonicalEntity,
-): CurrentProfileSnapshotSortFields {
-  return {
-    snapshotId: snapshot.entityId,
-    snapshotTimestamp: snapshot.occurredAt ?? snapshot.date,
-  };
-}
-
-function currentProfileSnapshotId(
-  entity: CanonicalEntity,
-): string | null {
-  return firstString(entity.attributes, ["snapshotId"]);
 }

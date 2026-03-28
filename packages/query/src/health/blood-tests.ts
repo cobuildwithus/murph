@@ -12,7 +12,8 @@ import {
   matchesText,
 } from "./shared.ts";
 import { compareByOccurredAtDescThenId } from "./comparators.ts";
-import { listHistoryEvents, toHistoryRecord, type HistoryQueryRecord } from "./history.ts";
+import { listHistoryEvents } from "./history.ts";
+import { toHistoryRecord, type HistoryQueryRecord } from "./projections.ts";
 
 const BLOOD_TEST_SPECIMEN_TYPE_SET = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
 

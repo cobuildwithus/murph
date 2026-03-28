@@ -1,201 +1,49 @@
 import {
-  applyLimit,
-  asObject,
-  firstObject,
-  firstString,
-  firstStringArray,
-  matchesDateRange,
   matchesLookup,
-  matchesText,
 } from "./shared.ts";
 import {
-  readJsonlRecords,
   readOptionalMarkdownDocumentOutcome,
 } from "./loaders.ts";
 import {
-  projectCurrentProfileEntity,
-  projectProfileSnapshotEntity,
-} from "../canonical-entities.ts";
+  readCurrentProfileCollectionAsync,
+  readProfileSnapshotEntitiesStrict,
+} from "./entity-slices.ts";
 import {
-  compareCurrentProfileSnapshotRecency,
-  resolveCurrentProfileDocument,
-  fallbackCurrentProfileEntityFromSnapshotRecord,
-  resolveCurrentProfileSnapshot,
-  type CurrentProfileDocumentOutcome,
-  type CurrentProfileSnapshotSortFields,
-} from "./current-profile-resolution.ts";
-
-import type {
-  CanonicalEntity,
-} from "../canonical-entities.ts";
-import type { ParseFailure } from "./loaders.ts";
-import type { MarkdownDocumentRecord } from "./shared.ts";
-
-export interface ProfileSnapshotQueryRecord {
-  id: string;
-  capturedAt: string | null;
-  recordedAt: string | null;
-  status: string;
-  summary: string | null;
-  source: string | null;
-  sourceAssessmentIds: string[];
-  sourceEventIds: string[];
-  profile: Record<string, unknown>;
-  relativePath: string;
-}
-
-export interface CurrentProfileQueryRecord {
-  id: "current";
-  snapshotId: string | null;
-  updatedAt: string | null;
-  sourceAssessmentIds: string[];
-  sourceEventIds: string[];
-  topGoalIds: string[];
-  relativePath: string;
-  markdown: string | null;
-  body: string | null;
-}
-
-export interface ProfileSnapshotListOptions {
-  from?: string;
-  to?: string;
-  text?: string;
-  limit?: number;
-}
+  buildCurrentProfileRecord,
+  compareSnapshots,
+  currentProfileRecordFromEntity,
+  selectProfileSnapshotRecords,
+  toCurrentProfileRecord,
+  toProfileSnapshotRecord,
+  type CurrentProfileQueryRecord,
+  type ProfileSnapshotListOptions,
+  type ProfileSnapshotQueryRecord,
+} from "./projections.ts";
 
 interface CurrentProfileState {
   currentProfile: CurrentProfileQueryRecord | null;
   snapshots: ProfileSnapshotQueryRecord[];
 }
-
-function profileSnapshotRecordFromEntity(
-  entity: CanonicalEntity,
-): ProfileSnapshotQueryRecord | null {
-  if (entity.family !== "profile_snapshot") {
-    return null;
-  }
-
-  const attributes = asObject(entity.attributes);
-  if (!attributes) {
-    return null;
-  }
-
-  return {
-    id: entity.entityId,
-    capturedAt: firstString(attributes, ["capturedAt", "recordedAt"]),
-    recordedAt: firstString(attributes, ["recordedAt", "capturedAt"]),
-    status: firstString(attributes, ["status"]) ?? "accepted",
-    summary: firstString(attributes, ["summary"]),
-    source: firstString(attributes, ["source"]),
-    sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
-    sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
-    profile: firstObject(attributes, ["profile"]) ?? {},
-    relativePath: entity.path,
-  };
-}
-
-function currentProfileRecordFromProjectedEntity(
-  entity: CanonicalEntity,
-  rawDocumentMarkdown: string | null = entity.body,
-): CurrentProfileQueryRecord | null {
-  if (entity.family !== "current_profile") {
-    return null;
-  }
-
-  const attributes = asObject(entity.attributes);
-  if (!attributes) {
-    return null;
-  }
-
-  return {
-    id: "current",
-    snapshotId: firstString(attributes, ["snapshotId"]),
-    updatedAt: firstString(attributes, ["updatedAt"]),
-    sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
-    sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),
-    topGoalIds: firstStringArray(attributes, ["topGoalIds"]),
-    relativePath: entity.path,
-    markdown: rawDocumentMarkdown,
-    body: entity.body,
-  };
-}
-
-export function buildCurrentProfileRecord(input: {
-  snapshotId: string;
-  updatedAt: string | null;
-  sourceAssessmentIds: string[];
-  sourceEventIds: string[];
-  topGoalIds: string[];
-  markdown: string | null;
-  body: string | null;
-}): CurrentProfileQueryRecord {
-  return {
-    id: "current",
-    snapshotId: input.snapshotId,
-    updatedAt: input.updatedAt,
-    sourceAssessmentIds: input.sourceAssessmentIds,
-    sourceEventIds: input.sourceEventIds,
-    topGoalIds: input.topGoalIds,
-    relativePath: "bank/profile/current.md",
-    markdown: input.markdown,
-    body: input.body,
-  };
-}
-
-export function toProfileSnapshotRecord(
-  value: unknown,
-  relativePath: string,
-): ProfileSnapshotQueryRecord | null {
-  const entity = projectProfileSnapshotEntity(value, relativePath);
-  return entity ? profileSnapshotRecordFromEntity(entity) : null;
-}
-
-export function compareSnapshots(
-  left: ProfileSnapshotQueryRecord,
-  right: ProfileSnapshotQueryRecord,
-): number {
-  return compareCurrentProfileSnapshotRecency(
-    profileSnapshotSortFields(left),
-    profileSnapshotSortFields(right),
-  );
-}
-
-function isProfileSnapshotRecord(
-  record: ProfileSnapshotQueryRecord | null,
-): record is ProfileSnapshotQueryRecord {
-  return record !== null;
-}
-
-export function toCurrentProfileRecord(
-  document: MarkdownDocumentRecord,
-): CurrentProfileQueryRecord {
-  const projectedCurrentProfile = projectCurrentProfileEntity(document);
-  const record = currentProfileRecordFromProjectedEntity(
-    projectedCurrentProfile,
-    document.markdown,
-  );
-
-  if (!record) {
-    throw new Error("Failed to project current profile.");
-  }
-
-  return record;
-}
+export type {
+  CurrentProfileQueryRecord,
+  ProfileSnapshotListOptions,
+  ProfileSnapshotQueryRecord,
+} from "./projections.ts";
+export {
+  buildCurrentProfileRecord,
+  compareSnapshots,
+  toCurrentProfileRecord,
+  toProfileSnapshotRecord,
+} from "./projections.ts";
 
 export async function listProfileSnapshots(
   vaultRoot: string,
   options: ProfileSnapshotListOptions = {},
 ): Promise<ProfileSnapshotQueryRecord[]> {
-  const entries = await readJsonlRecords(vaultRoot, "ledger/profile-snapshots");
-  const records = entries
-    .map((entry) => projectProfileSnapshotEntity(entry.value, entry.relativePath))
-    .map((entity) => (entity ? profileSnapshotRecordFromEntity(entity) : null))
-    .filter(isProfileSnapshotRecord)
-    .filter((record) => matchesDateRange(record.recordedAt ?? record.capturedAt, options.from, options.to))
-    .filter((record) => matchesText([record], options.text))
-    .sort(compareSnapshots);
-
-  return applyLimit(records, options.limit);
+  return selectProfileSnapshotRecords(
+    await readProfileSnapshotEntitiesStrict(vaultRoot),
+    options,
+  );
 }
 
 export async function readProfileSnapshot(
@@ -227,77 +75,23 @@ export async function showProfile(
 async function readCurrentProfileState(
   vaultRoot: string,
 ): Promise<CurrentProfileState> {
-  const snapshots = await listProfileSnapshots(vaultRoot);
-  const resolution = resolveCurrentProfileSnapshot(
-    snapshots,
-    profileSnapshotSortFields,
-    fallbackCurrent,
-  );
-
-  if (resolution.latestSnapshotId === null) {
-    return {
-      currentProfile: null,
-      snapshots,
-    };
-  }
-
-  try {
-    const resolvedCurrentProfile = resolveCurrentProfileDocument(
-      resolution,
-      await readCurrentProfileRecordOutcome(vaultRoot),
-      (currentProfile) => currentProfile.snapshotId,
-    );
-
-    return {
-      currentProfile: resolvedCurrentProfile.currentProfile,
-      snapshots,
-    };
-  } catch {
-    return {
-      currentProfile: resolution.fallbackCurrentProfile,
-      snapshots,
-    };
-  }
-}
-
-function fallbackCurrent(
-  latestSnapshot: ProfileSnapshotQueryRecord,
-): CurrentProfileQueryRecord | null {
-  const fallback = fallbackCurrentProfileEntityFromSnapshotRecord(latestSnapshot);
-
-  return fallback ? currentProfileRecordFromProjectedEntity(fallback) : null;
-}
-
-function profileSnapshotSortFields(
-  snapshot: ProfileSnapshotQueryRecord,
-): CurrentProfileSnapshotSortFields {
-  return {
-    snapshotId: snapshot.id,
-    snapshotTimestamp: snapshot.recordedAt ?? snapshot.capturedAt,
-  };
-}
-
-async function readCurrentProfileRecordOutcome(
-  vaultRoot: string,
-): Promise<CurrentProfileDocumentOutcome<CurrentProfileQueryRecord, ParseFailure>> {
-  const outcome = await readOptionalMarkdownDocumentOutcome(
+  const snapshotEntities = await readProfileSnapshotEntitiesStrict(vaultRoot);
+  const snapshots = selectProfileSnapshotRecords(snapshotEntities);
+  const markdownByPath = new Map<string, string>();
+  const currentProfile = await readCurrentProfileCollectionAsync(
     vaultRoot,
-    "bank/profile/current.md",
+    snapshotEntities,
+    markdownByPath,
+    readOptionalMarkdownDocumentOutcome,
   );
 
-  if (!outcome) {
-    return { status: "missing" };
-  }
-
-  if (!outcome.ok) {
-    return {
-      status: "parse-failed",
-      failure: outcome,
-    };
-  }
-
   return {
-    status: "ok",
-    currentProfile: toCurrentProfileRecord(outcome.document),
+    currentProfile: currentProfile.entity
+      ? currentProfileRecordFromEntity(
+          currentProfile.entity,
+          markdownByPath.get(currentProfile.entity.path) ?? currentProfile.entity.body,
+        )
+      : null,
+    snapshots,
   };
 }
