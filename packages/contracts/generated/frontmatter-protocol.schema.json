@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.protocol.v1"
+      "const": "murph.frontmatter.protocol.v1"
     },
     "docType": {
       "type": "string",
@@ -148,6 +148,6 @@
     "startedOn"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-protocol.schema.json",
-  "title": "Healthy Bob Protocol Frontmatter"
+  "$id": "@murph/contracts/frontmatter-protocol.schema.json",
+  "title": "Murph Protocol Frontmatter"
 }

@@ -12,7 +12,7 @@ Prepared the downstream release-note scaffold for the health CLI cutover. This n
 - Recorded the intended boundary behavior for the cutover:
   - structured command payloads remain the machine-facing source of truth
   - Markdown rendering remains a presentation mode rather than an alternate contract
-  - CLI handlers continue to delegate writes to `@healthybob/core` and reads to `@healthybob/query`
+  - CLI handlers continue to delegate writes to `@murph/core` and reads to `@murph/query`
 - Marked the downstream seams that still need source-lane output before this can be promoted from scaffold-only status:
   - final command grammar per noun
   - response-envelope examples

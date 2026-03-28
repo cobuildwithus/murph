@@ -89,10 +89,10 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     publicBaseUrl: readEnv(source, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ?? null,
     trustedUserAssertionHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS)) ??
-      "x-healthybob-user-assertion",
+      "x-hosted-user-assertion",
     trustedUserSignatureHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS)) ??
-      "x-healthybob-user-signature",
+      "x-hosted-user-signature",
     trustedUserSigningSecret: readEnv(source, DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS),
     devUserEmail: readEnv(source, DEVICE_SYNC_DEV_USER_EMAIL_ENV_KEYS) ?? null,
     devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,

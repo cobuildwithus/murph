@@ -33,7 +33,7 @@ If instructions still conflict after applying this order, ask the user before ac
 
 - Always use Tailwind CSS utility classes in the web package (`packages/web`). No raw CSS — do not add custom classes to `globals.css` or create new `.css` files. All styling must be expressed as Tailwind utilities in JSX `className` props. The theme (colors, fonts, shadows, animations) is defined via `@theme` in `globals.css`.
 - For `packages/web` UI work, treat the app as an operator-facing observability surface by default: utility copy first, workspace/status hierarchy first, and no marketing-style hero treatment unless the user explicitly asks for it.
-- Treat `.env` and `.env*` files as sensitive inputs. Healthy Bob's CLI may load local `.env.local` and `.env` files at runtime for operator configuration, but agents must never print, commit, or otherwise expose their contents.
+- Treat `.env` and `.env*` files as sensitive inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator configuration, but agents must never print, commit, or otherwise expose their contents.
 - Do not introduce new `HB_`, `HEALTHYBOB_`, or similarly branded prefixes for env vars, error codes, config keys, identifiers, or docs unless the user explicitly asks for them; prefer neutral names.
 - Never print or commit full secrets, tokens, raw credentials, or full `Authorization` headers.
 - Inside this monorepo, source/test/config code must import sibling workspace packages by package name and only through declared public entrypoints; do not reach into another package's `src/` or `dist/` tree. Keep repo-local Next/Vitest source aliasing in `config/workspace-source-resolution.ts`, and do not add TS paths, aliases, or package-local typecheck steps that point internal consumers at sibling `dist/` output. Treat `dist/` as a publish/runtime artifact only.
@@ -67,9 +67,9 @@ If instructions still conflict after applying this order, ask the user before ac
 ## Commit and Handoff
 
 - Same-turn task completion = acceptance, unless the user explicitly says `review first` or `do not commit`.
-- If you changed files, run the required checks defined below before handoff. If they pass, run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
+- If you changed files, run the required checks defined below before handoff. If the task used an execution plan, close it and commit with `scripts/finish-task agent-docs/exec-plans/active/<plan>.md "type(scope): summary" path/to/file1 path/to/file2`. Otherwise run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
 - If a required check fails for a credibly unrelated pre-existing reason, do not leave your scoped work uncommitted solely because the repo is red. Commit your exact touched files after recording the failing command, the failing target, and why your diff did not cause it. If you cannot defend that causal separation, treat the failure as blocking.
-- Use `scripts/committer` only (no manual `git commit`).
+- Use `scripts/finish-task` for plan-bearing tasks and `scripts/committer` otherwise (no manual `git commit`).
 - Agent-authored commit messages should use Conventional Commits (`feat|fix|refactor|build|ci|chore|docs|style|perf|test`).
 - If no files changed, do not create a commit.
 - Commit only exact file paths touched in the current turn.

@@ -7,7 +7,7 @@ import {
   initializeVault,
   upsertFood,
   upsertProtocolItem,
-} from '@healthybob/core'
+} from '@murph/core'
 import type { AssistantAskResult } from '../src/assistant-cli-contracts.js'
 import { writeAssistantChatResultArtifacts } from '../src/assistant/automation/artifacts.js'
 import {
@@ -116,7 +116,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     prompt: 'Reply to the capture.',
     response: 'Acknowledged.',
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: 'asst_session_1',
       provider: 'codex-cli',
       providerSessionId: null,
@@ -164,7 +164,7 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 test('materializeInboxModelBundle emits a text-only routing bundle with write-capable tools', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-bundle-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-'))
   const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_1', 'attachment-1')
   await mkdir(derivedDirectory, { recursive: true })
   await writeFile(
@@ -181,7 +181,7 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
     path.join(derivedDirectory, 'manifest.json'),
     JSON.stringify(
       {
-        schema: 'healthybob.parser-manifest.v1',
+        schema: 'murph.parser-manifest.v1',
         paths: {
           plainTextPath: 'derived/inbox/cap_1/attachment-1/plain.txt',
           markdownPath: 'derived/inbox/cap_1/attachment-1/notes.md',
@@ -243,7 +243,7 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       vaultServices,
     })
 
-    assert.equal(result.bundle.schema, 'healthybob.inbox-model-bundle.v1')
+    assert.equal(result.bundle.schema, 'murph.inbox-model-bundle.v1')
     assert.equal(result.bundle.captureId, 'cap_1')
     assert.equal(result.bundle.preparedInputMode, 'text-only')
     assert.equal(result.bundle.attachments[0]?.routingImage.eligible, false)
@@ -288,7 +288,7 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
       tools: Array<{ name: string }>
     }
 
-    assert.equal(persistedBundle.schema, 'healthybob.inbox-model-bundle.v1')
+    assert.equal(persistedBundle.schema, 'murph.inbox-model-bundle.v1')
     assert.equal(
       persistedBundle.tools.some((tool) => tool.name === 'inbox.promote.document'),
       true,
@@ -299,8 +299,8 @@ test('materializeInboxModelBundle emits a text-only routing bundle with write-ca
 })
 
 test('materializeInboxModelBundle rejects malicious capture ids before writing bundle artifacts outside the vault', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-malicious-bundle-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-malicious-outside-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-malicious-bundle-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-malicious-outside-'))
   const maliciousCaptureId = path.posix.join('..', '..', '..', path.basename(outsideRoot))
 
   const inboxServices = createStubInboxServices({
@@ -355,7 +355,7 @@ test('materializeInboxModelBundle rejects malicious capture ids before writing b
 })
 
 test('materializeInboxModelBundle marks supported meal photos as multimodal-ready routing inputs', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-photo-bundle-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-photo-bundle-'))
   const imageDirectory = path.join(
     vaultRoot,
     'raw',
@@ -427,8 +427,8 @@ test('materializeInboxModelBundle marks supported meal photos as multimodal-read
 })
 
 test('writeAssistantChatResultArtifacts rejects malicious capture ids before writing chat artifacts outside the vault', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-chat-malicious-vault-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-chat-malicious-outside-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-malicious-vault-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-malicious-outside-'))
   const maliciousCaptureId = path.posix.join('..', '..', '..', path.basename(outsideRoot))
 
   try {
@@ -457,7 +457,7 @@ test('writeAssistantChatResultArtifacts rejects malicious capture ids before wri
 })
 
 test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text-only path', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-heic-bundle-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-heic-bundle-'))
 
   const inboxServices = createStubInboxServices({
     vault: vaultRoot,
@@ -517,8 +517,8 @@ test('materializeInboxModelBundle keeps unsupported HEIC meal photos on the text
 })
 
 test('materializeInboxModelBundle ignores derived parser paths that escape the vault through symlinks', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-bundle-symlink-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-outside-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-symlink-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-outside-'))
   const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_2', 'attachment-1')
   const linkedPlainText = path.join(derivedDirectory, 'linked-plain.txt')
   await mkdir(derivedDirectory, { recursive: true })
@@ -537,7 +537,7 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
     path.join(derivedDirectory, 'manifest.json'),
     JSON.stringify(
       {
-        schema: 'healthybob.parser-manifest.v1',
+        schema: 'murph.parser-manifest.v1',
         paths: {
           plainTextPath: 'derived/inbox/cap_2/attachment-1/linked-plain.txt',
           markdownPath: 'derived/inbox/cap_2/attachment-1/notes.md',
@@ -623,8 +623,8 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
 })
 
 test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and rejects file paths outside the vault', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-routing-tools-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-routing-outside-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-routing-tools-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-routing-outside-'))
   const importDocument = vi.fn(async () => ({
     vault: vaultRoot,
     lookupId: 'doc_1',
@@ -694,8 +694,8 @@ test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and r
 })
 
 test('materializeInboxModelBundle ignores derived parser paths that resolve outside the vault', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-bundle-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'hb-inbox-model-outside-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-outside-'))
   const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_2', 'attachment-1')
   const outsideTextPath = path.join(outsideRoot, 'outside.txt')
 
@@ -705,7 +705,7 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
     path.join(derivedDirectory, 'manifest.json'),
     JSON.stringify(
       {
-        schema: 'healthybob.parser-manifest.v1',
+        schema: 'murph.parser-manifest.v1',
         paths: {
           plainTextPath: outsideTextPath,
           markdownPath: outsideTextPath,
@@ -782,9 +782,209 @@ test('materializeInboxModelBundle ignores derived parser paths that resolve outs
   }
 })
 
+test('materializeInboxModelBundle ignores manifest entries that point at in-vault bank content outside the attachment subtree', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-bank-path-'))
+  const derivedDirectory = path.join(vaultRoot, 'derived', 'inbox', 'cap_3', 'attachment-1')
+  await mkdir(derivedDirectory, { recursive: true })
+  await mkdir(path.join(vaultRoot, 'bank'), { recursive: true })
+  await writeFile(
+    path.join(vaultRoot, 'bank', 'secret.md'),
+    'bank secret text should never enter the routing bundle\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(derivedDirectory, 'notes.md'),
+    '# Parsed Markdown\n\nAllowed attachment notes.\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(derivedDirectory, 'manifest.json'),
+    JSON.stringify(
+      {
+        schema: 'murph.parser-manifest.v1',
+        paths: {
+          plainTextPath: 'bank/secret.md',
+          markdownPath: 'derived/inbox/cap_3/attachment-1/notes.md',
+          tablesPath: null,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_3',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-3',
+      threadId: 'thread-3',
+      threadTitle: 'Care team',
+      actorId: 'contact-3',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Please route this document safely.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_3/envelope.json',
+      eventId: 'evt_3',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_3',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'safe.pdf',
+          storedPath: 'raw/inbox/captures/cap_3/attachments/1/safe.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: 'derived/inbox/cap_3/attachment-1/manifest.json',
+          parserProviderId: 'text-file',
+          parseState: 'succeeded',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_bank_path',
+      captureId: 'cap_3',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.doesNotMatch(result.bundle.routingText, /bank secret text should never enter/u)
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some(
+        (fragment) =>
+          fragment.kind === 'derived_plain_text' &&
+          /bank secret text should never enter/u.test(fragment.text),
+      ),
+      false,
+    )
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some(
+        (fragment) =>
+          fragment.kind === 'derived_markdown' &&
+          /Allowed attachment notes\./u.test(fragment.text),
+      ),
+      true,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('materializeInboxModelBundle ignores derived manifests from another capture subtree inside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-bundle-cross-capture-'))
+  const otherDerivedDirectory = path.join(
+    vaultRoot,
+    'derived',
+    'inbox',
+    'cap_other',
+    'attachment-1',
+  )
+  await mkdir(otherDerivedDirectory, { recursive: true })
+  await writeFile(
+    path.join(otherDerivedDirectory, 'plain.txt'),
+    'other capture text should never enter this routing bundle\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(otherDerivedDirectory, 'notes.md'),
+    '# Other Capture\n\nCross-capture text.\n',
+    'utf8',
+  )
+  await writeFile(
+    path.join(otherDerivedDirectory, 'manifest.json'),
+    JSON.stringify(
+      {
+        schema: 'murph.parser-manifest.v1',
+        paths: {
+          plainTextPath: 'derived/inbox/cap_other/attachment-1/plain.txt',
+          markdownPath: 'derived/inbox/cap_other/attachment-1/notes.md',
+          tablesPath: null,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+
+  const inboxServices = createStubInboxServices({
+    vault: vaultRoot,
+    capture: {
+      captureId: 'cap_4',
+      source: 'imessage',
+      accountId: 'self',
+      externalId: 'message-4',
+      threadId: 'thread-4',
+      threadTitle: 'Care team',
+      actorId: 'contact-4',
+      actorName: 'Clinician',
+      actorIsSelf: false,
+      occurredAt: '2026-03-13T10:00:00.000Z',
+      receivedAt: '2026-03-13T10:00:02.000Z',
+      text: 'Please keep this capture isolated.',
+      attachmentCount: 1,
+      envelopePath: 'raw/inbox/captures/cap_4/envelope.json',
+      eventId: 'evt_4',
+      promotions: [],
+      createdAt: '2026-03-13T10:00:02.000Z',
+      threadIsDirect: true,
+      attachments: [
+        {
+          attachmentId: 'att_4',
+          ordinal: 1,
+          kind: 'document',
+          mime: 'application/pdf',
+          fileName: 'isolated.pdf',
+          storedPath: 'raw/inbox/captures/cap_4/attachments/1/isolated.pdf',
+          extractedText: null,
+          transcriptText: null,
+          derivedPath: 'derived/inbox/cap_other/attachment-1/manifest.json',
+          parserProviderId: 'text-file',
+          parseState: 'succeeded',
+        },
+      ],
+    },
+  })
+
+  try {
+    const result = await materializeInboxModelBundle({
+      inboxServices,
+      requestId: 'req_bundle_cross_capture',
+      captureId: 'cap_4',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    assert.equal(
+      result.bundle.attachments[0]?.fragments.some((fragment) =>
+        fragment.kind.startsWith('derived_'),
+      ),
+      false,
+    )
+    assert.doesNotMatch(result.bundle.routingText, /other capture text should never enter/u)
+    assert.doesNotMatch(result.bundle.routingText, /Cross-capture text/u)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('createDefaultAssistantToolCatalog exposes recipe and food query and write tools', () => {
   const catalog = createDefaultAssistantToolCatalog({
-    vault: '/tmp/healthybob-vault',
+    vault: '/tmp/murph-vault',
     vaultServices: createStubVaultServices(),
   })
 
@@ -797,7 +997,7 @@ test('createDefaultAssistantToolCatalog exposes recipe and food query and write 
 })
 
 test('createDefaultAssistantToolCatalog recipe upsert writes payload files and calls the recipe service with inputFile', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-recipe-tools-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-recipe-tools-'))
   let recordedCall:
     | {
         inputFile: string
@@ -872,7 +1072,7 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
 })
 
 test('createDefaultAssistantToolCatalog food upsert writes payload files and calls the food service with inputFile', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-food-tools-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-food-tools-'))
   let recordedCall:
     | {
         inputFile: string
@@ -947,7 +1147,7 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
 })
 
 test('createDefaultAssistantToolCatalog share-link tool exports attached protocols and posts the hosted request', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-share-tools-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-'))
   const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
   const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
   const originalFetch = global.fetch
@@ -1072,7 +1272,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
 })
 
 test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-share-tools-error-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
   const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
   const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
   const originalFetch = global.fetch
@@ -1146,7 +1346,7 @@ test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API erro
 })
 
 test('createDefaultAssistantToolCatalog health upserts write payload files and call the goal service with input', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'hb-assistant-tools-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-tools-'))
   let recordedCall:
     | {
         input: string

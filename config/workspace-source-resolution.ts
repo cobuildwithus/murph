@@ -6,6 +6,23 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
   string
 >;
 
+export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murph/contracts": "../../packages/contracts/src/index.ts",
+  "@murph/hosted-execution": "../../packages/hosted-execution/src/index.ts",
+  "@murph/runtime-state": "../../packages/runtime-state/src/index.ts",
+  "@murph/core": "../../packages/core/src/index.ts",
+  "@murph/importers": "../../packages/importers/src/index.ts",
+  "@murph/inboxd": "../../packages/inboxd/src/index.ts",
+  "@murph/device-syncd": "../../packages/device-syncd/src/index.ts",
+} as const satisfies WorkspaceSourceEntryRelativePaths;
+
+export const LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murph/contracts": "../contracts/src/index.ts",
+  "@murph/hosted-execution": "../hosted-execution/src/index.ts",
+  "@murph/runtime-state": "../runtime-state/src/index.ts",
+  "@murph/query": "../query/src/index.ts",
+} as const satisfies WorkspaceSourceEntryRelativePaths;
+
 type VitestAlias = {
   find: RegExp;
   replacement: string;
@@ -46,6 +63,28 @@ export function createVitestWorkspaceRuntimeAliases(
       },
     ];
   });
+}
+
+export const HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
+  HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
+);
+
+export const LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
+  LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
+);
+
+export function resolveHostedWebWorkspaceSourceEntries(workspaceDir: string) {
+  return resolveWorkspaceSourceEntries(
+    workspaceDir,
+    HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
+  );
+}
+
+export function resolveLocalWebWorkspaceSourceEntries(workspaceDir: string) {
+  return resolveWorkspaceSourceEntries(
+    workspaceDir,
+    LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
+  );
 }
 
 function escapeRegExp(value: string): string {

@@ -5,7 +5,7 @@ import {
   buildProcessCommand,
   DirectoryLockHeldError,
   isProcessRunning,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 import { VaultCliError } from '../vault-cli-errors.js'
 
 export interface AssistantStateWriteLockMetadata {

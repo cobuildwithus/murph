@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "healthybob-hosted-runner-vitest",
+  "name": "hosted-runner-vitest",
   "main": "./worker-entry.ts",
   "compatibility_date": "2026-03-27",
   "compatibility_flags": ["nodejs_compat"],
@@ -29,7 +29,7 @@
   "r2_buckets": [
     {
       "binding": "BUNDLES",
-      "bucket_name": "healthybob-hosted-runner-vitest-bundles"
+      "bucket_name": "hosted-runner-vitest-bundles"
     }
   ],
   "vars": {

@@ -5,6 +5,7 @@ import { test } from "vitest";
 
 import {
   allowedDeclarationArtifacts,
+  buildNextEnvDeclarationArtifact,
   getBlockedWorkingTreeArtifactPath,
   isAllowedDeclarationArtifactContents,
   isBlockedTrackedArtifactPath,
@@ -34,6 +35,40 @@ test("check-no-js rejects modified declaration stubs", () => {
   );
 });
 
+test("check-no-js allowlists the hosted dev Next.js declaration stub variant", () => {
+  const hostedDevNextEnv = buildNextEnvDeclarationArtifact("./.next-dev/types/routes.d.ts");
+
+  assert.equal(
+    isAllowedDeclarationArtifactContents("apps/web/next-env.d.ts", hostedDevNextEnv),
+    true,
+  );
+});
+
+test("check-no-js also allowlists the hosted nested dev Next.js declaration stub variant", () => {
+  const hostedNestedDevNextEnv = buildNextEnvDeclarationArtifact("./.next-dev/dev/types/routes.d.ts");
+
+  assert.equal(
+    isAllowedDeclarationArtifactContents("apps/web/next-env.d.ts", hostedNestedDevNextEnv),
+    true,
+  );
+});
+
+test("check-no-js also allowlists the hosted smoke Next.js declaration stub variants", () => {
+  const hostedSmokeNextEnv = buildNextEnvDeclarationArtifact("./.next-smoke/types/routes.d.ts");
+  const hostedNestedSmokeNextEnv = buildNextEnvDeclarationArtifact(
+    "./.next-smoke/dev/types/routes.d.ts",
+  );
+
+  assert.equal(
+    isAllowedDeclarationArtifactContents("apps/web/next-env.d.ts", hostedSmokeNextEnv),
+    true,
+  );
+  assert.equal(
+    isAllowedDeclarationArtifactContents("apps/web/next-env.d.ts", hostedNestedSmokeNextEnv),
+    true,
+  );
+});
+
 test("check-no-js rejects tracked local env files while allowlisting tracked examples", () => {
   assert.equal(isBlockedTrackedEnvArtifactPath(".env"), true);
   assert.equal(isBlockedTrackedEnvArtifactPath("apps/web/.env"), true);
@@ -47,6 +82,8 @@ test("check-no-js flags tracked generated/private artifact paths", () => {
   assert.equal(isBlockedTrackedArtifactPath(".env"), true);
   assert.equal(isBlockedTrackedArtifactPath("apps/web/.env.example"), false);
   assert.equal(isBlockedTrackedArtifactPath("apps/web/.next"), true);
+  assert.equal(isBlockedTrackedArtifactPath("apps/web/.next-dev/cache"), true);
+  assert.equal(isBlockedTrackedArtifactPath("apps/web/.next-smoke/cache"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/web/.next/server/app.js"), true);
   assert.equal(isBlockedTrackedArtifactPath(".next/cache/tsconfig.tsbuildinfo"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/core/dist/index.js"), true);
@@ -62,6 +99,14 @@ test("check-no-js flags bundle-only working-tree private/build artifacts", () =>
   );
   assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.env.example", "file"), null);
   assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.next", "directory"), "apps/web/.next/");
+  assert.equal(
+    getBlockedWorkingTreeArtifactPath("apps/web/.next-dev", "directory"),
+    "apps/web/.next-dev/",
+  );
+  assert.equal(
+    getBlockedWorkingTreeArtifactPath("apps/web/.next-smoke", "directory"),
+    "apps/web/.next-smoke/",
+  );
   assert.equal(
     getBlockedWorkingTreeArtifactPath("packages/core/.test-dist", "directory"),
     "packages/core/.test-dist/",

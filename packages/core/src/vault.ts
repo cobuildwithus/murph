@@ -24,7 +24,7 @@ import {
   sampleRecordSchema,
   vaultMetadataSchema,
   workoutFormatFrontmatterSchema,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import {
   DEFAULT_TIMEZONE,
@@ -176,7 +176,7 @@ function validationIssue(
 
 export async function initializeVault({
   vaultRoot,
-  title = "Healthy Bob Vault",
+  title = "Murph Vault",
   timezone = DEFAULT_TIMEZONE,
   createdAt = new Date(),
 }: InitializeVaultInput = {}): Promise<InitializedVault> {

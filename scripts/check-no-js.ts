@@ -11,7 +11,13 @@ const allowedSourceArtifacts = new Set([
   "packages/web/postcss.config.mjs",
   "apps/web/postcss.config.mjs",
 ]);
-const blockedTrackedArtifactDirectoryNames = new Set(["dist", ".next", ".test-dist"]);
+const blockedTrackedArtifactDirectoryNames = new Set([
+  "dist",
+  ".next",
+  ".next-dev",
+  ".next-smoke",
+  ".test-dist",
+]);
 const execFileAsync = promisify(execFile);
 const nextEnvCommonLines = [
   '/// <reference types="next" />',
@@ -24,28 +30,37 @@ const nextEnvTrailingLines = [
   "",
 ];
 const bundleArtifactFlag = "--for-source-bundle";
+
+export function buildNextEnvDeclarationArtifact(routeTypesImportPath: string): string {
+  return [...nextEnvCommonLines, `import "${routeTypesImportPath}";`, ...nextEnvTrailingLines].join(
+    "\n",
+  );
+}
+
+export function buildNextEnvDeclarationArtifacts(
+  routeTypesImportPaths: readonly string[],
+): string[] {
+  return routeTypesImportPaths.map(buildNextEnvDeclarationArtifact);
+}
+
 export const allowedDeclarationArtifacts = new Map<string, string[]>([
   [
     "packages/web/next-env.d.ts",
-    [
-      [...nextEnvCommonLines, 'import "./.next/types/routes.d.ts";', ...nextEnvTrailingLines].join(
-        "\n",
-      ),
-      [...nextEnvCommonLines, 'import "./.next/dev/types/routes.d.ts";', ...nextEnvTrailingLines].join(
-        "\n",
-      ),
-    ],
+    buildNextEnvDeclarationArtifacts([
+      "./.next/types/routes.d.ts",
+      "./.next/dev/types/routes.d.ts",
+    ]),
   ],
   [
     "apps/web/next-env.d.ts",
-    [
-      [...nextEnvCommonLines, 'import "./.next/types/routes.d.ts";', ...nextEnvTrailingLines].join(
-        "\n",
-      ),
-      [...nextEnvCommonLines, 'import "./.next/dev/types/routes.d.ts";', ...nextEnvTrailingLines].join(
-        "\n",
-      ),
-    ],
+    buildNextEnvDeclarationArtifacts([
+      "./.next/types/routes.d.ts",
+      "./.next-dev/types/routes.d.ts",
+      "./.next-dev/dev/types/routes.d.ts",
+      "./.next-smoke/types/routes.d.ts",
+      "./.next-smoke/dev/types/routes.d.ts",
+      "./.next/dev/types/routes.d.ts",
+    ]),
   ],
 ]);
 
@@ -102,7 +117,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and fixed PostCSS config paths, and no tracked .env/.env.* private files or dist/.next/.test-dist/*.tsbuildinfo artifacts, were found.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and fixed PostCSS config paths, and no tracked .env/.env.* private files or dist/.next/.next-dev/.next-smoke/.test-dist/*.tsbuildinfo artifacts, were found.",
   );
 }
 
@@ -117,7 +132,9 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
       if (
         entry.name === "dist" ||
         entry.name === "node_modules" ||
-        entry.name === ".next"
+        entry.name === ".next" ||
+        entry.name === ".next-dev" ||
+        entry.name === ".next-smoke"
       ) {
         continue;
       }

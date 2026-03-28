@@ -8,6 +8,11 @@ const providerMocks = vi.hoisted(() => ({
   resolveAssistantLanguageModel: vi.fn(),
 }))
 
+const promptMocks = vi.hoisted(() => ({
+  answers: [] as string[],
+  prompts: [] as string[],
+}))
+
 vi.mock('ai', () => ({
   generateText: providerMocks.generateText,
 }))
@@ -20,27 +25,46 @@ vi.mock('../src/model-harness.js', () => ({
   resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
 }))
 
+vi.mock('node:readline/promises', () => ({
+  default: {
+    createInterface: () => ({
+      close() {},
+      question: async (prompt: string) => {
+        promptMocks.prompts.push(prompt)
+        return promptMocks.answers.shift() ?? ''
+      },
+    }),
+  },
+}))
+
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
-  resolveAssistantProviderOptions,
 } from '../src/chat-provider.js'
 import {
   defaultDiscoverOpenAICompatibleModels,
+  type AssistantModelDiscoveryResult,
   resolveAssistantModelCatalog,
 } from '../src/assistant/provider-catalog.js'
+import {
+  buildAssistantProviderDefaultsPatch,
+  resolveAssistantProviderDefaults,
+} from '../src/operator-config.js'
+import { serializeAssistantProviderSessionOptions } from '../src/assistant/provider-config.js'
 import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
 beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
   providerMocks.generateText.mockReset()
   providerMocks.resolveAssistantLanguageModel.mockReset()
+  promptMocks.answers.length = 0
+  promptMocks.prompts.length = 0
   vi.unstubAllGlobals()
 })
 
-test('resolveAssistantProviderOptions sanitizes settings for the selected provider', () => {
+test('serializeAssistantProviderSessionOptions sanitizes settings for the selected provider', () => {
   assert.deepEqual(
-    resolveAssistantProviderOptions({
+    serializeAssistantProviderSessionOptions({
       provider: 'openai-compatible',
       model: ' gpt-oss:20b ',
       sandbox: 'read-only',
@@ -71,6 +95,134 @@ test('resolveAssistantProviderOptions sanitizes settings for the selected provid
       },
     },
   )
+})
+
+test('buildAssistantProviderDefaultsPatch keeps OpenAI-compatible endpoint auth and headers when only the model changes', () => {
+  assert.deepEqual(
+    buildAssistantProviderDefaultsPatch({
+      defaults: {
+        provider: 'openai-compatible',
+        defaultsByProvider: {
+          'openai-compatible': {
+            codexCommand: null,
+            model: 'llama3.2:latest',
+            reasoningEffort: null,
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            apiKeyEnv: 'OLLAMA_API_KEY',
+            providerName: 'ollama',
+            headers: {
+              Authorization: 'Bearer override-token',
+              'X-Foo': 'bar',
+            },
+          },
+        },
+        identityId: null,
+        failoverRoutes: null,
+        account: null,
+        selfDeliveryTargets: null,
+      },
+      provider: 'openai-compatible',
+      providerConfig: {
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+          'X-Foo': 'bar',
+        },
+      },
+    }),
+    {
+      provider: 'openai-compatible',
+      defaultsByProvider: {
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'gpt-oss:20b',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+            'X-Foo': 'bar',
+          },
+        },
+      },
+    },
+  )
+})
+
+test('resolveAssistantProviderDefaults can read inactive saved provider entries', () => {
+  const openAiDefaults = resolveAssistantProviderDefaults(
+    {
+      provider: 'codex-cli',
+      defaultsByProvider: {
+        'codex-cli': {
+          codexCommand: '/opt/bin/codex',
+          model: 'gpt-5.4',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: 'ops',
+          oss: true,
+          baseUrl: null,
+          apiKeyEnv: null,
+          providerName: null,
+          headers: null,
+        },
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'llama3.2:latest',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+          },
+        },
+      },
+      identityId: null,
+      failoverRoutes: null,
+      account: null,
+      selfDeliveryTargets: null,
+    },
+    'openai-compatible',
+  )
+
+  assert.deepEqual(openAiDefaults, {
+    codexCommand: null,
+    model: 'llama3.2:latest',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      Authorization: 'Bearer override-token',
+    },
+  })
 })
 
 test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
@@ -201,8 +353,49 @@ test('defaultDiscoverOpenAICompatibleModels respects explicit Authorization head
 
   const headers = (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
     ?.headers
-  assert.equal(headers?.authorization, 'Bearer override-token')
-  assert.equal('Authorization' in (headers ?? {}), false)
+  assert.equal(headers?.Authorization, 'Bearer override-token')
+  assert.equal('authorization' in (headers ?? {}), false)
+})
+
+test('defaultDiscoverOpenAICompatibleModels merges process env lookup with normalized header dedupe', async () => {
+  const originalApiKey = process.env.MERGED_OLLAMA_API_KEY
+  process.env.MERGED_OLLAMA_API_KEY = 'process-token'
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      data: [],
+    }),
+  } as Response)
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    await defaultDiscoverOpenAICompatibleModels('http://127.0.0.1:11434/v1', {
+      apiKeyEnv: 'MERGED_OLLAMA_API_KEY',
+      env: {
+        LOCAL_ONLY: '1',
+      },
+      headers: {
+        ' x-foo ': 'one',
+        'X-Foo': 'two',
+      },
+    })
+  } finally {
+    if (originalApiKey === undefined) {
+      delete process.env.MERGED_OLLAMA_API_KEY
+    } else {
+      process.env.MERGED_OLLAMA_API_KEY = originalApiKey
+    }
+  }
+
+  assert.deepEqual(
+    (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
+      ?.headers,
+    {
+      Accept: 'application/json',
+      Authorization: 'Bearer process-token',
+      'X-Foo': 'two',
+    },
+  )
 })
 
 test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefined', async () => {
@@ -244,10 +437,10 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const result = await executeAssistantProviderTurn({
     abortSignal: abortController.signal,
     provider: 'codex-cli',
-    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     continuityContext: 'Recent local conversation transcript:\nUser: prior question',
     env: {
-      PATH: '/tmp/healthybob-bin',
+      PATH: '/tmp/murph-bin',
     },
     workingDirectory: '/tmp/vault',
     systemPrompt: 'system prompt',
@@ -279,9 +472,9 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.equal(call?.abortSignal, abortController.signal)
   assert.equal(call?.codexCommand, '/opt/homebrew/bin/codex')
-  assert.deepEqual(call?.configOverrides, ['mcp_servers.healthybob_memory.command="node"'])
+  assert.deepEqual(call?.configOverrides, ['mcp_servers.murph_memory.command="node"'])
   assert.deepEqual(call?.env, {
-    PATH: '/tmp/healthybob-bin',
+    PATH: '/tmp/murph-bin',
   })
   assert.equal(call?.workingDirectory, '/tmp/vault')
   assert.equal(call?.resumeSessionId, 'thread-existing')
@@ -421,7 +614,7 @@ test('executeAssistantProviderTurn throws a base-url error before attempting Ope
 })
 
 test('createSetupAssistantResolver refuses to pick a fake OpenAI-compatible model in non-interactive mode when discovery is empty', async () => {
-  const discoverModels = vi.fn().mockResolvedValue([])
+  const discoverModels = vi.fn().mockResolvedValue(createDiscoveryResult([]))
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -445,7 +638,9 @@ test('createSetupAssistantResolver refuses to pick a fake OpenAI-compatible mode
 })
 
 test('createSetupAssistantResolver chooses the first discovered OpenAI-compatible model in non-interactive mode', async () => {
-  const discoverModels = vi.fn().mockResolvedValue(['llama3.3:70b', 'gpt-oss:20b'])
+  const discoverModels = vi
+    .fn()
+    .mockResolvedValue(createDiscoveryResult(['llama3.3:70b', 'gpt-oss:20b']))
   const resolver = createSetupAssistantResolver({
     assistantAccount: {
       resolve: async () => null,
@@ -466,6 +661,66 @@ test('createSetupAssistantResolver chooses the first discovered OpenAI-compatibl
   assert.equal(resolved.model, 'llama3.3:70b')
 })
 
+test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model when discovery is empty', async () => {
+  const discoverModels = vi.fn().mockResolvedValue(createDiscoveryResult([]))
+  promptMocks.answers.push('', '', '', 'custom-model')
+  const input = new PassThrough()
+  const output = new PassThrough()
+  const outputChunks: string[] = []
+  output.on('data', (chunk: Buffer | string) => {
+    outputChunks.push(chunk.toString())
+  })
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    discoverModels,
+    input,
+    output,
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: true,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {} as any,
+  })
+
+  assert.equal(resolved.provider, 'openai-compatible')
+  assert.equal(resolved.model, 'custom-model')
+  assert.match(outputChunks.join(''), /A model id is required\./u)
+  assert.deepEqual(promptMocks.prompts, [
+    'OpenAI-compatible base URL [http://127.0.0.1:11434/v1]: ',
+    'API key environment variable (leave blank for local/no auth): ',
+    'Default model for the OpenAI-compatible endpoint: ',
+    'Default model for the OpenAI-compatible endpoint: ',
+  ])
+})
+
+test('createSetupAssistantResolver rejects unsupported OpenAI-compatible reasoning effort overrides', async () => {
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  await assert.rejects(
+    () =>
+      resolver.resolve({
+        allowPrompt: false,
+        commandName: 'setup',
+        preset: 'openai-compatible',
+        options: {
+          assistantModel: 'gpt-oss:20b',
+          assistantReasoningEffort: 'high',
+        } as any,
+      }),
+    /does not support assistantReasoningEffort/u,
+  )
+})
+
 test('executeAssistantProviderTurn enables reasoning summary traces when requested', async () => {
   const onTraceEvent = vi.fn()
   providerMocks.executeCodexPrompt.mockResolvedValue({
@@ -478,7 +733,7 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
 
   await executeAssistantProviderTurn({
     provider: 'codex-cli',
-    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     workingDirectory: '/tmp/vault',
     userPrompt: 'hello',
     showThinkingTraces: true,
@@ -487,9 +742,32 @@ test('executeAssistantProviderTurn enables reasoning summary traces when request
 
   const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
   assert.deepEqual(call?.configOverrides, [
-    'mcp_servers.healthybob_memory.command="node"',
+    'mcp_servers.murph_memory.command="node"',
     'model_reasoning_summary="auto"',
     'hide_agent_reasoning=false',
   ])
   assert.equal(call?.onTraceEvent, onTraceEvent)
 })
+
+function createDiscoveryResult(
+  models: readonly string[],
+  input?: Partial<AssistantModelDiscoveryResult>,
+): AssistantModelDiscoveryResult {
+  return {
+    status: input?.status ?? 'ok',
+    message: input?.message ?? null,
+    models: models.map((id) => ({
+      id,
+      label: id,
+      description: `Discovered ${id}.`,
+      source: 'discovered',
+      capabilities: {
+        images: false,
+        pdf: false,
+        reasoning: false,
+        streaming: true,
+        tools: true,
+      },
+    })),
+  }
+}

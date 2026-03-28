@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { initializeVault } from '@healthybob/core'
+import { initializeVault } from '@murph/core'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerAuditCommands } from '../src/commands/audit.js'
@@ -74,7 +74,7 @@ test('samples import-csv schema exposes the expansion-only import options', asyn
 })
 
 test.sequential('samples commands support richer import options plus show/list/batch follow-up flows', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-samples-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-'))
   const csvPath = path.join(vaultRoot, 'samples-semicolon.csv')
 
   try {
@@ -266,7 +266,7 @@ test.sequential('samples commands support richer import options plus show/list/b
 })
 
 test.sequential('audit commands show, filter, and tail canonical audit records', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-audit-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-audit-'))
 
   try {
     await initializeVault({ vaultRoot })
@@ -275,7 +275,7 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
       path.join(vaultRoot, 'audit/2026/2026-03.jsonl'),
       [
         JSON.stringify({
-          schemaVersion: 'hb.audit.v1',
+          schemaVersion: 'murph.audit.v1',
           id: 'aud_01JNW00000000000000000001',
           action: 'samples_import_csv',
           status: 'success',
@@ -286,7 +286,7 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
           changes: [],
         }),
         JSON.stringify({
-          schemaVersion: 'hb.audit.v1',
+          schemaVersion: 'murph.audit.v1',
           id: 'aud_01JNW00000000000000000002',
           action: 'show',
           status: 'failure',
@@ -297,7 +297,7 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
           changes: [],
         }),
         JSON.stringify({
-          schemaVersion: 'hb.audit.v1',
+          schemaVersion: 'murph.audit.v1',
           id: 'aud_01JNW00000000000000000003',
           action: 'validate',
           status: 'success',
@@ -473,7 +473,7 @@ test.sequential('audit commands show, filter, and tail canonical audit records',
 })
 
 test.sequential('audit commands are reachable through the top-level CLI registration', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-audit-runtime-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-audit-runtime-'))
 
   try {
     await initializeVault({ vaultRoot })
@@ -481,7 +481,7 @@ test.sequential('audit commands are reachable through the top-level CLI registra
     await writeFile(
       path.join(vaultRoot, 'audit/2026/2026-03.jsonl'),
       JSON.stringify({
-        schemaVersion: 'hb.audit.v1',
+        schemaVersion: 'murph.audit.v1',
         id: 'aud_01JNW00000000000000000010',
         action: 'validate',
         status: 'success',

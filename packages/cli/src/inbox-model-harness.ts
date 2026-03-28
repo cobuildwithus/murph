@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
+import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murph/core'
 import {
   resolveAssistantInboxArtifactPath,
   resolveAssistantVaultPath,
@@ -40,7 +41,7 @@ const DEFAULT_MAX_FRAGMENT_CHARS = 6000
 const DEFAULT_MAX_ROUTING_CHARS = 24000
 
 const parserManifestSchema = z.object({
-  schema: z.literal('healthybob.parser-manifest.v1'),
+  schema: z.literal('murph.parser-manifest.v1'),
   paths: z.object({
     plainTextPath: z.string().min(1),
     markdownPath: z.string().min(1),
@@ -104,7 +105,7 @@ export async function materializeInboxModelBundle(
 export async function routeInboxCaptureWithModel(
   input: RouteInboxCaptureWithModelInput,
 ): Promise<InboxModelRouteResult> {
-  const { bundle, toolCatalog } = await prepareInboxModelSession(input)
+  const { bundle, capture, toolCatalog } = await prepareInboxModelSession(input)
   const bundlePath = await writeAssistantArtifact(
     input.vault,
     input.captureId,
@@ -114,6 +115,7 @@ export async function routeInboxCaptureWithModel(
   const model = resolveAssistantLanguageModel(input.modelSpec)
   const preparedInput = await prepareInboxPlacementInput({
     bundle,
+    capture,
     vaultRoot: input.vault,
   })
 
@@ -132,7 +134,7 @@ export async function routeInboxCaptureWithModel(
       rawPlan = await generateAssistantObject({
         model,
         schema: assistantExecutionPlanSchema,
-        schemaName: 'healthybob_assistant_plan',
+        schemaName: 'murph_assistant_plan',
         system: buildInboxPlacementSystemPrompt(),
         prompt: preparedInput.prompt,
       })
@@ -158,7 +160,7 @@ export async function routeInboxCaptureWithModel(
     input.captureId,
     'result.json',
     {
-      schema: 'healthybob.assistant-plan-result.v1',
+      schema: 'murph.assistant-plan-result.v1',
       apply: input.apply ?? false,
       preparedInputMode: bundle.preparedInputMode,
       inputMode,
@@ -192,6 +194,7 @@ async function prepareInboxModelSession(
   input: BuildInboxModelBundleInput,
 ): Promise<{
   bundle: InboxModelBundle
+  capture: InboxShowResult['capture']
   toolCatalog: ReturnType<typeof createInboxRoutingAssistantToolCatalog>
 }> {
   const shown = await input.inboxServices.show({
@@ -211,6 +214,7 @@ async function prepareInboxModelSession(
     shown.capture.attachments.map((attachment) =>
       buildAttachmentBundle({
         attachment,
+        captureId: shown.capture.captureId,
         vaultRoot: input.vault,
       }),
     ),
@@ -222,9 +226,10 @@ async function prepareInboxModelSession(
   ).text
 
   return {
+    capture: shown.capture,
     toolCatalog,
     bundle: inboxModelBundleSchema.parse({
-      schema: 'healthybob.inbox-model-bundle.v1',
+      schema: 'murph.inbox-model-bundle.v1',
       captureId: shown.capture.captureId,
       eventId: shown.capture.eventId,
       source: shown.capture.source,
@@ -248,7 +253,7 @@ async function prepareInboxModelSession(
 
 function buildInboxPlacementSystemPrompt(): string {
   return [
-    'You are the Healthy Bob assistant routing model.',
+    'You are the Murph assistant routing model.',
     'Choose the smallest safe set of CLI tool calls needed to place the capture into canonical storage.',
     'Prefer inbox.promote.* tools when a single capture-level promotion fits the evidence.',
     'Use broader vault.* tools only when the capture clearly contains structured data that should be written directly.',
@@ -261,7 +266,7 @@ function buildInboxPlacementSystemPrompt(): string {
 
 function buildInboxPlacementPrompt(bundle: InboxModelBundle): string {
   const responseShape = {
-    schema: 'healthybob.assistant-plan.v1',
+    schema: 'murph.assistant-plan.v1',
     summary: 'one-sentence routing summary',
     rationale: 'brief explanation grounded in the bundle',
     actions: [
@@ -298,7 +303,7 @@ function buildInboxPlacementGenerationInput(
   return {
     model,
     schema: assistantExecutionPlanSchema,
-    schemaName: 'healthybob_assistant_plan',
+    schemaName: 'murph_assistant_plan',
     system: buildInboxPlacementSystemPrompt(),
     ...(preparedInput.inputMode === 'multimodal' && preparedInput.messages
       ? {
@@ -312,6 +317,7 @@ function buildInboxPlacementGenerationInput(
 
 async function prepareInboxPlacementInput(input: {
   bundle: InboxModelBundle
+  capture: InboxShowResult['capture']
   vaultRoot: string
 }): Promise<PreparedInboxPlacementInput> {
   const prompt = buildInboxPlacementPrompt(input.bundle)
@@ -324,7 +330,8 @@ async function prepareInboxPlacementInput(input: {
   }
 
   const routingImages = await readPreparedRoutingImages({
-    attachments: input.bundle.attachments,
+    attachments: input.capture.attachments,
+    captureId: input.capture.captureId,
     vaultRoot: input.vaultRoot,
   })
 
@@ -395,13 +402,18 @@ function validateAssistantPlan(
 
 async function buildAttachmentBundle(input: {
   attachment: InboxShowResult['capture']['attachments'][number]
+  captureId: string
   vaultRoot: string
 }): Promise<InboxModelAttachmentBundle> {
   const routingImage = getRoutingImageEligibility(input.attachment)
   const fragments = [
     buildMetadataFragment(input.attachment, routingImage),
     ...buildInlineTextFragments(input.attachment),
-    ...(await buildDerivedTextFragments(input.vaultRoot, input.attachment.derivedPath)),
+    ...(await buildDerivedTextFragments({
+      attachment: input.attachment,
+      captureId: input.captureId,
+      vaultRoot: input.vaultRoot,
+    })),
   ]
   const combinedText = fragments
     .map((fragment) => `[${fragment.label}]\n${fragment.text}`)
@@ -487,16 +499,24 @@ function buildInlineTextFragments(
   return fragments
 }
 
-async function buildDerivedTextFragments(
-  vaultRoot: string,
-  manifestPath: string | null | undefined,
-) {
-  const normalizedManifestPath = normalizeNullableString(manifestPath)
+async function buildDerivedTextFragments(input: {
+  attachment: InboxShowResult['capture']['attachments'][number]
+  captureId: string
+  vaultRoot: string
+}) {
+  const allowedDerivedPrefixes = buildAllowedDerivedPrefixes(
+    input.captureId,
+    input.attachment,
+  )
+  const normalizedManifestPath = normalizeAnchoredVaultRelativePath(
+    input.attachment.derivedPath,
+    allowedDerivedPrefixes,
+  )
   if (!normalizedManifestPath) {
     return []
   }
 
-  const manifest = await readParserManifest(vaultRoot, normalizedManifestPath)
+  const manifest = await readParserManifest(input.vaultRoot, normalizedManifestPath)
   if (!manifest) {
     return []
   }
@@ -509,33 +529,48 @@ async function buildDerivedTextFragments(
     truncated: boolean
   }> = []
 
-  const plainText = await readRelativeTextFile(vaultRoot, manifest.paths.plainTextPath)
+  const plainTextPath = normalizeAnchoredVaultRelativePath(
+    manifest.paths.plainTextPath,
+    allowedDerivedPrefixes,
+  )
+  const plainText = plainTextPath
+    ? await readRelativeTextFile(input.vaultRoot, plainTextPath)
+    : null
   if (plainText) {
     const clamped = clampText(plainText, DEFAULT_MAX_FRAGMENT_CHARS)
     fragments.push({
       kind: 'derived_plain_text',
       label: 'derived-plain-text',
-      path: manifest.paths.plainTextPath,
+      path: plainTextPath,
       text: clamped.text,
       truncated: clamped.truncated,
     })
   }
 
-  const markdown = await readRelativeTextFile(vaultRoot, manifest.paths.markdownPath)
+  const markdownPath = normalizeAnchoredVaultRelativePath(
+    manifest.paths.markdownPath,
+    allowedDerivedPrefixes,
+  )
+  const markdown = markdownPath
+    ? await readRelativeTextFile(input.vaultRoot, markdownPath)
+    : null
   if (markdown) {
     const clamped = clampText(markdown, DEFAULT_MAX_FRAGMENT_CHARS)
     fragments.push({
       kind: 'derived_markdown',
       label: 'derived-markdown',
-      path: manifest.paths.markdownPath,
+      path: markdownPath,
       text: clamped.text,
       truncated: clamped.truncated,
     })
   }
 
-  const tablesPath = normalizeNullableString(manifest.paths.tablesPath ?? null)
+  const tablesPath = normalizeAnchoredVaultRelativePath(
+    manifest.paths.tablesPath ?? null,
+    allowedDerivedPrefixes,
+  )
   if (tablesPath) {
-    const tables = await readRelativeTextFile(vaultRoot, tablesPath)
+    const tables = await readRelativeTextFile(input.vaultRoot, tablesPath)
     if (tables) {
       const clamped = clampText(tables, DEFAULT_MAX_FRAGMENT_CHARS)
       fragments.push({
@@ -620,7 +655,8 @@ async function readRelativeTextFile(
 }
 
 async function readPreparedRoutingImages(input: {
-  attachments: InboxModelBundle['attachments']
+  attachments: InboxShowResult['capture']['attachments']
+  captureId: string
   vaultRoot: string
 }): Promise<{
   images: PreparedRoutingImage[]
@@ -630,20 +666,28 @@ async function readPreparedRoutingImages(input: {
   const errors: string[] = []
 
   for (const attachment of input.attachments) {
-    if (!attachment.routingImage.eligible || !attachment.storedPath) {
+    const routingImage = getRoutingImageEligibility(attachment)
+    const storedPath = normalizeCaptureStoredAttachmentPath(
+      attachment.storedPath ?? null,
+      input.captureId,
+    )
+    if (!routingImage.eligible || !attachment.storedPath) {
       continue
     }
 
     try {
+      if (!storedPath) {
+        throw new Error('attachment stored path is outside the capture attachment subtree')
+      }
       const absolutePath = await resolveAssistantVaultPath(
         input.vaultRoot,
-        attachment.storedPath,
+        storedPath,
         'file path',
       )
       images.push({
         ordinal: attachment.ordinal,
         fileName: attachment.fileName ?? null,
-        mediaType: attachment.routingImage.mediaType ?? null,
+        mediaType: routingImage.mediaType ?? null,
         bytes: await readFile(absolutePath),
       })
     } catch (error) {
@@ -657,6 +701,90 @@ async function readPreparedRoutingImages(input: {
       images.length === 0 && errors.length > 0
         ? `Falling back to text-only routing because image evidence could not be loaded (${errors.join('; ')}).`
         : null,
+  }
+}
+
+function buildAllowedDerivedPrefixes(
+  captureId: string,
+  attachment: InboxShowResult['capture']['attachments'][number],
+): string[] {
+  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
+  const prefixes = [
+    normalizeRelativeVaultPath(
+      path.posix.join(
+        'derived',
+        'inbox',
+        normalizedCaptureId,
+        `attachment-${attachment.ordinal}`,
+      ),
+    ),
+  ]
+  const attachmentId = normalizeNullableString(attachment.attachmentId)
+  if (attachmentId) {
+    prefixes.push(
+      normalizeRelativeVaultPath(
+        path.posix.join(
+          'derived',
+          'inbox',
+          normalizedCaptureId,
+          'attachments',
+          normalizeOpaquePathSegment(attachmentId, 'Attachment id'),
+        ),
+      ),
+    )
+  }
+  return prefixes.map((prefix) => `${prefix}/`)
+}
+
+function normalizeCaptureStoredAttachmentPath(
+  candidatePath: string | null | undefined,
+  captureId: string,
+): string | null {
+  const normalizedCandidate = normalizeNullableString(candidatePath)
+  if (!normalizedCandidate) {
+    return null
+  }
+
+  try {
+    const normalized = normalizeRelativeVaultPath(normalizedCandidate)
+    return isCaptureStoredAttachmentPath(normalized, captureId) ? normalized : null
+  } catch {
+    return null
+  }
+}
+
+function isCaptureStoredAttachmentPath(
+  normalizedStoredPath: string,
+  captureId: string,
+): boolean {
+  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
+  const segments = normalizedStoredPath.split('/')
+  const attachmentsIndex = segments.indexOf('attachments')
+  return (
+    segments[0] === 'raw' &&
+    segments[1] === 'inbox' &&
+    attachmentsIndex >= 3 &&
+    attachmentsIndex < segments.length - 1 &&
+    segments[attachmentsIndex - 1] === normalizedCaptureId
+  )
+}
+
+function normalizeAnchoredVaultRelativePath(
+  candidatePath: string | null | undefined,
+  allowedPrefixes: readonly string[],
+): string | null {
+  const normalizedCandidate = normalizeNullableString(candidatePath)
+  if (!normalizedCandidate) {
+    return null
+  }
+
+  try {
+    const normalized = normalizeRelativeVaultPath(normalizedCandidate)
+    return allowedPrefixes.some((prefix) => normalized.startsWith(prefix))
+      ? normalized
+      : null
+  } catch {
+    return null
   }
 }
 

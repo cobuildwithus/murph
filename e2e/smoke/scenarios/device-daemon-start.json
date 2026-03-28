@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/raw/README.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/device-sync",
-  "purpose": "Documents starting or reusing the Healthy Bob-managed local device-sync daemon for one vault."
+  "purpose": "Documents starting or reusing the Murph-managed local device-sync daemon for one vault."
 }

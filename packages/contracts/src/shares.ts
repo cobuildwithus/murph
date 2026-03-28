@@ -177,8 +177,8 @@ export const foodUpsertPayloadSchema = withContractMetadata(
       attachedProtocolIds: attachedProtocolIdsSchema,
     })
     .strict(),
-  "@healthybob/contracts/food-upsert-payload.schema.json",
-  "Healthy Bob Food Upsert Payload",
+  "@murph/contracts/food-upsert-payload.schema.json",
+  "Murph Food Upsert Payload",
 );
 
 export const recipeUpsertPayloadSchema = withContractMetadata(
@@ -203,8 +203,8 @@ export const recipeUpsertPayloadSchema = withContractMetadata(
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/recipe-upsert-payload.schema.json",
-  "Healthy Bob Recipe Upsert Payload",
+  "@murph/contracts/recipe-upsert-payload.schema.json",
+  "Murph Recipe Upsert Payload",
 );
 
 export const workoutFormatUpsertPayloadSchema = withContractMetadata(
@@ -225,8 +225,8 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@healthybob/contracts/workout-format-upsert-payload.schema.json",
-  "Healthy Bob Workout Format Upsert Payload",
+  "@murph/contracts/workout-format-upsert-payload.schema.json",
+  "Murph Workout Format Upsert Payload",
 );
 
 export const protocolUpsertPayloadSchema = withContractMetadata(
@@ -252,8 +252,8 @@ export const protocolUpsertPayloadSchema = withContractMetadata(
       group: patternedString(GROUP_PATTERN, 1, 160).optional(),
     })
     .strict(),
-  "@healthybob/contracts/protocol-upsert-payload.schema.json",
-  "Healthy Bob Protocol Upsert Payload",
+  "@murph/contracts/protocol-upsert-payload.schema.json",
+  "Murph Protocol Upsert Payload",
 );
 
 export const sharePackFoodPayloadSchema = withContractMetadata(
@@ -269,20 +269,20 @@ export const sharePackFoodPayloadSchema = withContractMetadata(
       }).optional(),
     })
     .strict(),
-  "@healthybob/contracts/share-pack-food-payload.schema.json",
-  "Healthy Bob Share Pack Food Payload",
+  "@murph/contracts/share-pack-food-payload.schema.json",
+  "Murph Share Pack Food Payload",
 );
 
 export const sharePackRecipePayloadSchema = withContractMetadata(
   recipeUpsertPayloadSchema.omit({ recipeId: true }).strict(),
-  "@healthybob/contracts/share-pack-recipe-payload.schema.json",
-  "Healthy Bob Share Pack Recipe Payload",
+  "@murph/contracts/share-pack-recipe-payload.schema.json",
+  "Murph Share Pack Recipe Payload",
 );
 
 export const sharePackProtocolPayloadSchema = withContractMetadata(
   protocolUpsertPayloadSchema.omit({ protocolId: true }).strict(),
-  "@healthybob/contracts/share-pack-protocol-payload.schema.json",
-  "Healthy Bob Share Pack Protocol Payload",
+  "@murph/contracts/share-pack-protocol-payload.schema.json",
+  "Murph Share Pack Protocol Payload",
 );
 
 export const sharePackEntitySchema = withContractMetadata(
@@ -309,8 +309,8 @@ export const sharePackEntitySchema = withContractMetadata(
       })
       .strict(),
   ]),
-  "@healthybob/contracts/share-pack-entity.schema.json",
-  "Healthy Bob Share Pack Entity",
+  "@murph/contracts/share-pack-entity.schema.json",
+  "Murph Share Pack Entity",
 );
 
 export const sharePackSchema = withContractMetadata(
@@ -396,8 +396,8 @@ export const sharePackSchema = withContractMetadata(
         }
       }
     }),
-  "@healthybob/contracts/share-pack.schema.json",
-  "Healthy Bob Share Pack",
+  "@murph/contracts/share-pack.schema.json",
+  "Murph Share Pack",
 );
 
 export type FoodUpsertPayload = z.infer<typeof foodUpsertPayloadSchema>;

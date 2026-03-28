@@ -28,7 +28,7 @@ const deviceControlOptionsSchema = withBaseOptions({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
     .describe(
-      'Override the reachable device sync control-plane URL. When omitted, Healthy Bob manages the local daemon for the selected vault. When set, Healthy Bob talks to the explicit control-plane target instead.',
+      'Override the reachable device sync control-plane URL. When omitted, Murph manages the local daemon for the selected vault. When set, Murph talks to the explicit control-plane target instead.',
     ),
 })
 
@@ -36,7 +36,7 @@ const deviceDaemonOptionsSchema = withBaseOptions({
   baseUrl: deviceSyncBaseUrlSchema
     .optional()
     .describe(
-      'Override the loopback control-plane URL that Healthy Bob should manage for this vault.',
+      'Override the loopback control-plane URL that Murph should manage for this vault.',
     ),
 }).partial({
   requestId: true,
@@ -48,7 +48,7 @@ export function registerDeviceCommands(
 ) {
   const device = Cli.create('device', {
     description:
-      'Device sync commands for provider auth, account inspection, and the Healthy Bob-managed local device daemon.',
+      'Device sync commands for provider auth, account inspection, and the Murph-managed local device daemon.',
   })
 
   const provider = Cli.create('provider', {
@@ -72,7 +72,7 @@ export function registerDeviceCommands(
 
   device.command('connect', {
     description:
-      'Start a browser-based OAuth connection for one device provider through the Healthy Bob-managed device daemon.',
+      'Start a browser-based OAuth connection for one device provider through the Murph-managed device daemon.',
     args: z.object({
       provider: providerNameSchema,
     }),
@@ -177,12 +177,12 @@ export function registerDeviceCommands(
 
   const daemon = Cli.create('daemon', {
     description:
-      'Start, inspect, and stop the Healthy Bob-managed local device sync daemon for one vault.',
+      'Start, inspect, and stop the Murph-managed local device sync daemon for one vault.',
   })
 
   daemon.command('status', {
     description:
-      'Show whether Healthy Bob is managing a local device sync daemon for this vault.',
+      'Show whether Murph is managing a local device sync daemon for this vault.',
     args: emptyArgsSchema,
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStatusResultSchema,
@@ -196,7 +196,7 @@ export function registerDeviceCommands(
 
   daemon.command('start', {
     description:
-      'Start the local device sync daemon for this vault if Healthy Bob is not already managing one.',
+      'Start the local device sync daemon for this vault if Murph is not already managing one.',
     args: emptyArgsSchema,
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStartResultSchema,
@@ -210,7 +210,7 @@ export function registerDeviceCommands(
 
   daemon.command('stop', {
     description:
-      'Stop the local device sync daemon that Healthy Bob is managing for this vault.',
+      'Stop the local device sync daemon that Murph is managing for this vault.',
     args: emptyArgsSchema,
     options: deviceDaemonOptionsSchema,
     output: deviceDaemonStopResultSchema,

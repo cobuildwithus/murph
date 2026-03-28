@@ -1,4 +1,4 @@
-import { isVaultError, normalizeOpaquePathSegment } from "@healthybob/core";
+import { isVaultError, normalizeOpaquePathSegment } from "@murph/core";
 
 export type ParserArtifactKind = "audio" | "document" | "image" | "other" | "video";
 

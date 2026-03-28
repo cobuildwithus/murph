@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.profile-current.v1"
+      "const": "murph.frontmatter.profile-current.v1"
     },
     "docType": {
       "type": "string",
@@ -50,6 +50,6 @@
     "updatedAt"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-profile-current.schema.json",
-  "title": "Healthy Bob Profile Current Frontmatter"
+  "$id": "@murph/contracts/frontmatter-profile-current.schema.json",
+  "title": "Murph Profile Current Frontmatter"
 }

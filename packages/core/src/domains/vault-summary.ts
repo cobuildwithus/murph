@@ -1,8 +1,8 @@
-import type { CoreFrontmatter, VaultMetadata } from "@healthybob/contracts";
+import type { CoreFrontmatter, VaultMetadata } from "@murph/contracts";
 import {
   coreFrontmatterSchema,
   vaultMetadataSchema,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { VAULT_LAYOUT } from "../constants.ts";
 import { stringifyFrontmatterDocument } from "../frontmatter.ts";

@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { rawImportManifestSchema } from '@healthybob/contracts'
+import { rawImportManifestSchema } from '@murph/contracts'
 import { z } from 'incur'
 import { firstString } from '../command-helpers.js'
 import {

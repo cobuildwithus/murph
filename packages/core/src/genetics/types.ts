@@ -3,7 +3,7 @@ import {
   FRONTMATTER_DOC_TYPES,
   VARIANT_SIGNIFICANCES as CONTRACT_VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES as CONTRACT_VARIANT_ZYGOSITIES,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 export const GENETIC_VARIANT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter;
 export const GENETIC_VARIANT_DOC_TYPE = FRONTMATTER_DOC_TYPES.geneticVariant;
@@ -36,14 +36,11 @@ export interface UpsertGeneticVariantInput {
   slug?: string;
   gene: string;
   title?: string;
-  label?: string;
   zygosity?: VariantZygosity;
   significance?: VariantSignificance;
   inheritance?: VariantInheritance;
   sourceFamilyMemberIds?: string[];
-  familyMemberIds?: string[];
   note?: string;
-  summary?: string;
 }
 
 export interface UpsertGeneticVariantResult {

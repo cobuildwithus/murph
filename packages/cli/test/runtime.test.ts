@@ -53,21 +53,21 @@ test('runtime unavailable error preserves the shared operator guidance payload',
   assert.equal(result.code, 'runtime_unavailable')
   assert.equal(
     result.message,
-    'packages/cli can describe samples/audit query reads, but local execution is blocked until the integrating workspace installs incur and links @healthybob/core, @healthybob/importers, and @healthybob/query.',
+    'packages/cli can describe samples/audit query reads, but local execution is blocked until the integrating workspace installs incur and links @murph/core, @murph/importers, and @murph/query.',
   )
   assert.deepEqual(result.context, {
     cause: 'module missing',
     packages: [
-      '@healthybob/core',
-      '@healthybob/importers',
-      '@healthybob/query',
+      '@murph/core',
+      '@murph/importers',
+      '@murph/query',
       'incur',
     ],
   })
 })
 
 async function makeFixtureVault(): Promise<FixtureVault> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-test-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-test-'))
   const csvPath = path.join(vaultRoot, 'samples.csv')
 
   await writeFile(
@@ -149,7 +149,7 @@ async function makeFixtureVault(): Promise<FixtureVault> {
 }
 
 async function makeEmptyVaultFixture(): Promise<EmptyVaultFixture> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-test-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-test-'))
   const csvPath = path.join(vaultRoot, 'samples.csv')
 
   await writeFile(
@@ -415,7 +415,7 @@ test.sequential(
   'export pack materializes the derived five-file pack when --out is set',
   async () => {
     const fixture = await makeFixtureVault()
-    const outDir = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-'))
+    const outDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-'))
 
     try {
       const result = await runCli<{

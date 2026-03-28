@@ -1,5 +1,4 @@
 export const HOSTED_EXECUTION_DISPATCH_PATH = "/internal/dispatch";
-export const HOSTED_EXECUTION_DISPATCH_ALIAS_PATH = "/internal/events";
 
 export function buildHostedExecutionUserStatusPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/status`;

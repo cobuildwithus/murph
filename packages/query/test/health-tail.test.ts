@@ -57,7 +57,7 @@ async function createHealthVault(options: {
   currentProfileSnapshotId?: string;
   includeAlternateRecords?: boolean;
 } = {}): Promise<string> {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-health-"));
   const currentProfileSnapshotId = options.currentProfileSnapshotId ?? "psnap_stale";
 
   await writeVaultFile(
@@ -65,7 +65,7 @@ async function createHealthVault(options: {
     "ledger/assessments/2026/2026-03.jsonl",
     [
       JSON.stringify({
-        schemaVersion: "hb.assessment-response.v1",
+        schemaVersion: "murph.assessment-response.v1",
         id: "asmt_health_01",
         assessmentType: "full-intake",
         recordedAt: "2026-03-12T13:00:00Z",
@@ -83,7 +83,7 @@ async function createHealthVault(options: {
       }),
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.assessment-response.v1",
+            schemaVersion: "murph.assessment-response.v1",
             id: "asmt_health_00",
             assessmentType: "follow-up",
             recordedAt: "2026-03-01T08:00:00Z",
@@ -95,7 +95,7 @@ async function createHealthVault(options: {
         : null,
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.assessment-response.v1",
+            schemaVersion: "murph.assessment-response.v1",
             id: "asmt_health_missing_date",
             assessmentType: "partial",
             source: "import",
@@ -106,7 +106,7 @@ async function createHealthVault(options: {
         : null,
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.assessment-response.v1",
+            schemaVersion: "murph.assessment-response.v1",
             id: "asmt_health_before",
             assessmentType: "historical",
             recordedAt: "2026-02-20T08:00:00Z",
@@ -115,7 +115,7 @@ async function createHealthVault(options: {
         : null,
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.assessment-response.v1",
+            schemaVersion: "murph.assessment-response.v1",
             id: "asmt_health_undated",
             assessmentType: "undated",
             source: "import",
@@ -131,7 +131,7 @@ async function createHealthVault(options: {
     "ledger/profile-snapshots/2026/2026-03.jsonl",
     [
       JSON.stringify({
-        schemaVersion: "hb.profile-snapshot.v1",
+        schemaVersion: "murph.profile-snapshot.v1",
         id: "psnap_health_01",
         recordedAt: "2026-03-12T14:00:00Z",
         source: "assessment_projection",
@@ -145,7 +145,7 @@ async function createHealthVault(options: {
       }),
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.profile-snapshot.v1",
+            schemaVersion: "murph.profile-snapshot.v1",
             id: "psnap_health_00",
             recordedAt: "2026-03-01T09:00:00Z",
             source: {
@@ -159,7 +159,7 @@ async function createHealthVault(options: {
         : null,
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.profile-snapshot.v1",
+            schemaVersion: "murph.profile-snapshot.v1",
             id: "psnap_health_missing_date",
             source: "manual",
             profile: {
@@ -177,7 +177,7 @@ async function createHealthVault(options: {
     "ledger/events/2026/2026-03.jsonl",
     [
       JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: "evt_health_01",
         kind: "encounter",
         occurredAt: "2026-03-12T12:45:00Z",
@@ -188,7 +188,7 @@ async function createHealthVault(options: {
       }),
       options.includeAlternateRecords
         ? JSON.stringify({
-            schemaVersion: "hb.event.v1",
+            schemaVersion: "murph.event.v1",
             id: "evt_note_ignored",
             kind: "note",
             occurredAt: "2026-03-12T15:00:00Z",
@@ -204,7 +204,7 @@ async function createHealthVault(options: {
     vaultRoot,
     "bank/profile/current.md",
     `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
 snapshotId: ${currentProfileSnapshotId}
 updatedAt: 2026-03-01T00:00:00Z
@@ -321,7 +321,7 @@ updatedAt: 2026-03-12
 }
 
 test("supplement queries project product metadata and aggregate overlapping compounds", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-supplements-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-supplements-"));
 
   try {
     await writeVaultFile(
@@ -490,7 +490,7 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
 
 function createManualVault(records: VaultRecord[]): VaultReadModel {
   return {
-    format: "healthybob.query.v1",
+    format: "murph.query.v1",
     vaultRoot: "manual-vault",
     metadata: null,
     entities: records.map((record) => ({
@@ -561,7 +561,7 @@ test("readCurrentProfile falls back to the latest snapshot when current-profile 
       vaultRoot,
       "bank/profile/current.md",
       `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 snapshotId psnap_health_01
 ---
 # Current Profile
@@ -587,7 +587,7 @@ test("blood tests can be queried through dedicated helpers while remaining canon
       vaultRoot,
       "ledger/events/2026/2026-03.jsonl",
       `${JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: "evt_blood_01",
         kind: "test",
         occurredAt: "2026-03-13T08:00:00Z",
@@ -859,7 +859,7 @@ test("readVault rejects malformed current-profile frontmatter in the strict shar
       vaultRoot,
       "bank/profile/current.md",
       `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 snapshotId psnap_health_01
 ---
 # Current Profile
@@ -1222,7 +1222,7 @@ test("buildExportPack falls back to the latest snapshot when current-profile mar
       vaultRoot,
       "bank/profile/current.md",
       `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 snapshotId psnap_health_01
 ---
 # Current Profile
@@ -1247,6 +1247,53 @@ snapshotId psnap_health_01
       healthRead.failures.map((failure) => failure.relativePath),
       ["bank/profile/current.md"],
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("tolerant async collector preserves fallback and failure ordering for malformed current-profile and registry markdown", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+  });
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      "bank/profile/current.md",
+      `---
+schemaVersion: murph.frontmatter.profile-current.v1
+snapshotId psnap_health_01
+---
+# Current Profile
+`,
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "bank/conditions/broken.md",
+      `---
+schemaVersion: hv/condition@v1
+conditionId cond_broken
+---
+# Broken
+`,
+    );
+
+    const collected = await collectCanonicalEntities(vaultRoot, {
+      mode: "tolerant-async",
+    });
+
+    assert.equal(collected.currentProfile?.entityId, "current");
+    assert.equal(collected.currentProfile?.attributes.snapshotId, "psnap_health_01");
+    assert.deepEqual(
+      collected.conditions.map((entity) => entity.entityId),
+      ["cond_sleep_01"],
+    );
+    assert.deepEqual(
+      collected.failures.map((failure) => failure.relativePath),
+      ["bank/profile/current.md", "bank/conditions/broken.md"],
+    );
+    assert.equal(collected.markdownByPath.has("bank/profile/current.md"), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -1285,7 +1332,7 @@ test("buildExportPack trims health export strings and drops non-string array ent
       vaultRoot,
       "ledger/profile-snapshots/2026/2026-03.jsonl",
       `${JSON.stringify({
-        schemaVersion: "hb.profile-snapshot.v1",
+        schemaVersion: "murph.profile-snapshot.v1",
         id: "psnap_health_01",
         recordedAt: "2026-03-12T14:00:00Z",
         source: "  assessment_projection  ",
@@ -1301,7 +1348,7 @@ test("buildExportPack trims health export strings and drops non-string array ent
       vaultRoot,
       "ledger/events/2026/2026-03.jsonl",
       `${JSON.stringify({
-        schemaVersion: "hb.event.v1",
+        schemaVersion: "murph.event.v1",
         id: "evt_health_01",
         kind: "  encounter  ",
         occurredAt: "2026-03-12T12:45:00Z",
@@ -1317,7 +1364,7 @@ test("buildExportPack trims health export strings and drops non-string array ent
       vaultRoot,
       "bank/profile/current.md",
       `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
 snapshotId: psnap_health_01
 updatedAt: " 2026-03-12T14:00:00Z "
@@ -1354,7 +1401,7 @@ Snapshot ID: \`psnap_health_01\`
 });
 
 test("buildExportPack tolerates vaults with no health directories", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-empty-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-health-empty-"));
 
   try {
     const vault = await readVault(vaultRoot);
@@ -1376,14 +1423,14 @@ test("buildExportPack tolerates vaults with no health directories", async () => 
 });
 
 test("standalone current-profile markdown does not resolve without a latest snapshot", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-orphan-current-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-health-orphan-current-"));
 
   try {
     await writeVaultFile(
       vaultRoot,
       "bank/profile/current.md",
       `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
 snapshotId: psnap_orphan_01
 updatedAt: 2026-03-12T14:00:00Z
@@ -1403,14 +1450,14 @@ Snapshot ID: \`psnap_orphan_01\`
 });
 
 test("tolerant collector retains orphan current-profile markdown while returning no current profile", async () => {
-  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "healthybob-query-health-orphan-current-"));
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-health-orphan-current-"));
 
   try {
     await writeVaultFile(
       vaultRoot,
       "bank/profile/current.md",
       `---
-schemaVersion: hb.frontmatter.profile-current.v1
+schemaVersion: murph.frontmatter.profile-current.v1
 docType: profile_current
 snapshotId: psnap_orphan_01
 updatedAt: 2026-03-12T14:00:00Z

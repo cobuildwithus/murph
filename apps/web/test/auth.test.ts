@@ -1,4 +1,4 @@
-import { DeviceSyncError } from "@healthybob/device-syncd";
+import { DeviceSyncError } from "@murph/device-syncd";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -21,8 +21,8 @@ const BASE_ENVIRONMENT: HostedDeviceSyncEnvironment = {
   isProduction: false,
   ouraWebhookVerificationToken: null,
   publicBaseUrl: "https://control.example.test/api/device-sync",
-  trustedUserAssertionHeader: "x-healthybob-user-assertion",
-  trustedUserSignatureHeader: "x-healthybob-user-signature",
+  trustedUserAssertionHeader: "x-hosted-user-assertion",
+  trustedUserSignatureHeader: "x-hosted-user-signature",
   trustedUserSigningSecret: "test-signing-secret",
   devUserEmail: "dev@example.com",
   devUserId: "dev-user",
@@ -287,8 +287,8 @@ function createRequestWithAssertion(input: {
             origin: input.origin,
           }
         : {}),
-      "x-healthybob-user-assertion": input.assertion,
-      "x-healthybob-user-signature": input.signature,
+      "x-hosted-user-assertion": input.assertion,
+      "x-hosted-user-signature": input.signature,
     },
   });
 }

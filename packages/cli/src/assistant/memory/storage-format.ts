@@ -20,7 +20,7 @@ import {
   stripMemoryBulletPrefix,
 } from './text.js'
 
-const ASSISTANT_MEMORY_METADATA_COMMENT_PREFIX = 'healthybob-assistant-memory:'
+const ASSISTANT_MEMORY_METADATA_COMMENT_PREFIX = 'murph-assistant-memory:'
 
 export interface MarkdownSection {
   heading: string

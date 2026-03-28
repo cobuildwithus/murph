@@ -1,5 +1,5 @@
 {
-  "name": "@healthybob/importers",
+  "name": "@murph/importers",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,13 +24,13 @@
     }
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.json",
+    "build": "rimraf dist && tsc -b tsconfig.json --force",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm --dir ../.. exec vitest run packages/importers/test/importers.test.ts packages/importers/test/input-validation.test.ts packages/importers/test/device-providers.test.ts --no-coverage"
   },
   "dependencies": {
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/core": "workspace:*",
+    "@murph/contracts": "workspace:*",
+    "@murph/core": "workspace:*",
     "zod": "^4.3.6"
   }
 }

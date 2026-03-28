@@ -1,7 +1,9 @@
 import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
+import {
+  enqueueHostedExecutionOutbox,
+} from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import type { HostedSessionRecord } from "../hosted-onboarding/session";
 
@@ -42,8 +44,7 @@ export async function acceptHostedShareLink(input: {
   }
 
   let record = await requireHostedShareLink(shareCode, prisma);
-  const pack = readHostedSharePack(record).pack;
-  const preview = readHostedSharePreview(record.previewJson, pack);
+  const preview = readHostedSharePreview(record.previewJson, () => readHostedSharePack(record).pack);
   const acceptedAt = record.acceptedAt ?? now;
   const eventId = record.lastEventId ?? buildHostedShareAcceptanceEventId({
     acceptedAt,
@@ -110,7 +111,8 @@ export async function acceptHostedShareLink(input: {
           acceptedAt: acceptedAt.toISOString(),
           eventId: dispatchEventId,
           memberId: input.sessionRecord.member.id,
-          pack,
+          shareCode,
+          shareId: latest.id,
         }),
         sourceId: latest.id,
         sourceType: "hosted_share_link",

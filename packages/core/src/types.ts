@@ -1,4 +1,4 @@
-import type { FileChangeOperation, JsonObject } from "@healthybob/contracts";
+import type { FileChangeOperation, JsonObject } from "@murph/contracts";
 
 export type DateInput = string | number | Date;
 

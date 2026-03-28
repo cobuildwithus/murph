@@ -1,11 +1,19 @@
 import { createHostedExecutionSignatureHeaders } from "./auth.ts";
 import type {
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionUserEnvStatus,
   HostedExecutionUserEnvUpdate,
   HostedExecutionUserStatus,
 } from "./contracts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
+import {
+  parseHostedExecutionDispatchResult,
+  parseHostedExecutionDispatchRequest,
+  parseHostedExecutionUserEnvStatus,
+  parseHostedExecutionUserEnvUpdate,
+  parseHostedExecutionUserStatus,
+} from "./parsers.ts";
 import {
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserRunPath,
@@ -14,7 +22,7 @@ import {
 } from "./routes.ts";
 
 export interface HostedExecutionDispatchClient {
-  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
+  dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
 }
 
 export interface HostedExecutionDispatchClientOptions {
@@ -50,7 +58,8 @@ export function createHostedExecutionDispatchClient(
 
   return {
     async dispatch(input) {
-      const payload = JSON.stringify(input);
+      const requestPayload = parseHostedExecutionDispatchRequest(input);
+      const payload = JSON.stringify(requestPayload);
       const timestamp = options.now?.() ?? new Date().toISOString();
       const signatureHeaders = await createHostedExecutionSignatureHeaders({
         payload,
@@ -58,10 +67,11 @@ export function createHostedExecutionDispatchClient(
         timestamp,
       });
 
-      return requestHostedExecutionJson<HostedExecutionUserStatus>({
+      return requestHostedExecutionJson({
         baseUrl,
         fetchImpl,
         label: "dispatch",
+        parse: parseHostedExecutionDispatchResult,
         path: HOSTED_EXECUTION_DISPATCH_PATH,
         request: {
           body: payload,
@@ -86,10 +96,11 @@ export function createHostedExecutionControlClient(
 
   return {
     clearUserEnv(userId) {
-      return requestHostedExecutionJson<HostedExecutionUserEnvStatus>({
+      return requestHostedExecutionJson({
         baseUrl,
         fetchImpl,
         label: "user env clear",
+        parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
           headers: authHeaders,
@@ -98,10 +109,11 @@ export function createHostedExecutionControlClient(
       });
     },
     getStatus(userId) {
-      return requestHostedExecutionJson<HostedExecutionUserStatus>({
+      return requestHostedExecutionJson({
         baseUrl,
         fetchImpl,
         label: "status",
+        parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserStatusPath(userId),
         request: {
           headers: authHeaders,
@@ -110,10 +122,11 @@ export function createHostedExecutionControlClient(
       });
     },
     getUserEnvStatus(userId) {
-      return requestHostedExecutionJson<HostedExecutionUserEnvStatus>({
+      return requestHostedExecutionJson({
         baseUrl,
         fetchImpl,
         label: "user env status",
+        parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
           headers: authHeaders,
@@ -122,10 +135,11 @@ export function createHostedExecutionControlClient(
       });
     },
     run(userId) {
-      return requestHostedExecutionJson<HostedExecutionUserStatus>({
+      return requestHostedExecutionJson({
         baseUrl,
         fetchImpl,
         label: "manual run",
+        parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserRunPath(userId),
         request: {
           body: JSON.stringify({}),
@@ -140,13 +154,16 @@ export function createHostedExecutionControlClient(
       });
     },
     updateUserEnv(userId, update) {
-      return requestHostedExecutionJson<HostedExecutionUserEnvStatus>({
+      const requestPayload = parseHostedExecutionUserEnvUpdate(update);
+
+      return requestHostedExecutionJson({
         baseUrl,
         fetchImpl,
         label: "user env update",
+        parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
-          body: JSON.stringify(update),
+          body: JSON.stringify(requestPayload),
           headers: withHostedExecutionControlToken(
             {
               "content-type": "application/json; charset=utf-8",
@@ -178,6 +195,7 @@ async function requestHostedExecutionJson<TResponse>(input: {
   baseUrl: string;
   fetchImpl: typeof fetch;
   label: string;
+  parse: (value: unknown) => TResponse;
   path: string;
   request: RequestInit;
 }): Promise<TResponse> {
@@ -196,11 +214,7 @@ async function requestHostedExecutionJson<TResponse>(input: {
     );
   }
 
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error(`Hosted execution ${input.label} returned a non-object JSON payload.`);
-  }
-
-  return payload as TResponse;
+  return input.parse(payload);
 }
 
 function withHostedExecutionControlToken(

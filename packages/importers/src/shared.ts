@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
-import { normalizeStrictIsoTimestamp } from "@healthybob/contracts";
+import { normalizeStrictIsoTimestamp } from "@murph/contracts";
 import { z } from "zod";
 
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([
@@ -73,18 +73,6 @@ export function optionalTrimmedStringSchema(
       const trimmed = value.trim();
       return trimmed.length === 0 ? undefined : trimmed;
     });
-}
-
-export const vaultRootAliasSchemaFields = {
-  vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
-  vault: optionalTrimmedStringSchema("vault"),
-} satisfies z.ZodRawShape;
-
-export function resolveVaultRootAlias<T>(value: {
-  vaultRoot?: T;
-  vault?: T;
-}): T | undefined {
-  return value.vaultRoot ?? value.vault;
 }
 
 export function optionalStringListSchema(label: string): z.ZodType<string[]> {

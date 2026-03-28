@@ -7,7 +7,7 @@ import {
 import {
   buildHostedExecutionMemberActivatedDispatch,
   type HostedExecutionDispatchRequest,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";

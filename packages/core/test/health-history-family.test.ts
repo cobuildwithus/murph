@@ -28,7 +28,7 @@ async function makeTempDirectory(name: string): Promise<string> {
 }
 
 test("health history appends to the shared event ledger and supports list/read flows", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-history");
+  const vaultRoot = await makeTempDirectory("murph-history");
   await initializeVault({ vaultRoot });
 
   const encounter = await appendHistoryEvent({
@@ -102,7 +102,7 @@ test("health history appends to the shared event ledger and supports list/read f
 });
 
 test("health history writes store the vault-local dayKey and timezone when UTC crosses midnight", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-history-local-day");
+  const vaultRoot = await makeTempDirectory("murph-history-local-day");
   await initializeVault({
     vaultRoot,
     timezone: "Australia/Melbourne",
@@ -130,7 +130,7 @@ test("health history writes store the vault-local dayKey and timezone when UTC c
 });
 
 test("history test-event normalization keeps writes canonical and ignores legacy status aliases on read", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-history-test-aliases");
+  const vaultRoot = await makeTempDirectory("murph-history-test-aliases");
   await initializeVault({ vaultRoot });
 
   const writeInput = {
@@ -164,7 +164,7 @@ test("history test-event normalization keeps writes canonical and ignores legacy
     vaultRoot,
     relativePath: legacyRelativePath,
     record: {
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: legacyEventId,
       kind: "test",
       occurredAt: "2026-03-03T18:00:00.000Z",
@@ -203,8 +203,140 @@ test("history test-event normalization keeps writes canonical and ignores legacy
   );
 });
 
+test("history append keeps per-kind defaults and ignores the removed resultSummary alias", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-kind-normalization");
+  await initializeVault({ vaultRoot });
+
+  const procedure = await appendHistoryEvent({
+    vaultRoot,
+    kind: "procedure",
+    occurredAt: "2026-03-04T09:00:00.000Z",
+    title: "Left knee arthroscopy",
+    procedure: "arthroscopy",
+  });
+  const adverseEffect = await appendHistoryEvent({
+    vaultRoot,
+    kind: "adverse_effect",
+    occurredAt: "2026-03-04T10:00:00.000Z",
+    title: "Nausea after ibuprofen",
+    substance: "ibuprofen",
+    effect: "nausea",
+  });
+  const exposure = await appendHistoryEvent({
+    vaultRoot,
+    kind: "exposure",
+    occurredAt: "2026-03-04T11:00:00.000Z",
+    title: "Mold cleanup",
+    substance: "mold",
+  });
+  const labResult = await appendHistoryEvent({
+    vaultRoot,
+    kind: "test",
+    occurredAt: "2026-03-04T12:00:00.000Z",
+    title: "hs-CRP imported from summary-only payload",
+    testName: "hs_crp",
+    resultSummary: "Borderline elevation noted in source system.",
+  } as Parameters<typeof appendHistoryEvent>[0] & { resultSummary?: string });
+  const canonicalLabResult = await appendHistoryEvent({
+    vaultRoot,
+    kind: "test",
+    occurredAt: "2026-03-04T12:30:00.000Z",
+    title: "hs-CRP imported from canonical summary payload",
+    testName: "hs_crp",
+    summary: "Canonical summary text.",
+  });
+
+  const stored = await readJsonlRecords({
+    vaultRoot,
+    relativePath: procedure.relativePath,
+  });
+  const storedById = new Map(
+    stored.map((record) => [(record as { id?: string }).id, record as Record<string, unknown>]),
+  );
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    order: "asc",
+  });
+  const listedById = new Map(listed.map((record) => [record.id, record]));
+  const readProcedure = await readHistoryEvent({
+    vaultRoot,
+    eventId: procedure.record.id,
+  });
+  const readAdverseEffect = await readHistoryEvent({
+    vaultRoot,
+    eventId: adverseEffect.record.id,
+  });
+  const readExposure = await readHistoryEvent({
+    vaultRoot,
+    eventId: exposure.record.id,
+  });
+  const readLabResult = await readHistoryEvent({
+    vaultRoot,
+    eventId: labResult.record.id,
+  });
+  const readCanonicalLabResult = await readHistoryEvent({
+    vaultRoot,
+    eventId: canonicalLabResult.record.id,
+  });
+
+  assert.equal(procedure.record.kind, "procedure");
+  assert.equal(procedure.record.status, "completed");
+  assert.equal(readProcedure.record.kind, "procedure");
+  assert.equal(readProcedure.record.status, "completed");
+  assert.equal(listedById.get(procedure.record.id)?.kind, "procedure");
+  assert.equal(
+    (listedById.get(procedure.record.id) as { status?: string } | undefined)?.status,
+    "completed",
+  );
+  assert.equal(storedById.get(procedure.record.id)?.status, "completed");
+
+  assert.equal(adverseEffect.record.kind, "adverse_effect");
+  assert.equal(adverseEffect.record.severity, "moderate");
+  assert.equal(readAdverseEffect.record.kind, "adverse_effect");
+  assert.equal(readAdverseEffect.record.severity, "moderate");
+  assert.equal(listedById.get(adverseEffect.record.id)?.kind, "adverse_effect");
+  assert.equal(
+    (listedById.get(adverseEffect.record.id) as { severity?: string } | undefined)?.severity,
+    "moderate",
+  );
+  assert.equal(storedById.get(adverseEffect.record.id)?.severity, "moderate");
+
+  assert.equal(exposure.record.kind, "exposure");
+  assert.equal(exposure.record.exposureType, "unspecified");
+  assert.equal(readExposure.record.kind, "exposure");
+  assert.equal(readExposure.record.exposureType, "unspecified");
+  assert.equal(listedById.get(exposure.record.id)?.kind, "exposure");
+  assert.equal(
+    (listedById.get(exposure.record.id) as { exposureType?: string } | undefined)?.exposureType,
+    "unspecified",
+  );
+  assert.equal(storedById.get(exposure.record.id)?.exposureType, "unspecified");
+
+  assert.equal(labResult.record.kind, "test");
+  assert.equal(labResult.record.summary, undefined);
+  assert.equal(labResult.record.resultStatus, "unknown");
+  assert.equal(readLabResult.record.kind, "test");
+  assert.equal(readLabResult.record.summary, undefined);
+  assert.equal(readLabResult.record.resultStatus, "unknown");
+  assert.equal(listedById.get(labResult.record.id)?.kind, "test");
+  assert.equal(
+    (listedById.get(labResult.record.id) as { summary?: string } | undefined)?.summary,
+    undefined,
+  );
+  assert.equal(storedById.get(labResult.record.id)?.summary, undefined);
+  assert.equal(storedById.get(labResult.record.id)?.resultSummary, undefined);
+
+  assert.equal(canonicalLabResult.record.summary, "Canonical summary text.");
+  assert.equal(readCanonicalLabResult.record.kind, "test");
+  assert.equal(readCanonicalLabResult.record.summary, "Canonical summary text.");
+  assert.equal(
+    (listedById.get(canonicalLabResult.record.id) as { summary?: string } | undefined)?.summary,
+    "Canonical summary text.",
+  );
+});
+
 test("blood-test writes infer result status and persist structured analytes canonically", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-blood-test");
+  const vaultRoot = await makeTempDirectory("murph-blood-test");
   await initializeVault({ vaultRoot });
 
   const appended = await appendBloodTest({
@@ -272,7 +404,7 @@ test("blood-test writes infer result status and persist structured analytes cano
 });
 
 test("history writes reject provider ids and raw refs that violate the canonical event contract", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-history-contracts");
+  const vaultRoot = await makeTempDirectory("murph-history-contracts");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -304,7 +436,7 @@ test("history writes reject provider ids and raw refs that violate the canonical
 });
 
 test("family members are stored as deterministic markdown registry entries", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-family");
+  const vaultRoot = await makeTempDirectory("murph-family");
   await initializeVault({ vaultRoot });
 
   const created = await upsertFamilyMember({
@@ -361,7 +493,7 @@ test("family members are stored as deterministic markdown registry entries", asy
 });
 
 test("family registry upserts reject conflicting family member ids and slugs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-family-conflict");
+  const vaultRoot = await makeTempDirectory("murph-family-conflict");
   await initializeVault({ vaultRoot });
 
   const first = await upsertFamilyMember({
@@ -391,13 +523,13 @@ test("family registry upserts reject conflicting family member ids and slugs", a
 });
 
 test("family registry listing preserves invalid document shape errors after shared loader extraction", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-family-invalid-shape");
+  const vaultRoot = await makeTempDirectory("murph-family-invalid-shape");
   await initializeVault({ vaultRoot });
 
   const invalidMarkdown = stringifyFrontmatterDocument({
     attributes: {
-      schemaVersion: "hb.family-member-frontmatter.v999",
-      docType: "hb.family_member",
+      schemaVersion: "murph.family-member-frontmatter.v999",
+      docType: "murph.family_member",
       familyMemberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
       slug: "invalid-family-member",
       title: "Invalid Family Member",
@@ -418,7 +550,7 @@ test("family registry listing preserves invalid document shape errors after shar
 });
 
 test("genetic variants are stored in markdown registries and can link to family members", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-genetics");
+  const vaultRoot = await makeTempDirectory("murph-genetics");
   await initializeVault({ vaultRoot });
 
   const familyMember = await upsertFamilyMember({
@@ -502,7 +634,7 @@ test("genetic variants are stored in markdown registries and can link to family 
 });
 
 test("genetic registry upserts reject conflicting variant ids and slugs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-genetics-conflict");
+  const vaultRoot = await makeTempDirectory("murph-genetics-conflict");
   await initializeVault({ vaultRoot });
 
   const first = await upsertGeneticVariant({
@@ -533,13 +665,13 @@ test("genetic registry upserts reject conflicting variant ids and slugs", async 
 });
 
 test("genetic registry listing preserves invalid document shape errors after shared loader extraction", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-genetics-invalid-shape");
+  const vaultRoot = await makeTempDirectory("murph-genetics-invalid-shape");
   await initializeVault({ vaultRoot });
 
   const invalidMarkdown = stringifyFrontmatterDocument({
     attributes: {
-      schemaVersion: "hb.genetic-variant-frontmatter.v999",
-      docType: "hb.genetic_variant",
+      schemaVersion: "murph.genetic-variant-frontmatter.v999",
+      docType: "murph.genetic_variant",
       variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
       slug: "invalid-genetic-variant",
       gene: "APOE",
@@ -560,7 +692,7 @@ test("genetic registry listing preserves invalid document shape errors after sha
 });
 
 test("family and genetics registry writes enforce the frozen contract length boundaries", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-family-genetics-boundaries");
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-boundaries");
   await initializeVault({ vaultRoot });
 
   const familyAtLimit = await upsertFamilyMember({
@@ -611,7 +743,7 @@ test("family and genetics registry writes enforce the frozen contract length bou
 });
 
 test("family and genetics registry creation preserves caller-provided ids and explicit slugs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-family-genetics-explicit-ids");
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-explicit-ids");
   await initializeVault({ vaultRoot });
 
   const familyMemberId = "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8";
@@ -641,7 +773,7 @@ test("family and genetics registry creation preserves caller-provided ids and ex
 });
 
 test("family and genetics registry id-or-slug resolution preserves conflict and missing errors", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-family-genetics-resolution");
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-resolution");
   await initializeVault({ vaultRoot });
 
   const mother = await upsertFamilyMember({
@@ -680,7 +812,7 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
 
   const readFamilyByConflictingSelectors = await readFamilyMember({
     vaultRoot,
-    memberId: mother.record.familyMemberId,
+    familyMemberId: mother.record.familyMemberId,
     slug: father.record.slug,
   });
 
@@ -728,4 +860,38 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
   });
 
   assert.equal(readVariantByConflictingSelectors.variantId, apoe.record.variantId);
+});
+
+test("family and genetics upserts require canonical title and familyMemberId fields", async () => {
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-hard-cut");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertFamilyMember({
+        vaultRoot,
+        name: "Mother",
+        relationship: "mother",
+      } as Parameters<typeof upsertFamilyMember>[0] & { name?: string }),
+    /title is required/u,
+  );
+
+  await assert.rejects(
+    () =>
+      readFamilyMember({
+        vaultRoot,
+        memberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      } as Parameters<typeof readFamilyMember>[0] & { memberId?: string }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FAMILY_MEMBER_MISSING",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertGeneticVariant({
+        vaultRoot,
+        gene: "APOE",
+        label: "APOE e4 allele",
+      } as Parameters<typeof upsertGeneticVariant>[0] & { label?: string }),
+    /title is required/u,
+  );
 });

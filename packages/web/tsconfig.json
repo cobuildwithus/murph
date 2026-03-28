@@ -17,28 +17,28 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
-      "@healthybob/contracts": [
+      "@murph/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@healthybob/contracts/*": [
+      "@murph/contracts/*": [
         "packages/contracts/src/*"
       ],
-      "@healthybob/hosted-execution": [
+      "@murph/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
-      "@healthybob/hosted-execution/*": [
+      "@murph/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
-      "@healthybob/query": [
+      "@murph/query": [
         "packages/query/src/index.ts"
       ],
-      "@healthybob/query/*": [
+      "@murph/query/*": [
         "packages/query/src/*"
       ],
-      "@healthybob/runtime-state": [
+      "@murph/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
-      "@healthybob/runtime-state/*": [
+      "@murph/runtime-state/*": [
         "packages/runtime-state/src/*"
       ]
     },

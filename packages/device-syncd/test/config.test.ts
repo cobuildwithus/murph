@@ -11,8 +11,8 @@ test("computeRetryDelayMs uses the 15-second slot for the first retry", () => {
 
 test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
     DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",
@@ -27,8 +27,8 @@ test("loadDeviceSyncEnvironment supports Oura-only deployments", () => {
 
 test("loadDeviceSyncEnvironment supports mixed WHOOP and Oura deployments", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
     DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     WHOOP_CLIENT_ID: "whoop-client-id",
@@ -47,8 +47,8 @@ test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => 
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
         DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
         OURA_CLIENT_ID: "oura-client-id",
@@ -59,8 +59,8 @@ test("loadDeviceSyncEnvironment rejects incomplete provider credentials", () => 
 
 test("loadDeviceSyncEnvironment supports an explicit control token and public listener", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
     DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
@@ -78,8 +78,8 @@ test("loadDeviceSyncEnvironment rejects partial public listener configuration", 
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
         DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
         DEVICE_SYNC_PUBLIC_HOST: "0.0.0.0",
@@ -94,8 +94,8 @@ test("loadDeviceSyncEnvironment requires at least one provider", () => {
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
         DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
       }),
@@ -107,8 +107,8 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_CONTROL_TOKEN", () => {
   assert.throws(
     () =>
       loadDeviceSyncEnvironment({
-        DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-        DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+        DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
         DEVICE_SYNC_SECRET: "secret-for-tests",
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
@@ -119,8 +119,8 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_CONTROL_TOKEN", () => {
 
 test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification token on the HTTP config", () => {
   const loaded = loadDeviceSyncEnvironment({
-    DEVICE_SYNC_VAULT_ROOT: "/tmp/healthybob-vault",
-    DEVICE_SYNC_PUBLIC_BASE_URL: "https://healthybob.test/device-sync",
+    DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
+    DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
     DEVICE_SYNC_SECRET: "secret-for-tests",
     DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
     OURA_CLIENT_ID: "oura-client-id",

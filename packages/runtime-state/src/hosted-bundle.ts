@@ -5,7 +5,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 import type { HostedExecutionBundleKind } from "./hosted-execution.ts";
 
-export const HOSTED_BUNDLE_SCHEMA = "healthybob.hosted-bundle.v1";
+export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v1";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 
 interface HostedBundleArchiveFile {

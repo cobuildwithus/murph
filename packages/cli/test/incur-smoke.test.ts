@@ -570,7 +570,7 @@ test('health command schema remains JSON-Schema-safe', async () => {
 }, INCUR_HELP_TIMEOUT_MS)
 
 test.sequential('verbose json exposes the native Incur success envelope', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-incur-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
     const result = await runCli<{ created: boolean }>(['init', '--vault', vaultRoot])
@@ -584,7 +584,7 @@ test.sequential('verbose json exposes the native Incur success envelope', async 
 })
 
 test.sequential('health command metadata exposes Incur-native CTA suggestions', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-incur-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
     const result = await runCli<{ noun: string }>(['profile', 'scaffold', '--vault', vaultRoot])
@@ -683,7 +683,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
 })
 
 test.sequential('profile scaffold exposes a success CTA in the verbose json envelope', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-incur-cta-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-cta-'))
 
   try {
     const initResult = await runCli<{ created: boolean }>(['init', '--vault', vaultRoot])

@@ -2,7 +2,7 @@ import {
   formatTimeZoneDateTimeParts,
   normalizeIanaTimeZone,
   parseDailyTime,
-} from '@healthybob/contracts'
+} from '@murph/contracts'
 import type { AssistantCronSchedule } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 

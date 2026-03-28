@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { schemaCatalog } from "@healthybob/contracts/schemas";
+import { schemaCatalog } from "@murph/contracts/schemas";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const generatedDir = path.resolve(__dirname, "../../generated");

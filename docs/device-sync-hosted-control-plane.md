@@ -7,7 +7,7 @@ Last verified against repo layout: 2026-03-23
 `packages/device-syncd` currently combines three concerns in one local runtime:
 - public OAuth callback and webhook ingress
 - durable integration state such as OAuth state, encrypted provider tokens, webhook traces, and queued jobs in `.runtime/device-syncd.sqlite`
-- local data-plane execution that fetches provider payloads and imports normalized snapshots into the vault through `@healthybob/importers`
+- local data-plane execution that fetches provider payloads and imports normalized snapshots into the vault through `@murph/importers`
 
 That works well for local-first setups, but it makes production callback/webhook hosting awkward because the public surface is attached to the same long-lived local process that owns vault writes.
 
@@ -44,7 +44,7 @@ Responsibilities:
 Non-responsibilities:
 - no canonical health data store
 - no provider payload normalization/import into the vault
-- no direct writes into Healthy Bob canonical records
+- no direct writes into Murph canonical records
 
 ### Local data plane (`device-syncd` or successor local agent)
 
@@ -52,7 +52,7 @@ Responsibilities:
 - local token cache
 - scheduled reconcile/backfill execution
 - direct WHOOP/Oura data fetches whenever possible
-- normalization/import through `@healthybob/importers`
+- normalization/import through `@murph/importers`
 - the only component that writes health records into the local vault
 - sparse synchronization with the hosted control plane for token export/refresh and pending-sync markers
 
@@ -84,7 +84,7 @@ The local app remains the only canonical-writer. It may hold:
 - local sync schedules
 - the vault path and canonical write capability
 
-The local agent authenticates to the hosted backend with a server-to-server credential that is tied to one Healthy Bob user account and never shared with the browser runtime.
+The local agent authenticates to the hosted backend with a server-to-server credential that is tied to one Murph user account and never shared with the browser runtime.
 
 ## Is Postgres needed?
 
@@ -309,7 +309,7 @@ Mostly yes, with two important caveats.
 
 ### What still has to happen in the hosted app
 - OAuth authorization-code exchange
-- minimal provider identity lookup needed to map the provider account to the signed-in Healthy Bob user
+- minimal provider identity lookup needed to map the provider account to the signed-in Murph user
 - webhook verification/receipt
 - webhook subscription management
 - token refresh assistance if the provider app client secret is kept server-side

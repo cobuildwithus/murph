@@ -1,6 +1,6 @@
-# `@healthybob/contracts`
+# `@murph/contracts`
 
-Owns the frozen vault contracts for the Healthy Bob baseline:
+Owns the frozen vault contracts for the Murph baseline:
 
 - canonical Zod schemas and parse helpers
 - TypeScript declarations
@@ -9,8 +9,8 @@ Owns the frozen vault contracts for the Healthy Bob baseline:
 
 Surface split:
 
-- `@healthybob/contracts` exports the canonical Zod-first runtime surface.
-- `@healthybob/contracts/schemas` exports the derived JSON Schema objects for artifact consumers.
+- `@murph/contracts` exports the canonical Zod-first runtime surface.
+- `@murph/contracts/schemas` exports the derived JSON Schema objects for artifact consumers.
 
 Package-local commands:
 

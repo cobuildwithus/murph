@@ -31,21 +31,17 @@ const HOSTED_WORKER_OPTIONAL_SECRET_NAMES = [
 ] as const;
 
 const HOSTED_WORKER_OPTIONAL_VAR_NAMES = [
-  "AGENTMAIL_API_BASE_URL",
   "AGENTMAIL_BASE_URL",
   "DEVICE_SYNC_PUBLIC_BASE_URL",
   "FFMPEG_COMMAND",
+  "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER",
   "LINQ_API_BASE_URL",
   "PADDLEOCR_COMMAND",
-  "PADDLEOCR_MODEL_DIR",
-  "PARSER_FFMPEG_PATH",
   "PDFTOTEXT_COMMAND",
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_USERNAME",
   "TELEGRAM_FILE_BASE_URL",
   "WHISPER_COMMAND",
-  "WHISPER_MODEL",
-  "WHISPER_MODEL_DIR",
   "WHISPER_MODEL_PATH",
 ] as const;
 
@@ -55,7 +51,8 @@ const HOSTED_CONTAINER_IMAGE_VAR_NAMES = [
 
 const DEFAULT_DEPLOY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_CONTAINER_INSTANCE_TYPE = "basic";
-const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
+const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
+const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
 const HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS = new Set(["v1", "v2"]);
@@ -197,7 +194,7 @@ export function readHostedDeployAutomationEnvironment(
       "CF_TRACE_HEAD_SAMPLING_RATE",
     ),
     workerName: requireString(source.CF_WORKER_NAME, "CF_WORKER_NAME"),
-    workerVars: readPresentStringMap(source, HOSTED_WORKER_OPTIONAL_VAR_NAMES),
+    workerVars: readHostedWorkerVars(source),
   };
 }
 
@@ -278,8 +275,23 @@ export function buildHostedWranglerDeployConfig(
         head_sampling_rate: environment.traceHeadSamplingRate,
       },
     },
+    secrets: {
+      required: [...HOSTED_WORKER_REQUIRED_SECRET_NAMES],
+    },
     vars,
   };
+}
+
+function readHostedWorkerVars(source: EnvSource): Record<string, string> {
+  const normalized: Record<string, string | undefined> = {};
+
+  for (const key of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
+    const resolved = normalizeString(source[key]);
+    normalized[key] = resolved
+      ?? (key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER" ? DEFAULT_CONTAINER_SLEEP_AFTER : undefined);
+  }
+
+  return readPresentStringMap(normalized, HOSTED_WORKER_OPTIONAL_VAR_NAMES);
 }
 
 export function resolveHostedWorkerDeploymentTraffic(input: {

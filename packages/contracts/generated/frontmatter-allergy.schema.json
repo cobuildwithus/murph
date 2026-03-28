@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.allergy.v1"
+      "const": "murph.frontmatter.allergy.v1"
     },
     "docType": {
       "type": "string",
@@ -77,6 +77,6 @@
     "status"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-allergy.schema.json",
-  "title": "Healthy Bob Allergy Frontmatter"
+  "$id": "@murph/contracts/frontmatter-allergy.schema.json",
+  "title": "Murph Allergy Frontmatter"
 }

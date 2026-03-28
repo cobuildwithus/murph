@@ -2,7 +2,7 @@ import path from "node:path";
 import {
   parseFrontmatterDocument as parseSharedFrontmatterDocument,
   type FrontmatterParseProblem,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import { z } from "zod";
 
 export type FrontmatterScalar = string | number | boolean | null;

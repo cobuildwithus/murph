@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.profile-snapshot.v1"
+      "const": "murph.profile-snapshot.v1"
     },
     "id": {
       "type": "string",
@@ -54,8 +54,8 @@
     "profile"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/profile-snapshot.schema.json",
-  "title": "Healthy Bob Profile Snapshot",
+  "$id": "@murph/contracts/profile-snapshot.schema.json",
+  "title": "Murph Profile Snapshot",
   "$defs": {
     "__schema0": {
       "anyOf": [

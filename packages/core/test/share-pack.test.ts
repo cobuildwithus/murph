@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { assertContract, sharePackSchema } from "@healthybob/contracts";
+import { assertContract, sharePackSchema } from "@murph/contracts";
 
 import {
   buildSharePackFromVault,
@@ -21,8 +21,8 @@ async function makeTempDirectory(name: string): Promise<string> {
 }
 
 test("share packs export one food with attached supplement protocols and import the full bundle", async () => {
-  const sourceVault = await makeTempDirectory("healthybob-share-pack-source");
-  const destinationVault = await makeTempDirectory("healthybob-share-pack-destination");
+  const sourceVault = await makeTempDirectory("murph-share-pack-source");
+  const destinationVault = await makeTempDirectory("murph-share-pack-destination");
 
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });
@@ -112,7 +112,7 @@ test("share packs export one food with attached supplement protocols and import 
 test("share packs reject attached refs and post-import meal refs that point at the wrong entity kind", () => {
   assert.throws(
     () => assertContract(sharePackSchema, {
-      schemaVersion: "hb.share-pack.v1",
+      schemaVersion: "murph.share-pack.v1",
       title: "Broken smoothie",
       createdAt: "2026-03-26T12:00:00.000Z",
       entities: [
@@ -145,7 +145,7 @@ test("share packs reject attached refs and post-import meal refs that point at t
 
   assert.throws(
     () => assertContract(sharePackSchema, {
-      schemaVersion: "hb.share-pack.v1",
+      schemaVersion: "murph.share-pack.v1",
       title: "Broken post-import log",
       createdAt: "2026-03-26T12:00:00.000Z",
       entities: [
@@ -172,7 +172,7 @@ test("share packs reject attached refs and post-import meal refs that point at t
 });
 
 test("share packs reuse bank payload projections for protocol, recipe, and food exports", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-share-pack-payloads");
+  const vaultRoot = await makeTempDirectory("murph-share-pack-payloads");
   await initializeVault({ vaultRoot });
 
   const protocol = await upsertProtocolItem({
@@ -320,8 +320,8 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
 });
 
 test("share pack imports create fresh destination records instead of overwriting same-slug entities", async () => {
-  const sourceVault = await makeTempDirectory("healthybob-share-pack-copy-source");
-  const destinationVault = await makeTempDirectory("healthybob-share-pack-copy-destination");
+  const sourceVault = await makeTempDirectory("murph-share-pack-copy-source");
+  const destinationVault = await makeTempDirectory("murph-share-pack-copy-destination");
 
   await initializeVault({ vaultRoot: sourceVault });
   await initializeVault({ vaultRoot: destinationVault });

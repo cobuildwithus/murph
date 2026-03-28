@@ -157,6 +157,23 @@ export const assistantStatusRunLockStateValues = [
   'stale',
 ] as const
 
+export const assistantHeadersSchema = z.record(
+  z.string().min(1),
+  z.string(),
+)
+
+export const assistantCodexProviderStateSchema = z
+  .object({
+    promptVersion: z.string().min(1).nullable().default(null),
+  })
+  .strict()
+
+export const assistantSessionProviderStateSchema = z
+  .object({
+    codexCli: assistantCodexProviderStateSchema.nullable().default(null),
+  })
+  .strict()
+
 export const assistantProviderFailoverRouteSchema = z
   .object({
     name: z.string().min(1).nullable().default(null),
@@ -171,6 +188,7 @@ export const assistantProviderFailoverRouteSchema = z
     baseUrl: z.string().min(1).nullable().optional(),
     apiKeyEnv: z.string().min(1).nullable().optional(),
     providerName: z.string().min(1).nullable().optional(),
+    headers: assistantHeadersSchema.nullable().optional(),
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
@@ -185,6 +203,7 @@ export const assistantProviderSessionOptionsSchema = z.object({
   baseUrl: z.string().min(1).nullable().optional(),
   apiKeyEnv: z.string().min(1).nullable().optional(),
   providerName: z.string().min(1).nullable().optional(),
+  headers: assistantHeadersSchema.nullable().optional(),
 })
 
 export const assistantAliasStoreSchema = z
@@ -212,11 +231,11 @@ export const assistantSessionBindingSchema = z.object({
 
 export const assistantSessionSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-session.v2'),
+    schema: z.literal('murph.assistant-session.v2'),
     sessionId: z.string().min(1),
     provider: z.enum(assistantChatProviderValues),
     providerSessionId: z.string().min(1).nullable(),
-    codexPromptVersion: z.string().min(1).nullable().optional(),
+    providerState: assistantSessionProviderStateSchema.nullable().optional(),
     providerOptions: assistantProviderSessionOptionsSchema,
     alias: z.string().min(1).nullable(),
     binding: assistantSessionBindingSchema,
@@ -228,7 +247,7 @@ export const assistantSessionSchema = z
   .strict()
 
 export const assistantTranscriptEntrySchema = z.object({
-  schema: z.literal('healthybob.assistant-transcript-entry.v1'),
+  schema: z.literal('murph.assistant-transcript-entry.v1'),
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
@@ -300,7 +319,7 @@ export const assistantTurnTimelineEventSchema = z
 
 export const assistantTurnReceiptSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-turn-receipt.v1'),
+    schema: z.literal('murph.assistant-turn-receipt.v1'),
     turnId: z.string().min(1),
     sessionId: z.string().min(1),
     provider: z.enum(assistantChatProviderValues),
@@ -330,7 +349,7 @@ export const assistantOutboxIntentStatusValues = assistantOutboxStatusValues
 
 export const assistantOutboxIntentSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-outbox-intent.v1'),
+    schema: z.literal('murph.assistant-outbox-intent.v1'),
     intentId: z.string().min(1),
     sessionId: z.string().min(1),
     turnId: z.string().min(1),
@@ -358,7 +377,7 @@ export const assistantOutboxIntentSchema = z
 
 export const assistantDiagnosticEventSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-diagnostic-event.v1'),
+    schema: z.literal('murph.assistant-diagnostic-event.v1'),
     at: isoTimestampSchema,
     level: z.enum(assistantDiagnosticLevelValues),
     component: z.enum(assistantDiagnosticComponentValues),
@@ -393,7 +412,7 @@ export const assistantDiagnosticsCountersSchema = z
 
 export const assistantDiagnosticsSnapshotSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-diagnostics.v1'),
+    schema: z.literal('murph.assistant-diagnostics.v1'),
     updatedAt: isoTimestampSchema,
     lastEventAt: isoTimestampSchema.nullable(),
     lastErrorAt: isoTimestampSchema.nullable(),
@@ -420,7 +439,7 @@ export const assistantProviderRouteStateSchema = z
 
 export const assistantFailoverStateSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-failover-state.v1'),
+    schema: z.literal('murph.assistant-failover-state.v1'),
     updatedAt: isoTimestampSchema,
     routes: z.array(assistantProviderRouteStateSchema),
   })
@@ -611,7 +630,7 @@ export const assistantCronFoodAutoLogSchema = z
 
 export const assistantCronJobSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-cron-job.v1'),
+    schema: z.literal('murph.assistant-cron-job.v1'),
     jobId: z.string().min(1),
     name: z.string().min(1),
     enabled: z.boolean(),
@@ -629,7 +648,7 @@ export const assistantCronJobSchema = z
 
 export const assistantCronRunRecordSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-cron-run.v1'),
+    schema: z.literal('murph.assistant-cron-run.v1'),
     runId: z.string().min(1),
     jobId: z.string().min(1),
     trigger: z.enum(assistantCronTriggerValues),
@@ -1164,4 +1183,7 @@ export type AssistantDoctorCheckStatus =
   (typeof assistantDoctorCheckStatusValues)[number]
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
+>
+export type AssistantSessionProviderState = z.infer<
+  typeof assistantSessionProviderStateSchema
 >

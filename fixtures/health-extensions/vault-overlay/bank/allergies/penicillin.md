@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.allergy.v1
+schemaVersion: murph.frontmatter.allergy.v1
 docType: allergy
 allergyId: alg_01JNV43Y9ZV6EY1K9J7ZT4B9SC
 slug: penicillin

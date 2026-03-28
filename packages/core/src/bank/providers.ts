@@ -1,5 +1,5 @@
-import type { ProviderFrontmatter } from "@healthybob/contracts";
-import { CONTRACT_SCHEMA_VERSION, providerFrontmatterSchema } from "@healthybob/contracts";
+import type { ProviderFrontmatter } from "@murph/contracts";
+import { CONTRACT_SCHEMA_VERSION, providerFrontmatterSchema } from "@murph/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { VaultError } from "../errors.ts";

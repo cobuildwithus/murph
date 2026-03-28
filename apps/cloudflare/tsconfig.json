@@ -16,7 +16,8 @@
     "noEmit": true,
     "sourceMap": false,
     "types": [
-      "node"
+      "node",
+      "@cloudflare/workers-types"
     ]
   },
   "include": [

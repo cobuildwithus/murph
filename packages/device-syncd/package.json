@@ -1,17 +1,17 @@
 {
-  "name": "@healthybob/device-syncd",
+  "name": "@murph/device-syncd",
   "version": "0.0.0",
   "private": false,
   "type": "module",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "healthybob-device-syncd": "./dist/bin.js"
+    "murph-device-syncd": "./dist/bin.js"
   },
   "files": [
     "README.md",
@@ -27,12 +27,12 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.json",
-    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false"
+    "build": "rimraf dist && tsc -b tsconfig.json --force",
+    "typecheck": "tsc -b tsconfig.typecheck.json --pretty false"
   },
   "dependencies": {
-    "@healthybob/importers": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*"
+    "@murph/importers": "workspace:*",
+    "@murph/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

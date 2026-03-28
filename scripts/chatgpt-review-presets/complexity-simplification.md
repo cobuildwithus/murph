@@ -1,4 +1,4 @@
-You are running a behavior-preserving simplification pass for Healthy Bob.
+You are running a behavior-preserving simplification pass for Murph.
 
 Focus on:
 - dead code, stale branches, and no-op abstractions

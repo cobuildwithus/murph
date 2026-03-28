@@ -1,8 +1,8 @@
-import type { VaultMetadata } from "@healthybob/contracts";
+import type { VaultMetadata } from "@murph/contracts";
 import {
   safeParseContract,
   vaultMetadataSchema,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import {
   VAULT_LAYOUT,

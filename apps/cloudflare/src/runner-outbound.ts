@@ -1,20 +1,26 @@
-import type { HostedExecutionBundleRef } from "@healthybob/runtime-state";
+import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import {
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
   type HostedExecutionSideEffectRecord,
-} from "@healthybob/assistant-runtime";
+} from "@murph/assistant-runtime";
 
-import { readHostedExecutionEnvironment } from "./env.js";
+import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommitPayload,
   HostedExecutionCommittedResult,
   HostedExecutionFinalizePayload,
-} from "./execution-journal.js";
-import { json, readJsonObject } from "./json.js";
-import { createHostedExecutionSideEffectJournalStore } from "./outbox-delivery-journal.js";
+} from "./execution-journal.ts";
+import { json, readJsonObject } from "./json.ts";
+import { createHostedExecutionSideEffectJournalStore } from "./outbox-delivery-journal.ts";
+import {
+  readHostedEmailConfig,
+  readHostedEmailRawMessage,
+  sendHostedEmailMessage,
+} from "./hosted-email.ts";
 
 interface RunnerOutboundUserRunnerStubLike {
+  bootstrapUser?(userId: string): Promise<{ userId: string }>;
   commit(input: {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
@@ -23,12 +29,10 @@ interface RunnerOutboundUserRunnerStubLike {
         vault: HostedExecutionBundleRef | null;
       };
     };
-    userId: string;
   }): Promise<HostedExecutionCommittedResult>;
   finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
-    userId: string;
   }): Promise<HostedExecutionCommittedResult>;
 }
 
@@ -37,7 +41,7 @@ interface RunnerOutboundDurableObjectNamespaceLike {
 }
 
 export interface RunnerOutboundEnvironmentSource extends Readonly<Record<string, unknown>> {
-  BUNDLES: import("./bundle-store.js").R2BucketLike;
+  BUNDLES: import("./bundle-store.ts").R2BucketLike;
   HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS?: string;
   HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES?: string;
   HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY?: string;
@@ -49,7 +53,14 @@ export interface RunnerOutboundEnvironmentSource extends Readonly<Record<string,
   HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
   HOSTED_EXECUTION_RUNNER_TIMEOUT_MS?: string;
   HOSTED_EXECUTION_SIGNING_SECRET?: string;
-  HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET?: string;
+  HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID?: string;
+  HOSTED_EMAIL_CLOUDFLARE_API_BASE_URL?: string;
+  HOSTED_EMAIL_CLOUDFLARE_API_TOKEN?: string;
+  HOSTED_EMAIL_DEFAULT_SUBJECT?: string;
+  HOSTED_EMAIL_DOMAIN?: string;
+  HOSTED_EMAIL_FROM_ADDRESS?: string;
+  HOSTED_EMAIL_LOCAL_PART?: string;
+  HOSTED_EMAIL_SIGNING_SECRET?: string;
   USER_RUNNER: RunnerOutboundDurableObjectNamespaceLike;
 }
 
@@ -99,7 +110,116 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
+  if (url.hostname === "email.worker") {
+    if (url.pathname === "/send") {
+      if (request.method !== "POST") {
+        return methodNotAllowed();
+      }
+
+      return handleRunnerEmailSendRequest({
+        bucket: env.BUNDLES,
+        env,
+        environment,
+        request,
+        userId,
+      });
+    }
+
+    const match = /^\/messages\/(?<rawMessageKey>[^/]+)$/u.exec(url.pathname);
+    if (!match?.groups) {
+      return notFound();
+    }
+
+    if (request.method !== "GET") {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerEmailMessageReadRequest({
+      bucket: env.BUNDLES,
+      environment,
+      rawMessageKey: decodeRouteParam(match.groups.rawMessageKey),
+      userId,
+    });
+  }
+
   return notFound();
+}
+
+async function handleRunnerEmailMessageReadRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  rawMessageKey: string;
+  userId: string;
+}): Promise<Response> {
+  const payload = await readHostedEmailRawMessage({
+    bucket: input.bucket,
+    key: input.environment.bundleEncryptionKey,
+    rawMessageKey: input.rawMessageKey,
+    userId: input.userId,
+  });
+
+  if (!payload) {
+    return notFound();
+  }
+
+  return new Response(
+    copyBytesToArrayBuffer(payload),
+    {
+      headers: {
+        "content-type": "message/rfc822",
+      },
+      status: 200,
+    },
+  );
+}
+
+async function handleRunnerEmailSendRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  userId: string;
+}): Promise<Response> {
+  const payload = await sendHostedEmailMessage({
+    bucket: input.bucket,
+    config: readHostedEmailConfig(
+      input.env as unknown as Readonly<Record<string, string | undefined>>,
+    ),
+    key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
+    request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
+    userId: input.userId,
+  });
+
+  return json({
+    ok: true,
+    target: payload.target,
+  });
+}
+
+function parseHostedEmailSendRequest(value: Record<string, unknown>): {
+  identityId: string | null;
+  message: string;
+  target: string;
+  targetKind: "explicit" | "participant" | "thread";
+} {
+  const targetKind = value.targetKind;
+  if (targetKind !== "explicit" && targetKind !== "participant" && targetKind !== "thread") {
+    throw new TypeError("targetKind must be explicit, participant, or thread.");
+  }
+
+  return {
+    identityId: readOptionalString(value.identityId, "identityId"),
+    message: requireString(value.message, "message"),
+    target: requireString(value.target, "target"),
+    targetKind,
+  };
+}
+
+function copyBytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 async function forwardRunnerCommit(
@@ -108,11 +228,11 @@ async function forwardRunnerCommit(
   payload: Record<string, unknown>,
   env: RunnerOutboundEnvironmentSource,
 ): Promise<Response> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, userId);
   return json({
-    committed: await env.USER_RUNNER.getByName(userId).commit({
+    committed: await stub.commit({
       eventId,
       payload: parseHostedExecutionCommitRequest(payload),
-      userId,
     }),
     ok: true,
   });
@@ -124,11 +244,11 @@ async function forwardRunnerFinalize(
   payload: Record<string, unknown>,
   env: RunnerOutboundEnvironmentSource,
 ): Promise<Response> {
+  const stub = await resolveRunnerOutboundUserRunnerStub(env, userId);
   return json({
-    finalized: await env.USER_RUNNER.getByName(userId).finalizeCommit({
+    finalized: await stub.finalizeCommit({
       eventId,
       payload: parseHostedExecutionFinalizeRequest(payload),
-      userId,
     }),
     ok: true,
   });
@@ -180,6 +300,24 @@ async function handleRunnerSideEffectRequest(input: {
     effectId: savedRecord.effectId,
     record: savedRecord,
   });
+}
+
+async function resolveRunnerOutboundUserRunnerStub(
+  env: RunnerOutboundEnvironmentSource,
+  userId: string,
+): Promise<RunnerOutboundUserRunnerStubLike> {
+  const stub = env.USER_RUNNER.getByName(userId);
+  try {
+    await stub.bootstrapUser?.(userId);
+  } catch (error) {
+    if (
+      !(error instanceof TypeError)
+      || !error.message.includes('does not implement "bootstrapUser"')
+    ) {
+      throw error;
+    }
+  }
+  return stub;
 }
 
 function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
@@ -289,20 +427,17 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value;
 }
 
-function readOptionalString(value: unknown, label: string): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (value === null) {
+function readOptionalString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) {
     return null;
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string, null, or undefined.`);
+    throw new TypeError(`${label} must be a string or null.`);
   }
 
-  return value;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function requireString(value: unknown, label: string): string {

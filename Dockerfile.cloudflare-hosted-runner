@@ -6,13 +6,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/root \
     NODE_ENV=production \
     PORT=8080 \
-    WHISPER_MODEL=base \
     XDG_CACHE_HOME=/root/.cache \
-    HOSTED_HOME=/root/.healthybob \
-    HOSTED_MODELS_ROOT=/root/.healthybob/models \
-    WHISPER_MODEL_DIR=/root/.healthybob/models/whisper \
-    PADDLEOCR_MODEL_DIR=/root/.healthybob/models/paddleocr \
-    PARSER_FFMPEG_PATH=/usr/bin/ffmpeg \
+    HOSTED_HOME=/root/.murph \
+    HOSTED_MODELS_ROOT=/root/.murph/models \
+    FFMPEG_COMMAND=/usr/bin/ffmpeg \
     HF_HOME=/root/.cache/huggingface
 
 RUN apt-get update \
@@ -28,9 +25,9 @@ RUN apt-get update \
     python3-venv \
   && mkdir -p \
     /root/.cache/huggingface \
-    /root/.healthybob/hosted \
-    /root/.healthybob/models/paddleocr \
-    /root/.healthybob/models/whisper \
+    /root/.murph/hosted \
+    /root/.murph/models/paddleocr \
+    /root/.murph/models/whisper \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -55,5 +52,5 @@ EXPOSE 8080
 
 # This image intentionally keeps the current source-based hosted execution path.
 # Provider credentials, parser-toolchain paths, and model directories are supplied
-# through environment variables or pre-baked under /root/.healthybob.
+# through environment variables or pre-baked under /root/.murph.
 CMD ["bash", "-lc", "corepack pnpm exec tsx --tsconfig apps/cloudflare/tsconfig.json apps/cloudflare/src/container-entrypoint.ts"]

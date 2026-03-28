@@ -1,5 +1,5 @@
-import type { JournalDayFrontmatter } from "@healthybob/contracts";
-import { journalDayFrontmatterSchema } from "@healthybob/contracts";
+import type { JournalDayFrontmatter } from "@murph/contracts";
+import { journalDayFrontmatterSchema } from "@murph/contracts";
 
 import { FRONTMATTER_SCHEMA_VERSIONS, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";

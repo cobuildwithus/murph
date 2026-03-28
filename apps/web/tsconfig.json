@@ -25,46 +25,46 @@
       "@/*": [
         "apps/web/*"
       ],
-      "@healthybob/contracts": [
+      "@murph/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@healthybob/contracts/*": [
+      "@murph/contracts/*": [
         "packages/contracts/src/*"
       ],
-      "@healthybob/hosted-execution": [
+      "@murph/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
-      "@healthybob/hosted-execution/*": [
+      "@murph/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
-      "@healthybob/runtime-state": [
+      "@murph/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
-      "@healthybob/runtime-state/*": [
+      "@murph/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],
-      "@healthybob/core": [
+      "@murph/core": [
         "packages/core/src/index.ts"
       ],
-      "@healthybob/core/*": [
+      "@murph/core/*": [
         "packages/core/src/*"
       ],
-      "@healthybob/importers": [
+      "@murph/importers": [
         "packages/importers/src/index.ts"
       ],
-      "@healthybob/importers/*": [
+      "@murph/importers/*": [
         "packages/importers/src/*"
       ],
-      "@healthybob/inboxd": [
+      "@murph/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
-      "@healthybob/inboxd/*": [
+      "@murph/inboxd/*": [
         "packages/inboxd/src/*"
       ],
-      "@healthybob/device-syncd": [
+      "@murph/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],
-      "@healthybob/device-syncd/*": [
+      "@murph/device-syncd/*": [
         "packages/device-syncd/src/*"
       ]
     },

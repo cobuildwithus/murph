@@ -1,11 +1,11 @@
-# @healthybob/cloudflare-runner
+# @murph/cloudflare-runner
 
-Cloudflare-hosted execution plane for the hosted Healthy Bob path.
+Cloudflare-hosted execution plane for the hosted Murph path.
 
 This app is intentionally separate from `apps/web`:
 
 - `apps/web` stays the public onboarding, billing, OAuth, and webhook control plane.
-- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@healthybob/assistant-runtime`.
+- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murph/assistant-runtime`.
 
 ## Core responsibilities
 
@@ -15,7 +15,7 @@ This app is intentionally separate from `apps/web`:
 - perform durable hosted bootstrap explicitly on `member.activated` instead of mutating vault/assistant config during every run
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
-- run the existing Healthy Bob inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@healthybob/assistant-runtime` package
+- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murph/assistant-runtime` package
 
 ## Non-goals
 
@@ -35,7 +35,7 @@ Current worker bindings read directly by `src/index.ts`:
 
 Current worker env/config names read directly by `src/env.ts`:
 
-- required secret: `HOSTED_EXECUTION_SIGNING_SECRET` (the worker also accepts the historical alias `HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET`)
+- required secret: `HOSTED_EXECUTION_SIGNING_SECRET`
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - required secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes; missing values now fail those routes closed instead of leaving them open
 - required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server and native container invoke path; missing values now fail closed instead of silently skipping auth
@@ -54,7 +54,6 @@ Current worker routes:
 - `GET /health` returns a lightweight health payload and does not require the runtime secrets to be present
 - `GET /` returns the service banner payload
 - `POST /internal/dispatch` accepts only signed internal dispatch from `apps/web`
-- `POST /internal/events` is an alias for the same signed internal dispatch contract
 - `GET /internal/users/:userId/status` is an operator/internal status route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `POST /internal/users/:userId/run` is an operator/internal manual-run route guarded by `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `GET /internal/users/:userId/env` returns the configured per-user encrypted runner env key names (never the secret values)
@@ -76,9 +75,9 @@ That means:
 - the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
 - the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://outbox.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
-- the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's short `sleepAfter` idle timeout instead of forcing immediate teardown after every run
+- the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's configurable `sleepAfter` idle timeout, defaulting to `5m`, instead of forcing immediate teardown after every run
 
-The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, and uses `instance_type: "basic"` in the checked-in scaffold. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `basic` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
+The native container image is declared in `apps/cloudflare/wrangler.jsonc` under the `containers` section, points at `../../Dockerfile.cloudflare-hosted-runner`, uses `instance_type: "basic"` in the checked-in scaffold, and now keeps the default `max_instances` at `50` until deploy automation raises it explicitly. Generated deploy config accepts `CF_CONTAINER_INSTANCE_TYPE` as either a named Wrangler preset such as `basic` or a JSON object with `vcpu`, `memory_mib`, and `disk_mb`.
 
 ## Container image
 
@@ -138,14 +137,17 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - The checked-in Wrangler scaffold now explicitly enables Workers Logs and Workers Traces so request logs, container logs, and trace spans are available before production rollout. The generated deploy config exposes log and trace sampling through `CF_LOG_HEAD_SAMPLING_RATE` and `CF_TRACE_HEAD_SAMPLING_RATE`.
 - Normal deployment flow now separates version upload from deployment. After the first deploy, the GitHub Actions workflow and local rollout helper upload a version, create a gradual deployment, and pin smoke checks to the candidate version. First deploys still require a direct `wrangler deploy`, and the rollout helper now refuses gradual mode when the rendered config introduces a newer Durable Object migration tag than the currently allowed gradual-deploy set.
 - Frequent deploys can accumulate old managed-registry tags. Use `pnpm --dir apps/cloudflare images:cleanup -- --filter '<repo-regex>' --keep 10` first, then add `--apply` once the dry-run plan looks correct.
+- The checked-in deploy surface now documents and forwards only the canonical runtime vars that the container actually consumes, such as `AGENTMAIL_BASE_URL`, `FFMPEG_COMMAND`, `PADDLEOCR_COMMAND`, `WHISPER_COMMAND`, and `WHISPER_MODEL_PATH`.
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
-- The local `wrangler dev` scaffold no longer uses `secrets.required`, so optional provider vars/secrets in `apps/cloudflare/.dev.vars` stay visible during local container runs. The control tokens are still required for protected worker/container routes, and deploy-time required-secret enforcement still happens through `deploy:secrets:render`.
+- The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
+- The repo now ships `apps/cloudflare/r2-bundles-lifecycle.json` plus `pnpm --dir apps/cloudflare r2:lifecycle:apply` so the configured bundles buckets can expire transient execution journals and committed side-effect journal objects under `transient/execution-journal/` and `transient/side-effects/` after 30 days.
 
 ## Runtime boundary
 
-`apps/cloudflare` should treat `@healthybob/assistant-runtime` as its hosted execution surface. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
+`apps/cloudflare` should treat `@murph/assistant-runtime` as its hosted execution surface. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
 
 ## Known follow-ups
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
 - Cloudflare container lifecycle is currently "start on demand, keep warm until `sleepAfter` expires." If you later want explicit pooling or lease management, that should be a separate follow-up rather than an implicit background contract.
+- The internal `commit.worker` / `outbox.worker` / `email.worker` callback hosts remain the current durable boundary. The next simplification pass should have the container return a fuller final result to the Durable Object so the Worker can eventually collapse those callback hostnames without changing first-canary behavior now.

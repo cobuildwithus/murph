@@ -7,15 +7,17 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import {
-  parseHostedExecutionDispatchRequest,
   type HostedExecutionDispatchRequest,
-  type HostedExecutionUserStatus,
-} from "@healthybob/hosted-execution";
+  type HostedExecutionDispatchResult,
+} from "@murph/hosted-execution";
 
+import { finalizeHostedShareAcceptance } from "../hosted-share/shared";
 import { getPrisma } from "../prisma";
 import { dispatchHostedExecutionStatus } from "./dispatch";
 import { hydrateHostedExecutionDispatch } from "./hydration";
-import { serializeHostedExecutionOutboxPayload } from "./outbox-payload";
+import {
+  serializeHostedExecutionOutboxPayload,
+} from "./outbox-payload";
 
 const CLAIM_LEASE_MS = 30_000;
 const RETRY_BASE_DELAY_MS = 5_000;
@@ -57,30 +59,6 @@ export async function enqueueHostedExecutionOutbox(
   });
 }
 
-export async function findHostedExecutionOutboxByEventId(
-  eventId: string,
-  prisma: HostedExecutionOutboxClient = getPrisma(),
-): Promise<ExecutionOutbox | null> {
-  return prisma.executionOutbox.findUnique({
-    where: {
-      eventId,
-    },
-  });
-}
-
-export function readHostedExecutionOutboxOutcome(
-  record: ExecutionOutbox | null,
-): "completed" | "failed" | "pending" {
-  switch (record?.status) {
-    case ExecutionOutboxStatus.completed:
-      return "completed";
-    case ExecutionOutboxStatus.failed:
-      return "failed";
-    default:
-      return "pending";
-  }
-}
-
 export async function drainHostedExecutionOutbox(input: {
   eventIds?: readonly string[];
   limit?: number;
@@ -116,25 +94,6 @@ export async function drainHostedExecutionOutbox(input: {
   }
 
   return drained;
-}
-
-export async function drainHostedExecutionOutboxBestEffort(input: {
-  context?: string;
-  eventIds?: readonly string[];
-  limit?: number;
-  now?: string;
-  prisma?: PrismaClient;
-} = {}): Promise<void> {
-  try {
-    await drainHostedExecutionOutbox(input);
-  } catch (error) {
-    console.error(
-      input.context
-        ? `Hosted execution outbox drain failed (${input.context}).`
-        : "Hosted execution outbox drain failed.",
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 }
 
 function buildDueOutboxWhere(
@@ -250,10 +209,15 @@ async function processHostedExecutionOutboxRecord(
 
   try {
     dispatch = await readHostedExecutionDispatch(record, prisma);
-    const status = await dispatchHostedExecutionStatus(dispatch);
+    const dispatchResult = await dispatchHostedExecutionStatus(dispatch);
     const lifecycle = resolveHostedExecutionLifecycle({
-      eventId: record.eventId,
-      status,
+      dispatchResult,
+    });
+    await finalizeHostedExecutionSourceIfNeeded({
+      dispatch,
+      lifecycle,
+      prisma,
+      record,
     });
 
     return finalizeHostedExecutionOutboxAttempt(prisma, record, {
@@ -264,7 +228,7 @@ async function processHostedExecutionOutboxRecord(
       completedAt: lifecycle.status === ExecutionOutboxStatus.completed ? new Date(nowIso) : null,
       failedAt: lifecycle.status === ExecutionOutboxStatus.failed ? new Date(nowIso) : null,
       lastError: lifecycle.lastError,
-      lastStatusJson: status as unknown as Prisma.InputJsonValue,
+      lastStatusJson: dispatchResult as unknown as Prisma.InputJsonValue,
       nextAttemptAt:
         lifecycle.status === ExecutionOutboxStatus.completed || lifecycle.status === ExecutionOutboxStatus.failed
           ? null
@@ -357,62 +321,77 @@ function readHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: PrismaClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  try {
-    return Promise.resolve(parseHostedExecutionDispatchRequest(record.payloadJson));
-  } catch {
-    return hydrateHostedExecutionDispatch(record, prisma);
-  }
+  return hydrateHostedExecutionDispatch(record, prisma);
 }
 
 function resolveHostedExecutionLifecycle(input: {
-  eventId: string;
-  status: HostedExecutionUserStatus;
+  dispatchResult: HostedExecutionDispatchResult;
 }): {
   lastError: string | null;
   status: ExecutionOutboxStatus;
 } {
-  if (input.status.poisonedEventIds.includes(input.eventId)) {
-    return {
-      lastError: input.status.lastError ?? "Hosted execution event was poisoned.",
-      status: ExecutionOutboxStatus.failed,
-    };
-  }
+  const {
+    event,
+    status,
+  } = input.dispatchResult;
 
-  if (
-    input.status.lastEventId === input.eventId
-    && !input.status.lastError
-    && !input.status.inFlight
-    && input.status.pendingEventCount === 0
-    && input.status.retryingEventId !== input.eventId
-  ) {
-    return {
-      lastError: null,
-      status: ExecutionOutboxStatus.completed,
-    };
+  switch (event.state) {
+    case "completed":
+    case "duplicate_consumed":
+      return {
+        lastError: null,
+        status: ExecutionOutboxStatus.completed,
+      };
+    case "poisoned":
+      return {
+        lastError: event.lastError ?? status.lastError ?? "Hosted execution event was poisoned.",
+        status: ExecutionOutboxStatus.failed,
+      };
+    case "backpressured":
+      return {
+        lastError: event.lastError ?? status.lastError,
+        status: ExecutionOutboxStatus.pending,
+      };
+    case "queued":
+    case "duplicate_pending":
+      return {
+        lastError:
+          status.lastError === "Hosted execution dispatch is not configured."
+            ? status.lastError
+            : event.lastError ?? status.lastError,
+        status:
+          status.lastError === "Hosted execution dispatch is not configured."
+            ? ExecutionOutboxStatus.pending
+            : ExecutionOutboxStatus.accepted,
+      };
+    default:
+      throw new Error(`Unsupported hosted execution dispatch state: ${event.state}`);
   }
+}
 
-  if (
-    input.status.lastEventId === input.eventId
-    || input.status.retryingEventId === input.eventId
-    || input.status.backpressuredEventIds?.includes(input.eventId)
-  ) {
-    return {
-      lastError: input.status.lastError,
-      status: ExecutionOutboxStatus.accepted,
-    };
-  }
-
-  if (input.status.lastError === "Hosted execution dispatch is not configured.") {
-    return {
-      lastError: input.status.lastError,
-      status: ExecutionOutboxStatus.pending,
-    };
-  }
-
-  return {
-    lastError: input.status.lastError,
-    status: ExecutionOutboxStatus.accepted,
+async function finalizeHostedExecutionSourceIfNeeded(input: {
+  dispatch: HostedExecutionDispatchRequest;
+  lifecycle: {
+    lastError: string | null;
+    status: ExecutionOutboxStatus;
   };
+  prisma: PrismaClient;
+  record: ExecutionOutbox;
+}): Promise<void> {
+  if (
+    input.record.sourceType !== "hosted_share_link"
+    || input.lifecycle.status !== ExecutionOutboxStatus.completed
+    || input.dispatch.event.kind !== "vault.share.accepted"
+  ) {
+    return;
+  }
+
+  await finalizeHostedShareAcceptance({
+    eventId: input.record.eventId,
+    memberId: input.record.userId,
+    prisma: input.prisma,
+    shareCode: input.dispatch.event.share.shareCode,
+  });
 }
 
 function computeRetryDelayMs(attemptCount: number): number {

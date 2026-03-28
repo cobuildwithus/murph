@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { initializeVault } from '@healthybob/core'
-import { buildExportPack, readVault } from '@healthybob/query'
+import { initializeVault } from '@murph/core'
+import { buildExportPack, readVault } from '@murph/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerExportCommands } from '../src/commands/export.js'
@@ -116,7 +116,7 @@ test('intake and export pack help use generic id selectors plus from/to list fil
 test.sequential(
   'intake import forwards richer metadata and exposes manifest/raw follow-up commands',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-intake-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-'))
     const assessmentPath = path.join(vaultRoot, 'assessment.json')
 
     try {
@@ -218,7 +218,7 @@ test.sequential(
       assert.equal(requireData(manifestResult).lookupId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).kind, 'assessment')
       assert.equal(requireData(manifestResult).manifestFile, requireData(imported).manifestFile)
-      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'hb.raw-import-manifest.v1')
+      assert.equal(requireData(manifestResult).manifest.schemaVersion, 'murph.raw-import-manifest.v1')
       assert.equal(requireData(manifestResult).manifest.importId, requireData(imported).assessmentId)
       assert.equal(requireData(manifestResult).manifest.importKind, 'assessment')
       assert.equal(requireData(manifestResult).manifest.source, 'manual')
@@ -275,7 +275,7 @@ test.sequential(
 test.sequential(
   'export pack create stores the pack under the vault even without --out',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-vault-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-vault-'))
 
     try {
       await initializeVault({ vaultRoot })
@@ -312,8 +312,8 @@ test.sequential(
 test.sequential(
   'intake raw rejects assessment artifacts that escape the vault through symlinks',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-intake-raw-symlink-'))
-    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-intake-raw-outside-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-raw-symlink-'))
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-raw-outside-'))
     const assessmentPath = path.join(vaultRoot, 'assessment.json')
 
     try {
@@ -366,8 +366,8 @@ test.sequential(
 test.sequential(
   'export pack create stores the pack under the vault and treats --out as an additional copy target',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-'))
-    const outRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-out-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-out-'))
 
     try {
       await initializeVault({ vaultRoot })
@@ -407,8 +407,8 @@ test.sequential(
 test.sequential(
   'export pack show/list/materialize/prune operate on stored pack manifests under exports/packs',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-'))
-    const outRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-out-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-out-'))
 
     try {
       await initializeVault({ vaultRoot })
@@ -570,9 +570,9 @@ test.sequential(
 test.sequential(
   'export pack helpers rebuild or reject when stored pack paths traverse symlinks',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-symlink-'))
-    const outRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-symlink-out-'))
-    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-export-pack-symlink-outside-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-symlink-'))
+    const outRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-symlink-out-'))
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-pack-symlink-outside-'))
 
     try {
       await initializeVault({ vaultRoot })

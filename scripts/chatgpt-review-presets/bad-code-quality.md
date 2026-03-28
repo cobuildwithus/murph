@@ -1,4 +1,4 @@
-Run a code quality audit for Healthy Bob.
+Run a code quality audit for Murph.
 
 Prioritize:
 - unnecessary complexity

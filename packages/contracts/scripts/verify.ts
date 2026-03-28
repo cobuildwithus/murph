@@ -41,8 +41,8 @@ import {
   workoutFormatFrontmatterSchema,
   parseFrontmatterMarkdown,
   parseFrontmatterDocument,
-} from "@healthybob/contracts";
-import { schemaCatalog } from "@healthybob/contracts/schemas";
+} from "@murph/contracts";
+import { schemaCatalog } from "@murph/contracts/schemas";
 
 interface PackageJsonShape {
   main?: string;
@@ -282,10 +282,10 @@ details:
 assert.throws(
   () =>
     parseFrontmatterMarkdown(`---
-schema-version: hb.frontmatter.core.v1
+schema-version: murph.frontmatter.core.v1
 ---
 `),
-  /Unsupported frontmatter line: schema-version: hb\.frontmatter\.core\.v1/,
+  /Unsupported frontmatter line: schema-version: murph\.frontmatter\.core\.v1/,
 );
 assert.throws(
   () =>

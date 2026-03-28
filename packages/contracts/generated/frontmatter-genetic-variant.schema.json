@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.genetic-variant.v1"
+      "const": "murph.frontmatter.genetic-variant.v1"
     },
     "docType": {
       "type": "string",
@@ -76,6 +76,6 @@
     "gene"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-genetic-variant.schema.json",
-  "title": "Healthy Bob Genetic Variant Frontmatter"
+  "$id": "@murph/contracts/frontmatter-genetic-variant.schema.json",
+  "title": "Murph Genetic Variant Frontmatter"
 }

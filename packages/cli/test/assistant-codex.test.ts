@@ -50,7 +50,7 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
     prompt: 'Summarize the vault.',
     workingDirectory: '/tmp/vault',
     outputFile: '/tmp/last-message.txt',
-    configOverrides: ['mcp_servers.healthybob_memory.command="node"'],
+    configOverrides: ['mcp_servers.murph_memory.command="node"'],
     model: 'o3',
     reasoningEffort: 'xhigh',
     sandbox: 'read-only',
@@ -63,7 +63,7 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
     '--ask-for-approval',
     'never',
     '--config',
-    'mcp_servers.healthybob_memory.command="node"',
+    'mcp_servers.murph_memory.command="node"',
     'exec',
     '--json',
     '--skip-git-repo-check',
@@ -90,7 +90,7 @@ test('buildCodexArgs keeps approval as a root flag and omits sandbox when resumi
     workingDirectory: '/tmp/vault',
     outputFile: '/tmp/last-message.txt',
     resumeSessionId: 'thread-123',
-    configOverrides: ['mcp_servers.healthybob_memory.required=true'],
+    configOverrides: ['mcp_servers.murph_memory.required=true'],
     model: 'o3',
     reasoningEffort: 'high',
     sandbox: 'workspace-write',
@@ -103,7 +103,7 @@ test('buildCodexArgs keeps approval as a root flag and omits sandbox when resumi
     '--ask-for-approval',
     'on-request',
     '--config',
-    'mcp_servers.healthybob_memory.required=true',
+    'mcp_servers.murph_memory.required=true',
     'exec',
     'resume',
     'thread-123',
@@ -465,11 +465,11 @@ test('executeCodexPrompt does not misclassify MCP initialize failures as provide
   installSpawnMock((child) => {
     child.stderr.emit(
       'data',
-      '2026-03-24T03:30:58.077933Z ERROR codex_core::codex: Failed to create session: required MCP servers failed to initialize: healthybob_cron: handshaking with MCP server failed: connection closed: initialize response; healthybob_memory: handshaking with MCP server failed: connection closed: initialize response\n',
+      '2026-03-24T03:30:58.077933Z ERROR codex_core::codex: Failed to create session: required MCP servers failed to initialize: murph_cron: handshaking with MCP server failed: connection closed: initialize response; murph_memory: handshaking with MCP server failed: connection closed: initialize response\n',
     )
     child.stderr.emit(
       'data',
-      'Error: thread/resume: thread/resume failed: error resuming thread: Fatal error: Failed to initialize session: required MCP servers failed to initialize: healthybob_cron: handshaking with MCP server failed: connection closed: initialize response; healthybob_memory: handshaking with MCP server failed: connection closed: initialize response\n',
+      'Error: thread/resume: thread/resume failed: error resuming thread: Fatal error: Failed to initialize session: required MCP servers failed to initialize: murph_cron: handshaking with MCP server failed: connection closed: initialize response; murph_memory: handshaking with MCP server failed: connection closed: initialize response\n',
     )
     child.emit('close', 1, null)
   })
@@ -540,7 +540,7 @@ test('executeCodexPrompt prefers JSON error events when codex exits non-zero', a
 })
 
 test('resolveCodexDisplayOptions uses explicit model overrides but keeps reasoning from the active profile', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-codex-config-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-config-'))
   cleanupPaths.push(tempRoot)
   const configPath = path.join(tempRoot, 'config.toml')
   await writeFile(
@@ -577,7 +577,7 @@ test('resolveCodexDisplayOptions uses explicit model overrides but keeps reasoni
 })
 
 test('resolveCodexDisplayOptions uses the configured default profile when no explicit profile is set', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-codex-config-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-config-'))
   cleanupPaths.push(tempRoot)
   const configPath = path.join(tempRoot, 'config.toml')
   await writeFile(
@@ -606,7 +606,7 @@ test('resolveCodexDisplayOptions uses the configured default profile when no exp
 })
 
 test('resolveCodexDisplayOptions falls back to top-level config defaults when no profile is configured', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-codex-config-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-codex-config-'))
   cleanupPaths.push(tempRoot)
   const configPath = path.join(tempRoot, 'config.toml')
   await writeFile(

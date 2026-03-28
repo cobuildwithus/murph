@@ -118,7 +118,8 @@ function tokenResponseToAuthTokens(payload: OuraTokenResponse): ProviderAuthToke
 function buildOuraSignatureCandidates(timestamp: string, rawBody: Buffer, secret: string): string[] {
   const signatureBase = `${timestamp}${rawBody.toString("utf8")}`;
   const digest = createHmac("sha256", secret).update(signatureBase).digest();
-  return [digest.toString("hex"), digest.toString("base64"), digest.toString("base64url")];
+  const hex = digest.toString("hex");
+  return [hex, hex.toUpperCase(), digest.toString("base64"), digest.toString("base64url")];
 }
 
 function constantTimeMatchSignature(expectedCandidates: readonly string[], actual: string): boolean {
@@ -453,7 +454,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       if (!grantedScopes.includes("personal")) {
         throw deviceSyncError({
           code: "OURA_PERSONAL_SCOPE_REQUIRED",
-          message: "Oura connections require the personal scope so Healthy Bob can identify the account.",
+          message: "Oura connections require the personal scope so Murph can identify the account.",
           retryable: false,
           httpStatus: 400,
         });

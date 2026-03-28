@@ -100,7 +100,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   }
   const getPlatform = options.platform ?? (() => process.platform)
   const cli = Cli.create(commandName, {
-    description: 'Healthy Bob local machine setup helpers.',
+    description: 'Murph local machine setup helpers.',
   })
 
   const runSetupCommand = async (context: any) => {
@@ -396,7 +396,7 @@ function buildSetupCtaCommands(result: SetupResult): Array<{
 
   if (!result.channels.some((channel) => channel.channel === 'email' && channel.configured)) {
     commands.push({
-      command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Healthy Bob"',
+      command: 'inbox source add email --id email:agentmail --provision --emailDisplayName "Murph"',
       description:
         'Reuse an existing AgentMail inbox or provision a new one after setting AGENTMAIL_API_KEY in the shell or local `.env`. Use `--account <inbox_id>` when the API key is scoped to an existing inbox.',
     })

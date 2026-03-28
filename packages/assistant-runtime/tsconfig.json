@@ -11,6 +11,9 @@
   ],
   "references": [
     {
+      "path": "../hosted-execution"
+    },
+    {
       "path": "../runtime-state"
     },
     {

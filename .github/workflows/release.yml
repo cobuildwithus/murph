@@ -1,4 +1,4 @@
-name: Publish Healthy Bob Packages
+name: Publish Murph Packages
 
 on:
   push:

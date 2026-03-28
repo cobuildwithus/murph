@@ -31,3 +31,27 @@ export function requireHostedExecutionInternalToken(request: Request): void {
     });
   }
 }
+
+export function requireHostedExecutionSchedulerToken(request: Request): void {
+  const token = normalizeOptionalString(
+    process.env.CRON_SECRET
+      ?? process.env.HOSTED_EXECUTION_INTERNAL_TOKEN
+      ?? process.env.HOSTED_EXECUTION_CONTROL_TOKEN,
+  );
+
+  if (!token) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_SCHEDULER_TOKEN_REQUIRED",
+      message: "CRON_SECRET or HOSTED_EXECUTION_INTERNAL_TOKEN must be configured for scheduled hosted execution drains.",
+      httpStatus: 500,
+    });
+  }
+
+  if (request.headers.get("authorization") !== `Bearer ${token}`) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EXECUTION_UNAUTHORIZED",
+      message: "Unauthorized hosted execution request.",
+      httpStatus: 401,
+    });
+  }
+}

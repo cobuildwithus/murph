@@ -964,7 +964,7 @@ function matchAssistantAutoReplyLongRunningCommand(
     return null
   }
 
-  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|healthybob)\s+(research|deepthink)(?:\s|$)/iu.exec(
+  const cliCommandMatch = /(?:^|\s)(?:[^\s]+\/)?(?:vault-cli|murph)\s+(research|deepthink)(?:\s|$)/iu.exec(
     commandText,
   )
   if (cliCommandMatch) {

@@ -1,4 +1,4 @@
-import { deviceSyncError } from "@healthybob/device-syncd";
+import { deviceSyncError } from "@murph/device-syncd";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -171,7 +171,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
   });
 
-  it("keeps webhook verification challenges as plain-text responses", async () => {
+  it("returns Oura webhook verification challenges as JSON", async () => {
     mocks.resolveWebhookVerificationChallenge.mockReturnValue("oura-challenge-token");
 
     const response = await webhookRoute.GET(
@@ -183,7 +183,9 @@ describe("hosted device-sync agent and webhook routes", () => {
 
     expect(mocks.resolveWebhookVerificationChallenge).toHaveBeenCalledWith("oura");
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-    await expect(response.text()).resolves.toBe("oura-challenge-token");
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      challenge: "oura-challenge-token",
+    });
   });
 });

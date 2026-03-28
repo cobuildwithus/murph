@@ -45,10 +45,10 @@ export async function resolveAssistantProviderWorkingDirectory(input: {
 
 function buildAssistantProviderWorkspaceReadme(): string {
   return [
-    '# Healthy Bob assistant workspace',
+    '# Murph assistant workspace',
     '',
     'This session runs in an isolated assistant workspace so the live vault is not the writable model workspace.',
-    'Use `vault-cli` or other Healthy Bob assistant tools for canonical vault reads and writes.',
+    'Use `vault-cli` or other Murph assistant tools for canonical vault reads and writes.',
     '',
     'The real bound vault is supplied through the `VAULT` environment variable and assistant tooling.',
     'Do not treat direct file edits in this workspace as canonical vault changes.',

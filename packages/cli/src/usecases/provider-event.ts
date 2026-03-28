@@ -1,4 +1,4 @@
-import { EVENT_KINDS } from '@healthybob/contracts'
+import { EVENT_KINDS } from '@murph/contracts'
 import { z } from 'incur'
 import { loadJsonInputObject } from '../json-input.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
@@ -834,7 +834,7 @@ async function loadProviderEventQueryRuntime(): Promise<QueryRuntimeModule> {
 }
 
 async function loadProviderEventCoreRuntime(): Promise<ProviderEventCoreRuntime> {
-  return loadRuntimeModule<ProviderEventCoreRuntime>('@healthybob/core')
+  return loadRuntimeModule<ProviderEventCoreRuntime>('@murph/core')
 }
 
 function buildProviderData(provider: ProviderReadModel) {

@@ -2,9 +2,9 @@ import type {
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
   DeviceSyncProviderDescriptor,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
-export type { DeviceSyncAccountStatus } from "@healthybob/runtime-state";
+export type { DeviceSyncAccountStatus } from "@murph/runtime-state";
 
 export interface DeviceSyncLogger {
   debug?(message: string, context?: Record<string, unknown>): void;

@@ -41,7 +41,7 @@ const connectedAccount = {
 } as const
 
 test.sequential('device daemon commands stay in the generated CLI schema', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-cli-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))
 
   try {
     const schema = JSON.parse(
@@ -73,7 +73,7 @@ test.sequential('device daemon commands stay in the generated CLI schema', async
 test.sequential(
   'device CLI commands route through the local device sync control plane',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-device-cli-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-cli-'))
     const state: DeviceTestState = {
       lastConnectBody: null,
       lastAccountQuery: null,

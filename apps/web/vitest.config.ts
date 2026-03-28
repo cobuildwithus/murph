@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-import { createVitestWorkspaceRuntimeAliases } from "../../config/workspace-source-resolution";
-import { resolveWorkspaceSourceEntries } from "./next.config";
+import {
+  createVitestWorkspaceRuntimeAliases,
+  resolveHostedWebWorkspaceSourceEntries,
+} from "../../config/workspace-source-resolution";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
@@ -16,7 +18,7 @@ export default defineConfig({
         find: "@",
         replacement: path.resolve(repoRoot, "apps/web"),
       },
-      ...createVitestWorkspaceRuntimeAliases(resolveWorkspaceSourceEntries(appDir)),
+      ...createVitestWorkspaceRuntimeAliases(resolveHostedWebWorkspaceSourceEntries(appDir)),
     ],
   },
   test: {

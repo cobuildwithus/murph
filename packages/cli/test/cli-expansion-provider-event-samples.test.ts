@@ -200,7 +200,7 @@ test('provider/food/recipe/event/samples help uses generic id selectors for read
 test.sequential(
   'recipe scaffold/upsert/show/list work through the slice commands',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-recipe-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-recipe-'))
     const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
 
     try {
@@ -351,7 +351,7 @@ test.sequential(
 test.sequential(
   'food scaffold/upsert/show/list work through the slice commands',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-'))
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
 
     try {
@@ -497,7 +497,7 @@ test.sequential(
 test.sequential(
   'food schedule creates a remembered food plus a daily auto-log job',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-daily-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-daily-'))
 
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
@@ -588,7 +588,7 @@ test.sequential(
 test.sequential(
   'food rename moves the record to the new slug while preserving the id and prior title alias',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-food-rename-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-rename-'))
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
 
     try {
@@ -659,7 +659,7 @@ test.sequential(
 test.sequential(
   'provider upsert/show/list, event upsert/show/list, and samples add work through the slice commands',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-'))
     const providerPayloadPath = path.join(vaultRoot, 'provider.json')
     const eventPayloadPath = path.join(vaultRoot, 'event.json')
     const samplesPayloadPath = path.join(vaultRoot, 'samples.json')
@@ -1001,7 +1001,7 @@ test.sequential(
 test.sequential(
   'provider upsert rejects slug collisions against another provider id',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-collision-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-collision-'))
     const alphaPayloadPath = path.join(vaultRoot, 'provider-alpha.json')
     const betaPayloadPath = path.join(vaultRoot, 'provider-beta.json')
     const collisionPayloadPath = path.join(vaultRoot, 'provider-collision.json')
@@ -1100,7 +1100,7 @@ test.sequential(
 test.sequential(
   'provider upsert renames the provider document when the same provider id moves to a new slug',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-rename-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-rename-'))
     const initialPayloadPath = path.join(vaultRoot, 'provider-initial.json')
     const renamedPayloadPath = path.join(vaultRoot, 'provider-renamed.json')
 
@@ -1172,7 +1172,7 @@ test.sequential(
 test.sequential(
   'food and recipe edit rename the underlying document when slug is patched',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-edit-rename-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-rename-'))
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
     const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
 
@@ -1276,7 +1276,7 @@ test.sequential(
 test.sequential(
   'provider edit keeps templated markdown body aligned with note updates and body resets',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-provider-body-sync-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-body-sync-'))
     const providerPayloadPath = path.join(vaultRoot, 'provider.json')
 
     try {
@@ -1389,7 +1389,7 @@ test.sequential(
 test.sequential(
   'provider, food, recipe, and event edit/delete mutate existing records and remove them cleanly',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-record-mutations-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-record-mutations-'))
     const providerPayloadPath = path.join(vaultRoot, 'provider.json')
     const foodPayloadPath = path.join(vaultRoot, 'food.json')
     const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
@@ -1668,7 +1668,7 @@ test.sequential(
 test.sequential(
   'event edit requires an explicit dayKey policy for temporal edits and keeps fallback timezones out of legacy records',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-event-timezone-edit-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-timezone-edit-'))
     const eventPayloadPath = path.join(vaultRoot, 'event.json')
 
     try {

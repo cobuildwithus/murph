@@ -1,4 +1,4 @@
-import { EXPERIMENT_STATUSES } from '@healthybob/contracts'
+import { EXPERIMENT_STATUSES } from '@murph/contracts'
 import { Cli, z } from 'incur'
 import {
   inputFileOptionSchema,

@@ -9,7 +9,7 @@ import { configureSetupChannels } from '../src/setup-services/channels.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channels-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-'))
 
   try {
     const doctorCalls: string[] = []
@@ -83,7 +83,7 @@ test('configureSetupChannels enables Telegram auto-reply only after the doctor p
 })
 
 test('configureSetupChannels persists Telegram auto-reply when the doctor probe passes', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channels-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-'))
 
   try {
     const configured = await configureSetupChannels({
@@ -154,7 +154,7 @@ test('configureSetupChannels persists Telegram auto-reply when the doctor probe 
 })
 
 test('configureSetupChannels reuses a disabled Telegram connector and re-enables it before probing readiness', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channels-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-'))
 
   try {
     const doctorCalls: string[] = []
@@ -253,7 +253,7 @@ test('configureSetupChannels reuses a disabled Telegram connector and re-enables
 })
 
 test('configureSetupChannels adds a Linq connector and persists auto-reply when the doctor probe passes', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linq-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-linq-'))
 
   try {
     const doctorCalls: string[] = []
@@ -345,7 +345,7 @@ test('configureSetupChannels adds a Linq connector and persists auto-reply when 
 })
 
 test('configureSetupChannels provisions email and persists auto-reply when AgentMail readiness passes', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-'))
 
   try {
     const configured = await configureSetupChannels({
@@ -391,14 +391,14 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
               source: 'email',
               enabled: true,
               options: {
-                emailAddress: 'healthybob@example.test',
+                emailAddress: 'murph@example.test',
               },
             },
             connectorCount: 1,
             provisionedMailbox: {
               inboxId: 'inbox_123',
-              emailAddress: 'healthybob@example.test',
-              displayName: 'Healthy Bob',
+              emailAddress: 'murph@example.test',
+              displayName: 'Murph',
               clientId: null,
               provider: 'agentmail' as const,
             },
@@ -422,7 +422,7 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
     assert.equal(configured[0]?.autoReply, true)
     assert.equal(configured[0]?.connectorId, 'email:agentmail')
     assert.deepEqual(configured[0]?.missingEnv, [])
-    assert.match(configured[0]?.detail ?? '', /healthybob@example\.test/u)
+    assert.match(configured[0]?.detail ?? '', /murph@example\.test/u)
 
     const automationState = await readAssistantAutomationState(vault)
     assert.deepEqual(automationState.autoReplyChannels, ['email'])
@@ -433,7 +433,7 @@ test('configureSetupChannels provisions email and persists auto-reply when Agent
 })
 
 test('configureSetupChannels keeps email selected in onboarding preferences even when AgentMail readiness fails', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-fail-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-fail-'))
 
   try {
     const configured = await configureSetupChannels({
@@ -479,14 +479,14 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
               source: 'email',
               enabled: true,
               options: {
-                emailAddress: 'healthybob@example.test',
+                emailAddress: 'murph@example.test',
               },
             },
             connectorCount: 1,
             provisionedMailbox: {
               inboxId: 'inbox_123',
-              emailAddress: 'healthybob@example.test',
-              displayName: 'Healthy Bob',
+              emailAddress: 'murph@example.test',
+              displayName: 'Murph',
               clientId: null,
               provider: 'agentmail' as const,
             },
@@ -522,7 +522,7 @@ test('configureSetupChannels keeps email selected in onboarding preferences even
 })
 
 test('configureSetupChannels treats an empty but reachable AgentMail inbox as configured and auto-reply ready', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-warn-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-warn-'))
 
   try {
     const configured = await configureSetupChannels({
@@ -568,14 +568,14 @@ test('configureSetupChannels treats an empty but reachable AgentMail inbox as co
               source: 'email',
               enabled: true,
               options: {
-                emailAddress: 'healthybob@example.test',
+                emailAddress: 'murph@example.test',
               },
             },
             connectorCount: 1,
             provisionedMailbox: {
               inboxId: 'inbox_123',
-              emailAddress: 'healthybob@example.test',
-              displayName: 'Healthy Bob',
+              emailAddress: 'murph@example.test',
+              displayName: 'Murph',
               clientId: null,
               provider: 'agentmail' as const,
             },
@@ -608,7 +608,7 @@ test('configureSetupChannels treats an empty but reachable AgentMail inbox as co
 })
 
 test('configureSetupChannels disables stale setup connectors that were not selected in onboarding', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-channel-reconcile-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channel-reconcile-'))
 
   try {
     const sourceSetEnabledCalls: Array<{
@@ -655,11 +655,11 @@ test('configureSetupChannels disables stale setup connectors that were not selec
             configPath: '.runtime/inboxd/config.json',
             connectors: [
               {
-                accountId: 'healthybob@agentmail.to',
+                accountId: 'murph@agentmail.to',
                 enabled: true,
                 id: 'email:agentmail',
                 options: {
-                  emailAddress: 'healthybob@agentmail.to',
+                  emailAddress: 'murph@agentmail.to',
                 },
                 source: 'email' as const,
               },
@@ -687,13 +687,13 @@ test('configureSetupChannels disables stale setup connectors that were not selec
             vault,
             configPath: '.runtime/inboxd/config.json',
             connector: {
-              accountId: input.connectorId === 'email:agentmail' ? 'healthybob@agentmail.to' : 'self',
+              accountId: input.connectorId === 'email:agentmail' ? 'murph@agentmail.to' : 'self',
               enabled: input.enabled,
               id: input.connectorId,
               options:
                 input.connectorId === 'email:agentmail'
                   ? {
-                      emailAddress: 'healthybob@agentmail.to',
+                      emailAddress: 'murph@agentmail.to',
                     }
                   : {
                       includeOwnMessages: true,
@@ -728,7 +728,7 @@ test('configureSetupChannels disables stale setup connectors that were not selec
 })
 
 test('configureSetupChannels reuses a discovered AgentMail inbox during onboarding before falling back to provisioning', async () => {
-  const vault = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-email-discovered-'))
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-email-discovered-'))
 
   try {
     const sourceAddCalls: Array<Record<string, unknown>> = []
@@ -808,7 +808,7 @@ test('configureSetupChannels reuses a discovered AgentMail inbox during onboardi
       {
         account: 'existing@example.test',
         address: 'existing@example.test',
-        emailDisplayName: 'Healthy Bob',
+        emailDisplayName: 'Murph',
         id: 'email:agentmail',
         provision: false,
         requestId: null,

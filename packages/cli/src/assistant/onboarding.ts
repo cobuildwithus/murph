@@ -7,12 +7,13 @@ import { createAssistantStateWriteLock } from './state-write-lock.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store.js'
 
 const assistantOnboardingSlotValues = ['name', 'tone', 'goals'] as const
+const ASSISTANT_ONBOARDING_SCHEMA = 'murph.assistant-onboarding.v1'
 
 type AssistantOnboardingSlot = (typeof assistantOnboardingSlotValues)[number]
 
 const assistantOnboardingProfileSchema = z
   .object({
-    schema: z.literal('healthybob.assistant-onboarding.v1'),
+    schema: z.literal(ASSISTANT_ONBOARDING_SCHEMA),
     name: z.string().min(1).nullable(),
     nameAsked: z.boolean().optional().default(false),
     tone: z.string().min(1).nullable(),
@@ -98,7 +99,7 @@ async function readAssistantOnboardingProfile(
 
 function createEmptyAssistantOnboardingProfile() {
   return assistantOnboardingProfileSchema.parse({
-    schema: 'healthybob.assistant-onboarding.v1',
+    schema: ASSISTANT_ONBOARDING_SCHEMA,
     name: null,
     nameAsked: false,
     tone: null,

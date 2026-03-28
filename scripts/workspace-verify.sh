@@ -10,6 +10,7 @@ readonly shell_syntax_check_scripts=(
   "scripts/doc-gardening.sh"
   "scripts/open-exec-plan.sh"
   "scripts/close-exec-plan.sh"
+  "scripts/finish-task"
   "scripts/committer"
   "scripts/package-audit-context.sh"
   "scripts/package-data-context.sh"

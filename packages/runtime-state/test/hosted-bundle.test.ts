@@ -20,7 +20,7 @@ import {
 } from "../src/index.ts";
 
 test("hosted bundle helpers round-trip multi-root archives and base64 helpers", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-bundle-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-"));
 
   try {
     const alphaRoot = path.join(workspaceRoot, "alpha");
@@ -77,8 +77,8 @@ test("hosted bundle helpers round-trip multi-root archives and base64 helpers", 
 });
 
 test("hosted execution bundles keep only assistant state and operator config inside agent-state", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-context-"));
-  const restoreRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-context-restore-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-restore-"));
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
@@ -89,7 +89,7 @@ test("hosted execution bundles keep only assistant state and operator config ins
     await mkdir(path.join(vaultRoot, ".runtime", "parsers"), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
-    await mkdir(path.join(operatorHomeRoot, ".healthybob", "hosted"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
     for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
       await writeFile(path.join(vaultRoot, ".runtime", artifact.relativePath), artifact.contents);
@@ -97,10 +97,10 @@ test("hosted execution bundles keep only assistant state and operator config ins
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
     await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
-    await writeFile(path.join(operatorHomeRoot, ".healthybob", "config.json"), "{\"schema\":\"cfg\"}\n");
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
     await writeFile(
-      path.join(operatorHomeRoot, ".healthybob", "hosted", "user-env.json"),
-      "{\"schema\":\"healthybob.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
+      path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"),
+      "{\"schema\":\"murph.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
     );
 
     const bundles = await snapshotHostedExecutionContext({
@@ -122,7 +122,7 @@ test("hosted execution bundles keep only assistant state and operator config ins
       readHostedBundleTextFile({
         bytes: bundles.agentStateBundle,
         expectedKind: "agent-state",
-        path: ".healthybob/config.json",
+        path: ".murph/config.json",
         root: "operator-home",
       }),
       "{\"schema\":\"cfg\"}\n",
@@ -131,7 +131,7 @@ test("hosted execution bundles keep only assistant state and operator config ins
       readHostedBundleTextFile({
         bytes: bundles.agentStateBundle,
         expectedKind: "agent-state",
-        path: ".healthybob/hosted/user-env.json",
+        path: ".murph/hosted/user-env.json",
         root: "operator-home",
       }),
       null,
@@ -163,11 +163,11 @@ test("hosted execution bundles keep only assistant state and operator config ins
       "{\"autoReplyChannels\":[\"linq\"]}\n",
     );
     assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
+      await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
       "{\"schema\":\"cfg\"}\n",
     );
     await assert.rejects(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     );
     for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
       await assert.rejects(
@@ -182,9 +182,9 @@ test("hosted execution bundles keep only assistant state and operator config ins
   }
 });
 
-test("hosted execution restore ignores legacy vault runtime roots in agent-state bundles", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-context-legacy-"));
-  const restoreRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-context-legacy-restore-"));
+test("hosted execution restore rejects legacy vault-runtime roots in incoming agent-state bundles", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-root-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-root-restore-"));
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
@@ -192,54 +192,31 @@ test("hosted execution restore ignores legacy vault runtime roots in agent-state
     const operatorHomeRoot = path.join(workspaceRoot, "home");
     await mkdir(vaultRoot, { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
-    await mkdir(path.join(operatorHomeRoot, ".healthybob", "hosted"), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
     await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
-    await writeFile(path.join(operatorHomeRoot, ".healthybob", "config.json"), "{\"schema\":\"cfg\"}\n");
-    await writeFile(
-      path.join(operatorHomeRoot, ".healthybob", "hosted", "user-env.json"),
-      "{\"schema\":\"healthybob.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
-    );
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
 
     const bundles = await snapshotHostedExecutionContext({
       operatorHomeRoot,
       vaultRoot,
     });
-    assert.ok(bundles.agentStateBundle);
-
-    let legacyAgentStateBundle = bundles.agentStateBundle;
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      legacyAgentStateBundle = writeHostedBundleTextFile({
-        bytes: legacyAgentStateBundle,
-        kind: "agent-state",
-        path: artifact.relativePath,
-        root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
-        text: artifact.contents,
-      });
-    }
-
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: legacyAgentStateBundle,
-      vaultBundle: bundles.vaultBundle,
-      workspaceRoot: restoreRoot,
+    const agentStateBundleWithLegacyRoot = writeHostedBundleTextFile({
+      bytes: bundles.agentStateBundle,
+      kind: "agent-state",
+      path: "device-syncd/control-token",
+      root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
+      text: "legacy-token\n",
     });
 
-    assert.equal(
-      await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
-      "{\"autoReplyChannels\":[\"linq\"]}\n",
-    );
-    assert.equal(
-      await readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
-      "{\"schema\":\"cfg\"}\n",
-    );
     await assert.rejects(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      restoreHostedExecutionContext({
+        agentStateBundle: agentStateBundleWithLegacyRoot,
+        vaultBundle: bundles.vaultBundle,
+        workspaceRoot: restoreRoot,
+      }),
+      /Hosted bundle root "vault-runtime" is not mapped for restore\./u,
     );
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      await assert.rejects(
-        readFile(path.join(restored.vaultRoot, ".runtime", artifact.relativePath), "utf8"),
-      );
-    }
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });
@@ -250,7 +227,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
   let bundle = writeHostedBundleTextFile({
     bytes: null,
     kind: "agent-state",
-    path: ".healthybob/hosted/user-env.json",
+    path: ".murph/hosted/user-env.json",
     root: "operator-home",
     text: "{\"ok\":true}\n",
   });
@@ -259,7 +236,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
     readHostedBundleTextFile({
       bytes: bundle,
       expectedKind: "agent-state",
-      path: ".healthybob/hosted/user-env.json",
+      path: ".murph/hosted/user-env.json",
       root: "operator-home",
     }),
     "{\"ok\":true}\n",
@@ -268,7 +245,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
   bundle = writeHostedBundleTextFile({
     bytes: bundle,
     kind: "agent-state",
-    path: ".healthybob/hosted/user-env.json",
+    path: ".murph/hosted/user-env.json",
     root: "operator-home",
     text: "{\"ok\":false}\n",
   });
@@ -277,7 +254,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
     readHostedBundleTextFile({
       bytes: bundle,
       expectedKind: "agent-state",
-      path: ".healthybob/hosted/user-env.json",
+      path: ".murph/hosted/user-env.json",
       root: "operator-home",
     }),
     "{\"ok\":false}\n",
@@ -286,7 +263,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
   bundle = writeHostedBundleTextFile({
     bytes: bundle,
     kind: "agent-state",
-    path: ".healthybob/hosted/user-env.json",
+    path: ".murph/hosted/user-env.json",
     root: "operator-home",
     text: null,
   });
@@ -295,7 +272,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
     readHostedBundleTextFile({
       bytes: bundle,
       expectedKind: "agent-state",
-      path: ".healthybob/hosted/user-env.json",
+      path: ".murph/hosted/user-env.json",
       root: "operator-home",
     }),
     null,
@@ -303,7 +280,7 @@ test("hosted bundle text helpers patch and remove individual files deterministic
 });
 
 test("hosted bundle restore rejects backslash and drive-style traversal archive paths", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-hosted-bundle-paths-"));
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-paths-"));
 
   try {
     const restoreRoot = path.join(workspaceRoot, "restore");

@@ -121,7 +121,7 @@ test.sequential(
   'intervention add captures intervention_session events and fails fast on ambiguous types and durations',
   async () => {
     const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), 'healthybob-cli-intervention-'),
+      path.join(tmpdir(), 'murph-cli-intervention-'),
     )
 
     try {
@@ -274,7 +274,7 @@ test.sequential(
   'intervention add surfaces invalid timestamps without needing a custom intervention read surface',
   async () => {
     const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), 'healthybob-cli-intervention-'),
+      path.join(tmpdir(), 'murph-cli-intervention-'),
     )
 
     try {
@@ -309,7 +309,7 @@ test.sequential(
   'intervention edit/delete mutate and remove the saved intervention_session event',
   async () => {
     const vaultRoot = await mkdtemp(
-      path.join(tmpdir(), 'healthybob-cli-intervention-edit-'),
+      path.join(tmpdir(), 'murph-cli-intervention-edit-'),
     )
 
     try {

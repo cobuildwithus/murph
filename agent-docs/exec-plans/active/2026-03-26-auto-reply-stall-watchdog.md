@@ -7,7 +7,7 @@ Stop assistant auto-reply turns from hanging forever when the provider/tool brid
 ## Scope
 
 - Add an automation-side heartbeat/inactivity watchdog around auto-reply provider turns.
-- Surface safe heartbeat/stall status lines in `healthybob run`.
+- Surface safe heartbeat/stall status lines in `murph run`.
 - Classify stalled turns as deferred retries so the auto-reply cursor does not advance.
 - Add focused regression coverage for stall retry/session preservation and safe terminal formatting.
 - Refine the watchdog so long-running `research`/`deepthink` CLI tool calls can run for their expected duration without being misclassified as silent stalls.

@@ -3,11 +3,10 @@ import { z } from "zod";
 import { assertCanonicalWritePort } from "../core-port.ts";
 import type { DeviceBatchImportPayload } from "../core-port.ts";
 import {
+  optionalTrimmedStringSchema,
   parseInputObject,
   requiredTrimmedStringSchema,
-  resolveVaultRootAlias,
   stripUndefined,
-  vaultRootAliasSchemaFields,
 } from "../shared.ts";
 
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
@@ -24,14 +23,13 @@ export interface DeviceProviderSnapshotImportInput {
   provider: string;
   snapshot: unknown;
   vaultRoot?: string;
-  vault?: string;
 }
 
 const deviceProviderSnapshotImportSchema = z
   .object({
     provider: requiredTrimmedStringSchema("provider"),
     snapshot: z.unknown(),
-    ...vaultRootAliasSchemaFields,
+    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
   })
   .passthrough();
 
@@ -58,7 +56,7 @@ export async function prepareDeviceProviderSnapshotImport(
   const normalized = await adapter.normalizeSnapshot(request.snapshot);
 
   return stripUndefined({
-    vaultRoot: resolveVaultRootAlias(request),
+    vaultRoot: request.vaultRoot,
     ...normalized,
   });
 }

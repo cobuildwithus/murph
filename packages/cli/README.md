@@ -1,4 +1,4 @@
-# `healthybob` (`packages/cli`)
+# `murph` (`packages/cli`)
 
 Owns the `vault-cli` command surface. The CLI may validate inputs and format outputs, but it must delegate all canonical writes to core.
 
@@ -6,35 +6,35 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 
 - Package-local Incur command structure is present under `src/`.
 - Command handlers are thin and dependency-injected through `createVaultCli()`.
-- Machine-facing callers should rely on Incur's native envelope via `--verbose --format json` instead of a Healthy Bob-specific wrapper contract.
+- Machine-facing callers should rely on Incur's native envelope via `--verbose --format json` instead of a Murph-specific wrapper contract.
 - Built-in Incur surfaces such as `--help`, `--schema`, `--llms`, and `completions bash` are part of the package verification surface and should remain truthful as command metadata evolves.
 - Library exports and the executable bin are now split: `src/index.ts` is the package entrypoint, and `src/bin.ts` is the CLI launcher.
-- Default runtime services now lazy-load the workspace `@healthybob/core`, `@healthybob/importers`, and `@healthybob/query` package boundaries instead of reaching into sibling `src/` trees.
+- Default runtime services now lazy-load the workspace `@murph/core`, `@murph/importers`, and `@murph/query` package boundaries instead of reaching into sibling `src/` trees.
 - `packages/cli` now extends the shared `../../tsconfig.base.json`; `tsconfig.json` is the buildable package project, `tsconfig.build.json` stays as the local build alias, and `tsconfig.typecheck.json` covers package-local scripts and tests.
 - Package-local verification scripts and runtime tests now live in TypeScript under `scripts/` and `test/`.
 - Local build now runs in this workspace, and the built binary can be exercised with `node dist/bin.js ...` after `pnpm --dir packages/cli build`.
 - Top-level retrieval commands now include `search` for lexical read-model search, `search index status` / `search index rebuild` for the optional SQLite FTS index stored in `.runtime/search.sqlite`, and `timeline` for descending journal/event/sample-summary context, with the query package boundary isolated in `src/query-runtime.ts`.
-- The inbox CLI runtime now resolves `.runtime` paths through `@healthybob/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
+- The inbox CLI runtime now resolves `.runtime` paths through `@murph/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
 - The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion via `src/inbox-services.ts`.
 - The CLI now also owns an `assistant` command group for provider-backed local chat turns, Ink-backed local chat UI fallback, assistant-session metadata plus local transcripts outside the vault, outbound channel delivery, and an always-on inbox triage loop via `src/assistant-runtime.ts`.
 - iMessage-backed inbox and assistant delivery flows now depend directly on `@photon-ai/imessage-kit` instead of late-loading that package at call time, while Telegram delivery and ingestion share the same assistant channel binding abstraction.
-- The built CLI package shape exposes both `vault-cli` and a setup-focused `healthybob` alias from the same entrypoint; `healthybob`, `healthybob --help`, and `healthybob setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
+- The built CLI package shape exposes both `vault-cli` and a setup-focused `murph` alias from the same entrypoint; `murph`, `murph --help`, and `murph setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
 
 ## Host setup (macOS and Linux)
 
-Once `healthybob` is published, the installed-package onboarding path will be:
+Once `murph` is published, the installed-package onboarding path will be:
 
 ```bash
-healthybob setup
+murph setup
 ```
 
-That command installs or reuses the local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.healthybob/toolchain/models/whisper/`, optionally installs PaddleX OCR on supported hosts, initializes the default `./vault` target unless you override it, saves that vault as the default Healthy Bob CLI vault for later commands, runs inbox bootstrap, and then launches `assistant run` automatically when at least one selected channel is fully configured for auto-reply, falling back to `assistant chat` otherwise.
+That command installs or reuses the local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.murph/toolchain/models/whisper/`, optionally installs PaddleX OCR on supported hosts, initializes the default `./vault` target unless you override it, saves that vault as the default Murph CLI vault for later commands, runs inbox bootstrap, and then launches `assistant run` automatically when at least one selected channel is fully configured for auto-reply, falling back to `assistant chat` otherwise.
 
-Setup also installs user-level `healthybob` and `vault-cli` shims into `~/.local/bin`. If that directory is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells the operator to reload the shell. Once setup has run, the main CLI can omit `--vault` when the saved default is the intended target.
+Setup also installs user-level `murph` and `vault-cli` shims into `~/.local/bin`. If that directory is not already on `PATH`, setup appends a managed PATH block to the active shell profile and tells the operator to reload the shell. Once setup has run, the main CLI can omit `--vault` when the saved default is the intended target.
 
 Useful flags include `--dry-run`, `--whisperModel small.en`, and `--skipOcr`.
 
-From a checkout, the supported onboarding path is the repo-local `scripts/setup-host.sh` wrapper. On macOS it delegates to the existing Homebrew-based bootstrap path; on Linux it can reuse or download Node locally, activate pnpm through corepack, install dependencies, build the workspace, and then run the same CLI setup flow. `./scripts/setup-host.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `healthybob` and `vault-cli` commands for future shells via those user-level shims. iMessage remains macOS-only even though the rest of the host setup now supports Linux.
+From a checkout, the supported onboarding path is the repo-local `scripts/setup-host.sh` wrapper. On macOS it delegates to the existing Homebrew-based bootstrap path; on Linux it can reuse or download Node locally, activate pnpm through corepack, install dependencies, build the workspace, and then run the same CLI setup flow. `./scripts/setup-host.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `murph` and `vault-cli` commands for future shells via those user-level shims. iMessage remains macOS-only even though the rest of the host setup now supports Linux.
 
 ## Release Flow
 
@@ -56,14 +56,14 @@ The release flow bumps every publishable package in the manifest to one shared v
 
 The first publish set is:
 
-- `@healthybob/contracts`
-- `@healthybob/runtime-state`
-- `@healthybob/core`
-- `@healthybob/query`
-- `@healthybob/importers`
-- `@healthybob/inboxd`
-- `@healthybob/parsers`
-- `healthybob`
+- `@murph/contracts`
+- `@murph/runtime-state`
+- `@murph/core`
+- `@murph/query`
+- `@murph/importers`
+- `@murph/inboxd`
+- `@murph/parsers`
+- `murph`
 
 `pnpm release:check` now installs with the frozen lockfile, builds the workspace, runs the repo checks, verifies that every workspace dependency in the publish set stays inside the publish set, and packs every publishable package with `pnpm pack`.
 

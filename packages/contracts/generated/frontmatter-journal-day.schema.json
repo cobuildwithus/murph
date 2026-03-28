@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.journal-day.v1"
+      "const": "murph.frontmatter.journal-day.v1"
     },
     "docType": {
       "type": "string",
@@ -47,6 +47,6 @@
     "sampleStreams"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-journal-day.schema.json",
-  "title": "Healthy Bob Journal Day Frontmatter"
+  "$id": "@murph/contracts/frontmatter-journal-day.schema.json",
+  "title": "Murph Journal Day Frontmatter"
 }

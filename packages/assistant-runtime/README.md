@@ -1,8 +1,8 @@
-# `@healthybob/assistant-runtime`
+# `@murph/assistant-runtime`
 
-Headless hosted/runtime surface for Healthy Bob assistant execution.
+Headless hosted/runtime surface for Murph assistant execution.
 
-This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the published `healthybob` CLI package.
+This package exists so hosted runtimes such as `apps/cloudflare` do not need to import their execution seams directly from the published `murph` CLI package.
 
 Current responsibilities:
 
@@ -17,4 +17,4 @@ Current non-goals:
 - Ink/UI surfaces
 - replacing the canonical vault or hosted bundle model
 
-The current implementation still composes the existing assistant/runtime exports from `healthybob`, but the hosted/runtime boundary is now this package rather than the CLI package itself.
+The current implementation still composes the existing assistant/runtime exports from `murph`, but the hosted/runtime boundary is now this package rather than the CLI package itself.

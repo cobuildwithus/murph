@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.goal.v1"
+      "const": "murph.frontmatter.goal.v1"
     },
     "docType": {
       "type": "string",
@@ -111,6 +111,6 @@
     "window"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-goal.schema.json",
-  "title": "Healthy Bob Goal Frontmatter"
+  "$id": "@murph/contracts/frontmatter-goal.schema.json",
+  "title": "Murph Goal Frontmatter"
 }

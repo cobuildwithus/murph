@@ -4,9 +4,9 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
-import { resolveRuntimePaths } from "@healthybob/runtime-state";
+import { resolveRuntimePaths } from "@murph/runtime-state";
 
-import { initializeVault, readJsonlRecords } from "@healthybob/core";
+import { initializeVault, readJsonlRecords } from "@murph/core";
 
 import {
   createConnectorRegistry,
@@ -42,8 +42,8 @@ test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", 
 });
 
 test("processCapture stores redacted raw evidence, note events, audit records, and attachment jobs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const attachmentPath = await writeExternalFile(sourceRoot, "meal-photo.jpg", "photo");
@@ -219,7 +219,7 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
 
 
 test("processCapture stores in-memory attachment bytes without an external source path", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-bytes-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-bytes-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -275,7 +275,7 @@ test("processCapture stores in-memory attachment bytes without an external sourc
 });
 
 test("listCaptures supports oldest-first paging with a persisted after cursor", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-list-cursor");
+  const vaultRoot = await makeTempDirectory("murph-inbox-list-cursor");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -344,8 +344,8 @@ test("listCaptures supports oldest-first paging with a persisted after cursor", 
 });
 
 test("runtime search indexes attachment metadata and can rebuild from envelope files", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-search-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-search-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-search-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-search-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "toast.jpg", "image");
@@ -408,8 +408,8 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
 });
 
 test("completed attachment parse jobs refresh capture search text and attachment metadata", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-parse-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-parse-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-parse-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-parse-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "lab-result.png", "image");
@@ -468,8 +468,8 @@ test("completed attachment parse jobs refresh capture search text and attachment
 });
 
 test("attachment parse job filters and requeue reset runtime-only parser state", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-requeue-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-requeue-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-requeue-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-requeue-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const firstPath = await writeExternalFile(sourceRoot, "first.png", "image-one");
@@ -595,8 +595,8 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
 });
 
 test("requeue can reset running attachment parse jobs back to pending", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-requeue-running-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-requeue-running-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-requeue-running-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-requeue-running-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "running.png", "image");
@@ -656,8 +656,8 @@ test("requeue can reset running attachment parse jobs back to pending", async ()
 });
 
 test("requeue invalidates stale running claims before finalization", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-requeue-stale-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-inbox-requeue-stale-source");
+  const vaultRoot = await makeTempDirectory("murph-inbox-requeue-stale-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-requeue-stale-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const imagePath = await writeExternalFile(sourceRoot, "stale.png", "image");
@@ -740,7 +740,7 @@ test("requeue invalidates stale running claims before finalization", async () =>
 });
 
 test("runtime list and search filters stay scoped across both search branches", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-filter-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-filter-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -823,7 +823,7 @@ test("runtime list and search filters stay scoped across both search branches", 
 });
 
 test("runtime decoding rejects malformed sqlite rows with clear column errors", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-malformed-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-malformed-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
@@ -884,7 +884,7 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
 });
 
 test("runPollConnector backfills and watches iMessage messages while advancing the cursor", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-inbox-daemon-vault");
+  const vaultRoot = await makeTempDirectory("murph-inbox-daemon-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   let watcher: ((message: Record<string, unknown>) => Promise<void> | void) | null = null;

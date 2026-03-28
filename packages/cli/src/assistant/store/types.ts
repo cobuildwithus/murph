@@ -1,4 +1,4 @@
-import type { AssistantStatePaths } from '@healthybob/runtime-state'
+import type { AssistantStatePaths } from '@murph/runtime-state'
 import type {
   AssistantApprovalPolicy,
   AssistantBindingDeliveryKind,
@@ -27,6 +27,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
   baseUrl?: string | null
+  headers?: Record<string, string> | null
   model?: string | null
   now?: Date
   oss?: boolean

@@ -19,7 +19,7 @@ test('applyRecordPatch requires at least one mutation source', async () => {
 })
 
 test('applyRecordPatch parses values, deep-merges file patches, and does not over-report cleared top-level fields', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-record-patch-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-record-patch-'))
   const patchPath = path.join(vaultRoot, 'patch.json')
 
   try {

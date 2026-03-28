@@ -2,7 +2,7 @@ import path from 'node:path'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
-} from '@healthybob/runtime-state'
+} from '@murph/runtime-state'
 
 export type AssistantMemoryPaths = Pick<
   AssistantStatePaths,

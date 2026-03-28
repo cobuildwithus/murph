@@ -3,27 +3,15 @@ import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
 import {
-  createWorkspaceSourcePackageNames,
-  resolveWorkspaceSourceEntries as resolveWorkspaceSourceEntriesFromMap,
+  LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
+  resolveLocalWebWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
-const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@healthybob/contracts": "../contracts/src/index.ts",
-  "@healthybob/hosted-execution": "../hosted-execution/src/index.ts",
-  "@healthybob/runtime-state": "../runtime-state/src/index.ts",
-  "@healthybob/query": "../query/src/index.ts",
-} as const;
-
-export const WORKSPACE_SOURCE_PACKAGE_NAMES = createWorkspaceSourcePackageNames(
-  WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
-);
+export const WORKSPACE_SOURCE_PACKAGE_NAMES = LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES;
 
 export function resolveWorkspaceSourceEntries(packageDir: string): Record<string, string> {
-  return resolveWorkspaceSourceEntriesFromMap(
-    packageDir,
-    WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS,
-  );
+  return resolveLocalWebWorkspaceSourceEntries(packageDir);
 }
 
 const nextConfig: NextConfig = {

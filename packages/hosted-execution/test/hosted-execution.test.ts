@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
@@ -11,13 +12,16 @@ import {
   HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
+  parseHostedExecutionDispatchRequest,
+  readHostedEmailCapabilities,
+  readHostedExecutionControlEnvironment,
   readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
   readHostedExecutionWorkerEnvironment,
   verifyHostedExecutionSignature,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
-describe("@healthybob/hosted-execution", () => {
+describe("@murph/hosted-execution", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -97,12 +101,9 @@ describe("@healthybob/hosted-execution", () => {
     ).resolves.toBe(false);
   });
 
-  it("prefers generic hosted dispatch env names but falls back to Cloudflare compatibility aliases", () => {
+  it("reads hosted dispatch env from the canonical names", () => {
     expect(
       readHostedExecutionDispatchEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "compat-secret",
-        HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "45000",
         HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
         HOSTED_EXECUTION_SIGNING_SECRET: "secret",
         HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "15000",
@@ -112,29 +113,36 @@ describe("@healthybob/hosted-execution", () => {
       dispatchUrl: "https://dispatch.example.test",
       signingSecret: "secret",
     });
+  });
 
+  it("reads hosted control env from the shared dispatch base and control token", () => {
     expect(
-      readHostedExecutionDispatchEnvironment({
-        HOSTED_EXECUTION_CLOUDFLARE_BASE_URL: "https://compat.example.test/",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "compat-secret",
-        HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS: "45000",
-        HOSTED_EXECUTION_DISPATCH_URL: "   ",
-        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
-        HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS: "   ",
+      readHostedExecutionControlEnvironment({
+        HOSTED_EXECUTION_DISPATCH_URL: "https://dispatch.example.test/",
+        HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
       }),
     ).toEqual({
-      dispatchTimeoutMs: 45_000,
-      dispatchUrl: "https://compat.example.test",
-      signingSecret: "compat-secret",
+      baseUrl: "https://dispatch.example.test",
+      controlToken: "control-token",
+    });
+
+    expect(
+      readHostedExecutionControlEnvironment({
+        HOSTED_EXECUTION_DISPATCH_URL: "   ",
+        HOSTED_EXECUTION_CONTROL_TOKEN: "   ",
+      }),
+    ).toEqual({
+      baseUrl: null,
+      controlToken: null,
     });
   });
 
-  it("reads hosted worker env defaults and legacy signing-secret alias", () => {
+  it("reads hosted worker env defaults from the canonical signing-secret name", () => {
     expect(
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS: "OPENAI_API_KEY",
         HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
-        HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
+        HOSTED_EXECUTION_SIGNING_SECRET: "dispatch-secret",
       }),
     ).toEqual({
       allowedUserEnvKeys: "OPENAI_API_KEY",
@@ -151,14 +159,94 @@ describe("@healthybob/hosted-execution", () => {
     });
   });
 
-  it("falls back to the legacy worker signing-secret alias when the preferred value is blank", () => {
+  it("reads hosted email capabilities with separate ingress and send readiness", () => {
     expect(
+      readHostedEmailCapabilities({
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+      }),
+    ).toEqual({
+      ingressReady: true,
+      sendReady: false,
+      senderIdentity: "assistant@mail.example.test",
+    });
+
+    expect(
+      readHostedEmailCapabilities({
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_FROM_ADDRESS: "Hosted Sender <assistant@mail.example.test>",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+      }),
+    ).toEqual({
+      ingressReady: true,
+      sendReady: true,
+      senderIdentity: "assistant@mail.example.test",
+    });
+
+    expect(
+      readHostedEmailCapabilities({
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SEND_READY: "true",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+      }),
+    ).toEqual({
+      ingressReady: true,
+      sendReady: true,
+      senderIdentity: "assistant@mail.example.test",
+    });
+
+    expect(
+      readHostedEmailCapabilities({
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_FROM_ADDRESS: "assistant@mail.example.test",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+      }),
+    ).toEqual({
+      ingressReady: false,
+      sendReady: false,
+      senderIdentity: "assistant@mail.example.test",
+    });
+  });
+
+  it("round-trips hosted email dispatches through the shared builder and parser", () => {
+    expect(parseHostedExecutionDispatchRequest(
+      buildHostedExecutionEmailMessageReceivedDispatch({
+        envelopeFrom: "alice@example.test",
+        envelopeTo: "assistant+u-member@mail.example.test",
+        eventId: "email:raw_email_123",
+        identityId: "assistant@mail.example.test",
+        occurredAt: "2026-03-28T09:00:00.000Z",
+        rawMessageKey: "raw_email_123",
+        threadTarget: null,
+        userId: "member_123",
+      }),
+    )).toEqual({
+      event: {
+        envelopeFrom: "alice@example.test",
+        envelopeTo: "assistant+u-member@mail.example.test",
+        identityId: "assistant@mail.example.test",
+        kind: "email.message.received",
+        rawMessageKey: "raw_email_123",
+        threadTarget: null,
+        userId: "member_123",
+      },
+      eventId: "email:raw_email_123",
+      occurredAt: "2026-03-28T09:00:00.000Z",
+    });
+  });
+
+  it("does not accept the removed Cloudflare signing-secret alias", () => {
+    expect(() =>
       readHostedExecutionWorkerEnvironment({
         HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "Zm9v",
         HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET: "dispatch-secret",
-        HOSTED_EXECUTION_SIGNING_SECRET: "   ",
-      }).dispatchSigningSecret,
-    ).toBe("dispatch-secret");
+      } as Record<string, string>),
+    ).toThrow(/HOSTED_EXECUTION_SIGNING_SECRET/u);
   });
 
   it("builds stable encoded user control paths", () => {
@@ -172,21 +260,7 @@ describe("@healthybob/hosted-execution", () => {
     vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
+        JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
     );
@@ -244,21 +318,7 @@ describe("@healthybob/hosted-execution", () => {
   it("dispatch client omits the timeout signal when no override is configured", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
+        JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
     );
@@ -461,7 +521,7 @@ describe("@healthybob/hosted-execution", () => {
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
-      "Hosted execution status returned a non-object JSON payload.",
+      "Hosted execution user status must be an object.",
     );
   });
 
@@ -473,7 +533,7 @@ describe("@healthybob/hosted-execution", () => {
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
-      "Hosted execution status returned a non-object JSON payload.",
+      "Hosted execution user status must be an object.",
     );
   });
 
@@ -485,7 +545,33 @@ describe("@healthybob/hosted-execution", () => {
     });
 
     await expect(client.getStatus("user-123")).rejects.toThrow(
-      "Hosted execution status returned a non-object JSON payload.",
+      "Hosted execution user status must be an object.",
     );
   });
 });
+
+function buildDispatchResultFixture(eventId: string) {
+  return {
+    event: {
+      eventId,
+      lastError: null,
+      state: "completed",
+      userId: "user-123",
+    },
+    status: {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId: "user-123",
+    },
+  };
+}

@@ -1,6 +1,6 @@
-# `@healthybob/parsers`
+# `@murph/parsers`
 
-Local-first multimedia parsing on top of `@healthybob/inboxd`.
+Local-first multimedia parsing on top of `@murph/inboxd`.
 
 This package consumes attachment-level parse jobs from the inbox runtime,
 selects the best available local parser from a deterministic priority stack,
@@ -30,7 +30,7 @@ and remote APIs nowhere in the default stack.
 - `createParsedInboxPipeline(...)` processes a capture and immediately drains any newly enqueued attachment jobs
 - `runInboxDaemonWithParsers(...)` backfills parser jobs on startup and keeps future captures auto-drained
 
-These helpers keep parsing additive to `@healthybob/inboxd`: raw inbox evidence remains canonical, while parser outputs stay rebuildable under `derived/inbox/**`.
+These helpers keep parsing additive to `@murph/inboxd`: raw inbox evidence remains canonical, while parser outputs stay rebuildable under `derived/inbox/**`.
 
 ## Toolchain config and discovery
 

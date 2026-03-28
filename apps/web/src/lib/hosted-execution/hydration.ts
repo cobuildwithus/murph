@@ -1,12 +1,11 @@
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
-import { type HostedExecutionDispatchRequest } from "@healthybob/hosted-execution";
+import { type HostedExecutionDispatchRequest } from "@murph/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
-import { readHostedSharePack } from "../hosted-share/shared";
 import {
+  type HostedExecutionDispatchRef,
   readHostedExecutionDispatchRef,
-  readLegacyHostedExecutionDispatch,
 } from "./outbox-payload";
 
 type HostedExecutionHydrationClient = PrismaClient;
@@ -15,12 +14,6 @@ export async function hydrateHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: HostedExecutionHydrationClient,
 ): Promise<HostedExecutionDispatchRequest> {
-  const legacyDispatch = readLegacyHostedExecutionDispatch(record.payloadJson);
-
-  if (legacyDispatch && (record.eventKind !== "vault.share.accepted" || hasHydratableSharePack(legacyDispatch))) {
-    return validateHydratedHostedExecutionDispatch(legacyDispatch, record);
-  }
-
   const dispatchRef = readHostedExecutionDispatchRef(record.payloadJson, {
     eventId: record.eventId,
     eventKind: record.eventKind,
@@ -36,7 +29,7 @@ export async function hydrateHostedExecutionDispatch(
     case "device_sync_signal":
       return hydrateHostedExecutionDispatchFromDeviceSyncSignal(record, prisma);
     case "hosted_share_link":
-      return hydrateHostedExecutionDispatchFromHostedShareLink(record, prisma, dispatchRef.occurredAt);
+      return hydrateHostedExecutionDispatchFromHostedShareLink(record, dispatchRef);
     case "hosted_webhook_receipt":
       return hydrateHostedExecutionDispatchFromWebhookReceipt(record, prisma, dispatchRef.occurredAt);
     default:
@@ -78,23 +71,14 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
   const dispatch = readHostedWebhookReceiptDispatchByEventId(
     receipt?.payloadJson ?? null,
     record.eventId,
+    {
+      eventKind: record.eventKind,
+      occurredAt,
+      userId: record.userId,
+    },
   );
 
   if (!dispatch) {
-    if (record.eventKind === "member.activated") {
-      return validateHydratedHostedExecutionDispatch(
-        {
-          event: {
-            kind: "member.activated",
-            userId: record.userId,
-          },
-          eventId: record.eventId,
-          occurredAt,
-        },
-        record,
-      );
-    }
-
     throw new Error(
       `Hosted webhook receipt ${sourceKey.source}:${sourceKey.eventId} did not retain dispatch ${record.eventId}.`,
     );
@@ -111,35 +95,25 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
 
 async function hydrateHostedExecutionDispatchFromHostedShareLink(
   record: ExecutionOutbox,
-  prisma: HostedExecutionHydrationClient,
-  occurredAt: string,
+  dispatchRef: HostedExecutionDispatchRef,
 ): Promise<HostedExecutionDispatchRequest> {
   if (!record.sourceId) {
     throw new Error(`Hosted share outbox record ${record.eventId} is missing sourceId.`);
   }
 
-  const shareLink = await prisma.hostedShareLink.findUnique({
-    where: {
-      id: record.sourceId,
-    },
-    select: {
-      encryptedPayload: true,
-    },
-  });
-
-  if (!shareLink) {
-    throw new Error(`Hosted share source ${record.sourceId} was not found for ${record.eventId}.`);
+  if (dispatchRef?.eventKind !== "vault.share.accepted" || !dispatchRef.share) {
+    throw new Error(`Hosted share outbox record ${record.eventId} is missing a share reference.`);
   }
 
   return validateHydratedHostedExecutionDispatch(
     {
       event: {
         kind: "vault.share.accepted",
-        pack: readHostedSharePack(shareLink).pack,
+        share: dispatchRef.share,
         userId: record.userId,
       },
       eventId: record.eventId,
-      occurredAt,
+      occurredAt: dispatchRef.occurredAt,
     },
     record,
   );
@@ -226,8 +200,4 @@ function validateHydratedHostedExecutionDispatch(
   }
 
   return dispatch;
-}
-
-function hasHydratableSharePack(dispatch: HostedExecutionDispatchRequest): boolean {
-  return dispatch.event.kind === "vault.share.accepted" && "pack" in dispatch.event;
 }

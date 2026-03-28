@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { FOOD_STATUSES, RECIPE_STATUSES } from '@healthybob/contracts'
-import { buildSharePackFromVault } from '@healthybob/core'
+import { FOOD_STATUSES, RECIPE_STATUSES } from '@murph/contracts'
+import { buildSharePackFromVault } from '@murph/core'
 import path from 'node:path'
 import { z } from 'zod'
 import {
@@ -721,7 +721,13 @@ async function issueHostedShareLink(input: {
       senderMemberId: input.senderMemberId,
     }),
   })
-  const payload = await response.json()
+  const payload = (await response.json()) as
+    | ({
+        error?: {
+          message?: string
+        }
+      } & Record<string, unknown>)
+    | null
 
   if (!response.ok) {
     throw new Error(

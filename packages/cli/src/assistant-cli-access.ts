@@ -5,9 +5,9 @@ import { resolveOperatorHomeDirectory } from './operator-config.js'
 import { assistantMemoryTurnEnvKeys } from './assistant/memory.js'
 
 const DEFAULT_USER_BIN_SEGMENTS = ['.local', 'bin'] as const
-const ASSISTANT_STATE_MCP_SERVER_NAME = 'healthybob_state'
-const ASSISTANT_MEMORY_MCP_SERVER_NAME = 'healthybob_memory'
-const ASSISTANT_CRON_MCP_SERVER_NAME = 'healthybob_cron'
+const ASSISTANT_STATE_MCP_SERVER_NAME = 'murph_state'
+const ASSISTANT_MEMORY_MCP_SERVER_NAME = 'murph_memory'
+const ASSISTANT_CRON_MCP_SERVER_NAME = 'murph_cron'
 const ASSISTANT_CLI_MCP_FORWARD_ENV_VARS = [
   'HOME',
   'PATH',
@@ -17,7 +17,7 @@ const ASSISTANT_CLI_MCP_FORWARD_ENV_VARS = [
 export interface AssistantCliAccessContext {
   env: NodeJS.ProcessEnv
   rawCommand: 'vault-cli'
-  setupCommand: 'healthybob'
+  setupCommand: 'murph'
 }
 
 export interface AssistantCliMcpConfig {
@@ -37,7 +37,7 @@ export function resolveAssistantCliAccessContext(
   return {
     env: withPrependedPath(env, [userBinDirectory]),
     rawCommand: 'vault-cli',
-    setupCommand: 'healthybob',
+    setupCommand: 'murph',
   }
 }
 
@@ -47,14 +47,14 @@ export function buildAssistantCliGuidanceText(
 ): string {
   return [
     capabilities.supportsDirectCliExecution
-      ? `Direct Healthy Bob CLI execution is available in this session. \`${access.rawCommand}\` is the raw Healthy Bob operator/data-plane surface for vault, inbox, and assistant operations, so prefer the \`${access.rawCommand}\` spelling when you need the exact command.`
-      : `\`${access.rawCommand}\` is the raw Healthy Bob operator/data-plane surface for vault, inbox, and assistant operations, but this provider path does not expose direct CLI execution. If the user needs a CLI operation here, give them the exact \`${access.rawCommand} ...\` command to run or switch to a Codex-backed Healthy Bob chat session.`,
+      ? `Direct Murph CLI execution is available in this session. \`${access.rawCommand}\` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations, so prefer the \`${access.rawCommand}\` spelling when you need the exact command.`
+      : `\`${access.rawCommand}\` is the raw Murph operator/data-plane surface for vault, inbox, and assistant operations, but this provider path does not expose direct CLI execution. If the user needs a CLI operation here, give them the exact \`${access.rawCommand} ...\` command to run or switch to a Codex-backed Murph chat session.`,
     `\`${access.setupCommand}\` is the setup/onboarding entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup. Do not treat \`${access.setupCommand} chat\` or \`${access.setupCommand} run\` as separate products from the assistant surfaces.`,
     `Do not rely on this prompt for command semantics. Start with the narrowest CLI discovery that answers the user: use \`${access.rawCommand} <command> --help\` for syntax and examples, \`${access.rawCommand} <command> --schema --format json\` when you need exact flags or output shapes, and \`${access.rawCommand} --llms\` or \`${access.rawCommand} --llms-full\` only for broad CLI discovery.`,
     capabilities.supportsDirectCliExecution
-      ? 'When a user asks you to inspect or operate through Healthy Bob, prefer using the CLI directly over manually inferring behavior from files alone.'
+      ? 'When a user asks you to inspect or operate through Murph, prefer using the CLI directly over manually inferring behavior from files alone.'
       : 'When this prompt-only provider path cannot execute a command directly, map the request onto the canonical CLI surface and tell the user the exact command they should run instead of pretending you already ran it.',
-    'Do not edit canonical vault files such as `vault.json`, `CORE.md`, `ledger/**`, `bank/**`, or `raw/**` directly through shell or file tools in vault-operator mode. When the user wants to change canonical data, use the matching `vault-cli` write surface so the write follows Healthy Bob\'s intended validation and audit path.',
+    'Do not edit canonical vault files such as `vault.json`, `CORE.md`, `ledger/**`, `bank/**`, or `raw/**` directly through shell or file tools in vault-operator mode. When the user wants to change canonical data, use the matching `vault-cli` write surface so the write follows Murph\'s intended validation and audit path.',
     `When an action needs outbound contact details such as a phone number, Telegram chat/thread, email address, or AgentMail identity, first inspect saved local self-targets with \`${access.rawCommand} assistant self-target list\` or \`${access.rawCommand} assistant self-target show <channel>\`. If the needed route is not already saved, ask the user explicitly for the missing details instead of guessing, and save them later with \`${access.rawCommand} assistant self-target set <channel> ...\` only after the user provides them.`,
     `If the user shares a meal photo, audio note, or a text-only description of what they ate or drank, treat that as a meal-logging request that maps to \`${access.rawCommand} meal add\` instead of generic chat. Log the meal without asking whether they want it logged first. Meal logging no longer requires a photo, so use the same meal surface for meals, snacks, and drinks even when only freeform text is available, preserving "snack" or "drink" in the note when that is the right label.`,
     `If the user logs the same detailed meal more than once, such as an acai bowl with basically the same components on different days, still log the current meal first. Only then ask one short follow-up that could make it reusable, such as where it is from or what the specific version is, so you can add it as a food for future reuse. Do not infer this from broad generic repeats alone: two separate logs like "I ate steak" are not enough to make a reusable food. Do not silently create the food record unless the user clearly asks for that.`,
@@ -62,8 +62,8 @@ export function buildAssistantCliGuidanceText(
     'For restaurant meals, try to log as much useful structure as you can in one pass so the user does not need to come back and correct it later. Prefer details that help later aggregation, such as protein source, shared versus full portions, piece counts, and clearly labeled portion estimates. Ask a short follow-up only when the first description is too sparse for a useful log, such as a bare dish name without enough context to identify what was eaten. When counts, platter sizes, or named cuts make a reasonable estimate possible, include approximate grams, ounces, or per-item breakdowns in the note, but keep those estimates explicit and conservative instead of presenting them as exact facts.',
     'If the user wants to save a specific branded or packaged item as a reusable food, look up the ingredients on the web before creating the food record. Prefer the official product page when possible, then use a reputable retailer or product listing if the official page is unavailable. If you cannot verify the ingredients online in the current session, ask the user for the ingredient list or say what is missing before adding the food.',
     'Older food logs may still live in same-day journal or note records. Before saying nothing was logged for today, check meal records first and then same-day journal/note entries as a fallback, and describe what you found in user-facing terms such as meal log, journal entry, or note rather than internal file paths or ledger filenames unless the user explicitly asks for those details.',
-    `When the user asks for research on a complex topic, default to \`${access.rawCommand} research <prompt>\` so Healthy Bob runs \`review:gpt --deep-research --send --wait\`, saves the captured markdown note into \`research/\` inside the vault, and waits for completion.`,
-    'Deep Research can legitimately take 10 to 60 minutes, sometimes longer. Treat it as a long-running operation and keep waiting unless the command actually errors. Healthy Bob defaults the overall timeout to 40m.',
+    `When the user asks for research on a complex topic, default to \`${access.rawCommand} research <prompt>\` so Murph runs \`review:gpt --deep-research --send --wait\`, saves the captured markdown note into \`research/\` inside the vault, and waits for completion.`,
+    'Deep Research can legitimately take 10 to 60 minutes, sometimes longer. Treat it as a long-running operation and keep waiting unless the command actually errors. Murph defaults the overall timeout to 40m.',
     '`--timeout` is the normal knob. `--wait-timeout` is the advanced override only when you want the assistant-response wait cap to differ from the overall timeout.',
     `Use \`${access.rawCommand} deepthink <prompt>\` when you want the same auto-send and save-to-vault flow through GPT Pro instead of Deep Research.`,
   ].join('\n\n')

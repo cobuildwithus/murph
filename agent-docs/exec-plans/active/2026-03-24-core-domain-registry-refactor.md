@@ -24,7 +24,7 @@ Implement the requested refactor sequence by first standardizing provider and re
 
 ## Invariants
 
-- Keep the public `@healthybob/core` mutation API stable.
+- Keep the public `@murph/core` mutation API stable.
 - Preserve existing canonical write lock behavior, audit behavior, error codes/messages, and markdown/frontmatter output for the migrated flows.
 - Preserve the current split semantics where legacy `createExperiment` still differs from canonical update/stop validation.
 - Keep provider and recipe path layout, slug/id conflict behavior, and read/list ordering unchanged unless an existing test proves otherwise.

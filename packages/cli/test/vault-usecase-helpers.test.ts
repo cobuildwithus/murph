@@ -44,8 +44,8 @@ test('normalization helpers keep their distinct trim and dedupe behavior', () =>
 })
 
 test('path resolution preserves current invalid_path errors and rejects symlink escapes', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-vault-helper-'))
-  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-vault-helper-outside-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-vault-helper-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-vault-helper-outside-'))
 
   try {
     await mkdir(path.join(vaultRoot, 'journal'), { recursive: true })
@@ -94,7 +94,7 @@ test('path resolution preserves current invalid_path errors and rejects symlink 
 })
 
 test('path resolution fails fast when the selected vault root does not exist', async () => {
-  const missingVaultRoot = path.join(tmpdir(), `healthybob-vault-helper-missing-${Date.now()}`)
+  const missingVaultRoot = path.join(tmpdir(), `murph-vault-helper-missing-${Date.now()}`)
 
   await assert.rejects(
     () => resolveVaultRelativePath(missingVaultRoot, 'journal/2026-03-17.md'),

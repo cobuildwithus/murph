@@ -5,7 +5,7 @@ import {
   type CommandCapabilityBundleId,
   type HealthEntityDefinition,
   type HealthEntityKind,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import { z } from "incur";
 import type {
   HealthCoreRuntimeMethodName,

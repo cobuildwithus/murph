@@ -1,7 +1,7 @@
 import type {
   LinqListPhoneNumbersResponse,
   LinqSendMessageResponse,
-} from '@healthybob/inboxd'
+} from '@murph/inboxd'
 import {
   waitForRetryDelay,
   type ResponseHeadersLike,

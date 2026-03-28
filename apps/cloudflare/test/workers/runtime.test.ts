@@ -9,19 +9,23 @@ import { readHostedExecutionEnvironment } from "../../src/env.js";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 
 import type {
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionBundleRef,
   HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 interface UserRunnerRpcStub {
-  clearUserEnv(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  bootstrapUser(userId: string): Promise<{ userId: string }>;
+  clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
-  getUserEnvStatus(userId: string): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
-  status(userId: string): Promise<HostedExecutionUserStatus>;
-  updateUserEnv(
-    userId: string,
-    update: { env: Record<string, string | null>; mode: "merge" | "replace" },
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
+  getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  status(): Promise<HostedExecutionUserStatus>;
+  updateUserEnv(update: { env: Record<string, string | null>; mode: "merge" | "replace" }): Promise<{
+    configuredUserEnvKeys: string[];
+    userId: string;
+  }>;
 }
 
 describe("cloudflare worker runtime suite", () => {
@@ -41,7 +45,11 @@ describe("cloudflare worker runtime suite", () => {
     );
 
     expect(response.status).toBe(401);
-    await expect(getUserRunnerStub("member_invalid").status("member_invalid")).resolves.toMatchObject({
+    const stub = getUserRunnerStub("member_invalid");
+    await expect(stub.bootstrapUser("member_invalid")).resolves.toEqual({
+      userId: "member_invalid",
+    });
+    await expect(stub.status()).resolves.toMatchObject({
       lastEventId: null,
       pendingEventCount: 0,
       userId: "member_invalid",
@@ -54,31 +62,58 @@ describe("cloudflare worker runtime suite", () => {
 
     const dispatch = createDispatch("evt_signed_runtime");
     const response = await exports.default.fetch(
-      await createSignedDispatchRequest("/internal/events", dispatch),
+      await createSignedDispatchRequest("/internal/dispatch", dispatch),
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      bundleRefs: {
-        agentState: expect.objectContaining({
-          key: `users/${dispatch.event.userId}/agent-state.bundle.json`,
-        }),
-        vault: expect.objectContaining({
-          key: `users/${dispatch.event.userId}/vault.bundle.json`,
-        }),
+    const payload = await response.json() as HostedExecutionDispatchResult;
+    expect(payload).toMatchObject({
+      event: {
+        eventId: "evt_signed_runtime",
+        state: "completed",
       },
-      lastEventId: "evt_signed_runtime",
-      nextWakeAt: "2026-03-26T12:01:00.000Z",
-      pendingEventCount: 0,
-      retryingEventId: null,
-      userId: dispatch.event.userId,
+      status: {
+        bundleRefs: {
+          agentState: expect.objectContaining({
+            key: expect.stringMatching(/^bundles\/agent-state\/[0-9a-f]+\.bundle\.json$/u),
+          }),
+          vault: expect.objectContaining({
+            key: expect.stringMatching(/^bundles\/vault\/[0-9a-f]+\.bundle\.json$/u),
+          }),
+        },
+        lastEventId: "evt_signed_runtime",
+        nextWakeAt: "2026-03-26T12:01:00.000Z",
+        pendingEventCount: 0,
+        retryingEventId: null,
+        userId: dispatch.event.userId,
+      },
     });
-    await expect(readBundleText(dispatch.event.userId, "agent-state")).resolves.toBe(
+    await expect(readBundleText(payload.status.bundleRefs.agentState)).resolves.toBe(
       `agent-state:${dispatch.eventId}`,
     );
-    await expect(readBundleText(dispatch.event.userId, "vault")).resolves.toBe(
+    await expect(readBundleText(payload.status.bundleRefs.vault)).resolves.toBe(
       `vault:${dispatch.eventId}`,
     );
+  });
+
+  it("keeps the removed internal events alias hidden in the Workers runtime", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const userId = "member_removed_alias";
+
+    const response = await exports.default.fetch(
+      await createSignedDispatchRequest("/internal/events", createDispatch("evt_removed_alias", userId)),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(getUserRunnerStub(userId).bootstrapUser(userId)).resolves.toEqual({
+      userId,
+    });
+    await expect(getUserRunnerStub(userId).status()).resolves.toMatchObject({
+      lastEventId: null,
+      pendingEventCount: 0,
+      userId,
+    });
   });
 
   it("supports direct Durable Object RPC and alarm execution inside the Workers runtime", async () => {
@@ -92,7 +127,7 @@ describe("cloudflare worker runtime suite", () => {
     expect(initialStatus.lastEventId).toBe("evt_alarm_seed");
     await expect(runDurableObjectAlarm(stub as never)).resolves.toBeTypeOf("boolean");
     await vi.waitFor(async () => {
-      await expect(stub.status(userId)).resolves.toMatchObject({
+      await expect(stub.status()).resolves.toMatchObject({
         lastEventId: expect.stringMatching(/^alarm:/u),
         pendingEventCount: 0,
         retryingEventId: null,
@@ -143,12 +178,72 @@ describe("cloudflare worker runtime suite", () => {
       pendingEventCount: 0,
       userId,
     });
-    await expect(getUserRunnerStub(userId).getUserEnvStatus(userId)).resolves.toEqual({
+    await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId,
     });
-    await expect(getUserRunnerStub(userId).clearUserEnv(userId)).resolves.toEqual({
+    await expect(getUserRunnerStub(userId).clearUserEnv()).resolves.toEqual({
       configuredUserEnvKeys: [],
+      userId,
+    });
+  });
+
+  it("rejects removed and unknown hosted user env keys at the worker control boundary", async () => {
+    const userId = "member_control_env_reject";
+
+    const rejectedResponse = await exports.default.fetch(
+      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+        body: JSON.stringify({
+          env: {
+            AGENTMAIL_API_BASE_URL: "https://legacy-mail.example.test/v0",
+            AGENTMAIL_TIMEOUT_MS: "5000",
+            FFMPEG_THREADS: "2",
+            PARSER_FFMPEG_PATH: "/usr/local/bin/ffmpeg",
+          },
+          mode: "merge",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+    );
+
+    expect(rejectedResponse.status).toBe(400);
+    await expect(rejectedResponse.json()).resolves.toEqual({
+      error: "Hosted user env key is not allowed: AGENTMAIL_API_BASE_URL",
+    });
+    await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
+      configuredUserEnvKeys: [],
+      userId,
+    });
+
+    const acceptedResponse = await exports.default.fetch(
+      new Request(`https://runner.example.test/internal/users/${userId}/env`, {
+        body: JSON.stringify({
+          env: {
+            AGENTMAIL_API_KEY: "agentmail-secret",
+            AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
+            FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+          },
+          mode: "merge",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+    );
+
+    expect(acceptedResponse.status).toBe(200);
+    await expect(acceptedResponse.json()).resolves.toEqual({
+      configuredUserEnvKeys: [
+        "AGENTMAIL_API_KEY",
+        "AGENTMAIL_BASE_URL",
+        "FFMPEG_COMMAND",
+      ],
       userId,
     });
   });
@@ -243,8 +338,8 @@ async function createSignedDispatchRequest(
     body: payload,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "x-hb-execution-signature": signature,
-      "x-hb-execution-timestamp": timestamp,
+      "x-hosted-execution-signature": signature,
+      "x-hosted-execution-timestamp": timestamp,
     },
     method: "POST",
   });
@@ -272,8 +367,8 @@ function createBundleStore() {
   });
 }
 
-async function readBundleText(userId: string, kind: "agent-state" | "vault"): Promise<string | null> {
-  const bundle = await createBundleStore().readBundle(userId, kind);
+async function readBundleText(bundleRef: HostedExecutionBundleRef | null): Promise<string | null> {
+  const bundle = await createBundleStore().readBundle(bundleRef);
 
   if (!bundle) {
     return null;

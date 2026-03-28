@@ -30,7 +30,7 @@ export class RunnerCommitRecovery {
   async recoverCommittedPendingDispatch(
     record: RunnerStateRecord,
   ): Promise<RecoveredCommittedPendingDispatch | null> {
-    const pendingDispatches = await this.queueStore.listPendingDispatches(record.userId);
+    const pendingDispatches = await this.queueStore.listPendingDispatches();
 
     for (const pending of pendingDispatches) {
       const committed = await this.readCommittedDispatch(record.userId, pending.eventId);
@@ -67,16 +67,16 @@ export class RunnerCommitRecovery {
     userId: string,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
-    await this.queueStore.applyCommittedDispatch(userId, committed);
-    return this.scheduler.syncNextWake(userId, committed.result.nextWakeAt ?? null);
+    await this.queueStore.applyCommittedDispatch(committed);
+    return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
   }
 
   async syncCommittedBundlesWithoutConsuming(
     userId: string,
     committed: HostedExecutionCommittedResult,
   ): Promise<RunnerStateRecord> {
-    await this.queueStore.syncCommittedBundles(userId, committed);
-    return this.scheduler.syncNextWake(userId, committed.result.nextWakeAt ?? null);
+    await this.queueStore.syncCommittedBundles(committed);
+    return this.scheduler.syncNextWake(committed.result.nextWakeAt ?? null);
   }
 
   async rescheduleCommittedFinalizeRetry(input: {
@@ -91,10 +91,8 @@ export class RunnerCommitRecovery {
       committed: input.committed,
       errorMessage: input.errorMessage,
       retryDelayMs: input.retryDelayMs,
-      userIdHint: input.userId,
     });
     return this.scheduler.syncNextWake(
-      input.userId,
       input.committed.result.nextWakeAt ?? null,
     );
   }

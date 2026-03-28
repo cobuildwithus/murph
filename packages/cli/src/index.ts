@@ -26,13 +26,34 @@ export * from './assistant-cli-tools.js'
 export * from './inbox-model-contracts.js'
 export * from './inbox-model-harness.js'
 export * from './assistant-cli-contracts.js'
-export * from './assistant-state.js'
+export * from './assistant/store.js'
+export {
+  redactAssistantStateDocumentListEntry,
+  redactAssistantStateDocumentSnapshot,
+} from './assistant/state.js'
 export * from './assistant-provider.js'
 export * from './assistant-channel.js'
 export * from './assistant-runtime.js'
 export * from './assistant/cron.js'
+export {
+  runAssistantAutomation,
+  type RunAssistantAutomationInput,
+} from './assistant/automation.js'
+export {
+  dispatchAssistantOutboxIntent,
+  listAssistantOutboxIntents,
+  shouldDispatchAssistantOutboxIntent,
+  type AssistantChannelDelivery,
+  type AssistantOutboxDispatchHooks,
+} from './assistant/outbox.js'
+export { refreshAssistantStatusSnapshot } from './assistant/status.js'
 export * from './assistant-codex.js'
 export * from './assistant/memory.js'
 export * from './agentmail-runtime.js'
 export * from './research-runtime.js'
 export * from './research-cli-contracts.js'
+
+export {
+  resolveAssistantSelfDeliveryTarget,
+  saveAssistantSelfDeliveryTarget,
+} from './operator-config.js'

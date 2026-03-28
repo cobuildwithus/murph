@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, startTransition } from "react";
 
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
@@ -56,6 +56,46 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       setPendingAction(null);
     }
   }
+
+  useEffect(() => {
+    if (!(data.stage === "processing" && data.share?.acceptedByCurrentMember)) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/hosted-share/${encodeURIComponent(shareCode)}/status`, {
+          credentials: "same-origin",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json() as HostedSharePageData;
+        if (cancelled) {
+          return;
+        }
+
+        startTransition(() => {
+          setData(payload);
+        });
+      } catch {
+        // Keep polling; transient status failures should not reset the UI.
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 3_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [data.share?.acceptedByCurrentMember, data.stage, shareCode]);
 
   return (
     <section className="mx-auto w-full max-w-2xl space-y-5 rounded-3xl bg-white p-6 shadow-sm md:p-8">

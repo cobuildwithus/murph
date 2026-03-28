@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -11,7 +12,7 @@ import type {
   ExperimentEventRecord,
   MealEventRecord,
   SampleRecord,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 import {
   AUDIT_ACTORS as CONTRACT_AUDIT_ACTORS,
   AUDIT_STATUSES as CONTRACT_AUDIT_STATUSES,
@@ -24,7 +25,7 @@ import {
   SAMPLE_QUALITIES as CONTRACT_SAMPLE_QUALITIES,
   SAMPLE_SOURCES as CONTRACT_SAMPLE_SOURCES,
   SAMPLE_STREAMS as CONTRACT_SAMPLE_STREAMS,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import {
   addMeal,
@@ -69,6 +70,8 @@ import {
   writeVaultTextFile,
 } from "../src/fs.ts";
 import {
+  listProtectedCanonicalPaths,
+  readRecoverableStoredWriteOperation,
   listWriteOperationMetadataPaths,
   readStoredWriteOperation,
   WriteBatch,
@@ -144,19 +147,19 @@ test("core constants stay aligned with canonical contracts constants", () => {
 });
 
 test("initializeVault bootstraps the baseline contract layout and passes validation", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   const initialized = await initializeVault({
     vaultRoot,
     createdAt: "2026-03-12T12:00:00.000Z",
   });
 
-  assert.equal(initialized.metadata.schemaVersion, "hb.vault.v1");
+  assert.equal(initialized.metadata.schemaVersion, "murph.vault.v1");
   assert.match(initialized.metadata.vaultId, /^vault_[0-9A-HJKMNP-TV-Z]{26}$/);
 
   const coreContent = await fs.readFile(path.join(vaultRoot, "CORE.md"), "utf8");
   const coreDocument = parseFrontmatterDocument(coreContent);
   assert.equal(coreDocument.attributes.docType, "core");
-  assert.equal(coreDocument.attributes.schemaVersion, "hb.frontmatter.core.v1");
+  assert.equal(coreDocument.attributes.schemaVersion, "murph.frontmatter.core.v1");
 
   const validation = await validateVault({ vaultRoot });
   assert.equal(validation.valid, true);
@@ -182,7 +185,7 @@ test("initializeVault bootstraps the baseline contract layout and passes validat
 });
 
 test("initializeVault rejects roots that already contain a vault", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -196,7 +199,7 @@ test("initializeVault rejects roots that already contain a vault", async () => {
 });
 
 test("initializeVault rejects invalid generated metadata before writing canonical files", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
 
   await assert.rejects(
     () =>
@@ -213,7 +216,7 @@ test("initializeVault rejects invalid generated metadata before writing canonica
 });
 
 test("upsertEvent stores the vault-local dayKey without persisting the fallback timezone when UTC crosses midnight", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-event-local-day");
+  const vaultRoot = await makeTempDirectory("murph-event-local-day");
   await initializeVault({
     vaultRoot,
     timezone: "Australia/Melbourne",
@@ -245,7 +248,7 @@ test("upsertEvent stores the vault-local dayKey without persisting the fallback 
 });
 
 test("upsertEvent rejects specialized event kinds on the generic public boundary", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-event-kind-guard");
+  const vaultRoot = await makeTempDirectory("murph-event-kind-guard");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -269,7 +272,7 @@ test("upsertEvent rejects specialized event kinds on the generic public boundary
 });
 
 test("upsertEvent rejects malformed specialized event kinds on the generic public boundary before contract validation", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-event-kind-guard-malformed");
+  const vaultRoot = await makeTempDirectory("murph-event-kind-guard-malformed");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -288,7 +291,7 @@ test("upsertEvent rejects malformed specialized event kinds on the generic publi
 });
 
 test("upsertEvent appends new events without parsing unrelated invalid shards", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-event-fast-path");
+  const vaultRoot = await makeTempDirectory("murph-event-fast-path");
   await initializeVault({ vaultRoot });
 
   const invalidShardPath = path.join(vaultRoot, "ledger/events/2026/2026-01.jsonl");
@@ -318,7 +321,7 @@ test("upsertEvent appends new events without parsing unrelated invalid shards", 
 });
 
 test("upsertEvent rewrites existing events into the correct shard and deleteEvent removes them", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-event-rewrite");
+  const vaultRoot = await makeTempDirectory("murph-event-rewrite");
   await initializeVault({ vaultRoot });
 
   const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1A2";
@@ -402,8 +405,8 @@ test("upsertEvent rewrites existing events into the correct shard and deleteEven
 });
 
 test("deleteEvent removes duplicate stored event entries across shards while preserving other events", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-event-delete-duplicates");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-event-delete-duplicates");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
@@ -485,7 +488,7 @@ test("deleteEvent removes duplicate stored event entries across shards while pre
 });
 
 test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const metadataPath = path.join(vaultRoot, "vault.json");
@@ -572,7 +575,7 @@ test("loadVault backfills additive metadata defaults in memory and repairVault p
 });
 
 test("repairVault returns a no-op result when metadata and directories are already current", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const operationPathsBeforeRepair = await listWriteOperationMetadataPaths(vaultRoot);
@@ -587,8 +590,8 @@ test("repairVault returns a no-op result when metadata and directories are alrea
 });
 
 test("copyRawArtifact enforces raw immutability and importDocument appends contract-shaped events", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const documentPath = await writeExternalFile(sourceRoot, "Lab Result.pdf", "document body");
@@ -631,7 +634,7 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
   assert.equal(documentEvent.kind, "document");
   assert.equal(documentEvent.documentId, imported.documentId);
   assert.equal(documentEvent.documentPath, imported.raw.relativePath);
-  assert.equal(documentEvent.schemaVersion, "hb.event.v1");
+  assert.equal(documentEvent.schemaVersion, "murph.event.v1");
   assert.equal("sourcePath" in documentEvent, false);
 
   const auditRecords = await readJsonlRecords({
@@ -645,8 +648,8 @@ test("copyRawArtifact enforces raw immutability and importDocument appends contr
 });
 
 test("photo-only meals preserve an empty audioPaths array in the stored event", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
@@ -670,7 +673,7 @@ test("photo-only meals preserve an empty audioPaths array in the stored event", 
 });
 
 test("note-only meals stay first-class meal events without raw artifacts", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const meal = await addMeal({
@@ -700,7 +703,7 @@ test("note-only meals stay first-class meal events without raw artifacts", async
 });
 
 test("meal day keys follow the vault timezone instead of UTC date slicing", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({
     vaultRoot,
     timezone: "Australia/Melbourne",
@@ -723,8 +726,8 @@ test("meal day keys follow the vault timezone instead of UTC date slicing", asyn
 });
 
 test("meal, journal, experiment, and samples mutations write expected contract data", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
@@ -822,7 +825,7 @@ test("meal, journal, experiment, and samples mutations write expected contract d
 });
 
 test("importSamples normalizes uppercase unit aliases and falls back invalid source metadata", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const imported = await importSamples({
@@ -847,7 +850,7 @@ test("importSamples normalizes uppercase unit aliases and falls back invalid sou
 });
 
 test("importSamples rejects invalid sample objects and unsupported units", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -880,7 +883,7 @@ test("importSamples rejects invalid sample objects and unsupported units", async
 });
 
 test("createExperiment returns the existing experiment for idempotent retries", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const input = {
@@ -922,28 +925,26 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   assert.equal(experimentOperations[0]?.status, "committed");
 });
 
-test("createExperiment coerces invalid status values to active for the legacy create path", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+test("createExperiment rejects invalid status values on the canonical path", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
-  const created = await createExperiment({
-    vaultRoot,
-    slug: "status-boundary",
-    title: "Status Boundary",
-    status: "not-a-real-status",
-  });
-
-  const experimentDocument = parseFrontmatterDocument(
-    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot,
+        slug: "status-boundary",
+        title: "Status Boundary",
+        status: "not-a-real-status",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EXPERIMENT_STATUS_INVALID",
   );
-
-  assert.equal(created.created, true);
-  assert.equal(experimentDocument.attributes.status, "active");
 });
 
 test("assessment imports append contract-shaped records and emit intake audits", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const assessmentPath = await writeExternalFile(
@@ -1007,7 +1008,7 @@ test("assessment imports append contract-shaped records and emit intake audits",
 });
 
 test("ensureJournalDay rethrows non-file-exists write failures", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.rm(path.join(vaultRoot, "journal"), {
@@ -1027,16 +1028,16 @@ test("ensureJournalDay rethrows non-file-exists write failures", async () => {
 });
 
 test("createExperiment rejects invalid or conflicting existing experiment documents", async () => {
-  const invalidVaultRoot = await makeTempDirectory("healthybob-vault");
+  const invalidVaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot: invalidVaultRoot });
-  const conflictingVaultRoot = await makeTempDirectory("healthybob-vault");
+  const conflictingVaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot: conflictingVaultRoot });
 
   await fs.writeFile(
     path.join(invalidVaultRoot, "bank/experiments/glucose-baseline.md"),
     [
       "---",
-      "schemaVersion: hb.frontmatter.experiment.v1",
+      "schemaVersion: murph.frontmatter.experiment.v1",
       "docType: experiment",
       "slug: glucose-baseline",
       "---",
@@ -1049,7 +1050,7 @@ test("createExperiment rejects invalid or conflicting existing experiment docume
     path.join(conflictingVaultRoot, "bank/experiments/glucose-baseline.md"),
     [
       "---",
-      "schemaVersion: hb.frontmatter.experiment.v1",
+      "schemaVersion: murph.frontmatter.experiment.v1",
       "docType: experiment",
       "experimentId: exp_01JNV4458HYPP53JDQCBP1QJFM",
       "slug: glucose-baseline",
@@ -1090,7 +1091,7 @@ test("createExperiment rejects invalid or conflicting existing experiment docume
 });
 
 test("append-only helpers block traversal and validateVault reports tampered core documents", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -1114,8 +1115,8 @@ test("append-only helpers block traversal and validateVault reports tampered cor
 });
 
 test("append-only helpers reject drive-prefixed paths and symlink escapes", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const outsideRoot = await makeTempDirectory("healthybob-outside");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const outsideRoot = await makeTempDirectory("murph-outside");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -1148,7 +1149,7 @@ test("append-only helpers reject drive-prefixed paths and symlink escapes", asyn
 });
 
 test("validateVault accumulates malformed journal and experiment frontmatter issues", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const journal = await ensureJournalDay({
@@ -1193,7 +1194,7 @@ test("validateVault accumulates malformed journal and experiment frontmatter iss
 });
 
 test("jsonl helpers reject non-object writes and surface invalid JSON line numbers", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -1228,13 +1229,13 @@ test("jsonl helpers reject non-object writes and surface invalid JSON line numbe
 });
 
 test("validateVault reports invalid metadata before deeper validation", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.writeFile(
     path.join(vaultRoot, "vault.json"),
     JSON.stringify({
-      schemaVersion: "hb.vault.v1",
+      schemaVersion: "murph.vault.v1",
       title: "",
     }),
     "utf8",
@@ -1250,7 +1251,7 @@ test("validateVault reports invalid metadata before deeper validation", async ()
 });
 
 test("validateVault reports malformed metadata files as load failures", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.writeFile(path.join(vaultRoot, "vault.json"), "{not-json", "utf8");
@@ -1265,7 +1266,7 @@ test("validateVault reports malformed metadata files as load failures", async ()
 });
 
 test("validateVault reports missing metadata files before walking the vault", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
 
   const validation = await validateVault({ vaultRoot });
 
@@ -1277,7 +1278,7 @@ test("validateVault reports missing metadata files before walking the vault", as
 });
 
 test("validateVault accumulates missing directory and malformed event issues", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.rm(path.join(vaultRoot, "bank/providers"), {
@@ -1313,7 +1314,7 @@ test("validateVault accumulates missing directory and malformed event issues", a
 });
 
 test("validateVault covers health ledgers, registries, and the derived current profile page", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.mkdir(path.join(vaultRoot, "ledger/assessments/2026"), { recursive: true });
@@ -1321,19 +1322,19 @@ test("validateVault covers health ledgers, registries, and the derived current p
 
   await fs.writeFile(
     path.join(vaultRoot, "ledger/assessments/2026/2026-03.jsonl"),
-    `${JSON.stringify({ schemaVersion: "hb.assessment-response.v1", id: "asmt_invalid" })}\n`,
+    `${JSON.stringify({ schemaVersion: "murph.assessment-response.v1", id: "asmt_invalid" })}\n`,
     "utf8",
   );
   await fs.writeFile(
     path.join(vaultRoot, "ledger/profile-snapshots/2026/2026-03.jsonl"),
-    `${JSON.stringify({ schemaVersion: "hb.profile-snapshot.v1", id: "psnap_invalid" })}\n`,
+    `${JSON.stringify({ schemaVersion: "murph.profile-snapshot.v1", id: "psnap_invalid" })}\n`,
     "utf8",
   );
   await fs.writeFile(
     path.join(vaultRoot, "bank/family/father.md"),
     [
       "---",
-      "schemaVersion: hb.frontmatter.family-member.v1",
+      "schemaVersion: murph.frontmatter.family-member.v1",
       "docType: family_member",
       "familyMemberId: fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
       "slug: father",
@@ -1351,7 +1352,7 @@ test("validateVault covers health ledgers, registries, and the derived current p
     path.join(vaultRoot, "bank/profile/current.md"),
     [
       "---",
-      "schemaVersion: hb.frontmatter.profile-current.v1",
+      "schemaVersion: murph.frontmatter.profile-current.v1",
       "docType: profile_current",
       "snapshotId: psnap_invalid",
       "updatedAt: not-a-timestamp",
@@ -1374,8 +1375,8 @@ test("validateVault covers health ledgers, registries, and the derived current p
 });
 
 test("validateVault checks raw manifests, referenced artifacts, and current-profile consistency", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const documentPath = await writeExternalFile(sourceRoot, "visit-summary.md", "# Visit summary\n");
@@ -1426,7 +1427,7 @@ test("validateVault checks raw manifests, referenced artifacts, and current-prof
 });
 
 test("write batches roll back earlier writes when a later action fails", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const batch = await WriteBatch.create({
@@ -1450,8 +1451,8 @@ test("write batches roll back earlier writes when a later action fails", async (
 });
 
 test("direct and batched writes reject the same invalid vault targets", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const sourcePath = await writeExternalFile(sourceRoot, "artifact.txt", "artifact\n");
@@ -1541,7 +1542,7 @@ test("direct and batched writes reject the same invalid vault targets", async ()
 });
 
 test("direct and batched immutable raw writes reuse identical content and reject divergent content", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const rawPath = "raw/testing/fixed/source.json";
@@ -1620,8 +1621,8 @@ test("direct and batched immutable raw writes reuse identical content and reject
 });
 
 test("direct and batched raw copies reuse identical files and reject divergent files", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const rawPath = "raw/testing/fixed/source.txt";
@@ -1689,9 +1690,9 @@ test("direct and batched raw copies reuse identical files and reject divergent f
   assert.equal(failedOperation.status, "rolled_back");
 });
 
-test("committed raw-copy actions omit payload blobs while replayable text and jsonl actions keep them", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+test("committed raw-copy actions omit payload blobs while replayable text and jsonl actions keep only receipts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const sourcePath = await writeExternalFile(sourceRoot, "artifact.txt", "raw payload\n");
@@ -1737,15 +1738,20 @@ test("committed raw-copy actions omit payload blobs while replayable text and js
   assert.equal(operation.status, "committed");
   assert.equal(operation.actions.length, 3);
   assert.equal(operation.actions[0]?.kind, "raw_copy");
-  assert.equal("committedPayloadBase64" in (operation.actions[0] ?? {}), false);
+  assert.equal("committedPayloadReceipt" in (operation.actions[0] ?? {}), false);
   assert.equal(operation.actions[1]?.kind, "text_write");
-  assert.equal(typeof operation.actions[1]?.committedPayloadBase64, "string");
+  assert.deepEqual(operation.actions[1]?.committedPayloadReceipt, {
+    sha256: createHash("sha256").update("text payload\n").digest("hex"),
+    byteLength: Buffer.byteLength("text payload\n"),
+  });
   assert.equal(operation.actions[2]?.kind, "jsonl_append");
-  assert.equal(typeof operation.actions[2]?.committedPayloadBase64, "string");
+  assert.ok(operation.actions[2]?.committedPayloadReceipt);
+  assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.sha256, "string");
+  assert.equal(typeof operation.actions[2]?.committedPayloadReceipt?.byteLength, "number");
 });
 
 test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE_EMPTY", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-empty-write-batch");
+  const vaultRoot = await makeTempDirectory("murph-empty-write-batch");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -1760,8 +1766,115 @@ test("applyCanonicalWriteBatch rejects empty staged actions with CANONICAL_WRITE
   );
 });
 
+test("readRecoverableStoredWriteOperation tolerates malformed top-level metadata when staged actions stay recoverable", async () => {
+  const vaultRoot = await makeTempDirectory("murph-recoverable-write-operation");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
+
+  const relativePath = ".runtime/operations/op_test.json";
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    JSON.stringify(
+      {
+        operationId: "op_test",
+        status: "staged",
+        createdAt: "2026-03-27T00:00:00.000Z",
+        updatedAt: "2026-03-27T00:00:01.000Z",
+        actions: [
+          {
+            kind: "text_write",
+            state: "applied",
+            targetRelativePath: "bank/test.md",
+            stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const recovered = await readRecoverableStoredWriteOperation(vaultRoot, relativePath);
+
+  assert.deepEqual(recovered, {
+    operationId: "op_test",
+    status: "staged",
+    createdAt: "2026-03-27T00:00:00.000Z",
+    updatedAt: "2026-03-27T00:00:01.000Z",
+    actions: [
+      {
+        kind: "text_write",
+        state: "applied",
+        targetRelativePath: "bank/test.md",
+        stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+        overwrite: true,
+        allowExistingMatch: false,
+        allowRaw: false,
+        effect: undefined,
+        existedBefore: undefined,
+        backupRelativePath: undefined,
+        committedPayloadReceipt: undefined,
+        appliedAt: undefined,
+        rolledBackAt: undefined,
+      },
+    ],
+  });
+});
+
+test("readRecoverableStoredWriteOperation rejects committed text actions that omit committed payload receipts", async () => {
+  const vaultRoot = await makeTempDirectory("murph-recoverable-write-operation-missing-receipt");
+  await initializeVault({ vaultRoot });
+  await fs.mkdir(path.join(vaultRoot, ".runtime/operations/op_test/payloads"), { recursive: true });
+
+  const relativePath = ".runtime/operations/op_test.json";
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    JSON.stringify(
+      {
+        operationId: "op_test",
+        status: "committed",
+        createdAt: "2026-03-27T00:00:00.000Z",
+        updatedAt: "2026-03-27T00:00:01.000Z",
+        actions: [
+          {
+            kind: "text_write",
+            state: "applied",
+            targetRelativePath: "bank/test.md",
+            stageRelativePath: ".runtime/operations/op_test/payloads/test.md",
+          },
+        ],
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  assert.equal(await readRecoverableStoredWriteOperation(vaultRoot, relativePath), null);
+});
+
+test("listProtectedCanonicalPaths excludes symlinks under protected trees", async () => {
+  const vaultRoot = await makeTempDirectory("murph-protected-path-symlink");
+  const externalRoot = await makeTempDirectory("murph-protected-path-symlink-external");
+
+  try {
+    await initializeVault({ vaultRoot });
+    const externalPath = await writeExternalFile(externalRoot, "external.md", "# external\n");
+    await fs.writeFile(path.join(vaultRoot, "bank", "real.md"), "# real\n", "utf8");
+    await fs.symlink(externalPath, path.join(vaultRoot, "bank", "linked.md"));
+
+    const protectedPaths = await listProtectedCanonicalPaths(vaultRoot);
+
+    assert.equal(protectedPaths.includes("bank/real.md"), true);
+    assert.equal(protectedPaths.includes("bank/linked.md"), false);
+  } finally {
+    await fs.rm(externalRoot, { recursive: true, force: true });
+  }
+});
+
 test("WriteBatch rejects further mutations after commit with OPERATION_STATE_INVALID", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-terminal-write-batch");
+  const vaultRoot = await makeTempDirectory("murph-terminal-write-batch");
   await initializeVault({ vaultRoot });
 
   const batch = await WriteBatch.create({
@@ -1786,7 +1899,7 @@ test("WriteBatch rejects further mutations after commit with OPERATION_STATE_INV
 });
 
 test("direct and batched text writes keep no-overwrite and append semantics aligned", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const notePath = "notes/parity.txt";
@@ -1831,7 +1944,7 @@ test("direct and batched text writes keep no-overwrite and append semantics alig
 });
 
 test("validateVault reports unresolved write operations", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const batch = await WriteBatch.create({
@@ -1855,8 +1968,8 @@ test("validateVault reports unresolved write operations", async () => {
 });
 
 test("validateVault reports raw artifact directories that are missing manifest.json", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const documentPath = await writeExternalFile(sourceRoot, "manifest-gap.md", "# Missing manifest\n");
@@ -1883,7 +1996,7 @@ test("validateVault reports raw artifact directories that are missing manifest.j
 });
 
 test("validateVault allows envelope-based inbox raw evidence without manifest sidecars", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const captureDirectory = path.join(
@@ -1915,7 +2028,7 @@ test("validateVault allows envelope-based inbox raw evidence without manifest si
     vaultRoot,
     relativePath: "ledger/events/2026/2026-03.jsonl",
     record: {
-      schemaVersion: "hb.event.v1",
+      schemaVersion: "murph.event.v1",
       id: "evt_01JQ8PWXP5A68SQM1W0GYM40V4",
       kind: "note",
       occurredAt: "2026-03-27T08:09:31.000Z",
@@ -1935,7 +2048,7 @@ test("validateVault allows envelope-based inbox raw evidence without manifest si
 });
 
 test("validateVault allows inbox attachment recovery manifests without envelope.json", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const attachmentRelativePath =
@@ -1950,7 +2063,7 @@ test("validateVault allows inbox attachment recovery manifests without envelope.
   await fs.writeFile(
     path.join(vaultRoot, manifestRelativePath),
     JSON.stringify({
-      schemaVersion: "hb.raw-import-manifest.v1",
+      schemaVersion: "murph.raw-import-manifest.v1",
       importId: "evt_01JQ8PWXP5A68SQM1W0GYM40V5",
       importKind: "document",
       importedAt: "2026-03-27T08:09:31.000Z",
@@ -1983,7 +2096,7 @@ test("validateVault allows inbox attachment recovery manifests without envelope.
 });
 
 test("validateVault reports inbox capture roots that have neither envelope nor recovery manifest", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const attachmentRelativePath =
@@ -2010,7 +2123,7 @@ test("validateVault reports inbox capture roots that have neither envelope nor r
 });
 
 test("WriteBatch rolls back earlier writes when a later staged action fails during commit", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const batch = await WriteBatch.create({
@@ -2045,7 +2158,7 @@ test("WriteBatch rolls back earlier writes when a later staged action fails duri
 });
 
 test("applyCanonicalWriteBatch rolls back vault summary writes when a later text write fails", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const metadataAbsolutePath = path.join(vaultRoot, "vault.json");
@@ -2131,7 +2244,7 @@ test("applyCanonicalWriteBatch rolls back vault summary writes when a later text
 });
 
 test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle ledger append fails", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const experiment = await createExperiment({
@@ -2221,7 +2334,7 @@ test("applyCanonicalWriteBatch rolls back experiment markdown when the lifecycle
 });
 
 test("applyCanonicalWriteBatch rolls back provider slug renames when deleting the previous path fails", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const alphaRelativePath = "bank/providers/alpha.md";
@@ -2281,7 +2394,7 @@ test("applyCanonicalWriteBatch rolls back provider slug renames when deleting th
 });
 
 test("validateVault reports malformed raw manifests while allowing zero-artifact manifests", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const emptyManifestPath = path.join(
@@ -2292,7 +2405,7 @@ test("validateVault reports malformed raw manifests while allowing zero-artifact
   await fs.writeFile(
     emptyManifestPath,
     JSON.stringify({
-      schemaVersion: "hb.raw-import.v1",
+      schemaVersion: "murph.raw-import.v1",
       importId: "meal_01JNV42NP0KH6JQXMZM1G0V6SE",
       importKind: "meal",
       importedAt: "2026-03-12T12:33:00.000Z",
@@ -2314,7 +2427,7 @@ test("validateVault reports malformed raw manifests while allowing zero-artifact
   await fs.writeFile(
     malformedManifestPath,
     JSON.stringify({
-      schemaVersion: "hb.raw-import.v1",
+      schemaVersion: "murph.raw-import.v1",
       rawDirectory: "raw/documents/2026/03/malformed",
       artifacts: [
         {},
@@ -2354,7 +2467,7 @@ test("validateVault reports malformed raw manifests while allowing zero-artifact
 });
 
 test("validateVault reports unreadable and structurally invalid raw manifest files", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const invalidJsonManifestPath = path.join(
@@ -2379,7 +2492,7 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
   await fs.writeFile(
     missingArtifactsManifestPath,
     JSON.stringify({
-      schemaVersion: "hb.raw-import.v1",
+      schemaVersion: "murph.raw-import.v1",
       importId: "meal_01JNV42NP0KH6JQXMZM1G0V6SF",
       importKind: "meal",
       importedAt: "2026-03-12T12:33:00.000Z",
@@ -2462,7 +2575,7 @@ test("validateVault reports unreadable and structurally invalid raw manifest fil
 });
 
 test("validateVault surfaces malformed JSONL ledger files through family validation", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await fs.mkdir(path.join(vaultRoot, "ledger/assessments/2026"), { recursive: true });
@@ -2485,7 +2598,7 @@ test("validateVault surfaces malformed JSONL ledger files through family validat
 });
 
 test("validateVault reports unresolved and malformed write operation metadata", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
   await fs.mkdir(path.join(vaultRoot, ".runtime/operations"), { recursive: true });
 
@@ -2534,7 +2647,7 @@ test("validateVault reports unresolved and malformed write operation metadata", 
 });
 
 test("validateVault preserves unresolved write-operation error messages and vault errors", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
   await fs.mkdir(path.join(vaultRoot, ".runtime/operations"), { recursive: true });
 
@@ -2602,7 +2715,7 @@ test("validateVault preserves unresolved write-operation error messages and vaul
 });
 
 test("validateVault covers current profile success, missing-file, and unreadable-file branches", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await appendProfileSnapshot({
@@ -2649,7 +2762,7 @@ test("validateVault covers current profile success, missing-file, and unreadable
 });
 
 test("mutation helpers reject empty meal imports and invalid sample batches", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -2741,8 +2854,8 @@ test("mutation helpers reject empty meal imports and invalid sample batches", as
 });
 
 test("importSamples validates the full batch before copying raw artifacts or appending ledgers", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const csvPath = await writeExternalFile(
@@ -2786,8 +2899,8 @@ test("importSamples validates the full batch before copying raw artifacts or app
 });
 
 test("importSamples retries reuse stable transform ids and avoid duplicating canonical rows", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const csvPath = await writeExternalFile(
@@ -2838,8 +2951,8 @@ test("importSamples retries reuse stable transform ids and avoid duplicating can
 });
 
 test("importSamples retries repair partial shard state without minting new ids", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
-  const sourceRoot = await makeTempDirectory("healthybob-source");
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
   const csvPath = await writeExternalFile(
@@ -2926,7 +3039,7 @@ test("public core exports include the high-level canonical mutation ports", () =
 });
 
 test("high-level canonical mutation ports own experiment and journal mutation semantics", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({
@@ -3039,7 +3152,7 @@ test("high-level canonical mutation ports own experiment and journal mutation se
 });
 
 test("high-level canonical mutation ports own provider, event, and vault summary semantics", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const summary = await updateVaultSummary({
@@ -3127,7 +3240,7 @@ test("high-level canonical mutation ports own provider, event, and vault summary
 });
 
 test("high-level canonical mutation ports own inbox journal and experiment-note promotions", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault");
+  const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
   const created = await createExperiment({
@@ -3206,7 +3319,7 @@ test("high-level canonical mutation ports own inbox journal and experiment-note 
 });
 
 test("updateVaultSummary rejects invalid metadata and malformed CORE frontmatter with renamed codes", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-vault-summary-errors");
+  const vaultRoot = await makeTempDirectory("murph-vault-summary-errors");
   await initializeVault({ vaultRoot });
 
   await assert.rejects(
@@ -3223,7 +3336,7 @@ test("updateVaultSummary rejects invalid metadata and malformed CORE frontmatter
     path.join(vaultRoot, "CORE.md"),
     [
       "---",
-      "schemaVersion: hb.frontmatter.core.v1",
+      "schemaVersion: murph.frontmatter.core.v1",
       "docType: core",
       "---",
       "# Broken Core",

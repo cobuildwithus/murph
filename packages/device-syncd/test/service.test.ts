@@ -134,7 +134,7 @@ function createFakeProvider(overrides: Partial<DeviceSyncProvider> = {}): Device
 }
 
 test("device sync service connects, imports, and deduplicates webhook traces", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd");
   const imports: unknown[] = [];
   const importer: DeviceSyncImporterPort = {
     async importDeviceProviderSnapshot(input) {
@@ -148,7 +148,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     providers: [createFakeProvider()],
@@ -198,7 +198,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
 });
 
 test("device sync service durably suppresses WHOOP webhook replays without trace_id after the first job runs", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-whoop-replay");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-whoop-replay");
   const imports: unknown[] = [];
   const importer: DeviceSyncImporterPort = {
     async importDeviceProviderSnapshot(input) {
@@ -249,7 +249,7 @@ test("device sync service durably suppresses WHOOP webhook replays without trace
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     providers: [provider],
@@ -302,12 +302,12 @@ test("device sync service durably suppresses WHOOP webhook replays without trace
 });
 
 test("device sync service accepts configured external return origins and still rejects unknown origins", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-return");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-return");
   const service = createDeviceSyncService({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://sync.healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       allowedReturnOrigins: ["http://127.0.0.1:3000", "http://localhost:3000/app"],
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
@@ -342,7 +342,7 @@ test("device sync service accepts configured external return origins and still r
 });
 
 test("device sync service rejects manual reconcile and webhook enqueue for disconnected accounts", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-disconnect");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect");
   const imports: unknown[] = [];
   const importer: DeviceSyncImporterPort = {
     async importDeviceProviderSnapshot(input) {
@@ -356,7 +356,7 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     providers: [createFakeProvider()],
@@ -391,12 +391,12 @@ test("device sync service rejects manual reconcile and webhook enqueue for disco
 });
 
 test("device sync service records granted callback scopes and describes polling-only providers", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-polling");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-polling");
   const service = createDeviceSyncService({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     providers: [
@@ -446,12 +446,12 @@ test("device sync service records granted callback scopes and describes polling-
 });
 
 test("manual reconcile queues every scheduled job and store claims only one job per account at a time", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-serialized");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-serialized");
   const service = createDeviceSyncService({
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     providers: [
@@ -529,7 +529,7 @@ test("manual reconcile queues every scheduled job and store claims only one job 
 });
 
 test("device sync service fences in-flight jobs after disconnect", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-disconnect-fence");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-fence");
   const imports: unknown[] = [];
   let refreshCalls = 0;
   let providerStartedResolve: (() => void) | null = null;
@@ -552,7 +552,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
     secret: "secret-for-tests",
     config: {
       vaultRoot,
-      publicBaseUrl: "https://healthybob.test/device-sync",
+      publicBaseUrl: "https://sync.example.test/device-sync",
       stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
     },
     providers: [
@@ -646,7 +646,7 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
 });
 
 test("sqlite store persists the webhook trace claim lifecycle", async () => {
-  const vaultRoot = await makeTempDirectory("healthybob-device-syncd-webhook-trace-store");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-webhook-trace-store");
   const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
 
   const baseTrace = {

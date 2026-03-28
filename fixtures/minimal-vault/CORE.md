@@ -1,4 +1,4 @@
-# Healthy Bob Core
+# Murph Core
 
 This fixture keeps only human-readable placeholder content until canonical frontmatter and metadata contracts are finalized.
 

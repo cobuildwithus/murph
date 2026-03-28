@@ -1,4 +1,4 @@
-import { foodUpsertPayloadSchema } from '@healthybob/contracts'
+import { foodUpsertPayloadSchema } from '@murph/contracts'
 import { z } from 'incur'
 
 import {
@@ -629,7 +629,7 @@ async function readFoodEntries(vaultRoot: string) {
 }
 
 async function loadFoodCoreRuntime(): Promise<FoodCoreRuntime> {
-  return loadRuntimeModule<FoodCoreRuntime>('@healthybob/core')
+  return loadRuntimeModule<FoodCoreRuntime>('@murph/core')
 }
 
 async function findFoodForDailyAdd(

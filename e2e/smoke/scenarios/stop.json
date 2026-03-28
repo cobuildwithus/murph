@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the root alias for assistant automation recovery when a Healthy Bob run loop is already active for the same vault."
+  "purpose": "Documents the root alias for assistant automation recovery when a Murph run loop is already active for the same vault."
 }

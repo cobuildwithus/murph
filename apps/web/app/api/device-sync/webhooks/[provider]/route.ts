@@ -20,12 +20,12 @@ export const GET = withJsonError(async (
     );
   }
 
-  return new Response(challenge, {
-    status: 200,
-    headers: {
-      "content-type": "text/plain; charset=utf-8",
+  return jsonOk(
+    {
+      challenge,
     },
-  });
+    200,
+  );
 });
 
 export const POST = withJsonError(async (

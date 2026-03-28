@@ -2,7 +2,7 @@ import {
   parseTelegramThreadTarget,
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
-} from '@healthybob/inboxd'
+} from '@murph/inboxd'
 import { normalizeNullableString } from './text/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 

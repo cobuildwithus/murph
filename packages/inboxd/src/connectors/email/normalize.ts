@@ -24,6 +24,24 @@ export interface NormalizeAgentmailMessageInput {
   signal?: AbortSignal;
 }
 
+
+export interface BuildEmailMessageTextInput {
+  extractedHtml?: string | null;
+  extractedText?: string | null;
+  html?: string | null;
+  preview?: string | null;
+  text?: string | null;
+}
+
+export interface InferDirectEmailThreadParticipantsInput {
+  accountAddress?: string | null;
+  bcc?: ReadonlyArray<string | null | undefined> | null;
+  cc?: ReadonlyArray<string | null | undefined> | null;
+  from?: string | null;
+  selfAddresses?: ReadonlyArray<string | null | undefined> | null;
+  to?: ReadonlyArray<string | null | undefined> | null;
+}
+
 export async function normalizeAgentmailMessage({
   message,
   source = "email",
@@ -95,12 +113,22 @@ export async function toAgentmailChatMessage(input: {
 export function buildAgentmailMessageText(
   message: AgentmailMessageLike,
 ): string | null {
+  return buildEmailMessageText({
+    extractedHtml: message.extracted_html ?? null,
+    extractedText: message.extracted_text ?? null,
+    html: message.html ?? null,
+    preview: message.preview ?? null,
+    text: message.text ?? null,
+  });
+}
+
+export function buildEmailMessageText(input: BuildEmailMessageTextInput): string | null {
   return (
-    normalizeTextValue(message.extracted_text ?? null) ??
-    normalizeTextValue(stripHtml(message.extracted_html ?? null)) ??
-    normalizeTextValue(message.text ?? null) ??
-    normalizeTextValue(stripHtml(message.html ?? null)) ??
-    normalizeTextValue(message.preview ?? null) ??
+    normalizeTextValue(input.extractedText ?? null) ??
+    normalizeTextValue(stripHtml(input.extractedHtml ?? null)) ??
+    normalizeTextValue(input.text ?? null) ??
+    normalizeTextValue(stripHtml(input.html ?? null)) ??
+    normalizeTextValue(input.preview ?? null) ??
     null
   );
 }
@@ -109,11 +137,27 @@ export function inferDirectEmailThread(
   message: AgentmailMessageLike,
   accountAddress: string | null,
 ): boolean {
+  return inferDirectEmailThreadFromParticipants({
+    accountAddress,
+    bcc: message.bcc ?? [],
+    cc: message.cc ?? [],
+    from: message.from ?? null,
+    to: message.to ?? [],
+  });
+}
+
+export function inferDirectEmailThreadFromParticipants(
+  input: InferDirectEmailThreadParticipantsInput,
+): boolean {
+  const selfAddresses = resolveEmailParticipantSet([
+    input.accountAddress,
+    ...(input.selfAddresses ?? []),
+  ]);
   const allParticipants = new Set<string>();
   const otherParticipants = new Set<string>();
 
   const appendParticipant = (value: string | null | undefined) => {
-    const normalized = resolveAgentmailAddress(value ?? null);
+    const normalized = resolveEmailAddress(value ?? null);
     if (!normalized) {
       return;
     }
@@ -121,47 +165,67 @@ export function inferDirectEmailThread(
     const normalizedLower = normalized.toLowerCase();
     allParticipants.add(normalizedLower);
 
-    if (
-      accountAddress !== null &&
-      normalizedLower === accountAddress.toLowerCase()
-    ) {
+    if (selfAddresses.has(normalizedLower)) {
       return;
     }
 
     otherParticipants.add(normalizedLower);
   };
 
-  appendParticipant(message.from ?? null);
-  for (const value of message.to ?? []) {
+  appendParticipant(input.from ?? null);
+  for (const value of input.to ?? []) {
     appendParticipant(value);
   }
-  for (const value of message.cc ?? []) {
+  for (const value of input.cc ?? []) {
     appendParticipant(value);
   }
-  for (const value of message.bcc ?? []) {
+  for (const value of input.bcc ?? []) {
     appendParticipant(value);
   }
 
-  if (accountAddress !== null && otherParticipants.size > 0) {
+  if (selfAddresses.size > 0 && otherParticipants.size > 0) {
     return otherParticipants.size <= 1;
   }
 
-  if (accountAddress === null && allParticipants.size > 0) {
+  if (selfAddresses.size === 0 && allParticipants.size > 0) {
     return allParticipants.size <= 2;
   }
 
   const recipientCount = [
-    ...(message.to ?? []),
-    ...(message.cc ?? []),
-    ...(message.bcc ?? []),
+    ...(input.to ?? []),
+    ...(input.cc ?? []),
+    ...(input.bcc ?? []),
   ]
-    .map((value) => normalizeTextValue(value))
+    .map((value) => normalizeTextValue(value ?? null))
     .filter((value): value is string => value !== null).length;
 
   return recipientCount <= 1;
 }
 
+function resolveEmailParticipantSet(
+  values: ReadonlyArray<string | null | undefined>,
+): Set<string> {
+  const participants = new Set<string>();
+
+  for (const value of values) {
+    const normalized = resolveEmailAddress(value ?? null);
+    if (!normalized) {
+      continue;
+    }
+
+    participants.add(normalized.toLowerCase());
+  }
+
+  return participants;
+}
+
 export function resolveAgentmailAddress(
+  value: string | null | undefined,
+): string | null {
+  return resolveEmailAddress(value);
+}
+
+export function resolveEmailAddress(
   value: string | null | undefined,
 ): string | null {
   const normalized = normalizeTextValue(value ?? null);
@@ -176,6 +240,12 @@ export function resolveAgentmailAddress(
 }
 
 export function resolveAgentmailDisplayName(
+  value: string | null | undefined,
+): string | null {
+  return resolveEmailDisplayName(value);
+}
+
+export function resolveEmailDisplayName(
   value: string | null | undefined,
 ): string | null {
   const normalized = normalizeTextValue(value ?? null);
@@ -225,8 +295,8 @@ async function buildAgentmailAttachments(
   return attachments;
 }
 
-function inferAttachmentKind(
-  attachment: AgentmailMessageAttachment,
+export function inferAttachmentKind(
+  attachment: Pick<AgentmailMessageAttachment, "content_type" | "filename">,
 ): InboundAttachment["kind"] {
   const mime = String(attachment.content_type ?? "").toLowerCase();
   const fileName = String(attachment.filename ?? "").toLowerCase();

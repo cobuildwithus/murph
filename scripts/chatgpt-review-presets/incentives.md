@@ -1,4 +1,4 @@
-Healthy Bob does not use token incentives or economic security in the usual sense.
+Murph does not use token incentives or economic security in the usual sense.
 
 Review for operator-facing incentive issues such as:
 - defaults that encourage unsafe behavior

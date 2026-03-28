@@ -2,7 +2,7 @@ import type { RawArtifact } from "../raw.ts";
 import type { UnknownRecord } from "../types.ts";
 import type { ProfileSnapshotSource } from "../profile/types.ts";
 
-export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = "hb.assessment-response.v1";
+export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = "murph.assessment-response.v1";
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments";
 export const ASSESSMENT_SOURCES = ["import", "manual", "derived"] as const;
 

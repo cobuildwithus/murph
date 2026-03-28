@@ -1,7 +1,7 @@
 import {
   buildHostedExecutionDeviceSyncWakeDispatch,
   type HostedExecutionDispatchRequest,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
 

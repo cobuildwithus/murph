@@ -6,7 +6,7 @@ import { buildCallbackErrorRedirectLocation } from "../src/http.ts";
 
 test("callback error redirects keep only safe machine-readable params", () => {
   const location = buildCallbackErrorRedirectLocation({
-    returnTo: "https://app.healthybob.test/settings/devices?tab=wearables",
+    returnTo: "https://app.example.test/settings/devices?tab=wearables",
     provider: "demo",
     errorCode: "OAUTH_CALLBACK_REJECTED",
   });
@@ -14,7 +14,7 @@ test("callback error redirects keep only safe machine-readable params", () => {
   assert.ok(location);
 
   const destination = new URL(location);
-  assert.equal(destination.origin, "https://app.healthybob.test");
+  assert.equal(destination.origin, "https://app.example.test");
   assert.equal(destination.pathname, "/settings/devices");
   assert.equal(destination.searchParams.get("tab"), "wearables");
   assert.equal(destination.searchParams.get("deviceSyncStatus"), "error");

@@ -111,11 +111,60 @@ export function extractHostedPrivyEmailAccount(
         "latestVerifiedAt",
         "verifiedAt",
         "firstVerifiedAt",
+        "lv",
       ]),
     };
   }
 
   return null;
+}
+
+export function extractHostedPrivyPreferredEmailAccount(
+  linkedAccounts: readonly PrivyLinkedAccountLike[],
+): HostedPrivyEmailAccount | null {
+  return extractHostedPrivyVerifiedEmailAccount(linkedAccounts) ?? extractHostedPrivyEmailAccount(linkedAccounts);
+}
+
+export function isHostedPrivyEmailAccountVerified(
+  account: HostedPrivyEmailAccount | null | undefined,
+): account is HostedPrivyEmailAccount & { verifiedAt: number } {
+  return Boolean(account && typeof account.verifiedAt === "number" && Number.isFinite(account.verifiedAt));
+}
+
+export function extractHostedPrivyVerifiedEmailAccount(
+  linkedAccounts: readonly PrivyLinkedAccountLike[],
+): (HostedPrivyEmailAccount & { verifiedAt: number }) | null {
+  let bestMatch: (HostedPrivyEmailAccount & { verifiedAt: number }) | null = null;
+
+  for (const account of linkedAccounts) {
+    if (!account || account.type !== "email") {
+      continue;
+    }
+
+    const address = firstString(account, ["address", "email_address", "emailAddress", "email"]);
+    const verifiedAt = firstTimestamp(account, [
+      "latest_verified_at",
+      "verified_at",
+      "first_verified_at",
+      "latestVerifiedAt",
+      "verifiedAt",
+      "firstVerifiedAt",
+      "lv",
+    ]);
+
+    if (!address || verifiedAt === null) {
+      continue;
+    }
+
+    if (!bestMatch || verifiedAt > bestMatch.verifiedAt) {
+      bestMatch = {
+        address,
+        verifiedAt,
+      };
+    }
+  }
+
+  return bestMatch;
 }
 
 export function extractHostedPrivyWalletAccount(

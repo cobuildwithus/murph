@@ -4,9 +4,9 @@ Last verified: 2026-03-12
 
 ## Current Scope
 
-- `healthybob` is a standalone repo bootstrap inside this workspace.
+- `murph` is a standalone repo bootstrap inside this workspace.
 - Its precise product/runtime role is `UNCONFIRMED`.
-- Use this repo for Healthy Bob-specific code and docs once that role is defined.
+- Use this repo for Murph-specific code and docs once that role is defined.
 
 ## Routing Rule
 

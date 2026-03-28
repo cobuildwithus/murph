@@ -6,13 +6,13 @@
     "composite": false,
     "incremental": false,
     "paths": {
-      "@healthybob/contracts": [
+      "@murph/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@healthybob/contracts/schemas": [
+      "@murph/contracts/schemas": [
         "packages/contracts/src/schemas.ts"
       ],
-      "@healthybob/contracts/*": [
+      "@murph/contracts/*": [
         "packages/contracts/src/*.ts"
       ]
     }

@@ -88,7 +88,7 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
         key: 'location_context',
         label: 'Location context',
         description:
-          'Where to anchor the audit. The default tells Healthy Bob to use the saved current location from memory or profile state.',
+          'Where to anchor the audit. The default tells Murph to use the saved current location from memory or profile state.',
         required: true,
         defaultValue:
           'my current living location as stored in memory, profile context, or current-home details; if it is missing, say exactly what location detail I should save for future runs',
@@ -300,7 +300,7 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
 validateAssistantCronPresetDefinitions(assistantCronPresetDefinitions)
 
 export function listAssistantCronPresets(): AssistantCronPreset[] {
-  return assistantCronPresetDefinitions.map((preset) => stripPromptTemplate(preset))
+  return assistantCronPresetDefinitions.map((preset) => toAssistantCronPreset(preset))
 }
 
 export function getAssistantCronPresetDefinition(
@@ -362,7 +362,7 @@ export function renderAssistantCronPreset(
   }
 
   return {
-    preset: stripPromptTemplate(preset),
+    preset: toAssistantCronPreset(preset),
     promptTemplate: preset.promptTemplate,
     resolvedPrompt,
     resolvedVariables,
@@ -405,7 +405,7 @@ function resolveAssistantCronPresetVariables(
   return Object.fromEntries(resolvedEntries)
 }
 
-function stripPromptTemplate(
+export function toAssistantCronPreset(
   preset: AssistantCronPresetDefinition,
 ): AssistantCronPreset {
   return assistantCronPresetSchema.parse({
@@ -426,7 +426,7 @@ function validateAssistantCronPresetDefinitions(
   const seenIds = new Set<string>()
 
   for (const preset of presets) {
-    stripPromptTemplate(preset)
+    toAssistantCronPreset(preset)
 
     if (seenIds.has(preset.id)) {
       throw new Error(`Duplicate assistant cron preset id: ${preset.id}`)

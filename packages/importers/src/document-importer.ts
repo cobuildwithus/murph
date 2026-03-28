@@ -8,15 +8,12 @@ import {
   optionalTrimmedStringSchema,
   parseInputObject,
   requiredTrimmedStringSchema,
-  resolveVaultRootAlias,
   stripUndefined,
-  vaultRootAliasSchemaFields,
 } from "./shared.ts";
 
 export interface DocumentImportInput {
   filePath: string;
   vaultRoot?: string;
-  vault?: string;
   title?: string;
   occurredAt?: string | number | Date;
   note?: string;
@@ -30,7 +27,7 @@ export interface ImporterExecutionOptions {
 const documentImportInputSchema = z
   .object({
     filePath: requiredTrimmedStringSchema("filePath"),
-    ...vaultRootAliasSchemaFields,
+    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     title: optionalTrimmedStringSchema("title"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
@@ -47,7 +44,7 @@ export async function prepareDocumentImport(input: unknown): Promise<DocumentImp
   const rawArtifact = await inspectFileAsset(request.filePath);
 
   return stripUndefined({
-    vaultRoot: resolveVaultRootAlias(request),
+    vaultRoot: request.vaultRoot,
     sourcePath: rawArtifact.sourcePath,
     title: request.title ?? rawArtifact.fileName,
     occurredAt: request.occurredAt,

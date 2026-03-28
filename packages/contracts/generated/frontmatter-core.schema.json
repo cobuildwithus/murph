@@ -4,7 +4,7 @@
   "properties": {
     "schemaVersion": {
       "type": "string",
-      "const": "hb.frontmatter.core.v1"
+      "const": "murph.frontmatter.core.v1"
     },
     "docType": {
       "type": "string",
@@ -46,6 +46,6 @@
     "updatedAt"
   ],
   "additionalProperties": false,
-  "$id": "@healthybob/contracts/frontmatter-core.schema.json",
-  "title": "Healthy Bob CORE Frontmatter"
+  "$id": "@murph/contracts/frontmatter-core.schema.json",
+  "title": "Murph CORE Frontmatter"
 }

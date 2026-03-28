@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vitest/config";
 
-import { createVitestWorkspaceRuntimeAliases } from "../../config/workspace-source-resolution";
-import { resolveWorkspaceSourceEntries } from "./next.config";
+import {
+  createVitestWorkspaceRuntimeAliases,
+  resolveLocalWebWorkspaceSourceEntries,
+} from "../../config/workspace-source-resolution";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,9 +18,7 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: createVitestWorkspaceRuntimeAliases(
-      resolveWorkspaceSourceEntries(packageDir),
-    ),
+    alias: createVitestWorkspaceRuntimeAliases(resolveLocalWebWorkspaceSourceEntries(packageDir)),
   },
   test: {
     environment: "node",

@@ -1,16 +1,17 @@
 import { DurableObject } from "cloudflare:workers";
 
-import worker from "../../src/index.js";
-import { readHostedExecutionEnvironment } from "../../src/env.js";
-import { buildHostedRunnerContainerEnv } from "../../src/runner-env.js";
-import { HostedUserRunner } from "../../src/user-runner.js";
-import { parseHostedUserEnvUpdate } from "../../src/user-env.js";
+import worker from "../../src/index.ts";
+import { readHostedExecutionEnvironment } from "../../src/env.ts";
+import { buildHostedRunnerContainerEnv } from "../../src/runner-env.ts";
+import { HostedUserRunner } from "../../src/user-runner.ts";
+import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
 
 import type {
   HostedExecutionBundleRef,
+  HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionUserStatus,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 
 interface TestWorkerEnvironment extends Readonly<Record<string, string | undefined>> {
   BUNDLES: import("../../src/bundle-store.js").R2BucketLike;
@@ -31,8 +32,16 @@ export class VitestUserRunnerDurableObject extends DurableObject {
     );
   }
 
+  async bootstrapUser(userId: string): Promise<{ userId: string }> {
+    return this.runner.bootstrapUser(userId);
+  }
+
   async dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus> {
     return this.runner.dispatch(input);
+  }
+
+  async dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult> {
+    return this.runner.dispatchWithOutcome(input);
   }
 
   async commit(input: {
@@ -52,7 +61,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
         summary: string;
       };
     };
-    userId: string;
   }) {
     return this.runner.commit(input);
   }
@@ -65,32 +73,26 @@ export class VitestUserRunnerDurableObject extends DurableObject {
         vault: string | null;
       };
     };
-    userId: string;
   }) {
     return this.runner.finalizeCommit(input);
   }
 
-  async status(userId: string): Promise<HostedExecutionUserStatus> {
-    return this.runner.status(userId);
+  async status(): Promise<HostedExecutionUserStatus> {
+    return this.runner.status();
   }
 
-  async getUserEnvStatus(
-    userId: string,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.getUserEnvStatus(userId);
+  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.runner.getUserEnvStatus();
   }
 
   async updateUserEnv(
-    userId: string,
     update: Record<string, unknown>,
   ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.updateUserEnv(userId, parseHostedUserEnvUpdate(update));
+    return this.runner.updateUserEnv(parseHostedUserEnvUpdate(update));
   }
 
-  async clearUserEnv(
-    userId: string,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
-    return this.runner.clearUserEnv(userId);
+  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+    return this.runner.clearUserEnv();
   }
 
   override async alarm(): Promise<void> {
@@ -98,6 +100,6 @@ export class VitestUserRunnerDurableObject extends DurableObject {
   }
 }
 
-export { RunnerContainerTestDouble } from "./runner-container-double.js";
+export { RunnerContainerTestDouble } from "./runner-container-double.ts";
 
 export default worker;

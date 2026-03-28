@@ -1,6 +1,6 @@
 # Fixture Corpus
 
-This directory holds deterministic QA scaffolding for the first Healthy Bob implementation wave.
+This directory holds deterministic QA scaffolding for the first Murph implementation wave.
 
 ## Contents
 

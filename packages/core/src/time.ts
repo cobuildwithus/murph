@@ -2,7 +2,7 @@ import {
   extractIsoDatePrefix as extractIsoDatePrefixShared,
   normalizeIanaTimeZone,
   toLocalDayKey as toLocalDayKeyShared,
-} from "@healthybob/contracts";
+} from "@murph/contracts";
 
 import { DEFAULT_TIMEZONE } from "./constants.ts";
 import { VaultError } from "./errors.ts";

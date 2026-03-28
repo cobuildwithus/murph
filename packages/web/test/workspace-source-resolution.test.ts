@@ -6,16 +6,16 @@ import { createVitestWorkspaceRuntimeAliases } from "../../../config/workspace-s
 
 test("createVitestWorkspaceRuntimeAliases maps package roots and subpaths to workspace sources", () => {
   const aliases = createVitestWorkspaceRuntimeAliases({
-    "@healthybob/query": "/repo/packages/query/src/index.ts",
+    "@murph/query": "/repo/packages/query/src/index.ts",
   });
 
   assert.deepEqual(aliases, [
     {
-      find: /^@healthybob\/query$/,
+      find: /^@murph\/query$/,
       replacement: "/repo/packages/query/src/index.ts",
     },
     {
-      find: /^@healthybob\/query\/(.+)$/,
+      find: /^@murph\/query\/(.+)$/,
       replacement: "/repo/packages/query/src/$1",
     },
   ]);

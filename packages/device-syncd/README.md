@@ -1,8 +1,8 @@
-# @healthybob/device-syncd
+# @murph/device-syncd
 
-Published local device sync runtime for Healthy Bob.
+Published local device sync runtime for Murph.
 
-Healthy Bob's CLI can install, start, reuse, and stop this daemon for the selected vault through `healthybob device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
+Murph's CLI can install, start, reuse, and stop this daemon for the selected vault through `murph device daemon ...`, so most operators should treat it as a built-in local service rather than a separately managed sidecar.
 
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
@@ -16,7 +16,7 @@ What it does:
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race
-- imports provider snapshots through `@healthybob/importers`
+- imports provider snapshots through `@murph/importers`
 
 Current providers:
 - WHOOP
@@ -35,7 +35,7 @@ The shared ingress owns:
 - provider webhook verification/parsing
 - webhook dedupe and account lookup hooks
 
-It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Healthy Bob vault.
+It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
 
 ## Provider model
 
@@ -45,11 +45,11 @@ It does **not** own canonical health-data import. The local data plane should st
 - initial backfill
 - scheduled reconcile polling
 - optional webhook fan-in
-- normalized snapshot import through `@healthybob/importers`
+- normalized snapshot import through `@murph/importers`
 
 WHOOP uses OAuth plus webhooks.
 
-Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Healthy Bob setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
+Oura uses OAuth plus refresh tokens and works well in a polling-first mode, so the basic Murph setup does not require Oura webhooks. Once the operator configures the Oura client ID and secret, the end-user flow is just connect once and let scheduled sync keep the account fresh.
 
 ## Environment
 
@@ -99,7 +99,7 @@ Oura settings:
 ## Run
 
 ```bash
-healthybob device daemon start --vault ./vault
+murph device daemon start --vault ./vault
 ```
 
 Manual direct execution remains available:
@@ -108,7 +108,7 @@ Manual direct execution remains available:
 node packages/device-syncd/dist/bin.js
 ```
 
-The published bin name is also `healthybob-device-syncd`.
+The published bin name is also `murph-device-syncd`.
 
 ## Control-plane clients
 
@@ -136,7 +136,7 @@ Public routes: keep them on localhost unless you explicitly expose a separate ca
 
 ## Notes for Oura
 
-Healthy Bob's Oura connector is designed for the least-friction user path:
+Murph's Oura connector is designed for the least-friction user path:
 - the operator registers one Oura API application once
 - users connect their Oura account through the normal OAuth consent flow
 - `device-syncd` keeps the account alive with refresh tokens

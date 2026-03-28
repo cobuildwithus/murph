@@ -6,11 +6,11 @@ Updated: 2026-03-18
 
 ## Goal
 
-- Turn `healthybob setup` and `healthybob onboard` into an interactive onboarding flow that can select external message channels, default to iMessage, and leave Healthy Bob ready to auto-reply to new inbound iMessages through the assistant runtime.
+- Turn `murph setup` and `murph onboard` into an interactive onboarding flow that can select external message channels, default to iMessage, and leave Murph ready to auto-reply to new inbound iMessages through the assistant runtime.
 
 ## Success criteria
 
-- `healthybob onboard` is a first-class alias for the setup surface, and interactive runs of either `setup` or `onboard` show a terminal wizard before provisioning finishes.
+- `murph onboard` is a first-class alias for the setup surface, and interactive runs of either `setup` or `onboard` show a terminal wizard before provisioning finishes.
 - The wizard supports arrow-key navigation and Space toggles, with iMessage selected by default and Telegram shown as a disabled coming-soon option.
 - Setup provisions or reuses the local iMessage source during onboarding and records assistant auto-reply channel state in the assistant runtime when iMessage remains enabled.
 - After a successful interactive onboarding with iMessage enabled, the CLI launches `assistant run` instead of dropping straight into chat so inbound iMessages can create or continue assistant sessions automatically.

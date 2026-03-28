@@ -3,11 +3,11 @@ import {
   sha256HostedBundleHex,
   type HostedExecutionBundleRef,
   type HostedExecutionRunnerResult,
-} from "@healthybob/runtime-state";
+} from "@murph/runtime-state";
 import {
   parseHostedExecutionSideEffects,
   type HostedExecutionSideEffect,
-} from "@healthybob/assistant-runtime";
+} from "@murph/assistant-runtime";
 
 import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
@@ -54,35 +54,25 @@ export function createHostedExecutionJournalStore(input: {
 }): HostedExecutionJournalStore {
   return {
     async deleteCommittedResult(userId, eventId) {
-      for (const key of committedResultObjectKeys(userId, eventId)) {
-        await input.bucket.delete?.(key);
-      }
+      await input.bucket.delete?.(committedResultObjectKey(userId, eventId));
     },
 
     async readCommittedResult(userId, eventId) {
-      for (const key of committedResultObjectKeys(userId, eventId)) {
-        const result = await readEncryptedR2Json({
-          bucket: input.bucket,
-          cryptoKey: input.key,
-          key,
-          parse(value) {
-            return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
-          },
-        });
-
-        if (result) {
-          return result;
-        }
-      }
-
-      return null;
+      return readEncryptedR2Json({
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: committedResultObjectKey(userId, eventId),
+        parse(value) {
+          return normalizeHostedExecutionCommittedResult(value as HostedExecutionCommittedResult);
+        },
+      });
     },
 
     async writeCommittedResult(userId, eventId, value) {
       await writeEncryptedR2Json({
         bucket: input.bucket,
         cryptoKey: input.key,
-        key: committedResultPrimaryObjectKey(userId, eventId),
+        key: committedResultObjectKey(userId, eventId),
         keyId: input.keyId,
         value,
       });
@@ -121,14 +111,12 @@ export async function persistHostedExecutionCommit(input: {
         bundleStore,
         currentRef: input.currentBundleRefs.agentState,
         kind: "agent-state",
-        userId: input.userId,
         value: input.payload.bundles.agentState,
       }),
       vault: await writeCommittedBundle({
         bundleStore,
         currentRef: input.currentBundleRefs.vault,
         kind: "vault",
-        userId: input.userId,
         value: input.payload.bundles.vault,
       }),
     },
@@ -179,14 +167,12 @@ export async function persistHostedExecutionFinalBundles(input: {
       bundleStore,
       currentRef: existing.bundleRefs.agentState,
       kind: "agent-state",
-      userId: input.userId,
       value: input.payload.bundles.agentState,
     }),
     vault: await writeCommittedBundle({
       bundleStore,
       currentRef: existing.bundleRefs.vault,
       kind: "vault",
-      userId: input.userId,
       value: input.payload.bundles.vault,
     }),
   };
@@ -212,7 +198,6 @@ async function writeCommittedBundle(input: {
   bundleStore: ReturnType<typeof createHostedBundleStore>;
   currentRef: HostedExecutionBundleRef | null;
   kind: "agent-state" | "vault";
-  userId: string;
   value: string | null;
 }): Promise<HostedExecutionBundleRef | null> {
   if (input.value === null) {
@@ -230,7 +215,7 @@ async function writeCommittedBundle(input: {
     return input.currentRef;
   }
 
-  const ref = await input.bundleStore.writeBundle(input.userId, input.kind, plaintext);
+  const ref = await input.bundleStore.writeBundle(input.kind, plaintext);
 
   return {
     ...ref,
@@ -238,19 +223,8 @@ async function writeCommittedBundle(input: {
   };
 }
 
-function committedResultPrimaryObjectKey(userId: string, eventId: string): string {
+function committedResultObjectKey(userId: string, eventId: string): string {
   return `transient/execution-journal/${encodeURIComponent(userId)}/${encodeURIComponent(eventId)}.json`;
-}
-
-function committedResultLegacyObjectKey(userId: string, eventId: string): string {
-  return `users/${encodeURIComponent(userId)}/execution-journal/${encodeURIComponent(eventId)}.json`;
-}
-
-function committedResultObjectKeys(userId: string, eventId: string): string[] {
-  return [
-    committedResultPrimaryObjectKey(userId, eventId),
-    committedResultLegacyObjectKey(userId, eventId),
-  ];
 }
 
 function normalizeHostedExecutionCommittedResult(

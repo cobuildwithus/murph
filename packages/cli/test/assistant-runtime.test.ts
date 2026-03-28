@@ -11,8 +11,12 @@ import {
   resolveAssistantStatePaths,
 } from '../src/assistant-state.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
+import { readAssistantSession } from '../src/assistant/store/persistence.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   resolveOperatorConfigPath,
+  resolveAssistantOperatorDefaults,
+  resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../src/operator-config.js'
 import {
@@ -70,8 +74,6 @@ import { bridgeAbortSignals } from '../src/assistant/automation/shared.js'
 import {
   CHAT_BANNER,
   CHAT_COMPOSER_HINT,
-  CHAT_MODEL_OPTIONS,
-  CHAT_REASONING_OPTIONS,
   CHAT_SLASH_COMMANDS,
   CHAT_STARTER_SUGGESTIONS,
   applyInkChatTraceUpdates,
@@ -89,6 +91,10 @@ import {
   shouldShowChatComposerGuidance,
   shouldClearComposerForSubmitAction,
 } from '../src/assistant/ui/view-model.js'
+import {
+  DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
+  DEFAULT_ASSISTANT_REASONING_OPTIONS,
+} from '../src/assistant/provider-catalog.js'
 import {
   applyComposerEditingInput,
   formatFooterBadgeText,
@@ -168,7 +174,7 @@ beforeEach(() => {
 })
 
 test('sendAssistantMessage persists only assistant session metadata and reuses provider sessions via alias keys', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-runtime-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -232,7 +238,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(secondCall.resumeProviderSessionId, 'thread-123')
   assert.equal(firstCall.reasoningEffort, 'xhigh')
   assert.equal(secondCall.reasoningEffort, 'xhigh')
-  assert.match(firstCall.systemPrompt ?? '', /You are Healthy Bob/u)
+  assert.match(firstCall.systemPrompt ?? '', /You are Murph/u)
   assert.equal(firstCall.userPrompt, 'What did Bob eat?')
   assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
   assert.equal(secondCall.systemPrompt, null)
@@ -240,7 +246,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
 })
 
 test('sendAssistantMessage recovers provider sessions after user interruptions and preserves the interrupt marker', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-interrupt-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-interrupt-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -294,7 +300,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
 })
 
 test('sendAssistantMessage can optionally deliver the provider reply over the mapped outbound channel', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-delivery-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-delivery-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -311,7 +317,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
     async (input: { message: string; sessionId: string }) => ({
       message: input.message,
       session: {
-        schema: 'healthybob.assistant-session.v2',
+        schema: 'murph.assistant-session.v2',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-123',
@@ -376,7 +382,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
 })
 
 test('sendAssistantMessage keeps provider success and session updates even when outbound delivery fails', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-delivery-failure-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-delivery-failure-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -415,7 +421,7 @@ test('sendAssistantMessage keeps provider success and session updates even when 
 })
 
 test('sendAssistantMessage reuses saved assistant model defaults and persists reasoning effort metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-defaults-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-defaults-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(homeRoot, { recursive: true })
@@ -437,8 +443,22 @@ test('sendAssistantMessage reuses saved assistant model defaults and persists re
   try {
     await saveAssistantOperatorDefaultsPatch(
       {
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'high',
+        provider: 'codex-cli',
+        defaultsByProvider: {
+          'codex-cli': {
+            codexCommand: null,
+            model: 'gpt-5.4-mini',
+            reasoningEffort: 'high',
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: null,
+            apiKeyEnv: null,
+            providerName: null,
+            headers: null,
+          },
+        },
       },
       homeRoot,
     )
@@ -459,7 +479,7 @@ test('sendAssistantMessage reuses saved assistant model defaults and persists re
 })
 
 test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-openai-defaults-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-openai-defaults-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(homeRoot, { recursive: true })
@@ -484,12 +504,22 @@ test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', a
     await saveAssistantOperatorDefaultsPatch(
       {
         provider: 'openai-compatible',
-        model: 'gpt-oss:20b',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        apiKeyEnv: 'OLLAMA_API_KEY',
-        providerName: 'ollama',
-        headers: {
-          'X-Test': 'hello',
+        defaultsByProvider: {
+          'openai-compatible': {
+            codexCommand: null,
+            model: 'gpt-oss:20b',
+            reasoningEffort: null,
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: 'http://127.0.0.1:11434/v1',
+            apiKeyEnv: 'OLLAMA_API_KEY',
+            providerName: 'ollama',
+            headers: {
+              'X-Test': 'hello',
+            },
+          },
         },
       },
       homeRoot,
@@ -524,7 +554,7 @@ test('sendAssistantMessage reuses saved OpenAI-compatible assistant defaults', a
 })
 
 test('sendAssistantMessage stores prompt and response excerpts in the local assistant transcript without adding them to session metadata', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-runtime-summary-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-summary-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -583,7 +613,7 @@ test('sendAssistantMessage stores prompt and response excerpts in the local assi
 })
 
 test('sendAssistantMessage redacts vault paths under HOME in returned output', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-home-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-home-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
   await mkdir(vaultRoot, {
@@ -617,7 +647,7 @@ test('sendAssistantMessage redacts vault paths under HOME in returned output', a
 })
 
 test('sendAssistantMessage applies assistant defaults from operator config when flags are omitted', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-defaults-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-defaults-'))
   const homeRoot = path.join(parent, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
   await mkdir(vaultRoot, {
@@ -646,7 +676,7 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
       configPath,
       `${JSON.stringify(
         {
-          schema: 'healthybob.operator-config.v1',
+          schema: 'murph.operator-config.v1',
           defaultVault: null,
           assistant: {
             provider: 'codex-cli',
@@ -665,9 +695,6 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
                 headers: null,
               },
             },
-            codexCommand: '/opt/bin/codex',
-            model: 'gpt-oss:20b',
-            reasoningEffort: null,
             identityId: 'assistant:primary',
             account: {
               source: 'codex-rpc+codex-auth-json',
@@ -730,7 +757,7 @@ test('sendAssistantMessage applies assistant defaults from operator config when 
 })
 
 test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes canonical writes, and records failures', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-scan-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -907,9 +934,260 @@ test('scanAssistantInboxOnce skips completed captures, waits for parsers, routes
   ])
 })
 
+test('assistant operator config keeps nested provider defaults across unrelated writes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-config-'))
+  const homeRoot = path.join(parent, 'home')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  const configPath = resolveOperatorConfigPath(homeRoot)
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(
+    configPath,
+    `${JSON.stringify(
+      {
+        schema: 'murph.operator-config.v1',
+        defaultVault: null,
+        assistant: {
+          provider: 'openai-compatible',
+          defaultsByProvider: {
+            'openai-compatible': {
+              codexCommand: null,
+              model: 'llama3.2:latest',
+              reasoningEffort: null,
+              sandbox: null,
+              approvalPolicy: null,
+              profile: null,
+              oss: false,
+              baseUrl: 'http://127.0.0.1:11434/v1',
+              apiKeyEnv: 'OLLAMA_API_KEY',
+              providerName: 'ollama',
+              headers: {
+                Authorization: 'Bearer override-token',
+                'X-Foo': 'bar',
+              },
+            },
+          },
+          identityId: 'assistant:primary',
+          failoverRoutes: null,
+          account: null,
+          selfDeliveryTargets: null,
+        },
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      selfDeliveryTargets: {
+        telegram: {
+          channel: 'telegram',
+          identityId: null,
+          participantId: 'contact:alice',
+          sourceThreadId: 'chat-1',
+          deliveryTarget: 'chat-1',
+        },
+      },
+    },
+    homeRoot,
+  )
+
+  const defaults = await resolveAssistantOperatorDefaults(homeRoot)
+  const providerDefaults = resolveAssistantProviderDefaults(
+    defaults,
+    'openai-compatible',
+  )
+  assert.equal(defaults?.provider, 'openai-compatible')
+  assert.equal(providerDefaults?.model, 'llama3.2:latest')
+  assert.equal(providerDefaults?.baseUrl, 'http://127.0.0.1:11434/v1')
+  assert.equal(providerDefaults?.apiKeyEnv, 'OLLAMA_API_KEY')
+  assert.equal(providerDefaults?.providerName, 'ollama')
+  assert.deepEqual(providerDefaults?.headers, {
+    Authorization: 'Bearer override-token',
+    'X-Foo': 'bar',
+  })
+  assert.equal(defaults?.selfDeliveryTargets?.telegram?.deliveryTarget, 'chat-1')
+
+  const stored = JSON.parse(await readFile(configPath, 'utf8')) as {
+    assistant?: Record<string, unknown> & {
+      defaultsByProvider?: Record<string, unknown>
+    }
+  }
+  assert.equal('model' in (stored.assistant ?? {}), false)
+  assert.equal('baseUrl' in (stored.assistant ?? {}), false)
+  assert.equal('apiKeyEnv' in (stored.assistant ?? {}), false)
+  assert.deepEqual(stored.assistant?.defaultsByProvider, {
+    'openai-compatible': {
+      codexCommand: null,
+      model: 'llama3.2:latest',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      providerName: 'ollama',
+      headers: {
+        Authorization: 'Bearer override-token',
+        'X-Foo': 'bar',
+      },
+    },
+  })
+})
+
+test('updating one provider defaults entry preserves other saved provider entries', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-provider-map-'))
+  const homeRoot = path.join(parent, 'home')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await saveAssistantOperatorDefaultsPatch(
+    {
+      provider: 'codex-cli',
+      defaultsByProvider: {
+        'codex-cli': {
+          codexCommand: '/opt/bin/codex',
+          model: 'gpt-5.4-mini',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: 'ops',
+          oss: true,
+          baseUrl: null,
+          apiKeyEnv: null,
+          providerName: null,
+          headers: null,
+        },
+        'openai-compatible': {
+          codexCommand: null,
+          model: 'llama3.2:latest',
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKeyEnv: 'OLLAMA_API_KEY',
+          providerName: 'ollama',
+          headers: {
+            Authorization: 'Bearer override-token',
+          },
+        },
+      },
+    },
+    homeRoot,
+  )
+
+  const existing = await resolveAssistantOperatorDefaults(homeRoot)
+  await saveAssistantOperatorDefaultsPatch(
+    buildAssistantProviderDefaultsPatch({
+      defaults: existing,
+      provider: 'openai-compatible',
+      providerConfig: {
+        model: 'gpt-oss:20b',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+        },
+      },
+    }),
+    homeRoot,
+  )
+
+  const updated = await resolveAssistantOperatorDefaults(homeRoot)
+  assert.deepEqual(updated?.defaultsByProvider?.['codex-cli'], {
+    codexCommand: '/opt/bin/codex',
+    model: 'gpt-5.4-mini',
+    reasoningEffort: 'high',
+    sandbox: 'workspace-write',
+    approvalPolicy: 'on-request',
+    profile: 'ops',
+    oss: true,
+    baseUrl: null,
+    apiKeyEnv: null,
+    providerName: null,
+    headers: null,
+  })
+  assert.deepEqual(updated?.defaultsByProvider?.['openai-compatible'], {
+    codexCommand: null,
+    model: 'gpt-oss:20b',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnv: 'OLLAMA_API_KEY',
+    providerName: 'ollama',
+    headers: {
+      Authorization: 'Bearer override-token',
+    },
+  })
+})
+
+test('readAssistantSession rejects legacy codexPromptVersion session records', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-legacy-session-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:legacy-codex-version',
+    provider: 'codex-cli',
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const sessionPath = path.join(
+    paths.sessionsDirectory,
+    `${resolved.session.sessionId}.json`,
+  )
+  await writeFile(
+    sessionPath,
+    `${JSON.stringify(
+      {
+        ...resolved.session,
+        provider: 'codex-cli',
+        providerState: undefined,
+        providerOptions: {
+          model: 'gpt-5.4',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'on-request',
+          profile: null,
+          oss: false,
+        },
+        codexPromptVersion: '2026-03-20.1',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  await assert.rejects(
+    readAssistantSession({
+      paths,
+      sessionId: resolved.session.sessionId,
+    }),
+  )
+})
+
 
 test('scanAssistantInboxOnce bypasses parser waits for supported pending meal photos', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-photo-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-scan-photo-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -973,7 +1251,7 @@ test('scanAssistantInboxOnce bypasses parser waits for supported pending meal ph
 })
 
 test('scanAssistantInboxOnce still waits for pending document parsers', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-doc-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-scan-doc-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1038,7 +1316,7 @@ test('scanAssistantInboxOnce still waits for pending document parsers', async ()
 })
 
 test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-scan-heic-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-scan-heic-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1103,7 +1381,7 @@ test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', a
 })
 
 test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbound iMessages', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1125,7 +1403,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
         type: 'item.completed',
       },
       state: 'completed',
-      text: 'Tool healthybob.inbox_list',
+      text: 'Tool murph.inbox_list',
     })
 
     return {
@@ -1140,7 +1418,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-auto',
@@ -1334,7 +1612,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
       'utf8',
     ),
   )
-  assert.equal(artifact.schema, 'healthybob.assistant-chat-result.v1')
+  assert.equal(artifact.schema, 'murph.assistant-chat-result.v1')
   assert.equal(
     events.some(
       (event) => event.type === 'reply.scan.primed' && event.details?.includes('cap-backlog'),
@@ -1372,7 +1650,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
         event.captureId === 'cap-new' &&
         event.providerKind === 'tool' &&
         event.providerState === 'completed' &&
-        event.details === 'Tool healthybob.inbox_list',
+        event.details === 'Tool murph.inbox_list',
     ),
     true,
   )
@@ -1401,7 +1679,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
 })
 
 test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifacts for retryable delivery failures', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-deferred-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-deferred-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1515,7 +1793,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
     deliveryIntentId: string | null
     schema: string
   }
-  assert.equal(deferredArtifact.schema, 'healthybob.assistant-chat-deferred.v1')
+  assert.equal(deferredArtifact.schema, 'murph.assistant-chat-deferred.v1')
   assert.equal(typeof deferredArtifact.deliveryIntentId, 'string')
 
   const second = await scanAssistantAutoReplyOnce({
@@ -1536,7 +1814,7 @@ test('scanAssistantAutoReplyOnce advances the cursor and writes deferred artifac
 })
 
 test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending before commit', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-queue-only-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-queue-only-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1628,7 +1906,7 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
     deliveryIntentId: string | null
     schema: string
   }
-  assert.equal(artifact.schema, 'healthybob.assistant-chat-deferred.v1')
+  assert.equal(artifact.schema, 'murph.assistant-chat-deferred.v1')
   assert.equal(typeof artifact.deliveryIntentId, 'string')
 
   const snapshot = await readAssistantStatusSnapshot(vaultRoot)
@@ -1639,7 +1917,7 @@ test('scanAssistantAutoReplyOnce queues hosted auto-replies without sending befo
 })
 
 test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks only for missing items', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-onboarding-memory-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-onboarding-memory-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot, { recursive: true })
   cleanupPaths.push(parent)
@@ -1746,7 +2024,7 @@ test('scanAssistantAutoReplyOnce injects persisted onboarding answers and asks o
 })
 
 test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one reply', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-email-backlog-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-email-backlog-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot, { recursive: true })
 
@@ -1768,7 +2046,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-email-backlog',
@@ -1782,9 +2060,9 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
       },
       alias: null,
       binding: {
-        conversationKey: 'channel:email|identity:healthybob%40agentmail.to|thread:thread-1',
+        conversationKey: 'channel:email|identity:murph%40agentmail.to|thread:thread-1',
         channel: 'email',
-        identityId: 'healthybob@agentmail.to',
+        identityId: 'murph@agentmail.to',
         actorId: 'person@example.test',
         threadId: 'thread-1',
         threadIsDirect: true,
@@ -1824,7 +2102,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
           {
             captureId: 'cap-email-1',
             source: 'email',
-            accountId: 'healthybob@agentmail.to',
+            accountId: 'murph@agentmail.to',
             externalId: 'email:1',
             threadId: 'thread-1',
             threadTitle: 'Re: whats good',
@@ -1842,7 +2120,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
           {
             captureId: 'cap-email-2',
             source: 'email',
-            accountId: 'healthybob@agentmail.to',
+            accountId: 'murph@agentmail.to',
             externalId: 'email:2',
             threadId: 'thread-1',
             threadTitle: 'Re: whats good',
@@ -1860,7 +2138,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
           {
             captureId: 'cap-email-3',
             source: 'email',
-            accountId: 'healthybob@agentmail.to',
+            accountId: 'murph@agentmail.to',
             externalId: 'email:3',
             threadId: 'thread-1',
             threadTitle: 'Re: whats good',
@@ -1889,7 +2167,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
         capture: {
           captureId: input.captureId,
           source: 'email',
-          accountId: 'healthybob@agentmail.to',
+          accountId: 'murph@agentmail.to',
           threadTitle: 'Re: whats good',
           threadId: 'thread-1',
           threadIsDirect: true,
@@ -1960,7 +2238,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-03-18T00:00:00.000Z'))
 
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-self-auto-reply-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-self-auto-reply-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -1977,7 +2255,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
     runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
       message: input.message,
       session: {
-        schema: 'healthybob.assistant-session.v2',
+        schema: 'murph.assistant-session.v2',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-self',
@@ -2205,7 +2483,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
 })
 
 test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances it on prompt skips', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-cursor-policy-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-cursor-policy-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -2402,7 +2680,7 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
 })
 
 test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-scope-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-telegram-scope-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -2418,7 +2696,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-telegram-scope',
@@ -2575,7 +2853,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
 })
 
 test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the same capture with the preserved session', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-stall-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-stall-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -2646,7 +2924,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-stall-1',
@@ -2849,7 +3127,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
 
 test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the default stall window before retrying', async () => {
   const parent = await mkdtemp(
-    path.join(tmpdir(), 'healthybob-assistant-auto-reply-deepthink-watchdog-'),
+    path.join(tmpdir(), 'murph-assistant-auto-reply-deepthink-watchdog-'),
   )
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -3021,7 +3299,7 @@ test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the 
 })
 
 test('scanAssistantAutoReplyOnce defers reconnectable provider failures and preserves the resumable session without duplicating transcript turns', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-auto-reply-reconnect-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-reconnect-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3178,7 +3456,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
 })
 
 test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery and records the failure artifact', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-failure-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-telegram-failure-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3205,7 +3483,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     .mockImplementationOnce(async (input: any) => ({
       message: input.message,
       session: {
-        schema: 'healthybob.assistant-session.v2',
+        schema: 'murph.assistant-session.v2',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-telegram-failure',
@@ -3365,7 +3643,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
       'utf8',
     ),
   )
-  assert.equal(errorArtifact.schema, 'healthybob.assistant-chat-error.v1')
+  assert.equal(errorArtifact.schema, 'murph.assistant-chat-error.v1')
 
   const successArtifact = JSON.parse(
     await readFile(
@@ -3384,7 +3662,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
 })
 
 test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant reply', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-telegram-album-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-telegram-album-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(path.join(vaultRoot, 'raw', 'inbox'), {
     recursive: true,
@@ -3429,7 +3707,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-telegram-album',
@@ -3596,7 +3874,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
 })
 
 test('runAssistantAutomation rejects concurrent runs for the same vault and releases the lock after shutdown', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-run-lock-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-run-lock-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3643,7 +3921,7 @@ test('runAssistantAutomation rejects concurrent runs for the same vault and rele
 })
 
 test('runAssistantAutomation clears stale run locks before starting', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-stale-run-lock-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-stale-run-lock-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3655,7 +3933,7 @@ test('runAssistantAutomation clears stale run locks before starting', async () =
   await writeFile(
     path.join(paths.assistantStateRoot, '.automation-run-lock.json'),
     JSON.stringify({
-      command: 'node healthybob assistant run',
+      command: 'node murph assistant run',
       mode: 'continuous',
       pid: 999_999,
       startedAt: '2026-03-26T00:00:00.000Z',
@@ -3674,7 +3952,7 @@ test('runAssistantAutomation clears stale run locks before starting', async () =
 })
 
 test('runAssistantAutomation reports daemon failures as error results', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-daemon-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-daemon-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3736,7 +4014,7 @@ test('runAssistantAutomation reports daemon failures as error results', async ()
 })
 
 test('runAssistantAutomation preserves structured daemon failure details in the aggregate result', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-daemon-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-daemon-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3867,7 +4145,7 @@ test('bridgeAbortSignals keeps upstream aborts non-fatal', async () => {
 })
 
 test('runAssistantChat delegates to the Ink UI implementation', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-chat-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3878,7 +4156,7 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
     stoppedAt: '2026-03-17T00:00:01.000Z',
     turns: 2,
     session: {
-      schema: 'healthybob.assistant-session.v2',
+      schema: 'murph.assistant-session.v2',
       sessionId: 'asst_123',
       provider: 'codex-cli',
       providerSessionId: 'thread-ink',
@@ -3927,7 +4205,7 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
 })
 
 test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'healthybob-assistant-chat-error-'))
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-chat-error-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -3945,19 +4223,19 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
 test('assistant Ink view-model replays persisted local transcript entries', () => {
   const entries = seedChatEntries([
     {
-      schema: 'healthybob.assistant-transcript-entry.v1',
+      schema: 'murph.assistant-transcript-entry.v1',
       kind: 'user',
       text: 'hello',
       createdAt: '2026-03-17T00:00:00.000Z',
     },
     {
-      schema: 'healthybob.assistant-transcript-entry.v1',
+      schema: 'murph.assistant-transcript-entry.v1',
       kind: 'assistant',
       text: 'hi',
       createdAt: '2026-03-17T00:00:01.000Z',
     },
     {
-      schema: 'healthybob.assistant-transcript-entry.v1',
+      schema: 'murph.assistant-transcript-entry.v1',
       kind: 'error',
       text: 'boom',
       createdAt: '2026-03-17T00:00:02.000Z',
@@ -4182,7 +4460,7 @@ test('assistant Ink view-model preserves prior progress rows when later turns us
 
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
   const session = {
-    schema: 'healthybob.assistant-session.v2',
+    schema: 'murph.assistant-session.v2',
     sessionId: 'asst_demo',
     provider: 'codex-cli',
     providerSessionId: null,
@@ -4294,12 +4572,27 @@ test('assistant Ink view-model exposes codex-style footer metadata and busy copy
     }),
     ' vault: ~/vault ',
   )
-  assert.equal(CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
-  assert.equal(CHAT_REASONING_OPTIONS[3]?.value, 'xhigh')
+  assert.equal(DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS[0]?.value, 'gpt-5.4')
+  assert.equal(DEFAULT_ASSISTANT_REASONING_OPTIONS[3]?.value, 'xhigh')
   assert.equal(CHAT_SLASH_COMMANDS[0]?.command, '/model')
-  assert.equal(findAssistantModelOptionIndex('gpt-5.3-codex'), 2)
-  assert.equal(findAssistantReasoningOptionIndex('xhigh'), 3)
-  assert.equal(findAssistantReasoningOptionIndex(null), 1)
+  assert.equal(
+    findAssistantModelOptionIndex(
+      'gpt-5.3-codex',
+      DEFAULT_ASSISTANT_CHAT_MODEL_OPTIONS,
+    ),
+    2,
+  )
+  assert.equal(
+    findAssistantReasoningOptionIndex(
+      'xhigh',
+      DEFAULT_ASSISTANT_REASONING_OPTIONS,
+    ),
+    3,
+  )
+  assert.equal(
+    findAssistantReasoningOptionIndex(null, DEFAULT_ASSISTANT_REASONING_OPTIONS),
+    1,
+  )
   assert.deepEqual(
     getMatchingSlashCommands('/m').map((command) => command.command),
     ['/model'],
@@ -4524,7 +4817,7 @@ test('assistant Ink merges queued follow-ups back into the composer draft with b
 
 test('assistant Ink view-model falls back to default model labels when needed', () => {
   const ossSession = {
-    schema: 'healthybob.assistant-session.v2',
+    schema: 'murph.assistant-session.v2',
     sessionId: 'asst_demo',
     provider: 'codex-cli',
     providerSessionId: null,

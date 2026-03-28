@@ -4,7 +4,7 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   verifyHostedExecutionSignature,
-} from "@healthybob/hosted-execution";
+} from "@murph/hosted-execution";
 
 import {
   dispatchHostedExecutionStatus,
@@ -15,9 +15,6 @@ describe("dispatchHostedExecutionBestEffort", () => {
   const originalDispatchUrl = process.env.HOSTED_EXECUTION_DISPATCH_URL;
   const originalSigningSecret = process.env.HOSTED_EXECUTION_SIGNING_SECRET;
   const originalDispatchTimeoutMs = process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
-  const originalCloudflareBaseUrl = process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL;
-  const originalCloudflareSigningSecret = process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET;
-  const originalCloudflareTimeoutMs = process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS;
   const originalFetch = global.fetch;
 
   beforeEach(() => {
@@ -25,9 +22,6 @@ describe("dispatchHostedExecutionBestEffort", () => {
     delete process.env.HOSTED_EXECUTION_DISPATCH_URL;
     delete process.env.HOSTED_EXECUTION_SIGNING_SECRET;
     delete process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
-    delete process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL;
-    delete process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET;
-    delete process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS;
     global.fetch = vi.fn();
   });
 
@@ -50,24 +44,6 @@ describe("dispatchHostedExecutionBestEffort", () => {
       process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = originalDispatchTimeoutMs;
     } else {
       delete process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS;
-    }
-
-    if (typeof originalCloudflareBaseUrl === "string") {
-      process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = originalCloudflareBaseUrl;
-    } else {
-      delete process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL;
-    }
-
-    if (typeof originalCloudflareSigningSecret === "string") {
-      process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = originalCloudflareSigningSecret;
-    } else {
-      delete process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET;
-    }
-
-    if (typeof originalCloudflareTimeoutMs === "string") {
-      process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS = originalCloudflareTimeoutMs;
-    } else {
-      delete process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS;
     }
 
     global.fetch = originalFetch;
@@ -180,33 +156,10 @@ describe("dispatchHostedExecutionBestEffort", () => {
     expect(errorSpy).toHaveBeenCalled();
   });
 
-  it("dispatches through the web boundary when only Cloudflare compatibility aliases are configured", async () => {
+  it("ignores the removed Cloudflare compatibility aliases", async () => {
     process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://runner.example.test";
     process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "secret";
     process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS = "47000";
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_legacy",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
-        { status: 200 },
-      ),
-    );
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
 
     await expect(
       dispatchHostedExecutionStatus({
@@ -215,94 +168,17 @@ describe("dispatchHostedExecutionBestEffort", () => {
           reason: "manual",
           userId: "user-123",
         },
-        eventId: "evt_legacy",
+        eventId: "evt_removed_aliases",
         occurredAt: "2026-03-20T12:00:00.000Z",
       }),
     ).resolves.toMatchObject({
-      lastEventId: "evt_legacy",
-      userId: "user-123",
-    });
-
-    expect(timeoutSpy).toHaveBeenCalledWith(47_000);
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const fetchMock = global.fetch as unknown as {
-      mock: { calls: Array<[RequestInfo | URL, RequestInit | undefined]> };
-    };
-    const [url, init] = fetchMock.mock.calls[0] ?? [];
-    const headers = new Headers(init?.headers);
-    const payload = typeof init?.body === "string" ? init.body : "";
-
-    expect(url).toBe("https://runner.example.test/internal/dispatch");
-    await expect(
-      verifyHostedExecutionSignature({
-        payload,
-        secret: "secret",
-        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T09:15:00.000Z"),
-      }),
-    ).resolves.toBe(true);
-  });
-
-  it("prefers generic dispatch env names when both generic and compatibility aliases are present", async () => {
-    process.env.HOSTED_EXECUTION_DISPATCH_URL = "https://dispatch.example.test";
-    process.env.HOSTED_EXECUTION_SIGNING_SECRET = "secret";
-    process.env.HOSTED_EXECUTION_DISPATCH_TIMEOUT_MS = "47000";
-    process.env.HOSTED_EXECUTION_CLOUDFLARE_BASE_URL = "https://compat.example.test";
-    process.env.HOSTED_EXECUTION_CLOUDFLARE_SIGNING_SECRET = "compat-secret";
-    process.env.HOSTED_EXECUTION_CLOUDFLARE_TIMEOUT_MS = "15000";
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
-    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
-        { status: 200 },
-      ),
-    );
-
-    await dispatchHostedExecutionStatus({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
+      status: {
+        lastEventId: null,
         userId: "user-123",
       },
-      eventId: "evt_123",
-      occurredAt: "2026-03-20T12:00:00.000Z",
     });
 
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    const fetchMock = global.fetch as unknown as {
-      mock: { calls: Array<[RequestInfo | URL, RequestInit | undefined]> };
-    };
-    const [url, init] = fetchMock.mock.calls[0] ?? [];
-    expect(url).toBe("https://dispatch.example.test/internal/dispatch");
-    expect(timeoutSpy).toHaveBeenCalledWith(47_000);
-    const headers = new Headers(init?.headers);
-    const payload = typeof init?.body === "string" ? init.body : "";
-    await expect(
-      verifyHostedExecutionSignature({
-        payload,
-        secret: "secret",
-        signature: headers.get(HOSTED_EXECUTION_SIGNATURE_HEADER),
-        timestamp: headers.get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
-        nowMs: Date.parse("2026-03-27T09:15:00.000Z"),
-      }),
-    ).resolves.toBe(true);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it("signs dispatches with a fresh envelope timestamp instead of business occurredAt", async () => {
@@ -312,21 +188,7 @@ describe("dispatchHostedExecutionBestEffort", () => {
     vi.setSystemTime(new Date("2026-03-27T09:15:00.000Z"));
     global.fetch = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
+        JSON.stringify(buildDispatchResultFixture("evt_123")),
         { status: 200 },
       ),
     );
@@ -363,3 +225,29 @@ describe("dispatchHostedExecutionBestEffort", () => {
     ).resolves.toBe(true);
   });
 });
+
+function buildDispatchResultFixture(eventId: string) {
+  return {
+    event: {
+      eventId,
+      lastError: null,
+      state: "completed",
+      userId: "user-123",
+    },
+    status: {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastEventId: eventId,
+      lastRunAt: null,
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      userId: "user-123",
+    },
+  };
+}

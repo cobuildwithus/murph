@@ -34,7 +34,7 @@ Next:
 - None.
 
 Open questions (UNCONFIRMED if needed):
-- `pnpm test` still fails in `packages/cli/test/canonical-write-lock.test.ts` because its child process imports `packages/core/dist/constants.js` and then dies on a missing `@healthybob/contracts/dist/index.js` under `packages/core/node_modules`; this appears unrelated to the assistant-runtime diff.
+- `pnpm test` still fails in `packages/cli/test/canonical-write-lock.test.ts` because its child process imports `packages/core/dist/constants.js` and then dies on a missing `@murph/contracts/dist/index.js` under `packages/core/node_modules`; this appears unrelated to the assistant-runtime diff.
 
 Working set (files/ids/commands):
 - `agent-docs/exec-plans/active/2026-03-26-assistant-runtime-reliability-refactor.md`

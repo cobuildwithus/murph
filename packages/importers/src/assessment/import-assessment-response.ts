@@ -7,9 +7,7 @@ import {
   optionalTrimmedStringSchema,
   parseInputObject,
   requiredTrimmedStringSchema,
-  resolveVaultRootAlias,
   stripUndefined,
-  vaultRootAliasSchemaFields,
 } from "../shared.ts";
 
 import { assertAssessmentImportPort } from "./core-port.ts";
@@ -23,7 +21,6 @@ export interface AssessmentImporterExecutionOptions {
 export interface AssessmentResponseImportInput {
   filePath: string;
   vaultRoot?: string;
-  vault?: string;
   title?: string;
   occurredAt?: string | number | Date;
   importedAt?: string | number | Date;
@@ -33,7 +30,7 @@ export interface AssessmentResponseImportInput {
 const assessmentResponseImportInputSchema = z
   .object({
     filePath: requiredTrimmedStringSchema("filePath"),
-    ...vaultRootAliasSchemaFields,
+    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     title: optionalTrimmedStringSchema("title"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     importedAt: optionalTimestampSchema("importedAt"),
@@ -52,7 +49,7 @@ export async function prepareAssessmentResponseImport(
   const rawArtifact = await inspectFileAsset(request.filePath, "assessment");
 
   return stripUndefined({
-    vaultRoot: resolveVaultRootAlias(request),
+    vaultRoot: request.vaultRoot,
     sourcePath: rawArtifact.sourcePath,
     title: request.title ?? basename(rawArtifact.sourcePath),
     occurredAt: request.occurredAt,

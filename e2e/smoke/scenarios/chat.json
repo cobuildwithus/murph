@@ -6,5 +6,5 @@
     "fixtures/minimal-vault/CORE.md"
   ],
   "goldenOutput": "fixtures/golden-outputs/assistant",
-  "purpose": "Documents the root-level assistant chat shorthand so installed `healthybob chat` and `vault-cli chat` remain covered by the frozen command surface."
+  "purpose": "Documents the root-level assistant chat shorthand so installed `murph chat` and `vault-cli chat` remain covered by the frozen command surface."
 }

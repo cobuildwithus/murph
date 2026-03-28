@@ -151,7 +151,7 @@ export interface QuestionPackContext {
 }
 
 export interface QuestionPack {
-  format: "healthybob.question-pack.v1";
+  format: "murph.question-pack.v1";
   packId: string;
   generatedAt: string;
   scope: ExportPackFilters;
@@ -161,7 +161,7 @@ export interface QuestionPack {
 }
 
 export interface ExportPack {
-  format: "healthybob.export-pack.v1";
+  format: "murph.export-pack.v1";
   packId: string;
   basePath: string;
   generatedAt: string;
@@ -280,7 +280,7 @@ export function buildExportPack(
       mediaType: "application/json",
       contents: JSON.stringify(
         {
-          format: "healthybob.export-pack.v1",
+          format: "murph.export-pack.v1",
           packId,
           generatedAt,
           filters,
@@ -341,7 +341,7 @@ export function buildExportPack(
   ];
 
   return {
-    format: "healthybob.export-pack.v1",
+    format: "murph.export-pack.v1",
     packId,
     basePath,
     generatedAt,
@@ -372,7 +372,7 @@ function renderAssistantContext(input: QuestionPack): string {
   const healthBankSectionCount = countHealthBankPages(context.health);
 
   const lines = [
-    "# Healthy Bob Export Pack",
+    "# Murph Export Pack",
     "",
     `- Pack ID: ${packId}`,
     `- Generated At: ${generatedAt}`,
@@ -487,7 +487,7 @@ function buildQuestionPack(input: QuestionPackBuildInput): QuestionPack {
   } = input;
 
   return {
-    format: "healthybob.question-pack.v1",
+    format: "murph.question-pack.v1",
     packId,
     generatedAt,
     scope: filters,

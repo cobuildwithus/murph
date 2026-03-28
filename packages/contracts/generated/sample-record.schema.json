@@ -6,7 +6,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -106,7 +106,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -206,7 +206,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -306,7 +306,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -426,7 +426,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -526,7 +526,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -625,7 +625,7 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "const": "hb.sample.v1"
+          "const": "murph.sample.v1"
         },
         "id": {
           "type": "string",
@@ -721,6 +721,6 @@
       "additionalProperties": false
     }
   ],
-  "$id": "@healthybob/contracts/sample-record.schema.json",
-  "title": "Healthy Bob Sample Record"
+  "$id": "@murph/contracts/sample-record.schema.json",
+  "title": "Murph Sample Record"
 }

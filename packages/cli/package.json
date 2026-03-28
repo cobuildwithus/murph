@@ -1,11 +1,11 @@
 {
-  "name": "healthybob",
+  "name": "murph",
   "version": "0.0.0",
   "private": false,
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "https://github.com/cobuildwithus/healthybob"
+    "url": "https://github.com/cobuildwithus/murph"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -14,6 +14,38 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./inbox-services": {
+      "types": "./dist/inbox-services.d.ts",
+      "default": "./dist/inbox-services.js"
+    },
+    "./vault-cli-services": {
+      "types": "./dist/vault-cli-services.d.ts",
+      "default": "./dist/vault-cli-services.js"
+    },
+    "./assistant/automation": {
+      "types": "./dist/assistant/automation.d.ts",
+      "default": "./dist/assistant/automation.js"
+    },
+    "./assistant/cron": {
+      "types": "./dist/assistant/cron.d.ts",
+      "default": "./dist/assistant/cron.js"
+    },
+    "./assistant/outbox": {
+      "types": "./dist/assistant/outbox.d.ts",
+      "default": "./dist/assistant/outbox.js"
+    },
+    "./assistant/status": {
+      "types": "./dist/assistant/status.d.ts",
+      "default": "./dist/assistant/status.js"
+    },
+    "./assistant/store": {
+      "types": "./dist/assistant/store.d.ts",
+      "default": "./dist/assistant/store.js"
+    },
+    "./operator-config": {
+      "types": "./dist/operator-config.d.ts",
+      "default": "./dist/operator-config.js"
     }
   },
   "files": [
@@ -23,7 +55,7 @@
   ],
   "bin": {
     "vault-cli": "dist/bin.js",
-    "healthybob": "dist/bin.js"
+    "murph": "dist/bin.js"
   },
   "engines": {
     "node": ">=22.16.0"
@@ -36,14 +68,14 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.35",
-    "@healthybob/contracts": "workspace:*",
-    "@healthybob/core": "workspace:*",
-    "@healthybob/device-syncd": "workspace:*",
-    "@healthybob/importers": "workspace:*",
-    "@healthybob/inboxd": "workspace:*",
-    "@healthybob/parsers": "workspace:*",
-    "@healthybob/query": "workspace:*",
-    "@healthybob/runtime-state": "workspace:*",
+    "@murph/contracts": "workspace:*",
+    "@murph/core": "workspace:*",
+    "@murph/device-syncd": "workspace:*",
+    "@murph/importers": "workspace:*",
+    "@murph/inboxd": "workspace:*",
+    "@murph/parsers": "workspace:*",
+    "@murph/query": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
     "@photon-ai/imessage-kit": "2.1.2",
     "ai": "^6.0.116",
     "ink": "^6.8.0",

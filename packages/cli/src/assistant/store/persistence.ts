@@ -20,6 +20,8 @@ import {
   normalizeNullableString,
   writeJsonFileAtomic,
 } from '../shared.js'
+import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
+import { normalizeAssistantSessionSnapshot } from '../provider-state.js'
 import type {
   AssistantStatePaths,
 } from './paths.js'
@@ -61,7 +63,9 @@ export async function readAssistantSession(input: {
 
   try {
     const raw = await readFile(sessionPath, 'utf8')
-    return assistantSessionSchema.parse(JSON.parse(raw) as unknown)
+    return normalizeAssistantSessionSnapshot(
+      assistantSessionSchema.parse(JSON.parse(raw) as unknown),
+    )
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -75,7 +79,10 @@ export async function writeAssistantSession(
   session: AssistantSession,
 ): Promise<void> {
   const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
-  await writeJsonFileAtomic(sessionPath, session)
+  await writeJsonFileAtomic(
+    sessionPath,
+    assistantSessionSchema.parse(normalizeAssistantSessionForWrite(session)),
+  )
 }
 
 export async function readAssistantTranscriptEntries(
@@ -167,6 +174,19 @@ async function pathExists(filePath: string): Promise<boolean> {
 
     throw error
   }
+}
+
+function normalizeAssistantSessionForWrite(
+  session: AssistantSession,
+): AssistantSession {
+  return normalizeAssistantSessionSnapshot({
+    ...session,
+    providerOptions: serializeAssistantProviderSessionOptions({
+      provider: session.provider,
+      ...session.providerOptions,
+    }),
+    providerState: session.providerState,
+  })
 }
 
 export async function persistResolvedSession(

@@ -1,5 +1,5 @@
 ---
-schemaVersion: hb.frontmatter.goal.v1
+schemaVersion: murph.frontmatter.goal.v1
 docType: goal
 goalId: goal_01JNV43AK9SK58T6GX3DWRZH9Q
 slug: improve-sleep

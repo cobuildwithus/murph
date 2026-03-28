@@ -1,4 +1,3 @@
-import path from 'node:path'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { toVaultCliError } from '../usecases/vault-usecase-helpers.js'
 import type {
@@ -16,6 +15,7 @@ import {
   requireJournalPromotionCore,
   resolveAttachmentSha256,
   resolveExperimentPromotionTarget,
+  resolvePromotionAttachmentFilePath,
   withPromotionScope,
 } from '../inbox-services/promotions.js'
 import {
@@ -65,12 +65,14 @@ export function createInboxPromotionOps(
           return {
             photoSha256: await resolveAttachmentSha256(
               paths.absoluteVaultRoot,
+              capture,
               attachment,
             ),
             audioSha256:
               audioAttachment && typeof audioAttachment.storedPath === 'string'
                 ? await resolveAttachmentSha256(
                     paths.absoluteVaultRoot,
+                    capture,
                     audioAttachment,
                   )
                 : null,
@@ -82,10 +84,18 @@ export function createInboxPromotionOps(
             vaultRoot: paths.absoluteVaultRoot,
             occurredAt: capture.occurredAt,
             note: capture.text ?? undefined,
-            photoPath: path.join(paths.absoluteVaultRoot, attachment.storedPath),
+            photoPath: await resolvePromotionAttachmentFilePath(
+              paths.absoluteVaultRoot,
+              capture,
+              attachment,
+            ),
             audioPath:
               typeof audioAttachment?.storedPath === 'string'
-                ? path.join(paths.absoluteVaultRoot, audioAttachment.storedPath)
+                ? await resolvePromotionAttachmentFilePath(
+                    paths.absoluteVaultRoot,
+                    capture,
+                    audioAttachment,
+                  )
                 : undefined,
             source: 'import',
           })
@@ -117,11 +127,13 @@ export function createInboxPromotionOps(
         canonicalPromotionSpec: documentCanonicalPromotionSpec,
         buildCanonicalMatchContext: async ({
           paths,
+          capture,
           attachment,
         }) => {
           return {
             documentSha256: await resolveAttachmentSha256(
               paths.absoluteVaultRoot,
+              capture,
               attachment,
             ),
             title:
@@ -140,7 +152,11 @@ export function createInboxPromotionOps(
               ? capture.text.trim()
               : undefined
           const result = await prepared.importers.importDocument({
-            filePath: path.join(paths.absoluteVaultRoot, attachment.storedPath),
+            filePath: await resolvePromotionAttachmentFilePath(
+              paths.absoluteVaultRoot,
+              capture,
+              attachment,
+            ),
             vaultRoot: paths.absoluteVaultRoot,
             occurredAt: capture.occurredAt,
             title,

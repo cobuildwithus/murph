@@ -20,7 +20,10 @@ import {
 import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
 import {
   discoverAssistantProviderModels,
+  resolveAssistantCatalogReasoningOptions,
   resolveAssistantModelCatalog,
+  type AssistantCatalogModel,
+  type AssistantModelDiscoveryResult,
 } from '../provider-catalog.js'
 import type {
   AssistantProviderTraceEvent,
@@ -28,7 +31,9 @@ import type {
 } from '../provider-traces.js'
 import { resolveCodexDisplayOptions } from '../../assistant-codex.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   resolveAssistantOperatorDefaults,
+  resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
 } from '../../operator-config.js'
 import {
@@ -104,9 +109,12 @@ interface ModelSwitcherProps {
 }
 
 interface ModelSwitcherState {
+  models: readonly AssistantCatalogModel[]
   mode: 'model' | 'reasoning'
   modelIndex: number
   reasoningIndex: number
+  modelOptions: readonly AssistantModelOption[]
+  reasoningOptions: readonly AssistantReasoningOption[]
 }
 
 type ComposerSubmitMode = 'enter' | 'tab'
@@ -609,7 +617,7 @@ export function resolveAssistantTurnErrorPresentation(input: {
     status: canonicalWriteBlocked
       ? {
           kind: 'info',
-          text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Healthy Bob tools.${queuedFollowUpSuffix}`,
+          text: `Blocked a direct canonical vault write and kept the live vault unchanged. Retry after using vault-cli or other audited Murph tools.${queuedFollowUpSuffix}`,
         }
       : connectionLost
         ? {
@@ -1192,7 +1200,7 @@ const ChatHeader = React.memo(function ChatHeader(
         },
         createElement(Text, { color: theme.accentColor }, '●'),
         ' ',
-        createElement(Text, { bold: true }, 'Healthy Bob'),
+        createElement(Text, { bold: true }, 'Murph'),
       ),
       props.bindingSummary
         ? createElement(
@@ -1227,7 +1235,7 @@ const ChatHeader = React.memo(function ChatHeader(
         },
         createElement(Text, { color: theme.accentColor }, '●'),
         ' ',
-        createElement(Text, { bold: true }, 'Healthy Bob'),
+        createElement(Text, { bold: true }, 'Murph'),
         ' ',
         createElement(Text, { color: theme.mutedColor }, 'interactive chat'),
       ),
@@ -2721,6 +2729,27 @@ function wrapPickerIndex(index: number, count: number): number {
   return ((index % count) + count) % count
 }
 
+function assistantModelDiscoveryResultsEqual(
+  left: AssistantModelDiscoveryResult | null,
+  right: AssistantModelDiscoveryResult | null,
+): boolean {
+  if (left === right) {
+    return true
+  }
+
+  if (!left || !right) {
+    return false
+  }
+
+  return (
+    left.status === right.status &&
+    (normalizeNullableString(left.message) ?? null) ===
+      (normalizeNullableString(right.message) ?? null) &&
+    left.models.length === right.models.length &&
+    left.models.every((model, index) => model.id === right.models[index]?.id)
+  )
+}
+
 export async function runAssistantChatWithInk(
   input: AssistantChatInput,
 ): Promise<AssistantChatResult> {
@@ -2728,6 +2757,10 @@ export async function runAssistantChatWithInk(
   const defaults = await resolveAssistantOperatorDefaults()
   const themeBaseline = captureAssistantInkThemeBaseline()
   const resolved = await openAssistantConversation(input)
+  const selectedProviderDefaults = resolveAssistantProviderDefaults(
+    defaults,
+    resolved.session.provider,
+  )
   const transcriptEntries = await listAssistantTranscriptEntries(
     input.vault,
     resolved.session.sessionId,
@@ -2736,18 +2769,18 @@ export async function runAssistantChatWithInk(
   const codexDisplay = await resolveCodexDisplayOptions({
     model:
       input.model ??
-      defaults?.model ??
+      selectedProviderDefaults?.model ??
       resolved.session.providerOptions.model,
     profile:
       input.profile ??
-      defaults?.profile ??
+      selectedProviderDefaults?.profile ??
       resolved.session.providerOptions.profile,
   })
   const inkInput = resolveAssistantInkInputAdapter()
 
   if (!inkInput.stdin) {
     throw new Error(
-      'Healthy Bob chat requires interactive terminal input. process.stdin does not support raw mode, and Healthy Bob could not open the controlling terminal for Ink input.',
+      'Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.',
     )
   }
   const inkStdin = inkInput.stdin
@@ -2797,12 +2830,12 @@ export async function runAssistantChatWithInk(
       const [composerValue, setComposerValue] = React.useState('')
       const initialActiveModel =
         normalizeNullableString(input.model) ??
-        normalizeNullableString(defaults?.model) ??
+        normalizeNullableString(selectedProviderDefaults?.model) ??
         normalizeNullableString(resolved.session.providerOptions.model) ??
         normalizeNullableString(codexDisplay.model)
       const initialActiveReasoningEffort =
         normalizeNullableString(input.reasoningEffort) ??
-        normalizeNullableString(defaults?.reasoningEffort) ??
+        normalizeNullableString(selectedProviderDefaults?.reasoningEffort) ??
         normalizeNullableString(resolved.session.providerOptions.reasoningEffort) ??
         normalizeNullableString(codexDisplay.reasoningEffort)
       const [activeModel, setActiveModel] = React.useState<string | null>(
@@ -2811,7 +2844,8 @@ export async function runAssistantChatWithInk(
       const [activeReasoningEffort, setActiveReasoningEffort] = React.useState<string | null>(
         initialActiveReasoningEffort,
       )
-      const [discoveredModels, setDiscoveredModels] = React.useState<readonly string[]>([])
+      const [modelDiscovery, setModelDiscovery] =
+        React.useState<AssistantModelDiscoveryResult | null>(null)
       const [modelSwitcherState, setModelSwitcherState] =
         React.useState<ModelSwitcherState | null>(null)
       const latestSessionRef = React.useRef(resolved.session)
@@ -2826,7 +2860,9 @@ export async function runAssistantChatWithInk(
         baseUrl: session.providerOptions.baseUrl,
         currentModel: activeModel,
         currentReasoningEffort: activeReasoningEffort,
-        discoveredModels,
+        discovery: modelDiscovery,
+        headers: session.providerOptions.headers ?? null,
+        apiKeyEnv: session.providerOptions.apiKeyEnv,
         oss: session.providerOptions.oss,
         providerName: session.providerOptions.providerName,
       })
@@ -2851,27 +2887,29 @@ export async function runAssistantChatWithInk(
         const baseUrl = normalizeNullableString(session.providerOptions.baseUrl)
 
         if (!modelCatalog.capabilities.supportsModelDiscovery || !baseUrl) {
-          setDiscoveredModels((existing) => (existing.length === 0 ? existing : []))
+          setModelDiscovery((existing) => (existing === null ? existing : null))
           return () => {
             cancelled = true
           }
         }
 
         void (async () => {
-          const nextDiscoveredModels = await discoverAssistantProviderModels({
+          const nextDiscovery = await discoverAssistantProviderModels({
             provider: session.provider,
             baseUrl,
+            apiKeyEnv: session.providerOptions.apiKeyEnv,
+            headers: session.providerOptions.headers ?? null,
+            providerName: session.providerOptions.providerName,
           })
 
           if (cancelled) {
             return
           }
 
-          setDiscoveredModels((existing) =>
-            existing.length === nextDiscoveredModels.length &&
-            existing.every((value, index) => value === nextDiscoveredModels[index])
+          setModelDiscovery((existing) =>
+            assistantModelDiscoveryResultsEqual(existing, nextDiscovery)
               ? existing
-              : nextDiscoveredModels,
+              : nextDiscovery,
           )
         })()
 
@@ -2881,7 +2919,10 @@ export async function runAssistantChatWithInk(
       }, [
         modelCatalog.capabilities.supportsModelDiscovery,
         session.provider,
+        session.providerOptions.apiKeyEnv,
         session.providerOptions.baseUrl,
+        session.providerOptions.headers,
+        session.providerOptions.providerName,
       ])
 
       React.useEffect(() => {
@@ -2924,7 +2965,11 @@ export async function runAssistantChatWithInk(
       )
 
       const openModelSwitcher = () => {
+        const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+          modelCatalog.models[findAssistantModelOptionIndex(activeModel, modelCatalog.modelOptions)],
+        )
         setModelSwitcherState({
+          models: modelCatalog.models,
           mode: 'model',
           modelIndex: findAssistantModelOptionIndex(
             activeModel,
@@ -2932,8 +2977,10 @@ export async function runAssistantChatWithInk(
           ),
           reasoningIndex: findAssistantReasoningOptionIndex(
             activeReasoningEffort,
-            modelCatalog.reasoningOptions,
+            reasoningOptions,
           ),
+          modelOptions: modelCatalog.modelOptions,
+          reasoningOptions,
         })
       }
 
@@ -2944,12 +2991,21 @@ export async function runAssistantChatWithInk(
           }
 
           if (previous.mode === 'model') {
+            const modelIndex = wrapPickerIndex(
+              previous.modelIndex + delta,
+              previous.modelOptions.length,
+            )
+            const reasoningOptions = resolveAssistantCatalogReasoningOptions(
+              previous.models[modelIndex],
+            )
             return {
               ...previous,
-              modelIndex: wrapPickerIndex(
-                previous.modelIndex + delta,
-                modelCatalog.modelOptions.length,
+              modelIndex,
+              reasoningIndex: findAssistantReasoningOptionIndex(
+                activeReasoningEffort,
+                reasoningOptions,
               ),
+              reasoningOptions,
             }
           }
 
@@ -2957,7 +3013,7 @@ export async function runAssistantChatWithInk(
             ...previous,
             reasoningIndex: wrapPickerIndex(
               previous.reasoningIndex + delta,
-              modelCatalog.reasoningOptions.length,
+              previous.reasoningOptions.length,
             ),
           }
         })
@@ -2982,12 +3038,12 @@ export async function runAssistantChatWithInk(
 
       const applyModelSwitcherSelection = (selection: ModelSwitcherState) => {
         const nextModel =
-          modelCatalog.modelOptions[selection.modelIndex]?.value ??
+          selection.modelOptions[selection.modelIndex]?.value ??
           activeModel ??
           null
         const nextReasoningEffort =
-          modelCatalog.reasoningOptions.length > 0
-            ? modelCatalog.reasoningOptions[selection.reasoningIndex]?.value ??
+          selection.reasoningOptions.length > 0
+            ? selection.reasoningOptions[selection.reasoningIndex]?.value ??
               activeReasoningEffort ??
               'medium'
             : null
@@ -3020,10 +3076,17 @@ export async function runAssistantChatWithInk(
             latestSessionRef.current = updatedSession
             setSession(updatedSession)
 
-            await saveAssistantOperatorDefaultsPatch({
-              model: nextModel,
-              reasoningEffort: nextReasoningEffort,
-            })
+            await saveAssistantOperatorDefaultsPatch(
+              buildAssistantProviderDefaultsPatch({
+                defaults,
+                provider: updatedSession.provider,
+                providerConfig: {
+                  ...updatedSession.providerOptions,
+                  model: nextModel,
+                  reasoningEffort: nextReasoningEffort,
+                },
+              }),
+            )
           } catch (error) {
             setStatus({
               kind: 'error',
@@ -3043,7 +3106,7 @@ export async function runAssistantChatWithInk(
 
         if (
           modelSwitcherState.mode === 'model' &&
-          modelCatalog.reasoningOptions.length > 0
+          modelSwitcherState.reasoningOptions.length > 0
         ) {
           setModelSwitcherState({
             ...modelSwitcherState,
@@ -3450,12 +3513,12 @@ export async function runAssistantChatWithInk(
                   currentReasoningEffort: activeReasoningEffort,
                   mode: modelSwitcherState.mode,
                   modelIndex: modelSwitcherState.modelIndex,
-                  modelOptions: modelCatalog.modelOptions,
+                  modelOptions: modelSwitcherState.modelOptions,
                   onCancel: cancelModelSwitcher,
                   onConfirm: confirmModelSwitcher,
                   onMove: moveModelSwitcherSelection,
                   reasoningIndex: modelSwitcherState.reasoningIndex,
-                  reasoningOptions: modelCatalog.reasoningOptions,
+                  reasoningOptions: modelSwitcherState.reasoningOptions,
                 })
               : null,
             createElement(ChatComposer, {
