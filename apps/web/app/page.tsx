@@ -38,7 +38,7 @@ const capabilities = [
   },
   {
     title: "Always private",
-    body: "Your health data stays on your device. Nothing is sold or shared.",
+    body: "Local mode keeps your data on your device. Hosted runs use encrypted cloud snapshots. Nothing is sold or shared.",
   },
 ] as const;
 
@@ -78,7 +78,7 @@ const faqItems = [
   },
   {
     question: "Is my health data private?",
-    answer: "Yes. Your data is encrypted and stays on your device. We never sell or share your health information with third parties.",
+    answer: "Yes. Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots. We never sell or share your health information with third parties.",
   },
   {
     question: "What can I ask Murph?",
@@ -368,7 +368,7 @@ export default function HomePage() {
                 "Works on iMessage, Telegram, and email",
                 "Syncs with Oura and WHOOP, imports Garmin exports",
                 "Plain English — no jargon",
-                "Always online, always private",
+                "Encrypted cloud snapshots for hosted runs",
               ].map((text) => (
                 <span
                   key={`${repeat}-${text}`}
