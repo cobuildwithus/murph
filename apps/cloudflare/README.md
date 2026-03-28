@@ -79,7 +79,7 @@ That means:
 - those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one warm runner container cannot call them directly with `curl` or borrowed env
 - the worker-owned share and hosted-AI-usage proxy hosts inject the Durable Object's bound `userId` into the web request and keep the broader web control tokens out of the runner environment
 - worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
-- the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://outbox.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
+- the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://side-effects.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's configurable `sleepAfter` idle timeout, defaulting to `5m`, instead of forcing immediate teardown after every run
 
@@ -163,4 +163,4 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 - Only assistant delivery is implemented as a hosted side-effect kind today. Future provider mutations, callbacks, or outbound deliveries should extend the same committed side-effect journal rather than bypassing it.
 - Cloudflare container lifecycle is currently "start on demand, keep warm until `sleepAfter` expires." If you later want explicit pooling or lease management, that should be a separate follow-up rather than an implicit background contract.
-- The internal `commit.worker` / `outbox.worker` / `email.worker` callback hosts remain the current durable boundary. The next simplification pass should have the container return a fuller final result to the Durable Object so the Worker can eventually collapse those callback hostnames without changing first-canary behavior now.
+- The internal `commit.worker` / `side-effects.worker` / `email.worker` callback hosts remain the current durable boundary. The next simplification pass should have the container return a fuller final result to the Durable Object so the Worker can eventually collapse those callback hostnames without changing first-canary behavior now.

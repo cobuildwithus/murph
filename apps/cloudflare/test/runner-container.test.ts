@@ -89,15 +89,8 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
-      "outbox.worker": {
-        method: "outboxWorker",
-        params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-          userId: "member_123",
-        },
-      },
       "side-effects.worker": {
-        method: "outboxWorker",
+        method: "sideEffectsWorker",
         params: {
           internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
           userId: "member_123",

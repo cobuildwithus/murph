@@ -6,7 +6,6 @@ import {
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-  HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   buildHostedExecutionDispatchRef,
   buildHostedExecutionOutboxPayload,
@@ -21,6 +20,8 @@ import {
   buildHostedExecutionUserStatusPath,
   createHostedExecutionControlClient,
   createHostedExecutionDispatchClient,
+  createHostedExecutionServerAiUsageClient,
+  createHostedExecutionServerSharePackClient,
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
   HOSTED_EXECUTION_DISPATCH_PATH,
@@ -166,30 +167,30 @@ describe("@murph/hosted-execution", () => {
         CRON_SECRET: "cron-token",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://device-sync.example.test/",
         HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
-        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test/",
+        HOSTED_WEB_BASE_URL: "https://web.example.test/",
         HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
       }),
     ).toEqual({
       deviceSyncRuntimeBaseUrl: "https://device-sync.example.test",
       internalToken: "internal-token",
       schedulerToken: "cron-token",
-      shareBaseUrl: "https://join.example.test",
+      shareBaseUrl: "https://web.example.test",
       shareToken: "share-token",
-      usageBaseUrl: "https://join.example.test",
+      usageBaseUrl: "https://web.example.test",
     });
 
     expect(
       readHostedExecutionWebControlPlaneEnvironment({
-        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test/",
+        HOSTED_WEB_BASE_URL: "https://web.example.test/",
         HOSTED_SHARE_API_BASE_URL: "https://share.example.test/internal/",
       }),
     ).toEqual({
-      deviceSyncRuntimeBaseUrl: "https://join.example.test",
+      deviceSyncRuntimeBaseUrl: "https://web.example.test",
       internalToken: null,
       schedulerToken: null,
       shareBaseUrl: "https://share.example.test/internal",
       shareToken: null,
-      usageBaseUrl: "https://join.example.test",
+      usageBaseUrl: "https://web.example.test",
     });
   });
 
@@ -216,12 +217,127 @@ describe("@murph/hosted-execution", () => {
     });
   });
 
+  it("sends the bound hosted execution user header when recording hosted AI usage", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        recorded: 1,
+        usageIds: ["usage_123"],
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = createHostedExecutionServerAiUsageClient({
+      baseUrl: "https://join.example.test",
+      boundUserId: "member_123",
+      internalToken: "internal-token",
+      timeoutMs: 10_000,
+    });
+
+    await expect(
+      client.recordUsage([
+        {
+          usageId: "usage_123",
+        },
+      ]),
+    ).resolves.toEqual({
+      recorded: 1,
+      usageIds: ["usage_123"],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://join.example.test/api/internal/hosted-execution/usage/record",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+        method: "POST",
+      }),
+    );
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("sends the share token and bound hosted execution user header for direct share payload reads", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        pack: {
+          createdAt: "2026-03-29T10:00:00.000Z",
+          entities: [
+            {
+              kind: "food",
+              payload: {
+                kind: "smoothie",
+                status: "active",
+                title: "Share Smoothie",
+              },
+              ref: "food:share-smoothie",
+            },
+          ],
+          schemaVersion: "murph.share-pack.v1",
+          title: "Share pack",
+        },
+        shareId: "share_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = createHostedExecutionServerSharePackClient({
+      baseUrl: "https://share.example.test",
+      boundUserId: "member_123",
+      shareToken: "share-token",
+      timeoutMs: 10_000,
+    });
+
+    await expect(
+      client.fetchSharePack({
+        shareCode: "share-code",
+        shareId: "share_123",
+      }),
+    ).resolves.toEqual({
+      pack: {
+        createdAt: "2026-03-29T10:00:00.000Z",
+        entities: [
+          {
+            kind: "food",
+            payload: {
+              kind: "smoothie",
+              status: "active",
+              title: "Share Smoothie",
+            },
+            ref: "food:share-smoothie",
+          },
+        ],
+        schemaVersion: "murph.share-pack.v1",
+        title: "Share pack",
+      },
+      shareId: "share_123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://share.example.test/api/hosted-share/internal/share_123/payload?shareCode=share-code",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+        method: "GET",
+      }),
+    );
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer share-token");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
   it("exports the shared hosted callback hosts and default callback base urls", () => {
     expect(HOSTED_EXECUTION_CALLBACK_HOSTS).toEqual({
       artifacts: "artifacts.worker",
       commit: "commit.worker",
       email: "email.worker",
-      outbox: "outbox.worker",
       sideEffects: "side-effects.worker",
     });
     expect(DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL).toBe("http://artifacts.worker");
@@ -408,7 +524,7 @@ describe("@murph/hosted-execution", () => {
     });
   });
 
-  it("builds and reads inline, reference, and legacy outbox payloads", () => {
+  it("builds and reads inline and reference outbox payloads", () => {
     const inlineDispatch = buildHostedExecutionAssistantCronTickDispatch({
       eventId: "evt_cron",
       occurredAt: "2026-03-28T09:10:00.000Z",
@@ -455,24 +571,6 @@ describe("@murph/hosted-execution", () => {
         userId: referenceDispatch.event.userId,
       }),
     ).toEqual(referencePayload);
-    expect(
-      readHostedExecutionOutboxPayload(
-        {
-          dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
-          schemaVersion: HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-        },
-        {
-          eventId: referenceDispatch.eventId,
-          eventKind: referenceDispatch.event.kind,
-          occurredAt: referenceDispatch.occurredAt,
-          userId: referenceDispatch.event.userId,
-        },
-      ),
-    ).toEqual({
-      dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
-      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-      storage: "reference",
-    });
   });
 
   it("parses legacy hosted assistant delivery side effects without idempotency keys", () => {

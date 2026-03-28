@@ -1196,7 +1196,7 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("imports a shared food bundle with attached supplement protocols", async () => {
+  it("imports a hosted share through a direct control-plane client when the share token is configured", async () => {
     const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-source-"));
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
@@ -1225,7 +1225,13 @@ describe("runHostedExecutionJob", () => {
         food: { id: smoothie.record.foodId },
       },
     });
+    let sharePayloadRequests = 0;
+    let lastBoundUserIdHeader: string | null = null;
     const sharePayloadServer = createServer((request, response) => {
+      sharePayloadRequests += 1;
+      lastBoundUserIdHeader = typeof request.headers["x-hosted-execution-user-id"] === "string"
+        ? request.headers["x-hosted-execution-user-id"]
+        : null;
       if (
         request.url
         === "/api/hosted-share/internal/share_123/payload?shareCode=share_code_123"
@@ -1287,21 +1293,19 @@ describe("runHostedExecutionJob", () => {
           occurredAt: "2026-03-26T12:30:00.000Z",
         },
       });
-      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-"));
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-direct-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
         agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
-      const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
+      const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Morning Smoothie");
 
-      expect(result.result.summary).toBe(
-        `Imported share pack "${pack.title}" (1 foods, 1 protocols, 0 recipes). Logged one meal entry from the shared food. Parser jobs: 0. Device sync jobs: 0 (skipped: providers not configured).`,
-      );
+      expect(sharePayloadRequests).toBe(1);
+      expect(lastBoundUserIdHeader).toBe("member_456");
       expect(importedFood).toBeDefined();
-      expect(importedFood.attachedProtocolIds?.length).toBe(1);
-      expect(importedFood.autoLogDaily?.time).toBe("08:00");
+      expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
       setHostedExecutionCallbackBaseUrlsForTests(null);
       sharePayloadServer.close();

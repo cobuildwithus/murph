@@ -10,10 +10,8 @@ import type {
   HostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 import {
-  applyHostedExecutionDeviceSyncRuntimeUpdates,
-  fetchHostedExecutionDeviceSyncRuntimeSnapshot,
-  HOSTED_EXECUTION_PROXY_HOSTS,
   normalizeHostedDeviceSyncJobHints,
+  resolveHostedExecutionDeviceSyncRuntimeClient,
   resolveHostedDeviceSyncWakeContext,
   type HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
@@ -46,16 +44,23 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       snapshot: null,
     };
   }
-  const baseUrl = input.webControlPlane.deviceSyncRuntimeBaseUrl!;
-  const internalToken = input.webControlPlane.internalToken!;
-
-  const snapshot = await fetchHostedExecutionDeviceSyncRuntimeSnapshot({
-    baseUrl,
+  const client = resolveHostedExecutionDeviceSyncRuntimeClient({
+    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+    boundUserId: input.dispatch.event.userId,
     fetchImpl: input.fetchImpl,
-    internalToken,
+    internalToken: input.webControlPlane.internalToken,
     timeoutMs: input.timeoutMs,
-    userId: input.dispatch.event.userId,
   });
+  if (!client) {
+    return {
+      hostedToLocalAccountIds: new Map(),
+      localToHostedAccountIds: new Map(),
+      observedTokenVersions: new Map(),
+      snapshot: null,
+    };
+  }
+
+  const snapshot = await client.fetchSnapshot();
   const hostedToLocalAccountIds = new Map<string, string>();
   const localToHostedAccountIds = new Map<string, string>();
   const observedTokenVersions = new Map<string, number | null>();
@@ -135,8 +140,16 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   if (!hasHostedDeviceSyncRuntimeAccess(input.webControlPlane)) {
     return;
   }
-  const baseUrl = input.webControlPlane.deviceSyncRuntimeBaseUrl!;
-  const internalToken = input.webControlPlane.internalToken!;
+  const client = resolveHostedExecutionDeviceSyncRuntimeClient({
+    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+    boundUserId: input.dispatch.event.userId,
+    fetchImpl: input.fetchImpl,
+    internalToken: input.webControlPlane.internalToken,
+    timeoutMs: input.timeoutMs,
+  });
+  if (!client) {
+    return;
+  }
 
   const codec = createSecretCodec(input.secret);
   const updates: HostedDeviceSyncRuntimeConnectionUpdate[] = [];
@@ -164,37 +177,20 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
     }
   }
 
-  await applyHostedExecutionDeviceSyncRuntimeUpdates({
-    baseUrl,
-    fetchImpl: input.fetchImpl,
-    internalToken,
+  await client.applyUpdates({
     occurredAt: input.dispatch.occurredAt,
-    timeoutMs: input.timeoutMs,
     updates,
-    userId: input.dispatch.event.userId,
   });
 }
 
 function hasHostedDeviceSyncRuntimeAccess(
   webControlPlane: HostedExecutionWebControlPlaneEnvironment,
 ): boolean {
-  if (!webControlPlane.deviceSyncRuntimeBaseUrl) {
-    return false;
-  }
-
-  return webControlPlane.internalToken !== null
-    || isHostedWorkerProxyBaseUrl(
-      webControlPlane.deviceSyncRuntimeBaseUrl,
-      HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
-    );
-}
-
-function isHostedWorkerProxyBaseUrl(baseUrl: string, hostname: string): boolean {
-  try {
-    return new URL(baseUrl).hostname === hostname;
-  } catch {
-    return false;
-  }
+  return resolveHostedExecutionDeviceSyncRuntimeClient({
+    baseUrl: webControlPlane.deviceSyncRuntimeBaseUrl,
+    boundUserId: "member_probe",
+    internalToken: webControlPlane.internalToken,
+  }) !== null;
 }
 
 function applyHostedDeviceSyncWakeHint(input: {

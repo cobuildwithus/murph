@@ -2,9 +2,8 @@ import {
   importSharePackIntoVault,
 } from "@murph/core";
 import {
-  fetchHostedExecutionSharePack,
-  HOSTED_EXECUTION_PROXY_HOSTS,
   parseHostedExecutionSharePackResponse,
+  resolveHostedExecutionSharePackClient,
 } from "@murph/hosted-execution";
 
 import type {
@@ -28,6 +27,7 @@ export async function handleHostedShareAcceptedDispatch(
 ): Promise<HostedDispatchEffect> {
   const sharePayload = await fetchHostedSharePayload(
     input.dispatch.event.share,
+    input.dispatch.event.userId,
     input.internalWorkerFetch,
     input.runtime,
   );
@@ -43,45 +43,24 @@ export async function handleHostedShareAcceptedDispatch(
 
 async function fetchHostedSharePayload(
   share: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>["share"],
+  boundUserId: string,
   internalWorkerFetch: typeof fetch | undefined,
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "webControlPlane"
   >,
 ): Promise<ReturnType<typeof parseHostedExecutionSharePackResponse>> {
-  if (!hasHostedSharePayloadAccess(runtime.webControlPlane)) {
-    throw new Error("Hosted share payload fetch is not configured.");
-  }
-  const baseUrl = runtime.webControlPlane.shareBaseUrl!;
-  const shareToken = runtime.webControlPlane.shareToken!;
-
-  return await fetchHostedExecutionSharePack({
-    baseUrl,
+  const client = resolveHostedExecutionSharePackClient({
+    baseUrl: runtime.webControlPlane.shareBaseUrl,
+    boundUserId,
     fetchImpl: internalWorkerFetch,
-    share,
-    shareToken,
+    shareToken: runtime.webControlPlane.shareToken,
     timeoutMs: runtime.commitTimeoutMs,
   });
-}
 
-function hasHostedSharePayloadAccess(
-  webControlPlane: Pick<NormalizedHostedAssistantRuntimeConfig, "webControlPlane">["webControlPlane"],
-): boolean {
-  if (!webControlPlane.shareBaseUrl) {
-    return false;
+  if (!client) {
+    throw new Error("Hosted share payload fetch is not configured for the current control-plane client.");
   }
 
-  return webControlPlane.shareToken !== null
-    || isHostedWorkerProxyBaseUrl(
-      webControlPlane.shareBaseUrl,
-      HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
-    );
-}
-
-function isHostedWorkerProxyBaseUrl(baseUrl: string, hostname: string): boolean {
-  try {
-    return new URL(baseUrl).hostname === hostname;
-  } catch {
-    return false;
-  }
+  return await client.fetchSharePack(share);
 }

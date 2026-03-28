@@ -33,7 +33,6 @@ let hostedExecutionCallbackBaseUrlsForTests: {
   artifactsBaseUrl?: string | null;
   commitBaseUrl?: string | null;
   emailBaseUrl?: string | null;
-  outboxBaseUrl?: string | null;
   sharePackBaseUrl?: string | null;
   sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
@@ -59,7 +58,6 @@ export function setHostedExecutionCallbackBaseUrlsForTests(input: {
   artifactsBaseUrl?: string | null;
   commitBaseUrl?: string | null;
   emailBaseUrl?: string | null;
-  outboxBaseUrl?: string | null;
   sharePackBaseUrl?: string | null;
   sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
@@ -70,6 +68,9 @@ export function setHostedExecutionCallbackBaseUrlsForTests(input: {
 
 export async function runHostedExecutionJob(
   input: HostedExecutionRunnerJobRequest,
+  options?: {
+    signal?: AbortSignal;
+  },
 ): Promise<HostedExecutionRunnerResult> {
   hostedExecutionRunStartHookForTests?.();
   const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
@@ -114,5 +115,5 @@ export async function runHostedExecutionJob(
   return await runHostedAssistantRuntimeJobIsolated({
     request,
     runtime,
-  });
+  }, options);
 }

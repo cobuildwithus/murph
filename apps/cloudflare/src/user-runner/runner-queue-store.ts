@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   parseHostedExecutionDispatchRequest,
   type HostedExecutionBundleRef,
@@ -9,7 +7,6 @@ import {
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import {
   CONSUMED_EVENT_EXACT_TTL_MS,
-  CONSUMED_EVENT_REPLAY_FILTER_BYTES,
   MAX_BACKPRESSURED_EVENT_IDS,
   MAX_PENDING_EVENTS,
   MAX_POISONED_EVENT_IDS,
@@ -67,7 +64,6 @@ interface BundleRefSwapInput {
 }
 
 export class RunnerQueueStore {
-  private consumedReplayFilterCache: Uint8Array | null = null;
   private userId: string | null = null;
 
   constructor(private readonly state: DurableObjectStateLike) {
@@ -552,12 +548,7 @@ export class RunnerQueueStore {
       CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
       ON poisoned_events (poisoned_at, event_id)
     `);
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS consumed_event_replay_filter (
-        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-        bits BLOB NOT NULL
-      )
-    `);
+    this.sql.exec("DROP TABLE IF EXISTS consumed_event_replay_filter");
   }
 
   private pruneExpiredConsumedEventsSync(): void {
@@ -790,8 +781,6 @@ export class RunnerQueueStore {
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
-    // Exact tombstones remain authoritative. The replay filter is only retained as a
-    // best-effort hint and must never make a fresh event look consumed.
     return this.sql.exec<{ count: DurableObjectSqlValue }>(
       "SELECT COUNT(*) AS count FROM consumed_events WHERE event_id = ?",
       eventId,
@@ -861,7 +850,6 @@ export class RunnerQueueStore {
   }
 
   private writeConsumedEventSync(eventId: string, expiresAt: string): void {
-    this.rememberConsumedEventInReplayFilterSync(eventId);
     this.sql.exec(
       "INSERT OR REPLACE INTO consumed_events (event_id, expires_at) VALUES (?, ?)",
       eventId,
@@ -908,66 +896,6 @@ export class RunnerQueueStore {
       MAX_POISONED_EVENT_IDS,
     );
   }
-
-  private rememberConsumedEventInReplayFilterSync(eventId: string): void {
-    const bits = this.readConsumedReplayFilterBitsSync();
-    const bitCount = bits.length * 8;
-    let changed = false;
-
-    for (const bitIndex of consumedReplayFilterBitIndexes(eventId, bitCount)) {
-      const byteIndex = bitIndex >> 3;
-      const mask = 1 << (bitIndex & 7);
-      if ((bits[byteIndex] & mask) !== 0) {
-        continue;
-      }
-
-      bits[byteIndex] |= mask;
-      changed = true;
-    }
-
-    if (!changed) {
-      return;
-    }
-
-    this.sql.exec(
-      `INSERT OR REPLACE INTO consumed_event_replay_filter (
-        singleton,
-        bits
-      ) VALUES (?, ?)`,
-      1,
-      bits,
-    );
-  }
-
-  private readConsumedReplayFilterBitsSync(): Uint8Array {
-    if (this.consumedReplayFilterCache) {
-      return this.consumedReplayFilterCache;
-    }
-
-    const row = this.sql.exec<{ bits: DurableObjectSqlValue }>(
-      `SELECT bits
-      FROM consumed_event_replay_filter
-      WHERE singleton = 1`,
-    ).toArray()[0] ?? null;
-
-    const bits = normalizeReplayFilterBits(row?.bits);
-    if (bits) {
-      this.consumedReplayFilterCache = bits;
-      return bits;
-    }
-
-    const empty = new Uint8Array(CONSUMED_EVENT_REPLAY_FILTER_BYTES);
-    this.sql.exec(
-      `INSERT OR REPLACE INTO consumed_event_replay_filter (
-        singleton,
-        bits
-      ) VALUES (?, ?)`,
-      1,
-      empty,
-    );
-    this.consumedReplayFilterCache = empty;
-    return empty;
-  }
 }
 
 function appendBoundedEventId(eventIds: readonly string[], eventId: string, limit: number): string[] {
@@ -989,31 +917,6 @@ function normalizePreferredWakeAt(value: string | null): string | null {
 
 function nextConsumedEventExactExpiryIso(): string {
   return new Date(Date.now() + CONSUMED_EVENT_EXACT_TTL_MS).toISOString();
-}
-
-function normalizeReplayFilterBits(value: DurableObjectSqlValue | undefined): Uint8Array | null {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-
-  if (value instanceof ArrayBuffer) {
-    return new Uint8Array(value);
-  }
-
-  return null;
-}
-
-function consumedReplayFilterBitIndexes(eventId: string, bitCount: number): number[] {
-  const digest = createHash("sha256").update(eventId).digest();
-  const hashOne = digest.readUInt32BE(0);
-  const hashTwo = digest.readUInt32BE(4) || 0x9e3779b9;
-  const indexes: number[] = [];
-
-  for (let index = 0; index < 7; index += 1) {
-    indexes.push((hashOne + index * hashTwo) % bitCount);
-  }
-
-  return indexes;
 }
 
 function assignBundleRefs(

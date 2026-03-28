@@ -2,7 +2,6 @@ export const HOSTED_EXECUTION_CALLBACK_HOSTS = {
   artifacts: "artifacts.worker",
   commit: "commit.worker",
   email: "email.worker",
-  outbox: "outbox.worker",
   sideEffects: "side-effects.worker",
 } as const;
 

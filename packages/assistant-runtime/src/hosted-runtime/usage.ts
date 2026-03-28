@@ -1,9 +1,9 @@
 import {
   deletePendingAssistantUsageRecord,
   listPendingAssistantUsageRecords,
-  type AssistantUsageCredentialSource,
+  resolveAssistantUsageCredentialSource,
 } from "@murph/runtime-state";
-import { recordHostedExecutionAiUsage } from "@murph/hosted-execution";
+import { resolveHostedExecutionAiUsageClient } from "@murph/hosted-execution";
 
 export interface HostedPendingAssistantUsageExportResult {
   exported: number;
@@ -11,24 +11,15 @@ export interface HostedPendingAssistantUsageExportResult {
   pending: number;
 }
 
-const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set([
-  "ANTHROPIC_API_KEY",
-  "GOOGLE_GENERATIVE_AI_API_KEY",
-  "GROQ_API_KEY",
-  "MISTRAL_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "PERPLEXITY_API_KEY",
-  "TOGETHER_API_KEY",
-  "XAI_API_KEY",
-]);
+const HOSTED_USAGE_EXPORT_BATCH_LIMIT = 50;
 
 export async function exportHostedPendingAssistantUsage(input: {
   baseUrl: string | null;
   fetchImpl?: typeof fetch;
   internalToken: string | null;
   timeoutMs: number | null;
-  userEnv: Readonly<Record<string, string>>;
+  userId: string;
+  userEnvKeys?: readonly string[];
   vaultRoot: string;
 }): Promise<HostedPendingAssistantUsageExportResult> {
   const pendingRecords = await listPendingAssistantUsageRecords({
@@ -45,43 +36,66 @@ export async function exportHostedPendingAssistantUsage(input: {
 
   let exported = 0;
   let failed = 0;
+  const client = resolveHostedExecutionAiUsageClient({
+    baseUrl: input.baseUrl,
+    boundUserId: input.userId,
+    fetchImpl: input.fetchImpl,
+    internalToken: input.internalToken,
+    timeoutMs: input.timeoutMs,
+  });
 
-  for (const record of pendingRecords) {
-    const enrichedRecord = {
-      ...record,
-      credentialSource: resolveHostedAssistantUsageCredentialSource({
-        apiKeyEnv: record.apiKeyEnv,
-        provider: record.provider,
-        userEnv: input.userEnv,
-      }),
+  if (!client) {
+    console.warn(
+      `Hosted AI usage export is not configured for the current bound user; leaving ${pendingRecords.length} records pending.`,
+    );
+
+    return {
+      exported: 0,
+      failed: pendingRecords.length,
+      pending: pendingRecords.length,
     };
+  }
 
+  for (const batch of chunkPendingUsageRecords(pendingRecords, HOSTED_USAGE_EXPORT_BATCH_LIMIT)) {
     try {
-      const response = await recordHostedExecutionAiUsage({
-        baseUrl: input.baseUrl,
-        fetchImpl: input.fetchImpl,
-        internalToken: input.internalToken,
-        timeoutMs: input.timeoutMs,
-        usage: [enrichedRecord as Record<string, unknown>],
-      });
+      const response = await client.recordUsage(
+        batch.map((record): Record<string, unknown> =>
+          record.credentialSource === null
+            ? {
+                ...record,
+                credentialSource: resolveAssistantUsageCredentialSource({
+                  apiKeyEnv: record.apiKeyEnv,
+                  provider: record.provider,
+                  userEnvKeys: input.userEnvKeys ?? [],
+                }),
+              }
+            : {
+                ...record,
+              }
+        ),
+      );
 
-      if (response.recorded < 1 || !response.usageIds.includes(record.usageId)) {
-        failed += 1;
+      const batchUsageIds = new Set(batch.map((record) => record.usageId));
+      const acknowledgedUsageIds = response.usageIds.filter((usageId) => batchUsageIds.has(usageId));
+
+      if (acknowledgedUsageIds.length !== batch.length) {
+        failed += batch.length - acknowledgedUsageIds.length;
         console.warn(
-          `Hosted AI usage export did not acknowledge ${record.usageId}; leaving the pending record in place.`,
+          `Hosted AI usage export acknowledged ${acknowledgedUsageIds.length} of ${batch.length} records; leaving the remainder pending.`,
         );
-        continue;
       }
 
-      await deletePendingAssistantUsageRecord({
-        usageId: record.usageId,
-        vault: input.vaultRoot,
-      });
-      exported += 1;
+      for (const usageId of acknowledgedUsageIds) {
+        await deletePendingAssistantUsageRecord({
+          usageId,
+          vault: input.vaultRoot,
+        });
+      }
+      exported += acknowledgedUsageIds.length;
     } catch (error) {
-      failed += 1;
+      failed += batch.length;
       console.warn(
-        `Failed to export hosted AI usage ${record.usageId}: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to export hosted AI usage batch of ${batch.length} records: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -93,24 +107,12 @@ export async function exportHostedPendingAssistantUsage(input: {
   };
 }
 
-function resolveHostedAssistantUsageCredentialSource(input: {
-  apiKeyEnv: string | null;
-  provider: string;
-  userEnv: Readonly<Record<string, string>>;
-}): AssistantUsageCredentialSource {
-  if (!input.apiKeyEnv) {
-    if (input.provider === "codex-cli" && hasHostedMemberAiCredential(input.userEnv)) {
-      return "unknown";
-    }
+function chunkPendingUsageRecords<T>(records: readonly T[], size: number): T[][] {
+  const batches: T[][] = [];
 
-    return "platform";
+  for (let index = 0; index < records.length; index += size) {
+    batches.push(records.slice(index, index + size));
   }
 
-  return Object.prototype.hasOwnProperty.call(input.userEnv, input.apiKeyEnv)
-    ? "member"
-    : "platform";
-}
-
-function hasHostedMemberAiCredential(userEnv: Readonly<Record<string, string>>): boolean {
-  return Object.keys(userEnv).some((key) => HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS.has(key));
+  return batches;
 }

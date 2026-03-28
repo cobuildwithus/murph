@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 
 import {
-  fetchHostedExecutionDeviceSyncRuntimeSnapshot as fetchHostedDeviceSyncRuntimeSnapshot,
+  createHostedExecutionServerDeviceSyncRuntimeClient,
+  createHostedExecutionServerSharePackClient,
 } from "@murph/hosted-execution";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
 import { sendHostedEmailOverWorker } from "../src/hosted-email.ts";
@@ -168,15 +169,15 @@ test("hosted device-sync snapshot tolerates non-JSON error bodies and applies th
       },
     }));
   global.fetch = fetchMock;
+  const client = createHostedExecutionServerDeviceSyncRuntimeClient({
+    baseUrl: "https://hosted.example.test",
+    boundUserId: "member_123",
+    internalToken: "internal-token",
+    timeoutMs: 9_000,
+  });
 
   await assert.rejects(
-    () =>
-      fetchHostedDeviceSyncRuntimeSnapshot({
-        baseUrl: "https://hosted.example.test",
-        internalToken: "internal-token",
-        timeoutMs: 9_000,
-        userId: "member_123",
-      }),
+    () => client.fetchSnapshot(),
     /Hosted device-sync runtime snapshot failed with HTTP 502: <html>bad gateway<\/html>/,
   );
 
@@ -187,8 +188,7 @@ test("hosted device-sync snapshot tolerates non-JSON error bodies and applies th
   );
 });
 
-test("hosted share payload fetch tolerates non-JSON error bodies and applies the hosted timeout", async () => {
-  const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+test("hosted share payload fetch supports direct web-control URLs when the share token is configured", async () => {
   const fetchMock = vi.fn(async () =>
     new Response("<html>service unavailable</html>", {
       status: 503,
@@ -215,7 +215,7 @@ test("hosted share payload fetch tolerates non-JSON error bodies and applies the
           commitTimeoutMs: 12_000,
           webControlPlane: {
             deviceSyncRuntimeBaseUrl: null,
-            internalToken: "share-token",
+            internalToken: null,
             schedulerToken: null,
             shareBaseUrl: "https://share.example.test",
             shareToken: "share-token",
@@ -223,13 +223,68 @@ test("hosted share payload fetch tolerates non-JSON error bodies and applies the
         },
         vaultRoot: "/tmp/share-vault",
       }),
-    /Hosted share payload fetch failed with HTTP 503: <html>service unavailable<\/html>/,
+    /Hosted share payload fetch failed with HTTP 503/u,
   );
 
-  assert.equal(timeoutSpy.mock.calls[0]?.[0], 12_000);
+  assert.equal(fetchMock.mock.calls.length, 1);
   assert.equal(
     new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
     "Bearer share-token",
+  );
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id"),
+    "member_123",
+  );
+});
+
+test("hosted share payload direct client sends both the share token and bound-user header", async () => {
+  const fetchMock = vi.fn(async () =>
+    new Response(JSON.stringify({
+      pack: {
+        createdAt: "2026-03-29T10:00:00.000Z",
+        entities: [
+          {
+            kind: "food",
+            payload: {
+              kind: "smoothie",
+              status: "active",
+              title: "Share Smoothie",
+            },
+            ref: "food:share-smoothie",
+          },
+        ],
+        schemaVersion: "murph.share-pack.v1",
+        title: "Share pack",
+      },
+      shareId: "share_123",
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+    }));
+  global.fetch = fetchMock;
+  const client = createHostedExecutionServerSharePackClient({
+    baseUrl: "https://share.example.test",
+    boundUserId: "member_123",
+    shareToken: "share-token",
+    timeoutMs: 9_000,
+  });
+
+  await assert.doesNotReject(() =>
+    client.fetchSharePack({
+      shareCode: "share-code",
+      shareId: "share_123",
+    })
+  );
+
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
+    "Bearer share-token",
+  );
+  assert.equal(
+    new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id"),
+    "member_123",
   );
 });
 

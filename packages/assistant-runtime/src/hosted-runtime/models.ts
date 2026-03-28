@@ -25,7 +25,6 @@ export interface HostedAssistantRuntimeConfig {
   emailBaseUrl?: string | null;
   internalWorkerProxyToken?: string | null;
   forwardedEnv?: Readonly<Record<string, string>>;
-  outboxBaseUrl?: string | null;
   sideEffectsBaseUrl?: string | null;
   userEnv?: Readonly<Record<string, string>>;
   webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;

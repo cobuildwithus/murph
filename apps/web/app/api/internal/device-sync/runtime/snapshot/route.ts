@@ -1,21 +1,24 @@
-import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murph/hosted-execution";
-
 import {
   buildHostedDeviceSyncRuntimeSnapshot,
   parseHostedDeviceSyncRuntimeSnapshotRequest,
 } from "@/src/lib/device-sync/internal-runtime";
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
-import { requireHostedExecutionInternalToken } from "@/src/lib/hosted-execution/internal";
+import { authorizeHostedExecutionInternalRequest } from "@/src/lib/hosted-execution/internal";
 import { jsonError, jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";
 
 export async function POST(request: Request) {
   try {
-    requireHostedExecutionInternalToken(request);
-    const controlPlane = createHostedDeviceSyncControlPlane(request);
     const body = await readJsonObject(request);
+    const { trustedUserId } = authorizeHostedExecutionInternalRequest({
+      acceptedToken: "internal",
+      bodyUserIds: [typeof body.userId === "string" ? body.userId : null],
+      request,
+      requireBoundUserId: true,
+    });
+    const controlPlane = createHostedDeviceSyncControlPlane(request);
     const snapshotRequest = parseHostedDeviceSyncRuntimeSnapshotRequest(
       body,
-      request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER),
+      trustedUserId,
     );
     await controlPlane.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot(snapshotRequest);
     const snapshot = await buildHostedDeviceSyncRuntimeSnapshot(controlPlane.store, snapshotRequest);

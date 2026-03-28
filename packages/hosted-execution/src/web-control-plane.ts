@@ -6,6 +6,7 @@ import type {
   HostedExecutionSharePackResponse,
   HostedExecutionShareReference,
 } from "./contracts.ts";
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "./contracts.ts";
 import { HOSTED_EXECUTION_PROXY_HOSTS } from "./callback-hosts.ts";
 import { normalizeHostedExecutionBaseUrl } from "./env.ts";
 import {
@@ -29,97 +30,400 @@ export interface HostedExecutionAiUsageRecordResponse {
   usageIds: string[];
 }
 
-export async function fetchHostedExecutionDeviceSyncRuntimeSnapshot(input: {
+interface HostedExecutionUserBoundWebControlPlaneRequester {
+  requestJson<TResponse>(input: {
+    body?: Record<string, unknown>;
+    label: string;
+    method: "GET" | "POST";
+    parse: (value: unknown) => TResponse;
+    path: string;
+  }): Promise<TResponse>;
+}
+
+interface HostedExecutionUserBoundWebControlPlaneRequesterOptions {
   baseUrl: string;
-  connectionId?: string | null;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number | null;
+}
+
+export interface HostedExecutionProxyDeviceSyncRuntimeClient {
+  applyUpdates(input: {
+    occurredAt?: string | null;
+    updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
+  }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse>;
+  fetchSnapshot(input?: {
+    connectionId?: string | null;
+    provider?: string | null;
+  }): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse>;
+}
+
+export interface HostedExecutionServerDeviceSyncRuntimeClient
+  extends HostedExecutionProxyDeviceSyncRuntimeClient {}
+
+export interface HostedExecutionProxySharePackClient {
+  fetchSharePack(share: HostedExecutionShareReference): Promise<HostedExecutionSharePackResponse>;
+}
+
+export interface HostedExecutionServerSharePackClient
+  extends HostedExecutionProxySharePackClient {}
+
+export interface HostedExecutionProxyAiUsageClient {
+  recordUsage(
+    usage: HostedExecutionAiUsageRecordRequest["usage"],
+  ): Promise<HostedExecutionAiUsageRecordResponse>;
+}
+
+export interface HostedExecutionServerAiUsageClient
+  extends HostedExecutionProxyAiUsageClient {}
+
+export function createHostedExecutionProxyDeviceSyncRuntimeClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number | null;
+}): HostedExecutionProxyDeviceSyncRuntimeClient {
+  return buildHostedExecutionDeviceSyncRuntimeClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+    input.boundUserId,
+  );
+}
+
+export function createHostedExecutionServerDeviceSyncRuntimeClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  internalToken: string;
+  timeoutMs?: number | null;
+}): HostedExecutionServerDeviceSyncRuntimeClient {
+  return buildHostedExecutionDeviceSyncRuntimeClient(
+    createHostedExecutionServerRequester({
+      authorizationToken: input.internalToken,
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+    input.boundUserId,
+  );
+}
+
+export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
+  baseUrl: string | null | undefined;
+  boundUserId: string;
   fetchImpl?: typeof fetch;
   internalToken?: string | null;
-  provider?: string | null;
   timeoutMs?: number | null;
-  userId: string;
-}): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse> {
-  return requestHostedExecutionWebControlPlaneJson({
-    body: {
-      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      ...(input.provider ? { provider: input.provider } : {}),
-      userId: input.userId,
-    } satisfies HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+}): HostedExecutionProxyDeviceSyncRuntimeClient | HostedExecutionServerDeviceSyncRuntimeClient | null {
+  const { baseUrl } = input;
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  if (isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl)) {
+    return createHostedExecutionProxyDeviceSyncRuntimeClient({
+      baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs,
+    });
+  }
+
+  if (!input.internalToken) {
+    return null;
+  }
+
+  return createHostedExecutionServerDeviceSyncRuntimeClient({
+    baseUrl,
+    boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    label: "Hosted device-sync runtime snapshot",
-    method: "POST",
-    parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
-    path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
-    timeoutMs: input.timeoutMs ?? null,
-    token: input.internalToken,
-    url: input.baseUrl,
+    internalToken: input.internalToken,
+    timeoutMs: input.timeoutMs,
   });
 }
 
-export async function applyHostedExecutionDeviceSyncRuntimeUpdates(input: {
+export function createHostedExecutionProxySharePackClient(input: {
   baseUrl: string;
+  boundUserId: string;
   fetchImpl?: typeof fetch;
-  internalToken?: string | null;
-  occurredAt?: string | null;
   timeoutMs?: number | null;
-  updates: HostedExecutionDeviceSyncRuntimeApplyRequest["updates"];
-  userId: string;
-}): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-  return requestHostedExecutionWebControlPlaneJson({
-    body: {
-      ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
-      updates: input.updates,
-      userId: input.userId,
-    } satisfies HostedExecutionDeviceSyncRuntimeApplyRequest,
-    fetchImpl: input.fetchImpl,
-    label: "Hosted device-sync runtime apply",
-    method: "POST",
-    parse: parseHostedExecutionDeviceSyncRuntimeApplyResponse,
-    path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
-    timeoutMs: input.timeoutMs ?? null,
-    token: input.internalToken,
-    url: input.baseUrl,
-  });
+}): HostedExecutionProxySharePackClient {
+  return buildHostedExecutionSharePackClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
 }
 
-export async function recordHostedExecutionAiUsage(input: {
+export function createHostedExecutionServerSharePackClient(input: {
   baseUrl: string;
+  boundUserId: string;
   fetchImpl?: typeof fetch;
-  internalToken?: string | null;
+  shareToken: string;
   timeoutMs?: number | null;
-  usage: HostedExecutionAiUsageRecordRequest["usage"];
-}): Promise<HostedExecutionAiUsageRecordResponse> {
-  return requestHostedExecutionWebControlPlaneJson({
-    body: {
-      usage: [...input.usage],
-    } satisfies HostedExecutionAiUsageRecordRequest,
-    fetchImpl: input.fetchImpl,
-    label: "Hosted AI usage record",
-    method: "POST",
-    parse: parseHostedExecutionAiUsageRecordResponse,
-    path: HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
-    timeoutMs: input.timeoutMs ?? null,
-    token: input.internalToken,
-    url: input.baseUrl,
-  });
+}): HostedExecutionServerSharePackClient {
+  return buildHostedExecutionSharePackClient(
+    createHostedExecutionServerRequester({
+      authorizationToken: input.shareToken,
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
 }
 
-export async function fetchHostedExecutionSharePack(input: {
-  baseUrl: string;
+export function resolveHostedExecutionSharePackClient(input: {
+  baseUrl: string | null | undefined;
+  boundUserId: string;
   fetchImpl?: typeof fetch;
-  share: HostedExecutionShareReference;
   shareToken?: string | null;
   timeoutMs?: number | null;
-}): Promise<HostedExecutionSharePackResponse> {
-  return requestHostedExecutionWebControlPlaneJson({
+}): HostedExecutionProxySharePackClient | HostedExecutionServerSharePackClient | null {
+  const { baseUrl } = input;
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  if (isHostedExecutionSharePackProxyBaseUrl(baseUrl)) {
+    return createHostedExecutionProxySharePackClient({
+      baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs,
+    });
+  }
+
+  if (!input.shareToken) {
+    return null;
+  }
+
+  return createHostedExecutionServerSharePackClient({
+    baseUrl,
+    boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    label: "Hosted share payload fetch",
-    method: "GET",
-    parse: parseHostedExecutionSharePackResponse,
-    path: buildHostedExecutionSharePayloadPath(input.share.shareId, input.share.shareCode),
-    timeoutMs: input.timeoutMs ?? null,
-    token: input.shareToken,
-    url: input.baseUrl,
+    shareToken: input.shareToken,
+    timeoutMs: input.timeoutMs,
   });
+}
+
+export function createHostedExecutionProxyAiUsageClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number | null;
+}): HostedExecutionProxyAiUsageClient {
+  return buildHostedExecutionAiUsageClient(
+    createHostedExecutionProxyRequester({
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.usage,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
+}
+
+export function createHostedExecutionServerAiUsageClient(input: {
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  internalToken: string;
+  timeoutMs?: number | null;
+}): HostedExecutionServerAiUsageClient {
+  return buildHostedExecutionAiUsageClient(
+    createHostedExecutionServerRequester({
+      authorizationToken: input.internalToken,
+      baseUrl: input.baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs ?? null,
+    }),
+  );
+}
+
+export function resolveHostedExecutionAiUsageClient(input: {
+  baseUrl: string | null | undefined;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  internalToken?: string | null;
+  timeoutMs?: number | null;
+}): HostedExecutionProxyAiUsageClient | HostedExecutionServerAiUsageClient | null {
+  const { baseUrl } = input;
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  if (isHostedExecutionAiUsageProxyBaseUrl(baseUrl)) {
+    return createHostedExecutionProxyAiUsageClient({
+      baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs,
+    });
+  }
+
+  if (!input.internalToken) {
+    return null;
+  }
+
+  return createHostedExecutionServerAiUsageClient({
+    baseUrl,
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    internalToken: input.internalToken,
+    timeoutMs: input.timeoutMs,
+  });
+}
+
+export function isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl: string): boolean {
+  return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.deviceSync);
+}
+
+export function isHostedExecutionSharePackProxyBaseUrl(baseUrl: string): boolean {
+  return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.sharePack);
+}
+
+export function isHostedExecutionAiUsageProxyBaseUrl(baseUrl: string): boolean {
+  return isHostedWorkerProxyBaseUrl(baseUrl, HOSTED_EXECUTION_PROXY_HOSTS.usage);
+}
+
+function buildHostedExecutionDeviceSyncRuntimeClient(
+  requester: HostedExecutionUserBoundWebControlPlaneRequester,
+  boundUserId: string,
+): HostedExecutionProxyDeviceSyncRuntimeClient {
+  return {
+    applyUpdates(input) {
+      return requester.requestJson({
+        body: {
+          ...(input.occurredAt ? { occurredAt: input.occurredAt } : {}),
+          updates: input.updates,
+          userId: boundUserId,
+        } satisfies HostedExecutionDeviceSyncRuntimeApplyRequest,
+        label: "Hosted device-sync runtime apply",
+        method: "POST",
+        parse: parseHostedExecutionDeviceSyncRuntimeApplyResponse,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+      });
+    },
+    fetchSnapshot(input = {}) {
+      return requester.requestJson({
+        body: {
+          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+          ...(input.provider ? { provider: input.provider } : {}),
+          userId: boundUserId,
+        } satisfies HostedExecutionDeviceSyncRuntimeSnapshotRequest,
+        label: "Hosted device-sync runtime snapshot",
+        method: "POST",
+        parse: parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
+        path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+      });
+    },
+  };
+}
+
+function buildHostedExecutionSharePackClient(
+  requester: HostedExecutionUserBoundWebControlPlaneRequester,
+): HostedExecutionProxySharePackClient {
+  return {
+    fetchSharePack(share) {
+      return requester.requestJson({
+        label: "Hosted share payload fetch",
+        method: "GET",
+        parse: parseHostedExecutionSharePackResponse,
+        path: buildHostedExecutionSharePayloadPath(share.shareId, share.shareCode),
+      });
+    },
+  };
+}
+
+function buildHostedExecutionAiUsageClient(
+  requester: HostedExecutionUserBoundWebControlPlaneRequester,
+): HostedExecutionProxyAiUsageClient {
+  return {
+    recordUsage(usage) {
+      return requester.requestJson({
+        body: {
+          usage: [...usage],
+        } satisfies HostedExecutionAiUsageRecordRequest,
+        label: "Hosted AI usage record",
+        method: "POST",
+        parse: parseHostedExecutionAiUsageRecordResponse,
+        path: HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
+      });
+    },
+  };
+}
+
+function createHostedExecutionProxyRequester(
+  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & {
+    proxyHost: string;
+  },
+): HostedExecutionUserBoundWebControlPlaneRequester {
+  return createHostedExecutionUserBoundRequester({
+    baseUrl: requireHostedExecutionWorkerProxyBaseUrl(input.baseUrl, input.proxyHost),
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    timeoutMs: input.timeoutMs ?? null,
+  });
+}
+
+function createHostedExecutionServerRequester(
+  input: HostedExecutionUserBoundWebControlPlaneRequesterOptions & {
+    authorizationToken: string;
+  },
+): HostedExecutionUserBoundWebControlPlaneRequester {
+  return createHostedExecutionUserBoundRequester({
+    authorizationToken: requireHostedExecutionAuthorizationToken(input.authorizationToken),
+    baseUrl: requireHostedExecutionWebControlBaseUrl(input.baseUrl),
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    timeoutMs: input.timeoutMs ?? null,
+  });
+}
+
+function createHostedExecutionUserBoundRequester(input: {
+  authorizationToken?: string | null;
+  baseUrl: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+}): HostedExecutionUserBoundWebControlPlaneRequester {
+  return {
+    requestJson<TResponse>(request: {
+      body?: Record<string, unknown>;
+      label: string;
+      method: "GET" | "POST";
+      parse: (value: unknown) => TResponse;
+      path: string;
+    }) {
+      return requestHostedExecutionWebControlPlaneJson({
+        body: request.body,
+        boundUserId: input.boundUserId,
+        fetchImpl: input.fetchImpl,
+        label: request.label,
+        method: request.method,
+        parse: request.parse,
+        path: request.path,
+        timeoutMs: input.timeoutMs,
+        token: input.authorizationToken ?? null,
+        url: input.baseUrl,
+      });
+    },
+  };
 }
 
 function parseHostedExecutionAiUsageRecordResponse(
@@ -159,8 +463,29 @@ function requireHostedExecutionWebControlBaseUrl(value: string): string {
   return normalized;
 }
 
+function requireHostedExecutionWorkerProxyBaseUrl(value: string, proxyHost: string): string {
+  const normalized = requireHostedExecutionWebControlBaseUrl(value);
+
+  if (!isHostedWorkerProxyBaseUrl(normalized, proxyHost)) {
+    throw new TypeError(`Hosted web control-plane baseUrl must target ${proxyHost}.`);
+  }
+
+  return normalized;
+}
+
+function requireHostedExecutionAuthorizationToken(value: string): string {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    throw new TypeError("Hosted web control-plane authorization token must be configured.");
+  }
+
+  return normalized;
+}
+
 async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   body?: Record<string, unknown>;
+  boundUserId: string;
   fetchImpl?: typeof fetch;
   label: string;
   method: "GET" | "POST";
@@ -180,15 +505,18 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
       ...(input.body
         ? {
             body: JSON.stringify(input.body),
-            headers: {
-              ...(normalizedToken ? { authorization: `Bearer ${normalizedToken}` } : {}),
-              "content-type": "application/json",
-            },
+            headers: buildHostedExecutionRequestHeaders({
+              boundUserId: input.boundUserId,
+              token: normalizedToken,
+              withJsonContentType: true,
+            }),
           }
         : {
-            headers: {
-              ...(normalizedToken ? { authorization: `Bearer ${normalizedToken}` } : {}),
-            },
+            headers: buildHostedExecutionRequestHeaders({
+              boundUserId: input.boundUserId,
+              token: normalizedToken,
+              withJsonContentType: false,
+            }),
           }),
       method: input.method,
       signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
@@ -228,4 +556,32 @@ function formatHostedExecutionErrorSuffix(payload: unknown, text: string): strin
 
   const trimmed = text.trim();
   return trimmed.length > 0 ? `: ${trimmed.slice(0, 500)}` : "";
+}
+
+function buildHostedExecutionRequestHeaders(input: {
+  boundUserId: string;
+  token: string | null;
+  withJsonContentType: boolean;
+}): Headers {
+  const headers = new Headers();
+
+  headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
+
+  if (input.token) {
+    headers.set("authorization", `Bearer ${input.token}`);
+  }
+
+  if (input.withJsonContentType) {
+    headers.set("content-type", "application/json");
+  }
+
+  return headers;
+}
+
+function isHostedWorkerProxyBaseUrl(baseUrl: string, hostname: string): boolean {
+  try {
+    return new URL(baseUrl).hostname === hostname;
+  } catch {
+    return false;
+  }
 }

@@ -65,7 +65,6 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
-  HOSTED_ONBOARDING_PUBLIC_BASE_URL?: string;
   HOSTED_WEB_BASE_URL?: string;
   HOSTED_SHARE_API_BASE_URL?: string;
   HOSTED_SHARE_INTERNAL_TOKEN?: string;

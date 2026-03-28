@@ -72,63 +72,6 @@ describe("HostedUserRunner", () => {
     await expect(bundleStore.readBundle(ref)).resolves.toEqual(plaintext);
   });
 
-  it("does not treat replay-filter false positives as consumed events", async () => {
-    const { RunnerQueueStore } = await import("../src/user-runner/runner-queue-store.js");
-    const sql = createTestSqlStorage();
-    const queueStore = new RunnerQueueStore({
-      storage: {
-        sql,
-      },
-    } as never);
-
-    await queueStore.bootstrapUser("member_false_positive");
-    sql.exec(
-      "INSERT OR REPLACE INTO consumed_event_replay_filter (singleton, bits) VALUES (?, ?)",
-      1,
-      new Uint8Array(2048).fill(255),
-    );
-
-    const result = await queueStore.enqueueDispatch({
-      event: {
-        kind: "assistant.cron.tick",
-        reason: "manual",
-        userId: "member_false_positive",
-      },
-      eventId: "evt_false_positive",
-      occurredAt: "2026-03-29T10:00:00.000Z",
-    });
-
-    expect(result.accepted).toBe(true);
-    expect(result.alreadySeen).toBe(false);
-    await expect(queueStore.readEventPresence("evt_false_positive")).resolves.toEqual({
-      consumed: false,
-      pending: true,
-    });
-  });
-
-  it("reads legacy hosted bundle envelopes through object storage", async () => {
-    const bundleStore = createHostedBundleStore({
-      bucket: bucket.api,
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
-    });
-    const plaintext = new TextEncoder().encode("legacy vault bundle");
-    const legacyEnvelope = await encryptHostedBundle({
-      key: environment.bundleEncryptionKey,
-      keyId: environment.bundleEncryptionKeyId,
-      plaintext,
-    });
-
-    legacyEnvelope.schema = "healthybob.hosted-cipher.v1";
-    await bucket.api.put("bundles/vault/legacy.bundle.json", JSON.stringify(legacyEnvelope));
-
-    await expect(bundleStore.readBundle({
-      key: "bundles/vault/legacy.bundle.json",
-      sha256: "legacy",
-      size: plaintext.byteLength,
-    })).resolves.toEqual(plaintext);
-  });
-
   it("fails clearly when reading hosted objects encrypted with a different key id", async () => {
     const bundleStore = createHostedBundleStore({
       bucket: bucket.api,
@@ -143,7 +86,7 @@ describe("HostedUserRunner", () => {
     }).writeBundle("vault", plaintext);
 
     await expect(bundleStore.readBundle(legacyRef)).rejects.toThrow(
-      "Hosted bundle envelope keyId mismatch: expected v2, got v1. Multi-key decryption is not implemented.",
+      "Hosted bundle envelope keyId mismatch: expected v2, got v1. No keyring is configured for multi-key decryption.",
     );
   });
 
@@ -476,6 +419,101 @@ describe("HostedUserRunner", () => {
 
     await expect(journalStore.readCommittedResult("member_123", "evt_roundtrip")).resolves.toEqual(
       committedResult,
+    );
+  });
+
+  it("rejects duplicate durable commits whose payload diverges from the first write", async () => {
+    await persistHostedExecutionCommit({
+      bucket: bucket.api,
+      currentBundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      eventId: "evt_duplicate_commit",
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
+        },
+        result: {
+          eventsHandled: 1,
+          summary: "ok",
+        },
+      },
+      userId: "member_123",
+    });
+
+    await expect(
+      persistHostedExecutionCommit({
+        bucket: bucket.api,
+        currentBundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        eventId: "evt_duplicate_commit",
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        payload: {
+          bundles: {
+            agentState: Buffer.from("agent-state").toString("base64"),
+            vault: Buffer.from("vault").toString("base64"),
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "changed",
+          },
+        },
+        userId: "member_123",
+      }),
+    ).rejects.toThrow(
+      "Hosted execution commit evt_duplicate_commit result does not match the existing durable commit.",
+    );
+  });
+
+  it("rejects duplicate runner commits whose payload diverges from the first write", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.bootstrapUser("member_123");
+
+    await runner.commit({
+      eventId: "evt_duplicate_runner_commit",
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
+        },
+        currentBundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        result: {
+          eventsHandled: 1,
+          summary: "ok",
+        },
+      },
+    });
+
+    await expect(
+      runner.commit({
+        eventId: "evt_duplicate_runner_commit",
+        payload: {
+          bundles: {
+            agentState: Buffer.from("agent-state").toString("base64"),
+            vault: Buffer.from("vault-updated").toString("base64"),
+          },
+          currentBundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Hosted execution commit evt_duplicate_runner_commit vault bundle ref does not match the existing durable commit.",
     );
   });
 
@@ -1864,7 +1902,7 @@ describe("HostedUserRunner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps consumed event ids blocked even after the old replay TTL window passes", async () => {
+  it("allows consumed event ids to be retried after the 30-day exact tombstone expires", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const fetchSpy = vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
@@ -1885,7 +1923,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
     });
 
-    vi.setSystemTime(new Date("2026-04-02T12:00:01.000Z"));
+    vi.setSystemTime(new Date("2026-04-26T12:00:01.000Z"));
     const restartedRunner = new HostedUserRunner(storage.state, environment, bucket.api);
 
     await restartedRunner.status("member_123");
@@ -1896,10 +1934,10 @@ describe("HostedUserRunner", () => {
         userId: "member_123",
       },
       eventId: "evt_ttl_expiry",
-      occurredAt: "2026-04-02T12:00:01.000Z",
+      occurredAt: "2026-04-26T12:00:01.000Z",
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("keeps poisoned event ids blocked even after the old replay TTL window passes", async () => {

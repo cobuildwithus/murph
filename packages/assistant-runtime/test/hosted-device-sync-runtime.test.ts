@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   applyHostedDeviceSyncRuntimeUpdates: vi.fn(async () => undefined),
   fetchHostedDeviceSyncRuntimeSnapshot: vi.fn(async () => null),
   normalizeHostedDeviceSyncJobHints: vi.fn(() => []),
+  resolveHostedExecutionDeviceSyncRuntimeClient: vi.fn(),
   resolveHostedDeviceSyncWakeContext: vi.fn(() => ({
     connectionId: null,
     hint: null,
@@ -15,8 +16,7 @@ vi.mock("@murph/hosted-execution", async () => {
   const actual = await vi.importActual<typeof import("@murph/hosted-execution")>("@murph/hosted-execution");
   return {
     ...actual,
-    applyHostedExecutionDeviceSyncRuntimeUpdates: mocks.applyHostedDeviceSyncRuntimeUpdates,
-    fetchHostedExecutionDeviceSyncRuntimeSnapshot: mocks.fetchHostedDeviceSyncRuntimeSnapshot,
+    resolveHostedExecutionDeviceSyncRuntimeClient: mocks.resolveHostedExecutionDeviceSyncRuntimeClient,
     HOSTED_EXECUTION_PROXY_HOSTS: {
       ...actual.HOSTED_EXECUTION_PROXY_HOSTS,
       deviceSync: "device-sync.worker",
@@ -29,6 +29,36 @@ vi.mock("@murph/hosted-execution", async () => {
 describe("hosted device-sync runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveHostedExecutionDeviceSyncRuntimeClient.mockImplementation((input) =>
+      input.baseUrl
+        ? {
+            applyUpdates: (request: {
+              occurredAt?: string | null;
+              updates: unknown;
+            }) => mocks.applyHostedDeviceSyncRuntimeUpdates({
+              baseUrl: input.baseUrl,
+              fetchImpl: input.fetchImpl,
+              internalToken: input.internalToken ?? null,
+              occurredAt: request.occurredAt ?? null,
+              timeoutMs: input.timeoutMs ?? null,
+              updates: request.updates,
+              userId: input.boundUserId,
+            }),
+            fetchSnapshot: (request?: {
+              connectionId?: string | null;
+              provider?: string | null;
+            }) => mocks.fetchHostedDeviceSyncRuntimeSnapshot({
+              baseUrl: input.baseUrl,
+              connectionId: request?.connectionId ?? null,
+              fetchImpl: input.fetchImpl,
+              internalToken: input.internalToken ?? null,
+              provider: request?.provider ?? null,
+              timeoutMs: input.timeoutMs ?? null,
+              userId: input.boundUserId,
+            }),
+          }
+        : null
+    );
     mocks.normalizeHostedDeviceSyncJobHints.mockReturnValue([]);
     mocks.resolveHostedDeviceSyncWakeContext.mockReturnValue({
       connectionId: null,
