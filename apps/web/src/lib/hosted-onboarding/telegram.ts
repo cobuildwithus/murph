@@ -107,11 +107,7 @@ export async function summarizeHostedTelegramWebhook(
     message,
     update,
   });
-  const isBotMessage = chatMessage.actor.isSelf || (
-    botUserId !== null
-    && message.sender_business_bot?.id !== undefined
-    && String(message.sender_business_bot.id) === botUserId
-  );
+  const isBotMessage = chatMessage.actor.isSelf;
   const actorId = normalizeNullableString(chatMessage.actor.id ?? null);
   const senderTelegramUserId =
     !isBotMessage && actorId && /^-?\d+$/u.test(actorId)

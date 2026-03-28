@@ -208,11 +208,11 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
     },
   })
 
-  const captured = received as TelegramConnectorOptions | null
   assert.equal(connector.id, 'telegram:bot')
-  if (!captured) {
+  if (received == null) {
     throw new Error('expected Telegram connector options to be captured')
   }
+  const captured: TelegramConnectorOptions = received
   assert.equal(captured.accountId, 'bot')
   assert.equal(captured.backfillLimit, 7)
   assert.equal(captured.downloadAttachments, true)
