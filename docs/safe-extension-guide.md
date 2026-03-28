@@ -79,6 +79,7 @@ Storage and authority rules for the cutover:
 - Keep curated current state in Markdown bank docs. The cutover plan reserves Markdown registries for profile, goals, conditions, allergies, protocols, family members, and genetics.
 - Keep append-only machine history in JSONL. Assessments, profile snapshots, timed history, samples, and audit records stay ledger-backed rather than becoming mutable Markdown truth.
 - Keep `bank/profile/current.md` derived from profile snapshots instead of promoting it to the only source of truth.
+- Keep the current-profile seam intentionally split: the snapshot ledger is the durable historical source and rebuild anchor, `bank/profile/current.md` is the human-facing materialized current page, and query-side tolerant fallback keeps reads working when that page is stale, missing, or malformed.
 - Keep timed history in the existing `ledger/events` family. New health history kinds such as `encounter`, `procedure`, `test`, `adverse_effect`, and `exposure` extend that ledger instead of creating a second event timeline.
 - Keep assessment provenance split across immutable `raw/assessments` inputs and append-only assessment ledgers. Intake projection may return typed proposals, but noun-specific upserts still own canonical writes.
 
@@ -87,6 +88,7 @@ CLI and package-boundary rules for the cutover:
 - Keep the public surface payload-first. The planned noun pattern is `scaffold`, `upsert --input`, `show`, and `list`, with special cases for `intake import`, `intake project`, `profile current rebuild`, and `protocol stop`.
 - Keep canonical writes in `@murph/core` even when health nouns originate from `@murph/importers` or `@murph/cli`.
 - Keep `@murph/query` read-only. If the health read model needs repair logic, move that work into core mutation or validation paths instead.
+- If this area looks duplicated, simplify selector/helper plumbing around the seam rather than collapsing the seam itself. Any cleanup has to preserve both human-readable current-profile Markdown and tolerant reads derived from the latest snapshot.
 - Do not introduce a generic "apply this assessment" mutation. The cutover plan keeps assessment projection separate from noun-specific writes so operators can review proposals before they become canonical state.
 
 Downstream follow-up stays blocked until the source lanes publish the frozen health contract:

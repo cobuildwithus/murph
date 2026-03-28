@@ -72,6 +72,8 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Audit shards use `occurredAt`: `audit/YYYY/YYYY-MM.jsonl`.
 - Export-pack directories under `exports/packs/<packId>/` are derived, read-only outputs. Current pack ids are path-safe names derived from scope rather than canonical record ids.
 - `bank/profile/current.md` is a derived current-state document rebuilt from profile snapshots; append-only truth remains in `ledger/profile-snapshots/`.
+- Keep both the snapshot ledger and `bank/profile/current.md`: the ledger is the authoritative historical source and rebuild input, while the Markdown page remains the operator-facing current view.
+- Query readers must tolerate `bank/profile/current.md` being stale, missing, or malformed by falling back to the latest snapshot; the materialized page improves human readability but must not become a hard dependency for current-state reads.
 - `bank/goals`, `bank/conditions`, `bank/allergies`, `bank/foods`, `bank/workout-formats`, `bank/family`, and `bank/genetics` store one Markdown document per canonical record id or slug-safe alias or saved-default lookup key.
 - `bank/foods` stores long-lived remembered foods such as regular restaurant orders, smoothie presets, and grocery staples so assistants can resolve shorthand references without re-scraping menus or ingredient lists, and food records may optionally carry a narrow `autoLogDaily.time` rule for daily note-only meal auto-logging.
 - `bank/workout-formats` stores thin reusable workout defaults such as a saved lifting note plus optional duration, type, or distance overrides; `workout format log` still writes the canonical `activity_session` event and does not create a separate workout record family.
