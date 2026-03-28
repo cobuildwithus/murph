@@ -16,7 +16,11 @@ import {
   type AssistantStatePaths,
 } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
-import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
+import {
+  isJsonSyntaxError,
+  isMissingFileError,
+  writeJsonFileAtomic,
+} from './shared.js'
 
 const ASSISTANT_TURN_RECEIPT_SCHEMA = 'murph.assistant-turn-receipt.v1'
 const PROMPT_PREVIEW_LIMIT = 240
@@ -240,6 +244,9 @@ async function readAssistantTurnReceiptAtPath(
     return assistantTurnReceiptSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
     if (isMissingFileError(error)) {
+      return null
+    }
+    if (isJsonSyntaxError(error)) {
       return null
     }
 

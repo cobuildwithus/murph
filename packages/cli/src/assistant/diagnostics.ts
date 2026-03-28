@@ -12,7 +12,11 @@ import {
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
-import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
+import {
+  isJsonSyntaxError,
+  isMissingFileError,
+  writeJsonFileAtomic,
+} from './shared.js'
 
 const ASSISTANT_DIAGNOSTIC_EVENT_SCHEMA = 'murph.assistant-diagnostic-event.v1'
 const ASSISTANT_DIAGNOSTIC_SNAPSHOT_SCHEMA = 'murph.assistant-diagnostics.v1'
@@ -47,7 +51,7 @@ export async function readAssistantDiagnosticsSnapshot(
     const raw = await readFile(paths.diagnosticSnapshotPath, 'utf8')
     return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
-    if (!isMissingFileError(error)) {
+    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
       throw error
     }
   }
@@ -134,7 +138,7 @@ async function readAssistantDiagnosticsSnapshotAtPath(
     const raw = await readFile(snapshotPath, 'utf8')
     return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
-    if (!isMissingFileError(error)) {
+    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
       throw error
     }
   }

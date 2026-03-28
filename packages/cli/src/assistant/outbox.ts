@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 import {
   type AssistantChannelDelivery,
+  assistantChannelDeliverySchema,
   assistantDeliveryErrorSchema,
   assistantOutboxIntentSchema,
   type AssistantDeliveryError,
@@ -18,7 +19,12 @@ import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, saveAssistantSession } from './store.js'
 import { appendAssistantTurnReceiptEvent, updateAssistantTurnReceipt } from './turns.js'
-import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
+import {
+  isMissingFileError,
+  normalizeNullableString,
+  warnAssistantBestEffortFailure,
+  writeJsonFileAtomic,
+} from './shared.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
@@ -138,6 +144,9 @@ export async function createAssistantOutboxIntent(input: {
       bindingDelivery: input.bindingDelivery ?? null,
       explicitTarget: normalizeNullableString(input.explicitTarget),
       delivery: null,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: null,
+      deliveryTransportIdempotent: false,
       lastError: null,
     })
     await writeJsonFileAtomic(
@@ -234,9 +243,12 @@ export async function listAssistantOutboxIntents(
       continue
     }
 
-    const intent = await readAssistantOutboxIntent(
+    const intent = await readAssistantOutboxIntentInventoryEntry(
       vault,
-      entry.name.replace(/\.json$/u, ''),
+      resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        entry.name.replace(/\.json$/u, ''),
+      ),
     )
     if (intent) {
       intents.push(intent)
@@ -273,6 +285,8 @@ export async function dispatchAssistantOutboxIntent(input: {
     const startedAt = now.toISOString()
     const sending = assistantOutboxIntentSchema.parse({
       ...intent,
+      deliveryIdempotencyKey:
+        intent.deliveryIdempotencyKey ?? buildAssistantDeliveryIdempotencyKey(intent),
       updatedAt: startedAt,
       lastAttemptAt: startedAt,
       attemptCount: intent.attemptCount + 1,
@@ -307,6 +321,9 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
   }
 
+  let deliveryMayHaveSucceeded = false
+  let deliveryTransportIdempotent = prepared.sending.deliveryTransportIdempotent
+
   try {
     const reconciledDelivery =
       (await input.dispatchHooks?.resolveDeliveredIntent?.({
@@ -329,6 +346,24 @@ export async function dispatchAssistantOutboxIntent(input: {
       }
     }
 
+    if (
+      prepared.sending.deliveryConfirmationPending &&
+      !prepared.sending.deliveryTransportIdempotent
+    ) {
+      const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
+        error: createAssistantDeliveryConfirmationPendingError(),
+        intentPath: prepared.intentPath,
+        now,
+        sending: prepared.sending,
+        vault: input.vault,
+      })
+      return {
+        intent: retryIntent,
+        deliveryError: retryIntent.lastError,
+        session: null,
+      }
+    }
+
     maybeThrowInjectedAssistantFault({
       component: 'delivery',
       fault: 'delivery',
@@ -339,6 +374,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       sessionId: prepared.sending.sessionId,
       message: prepared.sending.message,
       channel: prepared.sending.channel,
+      idempotencyKey: prepared.sending.deliveryIdempotencyKey,
       identityId: prepared.sending.identityId,
       actorId: prepared.sending.actorId,
       threadId: prepared.sending.threadId,
@@ -357,22 +393,39 @@ export async function dispatchAssistantOutboxIntent(input: {
         },
       },
     }, input.dependencies)
+    const delivery = assistantChannelDeliverySchema.parse({
+      ...delivered.delivery,
+      idempotencyKey:
+        delivered.delivery.idempotencyKey ??
+        prepared.sending.deliveryIdempotencyKey,
+    })
+    deliveryTransportIdempotent = delivered.deliveryTransportIdempotent === true
+    deliveryMayHaveSucceeded = true
+    const deliveredIntent = assistantOutboxIntentSchema.parse({
+      ...prepared.sending,
+      deliveryTransportIdempotent,
+    })
 
     await input.dispatchHooks?.persistDeliveredIntent?.({
-      delivery: delivered.delivery,
-      intent: prepared.sending,
+      delivery,
+      intent: deliveredIntent,
       vault: input.vault,
     })
 
-    const completedAt = delivered.delivery.sentAt
+    const completedAt = delivery.sentAt
     if (delivered.session) {
       try {
         await saveAssistantSession(input.vault, delivered.session)
-      } catch {}
+      } catch (error) {
+        warnAssistantBestEffortFailure({
+          error,
+          operation: 'post-delivery session persistence',
+        })
+      }
     }
     const sentIntent = await markAssistantOutboxIntentSent({
-      delivery: delivered.delivery,
-      intent: prepared.sending,
+      delivery,
+      intent: deliveredIntent,
       intentPath: prepared.intentPath,
       vault: input.vault,
     })
@@ -383,74 +436,19 @@ export async function dispatchAssistantOutboxIntent(input: {
       session: delivered.session ?? null,
     }
   } catch (error) {
-    const deliveryError = normalizeAssistantDeliveryError(error)
-    const retryable = isAssistantOutboxRetryableError(error)
-    const failedIntent = await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-      await ensureAssistantState(paths)
-      const current =
-        await readAssistantOutboxIntentAtPath(prepared.intentPath)
-      const attemptCount = current?.attemptCount ?? prepared.sending.attemptCount
-      const updatedAt = new Date().toISOString()
-      const nextAttemptAt = retryable
-        ? new Date(now.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount)).toISOString()
-        : null
-      const failedIntent = assistantOutboxIntentSchema.parse({
-        ...(current ?? prepared.sending),
-        updatedAt,
-        nextAttemptAt,
-        status: retryable ? 'retryable' : 'failed',
-        lastError: deliveryError,
-      })
-      await writeJsonFileAtomic(prepared.intentPath, failedIntent)
-      await appendAssistantTurnReceiptEvent({
-        vault: input.vault,
-        turnId: failedIntent.turnId,
-        kind: retryable ? 'delivery.retry-scheduled' : 'delivery.failed',
-        detail: deliveryError.message,
-        metadata: {
-          intentId: failedIntent.intentId,
-          retryable: retryable ? 'true' : 'false',
-        },
-        at: failedIntent.updatedAt,
-      })
-      await updateAssistantTurnReceipt({
-        vault: input.vault,
-        turnId: failedIntent.turnId,
-        mutate(receipt) {
-          return {
-            ...receipt,
-            updatedAt: failedIntent.updatedAt,
-            status: retryable ? 'deferred' : 'failed',
-            deliveryDisposition: retryable ? 'retryable' : 'failed',
-            lastError: deliveryError,
-          }
-        },
-      })
-      await recordAssistantDiagnosticEvent({
-        vault: input.vault,
-        component: retryable ? 'outbox' : 'delivery',
-        kind: retryable ? 'delivery.retry-scheduled' : 'delivery.failed',
-        message: deliveryError.message,
-        level: retryable ? 'warn' : 'error',
-        code: deliveryError.code,
-        sessionId: failedIntent.sessionId,
-        turnId: failedIntent.turnId,
-        intentId: failedIntent.intentId,
-        counterDeltas: retryable
-          ? {
-              deliveriesRetryable: 1,
-              outboxRetries: 1,
-            }
-          : {
-              deliveriesFailed: 1,
-            },
-      })
-      return failedIntent
+    const failedIntent = await updateAssistantOutboxAfterDispatchFailure({
+      deliveryMayHaveSucceeded,
+      deliveryTransportIdempotent,
+      error,
+      intentPath: prepared.intentPath,
+      now,
+      sending: prepared.sending,
+      vault: input.vault,
     })
 
     return {
       intent: failedIntent,
-      deliveryError,
+      deliveryError: failedIntent.lastError,
       session: null,
     }
   }
@@ -637,6 +635,9 @@ async function markAssistantOutboxIntentSent(input: {
         : current ?? input.intent
     const sentIntent = assistantOutboxIntentSchema.parse({
       ...baseIntent,
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey:
+        input.delivery.idempotencyKey ?? baseIntent.deliveryIdempotencyKey,
       updatedAt: completedAt,
       nextAttemptAt: null,
       sentAt: completedAt,
@@ -832,6 +833,12 @@ function resolveAssistantOutboxIntentPath(
   return path.join(outboxDirectory, `${intentId}.json`)
 }
 
+function resolveAssistantOutboxQuarantineDirectory(
+  outboxDirectory: string,
+): string {
+  return path.join(outboxDirectory, '.quarantine')
+}
+
 async function findAssistantOutboxIntentByDedupeKey(
   vault: string,
   dedupeKey: string,
@@ -922,6 +929,187 @@ async function readAssistantOutboxIntentAtPath(
     }
     throw error
   }
+}
+
+async function readAssistantOutboxIntentInventoryEntry(
+  vault: string,
+  intentPath: string,
+): Promise<AssistantOutboxIntent | null> {
+  try {
+    return await readAssistantOutboxIntentAtPath(intentPath)
+  } catch (error) {
+    await quarantineAssistantOutboxIntentFile({
+      error,
+      intentPath,
+      vault,
+    })
+    return null
+  }
+}
+
+async function quarantineAssistantOutboxIntentFile(input: {
+  error: unknown
+  intentPath: string
+  vault: string
+}): Promise<void> {
+  const paths = resolveAssistantStatePaths(input.vault)
+  const quarantineDirectory = resolveAssistantOutboxQuarantineDirectory(
+    paths.outboxDirectory,
+  )
+  const basename = path.basename(input.intentPath, '.json')
+  const quarantinePath = path.join(
+    quarantineDirectory,
+    `${basename}.${Date.now()}.invalid.json`,
+  )
+
+  try {
+    await mkdir(quarantineDirectory, { recursive: true })
+    await rename(input.intentPath, quarantinePath)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return
+    }
+    throw error
+  }
+
+  try {
+    await recordAssistantDiagnosticEvent({
+      vault: input.vault,
+      component: 'outbox',
+      kind: 'outbox.intent.quarantined',
+      level: 'warn',
+      message: normalizeAssistantDeliveryError(input.error).message,
+    })
+  } catch {}
+}
+
+async function updateAssistantOutboxAfterDispatchFailure(input: {
+  deliveryMayHaveSucceeded: boolean
+  deliveryTransportIdempotent: boolean
+  error: unknown
+  intentPath: string
+  now: Date
+  sending: AssistantOutboxIntent
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  const deliveryError = input.deliveryMayHaveSucceeded
+    ? createAssistantDeliveryConfirmationPendingError(input.error)
+    : normalizeAssistantDeliveryError(input.error)
+  const retryable =
+    input.deliveryMayHaveSucceeded || isAssistantOutboxRetryableError(input.error)
+
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const attemptCount = current?.attemptCount ?? input.sending.attemptCount
+    const updatedAt = new Date().toISOString()
+    const nextAttemptAt = retryable
+      ? new Date(
+          input.now.getTime() + resolveAssistantOutboxRetryDelayMs(attemptCount),
+        ).toISOString()
+      : null
+    const failedIntent = assistantOutboxIntentSchema.parse({
+      ...(current ?? input.sending),
+      deliveryConfirmationPending: input.deliveryMayHaveSucceeded,
+      deliveryTransportIdempotent: input.deliveryMayHaveSucceeded
+        ? input.deliveryTransportIdempotent
+        : (current?.deliveryTransportIdempotent ?? input.sending.deliveryTransportIdempotent),
+      updatedAt,
+      nextAttemptAt,
+      status: retryable ? 'retryable' : 'failed',
+      lastError: deliveryError,
+    })
+    await writeJsonFileAtomic(input.intentPath, failedIntent)
+    await appendAssistantTurnReceiptEvent({
+      vault: input.vault,
+      turnId: failedIntent.turnId,
+      kind: retryable ? 'delivery.retry-scheduled' : 'delivery.failed',
+      detail: deliveryError.message,
+      metadata: {
+        intentId: failedIntent.intentId,
+        retryable: retryable ? 'true' : 'false',
+      },
+      at: failedIntent.updatedAt,
+    })
+    await updateAssistantTurnReceipt({
+      vault: input.vault,
+      turnId: failedIntent.turnId,
+      mutate(receipt) {
+        return {
+          ...receipt,
+          updatedAt: failedIntent.updatedAt,
+          status: retryable ? 'deferred' : 'failed',
+          deliveryDisposition: retryable ? 'retryable' : 'failed',
+          lastError: deliveryError,
+        }
+      },
+    })
+    await recordAssistantDiagnosticEvent({
+      vault: input.vault,
+      component: retryable ? 'outbox' : 'delivery',
+      kind: retryable ? 'delivery.retry-scheduled' : 'delivery.failed',
+      message: deliveryError.message,
+      level: retryable ? 'warn' : 'error',
+      code: deliveryError.code,
+      sessionId: failedIntent.sessionId,
+      turnId: failedIntent.turnId,
+      intentId: failedIntent.intentId,
+      counterDeltas: retryable
+        ? {
+            deliveriesRetryable: 1,
+            outboxRetries: 1,
+          }
+        : {
+            deliveriesFailed: 1,
+          },
+    })
+    return failedIntent
+  })
+}
+
+async function rescheduleAssistantOutboxConfirmationRetry(input: {
+  error: AssistantDeliveryError
+  intentPath: string
+  now: Date
+  sending: AssistantOutboxIntent
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath)
+    const baseIntent = current ?? input.sending
+    const updatedAt = new Date().toISOString()
+    const retryIntent = assistantOutboxIntentSchema.parse({
+      ...baseIntent,
+      deliveryConfirmationPending: true,
+      updatedAt,
+      nextAttemptAt: new Date(
+        input.now.getTime() + resolveAssistantOutboxRetryDelayMs(baseIntent.attemptCount),
+      ).toISOString(),
+      status: 'retryable',
+      lastError: input.error,
+    })
+    await writeJsonFileAtomic(input.intentPath, retryIntent)
+    return retryIntent
+  })
+}
+
+function createAssistantDeliveryConfirmationPendingError(
+  cause?: unknown,
+): AssistantDeliveryError {
+  const detail = cause ? normalizeAssistantDeliveryError(cause).message : null
+  return assistantDeliveryErrorSchema.parse({
+    code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
+    message: detail
+      ? `Assistant outbound delivery may have succeeded already and must be reconciled before resend. ${detail}`
+      : 'Assistant outbound delivery may have succeeded already and must be reconciled before resend.',
+  })
+}
+
+function buildAssistantDeliveryIdempotencyKey(
+  intent: Pick<AssistantOutboxIntent, 'intentId'>,
+): string {
+  return `assistant-outbox:${intent.intentId}`
 }
 
 function shouldBeginAssistantOutboxDispatch(

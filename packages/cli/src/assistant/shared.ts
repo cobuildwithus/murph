@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import {
   writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
   writeTextFileAtomic as writeRuntimeTextFileAtomic,
@@ -38,6 +39,117 @@ export function isMissingFileError(error: unknown): boolean {
       'code' in error &&
       (error as { code?: string }).code === 'ENOENT',
   )
+}
+
+export function isJsonSyntaxError(error: unknown): boolean {
+  return error instanceof SyntaxError
+}
+
+export async function readAssistantJsonFile<T>(input: {
+  createDefault?: () => T
+  filePath: string
+  parse: (value: unknown) => T
+}): Promise<{
+  present: boolean
+  recoveredFromParseError: boolean
+  value: T
+}> {
+  try {
+    const raw = await readFile(input.filePath, 'utf8')
+    return {
+      present: true,
+      recoveredFromParseError: false,
+      value: input.parse(JSON.parse(raw) as unknown),
+    }
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      if (!input.createDefault) {
+        throw error
+      }
+      return {
+        present: false,
+        recoveredFromParseError: false,
+        value: input.createDefault(),
+      }
+    }
+    if (isJsonSyntaxError(error) && input.createDefault) {
+      return {
+        present: true,
+        recoveredFromParseError: true,
+        value: input.createDefault(),
+      }
+    }
+    throw error
+  }
+}
+
+export function parseAssistantJsonLinesWithTailSalvage<T>(
+  raw: string,
+  parse: (value: unknown) => T,
+): {
+  malformedLineCount: number
+  salvagedTailLineCount: number
+  values: T[]
+} {
+  const lines = raw.split('\n')
+  const endsWithNewline = raw.endsWith('\n')
+  let lastNonEmptyLineIndex = -1
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (lines[index]?.trim().length) {
+      lastNonEmptyLineIndex = index
+    }
+  }
+
+  const values: T[] = []
+  let malformedLineCount = 0
+  let salvagedTailLineCount = 0
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]?.trim()
+    if (!line) {
+      continue
+    }
+
+    try {
+      values.push(parse(JSON.parse(line) as unknown))
+    } catch (error) {
+      const isRecoverableTail =
+        index === lastNonEmptyLineIndex &&
+        !endsWithNewline &&
+        isJsonSyntaxError(error)
+      if (isRecoverableTail) {
+        salvagedTailLineCount += 1
+        continue
+      }
+      malformedLineCount += 1
+    }
+  }
+
+  return {
+    malformedLineCount,
+    salvagedTailLineCount,
+    values,
+  }
+}
+
+export function warnAssistantBestEffortFailure(input: {
+  error: unknown
+  operation: string
+}): void {
+  const code =
+    input.error &&
+    typeof input.error === 'object' &&
+    'code' in input.error &&
+    typeof (input.error as { code?: unknown }).code === 'string'
+      ? (input.error as { code: string }).code
+      : null
+  const name =
+    input.error instanceof Error && input.error.name
+      ? input.error.name
+      : 'Error'
+  const suffix = code ? ` (${name}/${code})` : ` (${name})`
+  console.warn(`Assistant best-effort ${input.operation} failed${suffix}.`)
 }
 
 export async function writeJsonFileAtomic(

@@ -24,6 +24,7 @@ import {
 import {
   errorMessage,
   formatStructuredErrorMessage,
+  warnAssistantBestEffortFailure,
 } from '../shared.js'
 import {
   bridgeAbortSignals,
@@ -105,7 +106,12 @@ export async function runAssistantAutomation(
       })
   }
 
-  await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
+  await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'status snapshot refresh',
+    })
+  })
 
   try {
     while (!controller.signal.aborted) {
@@ -172,7 +178,12 @@ export async function runAssistantAutomation(
       aggregateReplies.replied += scanResult.replies.replied
       aggregateReplies.skipped += scanResult.replies.skipped
 
-      await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
+      await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
+        warnAssistantBestEffortFailure({
+          error,
+          operation: 'status snapshot refresh',
+        })
+      })
 
       if (input.once) {
         break
@@ -219,12 +230,25 @@ export async function runAssistantAutomation(
     if (daemonPromise) {
       try {
         await daemonPromise
-      } catch {
-        // surfaced through lastError/reason when relevant
+      } catch (error) {
+        warnAssistantBestEffortFailure({
+          error,
+          operation: 'daemon shutdown wait',
+        })
       }
     }
 
-    await runLock?.release().catch(() => undefined)
-    await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
+    await runLock?.release().catch((error) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'automation run-lock release',
+      })
+    })
+    await refreshAssistantStatusSnapshot(input.vault).catch((error) => {
+      warnAssistantBestEffortFailure({
+        error,
+        operation: 'status snapshot refresh',
+      })
+    })
   }
 }

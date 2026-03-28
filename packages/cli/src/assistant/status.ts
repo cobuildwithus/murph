@@ -16,7 +16,11 @@ import {
   resolveAssistantStatePaths,
 } from './store.js'
 import { listRecentAssistantTurnReceipts } from './turns.js'
-import { isMissingFileError, writeJsonFileAtomic } from './shared.js'
+import {
+  isJsonSyntaxError,
+  isMissingFileError,
+  writeJsonFileAtomic,
+} from './shared.js'
 
 export async function getAssistantStatus(
   input:
@@ -90,7 +94,7 @@ export async function readAssistantStatusSnapshot(
     const raw = await readFile(paths.statusPath, 'utf8')
     return assistantStatusResultSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
-    if (isMissingFileError(error)) {
+    if (isMissingFileError(error) || isJsonSyntaxError(error)) {
       return null
     }
     throw error

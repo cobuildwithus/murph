@@ -31,7 +31,10 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './assistant/store.js'
-import { normalizeRequiredText } from './assistant/shared.js'
+import {
+  normalizeRequiredText,
+  warnAssistantBestEffortFailure,
+} from './assistant/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 export {
@@ -62,6 +65,7 @@ export interface DeliverAssistantMessageInput {
 export interface DeliverAssistantMessageOverBindingResult {
   delivery: AssistantChannelDelivery
   deliveryDeduplicated: boolean
+  deliveryTransportIdempotent?: boolean
   outboxIntentId: string | null
   session?: AssistantSession
 }
@@ -231,6 +235,7 @@ export async function deliverAssistantMessageOverBinding(
   input: {
     actorId?: string | null
     channel?: string | null
+    idempotencyKey?: string | null
     identityId?: string | null
     message: string
     replyToMessageId?: string | null
@@ -278,6 +283,7 @@ export async function deliverAssistantMessageOverBinding(
     {
       bindingDelivery: binding.delivery,
       explicitTarget,
+      idempotencyKey: input.idempotencyKey ?? null,
       identityId: binding.identityId,
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
@@ -288,6 +294,7 @@ export async function deliverAssistantMessageOverBinding(
   return {
     delivery,
     deliveryDeduplicated: false,
+    deliveryTransportIdempotent: adapter.supportsIdempotencyKey,
     outboxIntentId: null,
   }
 }
@@ -323,7 +330,12 @@ async function dispatchAssistantFallbackReceiptFailure(input: {
     detail: input.error.message,
     metadata: {},
     at: failedAt,
-  }).catch(() => undefined)
+  }).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'delivery failure receipt append',
+    })
+  })
   await updateAssistantTurnReceipt({
     vault: input.vault,
     turnId: input.turnId,
@@ -337,7 +349,12 @@ async function dispatchAssistantFallbackReceiptFailure(input: {
         lastError: input.error,
       }
     },
-  }).catch(() => undefined)
+  }).catch((error) => {
+    warnAssistantBestEffortFailure({
+      error,
+      operation: 'delivery failure receipt update',
+    })
+  })
 }
 
 function attachAssistantOutboxIntentId(error: unknown, outboxIntentId: string | null) {
@@ -356,7 +373,12 @@ function attachAssistantOutboxIntentId(error: unknown, outboxIntentId: string | 
       value: outboxIntentId,
       writable: true,
     })
-  } catch {}
+  } catch (defineError) {
+    warnAssistantBestEffortFailure({
+      error: defineError,
+      operation: 'delivery error outbox-intent decoration',
+    })
+  }
 
   return error
 }
