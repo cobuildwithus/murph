@@ -191,9 +191,6 @@ export async function readAssistantOutboxIntent(
     const parsed = JSON.parse(
       await readFile(resolveAssistantOutboxIntentPath(paths.outboxDirectory, intentId), 'utf8'),
     ) as unknown
-    if (isLegacyAssistantOutboxIntent(parsed)) {
-      return null
-    }
     return assistantOutboxIntentSchema.parse(parsed)
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -828,39 +825,6 @@ function resolveAssistantOutboxIntentPath(
   return path.join(outboxDirectory, `${intentId}.json`)
 }
 
-function isLegacyAssistantOutboxIntent(input: unknown): boolean {
-  if (!isRecord(input)) {
-    return false
-  }
-
-  const schema = readRecordNullableString(input, 'schema')
-  const intentId = readRecordNullableString(input, 'intentId')
-  const sessionId = readRecordNullableString(input, 'sessionId')
-  const idempotencyKey = readRecordNullableString(input, 'idempotencyKey')
-
-  return (
-    schema === ASSISTANT_OUTBOX_INTENT_SCHEMA &&
-    intentId !== null &&
-    sessionId !== null &&
-    idempotencyKey !== null &&
-    !('turnId' in input) &&
-    !('dedupeKey' in input) &&
-    !('message' in input)
-  )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function readRecordNullableString(
-  record: Record<string, unknown>,
-  key: string,
-): string | null {
-  const value = record[key]
-  return typeof value === 'string' ? normalizeNullableString(value) : null
-}
-
 async function findAssistantOutboxIntentByDedupeKey(
   vault: string,
   dedupeKey: string,
@@ -940,9 +904,6 @@ async function readAssistantOutboxIntentAtPath(
 ): Promise<AssistantOutboxIntent | null> {
   try {
     const parsed = JSON.parse(await readFile(intentPath, 'utf8')) as unknown
-    if (isLegacyAssistantOutboxIntent(parsed)) {
-      return null
-    }
     return assistantOutboxIntentSchema.parse(parsed)
   } catch (error) {
     if (isMissingFileError(error)) {

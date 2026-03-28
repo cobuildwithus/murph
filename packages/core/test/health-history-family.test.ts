@@ -203,7 +203,7 @@ test("history test-event normalization keeps writes canonical and ignores legacy
   );
 });
 
-test("history append keeps per-kind defaults and resultSummary alias behavior through stored/read/list flows", async () => {
+test("history append keeps per-kind defaults and ignores the removed resultSummary alias", async () => {
   const vaultRoot = await makeTempDirectory("murph-history-kind-normalization");
   await initializeVault({ vaultRoot });
 
@@ -236,6 +236,14 @@ test("history append keeps per-kind defaults and resultSummary alias behavior th
     title: "hs-CRP imported from summary-only payload",
     testName: "hs_crp",
     resultSummary: "Borderline elevation noted in source system.",
+  } as Parameters<typeof appendHistoryEvent>[0] & { resultSummary?: string });
+  const canonicalLabResult = await appendHistoryEvent({
+    vaultRoot,
+    kind: "test",
+    occurredAt: "2026-03-04T12:30:00.000Z",
+    title: "hs-CRP imported from canonical summary payload",
+    testName: "hs_crp",
+    summary: "Canonical summary text.",
   });
 
   const stored = await readJsonlRecords({
@@ -265,6 +273,10 @@ test("history append keeps per-kind defaults and resultSummary alias behavior th
   const readLabResult = await readHistoryEvent({
     vaultRoot,
     eventId: labResult.record.id,
+  });
+  const readCanonicalLabResult = await readHistoryEvent({
+    vaultRoot,
+    eventId: canonicalLabResult.record.id,
   });
 
   assert.equal(procedure.record.kind, "procedure");
@@ -301,18 +313,26 @@ test("history append keeps per-kind defaults and resultSummary alias behavior th
   assert.equal(storedById.get(exposure.record.id)?.exposureType, "unspecified");
 
   assert.equal(labResult.record.kind, "test");
-  assert.equal(labResult.record.summary, "Borderline elevation noted in source system.");
+  assert.equal(labResult.record.summary, undefined);
   assert.equal(labResult.record.resultStatus, "unknown");
   assert.equal(readLabResult.record.kind, "test");
-  assert.equal(readLabResult.record.summary, "Borderline elevation noted in source system.");
+  assert.equal(readLabResult.record.summary, undefined);
   assert.equal(readLabResult.record.resultStatus, "unknown");
   assert.equal(listedById.get(labResult.record.id)?.kind, "test");
   assert.equal(
     (listedById.get(labResult.record.id) as { summary?: string } | undefined)?.summary,
-    "Borderline elevation noted in source system.",
+    undefined,
   );
-  assert.equal(storedById.get(labResult.record.id)?.summary, "Borderline elevation noted in source system.");
+  assert.equal(storedById.get(labResult.record.id)?.summary, undefined);
   assert.equal(storedById.get(labResult.record.id)?.resultSummary, undefined);
+
+  assert.equal(canonicalLabResult.record.summary, "Canonical summary text.");
+  assert.equal(readCanonicalLabResult.record.kind, "test");
+  assert.equal(readCanonicalLabResult.record.summary, "Canonical summary text.");
+  assert.equal(
+    (listedById.get(canonicalLabResult.record.id) as { summary?: string } | undefined)?.summary,
+    "Canonical summary text.",
+  );
 });
 
 test("blood-test writes infer result status and persist structured analytes canonically", async () => {
@@ -792,7 +812,7 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
 
   const readFamilyByConflictingSelectors = await readFamilyMember({
     vaultRoot,
-    memberId: mother.record.familyMemberId,
+    familyMemberId: mother.record.familyMemberId,
     slug: father.record.slug,
   });
 
@@ -840,4 +860,38 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
   });
 
   assert.equal(readVariantByConflictingSelectors.variantId, apoe.record.variantId);
+});
+
+test("family and genetics upserts require canonical title and familyMemberId fields", async () => {
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-hard-cut");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertFamilyMember({
+        vaultRoot,
+        name: "Mother",
+        relationship: "mother",
+      } as Parameters<typeof upsertFamilyMember>[0] & { name?: string }),
+    /title is required/u,
+  );
+
+  await assert.rejects(
+    () =>
+      readFamilyMember({
+        vaultRoot,
+        memberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      } as Parameters<typeof readFamilyMember>[0] & { memberId?: string }),
+    (error: unknown) => error instanceof VaultError && error.code === "VAULT_FAMILY_MEMBER_MISSING",
+  );
+
+  await assert.rejects(
+    () =>
+      upsertGeneticVariant({
+        vaultRoot,
+        gene: "APOE",
+        label: "APOE e4 allele",
+      } as Parameters<typeof upsertGeneticVariant>[0] & { label?: string }),
+    /title is required/u,
+  );
 });

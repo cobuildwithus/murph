@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
 import { runAssistantDoctor } from '../src/assistant/doctor.js'
-import { runAssistantAutomation } from '../src/assistant-runtime.js'
+import { drainAssistantOutbox, readAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { getAssistantStatus } from '../src/assistant/status.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import { deliverAssistantMessage } from '../src/outbound-channel.js'
@@ -95,7 +95,7 @@ test('assistant doctor flags malformed transcript lines without breaking status'
   assert.equal(transcriptCheck?.status, 'fail')
 })
 
-test('assistant automation ignores legacy outbox records after the outbox cutover', async () => {
+test('assistant outbox inventory paths reject legacy intent payloads after the hard cut', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-legacy-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -131,19 +131,18 @@ test('assistant automation ignores legacy outbox records after the outbox cutove
     'utf8',
   )
 
-  const result = await runAssistantAutomation({
-    vault: vaultRoot,
-    once: true,
-    startDaemon: false,
-    inboxServices: {} as any,
-  })
-  assert.equal(result.reason, 'completed')
-
-  const status = await getAssistantStatus({
-    vault: vaultRoot,
-    limit: 5,
-  })
-  assert.equal(status.outbox.total, 0)
+  await assert.rejects(() => readAssistantOutboxIntent(vaultRoot, 'legacy-intent'))
+  await assert.rejects(() =>
+    getAssistantStatus({
+      vault: vaultRoot,
+      limit: 5,
+    }),
+  )
+  await assert.rejects(() =>
+    drainAssistantOutbox({
+      vault: vaultRoot,
+    }),
+  )
 
   const doctor = await runAssistantDoctor(vaultRoot)
   const outboxCheck = doctor.checks.find(

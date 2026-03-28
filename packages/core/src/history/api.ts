@@ -310,22 +310,6 @@ function inferTestResultStatus(
   return undefined;
 }
 
-function readHistoryFieldValue(
-  source: HistorySourceRecord,
-  aliases: readonly string[],
-  fallback: unknown,
-): unknown {
-  for (const alias of aliases) {
-    const value = source[alias];
-
-    if (value !== undefined && value !== null) {
-      return value;
-    }
-  }
-
-  return fallback;
-}
-
 function normalizeEncounterHistoryFields(
   source: HistorySourceRecord,
 ): EncounterHistoryFields {
@@ -369,7 +353,7 @@ function normalizeTestHistoryFields(
   return stripUndefined({
     testName: requireString(source.testName, "testName", 160),
     resultStatus,
-    summary: optionalString(readHistoryFieldValue(source, ["summary", "resultSummary"], undefined), "summary", 1000),
+    summary: optionalString(source.summary, "summary", 1000),
     testCategory,
     specimenType,
     labName: optionalString(source.labName, "labName", 160),
@@ -437,7 +421,6 @@ function buildHistoryKindFields(input: AppendHistoryEventInput): HistoryKindFiel
         testName: input.testName,
         resultStatus: input.resultStatus,
         summary: input.summary,
-        resultSummary: input.resultSummary,
         testCategory: input.testCategory,
         specimenType: input.specimenType,
         labName: input.labName,

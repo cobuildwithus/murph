@@ -364,6 +364,9 @@ test("health registry queries prefer canonical fields and stable title ordering"
         "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
       ],
     );
+    assert.equal(family[1]?.title, "Mother");
+    assert.equal(family[1]?.relationship, "mother");
+    assert.equal(family[1]?.note, null);
     assert.deepEqual(family[0]?.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z400"]);
     assert.deepEqual(family[1]?.relatedVariantIds, []);
     assert.equal(family[1]?.updatedAt, "2026-03-12T09:00:00Z");
@@ -375,6 +378,7 @@ test("health registry queries prefer canonical fields and stable title ordering"
         "var_01JNW7YJ7MNE7M9Q2QWQK4Z401",
       ],
     );
+    assert.equal(genetics[0]?.title, "APOE e4 allele");
     assert.equal(genetics[1]?.updatedAt, "2026-03-12T11:00:00Z");
     assert.deepEqual(genetics[1]?.sourceFamilyMemberIds, ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
   } finally {
@@ -1397,9 +1401,12 @@ docType: family_member
 familyMemberId: fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8
 slug: mother
 title: Mother
+name: Alias Mother
 relationship: mother
+relation: alias-mother
 familyMemberIds:
   - var_should_not_leak_from_wrong_field
+summary: Alias summary that should not leak
 updatedAt: 2026-03-12T09:00:00Z
 ---
 # Mother
@@ -1435,6 +1442,7 @@ docType: genetic_variant
 variantId: var_01JNW7YJ7MNE7M9Q2QWQK4Z400
 slug: apoe-e4
 title: APOE e4 allele
+label: Alias APOE label
 gene: APOE
 significance: risk_factor
 sourceFamilyMemberIds:

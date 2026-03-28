@@ -358,8 +358,6 @@ export async function addMeal(
   return withCanonicalInputWriteLock(input, addMealInternal);
 }
 
-export const importMeal = addMeal;
-
 export async function importSamples(
   input: Parameters<typeof importSamplesInternal>[0],
 ): ReturnType<typeof importSamplesInternal> {

@@ -1060,6 +1060,53 @@ test('getAssistantSession rejects non-canonical assistant state payloads with le
   await assert.rejects(() => getAssistantSession(vaultRoot, sessionId))
 })
 
+test('getAssistantSession rejects legacy-normalized provider payloads instead of coercing them', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-provider-hard-cut-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(statePaths.sessionsDirectory, {
+    recursive: true,
+  })
+
+  const sessionId = 'asst_provider_legacy'
+  await writeFile(
+    path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
+    `${JSON.stringify(
+      {
+        schema: 'murph.assistant-session.v2',
+        sessionId,
+        provider: 'legacy-provider',
+        providerSessionId: 'thread-legacy',
+        providerOptions: {
+          model: 'gpt-oss:20b',
+        },
+        alias: 'legacy:bob',
+        binding: {
+          conversationKey: null,
+          channel: null,
+          identityId: null,
+          actorId: null,
+          threadId: null,
+          threadIsDirect: null,
+          delivery: null,
+        },
+        createdAt: '2026-03-16T10:00:00.000Z',
+        updatedAt: '2026-03-16T10:05:00.000Z',
+        lastTurnAt: null,
+        turnCount: 0,
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  )
+
+  await assert.rejects(() => getAssistantSession(vaultRoot, sessionId))
+})
+
 test('resolveAssistantSession ignores legacy aliases.json fallback state', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-hard-cut-'))
   const vaultRoot = path.join(parent, 'vault')

@@ -36,14 +36,11 @@ export interface UpsertGeneticVariantInput {
   slug?: string;
   gene: string;
   title?: string;
-  label?: string;
   zygosity?: VariantZygosity;
   significance?: VariantSignificance;
   inheritance?: VariantInheritance;
   sourceFamilyMemberIds?: string[];
-  familyMemberIds?: string[];
   note?: string;
-  summary?: string;
 }
 
 export interface UpsertGeneticVariantResult {

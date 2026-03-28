@@ -318,16 +318,16 @@ const checkedHealthEntityDefinitions = [
     },
     registry: {
       directory: "bank/family",
-      idKeys: ["familyMemberId", "memberId"],
-      titleKeys: ["title", "name"],
+      idKeys: ["familyMemberId"],
+      titleKeys: ["title"],
       statusKeys: [],
       transform({ attributes, helpers }) {
         return {
-          relationship: helpers.firstString(attributes, ["relationship", "relation"]),
+          relationship: helpers.firstString(attributes, ["relationship"]),
           deceased: helpers.firstBoolean(attributes, ["deceased"]),
           conditions: helpers.firstStringArray(attributes, ["conditions"]),
           relatedVariantIds: helpers.firstStringArray(attributes, ["relatedVariantIds"]),
-          note: helpers.firstString(attributes, ["note", "summary", "notes"]),
+          note: helpers.firstString(attributes, ["note"]),
           lineage: helpers.firstString(attributes, ["lineage"]),
           updatedAt: helpers.firstString(attributes, ["updatedAt"]),
         };
@@ -348,7 +348,7 @@ const checkedHealthEntityDefinitions = [
     registry: {
       directory: "bank/genetics",
       idKeys: ["variantId"],
-      titleKeys: ["title", "label"],
+      titleKeys: ["title"],
       statusKeys: ["significance"],
       transform({ attributes, helpers }) {
         return {
@@ -356,8 +356,8 @@ const checkedHealthEntityDefinitions = [
           zygosity: helpers.firstString(attributes, ["zygosity"]),
           significance: helpers.firstString(attributes, ["significance"]),
           inheritance: helpers.firstString(attributes, ["inheritance"]),
-          sourceFamilyMemberIds: helpers.firstStringArray(attributes, ["sourceFamilyMemberIds", "familyMemberIds"]),
-          note: helpers.firstString(attributes, ["note", "summary", "actionability", "notes"]),
+          sourceFamilyMemberIds: helpers.firstStringArray(attributes, ["sourceFamilyMemberIds"]),
+          note: helpers.firstString(attributes, ["note"]),
           updatedAt: helpers.firstString(attributes, ["updatedAt"]),
         };
       },

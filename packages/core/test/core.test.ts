@@ -925,23 +925,21 @@ test("createExperiment returns the existing experiment for idempotent retries", 
   assert.equal(experimentOperations[0]?.status, "committed");
 });
 
-test("createExperiment coerces invalid status values to active for the legacy create path", async () => {
+test("createExperiment rejects invalid status values on the canonical path", async () => {
   const vaultRoot = await makeTempDirectory("murph-vault");
   await initializeVault({ vaultRoot });
 
-  const created = await createExperiment({
-    vaultRoot,
-    slug: "status-boundary",
-    title: "Status Boundary",
-    status: "not-a-real-status",
-  });
-
-  const experimentDocument = parseFrontmatterDocument(
-    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot,
+        slug: "status-boundary",
+        title: "Status Boundary",
+        status: "not-a-real-status",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EXPERIMENT_STATUS_INVALID",
   );
-
-  assert.equal(created.created, true);
-  assert.equal(experimentDocument.attributes.status, "active");
 });
 
 test("assessment imports append contract-shaped records and emit intake audits", async () => {

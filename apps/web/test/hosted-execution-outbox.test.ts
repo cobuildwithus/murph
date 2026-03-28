@@ -199,20 +199,19 @@ function createDispatchResult(
       userId: "member_123",
     },
     status: {
-      activated: true,
       backpressuredEventIds: eventState === "backpressured" ? ["evt_tick"] : [],
       bundleRefs: {
         agentState: null,
         vault: null,
       },
+      inFlight: false,
       lastError: input.statusLastError ?? null,
       lastEventId: "evt_tick",
+      lastRunAt: null,
+      nextWakeAt: null,
       pendingEventCount: eventState === "queued" || eventState === "duplicate_pending" ? 1 : 0,
-      recentEventIds: ["evt_tick"],
-      userEnv: {
-        count: 0,
-        updatedAt: null,
-      },
+      poisonedEventIds: [],
+      retryingEventId: null,
       userId: "member_123",
     },
   };

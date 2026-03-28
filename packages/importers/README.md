@@ -24,7 +24,7 @@ This package still supports an injected write port for tests and alternate calle
 The assumed core surface is:
 
 - `importDocument(payload)`
-- `addMeal(payload)` or `importMeal(payload)`
+- `addMeal(payload)`
 - `importSamples(payload)`
 
 Importers never write vault files directly. They validate inputs, inspect source files, normalize payloads, and delegate the final canonical mutation to the injected core port.

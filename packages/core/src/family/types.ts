@@ -23,13 +23,10 @@ export interface UpsertFamilyMemberInput {
   familyMemberId?: string;
   slug?: string;
   title?: string;
-  name?: string;
   relationship?: string;
-  relation?: string;
   conditions?: string[];
   deceased?: boolean;
   note?: string;
-  summary?: string;
   relatedVariantIds?: string[];
 }
 
@@ -41,6 +38,6 @@ export interface UpsertFamilyMemberResult {
 
 export interface ReadFamilyMemberInput {
   vaultRoot: string;
-  memberId?: string;
+  familyMemberId?: string;
   slug?: string;
 }

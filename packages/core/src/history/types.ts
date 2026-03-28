@@ -150,7 +150,6 @@ export interface AppendTestHistoryEventInput extends HistoryEventDraftBase {
   testName: string;
   resultStatus?: TestResultStatus;
   summary?: string;
-  resultSummary?: string;
   testCategory?: string;
   specimenType?: string;
   labName?: string;
@@ -165,7 +164,6 @@ export interface AppendBloodTestInput extends HistoryEventDraftBase {
   testName: string;
   resultStatus?: TestResultStatus;
   summary?: string;
-  resultSummary?: string;
   specimenType?: BloodTestSpecimenType | string;
   labName?: string;
   labPanelId?: string;

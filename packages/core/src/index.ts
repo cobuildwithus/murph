@@ -39,7 +39,6 @@ export {
   importAssessmentResponse,
   importDeviceBatch,
   importDocument,
-  importMeal,
   importSamples,
   initializeVault,
   linkJournalEventIds,

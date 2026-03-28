@@ -43,6 +43,7 @@ import {
   runAssistantCronJobNow,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.ts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
 import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store.ts'
 
@@ -449,7 +450,7 @@ test('assistant cron assigns vault timezones to cron schedules and computes next
   assert.equal(job.state.nextRunAt, '2026-03-27T21:00:00.000Z')
 })
 
-test('assistant cron re-enable normalizes legacy cron schedules to the vault timezone', async () => {
+test('assistant cron re-enable preserves missing legacy cron timezones instead of backfilling them', async () => {
   vi.useFakeTimers()
 
   try {
@@ -499,8 +500,11 @@ test('assistant cron re-enable normalizes legacy cron schedules to the vault tim
 
     assert.equal(reenabled.enabled, true)
     assert.equal(reenabled.schedule.kind, 'cron')
-    assert.equal(reenabled.schedule.timeZone, 'Australia/Melbourne')
-    assert.equal(reenabled.state.nextRunAt, '2026-03-27T21:00:00.000Z')
+    assert.equal(reenabled.schedule.timeZone, undefined)
+    assert.equal(
+      reenabled.state.nextRunAt,
+      computeAssistantCronNextRunAt(reenabled.schedule, new Date('2026-03-26T21:30:00.000Z')),
+    )
   } finally {
     vi.useRealTimers()
   }

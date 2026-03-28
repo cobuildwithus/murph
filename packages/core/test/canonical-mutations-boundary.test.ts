@@ -248,7 +248,7 @@ test("high-level core provider, event, and summary mutation ports preserve canon
   assert.deepEqual(eventRecord.relatedIds, [createdProvider.providerId]);
 });
 
-test("high-level core experiment mutation ports keep legacy create coercion distinct from canonical update validation", async () => {
+test("high-level core experiment mutation ports reject invalid experiment statuses consistently", async () => {
   const vaultRoot = await makeTempDirectory("murph-core-boundary");
   await initializeVault({ vaultRoot });
 
@@ -256,13 +256,20 @@ test("high-level core experiment mutation ports keep legacy create coercion dist
     vaultRoot,
     slug: "status-boundary",
     title: "Status Boundary",
-    status: "not-a-real-status",
+    status: "active",
   });
-  const experimentDocument = parseFrontmatterDocument(
-    await fs.readFile(path.join(vaultRoot, created.experiment.relativePath), "utf8"),
-  );
 
-  assert.equal(experimentDocument.attributes.status, "active");
+  await assert.rejects(
+    () =>
+      createExperiment({
+        vaultRoot,
+        slug: "status-boundary-invalid",
+        title: "Status Boundary Invalid",
+        status: "not-a-real-status",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EXPERIMENT_STATUS_INVALID",
+  );
 
   await assert.rejects(
     () =>

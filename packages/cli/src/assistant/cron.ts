@@ -332,27 +332,16 @@ export async function setAssistantCronJobEnabled(
   enabled: boolean,
 ): Promise<AssistantCronJob> {
   const paths = resolveAssistantStatePaths(vault)
-  const defaultTimeZone = await resolveAssistantCronDefaultTimeZone(vault)
   await ensureAssistantCronState(paths)
 
   return withAssistantCronWriteLock(paths, async () => {
     const store = await readAssistantCronStore(paths)
     const index = resolveAssistantCronJobIndex(store, job)
     const existing = store.jobs[index] as AssistantCronJob
-    const normalizedSchedule = applyAssistantCronDefaultTimeZone(
-      existing.schedule,
-      defaultTimeZone,
-    )
     const now = new Date()
 
     const nextRunAt = enabled
-      ? resolveAssistantCronReenabledNextRunAt(
-          {
-            ...existing,
-            schedule: normalizedSchedule,
-          },
-          now,
-        )
+      ? resolveAssistantCronReenabledNextRunAt(existing, now)
       : existing.state.nextRunAt
 
     if (enabled && nextRunAt === null) {
@@ -365,7 +354,6 @@ export async function setAssistantCronJobEnabled(
     const updated = assistantCronJobSchema.parse({
       ...existing,
       enabled,
-      schedule: normalizedSchedule,
       updatedAt: now.toISOString(),
       state: {
         ...existing.state,
@@ -685,7 +673,6 @@ async function executeClaimedAssistantCronJob(input: {
     responseLength: response?.length ?? 0,
     error: errorText,
   })
-  const defaultTimeZone = await resolveAssistantCronDefaultTimeZone(input.vault)
 
   const finalized = await withAssistantCronWriteLock(input.paths, async () => {
     const store = await readAssistantCronStore(input.paths)
@@ -701,7 +688,6 @@ async function executeClaimedAssistantCronJob(input: {
 
     const current = store.jobs[index] as AssistantCronJob
     const finalizedJob = finalizeAssistantCronJobAfterRun({
-      defaultTimeZone,
       job: current,
       finishedAt,
       responseSessionId: sessionId,
@@ -767,50 +753,38 @@ function buildAssistantCronExecutionPrompt(job: AssistantCronJob): string {
 }
 
 function finalizeAssistantCronJobAfterRun(input: {
-  defaultTimeZone: string
   finishedAt: string
   job: AssistantCronJob
   responseSessionId: string | null
   run: AssistantCronRunRecord
 }): AssistantCronJob {
-  const normalizedSchedule = applyAssistantCronDefaultTimeZone(
-    input.job.schedule,
-    input.defaultTimeZone,
-  )
-  const normalizedJob =
-    normalizedSchedule === input.job.schedule
-      ? input.job
-      : assistantCronJobSchema.parse({
-          ...input.job,
-          schedule: normalizedSchedule,
-        })
   const runningClearedState = {
-    ...normalizedJob.state,
+    ...input.job.state,
     runningAt: null,
     runningPid: null,
     lastRunAt: input.finishedAt,
   }
   const shouldAutoBindSession =
-    input.responseSessionId !== null && !assistantCronJobHasStableSessionLocator(normalizedJob)
+    input.responseSessionId !== null && !assistantCronJobHasStableSessionLocator(input.job)
 
   if (input.run.status === 'succeeded') {
     const nextRunAt = resolveAssistantCronNextRunAfterSuccess(
-      normalizedJob,
+      input.job,
       new Date(input.finishedAt),
     )
 
     return assistantCronJobSchema.parse({
-      ...normalizedJob,
+      ...input.job,
       enabled:
-        normalizedJob.schedule.kind === 'at' && normalizedJob.keepAfterRun
+        input.job.schedule.kind === 'at' && input.job.keepAfterRun
           ? false
-          : normalizedJob.enabled,
+          : input.job.enabled,
       target: shouldAutoBindSession
         ? {
-            ...normalizedJob.target,
+            ...input.job.target,
             sessionId: input.responseSessionId,
           }
-        : normalizedJob.target,
+        : input.job.target,
       updatedAt: input.finishedAt,
       state: {
         ...runningClearedState,
@@ -824,21 +798,21 @@ function finalizeAssistantCronJobAfterRun(input: {
 
   if (input.run.status === 'skipped') {
     return assistantCronJobSchema.parse({
-      ...normalizedJob,
+      ...input.job,
       updatedAt: input.finishedAt,
       state: runningClearedState,
     })
   }
 
-  const failureCount = normalizedJob.state.consecutiveFailures + 1
-  const nextRunAt = normalizedJob.enabled
+  const failureCount = input.job.state.consecutiveFailures + 1
+  const nextRunAt = input.job.enabled
     ? new Date(
         Date.parse(input.finishedAt) + resolveAssistantCronFailureBackoffMs(failureCount),
       ).toISOString()
-    : normalizedJob.state.nextRunAt
+    : input.job.state.nextRunAt
 
   return assistantCronJobSchema.parse({
-    ...normalizedJob,
+    ...input.job,
     updatedAt: input.finishedAt,
     state: {
       ...runningClearedState,
@@ -904,28 +878,18 @@ function resolveAssistantCronFailureBackoffMs(failureCount: number): number {
   return 60 * 60_000
 }
 
-function applyAssistantCronDefaultTimeZone(
+async function resolveAssistantCronScheduleForVault(
+  vault: string,
   schedule: AssistantCronSchedule,
-  defaultTimeZone: string,
-): AssistantCronSchedule {
+): Promise<AssistantCronSchedule> {
   if (schedule.kind !== 'cron' || schedule.timeZone) {
     return schedule
   }
 
   return assistantCronScheduleSchema.parse({
     ...schedule,
-    timeZone: defaultTimeZone,
+    timeZone: await resolveAssistantCronDefaultTimeZone(vault),
   })
-}
-
-async function resolveAssistantCronScheduleForVault(
-  vault: string,
-  schedule: AssistantCronSchedule,
-): Promise<AssistantCronSchedule> {
-  return applyAssistantCronDefaultTimeZone(
-    schedule,
-    await resolveAssistantCronDefaultTimeZone(vault),
-  )
 }
 
 async function resolveAssistantCronDefaultTimeZone(vault: string): Promise<string> {
@@ -969,7 +933,7 @@ async function runFoodAutoLogCronJob(input: {
     foodId: input.foodId,
   })
   const note = renderAutoLoggedFoodMealNote(food)
-  const result = await importers.importMeal({
+  const result = await importers.addMeal({
     vaultRoot: input.vault,
     occurredAt: new Date().toISOString(),
     note,
