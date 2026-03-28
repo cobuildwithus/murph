@@ -82,6 +82,11 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
+  if (replyBacklogActive) {
+    // Once backlog replay starts, the current reply cursor becomes authoritative.
+    scanState.autoReplyPrimed = true
+  }
+
   if (replyChannels.length > 0 && !scanState.autoReplyPrimed && !replyBacklogActive) {
     scanState.autoReplyScanCursor = await primeAssistantAutoReplyCursor({
       afterCursor: scanState.autoReplyScanCursor,
@@ -110,6 +115,7 @@ export async function scanAssistantAutomationOnce(input: {
   const candidateBatches = await listAssistantAutomationCandidates({
     inboxServices: input.inboxServices,
     maxPerScan: input.maxPerScan,
+    restrictReplyToChannels: replyBacklogActive,
     replyChannels,
     requestId: input.requestId ?? null,
     routingEnabled,
@@ -119,6 +125,9 @@ export async function scanAssistantAutomationOnce(input: {
 
   if (replyBacklogActive && candidateBatches.reply.length === 0) {
     scanState.autoReplyBacklogChannels = []
+    // Once the configured backlog is drained, continue from the current
+    // reply cursor instead of re-priming to the newest capture.
+    scanState.autoReplyPrimed = true
     await persistAssistantAutomationScanState({
       onStateProgress: input.onStateProgress,
       persistedState,
@@ -311,6 +320,7 @@ async function primeAssistantAutoReplyCursor(input: {
 async function listAssistantAutomationCandidates(input: {
   inboxServices: InboxCliServices
   maxPerScan?: number
+  restrictReplyToChannels: boolean
   replyChannels: readonly string[]
   requestId: string | null
   routingEnabled: boolean
@@ -351,7 +361,17 @@ async function listAssistantAutomationCandidates(input: {
   ])
 
   return {
-    reply: [...replyListed.items].sort(compareAssistantCaptureOrder),
+    reply: [
+      ...(
+        // When a backlog channel is draining, keep other enabled channels
+        // pending so they are still eligible once backlog mode clears.
+        input.restrictReplyToChannels
+          ? replyListed.items.filter((capture) =>
+              input.replyChannels.includes(capture.source),
+            )
+          : replyListed.items
+      ),
+    ].sort(compareAssistantCaptureOrder),
     routing: [...routingListed.items].sort(compareAssistantCaptureOrder),
   }
 }
