@@ -19,8 +19,37 @@ import {
   uniqueTrimmedStringList,
   validateContract,
 } from "./shared.ts";
+import type { DateInput } from "../types.ts";
 
 type JsonObject = Record<string, unknown>;
+type EventRecordByKind<K extends EventRecord["kind"]> = Extract<EventRecord, { kind: K }>;
+
+const PUBLIC_EVENT_WRITE_KIND_LIST = [
+  "symptom",
+  "note",
+  "observation",
+  "medication_intake",
+  "supplement_intake",
+  "activity_session",
+  "sleep_session",
+  "intervention_session",
+] as const;
+
+export type PublicWritableEventKind = (typeof PUBLIC_EVENT_WRITE_KIND_LIST)[number];
+export type EventDraftByKind<K extends PublicWritableEventKind> = Omit<
+  EventRecordByKind<K>,
+  "schemaVersion" | "kind" | "occurredAt" | "recordedAt" | "dayKey" | "source"
+> & {
+  kind: K;
+  id?: string;
+  occurredAt: DateInput;
+  recordedAt?: DateInput;
+  dayKey?: string;
+  source?: EventRecordByKind<K>["source"];
+};
+export type PublicEventDraft = {
+  [K in PublicWritableEventKind]: EventDraftByKind<K>;
+}[PublicWritableEventKind];
 
 interface LoadedEventLedgerShard {
   relativePath: string;
@@ -28,11 +57,19 @@ interface LoadedEventLedgerShard {
   matchingRecords: EventRecord[];
 }
 
-export interface UpsertEventInput {
+export interface UpsertEventPayloadInput {
   vaultRoot: string;
   payload: JsonObject;
   allowSpecializedKindRewrite?: boolean;
 }
+
+export interface UpsertEventDraftInput {
+  vaultRoot: string;
+  draft: PublicEventDraft;
+  allowSpecializedKindRewrite?: boolean;
+}
+
+export type UpsertEventInput = UpsertEventPayloadInput | UpsertEventDraftInput;
 
 export interface DeleteEventInput {
   vaultRoot: string;
@@ -69,16 +106,7 @@ const RESERVED_EVENT_KEYS = new Set([
   "rawRefs",
 ]);
 
-const PUBLIC_EVENT_WRITE_KINDS = new Set<EventRecord["kind"]>([
-  "symptom",
-  "note",
-  "observation",
-  "medication_intake",
-  "supplement_intake",
-  "activity_session",
-  "sleep_session",
-  "intervention_session",
-]);
+const PUBLIC_EVENT_WRITE_KINDS = new Set<EventRecord["kind"]>(PUBLIC_EVENT_WRITE_KIND_LIST);
 const SUPPORTED_EVENT_KINDS = new Set<string>(EVENT_KINDS);
 
 function valueAsString(value: unknown): string | undefined {
@@ -98,6 +126,10 @@ function normalizeEventId(payload: JsonObject): string | undefined {
   return normalizeOptionalText(
     typeof payload.id === "string" ? payload.id : valueAsString(payload.eventId),
   ) ?? undefined;
+}
+
+function normalizeDraftEventId(value: unknown): string | undefined {
+  return typeof value === "string" ? normalizeOptionalText(value) ?? undefined : undefined;
 }
 
 function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
@@ -152,6 +184,184 @@ function buildEventRecord(payload: JsonObject, fallbackTimeZone?: string): Event
     "EVENT_CONTRACT_INVALID",
     `Event payload for kind "${kind}" is invalid.`,
   );
+}
+
+function buildBaseEventContractInput(
+  draft: PublicEventDraft,
+  fallbackTimeZone?: string,
+): Omit<EventRecord, "kind"> {
+  const occurredAt = normalizeTimestampInput(draft.occurredAt);
+  if (!occurredAt) {
+    throw new VaultError("EVENT_OCCURRED_AT_MISSING", "Event draft requires occurredAt.");
+  }
+
+  const timeZone = normalizeTimeZone(valueAsString(draft.timeZone));
+  const effectiveTimeZone = timeZone ?? normalizeTimeZone(fallbackTimeZone) ?? defaultTimeZone();
+  const dayKey =
+    normalizeLocalDate(valueAsString(draft.dayKey)) ??
+    toLocalDayKey(occurredAt, effectiveTimeZone, "occurredAt");
+
+  return compactObject({
+    schemaVersion: CONTRACT_SCHEMA_VERSION.event,
+    id: normalizeDraftEventId(draft.id) ?? generateRecordId(ID_PREFIXES.event),
+    occurredAt,
+    recordedAt: normalizeTimestampInput(draft.recordedAt) ?? new Date().toISOString(),
+    dayKey,
+    timeZone,
+    source: normalizeOptionalText(valueAsString(draft.source)) ?? "manual",
+    title: requireText(draft.title, "Event draft requires a title."),
+    note: normalizeOptionalText(valueAsString(draft.note)) ?? undefined,
+    tags: uniqueTrimmedStringList(draft.tags) ?? undefined,
+    relatedIds: uniqueTrimmedStringList(draft.relatedIds) ?? undefined,
+    rawRefs: uniqueTrimmedStringList(draft.rawRefs) ?? undefined,
+    externalRef: draft.externalRef,
+  }) as Omit<EventRecord, "kind">;
+}
+
+function buildTypedEventRecord(
+  draft: PublicEventDraft,
+  fallbackTimeZone?: string,
+): EventRecord {
+  const base = buildBaseEventContractInput(draft, fallbackTimeZone);
+
+  const record = (() => {
+    switch (draft.kind) {
+      case "note":
+        return compactObject({
+          ...base,
+          kind: "note",
+        });
+      case "symptom":
+        return compactObject({
+          ...base,
+          kind: "symptom",
+          symptom: draft.symptom,
+          intensity: draft.intensity,
+          bodySite: draft.bodySite,
+        });
+      case "observation":
+        return compactObject({
+          ...base,
+          kind: "observation",
+          metric: draft.metric,
+          value: draft.value,
+          unit: draft.unit,
+        });
+      case "medication_intake":
+        return compactObject({
+          ...base,
+          kind: "medication_intake",
+          medicationName: draft.medicationName,
+          dose: draft.dose,
+          unit: draft.unit,
+        });
+      case "supplement_intake":
+        return compactObject({
+          ...base,
+          kind: "supplement_intake",
+          supplementName: draft.supplementName,
+          dose: draft.dose,
+          unit: draft.unit,
+        });
+      case "activity_session":
+        return compactObject({
+          ...base,
+          kind: "activity_session",
+          activityType: draft.activityType,
+          durationMinutes: draft.durationMinutes,
+          distanceKm: draft.distanceKm,
+          strengthExercises: draft.strengthExercises,
+        });
+      case "sleep_session":
+        return compactObject({
+          ...base,
+          kind: "sleep_session",
+          startAt: draft.startAt,
+          endAt: draft.endAt,
+          durationMinutes: draft.durationMinutes,
+        });
+      case "intervention_session":
+        return compactObject({
+          ...base,
+          kind: "intervention_session",
+          interventionType: draft.interventionType,
+          durationMinutes: draft.durationMinutes,
+          protocolId: draft.protocolId,
+        });
+    }
+  })();
+
+  return validateContract(
+    eventRecordSchema,
+    record,
+    "EVENT_CONTRACT_INVALID",
+    `Event draft for kind "${draft.kind}" is invalid.`,
+  );
+}
+
+function buildTypedEventDraft<K extends PublicWritableEventKind>(
+  kind: K,
+  input: Omit<EventDraftByKind<K>, "kind">,
+): EventDraftByKind<K> {
+  return {
+    kind,
+    ...input,
+  } as EventDraftByKind<K>;
+}
+
+export function buildSymptomEventDraft(
+  input: Omit<EventDraftByKind<"symptom">, "kind">,
+): EventDraftByKind<"symptom"> {
+  return buildTypedEventDraft("symptom", input);
+}
+
+export function buildNoteEventDraft(
+  input: Omit<EventDraftByKind<"note">, "kind">,
+): EventDraftByKind<"note"> {
+  return buildTypedEventDraft("note", input);
+}
+
+export function buildObservationEventDraft(
+  input: Omit<EventDraftByKind<"observation">, "kind">,
+): EventDraftByKind<"observation"> {
+  return buildTypedEventDraft("observation", input);
+}
+
+export function buildMedicationIntakeEventDraft(
+  input: Omit<EventDraftByKind<"medication_intake">, "kind">,
+): EventDraftByKind<"medication_intake"> {
+  return buildTypedEventDraft("medication_intake", input);
+}
+
+export function buildSupplementIntakeEventDraft(
+  input: Omit<EventDraftByKind<"supplement_intake">, "kind">,
+): EventDraftByKind<"supplement_intake"> {
+  return buildTypedEventDraft("supplement_intake", input);
+}
+
+export function buildActivitySessionEventDraft(
+  input: Omit<EventDraftByKind<"activity_session">, "kind">,
+): EventDraftByKind<"activity_session"> {
+  return buildTypedEventDraft("activity_session", input);
+}
+
+export function buildSleepSessionEventDraft(
+  input: Omit<EventDraftByKind<"sleep_session">, "kind">,
+): EventDraftByKind<"sleep_session"> {
+  return buildTypedEventDraft("sleep_session", input);
+}
+
+export function buildInterventionSessionEventDraft(
+  input: Omit<EventDraftByKind<"intervention_session">, "kind">,
+): EventDraftByKind<"intervention_session"> {
+  return buildTypedEventDraft("intervention_session", input);
+}
+
+export function buildPublicEventRecord<K extends PublicWritableEventKind>(
+  draft: EventDraftByKind<K>,
+  fallbackTimeZone?: string,
+): EventRecordByKind<K> {
+  return buildTypedEventRecord(draft as PublicEventDraft, fallbackTimeZone) as EventRecordByKind<K>;
 }
 
 export function buildExperimentEventRecord(input: {
@@ -299,12 +509,20 @@ function canWriteEventKind(
   return allowSpecializedKindRewrite === true && matchedShards.length > 0;
 }
 
+function isDraftUpsertInput(input: UpsertEventInput): input is UpsertEventDraftInput {
+  return "draft" in input;
+}
+
 export async function upsertEvent(
   input: UpsertEventInput,
 ): Promise<UpsertEventResult> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const suppliedEventId = normalizeEventId(input.payload);
-  const kind = normalizeEventKind(input.payload);
+  const suppliedEventId = isDraftUpsertInput(input)
+    ? normalizeDraftEventId(input.draft.id)
+    : normalizeEventId(input.payload);
+  const kind = isDraftUpsertInput(input)
+    ? input.draft.kind
+    : normalizeEventKind(input.payload);
   const matchedShards =
     suppliedEventId === undefined
       ? []
@@ -323,7 +541,9 @@ export async function upsertEvent(
     );
   }
 
-  const eventRecord = buildEventRecord(input.payload, vault.metadata.timezone);
+  const eventRecord = isDraftUpsertInput(input)
+    ? buildTypedEventRecord(input.draft, vault.metadata.timezone)
+    : buildEventRecord(input.payload, vault.metadata.timezone);
 
   const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
   const rewritten = new Map<string, JsonObject[]>();

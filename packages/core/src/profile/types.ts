@@ -1,3 +1,5 @@
+import type { ProfileSnapshotProfile as ContractProfileSnapshotProfile } from "@murph/contracts";
+
 import type { UnknownRecord } from "../types.ts";
 
 export const PROFILE_SNAPSHOT_SCHEMA_VERSION = "murph.profile-snapshot.v1";
@@ -8,6 +10,8 @@ export const PROFILE_CURRENT_DOC_TYPE = "profile_current";
 
 export const PROFILE_SNAPSHOT_SOURCES = ["assessment_projection", "manual", "derived"] as const;
 export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
+export type ProfileSnapshotProfile = ContractProfileSnapshotProfile;
+export type ProfileSnapshotProfileInput = ProfileSnapshotProfile | UnknownRecord;
 
 export interface ProfileSnapshotRecord {
   schemaVersion: typeof PROFILE_SNAPSHOT_SCHEMA_VERSION;
@@ -16,7 +20,7 @@ export interface ProfileSnapshotRecord {
   source: ProfileSnapshotSource;
   sourceAssessmentIds?: string[];
   sourceEventIds?: string[];
-  profile: UnknownRecord;
+  profile: ProfileSnapshotProfile;
 }
 
 export interface AppendProfileSnapshotInput {
@@ -25,7 +29,7 @@ export interface AppendProfileSnapshotInput {
   source?: ProfileSnapshotSource;
   sourceAssessmentIds?: string[];
   sourceEventIds?: string[];
-  profile: UnknownRecord;
+  profile: ProfileSnapshotProfileInput;
 }
 
 export interface CurrentProfileState {
@@ -33,7 +37,7 @@ export interface CurrentProfileState {
   exists: boolean;
   markdown: string | null;
   snapshot: ProfileSnapshotRecord | null;
-  profile: UnknownRecord | null;
+  profile: ProfileSnapshotProfile | null;
 }
 
 export interface RebuiltCurrentProfile extends CurrentProfileState {

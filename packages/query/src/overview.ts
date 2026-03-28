@@ -1,3 +1,5 @@
+import { extractProfileTopGoalIds } from "./canonical-entities.ts";
+
 import type { VaultReadModel } from "./model.ts";
 
 export interface OverviewMetric {
@@ -108,8 +110,8 @@ export function summarizeCurrentOverviewProfile(
     : null;
   const topGoalIds = extractStringArray(
     getRecordField(currentData, "topGoalIds"),
-    getRecordField(currentProfileData, "topGoalIds"),
-    getRecordField(latestSnapshotProfile, "topGoalIds"),
+    extractProfileTopGoalIds(currentProfileData),
+    extractProfileTopGoalIds(latestSnapshotProfile),
   );
 
   return {

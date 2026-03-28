@@ -1,5 +1,8 @@
 import {
   jsonObjectSchema,
+  profileSnapshotGoalsSchema,
+  profileSnapshotNarrativeSchema,
+  profileSnapshotProfileSchema,
   profileCurrentFrontmatterSchema,
   profileSnapshotSchema,
   safeParseContract,
@@ -20,6 +23,8 @@ import type { FrontmatterObject, UnknownRecord } from "../types.ts";
 import type {
   AppendProfileSnapshotInput,
   CurrentProfileState,
+  ProfileSnapshotProfile,
+  ProfileSnapshotProfileInput,
   ProfileSnapshotRecord,
   RebuiltCurrentProfile,
 } from "./types.ts";
@@ -43,7 +48,22 @@ interface RebuildCurrentProfileInput {
   vaultRoot: string;
 }
 
-function assertProfile(value: unknown): asserts value is UnknownRecord {
+const LEGACY_PROFILE_SECTION_KEYS = new Set([
+  "narrative",
+  "goals",
+  "custom",
+  "summary",
+  "highlights",
+  "topGoalIds",
+]);
+
+function compactProfileRecord<TRecord extends Record<string, unknown>>(record: TRecord): TRecord {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, entryValue]) => entryValue !== undefined),
+  ) as TRecord;
+}
+
+function assertProfileRecord(value: unknown): asserts value is UnknownRecord {
   const result = safeParseContract(jsonObjectSchema, value);
 
   if (!result.success) {
@@ -51,12 +71,86 @@ function assertProfile(value: unknown): asserts value is UnknownRecord {
   }
 }
 
+function normalizeProfileHighlights(value: unknown): string[] | undefined {
+  const result = profileSnapshotNarrativeSchema.shape.highlights.safeParse(value);
+  return result.success ? result.data : undefined;
+}
+
+function normalizeProfileTopGoalIds(value: unknown): string[] | undefined {
+  const result = profileSnapshotGoalsSchema.shape.topGoalIds.safeParse(value);
+  return result.success ? result.data : undefined;
+}
+
+function hasTypedProfileSectionKeys(value: UnknownRecord): boolean {
+  return ["narrative", "goals", "custom"].some((key) => key in value);
+}
+
+function normalizeProfileSnapshotProfileInput(
+  value: ProfileSnapshotProfileInput,
+): ProfileSnapshotProfile {
+  const parsed = safeParseContract(profileSnapshotProfileSchema, value);
+  if (parsed.success) {
+    return compactProfileRecord(parsed.data) as ProfileSnapshotProfile;
+  }
+
+  assertProfileRecord(value);
+  const legacyProfile = value as UnknownRecord;
+  if (hasTypedProfileSectionKeys(legacyProfile)) {
+    throw new VaultError("PROFILE_INVALID", "Profile snapshots require a valid typed profile payload.", {
+      errors: parsed.errors,
+    });
+  }
+
+  const narrativeSummary = legacyProfile.summary;
+  const narrativeHighlights = normalizeProfileHighlights(legacyProfile.highlights);
+  const topGoalIds = normalizeProfileTopGoalIds(legacyProfile.topGoalIds);
+
+  const legacyCustomEntries = Object.fromEntries(
+    Object.entries(legacyProfile).filter(
+      ([key, entryValue]) =>
+        !LEGACY_PROFILE_SECTION_KEYS.has(key) &&
+        entryValue !== undefined,
+    ),
+  ) as UnknownRecord;
+
+  const normalized = compactProfileRecord({
+    narrative:
+      typeof narrativeSummary === "string" || narrativeHighlights !== undefined
+        ? {
+            ...(typeof narrativeSummary === "string" ? { summary: narrativeSummary } : {}),
+            ...(narrativeHighlights !== undefined ? { highlights: narrativeHighlights } : {}),
+          }
+        : undefined,
+    goals: topGoalIds !== undefined ? { topGoalIds } : undefined,
+    custom:
+      Object.keys(legacyCustomEntries).length > 0 ? legacyCustomEntries : undefined,
+  }) as ProfileSnapshotProfile;
+
+  const normalizedResult = safeParseContract(profileSnapshotProfileSchema, normalized);
+  if (!normalizedResult.success) {
+    throw new VaultError("PROFILE_INVALID", "Profile snapshots require a valid typed profile payload.", {
+      errors: normalizedResult.errors,
+    });
+  }
+
+  return normalizedResult.data;
+}
+
 function isProfileSnapshotSource(value: unknown): value is ProfileSnapshotRecord["source"] {
   return profileSnapshotSchema.shape.source.safeParse(value).success;
 }
 
 function toProfileSnapshotRecord(value: unknown): ProfileSnapshotRecord {
-  const result = safeParseContract(profileSnapshotSchema, value);
+  const candidate =
+    isPlainRecord(value) && "profile" in value
+      ? {
+          ...value,
+          profile: normalizeProfileSnapshotProfileInput(
+            (value as { profile: ProfileSnapshotProfileInput }).profile,
+          ),
+        }
+      : value;
+  const result = safeParseContract(profileSnapshotSchema, candidate);
 
   if (!result.success) {
     throw new VaultError("PROFILE_SNAPSHOT_INVALID", "Profile snapshot record failed contract validation.", {
@@ -123,9 +217,6 @@ function renderProfileValue(
 }
 
 export function buildCurrentProfileMarkdown(snapshot: ProfileSnapshotRecord): string {
-  const topGoalIdsResult = profileCurrentFrontmatterSchema.shape.topGoalIds.safeParse(
-    snapshot.profile.topGoalIds,
-  );
   const attributesResult = safeParseContract(profileCurrentFrontmatterSchema, {
     schemaVersion: PROFILE_CURRENT_SCHEMA_VERSION,
     docType: PROFILE_CURRENT_DOC_TYPE,
@@ -133,7 +224,7 @@ export function buildCurrentProfileMarkdown(snapshot: ProfileSnapshotRecord): st
     updatedAt: snapshot.recordedAt,
     sourceAssessmentIds: snapshot.sourceAssessmentIds,
     sourceEventIds: snapshot.sourceEventIds,
-    topGoalIds: topGoalIdsResult.success ? topGoalIdsResult.data : undefined,
+    topGoalIds: snapshot.profile.goals?.topGoalIds,
   });
 
   if (!attributesResult.success) {
@@ -287,7 +378,7 @@ export async function appendProfileSnapshot({
   ledgerPath: string;
   currentProfile: RebuiltCurrentProfile;
 }> {
-  assertProfile(profile);
+  const normalizedProfile = normalizeProfileSnapshotProfileInput(profile);
 
   const recordedTimestamp = toIsoTimestamp(recordedAt, "recordedAt");
   const snapshot = toProfileSnapshotRecord({
@@ -299,7 +390,7 @@ export async function appendProfileSnapshot({
       sourceAssessmentIds && sourceAssessmentIds.length > 0 ? [...new Set(sourceAssessmentIds)] : undefined,
     sourceEventIds:
       sourceEventIds && sourceEventIds.length > 0 ? [...new Set(sourceEventIds)] : undefined,
-    profile,
+    profile: normalizedProfile,
   });
 
   const ledgerPath = toMonthlyShardRelativePath(
