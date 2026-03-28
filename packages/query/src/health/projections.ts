@@ -8,7 +8,6 @@ import {
 } from "../canonical-entities.ts";
 import { compareByOccurredAtDescThenId, compareByRecordedOrImportedAtDescThenId } from "./comparators.ts";
 import {
-  buildCurrentProfileSnapshotSortFields,
   compareCurrentProfileSnapshotRecency,
   type CurrentProfileSnapshotSortFields,
 } from "./current-profile-resolution.ts";
@@ -394,8 +393,8 @@ function matchesKindFilter(
 function profileSnapshotSortFields(
   snapshot: ProfileSnapshotQueryRecord,
 ): CurrentProfileSnapshotSortFields {
-  return buildCurrentProfileSnapshotSortFields(
-    snapshot.id,
-    snapshot.recordedAt ?? snapshot.capturedAt,
-  );
+  return {
+    snapshotId: snapshot.id,
+    snapshotTimestamp: snapshot.recordedAt ?? snapshot.capturedAt,
+  };
 }
