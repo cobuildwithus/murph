@@ -1207,7 +1207,10 @@ async function ensureAssistantDefaultSelection(input: {
   }
 
   const existing = await readOperatorConfig(input.homeDirectory)
-  const nextDefaults = assistantSelectionToOperatorDefaults(input.assistant)
+  const nextDefaults = assistantSelectionToOperatorDefaults(
+    input.assistant,
+    existing?.assistant ?? null,
+  )
   const status = assistantOperatorDefaultsMatch(
     existing?.assistant ?? null,
     nextDefaults,
@@ -1249,6 +1252,7 @@ async function ensureAssistantDefaultSelection(input: {
 
 function assistantSelectionToOperatorDefaults(
   assistant: SetupConfiguredAssistant,
+  existingDefaults: AssistantOperatorDefaults | null,
 ): Partial<AssistantOperatorDefaults> {
   if (!assistant.provider) {
     return {
@@ -1259,7 +1263,7 @@ function assistantSelectionToOperatorDefaults(
 
   return {
     ...buildAssistantProviderDefaultsPatch({
-      defaults: null,
+      defaults: existingDefaults,
       provider: assistant.provider,
       providerConfig: {
         model: assistant.model,
@@ -1271,7 +1275,6 @@ function assistantSelectionToOperatorDefaults(
         baseUrl: assistant.baseUrl,
         apiKeyEnv: assistant.apiKeyEnv,
         providerName: assistant.providerName,
-        headers: null,
       },
     }),
     account: assistant.account ?? null,
