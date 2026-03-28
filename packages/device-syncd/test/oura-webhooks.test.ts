@@ -289,9 +289,9 @@ test("Oura webhook subscription ensure re-lists after create and prunes stale ma
   assert.deepEqual(operations, [
     "GET https://api.ouraring.com/v2/webhook/subscription",
     "PUT https://api.ouraring.com/v2/webhook/subscription/renew/sub-create-a-primary",
-    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate",
     "POST https://api.ouraring.com/v2/webhook/subscription",
     "GET https://api.ouraring.com/v2/webhook/subscription",
+    "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-create-b-duplicate",
     "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-other-callback",
   ]);
 });
