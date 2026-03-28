@@ -1,4 +1,4 @@
-import { foodUpsertPayloadSchema } from '@murph/contracts'
+import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId } from '@murph/contracts'
 import { z } from 'incur'
 
 import {
@@ -51,8 +51,6 @@ interface FoodReadModel {
   markdown: string
   [key: string]: unknown
 }
-
-const FOOD_ID_PATTERN = /^food_[0-9A-Za-z]+$/u
 
 interface FoodCoreRuntime {
   loadVault(input: {
@@ -231,7 +229,7 @@ export async function deleteFoodRecord(input: {
   try {
     await core.deleteFood({
       vaultRoot: input.vault,
-      foodId: FOOD_ID_PATTERN.test(normalizedLookup)
+      foodId: isContractId(normalizedLookup, ID_PREFIXES.food)
         ? normalizedLookup
         : food.foodId,
       slug: normalizedLookup,
@@ -528,7 +526,7 @@ async function requireFoodRecord(vault: string, lookup: string) {
   try {
     return await core.readFood({
       vaultRoot: vault,
-      foodId: FOOD_ID_PATTERN.test(normalizedLookup) ? normalizedLookup : undefined,
+      foodId: isContractId(normalizedLookup, ID_PREFIXES.food) ? normalizedLookup : undefined,
       slug: normalizedLookup,
     })
   } catch (error) {

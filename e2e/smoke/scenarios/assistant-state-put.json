@@ -1,0 +1,10 @@
+{
+  "id": "assistant-state-put",
+  "command": "vault-cli assistant state put <doc> --vault <path> --input @payload.json|-",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents replacing an assistant scratch-state document from a JSON payload."
+}

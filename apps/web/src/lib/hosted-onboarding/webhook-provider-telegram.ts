@@ -33,7 +33,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   prisma: PrismaClient;
   update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
 }): Promise<HostedWebhookPlan<HostedOnboardingTelegramWebhookResponse>> {
-  const summary = summarizeHostedTelegramWebhook(input.update);
+  const summary = await summarizeHostedTelegramWebhook(input.update);
 
   if (!summary) {
     return {
@@ -127,6 +127,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     desiredSideEffects: [
       createHostedWebhookDispatchSideEffect({
         dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+          botUserId: summary.botUserId,
           eventId: buildHostedTelegramWebhookEventId(input.update),
           occurredAt: summary.occurredAt,
           telegramUpdate: input.update as unknown as Record<string, unknown>,

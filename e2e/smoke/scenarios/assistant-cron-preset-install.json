@@ -1,6 +1,6 @@
 {
   "id": "assistant-cron-preset-install",
-  "command": "vault-cli assistant cron preset install <preset> --vault <path> [--name <name>] [--var <key=value>]... [--instructions <text>] [--at <ts>] [--every <duration>] [--cron <expr>] [--disabled] [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]",
+  "command": "vault-cli assistant cron preset install <preset> --vault <path> [--name <name>] [--var <key=value>]... [--instructions <text>] [--at <ts>] [--every <duration>] [--cron <expr>] [--disabled] [--state] [--stateDoc <docId>] [--session <id>] [--alias <alias>] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

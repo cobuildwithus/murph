@@ -1,0 +1,10 @@
+{
+  "id": "assistant-state-list",
+  "command": "vault-cli assistant state list --vault <path> [--prefix <prefix>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents listing assistant scratch-state documents stored outside the canonical vault."
+}

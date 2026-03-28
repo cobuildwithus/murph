@@ -8,6 +8,7 @@ import {
 
 import { readHostedWebhookReceiptState } from "./webhook-receipt-codec";
 import { normalizePhoneNumber } from "./phone";
+import type { HostedWebhookDispatchSideEffect } from "./webhook-receipt-types";
 
 export function readHostedWebhookReceiptDispatchByEventId(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
@@ -90,6 +91,7 @@ export function readHostedWebhookReceiptDispatchByEventId(
       }
 
       return buildHostedExecutionTelegramMessageReceivedDispatch({
+        botUserId: readHostedWebhookReceiptBotUserId(sideEffect.payload),
         eventId: dispatchRef.eventId,
         occurredAt: dispatchRef.occurredAt,
         telegramUpdate,
@@ -115,6 +117,88 @@ function readHostedWebhookReceiptTelegramUpdate(
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function readHostedWebhookReceiptBotUserId(
+  payload: HostedWebhookDispatchSideEffect["payload"],
+): string | null {
+  if ("dispatch" in payload) {
+    return null;
+  }
+
+  if (typeof payload.botUserId === "string") {
+    const normalized = payload.botUserId.trim();
+    if (normalized.length > 0) {
+      return normalized;
+    }
+  }
+
+  return inferHostedWebhookReceiptTelegramBotUserId(
+    payload.telegramUpdate as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+  );
+}
+
+function inferHostedWebhookReceiptTelegramBotUserId(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const update = value as Record<string, unknown>;
+  const message = readHostedWebhookReceiptTelegramMessage(update.message)
+    ?? readHostedWebhookReceiptTelegramMessage(update.business_message);
+
+  if (!message) {
+    return null;
+  }
+
+  const senderBusinessBotId = readHostedWebhookReceiptTelegramUserId(message.sender_business_bot);
+  if (senderBusinessBotId) {
+    return senderBusinessBotId;
+  }
+
+  const senderId = readHostedWebhookReceiptTelegramUserId(message.from);
+  if (senderId && readHostedWebhookReceiptTelegramUserIsBot(message.from)) {
+    return senderId;
+  }
+
+  return null;
+}
+
+function readHostedWebhookReceiptTelegramMessage(
+  value: unknown,
+): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readHostedWebhookReceiptTelegramUserId(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const id = (value as Record<string, unknown>).id;
+  if (typeof id === "number" && Number.isFinite(id)) {
+    return String(id);
+  }
+
+  if (typeof id === "string") {
+    const normalized = id.trim();
+    return normalized.length > 0 ? normalized : null;
+  }
+
+  return null;
+}
+
+function readHostedWebhookReceiptTelegramUserIsBot(value: unknown): boolean {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && !Array.isArray(value)
+      && (value as Record<string, unknown>).is_bot === true,
+  );
 }
 
 function readHostedWebhookReceiptNormalizedPhoneNumber(

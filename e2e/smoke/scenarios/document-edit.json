@@ -1,0 +1,10 @@
+{
+  "id": "document-edit",
+  "command": "vault-cli document edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/document-import",
+  "purpose": "Documents patching an existing imported document without changing its canonical ownership rules."
+}

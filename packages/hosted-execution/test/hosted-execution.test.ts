@@ -8,6 +8,9 @@ import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
+  buildHostedExecutionSharePayloadPath,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
@@ -27,6 +30,8 @@ import {
   readHostedExecutionOutboxPayload,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedExecutionWorkerEnvironment,
+  normalizeHostedDeviceSyncJobHints,
+  resolveHostedDeviceSyncWakeContext,
   resolveHostedExecutionDispatchLifecycle,
   resolveHostedExecutionDispatchOutcomeState,
   verifyHostedExecutionSignature,
@@ -285,6 +290,7 @@ describe("@murph/hosted-execution", () => {
   it("round-trips hosted Telegram dispatches through the shared builder and parser", () => {
     expect(parseHostedExecutionDispatchRequest(
       buildHostedExecutionTelegramMessageReceivedDispatch({
+        botUserId: "999",
         eventId: "telegram:update:123",
         occurredAt: "2026-03-28T09:05:00.000Z",
         telegramUpdate: {
@@ -307,6 +313,7 @@ describe("@murph/hosted-execution", () => {
       }),
     )).toEqual({
       event: {
+        botUserId: "999",
         kind: "telegram.message.received",
         telegramUpdate: {
           message: {
@@ -523,6 +530,172 @@ describe("@murph/hosted-execution", () => {
       lastError: "runner failed repeatedly",
       status: "failed",
     });
+
+    expect(
+      resolveHostedExecutionDispatchOutcomeState({
+        initialState: {
+          backpressured: false,
+          consumed: false,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+        nextState: {
+          backpressured: true,
+          consumed: false,
+          lastError: "slow lane",
+          pending: false,
+          poisoned: false,
+        },
+      }),
+    ).toBe("backpressured");
+
+    expect(
+      resolveHostedExecutionDispatchOutcomeState({
+        initialState: {
+          backpressured: false,
+          consumed: true,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+        nextState: {
+          backpressured: false,
+          consumed: true,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+      }),
+    ).toBe("duplicate_consumed");
+
+    expect(
+      resolveHostedExecutionDispatchOutcomeState({
+        initialState: {
+          backpressured: false,
+          consumed: false,
+          lastError: null,
+          pending: true,
+          poisoned: false,
+        },
+        nextState: {
+          backpressured: false,
+          consumed: false,
+          lastError: null,
+          pending: true,
+          poisoned: false,
+        },
+      }),
+    ).toBe("duplicate_pending");
+
+    expect(
+      resolveHostedExecutionDispatchOutcomeState({
+        initialState: {
+          backpressured: false,
+          consumed: false,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+        nextState: {
+          backpressured: false,
+          consumed: false,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+      }),
+    ).toBe("queued");
+
+    expect(
+      resolveHostedExecutionDispatchLifecycle({
+        event: {
+          eventId: "evt_duplicate",
+          lastError: "ignored",
+          state: "duplicate_consumed",
+          userId: "member_123",
+        },
+        status: {
+          backpressuredEventIds: [],
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: false,
+          lastError: null,
+          lastEventId: "evt_duplicate",
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 0,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "member_123",
+        },
+      }),
+    ).toEqual({
+      lastError: null,
+      status: "completed",
+    });
+
+    expect(
+      resolveHostedExecutionDispatchLifecycle({
+        event: {
+          eventId: "evt_backpressured",
+          lastError: "runner busy",
+          state: "backpressured",
+          userId: "member_123",
+        },
+        status: {
+          backpressuredEventIds: ["evt_backpressured"],
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: true,
+          lastError: "runner busy",
+          lastEventId: "evt_backpressured",
+          lastRunAt: null,
+          nextWakeAt: "2026-03-28T10:00:00.000Z",
+          pendingEventCount: 1,
+          poisonedEventIds: [],
+          retryingEventId: "evt_backpressured",
+          userId: "member_123",
+        },
+      }),
+    ).toEqual({
+      lastError: "runner busy",
+      status: "pending",
+    });
+
+    expect(
+      resolveHostedExecutionDispatchLifecycle({
+        event: {
+          eventId: "evt_config",
+          lastError: null,
+          state: "duplicate_pending",
+          userId: "member_123",
+        },
+        status: {
+          backpressuredEventIds: [],
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: false,
+          lastError: "Hosted execution dispatch is not configured.",
+          lastEventId: "evt_config",
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 1,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "member_123",
+        },
+      }),
+    ).toEqual({
+      lastError: "Hosted execution dispatch is not configured.",
+      status: "pending",
+    });
   });
 
   it("does not accept the removed Cloudflare signing-secret alias", () => {
@@ -535,9 +708,124 @@ describe("@murph/hosted-execution", () => {
   });
 
   it("builds stable encoded user control paths", () => {
+    expect(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH).toBe(
+      "/api/internal/device-sync/runtime/snapshot",
+    );
+    expect(HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH).toBe(
+      "/api/internal/device-sync/runtime/apply",
+    );
     expect(buildHostedExecutionUserStatusPath("member/123")).toBe("/internal/users/member%2F123/status");
     expect(buildHostedExecutionUserRunPath("member/123")).toBe("/internal/users/member%2F123/run");
     expect(buildHostedExecutionUserEnvPath("member/123")).toBe("/internal/users/member%2F123/env");
+    expect(
+      buildHostedExecutionSharePayloadPath("share/id", "code+with spaces"),
+    ).toBe(
+      "/api/hosted-share/internal/share%2Fid/payload?shareCode=code%2Bwith+spaces",
+    );
+  });
+
+  it("normalizes device-sync wake helpers for hosted execution", () => {
+    expect(
+      resolveHostedDeviceSyncWakeContext({
+        kind: "device-sync.wake",
+        reason: "webhook_hint",
+        userId: "member_123",
+      }),
+    ).toEqual({
+      connectionId: null,
+      hint: null,
+      provider: null,
+    });
+
+    expect(
+      resolveHostedDeviceSyncWakeContext({
+        connectionId: "conn_123",
+        hint: {
+          eventType: "sleep.updated",
+          jobs: [
+            {
+              availableAt: "2026-03-28T11:00:00.000Z",
+              dedupeKey: "job:1",
+              kind: "oura.reconcile",
+              maxAttempts: 5,
+              payload: {
+                source: "webhook",
+              },
+              priority: 3,
+            },
+            {
+              dedupeKey: null,
+              kind: "oura.refresh",
+            },
+          ],
+          reason: "webhook",
+        },
+        kind: "device-sync.wake",
+        provider: "oura",
+        reason: "webhook_hint",
+        userId: "member_123",
+      }),
+    ).toEqual({
+      connectionId: "conn_123",
+      hint: {
+        eventType: "sleep.updated",
+        jobs: [
+          {
+            availableAt: "2026-03-28T11:00:00.000Z",
+            dedupeKey: "job:1",
+            kind: "oura.reconcile",
+            maxAttempts: 5,
+            payload: {
+              source: "webhook",
+            },
+            priority: 3,
+          },
+          {
+            dedupeKey: null,
+            kind: "oura.refresh",
+          },
+        ],
+        reason: "webhook",
+      },
+      provider: "oura",
+    });
+
+    expect(
+      normalizeHostedDeviceSyncJobHints({
+        jobs: [
+          {
+            availableAt: "2026-03-28T11:00:00.000Z",
+            dedupeKey: "job:1",
+            kind: "oura.reconcile",
+            maxAttempts: 5,
+            payload: {
+              source: "webhook",
+            },
+            priority: 3,
+          },
+          {
+            dedupeKey: null,
+            kind: "oura.refresh",
+          },
+        ],
+      }),
+    ).toEqual([
+      {
+        availableAt: "2026-03-28T11:00:00.000Z",
+        dedupeKey: "job:1",
+        kind: "oura.reconcile",
+        maxAttempts: 5,
+        payload: {
+          source: "webhook",
+        },
+        priority: 3,
+      },
+      {
+        dedupeKey: null,
+        kind: "oura.refresh",
+      },
+    ]);
+    expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
   });
 
   it("dispatch client signs payloads and posts to the shared dispatch route", async () => {

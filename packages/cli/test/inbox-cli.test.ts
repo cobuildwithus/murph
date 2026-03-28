@@ -336,6 +336,7 @@ function createFakeInboxRuntimeModule(input?: {
       id?: string
       accountId?: string | null
       backfillLimit?: number
+      transportMode?: 'take-over-webhook' | 'require-no-webhook'
     }) {
       return {
         id: options.id ?? 'telegram:bot',
@@ -2393,6 +2394,7 @@ test.sequential('run on Linux skips unsupported iMessage connectors and continue
         id?: string
         accountId?: string | null
         backfillLimit?: number
+        transportMode?: 'take-over-webhook' | 'require-no-webhook'
       }) {
         return {
           id: options.id ?? 'telegram:bot',

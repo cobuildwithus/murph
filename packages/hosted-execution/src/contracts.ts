@@ -32,6 +32,7 @@ export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecution
 }
 
 export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecutionBaseEvent {
+  botUserId: string | null;
   kind: "telegram.message.received";
   telegramUpdate: Record<string, unknown>;
 }

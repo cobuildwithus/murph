@@ -111,6 +111,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expect.objectContaining({
         dispatch: expect.objectContaining({
           event: expect.objectContaining({
+            botUserId: null,
             kind: "telegram.message.received",
             userId: "member_telegram_123",
           }),
@@ -143,6 +144,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
                       eventKind: "telegram.message.received",
                       userId: "member_telegram_123",
                     }),
+                    botUserId: null,
                     telegramUpdate: expect.objectContaining({
                       update_id: 321,
                     }),
@@ -358,6 +360,145 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
+  it("ignores plain self messages when Telegram marks the sender as the bot user", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 655,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+
+    const response = await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_602,
+          from: {
+            first_name: "murph_bot",
+            id: 999,
+            is_bot: true,
+            username: "murph_bot",
+          },
+          message_id: 10,
+          text: "self echo",
+        },
+        update_id: 655,
+      }),
+      secretToken: "telegram-secret",
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "own-message",
+    });
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("dispatches direct-messages topic chats using the shared local direct-thread model", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 777,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_telegram_456",
+          status: HostedMemberStatus.active,
+        }),
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+
+    const response = await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: -100555,
+            is_direct_messages: true,
+            title: "Channel inbox",
+            type: "supergroup",
+          },
+          date: 1_774_522_602,
+          direct_messages_topic: {
+            title: "Priority",
+            topic_id: 9,
+          },
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 4,
+          text: "hello from the DM topic",
+        },
+        update_id: 777,
+      }),
+      secretToken: "telegram-secret",
+    });
+
+    expect(response).toEqual({
+      ok: true,
+      reason: "dispatched-active-member",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            botUserId: null,
+            kind: "telegram.message.received",
+            telegramUpdate: expect.objectContaining({
+              message: expect.objectContaining({
+                chat: expect.objectContaining({
+                  id: -100555,
+                  is_direct_messages: true,
+                }),
+                direct_messages_topic: expect.objectContaining({
+                  topic_id: 9,
+                }),
+              }),
+            }),
+            userId: "member_telegram_456",
+          }),
+          eventId: "telegram:update:777",
+        }),
+      }),
+    );
+  });
+
   it("rejects malformed Telegram message payloads before receipt persistence", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn();
@@ -392,6 +533,53 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         secretToken: "telegram-secret",
       }),
     ).rejects.toThrowError(new TypeError("message.chat must be a JSON object."));
+
+    expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed direct-message topic payloads even when the secret is valid", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedWebhookReceiptCreate = vi.fn();
+    const hostedMemberFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: hostedWebhookReceiptCreate,
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+
+    await expect(
+      handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: JSON.stringify({
+          message: {
+            chat: {
+              id: -100555,
+              is_direct_messages: true,
+              type: "supergroup",
+            },
+            date: 1_774_522_603,
+            direct_messages_topic: {
+              topic_id: "nine",
+            },
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 5,
+            text: "hello",
+          },
+          update_id: 778,
+        }),
+        secretToken: "telegram-secret",
+      }),
+    ).rejects.toThrowError(new TypeError("message.direct_messages_topic.topic_id must be an integer."));
 
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedMemberFindUnique).not.toHaveBeenCalled();

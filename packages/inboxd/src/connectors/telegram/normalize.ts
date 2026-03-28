@@ -17,7 +17,10 @@ import type {
   TelegramUser,
   TelegramVenue,
 } from "./types.ts";
-import { serializeTelegramThreadTarget } from "./target.ts";
+import {
+  serializeTelegramThreadTarget,
+  type TelegramThreadTarget,
+} from "./target.ts";
 
 export interface TelegramAttachmentDownloadDriver {
   getFile(fileId: string, signal?: AbortSignal): Promise<TelegramFile>;
@@ -29,6 +32,7 @@ export interface NormalizeTelegramUpdateInput {
   source?: string;
   accountId?: string | null;
   botUser?: TelegramUser | null;
+  botUserId?: string | null;
   downloadDriver?: TelegramAttachmentDownloadDriver | null;
   signal?: AbortSignal;
 }
@@ -39,6 +43,7 @@ export interface NormalizeTelegramMessageInput {
   source?: string;
   accountId?: string | null;
   botUser?: TelegramUser | null;
+  botUserId?: string | null;
   downloadDriver?: TelegramAttachmentDownloadDriver | null;
   signal?: AbortSignal;
 }
@@ -48,6 +53,7 @@ export async function normalizeTelegramUpdate({
   source = "telegram",
   accountId = "bot",
   botUser = null,
+  botUserId = null,
   downloadDriver = null,
   signal,
 }: NormalizeTelegramUpdateInput): Promise<InboundCapture> {
@@ -63,6 +69,7 @@ export async function normalizeTelegramUpdate({
     source,
     accountId,
     botUser,
+    botUserId,
     downloadDriver,
     signal,
   });
@@ -74,6 +81,7 @@ export async function normalizeTelegramMessage({
   source = "telegram",
   accountId = "bot",
   botUser = null,
+  botUserId = null,
   downloadDriver = null,
   signal,
 }: NormalizeTelegramMessageInput): Promise<InboundCapture> {
@@ -81,6 +89,7 @@ export async function normalizeTelegramMessage({
     update,
     message,
     botUser,
+    botUserId,
     downloadDriver,
     signal,
   });
@@ -104,15 +113,27 @@ export async function toTelegramChatMessage(input: {
   update: TelegramUpdateLike;
   message: TelegramMessageLike;
   botUser?: TelegramUser | null;
+  botUserId?: string | null;
   downloadDriver?: TelegramAttachmentDownloadDriver | null;
   signal?: AbortSignal;
 }): Promise<ChatMessage> {
-  const { message, update, botUser = null, downloadDriver = null, signal } = input;
+  const {
+    message,
+    update,
+    botUser = null,
+    botUserId = null,
+    downloadDriver = null,
+    signal,
+  } = input;
   const actorId = resolveActorId(message);
   const actorDisplayName = resolveActorDisplayName(message);
   const occurredAt = telegramTimestampToIso(message.edit_date ?? message.date ?? nowUnixSeconds());
   const receivedAt = message.date ? telegramTimestampToIso(message.date) : null;
   const attachments = await buildTelegramAttachments(message, downloadDriver, signal);
+  const resolvedBotUserId = resolveTelegramBotUserId({
+    botUser,
+    botUserId,
+  });
 
   return {
     externalId: `update:${update.update_id}`,
@@ -124,7 +145,7 @@ export async function toTelegramChatMessage(input: {
     actor: {
       id: actorId,
       displayName: actorDisplayName,
-      isSelf: isBotActor(message, botUser),
+      isSelf: isBotActor(message, resolvedBotUserId),
     },
     occurredAt,
     receivedAt,
@@ -134,15 +155,19 @@ export async function toTelegramChatMessage(input: {
   };
 }
 
-export function buildTelegramThreadId(message: TelegramMessageLike): string {
-  return serializeTelegramThreadTarget({
+export function buildTelegramThreadTarget(message: TelegramMessageLike): TelegramThreadTarget {
+  return {
     businessConnectionId: normalizeTextValue(message.business_connection_id ?? null),
     chatId: String(message.chat.id),
     directMessagesTopicId: normalizeTelegramPositiveInteger(
       message.direct_messages_topic?.topic_id,
     ),
     messageThreadId: normalizeTelegramPositiveInteger(message.message_thread_id),
-  });
+  };
+}
+
+export function buildTelegramThreadId(message: TelegramMessageLike): string {
+  return serializeTelegramThreadTarget(buildTelegramThreadTarget(message));
 }
 
 export function resolveThreadTitle(message: TelegramMessageLike): string | null {
@@ -297,16 +322,35 @@ function displayNameFromChat(chat: TelegramChat | null | undefined): string | nu
   return normalizeTextValue(chat.title ?? (chat.username ? `@${chat.username}` : null));
 }
 
-function isBotActor(message: TelegramMessageLike, botUser: TelegramUser | null): boolean {
-  if (botUser && message.from?.id !== undefined) {
-    return message.from.id === botUser.id;
-  }
+function isBotActor(message: TelegramMessageLike, botUserId: string | null): boolean {
+  if (botUserId) {
+    if (message.sender_business_bot?.id !== undefined) {
+      return String(message.sender_business_bot.id) === botUserId;
+    }
 
-  if (botUser && message.sender_business_bot?.id !== undefined) {
-    return message.sender_business_bot.id === botUser.id;
+    if (message.from?.id !== undefined) {
+      return String(message.from.id) === botUserId;
+    }
+
+    return false;
   }
 
   return message.sender_business_bot?.is_bot === true;
+}
+
+function resolveTelegramBotUserId(input: {
+  botUser: TelegramUser | null;
+  botUserId: string | null;
+}): string | null {
+  if (input.botUserId) {
+    return input.botUserId;
+  }
+
+  if (input.botUser?.id !== undefined) {
+    return String(input.botUser.id);
+  }
+
+  return null;
 }
 
 async function buildTelegramAttachments(

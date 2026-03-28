@@ -896,6 +896,84 @@ test('assistant runtime write locks allow nested reentry while serializing concu
   ])
 })
 
+test('saveAssistantSession waits for the assistant runtime write lock before mutating session state', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-save-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:save-lock',
+  })
+  const lockHeld = createDeferred<void>()
+  const releaseLock = createDeferred<void>()
+
+  const holder = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    lockHeld.resolve()
+    await releaseLock.promise
+  })
+
+  await lockHeld.promise
+
+  let settled = false
+  const savePromise = saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    updatedAt: '2026-03-28T10:00:00.000Z',
+    lastTurnAt: '2026-03-28T10:00:00.000Z',
+    turnCount: 1,
+  }).then((value) => {
+    settled = true
+    return value
+  })
+
+  await Promise.resolve()
+  assert.equal(settled, false)
+
+  releaseLock.resolve()
+  const saved = await savePromise
+  await holder
+
+  assert.equal(saved.turnCount, 1)
+  assert.equal(saved.lastTurnAt, '2026-03-28T10:00:00.000Z')
+})
+
+test('resolveAssistantSession create-if-missing waits for the assistant runtime write lock before creating session indexes', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-resolve-lock-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const lockHeld = createDeferred<void>()
+  const releaseLock = createDeferred<void>()
+
+  const holder = withAssistantRuntimeWriteLock(vaultRoot, async () => {
+    lockHeld.resolve()
+    await releaseLock.promise
+  })
+
+  await lockHeld.promise
+
+  let settled = false
+  const resolvePromise = resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:resolve-lock',
+  }).then((value) => {
+    settled = true
+    return value
+  })
+
+  await Promise.resolve()
+  assert.equal(settled, false)
+
+  releaseLock.resolve()
+  const resolved = await resolvePromise
+  await holder
+
+  assert.equal(resolved.created, true)
+  assert.equal(resolved.session.alias, 'chat:resolve-lock')
+})
+
 test('assistant transcripts are stored separately from session metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-transcript-'))
   const vaultRoot = path.join(parent, 'vault')

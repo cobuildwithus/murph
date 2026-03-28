@@ -326,6 +326,35 @@ test("normalizeTelegramUpdate does not treat third-party bot senders as self wit
   assert.equal(capture.actor.isSelf, false);
 });
 
+test("normalizeTelegramUpdate treats the bot sender as self when botUserId matches from.id", async () => {
+  const capture = await normalizeTelegramUpdate({
+    update: {
+      update_id: 129,
+      message: {
+        message_id: 23,
+        date: 1_773_397_206,
+        text: "self echo",
+        chat: {
+          id: 42,
+          type: "private",
+          first_name: "Murph",
+        },
+        from: {
+          id: 999,
+          first_name: "Murph",
+          is_bot: true,
+          username: "murph_bot",
+        },
+      },
+    },
+    botUserId: "999",
+  });
+
+  assert.equal(capture.actor.id, "999");
+  assert.equal(capture.actor.displayName, "Murph");
+  assert.equal(capture.actor.isSelf, true);
+});
+
 test("createTelegramPollConnector backfills in update order and emits Telegram update checkpoints", async () => {
   const emitted: Array<{ capture: InboundCapture; checkpoint?: Record<string, unknown> | null }> = [];
   let watcher:
@@ -740,7 +769,7 @@ test("createTelegramPollConnector backfills page-by-page so cursors advance afte
     },
     downloadAttachments: false,
     backfillLimit: 3,
-    resetWebhookOnStart: false,
+    transportMode: "require-no-webhook",
   });
 
   const cursor = await connector.backfill(null, async (capture, checkpoint) => {
@@ -806,7 +835,7 @@ test("createTelegramPollConnector advances raw cursors even when a page emits no
     },
     downloadAttachments: false,
     backfillLimit: 3,
-    resetWebhookOnStart: false,
+    transportMode: "require-no-webhook",
   });
 
   const cursor = await connector.backfill(null, async (capture, checkpoint) => {
@@ -847,7 +876,7 @@ test("createTelegramPollConnector surfaces async polling failures from the watch
       },
     },
     downloadAttachments: false,
-    resetWebhookOnStart: false,
+    transportMode: "require-no-webhook",
   });
 
   await assert.rejects(

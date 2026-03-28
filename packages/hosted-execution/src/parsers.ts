@@ -366,15 +366,22 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
-    case "telegram.message.received":
-      return {
+    case "telegram.message.received": {
+      const event: HostedExecutionTelegramMessageReceivedEvent = {
+        botUserId: readNullableString(
+          record.botUserId,
+          "Hosted execution Telegram message botUserId",
+        ),
         kind,
         telegramUpdate: requireObject(
           record.telegramUpdate,
           "Hosted execution Telegram message telegramUpdate",
         ),
         userId,
-      } satisfies HostedExecutionTelegramMessageReceivedEvent;
+      };
+
+      return event;
+    }
     case "email.message.received":
       return {
         envelopeFrom: readNullableString(

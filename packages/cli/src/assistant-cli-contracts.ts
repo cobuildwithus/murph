@@ -361,6 +361,11 @@ export const assistantSessionCompatSchema = z
   .unknown()
   .transform((value) => normalizeAssistantSessionRecord(value))
 
+const assistantSessionOutputSchema = z.union([
+  assistantSessionSchema,
+  assistantLegacySessionSchema,
+])
+
 export const assistantTranscriptEntrySchema = z.object({
   schema: z.literal('murph.assistant-transcript-entry.v1'),
   kind: z.enum(assistantTranscriptEntryKindValues),
@@ -807,7 +812,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
-  session: assistantSessionCompatSchema,
+  session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
   deliveryDeferred: z.boolean().default(false),
   deliveryIntentId: z.string().min(1).nullable().default(null),
@@ -820,26 +825,26 @@ export const assistantChatResultSchema = z.object({
   startedAt: isoTimestampSchema,
   stoppedAt: isoTimestampSchema,
   turns: z.number().int().nonnegative(),
-  session: assistantSessionCompatSchema,
+  session: assistantSessionOutputSchema,
 })
 
 export const assistantDeliverResultSchema = z.object({
   vault: pathSchema,
   message: z.string().min(1),
-  session: assistantSessionCompatSchema,
+  session: assistantSessionOutputSchema,
   delivery: assistantChannelDeliverySchema,
 })
 
 export const assistantSessionListResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  sessions: z.array(assistantSessionCompatSchema),
+  sessions: z.array(assistantSessionOutputSchema),
 })
 
 export const assistantSessionShowResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  session: assistantSessionCompatSchema,
+  session: assistantSessionOutputSchema,
 })
 
 export const assistantMemorySearchResultSchema = z.object({
