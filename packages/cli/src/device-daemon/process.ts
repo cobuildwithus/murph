@@ -69,10 +69,16 @@ export async function defaultSpawnDeviceDaemonProcess(input: {
 export async function isDeviceDaemonHealthy(
   baseUrl: string,
   fetchImpl: typeof fetch,
+  controlToken?: string | null,
 ): Promise<boolean> {
   try {
+    const headers: Record<string, string> = {}
+    if (controlToken) {
+      headers['Authorization'] = `Bearer ${controlToken}`
+    }
     const response = await fetchImpl(new URL('healthz', `${baseUrl}/`), {
       signal: AbortSignal.timeout(750),
+      headers,
     })
     return response.ok
   } catch {
@@ -84,11 +90,12 @@ export async function waitForDeviceDaemonHealth(
   baseUrl: string,
   dependencies: Pick<DeviceDaemonDependencies, 'now' | 'sleep' | 'fetchImpl'>,
   timeoutMs: number,
+  controlToken?: string | null,
 ): Promise<boolean> {
   const deadline = dependencies.now().valueOf() + timeoutMs
 
   while (dependencies.now().valueOf() < deadline) {
-    if (await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl)) {
+    if (await isDeviceDaemonHealthy(baseUrl, dependencies.fetchImpl, controlToken)) {
       return true
     }
 
