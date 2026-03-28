@@ -84,11 +84,12 @@ export function createJsonErrorResponse(
   }
 
   if (error instanceof SyntaxError) {
+    console.warn(options.logMessage, error);
     return NextResponse.json(
       {
         error: {
           code: "INVALID_JSON",
-          message: error.message,
+          message: "Invalid JSON.",
         },
       },
       buildJsonResponseInit(options, 400),
@@ -96,11 +97,12 @@ export function createJsonErrorResponse(
   }
 
   if (error instanceof TypeError || error instanceof RangeError) {
+    console.warn(options.logMessage, error);
     return NextResponse.json(
       {
         error: {
           code: "INVALID_REQUEST",
-          message: error.message,
+          message: "Invalid request.",
         },
       },
       buildJsonResponseInit(options, 400),
@@ -112,7 +114,7 @@ export function createJsonErrorResponse(
     {
       error: {
         code: "INTERNAL_ERROR",
-        message: options.internalMessage,
+        message: "Internal error.",
       },
     },
     buildJsonResponseInit(options, 500),

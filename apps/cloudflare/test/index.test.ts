@@ -522,7 +522,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
 
     const readResponse = await callRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://side-effects.worker/intents/outbox_123?kind=assistant.delivery&fingerprint=dedupe_123", {
         method: "GET",
       }),
       env,
@@ -547,7 +547,7 @@ describe("cloudflare worker routes", () => {
     const env = createWorkerEnv();
 
     await callRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
+      new Request("http://side-effects.worker/intents/outbox_a?kind=assistant.delivery&fingerprint=dedupe_123", {
         body: JSON.stringify({
           delivery: createOutboxDelivery(),
           effectId: "outbox_a",
@@ -610,7 +610,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const response = await callRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_rotated?kind=assistant.delivery&fingerprint=dedupe_rotated", {
+      new Request("http://side-effects.worker/intents/outbox_rotated?kind=assistant.delivery&fingerprint=dedupe_rotated", {
         method: "GET",
       }),
       env,
@@ -696,6 +696,52 @@ describe("cloudflare worker routes", () => {
     );
     expect(statusResponse.status).toBe(200);
     expect(stub.status).toHaveBeenCalledWith();
+  });
+
+  it("returns a stable invalid JSON error for malformed worker control payloads", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/env", {
+        body: "{]",
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid JSON.",
+    });
+  });
+
+  it("returns a stable invalid request error for malformed worker control payload shapes", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/env", {
+        body: JSON.stringify([]),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "PUT",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid request.",
+    });
   });
 
   it("fails closed on control routes when the worker control token is missing", async () => {
@@ -1054,7 +1100,7 @@ describe("cloudflare worker routes", () => {
     });
 
     const wrongMethodOutboxResponse = await callRunnerOutbound(
-      new Request("http://outbox.worker/intents/outbox_123", {
+      new Request("http://side-effects.worker/intents/outbox_123", {
         method: "POST",
       }),
       createWorkerEnv(),

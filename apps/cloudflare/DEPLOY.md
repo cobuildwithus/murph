@@ -89,6 +89,7 @@ Optional tuning variables:
 - `CF_TRACE_HEAD_SAMPLING_RATE` (default `0.1`)
 - `CF_ALLOWED_USER_ENV_KEYS`
 - `CF_ALLOWED_USER_ENV_PREFIXES`
+- `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` (comma-separated `host[:port]` entries for runner web-control targets that do not share the public hosted-web host)
 
 Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
 

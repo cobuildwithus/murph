@@ -9,6 +9,8 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   normalizeHostedExecutionBaseUrl,
+  readHostedExecutionWebControlPlaneEnvironment,
+  type HostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 import {
   parseHostedExecutionSideEffectRecord,
@@ -45,7 +47,6 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
   HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
   HOSTED_EXECUTION_CALLBACK_HOSTS.email,
-  HOSTED_EXECUTION_CALLBACK_HOSTS.outbox,
   HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
   HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
   HOSTED_EXECUTION_PROXY_HOSTS.usage,
@@ -59,6 +60,12 @@ export async function handleRunnerOutboundRequest(
 ): Promise<Response> {
   const environment = readHostedExecutionEnvironment(
     env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+    {
+      allowHttpLocalhost: true,
+    },
   );
   const url = new URL(request.url);
   const authorizationError = requireRunnerInternalProxyAuthorization(
@@ -111,6 +118,7 @@ export async function handleRunnerOutboundRequest(
       request,
       url,
       userId,
+      webControlPlane,
     });
   }
 
@@ -120,6 +128,7 @@ export async function handleRunnerOutboundRequest(
       request,
       url,
       userId,
+      webControlPlane,
     });
   }
 
@@ -129,13 +138,11 @@ export async function handleRunnerOutboundRequest(
       request,
       url,
       userId,
+      webControlPlane,
     });
   }
 
-  if (
-    url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.outbox ||
-    url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects
-  ) {
+  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects) {
     const match = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(url.pathname);
     if (!match?.groups) {
       return notFound();
@@ -394,6 +401,7 @@ async function handleRunnerDeviceSyncControlRequest(input: {
   request: Request;
   url: URL;
   userId: string;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<Response> {
   if (input.request.method !== "POST") {
     return methodNotAllowed();
@@ -412,11 +420,15 @@ async function handleRunnerDeviceSyncControlRequest(input: {
   };
 
   return forwardRunnerWebControlRequest({
-    actualBaseUrl: resolveHostedDeviceSyncWebBaseUrl(input.env),
+    actualBaseUrl: resolveHostedRunnerWebControlBaseUrl(
+      input.webControlPlane.deviceSyncRuntimeBaseUrl,
+      input.env,
+      "HOSTED_DEVICE_SYNC_CONTROL_BASE_URL",
+    ),
     body: JSON.stringify(payload),
     method: "POST",
     search: input.url.search,
-    token: readHostedDeviceSyncWebControlToken(input.env),
+    token: input.webControlPlane.internalToken,
     userId: input.userId,
     pathname: input.url.pathname,
   });
@@ -427,6 +439,7 @@ async function handleRunnerSharePackRequest(input: {
   request: Request;
   url: URL;
   userId: string;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<Response> {
   if (input.request.method !== "GET") {
     return methodNotAllowed();
@@ -443,10 +456,14 @@ async function handleRunnerSharePackRequest(input: {
   }
 
   return forwardRunnerWebControlRequest({
-    actualBaseUrl: resolveHostedShareWebBaseUrl(input.env),
+    actualBaseUrl: resolveHostedRunnerWebControlBaseUrl(
+      input.webControlPlane.shareBaseUrl,
+      input.env,
+      "HOSTED_SHARE_API_BASE_URL",
+    ),
     method: "GET",
     search: input.url.search,
-    token: readHostedShareWebControlToken(input.env),
+    token: input.webControlPlane.shareToken,
     userId: input.userId,
     pathname: input.url.pathname,
   });
@@ -457,6 +474,7 @@ async function handleRunnerUsageRecordRequest(input: {
   request: Request;
   url: URL;
   userId: string;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<Response> {
   if (input.request.method !== "POST" || input.url.pathname !== HOSTED_EXECUTION_AI_USAGE_RECORD_PATH) {
     return input.url.pathname === HOSTED_EXECUTION_AI_USAGE_RECORD_PATH
@@ -465,12 +483,16 @@ async function handleRunnerUsageRecordRequest(input: {
   }
 
   return forwardRunnerWebControlRequest({
-    actualBaseUrl: resolveHostedUsageWebBaseUrl(input.env),
+    actualBaseUrl: resolveHostedRunnerWebControlBaseUrl(
+      input.webControlPlane.usageBaseUrl ?? null,
+      input.env,
+      "HOSTED_AI_USAGE_BASE_URL",
+    ),
     body: JSON.stringify(await readJsonObject(input.request)),
     method: "POST",
     pathname: input.url.pathname,
     search: input.url.search,
-    token: readHostedDeviceSyncWebControlToken(input.env),
+    token: input.webControlPlane.internalToken,
     userId: input.userId,
   });
 }
@@ -691,37 +713,6 @@ function requireRunnerInternalProxyAuthorization(
   return null;
 }
 
-function resolveHostedDeviceSyncWebBaseUrl(
-  env: RunnerOutboundEnvironmentSource,
-): string | null {
-  return normalizeBaseUrl(
-    readOptionalString(env.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL, "HOSTED_DEVICE_SYNC_CONTROL_BASE_URL")
-      ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
-  );
-}
-
-function resolveHostedShareWebBaseUrl(env: RunnerOutboundEnvironmentSource): string | null {
-  return normalizeBaseUrl(
-    readOptionalString(env.HOSTED_SHARE_API_BASE_URL, "HOSTED_SHARE_API_BASE_URL")
-      ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
-  );
-}
-
-function resolveHostedUsageWebBaseUrl(env: RunnerOutboundEnvironmentSource): string | null {
-  return normalizeBaseUrl(
-    readOptionalString(env.HOSTED_AI_USAGE_BASE_URL, "HOSTED_AI_USAGE_BASE_URL")
-      ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
-  );
-}
-
-function readHostedDeviceSyncWebControlToken(env: RunnerOutboundEnvironmentSource): string | null {
-  return readOptionalString(env.HOSTED_EXECUTION_INTERNAL_TOKEN, "HOSTED_EXECUTION_INTERNAL_TOKEN");
-}
-
-function readHostedShareWebControlToken(env: RunnerOutboundEnvironmentSource): string | null {
-  return readOptionalString(env.HOSTED_SHARE_INTERNAL_TOKEN, "HOSTED_SHARE_INTERNAL_TOKEN");
-}
-
 function methodNotAllowed(): Response {
   return json({ error: "Method not allowed." }, 405);
 }
@@ -730,8 +721,77 @@ function notFound(): Response {
   return json({ error: "Not found" }, 404);
 }
 
+function resolveHostedRunnerWebControlBaseUrl(
+  value: string | null,
+  env: RunnerOutboundEnvironmentSource,
+  label: string,
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const actualHost = new URL(value).host.toLowerCase();
+  const allowedHosts = readAllowedRunnerWebControlHosts(env);
+
+  if (!allowedHosts.has(actualHost)) {
+    throw new TypeError(`${label} host is not allowlisted.`);
+  }
+
+  return value;
+}
+
 function normalizeBaseUrl(value: string | null): string | null {
   return normalizeHostedExecutionBaseUrl(value, {
     allowHttpLocalhost: true,
   });
+}
+
+function readAllowedRunnerWebControlHosts(
+  env: RunnerOutboundEnvironmentSource,
+): Set<string> {
+  const allowedHosts = new Set<string>();
+  const sharedBaseUrl = normalizeBaseUrl(
+    readOptionalString(env.HOSTED_WEB_BASE_URL, "HOSTED_WEB_BASE_URL"),
+  );
+
+  if (sharedBaseUrl) {
+    allowedHosts.add(new URL(sharedBaseUrl).host.toLowerCase());
+  }
+
+  const extraHosts = readOptionalString(
+    env.HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS,
+    "HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS",
+  );
+
+  for (const hostEntry of (extraHosts ?? "").split(",")) {
+    const normalizedHost = normalizeRunnerWebControlHost(hostEntry);
+
+    if (normalizedHost) {
+      allowedHosts.add(normalizedHost);
+    }
+  }
+
+  return allowedHosts;
+}
+
+function normalizeRunnerWebControlHost(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized.length === 0) {
+    return null;
+  }
+
+  if (
+    normalized.includes("://")
+    || normalized.includes("/")
+    || normalized.includes("?")
+    || normalized.includes("#")
+    || normalized.includes("@")
+  ) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS must contain comma-separated host[:port] entries.",
+    );
+  }
+
+  return normalized;
 }

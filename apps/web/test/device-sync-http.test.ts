@@ -136,7 +136,7 @@ describe("device sync callback redirect helpers", () => {
     await expect(invalidJsonResponse.json()).resolves.toEqual({
       error: {
         code: "INVALID_JSON",
-        message: "Unexpected token ] in JSON at position 3",
+        message: "Invalid JSON.",
       },
     });
 
@@ -144,7 +144,7 @@ describe("device sync callback redirect helpers", () => {
     await expect(invalidRequestResponse.json()).resolves.toEqual({
       error: {
         code: "INVALID_REQUEST",
-        message: "Expected a shorter callback state value.",
+        message: "Invalid request.",
       },
     });
   });

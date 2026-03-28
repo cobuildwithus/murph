@@ -22,6 +22,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
+        HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "web.example.test",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
@@ -55,6 +56,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
+        HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "web.example.test",
         HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
       }),
       "member_123",
@@ -79,6 +81,59 @@ describe("handleRunnerOutboundRequest", () => {
     );
   });
 
+  it("fails closed when a runner web-control base URL host is not allowlisted", async () => {
+    await expect(handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "oura",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    )).rejects.toThrow(/HOSTED_DEVICE_SYNC_CONTROL_BASE_URL host is not allowlisted/u);
+  });
+
+  it("accepts extra allowlisted runner web-control hosts", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://device-sync.worker/api/internal/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          provider: "oura",
+        }),
+        headers: createRunnerProxyHeaders({
+          "content-type": "application/json; charset=utf-8",
+        }),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
+        HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "api.example.test, web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL("https://web.example.test/api/internal/device-sync/runtime/snapshot"),
+      expect.any(Object),
+    );
+  });
+
   it("proxies hosted share payload requests through the worker control token", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
       headers: {
@@ -94,7 +149,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "GET",
       }),
       createRunnerOutboundEnv({
-        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,
@@ -128,7 +183,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "GET",
       }),
       createRunnerOutboundEnv({
-        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
         HOSTED_SHARE_INTERNAL_TOKEN: undefined,
       }),
       "member_123",
@@ -169,7 +224,7 @@ describe("handleRunnerOutboundRequest", () => {
         method: "POST",
       }),
       createRunnerOutboundEnv({
-        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://web.example.test",
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
       }),
       "member_123",
       RUNNER_PROXY_TOKEN,

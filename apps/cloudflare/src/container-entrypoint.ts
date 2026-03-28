@@ -1,4 +1,4 @@
-import { createServer, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
 import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
@@ -8,6 +8,8 @@ export async function startHostedContainerEntrypoint(input: {
   port?: number;
 }): Promise<ReturnType<typeof createServer>> {
   const server = createServer(async (request, response) => {
+    const requestAbort = createRequestAbortController(request, response);
+
     try {
       if (request.method === "GET" && request.url === "/health") {
         response.statusCode = 200;
@@ -44,18 +46,32 @@ export async function startHostedContainerEntrypoint(input: {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
 
-      const job = JSON.parse(
-        Buffer.concat(chunks).toString("utf8"),
+      const job = requireJsonObject(
+        JSON.parse(Buffer.concat(chunks).toString("utf8")),
       ) as HostedExecutionRunnerJobRequest;
-      const result = await runHostedExecutionJob(job);
+      const result = await runHostedExecutionJob(job, {
+        signal: requestAbort.signal,
+      });
+
+      if (requestAbort.signal.aborted || response.destroyed) {
+        return;
+      }
 
       response.statusCode = 200;
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
     } catch (error) {
-      writeJsonResponse(response, 500, {
-        error: error instanceof Error ? error.message : String(error),
+      if (requestAbort.signal.aborted || response.destroyed) {
+        return;
+      }
+
+      console.error("Hosted container entrypoint failed.", error);
+      const classified = classifyPublicEntrypointError(error);
+      writeJsonResponse(response, classified.statusCode, {
+        error: classified.message,
       });
+    } finally {
+      requestAbort.cleanup();
     }
   });
 
@@ -86,4 +102,67 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
+}
+
+function requireJsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Request body must be a JSON object.");
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function createRequestAbortController(
+  request: IncomingMessage,
+  response: ServerResponse,
+): {
+  cleanup: () => void;
+  signal: AbortSignal;
+} {
+  const controller = new AbortController();
+  const abort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(new Error("Hosted runner request aborted before completion."));
+    }
+  };
+  const handleResponseClose = () => {
+    if (!response.writableEnded) {
+      abort();
+    }
+  };
+
+  request.once("aborted", abort);
+  response.once("close", handleResponseClose);
+
+  return {
+    cleanup: () => {
+      request.off("aborted", abort);
+      response.off("close", handleResponseClose);
+    },
+    signal: controller.signal,
+  };
+}
+
+function classifyPublicEntrypointError(error: unknown): {
+  message: string;
+  statusCode: number;
+} {
+  if (error instanceof SyntaxError) {
+    return {
+      message: "Invalid JSON.",
+      statusCode: 400,
+    };
+  }
+
+  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+    return {
+      message: "Invalid request.",
+      statusCode: 400,
+    };
+  }
+
+  return {
+    message: "Internal error.",
+    statusCode: 500,
+  };
 }

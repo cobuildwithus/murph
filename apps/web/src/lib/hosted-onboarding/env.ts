@@ -1,3 +1,5 @@
+import { normalizeHostedExecutionBaseUrl } from "@murph/hosted-execution";
+
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { normalizeNullableString, parseInteger } from "../device-sync/shared";
 import { readLinqEnvironment } from "../linq/env";
@@ -107,16 +109,9 @@ function readEnv(source: HostedOnboardingEnvSource, keys: readonly string[]): st
 }
 
 function normalizeBaseUrl(value: string | null): string | null {
-  const normalized = normalizeNullableString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const url = new URL(normalized);
-  url.hash = "";
-  url.search = "";
-  return url.toString().replace(/\/$/u, "");
+  return normalizeHostedExecutionBaseUrl(value, {
+    allowHttpLocalhost: true,
+  });
 }
 
 function normalizeRpcUrl(value: string | null): string | null {
