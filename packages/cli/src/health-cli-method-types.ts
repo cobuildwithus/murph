@@ -23,6 +23,38 @@ export interface HealthListInput extends CommandContext {
   limit?: number
 }
 
+export interface AssessmentListRuntimeOptions {
+  from?: string
+  to?: string
+  limit?: number
+}
+
+export interface ProfileSnapshotListRuntimeOptions {
+  from?: string
+  to?: string
+  limit?: number
+}
+
+export interface RegistryEntityListRuntimeOptions {
+  limit?: number
+  status?: string
+}
+
+export interface HistoryListRuntimeOptions {
+  kind?: string
+  from?: string
+  to?: string
+  limit?: number
+  status?: string
+}
+
+export interface BloodTestListRuntimeOptions {
+  from?: string
+  to?: string
+  limit?: number
+  status?: string
+}
+
 export interface HealthScaffoldResult<TNoun extends string> {
   vault: string
   noun: TNoun
@@ -214,51 +246,40 @@ export interface HealthQueryRuntimeShowMethods {
 export interface HealthQueryRuntimeListMethods {
   listAssessments(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: AssessmentListRuntimeOptions,
   ): Promise<JsonObject[]>
   listProfileSnapshots(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: ProfileSnapshotListRuntimeOptions,
   ): Promise<JsonObject[]>
-  listGoals(vaultRoot: string, options?: Record<string, unknown>): Promise<JsonObject[]>
+  listGoals(vaultRoot: string, options?: RegistryEntityListRuntimeOptions): Promise<JsonObject[]>
   listConditions(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: RegistryEntityListRuntimeOptions,
   ): Promise<JsonObject[]>
   listAllergies(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: RegistryEntityListRuntimeOptions,
   ): Promise<JsonObject[]>
   listProtocols(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: RegistryEntityListRuntimeOptions,
   ): Promise<JsonObject[]>
   listHistoryEvents(
     vaultRoot: string,
-    options?: {
-      kind?: string
-      from?: string
-      to?: string
-      limit?: number
-      status?: string
-    },
+    options?: HistoryListRuntimeOptions,
   ): Promise<JsonObject[]>
   listBloodTests(
     vaultRoot: string,
-    options?: {
-      from?: string
-      to?: string
-      limit?: number
-      status?: string
-    },
+    options?: BloodTestListRuntimeOptions,
   ): Promise<JsonObject[]>
   listFamilyMembers(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: RegistryEntityListRuntimeOptions,
   ): Promise<JsonObject[]>
   listGeneticVariants(
     vaultRoot: string,
-    options?: Record<string, unknown>,
+    options?: RegistryEntityListRuntimeOptions,
   ): Promise<JsonObject[]>
 }
 

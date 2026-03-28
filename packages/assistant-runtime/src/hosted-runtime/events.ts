@@ -15,7 +15,10 @@ import { assertNever } from "./utils.ts";
 export async function executeHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "webControlPlane"
+  >;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedDispatchExecutionMetrics> {
@@ -41,7 +44,10 @@ export async function executeHostedDispatchEvent(input: {
 async function handleHostedDispatchEvent(input: {
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">;
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "webControlPlane"
+  >;
   vaultRoot: string;
 }): Promise<HostedDispatchEffect> {
   const dispatch = input.dispatch;
@@ -69,6 +75,7 @@ async function handleHostedDispatchEvent(input: {
           event: dispatch.event,
         },
         input.emailBaseUrl,
+        input.runtime.commitTimeoutMs,
       );
       return createNoopDispatchEffect();
     case "assistant.cron.tick":

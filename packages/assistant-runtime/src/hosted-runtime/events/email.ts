@@ -10,6 +10,7 @@ import {
 import {
   buildHostedRunnerEmailMessageUrl,
 } from "../../hosted-email.ts";
+import { fetchHostedBytesResponse } from "../internal-http.ts";
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 
 export async function ingestHostedEmailMessage(
@@ -18,10 +19,13 @@ export async function ingestHostedEmailMessage(
     event: Extract<HostedExecutionDispatchRequest["event"], { kind: "email.message.received" }>;
   },
   emailBaseUrl: string,
+  timeoutMs: number | null,
 ): Promise<void> {
-  const response = await fetch(
-    buildHostedRunnerEmailMessageUrl(emailBaseUrl, dispatch.event.rawMessageKey).toString(),
-  );
+  const { bytes, response } = await fetchHostedBytesResponse({
+    description: "Hosted email message fetch",
+    timeoutMs,
+    url: buildHostedRunnerEmailMessageUrl(emailBaseUrl, dispatch.event.rawMessageKey).toString(),
+  });
 
   if (!response.ok) {
     throw new Error(
@@ -32,7 +36,7 @@ export async function ingestHostedEmailMessage(
   const capture = await normalizeParsedEmailMessage({
     accountAddress: dispatch.event.identityId,
     accountId: dispatch.event.identityId,
-    message: parseRawEmailMessage(new Uint8Array(await response.arrayBuffer())),
+    message: parseRawEmailMessage(bytes),
     selfAddresses: resolveHostedEmailSelfAddresses({
       envelopeTo: dispatch.event.envelopeTo,
       senderIdentity: dispatch.event.identityId,

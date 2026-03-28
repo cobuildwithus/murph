@@ -2,6 +2,7 @@ import {
   importSharePackIntoVault,
 } from "@murph/core";
 import {
+  fetchHostedExecutionSharePack,
   parseHostedExecutionSharePackResponse,
 } from "@murph/hosted-execution";
 
@@ -16,7 +17,10 @@ export async function handleHostedShareAcceptedDispatch(
     dispatch: {
       event: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>;
     };
-    runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">;
+    runtime: Pick<
+      NormalizedHostedAssistantRuntimeConfig,
+      "commitTimeoutMs" | "webControlPlane"
+    >;
     vaultRoot: string;
   },
 ): Promise<HostedDispatchEffect> {
@@ -36,32 +40,19 @@ export async function handleHostedShareAcceptedDispatch(
 
 async function fetchHostedSharePayload(
   share: Extract<HostedDispatchEvent, { kind: "vault.share.accepted" }>["share"],
-  runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "sharePackBaseUrl" | "sharePackToken">,
+  runtime: Pick<
+    NormalizedHostedAssistantRuntimeConfig,
+    "commitTimeoutMs" | "webControlPlane"
+  >,
 ): Promise<ReturnType<typeof parseHostedExecutionSharePackResponse>> {
-  if (!runtime.sharePackBaseUrl || !runtime.sharePackToken) {
+  if (!runtime.webControlPlane.shareBaseUrl || !runtime.webControlPlane.shareToken) {
     throw new Error("Hosted share payload fetch is not configured.");
   }
 
-  const url = new URL(
-    `/api/hosted-share/internal/${encodeURIComponent(share.shareId)}/payload`,
-    runtime.sharePackBaseUrl,
-  );
-  url.searchParams.set("shareCode", share.shareCode);
-  const response = await fetch(url, {
-    headers: {
-      authorization: `Bearer ${runtime.sharePackToken}`,
-    },
+  return await fetchHostedExecutionSharePack({
+    baseUrl: runtime.webControlPlane.shareBaseUrl,
+    share,
+    shareToken: runtime.webControlPlane.shareToken,
+    timeoutMs: runtime.commitTimeoutMs,
   });
-  const text = await response.text();
-  const payload = text.trim() ? JSON.parse(text) as unknown : null;
-
-  if (!response.ok) {
-    throw new Error(
-      `Hosted share payload fetch failed with HTTP ${response.status}${
-        text ? `: ${text.slice(0, 500)}` : ""
-      }.`,
-    );
-  }
-
-  return parseHostedExecutionSharePackResponse(payload);
 }

@@ -22,7 +22,10 @@ import {
   runAssistantAutomation,
 } from "@murph/assistant-services/automation";
 
-import type { HostedMaintenanceMetrics } from "./models.ts";
+import type {
+  HostedMaintenanceMetrics,
+  HostedWorkspaceArtifactMaterializer,
+} from "./models.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
@@ -34,48 +37,64 @@ const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
 
 export async function runHostedMaintenanceLoop(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   dispatch: HostedExecutionDispatchRequest;
   requestId: string;
+  timeoutMs: number | null;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
-  const parserResult = await drainHostedParserQueue(input.vaultRoot);
+  const parserResult = await drainHostedParserQueue({
+    artifactMaterializer: input.artifactMaterializer ?? null,
+    vaultRoot: input.vaultRoot,
+  });
   await runHostedAssistantAutomation(input.vaultRoot, input.requestId);
   const assistantCronStatus = await getAssistantCronStatus(input.vaultRoot);
   const deviceSyncResult = await runHostedDeviceSyncPass(
     input.dispatch,
     input.vaultRoot,
     input.runtimeEnv,
+    input.timeoutMs,
   );
 
   return {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
     deviceSyncSkipped: deviceSyncResult.skipped,
-    nextWakeAt: assistantCronStatus.nextRunAt,
+    nextWakeAt: earliestHostedWakeAt(
+      assistantCronStatus.nextRunAt,
+      deviceSyncResult.nextWakeAt,
+    ),
     parserProcessed: parserResult.processedJobs,
   };
 }
 
-export async function drainHostedParserQueue(
-  vaultRoot: string,
-): Promise<{ processedJobs: number }> {
+export async function drainHostedParserQueue(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  vaultRoot: string;
+}): Promise<{ processedJobs: number }> {
   const runtime = await openInboxRuntime({
-    vaultRoot,
+    vaultRoot: input.vaultRoot,
   });
 
   try {
     await rebuildRuntimeFromVault({
       runtime,
-      vaultRoot,
+      vaultRoot: input.vaultRoot,
     });
+    if (input.artifactMaterializer) {
+      await hydratePendingHostedParserArtifacts({
+        artifactMaterializer: input.artifactMaterializer,
+        runtime,
+      });
+    }
     const configured = await createConfiguredParserRegistry({
-      vaultRoot,
+      vaultRoot: input.vaultRoot,
     });
     const parserService = createInboxParserService({
       ffmpeg: configured.ffmpeg,
       registry: configured.registry,
       runtime,
-      vaultRoot,
+      vaultRoot: input.vaultRoot,
     });
     const results = await parserService.drain({
       maxJobs: HOSTED_MAX_PARSER_JOBS,
@@ -87,6 +106,32 @@ export async function drainHostedParserQueue(
   } finally {
     runtime.close();
   }
+}
+
+async function hydratePendingHostedParserArtifacts(input: {
+  artifactMaterializer: HostedWorkspaceArtifactMaterializer;
+  runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+}): Promise<void> {
+  const relativePaths = new Set<string>();
+
+  for (const job of input.runtime.listAttachmentParseJobs({
+    limit: HOSTED_MAX_PARSER_JOBS,
+    state: "pending",
+  })) {
+    const capture = input.runtime.getCapture(job.captureId);
+    const attachment = capture?.attachments.find((candidate) => candidate.attachmentId === job.attachmentId);
+    if (!attachment?.storedPath) {
+      continue;
+    }
+
+    relativePaths.add(attachment.storedPath);
+  }
+
+  if (relativePaths.size === 0) {
+    return;
+  }
+
+  await input.artifactMaterializer([...relativePaths]);
 }
 
 export async function runHostedAssistantAutomation(
@@ -123,7 +168,8 @@ export async function runHostedDeviceSyncPass(
   dispatch: HostedExecutionDispatchRequest,
   vaultRoot: string,
   env: Readonly<Record<string, string>>,
-): Promise<{ processedJobs: number; skipped: boolean }> {
+  timeoutMs: number | null,
+): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
     env,
     vaultRoot,
@@ -131,6 +177,7 @@ export async function runHostedDeviceSyncPass(
 
   if (!service) {
     return {
+      nextWakeAt: null,
       processedJobs: 0,
       skipped: true,
     };
@@ -143,37 +190,76 @@ export async function runHostedDeviceSyncPass(
     observedTokenVersions: new Map(),
     snapshot: null,
   };
+  let controlPlaneSynced = false;
+  const failHardOnControlPlaneError = dispatch.event.kind === "device-sync.wake";
 
   try {
     if (secret) {
-      syncState = await syncHostedDeviceSyncControlPlaneState({
-        dispatch,
-        env,
-        secret,
-        service,
-      });
+      try {
+        syncState = await syncHostedDeviceSyncControlPlaneState({
+          dispatch,
+          env,
+          secret,
+          service,
+          timeoutMs,
+        });
+        controlPlaneSynced = true;
+      } catch (error) {
+        if (failHardOnControlPlaneError) {
+          throw error;
+        }
+
+        reportHostedDeviceSyncControlPlaneFailure("sync", dispatch, error);
+      }
     }
 
     await service.runSchedulerOnce();
     const processedJobs = await service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS);
 
-    if (secret) {
-      await reconcileHostedDeviceSyncControlPlaneState({
-        dispatch,
-        env,
-        secret,
-        service,
-        state: syncState,
-      });
+    if (secret && controlPlaneSynced) {
+      try {
+        await reconcileHostedDeviceSyncControlPlaneState({
+          dispatch,
+          env,
+          secret,
+          service,
+          state: syncState,
+          timeoutMs,
+        });
+      } catch (error) {
+        if (failHardOnControlPlaneError) {
+          throw error;
+        }
+
+        reportHostedDeviceSyncControlPlaneFailure("reconcile", dispatch, error);
+      }
     }
 
     return {
+      nextWakeAt: service.getNextWakeAt(dispatch.occurredAt),
       processedJobs,
       skipped: false,
     };
   } finally {
     service.close();
   }
+}
+
+function reportHostedDeviceSyncControlPlaneFailure(
+  phase: "reconcile" | "sync",
+  dispatch: HostedExecutionDispatchRequest,
+  error: unknown,
+): void {
+  console.warn(
+    "[hosted-runtime] device-sync control-plane failure; continuing hosted job",
+    {
+      error: error instanceof Error ? error.message : String(error),
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      phase,
+      userId: dispatch.event.userId,
+    },
+  );
 }
 
 function createHostedDeviceSyncRuntime(input: {
@@ -219,4 +305,10 @@ function createHostedDeviceSyncRuntime(input: {
     },
     registry,
   });
+}
+
+function earliestHostedWakeAt(...values: Array<string | null | undefined>): string | null {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }

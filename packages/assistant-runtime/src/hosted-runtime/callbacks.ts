@@ -191,6 +191,7 @@ async function dispatchHostedCommittedSideEffect(input: {
   await dispatchAssistantOutboxIntent({
     dependencies: createHostedEmailChannelDependencies({
       emailBaseUrl: input.emailBaseUrl,
+      timeoutMs: input.commitTimeoutMs,
     }),
     dispatchHooks: input.commit
       ? createHostedAssistantDeliveryDispatchHooks({

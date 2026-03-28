@@ -27,10 +27,12 @@ import type {
   HostedExecutionCommitCallback,
   HostedRestoredExecutionContext,
   NormalizedHostedAssistantRuntimeConfig,
+  HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import { summarizeDispatch } from "./summary.ts";
 
 export async function executeHostedDispatchForCommit(input: {
+  artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   request: HostedAssistantRuntimeJobRequest;
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
@@ -47,8 +49,10 @@ export async function executeHostedDispatchForCommit(input: {
     vaultRoot: input.restored.vaultRoot,
   });
   const maintenanceMetrics = await runHostedMaintenanceLoop({
+    artifactMaterializer: input.artifactMaterializer ?? null,
     dispatch: input.request.dispatch,
     requestId: input.request.dispatch.eventId,
+    timeoutMs: input.runtime.commitTimeoutMs,
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.restored.vaultRoot,
   });

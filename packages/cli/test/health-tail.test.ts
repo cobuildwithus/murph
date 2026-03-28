@@ -156,6 +156,31 @@ test.sequential("intake list applies date bounds and echoes renamed filter keys"
   }
 });
 
+test.sequential("intake list rejects the removed assessment status filter", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+
+    const result = await runCli([
+      "intake",
+      "list",
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.ok, false);
+    assert.match(
+      result.error.message ?? "",
+      /status|unknown option|unexpected option/i,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("goal descriptor wiring keeps noun-specific and generic reads aligned", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal.json");

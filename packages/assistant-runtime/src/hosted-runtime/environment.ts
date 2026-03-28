@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import {
+  normalizeHostedExecutionBaseUrl,
+  normalizeHostedExecutionString,
+  type HostedExecutionWebControlPlaneEnvironment,
+} from "@murph/hosted-execution";
+
 import { normalizeHostedEmailBaseUrl } from "../hosted-email.ts";
 import type {
   HostedAssistantRuntimeConfig,
@@ -26,21 +32,12 @@ export function normalizeHostedAssistantRuntimeConfig(
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     emailBaseUrl: normalizeHostedEmailBaseUrl(input?.emailBaseUrl),
     forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
-    sharePackBaseUrl: normalizeOptionalCallbackBaseUrl(
-      input?.sharePackBaseUrl
-        ?? input?.forwardedEnv?.HOSTED_ONBOARDING_PUBLIC_BASE_URL
-        ?? null,
-    ),
-    sharePackToken: normalizeOptionalString(
-      input?.sharePackToken
-        ?? input?.forwardedEnv?.HOSTED_SHARE_INTERNAL_TOKEN
-        ?? null,
-    ),
     sideEffectsBaseUrl: normalizeCallbackBaseUrl(
       input?.sideEffectsBaseUrl ?? input?.outboxBaseUrl,
       HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL,
     ),
     userEnv: { ...(input?.userEnv ?? {}) },
+    webControlPlane: normalizeHostedExecutionWebControlPlaneConfig(input?.webControlPlane ?? null),
   };
 }
 
@@ -90,21 +87,19 @@ export async function withHostedProcessEnvironment<T>(input: {
   }
 }
 
-function normalizeOptionalCallbackBaseUrl(value: string | null | undefined): string | null {
-  const normalized = normalizeOptionalString(value);
-  return normalized ? new URL(normalized).toString() : null;
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
 function normalizeCallbackBaseUrl(value: string | null | undefined, fallback: string): string {
   const candidate = value && value.trim().length > 0 ? value : fallback;
   return new URL(candidate).toString();
+}
+
+function normalizeHostedExecutionWebControlPlaneConfig(
+  value: Partial<HostedExecutionWebControlPlaneEnvironment> | null,
+): HostedExecutionWebControlPlaneEnvironment {
+  return {
+    deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(value?.deviceSyncRuntimeBaseUrl),
+    internalToken: normalizeHostedExecutionString(value?.internalToken),
+    schedulerToken: normalizeHostedExecutionString(value?.schedulerToken),
+    shareBaseUrl: normalizeHostedExecutionBaseUrl(value?.shareBaseUrl),
+    shareToken: normalizeHostedExecutionString(value?.shareToken),
+  };
 }

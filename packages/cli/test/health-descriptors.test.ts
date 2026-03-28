@@ -39,3 +39,10 @@ test("generic CLI lookup inference stays anchored to shared aliases and prefixes
   assert.equal(goalKind, "goal");
   assert.equal(protocolDescriptor?.kind, "protocol");
 });
+
+test("assessment list capabilities only advertise supported date-range filtering", () => {
+  const descriptor = healthEntityDescriptorByKind.get("assessment");
+
+  assert.ok(descriptor?.query);
+  assert.deepEqual(descriptor?.query?.genericListFilterCapabilities, ["date-range"]);
+});
