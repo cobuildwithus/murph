@@ -48,6 +48,7 @@ export function resumeHostedCommittedExecution(
 export async function commitHostedExecutionResult(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
+  fetchImpl?: typeof fetch;
   result: HostedExecutionRunnerResult;
   sideEffects: HostedExecutionSideEffect[];
   runtime: {
@@ -59,7 +60,7 @@ export async function commitHostedExecutionResult(input: {
     return;
   }
 
-  const response = await fetch(
+  const response = await (input.fetchImpl ?? fetch)(
     buildHostedRunnerCommitUrl(
       input.runtime.commitBaseUrl,
       input.dispatch.eventId,
@@ -90,6 +91,7 @@ export async function finalizeHostedExecutionResult(input: {
   commit: HostedExecutionCommitCallback | null;
   committedResult: HostedExecutionRunnerResult;
   dispatch: HostedExecutionDispatchRequest;
+  fetchImpl?: typeof fetch;
   finalResult: HostedExecutionRunnerResult;
   runtime: {
     commitBaseUrl: string;
@@ -100,7 +102,7 @@ export async function finalizeHostedExecutionResult(input: {
     return;
   }
 
-  const response = await fetch(
+  const response = await (input.fetchImpl ?? fetch)(
     buildHostedRunnerCommitUrl(
       input.runtime.commitBaseUrl,
       input.dispatch.eventId,
@@ -149,6 +151,7 @@ export async function drainHostedCommittedSideEffectsAfterCommit(input: {
   commitTimeoutMs: number | null;
   dispatch: HostedExecutionDispatchRequest;
   emailBaseUrl: string;
+  fetchImpl?: typeof fetch;
   sideEffectsBaseUrl: string;
   sideEffects: HostedExecutionSideEffect[];
   vaultRoot: string;
@@ -158,6 +161,7 @@ export async function drainHostedCommittedSideEffectsAfterCommit(input: {
       commit: input.commit,
       commitTimeoutMs: input.commitTimeoutMs,
       emailBaseUrl: input.emailBaseUrl,
+      fetchImpl: input.fetchImpl,
       sideEffect,
       sideEffectsBaseUrl: input.sideEffectsBaseUrl,
       userId: input.dispatch.event.userId,
@@ -170,6 +174,7 @@ async function dispatchHostedCommittedSideEffect(input: {
   commit: HostedExecutionCommitCallback;
   commitTimeoutMs: number | null;
   emailBaseUrl: string;
+  fetchImpl?: typeof fetch;
   sideEffect: HostedExecutionSideEffect;
   sideEffectsBaseUrl: string;
   userId: string;
@@ -178,6 +183,7 @@ async function dispatchHostedCommittedSideEffect(input: {
   commit: null;
   commitTimeoutMs: number | null;
   emailBaseUrl: string;
+  fetchImpl?: typeof fetch;
   sideEffect: HostedExecutionSideEffect;
   sideEffectsBaseUrl: string;
   userId: string;
@@ -186,12 +192,14 @@ async function dispatchHostedCommittedSideEffect(input: {
   await dispatchAssistantOutboxIntent({
     dependencies: createHostedEmailChannelDependencies({
       emailBaseUrl: input.emailBaseUrl,
+      fetchImpl: input.fetchImpl,
       timeoutMs: input.commitTimeoutMs,
     }),
     dispatchHooks: input.commit
       ? createHostedAssistantDeliveryDispatchHooks({
           commit: input.commit,
           commitTimeoutMs: input.commitTimeoutMs,
+          fetchImpl: input.fetchImpl,
           sideEffectsBaseUrl: input.sideEffectsBaseUrl,
           userId: input.userId,
         })
@@ -204,6 +212,7 @@ async function dispatchHostedCommittedSideEffect(input: {
 function createHostedAssistantDeliveryDispatchHooks(input: {
   commit: HostedExecutionCommitCallback;
   commitTimeoutMs: number | null;
+  fetchImpl?: typeof fetch;
   sideEffectsBaseUrl: string;
   userId: string;
 }): AssistantOutboxDispatchHooks {
@@ -219,6 +228,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
+        fetchImpl: input.fetchImpl,
         method: "PUT",
         record: {
           delivery,
@@ -242,6 +252,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       const record = await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
+        fetchImpl: input.fetchImpl,
         method: "GET",
         sideEffect: buildHostedAssistantDeliverySideEffect({
           dedupeKey: intent.dedupeKey,
@@ -251,7 +262,19 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         userId: input.userId,
       });
 
-      return record?.kind === "assistant.delivery" ? record.delivery : null;
+      if (record?.kind !== "assistant.delivery") {
+        return null;
+      }
+
+      return {
+        channel: record.delivery.channel,
+        idempotencyKey:
+          (record.delivery as { idempotencyKey?: string | null }).idempotencyKey ?? null,
+        messageLength: record.delivery.messageLength,
+        sentAt: record.delivery.sentAt,
+        target: record.delivery.target,
+        targetKind: record.delivery.targetKind,
+      } satisfies AssistantChannelDelivery;
     },
   };
 }
@@ -260,6 +283,7 @@ async function callHostedRunnerSideEffectJournal(input:
   | {
       commit: HostedExecutionCommitCallback;
       commitTimeoutMs: number | null;
+      fetchImpl?: typeof fetch;
       method: "GET";
       sideEffect: HostedExecutionSideEffect;
       sideEffectsBaseUrl: string;
@@ -268,6 +292,7 @@ async function callHostedRunnerSideEffectJournal(input:
   | {
       commit: HostedExecutionCommitCallback;
       commitTimeoutMs: number | null;
+      fetchImpl?: typeof fetch;
       method: "PUT";
       record: HostedExecutionSideEffectRecord;
       sideEffectsBaseUrl: string;
@@ -285,7 +310,7 @@ async function callHostedRunnerSideEffectJournal(input:
 
   let response: Response;
   try {
-    response = await fetch(url.toString(), {
+    response = await (input.fetchImpl ?? fetch)(url.toString(), {
       body: input.method === "PUT" ? JSON.stringify(input.record) : undefined,
       headers: {
         ...(input.method === "PUT"

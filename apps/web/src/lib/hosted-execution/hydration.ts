@@ -11,6 +11,12 @@ import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/
 
 type HostedExecutionHydrationClient = PrismaClient;
 
+export interface HostedExecutionHydrationError extends Error {
+  code: string;
+  permanent: true;
+  retryable: false;
+}
+
 export async function hydrateHostedExecutionDispatch(
   record: ExecutionOutbox,
   prisma: HostedExecutionHydrationClient,
@@ -23,7 +29,10 @@ export async function hydrateHostedExecutionDispatch(
   });
 
   if (!payload) {
-    throw new Error(`Hosted execution outbox record ${record.eventId} is missing a dispatch payload.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_PAYLOAD_MISSING",
+      `Hosted execution outbox record ${record.eventId} is missing a dispatch payload.`,
+    );
   }
 
   if (payload.storage === "inline") {
@@ -52,7 +61,8 @@ export async function hydrateHostedExecutionDispatch(
         );
       }
 
-      throw new Error(
+      throw createHostedExecutionHydrationError(
+        "HOSTED_EXECUTION_HYDRATION_SOURCE_UNSUPPORTED",
         `Unsupported hosted execution outbox reference source ${record.sourceType} for event ${record.eventId}.`,
       );
   }
@@ -84,7 +94,8 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
   );
 
   if (!dispatch) {
-    throw new Error(
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_MISSING",
       `Hosted webhook receipt ${sourceKey.source}:${sourceKey.eventId} did not retain dispatch ${record.eventId}.`,
     );
   }
@@ -103,11 +114,17 @@ async function hydrateHostedExecutionDispatchFromHostedShareLink(
   dispatchRef: HostedExecutionDispatchRef,
 ): Promise<HostedExecutionDispatchRequest> {
   if (!record.sourceId) {
-    throw new Error(`Hosted share outbox record ${record.eventId} is missing sourceId.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_REQUIRED",
+      `Hosted share outbox record ${record.eventId} is missing sourceId.`,
+    );
   }
 
   if (dispatchRef?.eventKind !== "vault.share.accepted" || !dispatchRef.share) {
-    throw new Error(`Hosted share outbox record ${record.eventId} is missing a share reference.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_REFERENCE_INVALID",
+      `Hosted share outbox record ${record.eventId} is missing a share reference.`,
+    );
   }
 
   return validateHydratedHostedExecutionDispatch(
@@ -144,7 +161,10 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
   });
 
   if (!signal) {
-    throw new Error(`Device-sync signal ${signalId} was not found for hosted execution ${record.eventId}.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_MISSING",
+      `Device-sync signal ${signalId} was not found for hosted execution ${record.eventId}.`,
+    );
   }
 
   return validateHydratedHostedExecutionDispatch(
@@ -165,13 +185,19 @@ function parseHostedWebhookReceiptSourceId(
   sourceId: string | null,
 ): { eventId: string; source: string } {
   if (!sourceId) {
-    throw new Error("Hosted webhook receipt sourceId is required for execution outbox hydration.");
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_REQUIRED",
+      "Hosted webhook receipt sourceId is required for execution outbox hydration.",
+    );
   }
 
   const separatorIndex = sourceId.indexOf(":");
 
   if (separatorIndex <= 0 || separatorIndex >= sourceId.length - 1) {
-    throw new Error(`Hosted webhook receipt sourceId is malformed: ${sourceId}`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_INVALID",
+      `Hosted webhook receipt sourceId is malformed: ${sourceId}`,
+    );
   }
 
   return {
@@ -182,13 +208,19 @@ function parseHostedWebhookReceiptSourceId(
 
 function parseDeviceSyncSignalSourceId(sourceId: string | null, eventId: string): number {
   if (!sourceId) {
-    throw new Error(`Device-sync sourceId is required for hosted execution ${eventId}.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_REQUIRED",
+      `Device-sync sourceId is required for hosted execution ${eventId}.`,
+    );
   }
 
   const parsed = Number.parseInt(sourceId, 10);
 
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new Error(`Device-sync sourceId ${sourceId} is not a valid signal id for ${eventId}.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_INVALID",
+      `Device-sync sourceId ${sourceId} is not a valid signal id for ${eventId}.`,
+    );
   }
 
   return parsed;
@@ -199,16 +231,52 @@ function validateHydratedHostedExecutionDispatch(
   record: ExecutionOutbox,
 ): HostedExecutionDispatchRequest {
   if (dispatch.eventId !== record.eventId) {
-    throw new Error(`Hosted execution dispatch event id mismatch for ${record.eventId}: ${dispatch.eventId}.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_EVENT_MISMATCH",
+      `Hosted execution dispatch event id mismatch for ${record.eventId}: ${dispatch.eventId}.`,
+    );
   }
 
   if (dispatch.event.kind !== record.eventKind) {
-    throw new Error(`Hosted execution dispatch kind mismatch for ${record.eventId}: ${dispatch.event.kind}.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_KIND_MISMATCH",
+      `Hosted execution dispatch kind mismatch for ${record.eventId}: ${dispatch.event.kind}.`,
+    );
   }
 
   if (dispatch.event.userId !== record.userId) {
-    throw new Error(`Hosted execution dispatch user mismatch for ${record.eventId}: ${dispatch.event.userId}.`);
+    throw createHostedExecutionHydrationError(
+      "HOSTED_EXECUTION_HYDRATION_USER_MISMATCH",
+      `Hosted execution dispatch user mismatch for ${record.eventId}: ${dispatch.event.userId}.`,
+    );
   }
 
   return dispatch;
+}
+
+export function isPermanentHostedExecutionHydrationError(
+  error: unknown,
+): error is HostedExecutionHydrationError {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      "permanent" in error &&
+      "retryable" in error &&
+      typeof (error as { code?: unknown }).code === "string" &&
+      (error as { code?: string }).code.length > 0 &&
+      (error as { permanent?: unknown }).permanent === true &&
+      (error as { retryable?: unknown }).retryable === false,
+  );
+}
+
+function createHostedExecutionHydrationError(
+  code: string,
+  message: string,
+): HostedExecutionHydrationError {
+  const error = new Error(message) as HostedExecutionHydrationError;
+  error.code = code;
+  error.permanent = true;
+  error.retryable = false;
+  return error;
 }
