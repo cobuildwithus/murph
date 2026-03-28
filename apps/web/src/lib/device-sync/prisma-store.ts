@@ -95,15 +95,11 @@ export interface UpdateLocalHeartbeatInput {
   clearError?: boolean;
 }
 
-export class PrismaDeviceSyncControlPlaneStore
-  implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
-{
+class PrismaHostedOAuthSessionStore {
   readonly prisma: PrismaClient;
-  readonly codec: HostedSecretCodec;
 
-  constructor(input: { prisma: PrismaClient; codec: HostedSecretCodec }) {
-    this.prisma = input.prisma;
-    this.codec = input.codec;
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma;
   }
 
   async deleteExpiredOAuthStates(now: string): Promise<number> {
@@ -164,6 +160,16 @@ export class PrismaDeviceSyncControlPlaneStore
         expiresAt: record.expiresAt.toISOString(),
       } satisfies OAuthStateRecord;
     });
+  }
+}
+
+class PrismaHostedConnectionStore {
+  readonly prisma: PrismaClient;
+  readonly codec: HostedSecretCodec;
+
+  constructor(input: { prisma: PrismaClient; codec: HostedSecretCodec }) {
+    this.prisma = input.prisma;
+    this.codec = input.codec;
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -302,6 +308,151 @@ export class PrismaDeviceSyncControlPlaneStore
     return record ? mapHostedPublicAccountRecord(record) : null;
   }
 
+  async markWebhookReceived(accountId: string, now: string): Promise<void> {
+    await this.prisma.deviceConnection.update({
+      where: {
+        id: accountId,
+      },
+      data: {
+        lastWebhookAt: new Date(now),
+      },
+    });
+  }
+
+  async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
+    const records = await this.prisma.deviceConnection.findMany({
+      where: {
+        userId,
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    });
+
+    return records.map((record) => mapHostedPublicAccountRecord(record));
+  }
+
+  async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
+    const record = await this.prisma.deviceConnection.findFirst({
+      where: {
+        id: connectionId,
+        userId,
+      },
+    });
+
+    return record ? mapHostedPublicAccountRecord(record) : null;
+  }
+
+  async getConnectionOwnerId(connectionId: string): Promise<string | null> {
+    const record = await this.prisma.deviceConnection.findUnique({
+      where: {
+        id: connectionId,
+      },
+      select: {
+        userId: true,
+      },
+    });
+
+    return record?.userId ?? null;
+  }
+
+  async getConnectionBundleForUser(userId: string, connectionId: string): Promise<HostedConnectionSecretBundle | null> {
+    const record = await this.prisma.deviceConnection.findFirst({
+      where: {
+        id: connectionId,
+        userId,
+      },
+      ...hostedConnectionWithSecretArgs,
+    });
+
+    if (!record) {
+      return null;
+    }
+
+    return requireHostedConnectionBundleRecord(record, this.codec);
+  }
+
+  async markConnectionDisconnected(input: {
+    connectionId: string;
+    userId: string;
+    now: string;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<PublicDeviceSyncAccount> {
+    const run = async (tx: HostedPrismaTransactionClient) => {
+      const existing = await tx.deviceConnection.findFirst({
+        where: {
+          id: input.connectionId,
+          userId: input.userId,
+        },
+      });
+
+      if (!existing) {
+        throw deviceSyncError({
+          code: "CONNECTION_NOT_FOUND",
+          message: "Hosted device-sync connection was not found for the current user.",
+          retryable: false,
+          httpStatus: 404,
+        });
+      }
+
+      await tx.deviceConnectionSecret.deleteMany({
+        where: {
+          connectionId: input.connectionId,
+        },
+      });
+
+      return tx.deviceConnection.update({
+        where: {
+          id: input.connectionId,
+        },
+        data: {
+          status: "disconnected",
+          accessTokenExpiresAt: null,
+          nextReconcileAt: null,
+          lastSyncErrorAt: null,
+          lastErrorCode: input.errorCode ?? null,
+          lastErrorMessage: input.errorMessage ?? null,
+          updatedAt: new Date(input.now),
+        },
+      });
+    };
+    const updated = input.tx
+      ? await run(input.tx)
+      : await this.prisma.$transaction(run);
+
+    return mapHostedPublicAccountRecord(updated);
+  }
+
+  async updateConnectionStatus(input: {
+    connectionId: string;
+    status: DeviceSyncAccountStatus;
+    now: string;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }): Promise<PublicDeviceSyncAccount> {
+    const updated = await this.prisma.deviceConnection.update({
+      where: {
+        id: input.connectionId,
+      },
+      data: {
+        status: input.status,
+        lastSyncErrorAt: new Date(input.now),
+        lastErrorCode: input.errorCode ?? null,
+        lastErrorMessage: input.errorMessage ?? null,
+      },
+    });
+
+    return mapHostedPublicAccountRecord(updated);
+  }
+}
+
+class PrismaHostedWebhookTraceStore {
+  readonly prisma: PrismaClient;
+
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma;
+  }
+
   async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
     const claimedAt = new Date(input.receivedAt);
     const processingExpiresAt = new Date(input.processingExpiresAt);
@@ -412,67 +563,13 @@ export class PrismaDeviceSyncControlPlaneStore
       },
     });
   }
+}
 
-  async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    await this.prisma.deviceConnection.update({
-      where: {
-        id: accountId,
-      },
-      data: {
-        lastWebhookAt: new Date(now),
-      },
-    });
-  }
+class PrismaHostedSignalStore {
+  readonly prisma: PrismaClient;
 
-  async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
-    const records = await this.prisma.deviceConnection.findMany({
-      where: {
-        userId,
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-    });
-
-    return records.map((record) => mapHostedPublicAccountRecord(record));
-  }
-
-  async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
-    const record = await this.prisma.deviceConnection.findFirst({
-      where: {
-        id: connectionId,
-        userId,
-      },
-    });
-
-    return record ? mapHostedPublicAccountRecord(record) : null;
-  }
-
-  async getConnectionOwnerId(connectionId: string): Promise<string | null> {
-    const record = await this.prisma.deviceConnection.findUnique({
-      where: {
-        id: connectionId,
-      },
-      select: {
-        userId: true,
-      },
-    });
-
-    return record?.userId ?? null;
-  }
-
-  async getConnectionBundleForUser(userId: string, connectionId: string): Promise<HostedConnectionSecretBundle | null> {
-    const record = await this.prisma.deviceConnection.findFirst({
-      where: {
-        id: connectionId,
-        userId,
-      },
-      ...hostedConnectionWithSecretArgs,
-    });
-
-    if (!record) {
-      return null;
-    }
-
-    return requireHostedConnectionBundleRecord(record, this.codec);
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma;
   }
 
   async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
@@ -488,7 +585,7 @@ export class PrismaDeviceSyncControlPlaneStore
       },
     });
 
-    return this.mapSignalRecord(record);
+    return mapHostedSignalRecord(record);
   }
 
   async listSignalsForUser(userId: string, options: { afterId?: number; limit?: number } = {}): Promise<HostedSignalRecord[]> {
@@ -510,7 +607,15 @@ export class PrismaDeviceSyncControlPlaneStore
       take: limit,
     });
 
-    return records.map((record) => this.mapSignalRecord(record));
+    return records.map((record) => mapHostedSignalRecord(record));
+  }
+}
+
+class PrismaHostedBrowserAssertionNonceStore {
+  readonly prisma: PrismaClient;
+
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma;
   }
 
   async consumeBrowserAssertionNonce(input: {
@@ -551,6 +656,14 @@ export class PrismaDeviceSyncControlPlaneStore
       }
     });
   }
+}
+
+class PrismaHostedAgentSessionStore {
+  readonly prisma: PrismaClient;
+
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma;
+  }
 
   async createAgentSession(input: {
     user: AuthenticatedHostedUser;
@@ -573,7 +686,7 @@ export class PrismaDeviceSyncControlPlaneStore
       },
     });
 
-    return this.mapAgentSessionRecord(record);
+    return mapHostedAgentSessionRecord(record);
   }
 
   async authenticateAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionAuthResult> {
@@ -593,7 +706,7 @@ export class PrismaDeviceSyncControlPlaneStore
     if (record.revokedAt) {
       return {
         status: "revoked",
-        session: this.mapAgentSessionRecord(record),
+        session: mapHostedAgentSessionRecord(record),
       };
     }
 
@@ -619,7 +732,7 @@ export class PrismaDeviceSyncControlPlaneStore
 
     return {
       status: "active",
-      session: this.mapAgentSessionRecord(touched),
+      session: mapHostedAgentSessionRecord(touched),
     };
   }
 
@@ -689,7 +802,7 @@ export class PrismaDeviceSyncControlPlaneStore
         },
       });
 
-      return this.mapAgentSessionRecord(record);
+      return mapHostedAgentSessionRecord(record);
     });
   }
 
@@ -723,83 +836,18 @@ export class PrismaDeviceSyncControlPlaneStore
         },
       });
 
-      return record ? this.mapAgentSessionRecord(record) : null;
+      return record ? mapHostedAgentSessionRecord(record) : null;
     });
   }
+}
 
-  async markConnectionDisconnected(input: {
-    connectionId: string;
-    userId: string;
-    now: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-    tx?: HostedPrismaTransactionClient;
-  }): Promise<PublicDeviceSyncAccount> {
-    const run = async (tx: HostedPrismaTransactionClient) => {
-      const existing = await tx.deviceConnection.findFirst({
-        where: {
-          id: input.connectionId,
-          userId: input.userId,
-        },
-      });
+class PrismaHostedLocalHeartbeatStore {
+  readonly prisma: PrismaClient;
+  readonly connections: PrismaHostedConnectionStore;
 
-      if (!existing) {
-        throw deviceSyncError({
-          code: "CONNECTION_NOT_FOUND",
-          message: "Hosted device-sync connection was not found for the current user.",
-          retryable: false,
-          httpStatus: 404,
-        });
-      }
-
-      await tx.deviceConnectionSecret.deleteMany({
-        where: {
-          connectionId: input.connectionId,
-        },
-      });
-
-      return tx.deviceConnection.update({
-        where: {
-          id: input.connectionId,
-        },
-        data: {
-          status: "disconnected",
-          accessTokenExpiresAt: null,
-          nextReconcileAt: null,
-          lastSyncErrorAt: null,
-          lastErrorCode: input.errorCode ?? null,
-          lastErrorMessage: input.errorMessage ?? null,
-          updatedAt: new Date(input.now),
-        },
-      });
-    };
-    const updated = input.tx
-      ? await run(input.tx)
-      : await this.prisma.$transaction(run);
-
-    return mapHostedPublicAccountRecord(updated);
-  }
-
-  async updateConnectionStatus(input: {
-    connectionId: string;
-    status: DeviceSyncAccountStatus;
-    now: string;
-    errorCode?: string | null;
-    errorMessage?: string | null;
-  }): Promise<PublicDeviceSyncAccount> {
-    const updated = await this.prisma.deviceConnection.update({
-      where: {
-        id: input.connectionId,
-      },
-      data: {
-        status: input.status,
-        lastSyncErrorAt: new Date(input.now),
-        lastErrorCode: input.errorCode ?? null,
-        lastErrorMessage: input.errorMessage ?? null,
-      },
-    });
-
-    return mapHostedPublicAccountRecord(updated);
+  constructor(input: { prisma: PrismaClient; connections: PrismaHostedConnectionStore }) {
+    this.prisma = input.prisma;
+    this.connections = input.connections;
   }
 
   async updateConnectionFromLocalHeartbeat(
@@ -843,7 +891,178 @@ export class PrismaDeviceSyncControlPlaneStore
       return null;
     }
 
-    return this.getConnectionForUser(userId, connectionId);
+    return this.connections.getConnectionForUser(userId, connectionId);
+  }
+}
+
+export class PrismaDeviceSyncControlPlaneStore
+  implements DeviceSyncPublicIngressStore, HostedBrowserAssertionNonceStore
+{
+  readonly prisma: PrismaClient;
+  readonly codec: HostedSecretCodec;
+  private readonly oauthSessions: PrismaHostedOAuthSessionStore;
+  private readonly connections: PrismaHostedConnectionStore;
+  private readonly webhookTraces: PrismaHostedWebhookTraceStore;
+  private readonly signals: PrismaHostedSignalStore;
+  private readonly browserAssertionNonces: PrismaHostedBrowserAssertionNonceStore;
+  private readonly agentSessions: PrismaHostedAgentSessionStore;
+  private readonly localHeartbeats: PrismaHostedLocalHeartbeatStore;
+
+  constructor(input: { prisma: PrismaClient; codec: HostedSecretCodec }) {
+    this.prisma = input.prisma;
+    this.codec = input.codec;
+    this.oauthSessions = new PrismaHostedOAuthSessionStore(this.prisma);
+    this.connections = new PrismaHostedConnectionStore({
+      prisma: this.prisma,
+      codec: this.codec,
+    });
+    this.webhookTraces = new PrismaHostedWebhookTraceStore(this.prisma);
+    this.signals = new PrismaHostedSignalStore(this.prisma);
+    this.browserAssertionNonces = new PrismaHostedBrowserAssertionNonceStore(this.prisma);
+    this.agentSessions = new PrismaHostedAgentSessionStore(this.prisma);
+    this.localHeartbeats = new PrismaHostedLocalHeartbeatStore({
+      prisma: this.prisma,
+      connections: this.connections,
+    });
+  }
+
+  async deleteExpiredOAuthStates(now: string): Promise<number> {
+    return this.oauthSessions.deleteExpiredOAuthStates(now);
+  }
+
+  async createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {
+    return this.oauthSessions.createOAuthState(input);
+  }
+
+  async consumeOAuthState(state: string, now: string): Promise<OAuthStateRecord | null> {
+    return this.oauthSessions.consumeOAuthState(state, now);
+  }
+
+  async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
+    return this.connections.upsertConnection(input);
+  }
+
+  async getConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    return this.connections.getConnectionByExternalAccount(provider, externalAccountId);
+  }
+
+  async claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): Promise<DeviceSyncWebhookTraceClaimResult> {
+    return this.webhookTraces.claimWebhookTrace(input);
+  }
+
+  async completeWebhookTrace(
+    provider: string,
+    traceId: string,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<void> {
+    return this.webhookTraces.completeWebhookTrace(provider, traceId, tx);
+  }
+
+  async releaseWebhookTrace(provider: string, traceId: string): Promise<void> {
+    return this.webhookTraces.releaseWebhookTrace(provider, traceId);
+  }
+
+  async markWebhookReceived(accountId: string, now: string): Promise<void> {
+    return this.connections.markWebhookReceived(accountId, now);
+  }
+
+  async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {
+    return this.connections.listConnectionsForUser(userId);
+  }
+
+  async getConnectionForUser(userId: string, connectionId: string): Promise<PublicDeviceSyncAccount | null> {
+    return this.connections.getConnectionForUser(userId, connectionId);
+  }
+
+  async getConnectionOwnerId(connectionId: string): Promise<string | null> {
+    return this.connections.getConnectionOwnerId(connectionId);
+  }
+
+  async getConnectionBundleForUser(userId: string, connectionId: string): Promise<HostedConnectionSecretBundle | null> {
+    return this.connections.getConnectionBundleForUser(userId, connectionId);
+  }
+
+  async createSignal(input: CreateHostedSignalInput): Promise<HostedSignalRecord> {
+    return this.signals.createSignal(input);
+  }
+
+  async listSignalsForUser(userId: string, options: { afterId?: number; limit?: number } = {}): Promise<HostedSignalRecord[]> {
+    return this.signals.listSignalsForUser(userId, options);
+  }
+
+  async consumeBrowserAssertionNonce(input: {
+    nonceHash: string;
+    userId: string;
+    method: string;
+    path: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<boolean> {
+    return this.browserAssertionNonces.consumeBrowserAssertionNonce(input);
+  }
+
+  async createAgentSession(input: {
+    user: AuthenticatedHostedUser;
+    label?: string | null;
+    tokenHash: string;
+    now?: string;
+    expiresAt: string;
+  }): Promise<HostedAgentSessionRecord> {
+    return this.agentSessions.createAgentSession(input);
+  }
+
+  async authenticateAgentSessionByTokenHash(tokenHash: string, now: string): Promise<HostedAgentSessionAuthResult> {
+    return this.agentSessions.authenticateAgentSessionByTokenHash(tokenHash, now);
+  }
+
+  async rotateAgentSession(input: {
+    sessionId: string;
+    tokenHash: string;
+    now: string;
+    expiresAt: string;
+  }): Promise<HostedAgentSessionRecord> {
+    return this.agentSessions.rotateAgentSession(input);
+  }
+
+  async revokeAgentSession(input: {
+    sessionId: string;
+    now: string;
+    reason: string;
+    replacedBySessionId?: string | null;
+  }): Promise<HostedAgentSessionRecord | null> {
+    return this.agentSessions.revokeAgentSession(input);
+  }
+
+  async markConnectionDisconnected(input: {
+    connectionId: string;
+    userId: string;
+    now: string;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    tx?: HostedPrismaTransactionClient;
+  }): Promise<PublicDeviceSyncAccount> {
+    return this.connections.markConnectionDisconnected(input);
+  }
+
+  async updateConnectionStatus(input: {
+    connectionId: string;
+    status: DeviceSyncAccountStatus;
+    now: string;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }): Promise<PublicDeviceSyncAccount> {
+    return this.connections.updateConnectionStatus(input);
+  }
+
+  async updateConnectionFromLocalHeartbeat(
+    userId: string,
+    connectionId: string,
+    patch: UpdateLocalHeartbeatInput,
+  ): Promise<PublicDeviceSyncAccount | null> {
+    return this.localHeartbeats.updateConnectionFromLocalHeartbeat(userId, connectionId, patch);
   }
 
   async withConnectionRefreshLock<TResult>(
@@ -855,33 +1074,6 @@ export class PrismaDeviceSyncControlPlaneStore
       return callback(tx);
     });
   }
-
-  private mapSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRecord {
-    return {
-      id: record.id,
-      userId: record.userId,
-      connectionId: record.connectionId,
-      provider: record.provider,
-      kind: record.kind,
-      payload: toJsonRecord(record.payloadJson),
-      createdAt: record.createdAt.toISOString(),
-    } satisfies HostedSignalRecord;
-  }
-
-  private mapAgentSessionRecord(record: HostedAgentSessionPrismaRecord): HostedAgentSessionRecord {
-    return {
-      id: record.id,
-      userId: record.userId,
-      label: record.label,
-      createdAt: record.createdAt.toISOString(),
-      updatedAt: record.updatedAt.toISOString(),
-      expiresAt: record.expiresAt.toISOString(),
-      lastSeenAt: maybeIsoTimestamp(record.lastSeenAt),
-      revokedAt: maybeIsoTimestamp(record.revokedAt),
-      revokeReason: record.revokeReason ?? null,
-      replacedBySessionId: record.replacedBySessionId ?? null,
-    } satisfies HostedAgentSessionRecord;
-  }
 }
 
 function toPrismaJsonObject(value: unknown): Prisma.InputJsonObject {
@@ -890,6 +1082,33 @@ function toPrismaJsonObject(value: unknown): Prisma.InputJsonObject {
 
 function toNullablePrismaJsonValue(value: Record<string, unknown> | null | undefined): Prisma.InputJsonValue | typeof Prisma.DbNull {
   return value ? toPrismaJsonObject(value) : Prisma.DbNull;
+}
+
+function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRecord {
+  return {
+    id: record.id,
+    userId: record.userId,
+    connectionId: record.connectionId,
+    provider: record.provider,
+    kind: record.kind,
+    payload: toJsonRecord(record.payloadJson),
+    createdAt: record.createdAt.toISOString(),
+  } satisfies HostedSignalRecord;
+}
+
+function mapHostedAgentSessionRecord(record: HostedAgentSessionPrismaRecord): HostedAgentSessionRecord {
+  return {
+    id: record.id,
+    userId: record.userId,
+    label: record.label,
+    createdAt: record.createdAt.toISOString(),
+    updatedAt: record.updatedAt.toISOString(),
+    expiresAt: record.expiresAt.toISOString(),
+    lastSeenAt: maybeIsoTimestamp(record.lastSeenAt),
+    revokedAt: maybeIsoTimestamp(record.revokedAt),
+    revokeReason: record.revokeReason ?? null,
+    replacedBySessionId: record.replacedBySessionId ?? null,
+  } satisfies HostedAgentSessionRecord;
 }
 
 export function mapHostedPublicAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
