@@ -8,8 +8,10 @@ export type HostedWebhookEventPayload = Prisma.InputJsonObject;
 export type HostedWebhookResponsePayload = Prisma.InputJsonObject;
 
 export type HostedWebhookReceiptErrorState = {
+  code: string | null;
   message: string;
   name: string;
+  retryable: boolean | null;
 };
 
 export type HostedWebhookSideEffectErrorState = {
@@ -67,9 +69,31 @@ export type HostedWebhookLinqMessageSideEffect = {
   status: HostedWebhookSideEffectStatus;
 };
 
+export type HostedWebhookRevnetIssuanceSideEffect = {
+  attemptCount: number;
+  effectId: string;
+  kind: "revnet_invoice_issue";
+  lastAttemptAt: string | null;
+  lastError: HostedWebhookSideEffectErrorState | null;
+  payload: {
+    amountPaid: number;
+    chargeId: string | null;
+    currency: string | null;
+    invoiceId: string;
+    memberId: string;
+    paymentIntentId: string | null;
+  };
+  result: {
+    handled: true;
+  } | null;
+  sentAt: string | null;
+  status: HostedWebhookSideEffectStatus;
+};
+
 export type HostedWebhookSideEffect =
   | HostedWebhookDispatchSideEffect
-  | HostedWebhookLinqMessageSideEffect;
+  | HostedWebhookLinqMessageSideEffect
+  | HostedWebhookRevnetIssuanceSideEffect;
 
 export type HostedWebhookReceiptStatus = "completed" | "failed" | "processing";
 
@@ -93,7 +117,8 @@ export type HostedWebhookReceiptClaim = {
 
 export type HostedWebhookSideEffectResult =
   | NonNullable<HostedWebhookDispatchSideEffect["result"]>
-  | NonNullable<HostedWebhookLinqMessageSideEffect["result"]>;
+  | NonNullable<HostedWebhookLinqMessageSideEffect["result"]>
+  | NonNullable<HostedWebhookRevnetIssuanceSideEffect["result"]>;
 
 export type HostedWebhookReceiptPersistenceClient = PrismaClient | Prisma.TransactionClient;
 
@@ -116,6 +141,7 @@ export type HostedWebhookReceiptHandlers = {
   performSideEffect: (
     effect: HostedWebhookSideEffect,
     options: {
+      prisma: PrismaClient;
       signal?: AbortSignal;
     },
   ) => Promise<HostedWebhookSideEffectResult>;
@@ -174,6 +200,34 @@ export function createHostedWebhookLinqMessageSideEffect(input: {
       inviteId: input.inviteId,
       message: input.message,
       replyToMessageId: input.replyToMessageId ?? null,
+    },
+    result: null,
+    sentAt: null,
+    status: "pending",
+  };
+}
+
+export function createHostedWebhookRevnetIssuanceSideEffect(input: {
+  amountPaid: number;
+  chargeId: string | null;
+  currency: string | null;
+  invoiceId: string;
+  memberId: string;
+  paymentIntentId: string | null;
+}): HostedWebhookRevnetIssuanceSideEffect {
+  return {
+    attemptCount: 0,
+    effectId: `revnet-issuance:${input.invoiceId}`,
+    kind: "revnet_invoice_issue",
+    lastAttemptAt: null,
+    lastError: null,
+    payload: {
+      amountPaid: input.amountPaid,
+      chargeId: input.chargeId,
+      currency: input.currency,
+      invoiceId: input.invoiceId,
+      memberId: input.memberId,
+      paymentIntentId: input.paymentIntentId,
     },
     result: null,
     sentAt: null,

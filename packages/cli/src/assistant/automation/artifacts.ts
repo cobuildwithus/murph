@@ -3,6 +3,9 @@ import { writeJsonFileAtomic, errorMessage } from '../shared.js'
 import { resolveAssistantInboxArtifactPath } from '../../assistant-vault-paths.js'
 import type { sendAssistantMessage } from '../service.js'
 
+const ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT =
+  'chat-group-outcome.json'
+
 export async function assistantResultArtifactExists(
   vaultRoot: string,
   captureId: string,
@@ -43,6 +46,72 @@ export async function assistantChatReplyArtifactExists(
       'chat-deferred.json',
     )
   )
+}
+
+export async function assistantAutoReplyGroupOutcomeArtifactExists(
+  vaultRoot: string,
+  captureId: string,
+): Promise<boolean> {
+  return assistantArtifactExists(
+    vaultRoot,
+    captureId,
+    ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT,
+  )
+}
+
+export async function writeAssistantAutoReplyGroupOutcomeArtifact(input: {
+  captureIds: readonly string[]
+  outcome: 'deferred' | 'result'
+  recordedAt: string
+  result: Awaited<ReturnType<typeof sendAssistantMessage>>
+  vault: string
+}): Promise<void> {
+  const [primaryCaptureId] = input.captureIds
+  if (!primaryCaptureId) {
+    throw new Error(
+      'assistant auto-reply outcome artifacts require at least one capture id',
+    )
+  }
+
+  const [artifactPath, ...groupArtifactPaths] = await Promise.all(
+    input.captureIds.map((captureId, index) =>
+      resolveAssistantInboxArtifactPath(
+        input.vault,
+        captureId,
+        index === 0
+          ? ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT
+          : 'chat-result.json',
+      ),
+    ),
+  )
+  if (!artifactPath) {
+    throw new Error(
+      'assistant auto-reply outcome artifacts require a primary capture artifact path',
+    )
+  }
+  const normalizedCaptureIds = [
+    artifactPath.captureId,
+    ...groupArtifactPaths.map((groupArtifactPath) => groupArtifactPath.captureId),
+  ]
+
+  await writeAssistantArtifactFile(artifactPath, {
+    schema: 'murph.assistant-auto-reply-group-outcome.v1',
+    captureId: artifactPath.captureId,
+    groupCaptureIds: normalizedCaptureIds,
+    sessionId: input.result.session.sessionId,
+    outcome: input.outcome,
+    recordedAt: input.recordedAt,
+    delivery: input.result.delivery
+      ? {
+          channel: input.result.delivery.channel,
+          target: input.result.delivery.target,
+          sentAt: input.result.delivery.sentAt,
+        }
+      : null,
+    deliveryIntentId: input.result.deliveryIntentId,
+    deliveryError: input.result.deliveryError,
+    response: input.result.response,
+  })
 }
 
 export async function writeAssistantChatResultArtifacts(input: {

@@ -2789,6 +2789,11 @@ interface AssistantTurnState {
   phase: 'idle' | 'running'
 }
 
+export interface AssistantTurnSelection {
+  activeModel: string | null
+  activeReasoningEffort: string | null
+}
+
 type AssistantTurnAction =
   | {
       kind: 'finish'
@@ -2800,7 +2805,9 @@ type AssistantTurnAction =
       kind: 'start'
     }
 
-type AssistantSendMessageResult = Awaited<ReturnType<typeof sendAssistantMessage>>
+type AssistantSendMessageResult = Awaited<
+  ReturnType<typeof sendAssistantMessage>
+>
 
 type AssistantPromptTurnOutcome =
   | {
@@ -2850,6 +2857,7 @@ interface RunAssistantPromptTurnInput {
   session: AssistantSession
   setEntries: React.Dispatch<React.SetStateAction<InkChatEntry[]>>
   setStatus: React.Dispatch<React.SetStateAction<AssistantChatStatus | null>>
+  transcriptSnapshot: NonNullable<AssistantChatInput['transcriptSnapshot']>
   turnTracePrefix: string
 }
 
@@ -3002,7 +3010,64 @@ export function resolveAssistantQueuedPromptDisposition(input: {
   }
 }
 
-async function runAssistantPromptTurn(
+function normalizeAssistantTurnSelection(
+  input: AssistantTurnSelection,
+): AssistantTurnSelection {
+  return {
+    activeModel: normalizeNullableString(input.activeModel),
+    activeReasoningEffort: normalizeNullableString(input.activeReasoningEffort),
+  }
+}
+
+function resolveAssistantSessionTurnSelection(
+  session: AssistantSession,
+): AssistantTurnSelection {
+  return normalizeAssistantTurnSelection({
+    activeModel: session.providerOptions.model,
+    activeReasoningEffort: session.providerOptions.reasoningEffort,
+  })
+}
+
+function buildAssistantTranscriptSnapshotFromInkEntries(input: {
+  entries: readonly InkChatEntry[]
+  pendingPrompt: string
+}): NonNullable<AssistantChatInput['transcriptSnapshot']> {
+  const transcriptEntries = input.entries.flatMap((entry) =>
+    entry.kind === 'assistant' || entry.kind === 'error' || entry.kind === 'user'
+      ? [{
+          kind: entry.kind,
+          text: entry.text,
+        }]
+      : [],
+  )
+  const lastEntry = transcriptEntries.at(-1)
+  if (lastEntry?.kind === 'user' && lastEntry.text === input.pendingPrompt) {
+    return transcriptEntries.slice(0, -1)
+  }
+
+  return transcriptEntries
+}
+
+export function resolveAssistantSelectionAfterSessionSync(input: {
+  currentSelection: AssistantTurnSelection
+  previousSession: AssistantSession
+  nextSession: AssistantSession
+}): AssistantTurnSelection {
+  const currentSelection = normalizeAssistantTurnSelection(input.currentSelection)
+  const previousSessionSelection = resolveAssistantSessionTurnSelection(
+    input.previousSession,
+  )
+  const nextSessionSelection = resolveAssistantSessionTurnSelection(input.nextSession)
+  const effectiveSelectionChanged =
+    input.previousSession.provider !== input.nextSession.provider ||
+    previousSessionSelection.activeModel !== nextSessionSelection.activeModel ||
+    previousSessionSelection.activeReasoningEffort !==
+      nextSessionSelection.activeReasoningEffort
+
+  return effectiveSelectionChanged ? nextSessionSelection : currentSelection
+}
+
+export async function runAssistantPromptTurn(
   input: RunAssistantPromptTurnInput,
 ): Promise<AssistantPromptTurnOutcome> {
   let streamedAssistantEntryKey: string | null = null
@@ -3059,6 +3124,7 @@ async function runAssistantPromptTurn(
       prompt: input.prompt,
       reasoningEffort: input.activeReasoningEffort,
       sessionSnapshot: input.session,
+      transcriptSnapshot: input.transcriptSnapshot,
       showThinkingTraces: true,
     })
 
@@ -3104,6 +3170,7 @@ function useAssistantChatController(
   const { exit } = useApp()
   const [session, setSession] = React.useState(input.resolvedSession)
   const [entries, setEntries] = React.useState(seedChatEntries(input.transcriptEntries))
+  const entriesRef = React.useRef(entries)
   const [status, setStatus] = React.useState<AssistantChatStatus | null>(null)
   const [composerValue, setComposerValue] = React.useState('')
   const initialActiveModel =
@@ -3139,6 +3206,10 @@ function useAssistantChatController(
   )
   const turnStateRef = React.useRef<AssistantTurnState>(IDLE_ASSISTANT_TURN_STATE)
   const activeTurnAbortControllerRef = React.useRef<AbortController | null>(null)
+  const activeSelectionRef = React.useRef<AssistantTurnSelection>({
+    activeModel: initialActiveModel,
+    activeReasoningEffort: initialActiveReasoningEffort,
+  })
   const modelCatalog = resolveAssistantModelCatalog({
     provider: session.provider,
     baseUrl: session.providerOptions.baseUrl,
@@ -3168,6 +3239,40 @@ function useAssistantChatController(
   React.useEffect(() => {
     latestSessionRef.current = session
   }, [session])
+
+  React.useEffect(() => {
+    entriesRef.current = entries
+  }, [entries])
+
+  const setActiveSelection = React.useCallback((nextSelection: AssistantTurnSelection) => {
+    const normalizedSelection = normalizeAssistantTurnSelection(nextSelection)
+    activeSelectionRef.current = normalizedSelection
+    setActiveModel(normalizedSelection.activeModel)
+    setActiveReasoningEffort(normalizedSelection.activeReasoningEffort)
+  }, [])
+
+  const commitSession = React.useCallback(
+    (nextSession: AssistantSession) => {
+      const previousSession = latestSessionRef.current
+      latestSessionRef.current = nextSession
+      setSession(nextSession)
+
+      const nextSelection = resolveAssistantSelectionAfterSessionSync({
+        currentSelection: activeSelectionRef.current,
+        previousSession,
+        nextSession,
+      })
+
+      if (
+        nextSelection.activeModel !== activeSelectionRef.current.activeModel ||
+        nextSelection.activeReasoningEffort !==
+          activeSelectionRef.current.activeReasoningEffort
+      ) {
+        setActiveSelection(nextSelection)
+      }
+    },
+    [setActiveSelection],
+  )
 
   React.useEffect(() => {
     let cancelled = false
@@ -3262,6 +3367,10 @@ function useAssistantChatController(
   }
 
   const startPromptTurn = (prompt: string) => {
+    const transcriptSnapshot = buildAssistantTranscriptSnapshotFromInkEntries({
+      entries: entriesRef.current,
+      pendingPrompt: prompt,
+    })
     setEntries((previous: InkChatEntry[]) => [
       ...previous,
       {
@@ -3279,9 +3388,10 @@ function useAssistantChatController(
     activeTurnAbortControllerRef.current = abortController
 
     void (async () => {
+      const activeSelection = activeSelectionRef.current
       const outcome = await runAssistantPromptTurn({
-        activeModel,
-        activeReasoningEffort,
+        activeModel: activeSelection.activeModel,
+        activeReasoningEffort: activeSelection.activeReasoningEffort,
         input: {
           ...input.input,
           abortSignal: abortController.signal,
@@ -3290,6 +3400,7 @@ function useAssistantChatController(
         session: latestSessionRef.current,
         setEntries,
         setStatus,
+        transcriptSnapshot,
         turnTracePrefix,
       })
 
@@ -3297,8 +3408,7 @@ function useAssistantChatController(
         'session' in outcome &&
         outcome.session !== latestSessionRef.current
       ) {
-        latestSessionRef.current = outcome.session
-        setSession(outcome.session)
+        commitSession(outcome.session)
       }
 
       if (outcome.kind === 'completed') {
@@ -3347,8 +3457,7 @@ function useAssistantChatController(
 
       if (outcome.kind === 'failed') {
         if (outcome.recoveredSession) {
-          latestSessionRef.current = outcome.recoveredSession
-          setSession(outcome.recoveredSession)
+          commitSession(outcome.recoveredSession)
         }
 
         const queuedPrompts = promptQueueStateRef.current.prompts
@@ -3385,8 +3494,7 @@ function useAssistantChatController(
       }
 
       if (outcome.kind === 'interrupted' && outcome.recoveredSession) {
-        latestSessionRef.current = outcome.recoveredSession
-        setSession(outcome.recoveredSession)
+        commitSession(outcome.recoveredSession)
       }
 
       activeTurnAbortControllerRef.current = null
@@ -3544,8 +3652,10 @@ function useAssistantChatController(
       .filter((value): value is string => Boolean(value))
       .join(' ')
 
-    setActiveModel(nextModel)
-    setActiveReasoningEffort(nextReasoningEffort)
+    setActiveSelection({
+      activeModel: nextModel,
+      activeReasoningEffort: nextReasoningEffort,
+    })
     setModelSwitcherState(null)
     setStatus({
       kind: 'info',
@@ -3563,8 +3673,7 @@ function useAssistantChatController(
           },
         })
 
-        latestSessionRef.current = updatedSession
-        setSession(updatedSession)
+        commitSession(updatedSession)
 
         await saveAssistantOperatorDefaultsPatch(
           buildAssistantProviderDefaultsPatch({

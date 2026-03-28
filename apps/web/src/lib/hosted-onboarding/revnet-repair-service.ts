@@ -33,7 +33,7 @@ type HostedRevnetRepairableIssuance = {
 
 export type HostedRevnetRepairCandidate = HostedRevnetRepairableIssuance & {
   replayAllowedWithoutForce: boolean;
-  repairCategory: "broadcast_unknown_stale" | "failed" | "repair_in_progress_stale";
+  repairCategory: "broadcast_unknown_stale" | "failed" | "repair_in_progress_stale" | "submitting_stale";
 };
 
 export async function listHostedRevnetRepairCandidates(input: {
@@ -53,14 +53,6 @@ export async function listHostedRevnetRepairCandidates(input: {
         },
         {
           status: HostedRevnetIssuanceStatus.submitting,
-          failureCode: REVNET_BROADCAST_STATUS_UNKNOWN_CODE,
-          updatedAt: {
-            lte: staleBefore,
-          },
-        },
-        {
-          status: HostedRevnetIssuanceStatus.submitting,
-          failureCode: REVNET_REPAIR_IN_PROGRESS_CODE,
           updatedAt: {
             lte: staleBefore,
           },
@@ -119,7 +111,8 @@ export async function replayHostedRevnetIssuanceById(input: {
 
   if (
     (candidate.repairCategory === "broadcast_unknown_stale" ||
-      candidate.repairCategory === "repair_in_progress_stale") &&
+      candidate.repairCategory === "repair_in_progress_stale" ||
+      candidate.repairCategory === "submitting_stale") &&
     candidate.payTxHash
   ) {
     throw hostedOnboardingError({
@@ -132,13 +125,14 @@ export async function replayHostedRevnetIssuanceById(input: {
 
   if (
     (candidate.repairCategory === "broadcast_unknown_stale" ||
-      candidate.repairCategory === "repair_in_progress_stale") &&
+      candidate.repairCategory === "repair_in_progress_stale" ||
+      candidate.repairCategory === "submitting_stale") &&
     !input.allowUnknownBroadcastReplay
   ) {
     throw hostedOnboardingError({
       code: "REVNET_ISSUANCE_REPLAY_UNSAFE",
       message:
-        "This stale submitting issuance needs explicit operator confirmation before replay. Re-run with allowUnknownBroadcastReplay after verifying no broadcast happened.",
+        "This stale submitting issuance needs explicit operator confirmation before replay. Re-run with allowUnknownBroadcastReplay only after verifying no broadcast happened or after deciding on the manual recovery path.",
       httpStatus: 409,
     });
   }
@@ -365,6 +359,17 @@ function classifyHostedRevnetRepairCandidate(input: {
       ...input.issuance,
       replayAllowedWithoutForce: false,
       repairCategory: "repair_in_progress_stale",
+    };
+  }
+
+  if (
+    input.issuance.status === HostedRevnetIssuanceStatus.submitting &&
+    input.issuance.updatedAt.getTime() <= input.now.getTime() - input.staleAfterMs
+  ) {
+    return {
+      ...input.issuance,
+      replayAllowedWithoutForce: false,
+      repairCategory: "submitting_stale",
     };
   }
 

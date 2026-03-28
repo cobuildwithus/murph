@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
   const stripeConstructEvent = vi.fn();
   const stripeChargesRetrieve = vi.fn();
   const stripePaymentIntentsRetrieve = vi.fn();
+  const requireHostedOnboardingStripeConfig = vi.fn();
 
   return {
     drainHostedExecutionOutboxBestEffort: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => {
     isHostedRevnetBroadcastStatusUnknownError: vi.fn(),
     isHostedOnboardingRevnetEnabled: vi.fn(),
     normalizeHostedWalletAddress: vi.fn((value: string | null | undefined) => value ?? null),
+    requireHostedOnboardingStripeConfig,
     requireHostedRevnetConfig: vi.fn(),
     sendHostedLinqChatMessage: vi.fn(),
     submitHostedRevnetPayment: vi.fn(),
@@ -87,22 +89,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     },
     webhookSecret: "whsec_123",
   }),
-  requireHostedOnboardingStripeConfig: () => ({
-    billingMode: "payment",
-    priceId: "price_123",
-    stripe: {
-      charges: {
-        retrieve: mocks.stripeChargesRetrieve,
-      },
-      paymentIntents: {
-        retrieve: mocks.stripePaymentIntentsRetrieve,
-      },
-      webhooks: {
-        constructEvent: mocks.stripeConstructEvent,
-      },
-    },
-    webhookSecret: "whsec_123",
-  }),
+  requireHostedOnboardingStripeConfig: mocks.requireHostedOnboardingStripeConfig,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/revnet", () => ({
@@ -141,6 +128,23 @@ describe("hosted onboarding webhook retry safety", () => {
     );
     mocks.isHostedOnboardingRevnetEnabled.mockReturnValue(false);
     mocks.normalizeHostedWalletAddress.mockImplementation((value: string | null | undefined) => value ?? null);
+    mocks.requireHostedOnboardingStripeConfig.mockReset();
+    mocks.requireHostedOnboardingStripeConfig.mockReturnValue({
+      billingMode: "payment",
+      priceId: "price_123",
+      stripe: {
+        charges: {
+          retrieve: mocks.stripeChargesRetrieve,
+        },
+        paymentIntents: {
+          retrieve: mocks.stripePaymentIntentsRetrieve,
+        },
+        webhooks: {
+          constructEvent: mocks.stripeConstructEvent,
+        },
+      },
+      webhookSecret: "whsec_123",
+    });
     mocks.requireHostedRevnetConfig.mockReturnValue({
       chainId: 8453,
       projectId: 1n,
@@ -1230,8 +1234,10 @@ describe("hosted onboarding webhook retry safety", () => {
               eventType: "message.received",
             },
             lastError: {
+              code: null,
               message: "linq unavailable",
               name: "Error",
+              retryable: null,
             },
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
@@ -1677,16 +1683,15 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).rejects.toMatchObject({
-      code: "hosted_webhook_side_effect_delivery_uncertain",
-      name: "HostedOnboardingError",
-      retryable: false,
+    ).resolves.toMatchObject({
+      duplicate: true,
+      ok: true,
     });
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(storedReceiptPayload).toEqual(
       buildWebhookReceiptPayload({
-        attemptCount: 2,
+        attemptCount: 1,
         attemptId: expect.any(String),
         eventPayload: {
           eventType: "message.received",
@@ -1717,6 +1722,191 @@ describe("hosted onboarding webhook retry safety", () => {
             replyToMessageId: "msg_123",
             sentAt: expect.any(String),
             status: "sent_unconfirmed",
+          }),
+        ],
+        status: "failed",
+      }),
+    );
+  });
+
+  it("does not replay a Linq invite reply when both sent and sent-unconfirmed receipt writes fail", async () => {
+    const member = {
+      billingStatus: HostedBillingStatus.not_started,
+      encryptedBootstrapSecret: "enc:bootstrap",
+      encryptionKeyVersion: "v1",
+      id: "member_123",
+      invites: [],
+      linqChatId: "chat_123",
+      normalizedPhoneNumber: "+15551234567",
+      phoneNumber: "+15551234567",
+      phoneNumberVerifiedAt: new Date("2026-03-26T12:00:00.000Z"),
+      status: "invited",
+    };
+    const invite = {
+      channel: "linq",
+      createdAt: new Date("2026-03-26T12:00:00.000Z"),
+      expiresAt: new Date("2026-03-27T12:00:00.000Z"),
+      id: "invite_123",
+      inviteCode: "join_123",
+      linqChatId: "chat_123",
+      linqEventId: "evt_123",
+      memberId: "member_123",
+      sentAt: null,
+      status: "pending",
+      triggerText: "I want to get healthy",
+      updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+    };
+    let storedReceiptPayload: Record<string, unknown> | null = null;
+
+    const prisma: any = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
+          if (storedReceiptPayload) {
+            throw createUniqueConstraintError();
+          }
+          storedReceiptPayload = data.payloadJson;
+          return {};
+        }),
+        findUnique: vi.fn().mockImplementation(() =>
+          storedReceiptPayload
+            ? {
+                payloadJson: storedReceiptPayload,
+              }
+            : null),
+        updateMany: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
+          const nextPayload = data.payloadJson;
+          const nextReceiptState = nextPayload.receiptState as {
+            sideEffects?: Array<{ kind?: string; status?: string }>;
+            status?: string;
+          } | undefined;
+          const nextLinqStatus = nextReceiptState?.sideEffects?.find(
+            (effect) => effect.kind === "linq_message_send",
+          )?.status;
+
+          if (nextLinqStatus === "sent") {
+            throw new Error("Receipt persistence failed after the Linq send.");
+          }
+
+          if (nextLinqStatus === "sent_unconfirmed") {
+            throw new Error("Receipt persistence failed while recording sent_unconfirmed.");
+          }
+
+          storedReceiptPayload = nextPayload;
+          return { count: 1 };
+        }),
+      },
+      hostedMember: {
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(member)
+          .mockResolvedValueOnce(member)
+          .mockResolvedValueOnce(member)
+          .mockResolvedValueOnce(member),
+        update: vi.fn().mockResolvedValue(member),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(invite),
+        findFirst: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue(invite),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "I want to get healthy",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "hosted_webhook_side_effect_delivery_uncertain",
+      name: "HostedOnboardingError",
+      retryable: false,
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(storedReceiptPayload).toEqual(
+      buildWebhookReceiptPayload({
+        attemptCount: 1,
+        attemptId: expect.any(String),
+        eventPayload: {
+          eventType: "message.received",
+        },
+        lastError: expect.objectContaining({
+          code: "hosted_webhook_side_effect_delivery_uncertain",
+          message: expect.stringContaining("may already have been delivered"),
+          name: "HostedOnboardingError",
+          retryable: false,
+        }),
+        lastReceivedAt: expect.any(String),
+        plannedAt: expect.any(String),
+        response: expect.objectContaining({
+          inviteCode: "join_123",
+          joinUrl: "https://join.example.test/join/join_123",
+          ok: true,
+        }),
+        sideEffects: [
+          buildLinqMessageSideEffect({
+            attemptCount: 1,
+            inviteId: "invite_123",
+            lastAttemptAt: expect.any(String),
+            lastError: null,
+            message: expect.stringContaining("https://join.example.test/join/join_123"),
+            replyToMessageId: "msg_123",
+            sentAt: null,
+            status: "pending",
+          }),
+        ],
+        status: "failed",
+      }),
+    );
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "I want to get healthy",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      duplicate: true,
+      ok: true,
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    expect(storedReceiptPayload).toEqual(
+      buildWebhookReceiptPayload({
+        attemptCount: 1,
+        attemptId: expect.any(String),
+        eventPayload: {
+          eventType: "message.received",
+        },
+        lastError: expect.objectContaining({
+          code: "hosted_webhook_side_effect_delivery_uncertain",
+          message: expect.stringContaining("may already have been delivered"),
+          name: "HostedOnboardingError",
+          retryable: false,
+        }),
+        lastReceivedAt: expect.any(String),
+        plannedAt: expect.any(String),
+        response: expect.objectContaining({
+          inviteCode: "join_123",
+          joinUrl: "https://join.example.test/join/join_123",
+          ok: true,
+        }),
+        sideEffects: [
+          buildLinqMessageSideEffect({
+            attemptCount: 1,
+            inviteId: "invite_123",
+            lastAttemptAt: expect.any(String),
+            lastError: null,
+            message: expect.stringContaining("https://join.example.test/join/join_123"),
+            replyToMessageId: "msg_123",
+            sentAt: null,
+            status: "pending",
           }),
         ],
         status: "failed",
@@ -1908,6 +2098,74 @@ describe("hosted onboarding webhook retry safety", () => {
       );
     }
     expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(4);
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("does not reclaim a refreshed processing receipt after a stale compare-and-swap miss", async () => {
+    const expiredProcessingReceiptPayload = buildWebhookReceiptPayload({
+      attemptCount: 1,
+      attemptId: "attempt-1",
+      eventPayload: {
+        eventType: "message.received",
+      },
+      lastReceivedAt: "2026-03-26T12:00:00.000Z",
+      status: "processing",
+    });
+    const refreshedProcessingReceiptPayload = buildWebhookReceiptPayload({
+      attemptCount: 2,
+      attemptId: "attempt-2",
+      eventPayload: {
+        eventType: "message.received",
+      },
+      lastReceivedAt: "2026-03-26T12:05:00.000Z",
+      status: "processing",
+    });
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
+        findUnique: vi
+          .fn()
+          .mockResolvedValueOnce({
+            claimExpiresAt: new Date("2026-03-26T12:10:00.000Z"),
+            payloadJson: expiredProcessingReceiptPayload,
+            updatedAt: new Date("2026-03-26T12:00:00.000Z"),
+          })
+          .mockResolvedValueOnce({
+            claimExpiresAt: new Date("2999-01-01T00:00:00.000Z"),
+            payloadJson: refreshedProcessingReceiptPayload,
+            updatedAt: new Date("2999-01-01T00:00:00.000Z"),
+          }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      duplicate: true,
+      ok: true,
+    });
+
+    expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          payloadJson: {
+            equals: expiredProcessingReceiptPayload,
+          },
+        }),
+      }),
+    );
+    expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(2);
     expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
@@ -2746,6 +3004,9 @@ describe("hosted onboarding webhook retry safety", () => {
       id: "evt_stripe_refund_123",
       type: "refund.created",
     });
+    mocks.requireHostedOnboardingStripeConfig.mockImplementation(() => {
+      throw new Error("checkout config should not be required for refund handling");
+    });
 
     const prisma: any = withPrismaTransaction({
       hostedRevnetIssuance: {
@@ -2793,6 +3054,7 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(mocks.stripeChargesRetrieve).toHaveBeenCalledWith("ch_123");
     expect(mocks.stripePaymentIntentsRetrieve).not.toHaveBeenCalled();
+    expect(mocks.requireHostedOnboardingStripeConfig).not.toHaveBeenCalled();
     expect(prisma.hostedMember.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({

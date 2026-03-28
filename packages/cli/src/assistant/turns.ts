@@ -28,6 +28,7 @@ export function createAssistantTurnId(): string {
 
 export async function createAssistantTurnReceipt(input: {
   deliveryRequested: boolean
+  metadata?: Record<string, string> | null
   prompt: string
   provider: AssistantChatProvider
   providerModel: string | null
@@ -58,7 +59,7 @@ export async function createAssistantTurnReceipt(input: {
         at: startedAt,
         kind: 'turn.started',
         detail: null,
-        metadata: {},
+        metadata: input.metadata ?? {},
       }),
     ],
   })

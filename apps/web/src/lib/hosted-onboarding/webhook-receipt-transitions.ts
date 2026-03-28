@@ -17,6 +17,7 @@ import type {
   HostedWebhookResponsePayload,
   HostedWebhookReceiptState,
   HostedWebhookReceiptStatus,
+  HostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookSideEffect,
   HostedWebhookSideEffectErrorState,
   HostedWebhookSideEffectResult,
@@ -309,6 +310,19 @@ function mergeHostedWebhookSideEffect(
         status: terminalStatus ?? "pending",
       };
     }
+    case "revnet_invoice_issue": {
+      const currentRevnetEffect = currentEffect as HostedWebhookRevnetIssuanceSideEffect;
+      const terminalStatus = readHostedWebhookSideEffectTerminalStatus(currentRevnetEffect.status);
+      return {
+        ...desiredEffect,
+        attemptCount: currentRevnetEffect.attemptCount,
+        lastAttemptAt: currentRevnetEffect.lastAttemptAt,
+        lastError: terminalStatus === "sent" ? null : currentRevnetEffect.lastError,
+        result: terminalStatus ? currentRevnetEffect.result : null,
+        sentAt: terminalStatus ? currentRevnetEffect.sentAt : null,
+        status: terminalStatus ?? "pending",
+      };
+    }
     default:
       return desiredEffect;
   }
@@ -348,29 +362,52 @@ function markHostedWebhookSideEffectSent(
         sentAt,
         status: "sent",
       };
+    case "revnet_invoice_issue":
+      return {
+        ...effect,
+        lastError: null,
+        result: result as HostedWebhookRevnetIssuanceSideEffect["result"],
+        sentAt,
+        status: "sent",
+      };
     default:
       return effect;
   }
 }
 
 function serializeHostedWebhookReceiptError(error: unknown): HostedWebhookReceiptErrorState {
-  if (error instanceof Error) {
+  if (isHostedOnboardingError(error)) {
     return {
+      code: error.code,
       message: error.message,
       name: error.name,
+      retryable: error.retryable ?? null,
+    };
+  }
+
+  if (error instanceof Error) {
+    return {
+      code: null,
+      message: error.message,
+      name: error.name,
+      retryable: null,
     };
   }
 
   if (typeof error === "string") {
     return {
+      code: null,
       message: error,
       name: "Error",
+      retryable: null,
     };
   }
 
   return {
+    code: null,
     message: "Unknown hosted webhook failure.",
     name: "UnknownError",
+    retryable: null,
   };
 }
 

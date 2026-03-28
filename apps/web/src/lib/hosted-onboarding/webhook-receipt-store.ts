@@ -19,9 +19,13 @@ import type {
   HostedWebhookEventPayload,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptHandlers,
+  HostedWebhookReceiptPersistenceClient,
   HostedWebhookReceiptState,
+  HostedWebhookResponsePayload,
   HostedWebhookSideEffect,
 } from "./webhook-receipt-types";
+
+const RECEIPT_CLAIM_LEASE_MS = 10 * 60_000;
 
 export async function recordHostedWebhookReceipt(input: {
   eventId: string;
@@ -38,6 +42,7 @@ export async function recordHostedWebhookReceipt(input: {
   try {
     await input.prisma.hostedWebhookReceipt.create({
       data: {
+        ...buildHostedWebhookReceiptLeaseWriteData(receipt.state.status),
         source: input.source,
         eventId: input.eventId,
         firstReceivedAt: now,
@@ -58,18 +63,18 @@ export async function queueHostedWebhookReceiptSideEffects(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   desiredSideEffects: HostedWebhookSideEffect[];
   eventId: string;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
+  response: HostedWebhookResponsePayload;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
-  if (input.desiredSideEffects.length === 0) {
-    return input.claimedReceipt;
-  }
-
   return updateHostedWebhookReceiptClaim({
     claimedReceipt: input.claimedReceipt,
     eventId: input.eventId,
     mutate: (currentState) =>
-      queueHostedWebhookReceiptStateSideEffects(currentState, input.desiredSideEffects),
+      queueHostedWebhookReceiptStateSideEffects(currentState, input.desiredSideEffects, {
+        plannedAt: new Date().toISOString(),
+        response: input.response,
+      }),
     prisma: input.prisma,
     source: input.source,
   });
@@ -79,7 +84,7 @@ export async function markHostedWebhookReceiptCompleted(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   eventId: string;
   eventPayload: HostedWebhookEventPayload;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   source: string;
 }): Promise<void> {
   await updateHostedWebhookReceiptStatus({
@@ -97,7 +102,7 @@ export async function markHostedWebhookReceiptFailed(input: {
   error: unknown;
   eventId: string;
   eventPayload: HostedWebhookEventPayload;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   source: string;
 }): Promise<void> {
   await updateHostedWebhookReceiptStatus({
@@ -115,7 +120,7 @@ export async function updateHostedWebhookReceiptClaim(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   eventId: string;
   mutate: (currentState: HostedWebhookReceiptState) => HostedWebhookReceiptState;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
   return compareAndSwapHostedWebhookReceiptClaim({
@@ -133,6 +138,7 @@ export async function updateHostedWebhookReceiptClaim(input: {
     eventId: input.eventId,
     failure: buildHostedWebhookReceiptUpdateError,
     prisma: input.prisma,
+    readCurrentClaim: readHostedWebhookReceiptClaim,
     source: input.source,
     updateReceipt: async ({ currentClaim, nextClaim }) =>
       (
@@ -146,6 +152,7 @@ export async function updateHostedWebhookReceiptClaim(input: {
           },
           data: {
             payloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+            ...buildHostedWebhookReceiptLeaseWriteData(nextClaim.state.status),
           },
         })
       ).count,
@@ -157,7 +164,7 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
   dispatchEffect: HostedWebhookDispatchSideEffect;
   enqueueDispatchEffect: HostedWebhookReceiptHandlers["enqueueDispatchEffect"];
   eventId: string;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   sentAt: string;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
@@ -182,12 +189,14 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
     eventId: input.eventId,
     failure: buildHostedWebhookReceiptUpdateError,
     prisma: input.prisma,
+    readCurrentClaim: readHostedWebhookReceiptClaim,
     source: input.source,
     updateReceipt: ({ currentClaim, nextClaim }) =>
       input.enqueueDispatchEffect({
         dispatch: requireHostedWebhookDispatchEffectDispatch(input.dispatchEffect),
         eventId: input.eventId,
         nextPayloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+        nextStatus: nextClaim.state.status,
         previousClaim: currentClaim,
         prismaOrTransaction: input.prisma,
         source: input.source,
@@ -213,7 +222,9 @@ async function reclaimHostedWebhookReceipt(
         },
       },
       select: {
+        claimExpiresAt: true,
         payloadJson: true,
+        updatedAt: true,
       },
     });
 
@@ -225,6 +236,7 @@ async function reclaimHostedWebhookReceipt(
       try {
         await input.prisma.hostedWebhookReceipt.create({
           data: {
+            ...buildHostedWebhookReceiptLeaseWriteData(receipt.state.status),
             source: input.source,
             eventId: input.eventId,
             firstReceivedAt: receivedAt,
@@ -240,15 +252,36 @@ async function reclaimHostedWebhookReceipt(
         throw error;
       }
     }
-    return compareAndSwapHostedWebhookReceiptClaim({
-      claimedReceipt: {
-        payloadJson: existingReceipt.payloadJson,
-        state: readHostedWebhookReceiptState(existingReceipt.payloadJson),
-      },
+    const existingClaim: HostedWebhookReceiptStoredClaim = {
+      claimExpiresAt: existingReceipt.claimExpiresAt,
+      payloadJson: existingReceipt.payloadJson,
+      state: readHostedWebhookReceiptState(existingReceipt.payloadJson),
+      updatedAt: existingReceipt.updatedAt,
+    };
+
+    return compareAndSwapHostedWebhookReceiptClaim<
+      HostedWebhookReceiptClaim | null,
+      HostedWebhookReceiptStoredClaim
+    >({
+      claimedReceipt: existingClaim,
       decide: (currentClaim) => {
+        if (currentClaim.state.status === "completed") {
+          return {
+            result: null,
+            type: "return",
+          };
+        }
+
+        if (isHostedWebhookReceiptAutomaticReplayBlocked(currentClaim)) {
+          return {
+            result: null,
+            type: "return",
+          };
+        }
+
         if (
-          currentClaim.state.status === "completed" ||
-          currentClaim.state.status === "processing"
+          currentClaim.state.status === "processing" &&
+          !isHostedWebhookReceiptClaimExpired(currentClaim.claimExpiresAt, currentClaim.updatedAt, receivedAt)
         ) {
           return {
             result: null,
@@ -272,6 +305,7 @@ async function reclaimHostedWebhookReceipt(
       failure: buildHostedWebhookReceiptClaimError,
       maxAttempts: 3 - attempt,
       prisma: input.prisma,
+      readCurrentClaim: readHostedWebhookReceiptStoredClaim,
       source: input.source,
       updateReceipt: async ({ currentClaim, nextClaim }) =>
         (
@@ -285,6 +319,7 @@ async function reclaimHostedWebhookReceipt(
             },
             data: {
               payloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+              ...buildHostedWebhookReceiptLeaseWriteData(nextClaim.state.status),
             },
           })
         ).count,
@@ -294,12 +329,18 @@ async function reclaimHostedWebhookReceipt(
   throw buildHostedWebhookReceiptClaimError();
 }
 
+function isHostedWebhookReceiptAutomaticReplayBlocked(
+  claim: HostedWebhookReceiptClaim,
+): boolean {
+  return claim.state.status === "failed" && claim.state.lastError?.retryable === false;
+}
+
 async function updateHostedWebhookReceiptStatus(input: {
   claimedReceipt: HostedWebhookReceiptClaim;
   error?: unknown;
   eventId: string;
   eventPayload: HostedWebhookEventPayload;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   source: string;
   status: "completed" | "failed";
 }): Promise<void> {
@@ -334,18 +375,31 @@ type HostedWebhookReceiptCompareAndSwapDecision<TResult> =
       type: "compare-and-swap";
     };
 
-async function compareAndSwapHostedWebhookReceiptClaim<TResult>(input: {
-  claimedReceipt: HostedWebhookReceiptClaim;
+interface HostedWebhookReceiptStoredClaim extends HostedWebhookReceiptClaim {
+  claimExpiresAt: Date | null;
+  updatedAt: Date | null;
+}
+
+async function compareAndSwapHostedWebhookReceiptClaim<
+  TResult,
+  TCurrentClaim extends HostedWebhookReceiptClaim = HostedWebhookReceiptClaim,
+>(input: {
+  claimedReceipt: TCurrentClaim;
   decide: (
-    currentClaim: HostedWebhookReceiptClaim,
+    currentClaim: TCurrentClaim,
   ) => HostedWebhookReceiptCompareAndSwapDecision<TResult>;
   eventId: string;
   failure: () => Error;
   maxAttempts?: number;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
+  readCurrentClaim: (input: {
+    eventId: string;
+    prisma: HostedWebhookReceiptPersistenceClient;
+    source: string;
+  }) => Promise<TCurrentClaim | null>;
   source: string;
   updateReceipt: (input: {
-    currentClaim: HostedWebhookReceiptClaim;
+    currentClaim: TCurrentClaim;
     nextClaim: HostedWebhookReceiptClaim;
   }) => Promise<number>;
 }): Promise<TResult> {
@@ -368,7 +422,7 @@ async function compareAndSwapHostedWebhookReceiptClaim<TResult>(input: {
       return decision.result;
     }
 
-    const latestClaim = await readHostedWebhookReceiptClaim({
+    const latestClaim = await input.readCurrentClaim({
       eventId: input.eventId,
       prisma: input.prisma,
       source: input.source,
@@ -386,9 +440,26 @@ async function compareAndSwapHostedWebhookReceiptClaim<TResult>(input: {
 
 async function readHostedWebhookReceiptClaim(input: {
   eventId: string;
-  prisma: PrismaClient;
+  prisma: HostedWebhookReceiptPersistenceClient;
   source: string;
 }): Promise<HostedWebhookReceiptClaim | null> {
+  const latestReceipt = await readHostedWebhookReceiptStoredClaim(input);
+
+  if (!latestReceipt) {
+    return null;
+  }
+
+  return {
+    payloadJson: latestReceipt.payloadJson,
+    state: latestReceipt.state,
+  };
+}
+
+async function readHostedWebhookReceiptStoredClaim(input: {
+  eventId: string;
+  prisma: HostedWebhookReceiptPersistenceClient;
+  source: string;
+}): Promise<HostedWebhookReceiptStoredClaim | null> {
   const latestReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
     where: {
       source_eventId: {
@@ -397,7 +468,9 @@ async function readHostedWebhookReceiptClaim(input: {
       },
     },
     select: {
+      claimExpiresAt: true,
       payloadJson: true,
+      updatedAt: true,
     },
   });
 
@@ -406,8 +479,10 @@ async function readHostedWebhookReceiptClaim(input: {
   }
 
   return {
+    claimExpiresAt: latestReceipt.claimExpiresAt,
     payloadJson: latestReceipt.payloadJson,
     state: readHostedWebhookReceiptState(latestReceipt.payloadJson),
+    updatedAt: latestReceipt.updatedAt,
   };
 }
 
@@ -427,4 +502,33 @@ function buildHostedWebhookReceiptUpdateError(): Error {
     httpStatus: 503,
     retryable: true,
   });
+}
+
+export function buildHostedWebhookReceiptLeaseWriteData(
+  status: HostedWebhookReceiptState["status"],
+): {
+  claimExpiresAt: Date | null;
+} {
+  return {
+    claimExpiresAt:
+      status === "processing"
+        ? new Date(Date.now() + RECEIPT_CLAIM_LEASE_MS)
+        : null,
+  };
+}
+
+function isHostedWebhookReceiptClaimExpired(
+  claimExpiresAt: Date | null | undefined,
+  updatedAt: Date | null | undefined,
+  now: Date,
+): boolean {
+  if (claimExpiresAt) {
+    return claimExpiresAt.getTime() <= now.getTime();
+  }
+
+  if (updatedAt) {
+    return updatedAt.getTime() + RECEIPT_CLAIM_LEASE_MS <= now.getTime();
+  }
+
+  return false;
 }

@@ -14,5 +14,6 @@ export type {
 export {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
+  createHostedWebhookRevnetIssuanceSideEffect,
   HostedWebhookReceiptSideEffectDrainError,
 } from "./webhook-receipt-types";

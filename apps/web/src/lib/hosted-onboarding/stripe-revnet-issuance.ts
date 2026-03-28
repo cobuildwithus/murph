@@ -22,6 +22,7 @@ import {
 import { generateHostedRevnetIssuanceId, normalizeNullableString } from "./shared";
 
 const REVNET_BROADCAST_STATUS_UNKNOWN_CODE = "REVNET_PAYMENT_BROADCAST_STATUS_UNKNOWN";
+const REVNET_ISSUANCE_RECORDING_FAILED_CODE = "REVNET_ISSUANCE_RECORDING_FAILED";
 const HOSTED_REVNET_SUBMITTING_STALE_MS = 5 * 60 * 1000;
 
 type HostedRevnetIssuanceRecord = Pick<
@@ -57,7 +58,7 @@ type HostedRevnetIssuanceEligibility =
     memberId: string;
     paymentAmount: bigint;
     paymentIntentId: string | null;
-    prisma: PrismaClient;
+    prisma: PrismaClient | Prisma.TransactionClient;
   };
 
 type HostedRevnetIssuanceSubmissionState =
@@ -69,6 +70,7 @@ type HostedRevnetIssuanceSubmissionState =
       | "confirmed"
       | "missing"
       | "pay_tx_hash_recorded"
+      | "submitting_stale"
       | "submitted"
       | "submitting_recent";
   }
@@ -91,7 +93,7 @@ type HostedRevnetIssuanceClaimState =
 export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   invoice: Stripe.Invoice;
   member: HostedMember;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
   const eligibility = loadHostedRevnetIssuanceEligibility(input);
 
@@ -224,7 +226,7 @@ function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssu
 function loadHostedRevnetIssuanceEligibility(input: {
   invoice: Stripe.Invoice;
   member: HostedMember;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): HostedRevnetIssuanceEligibility {
   if (input.member.status === HostedMemberStatus.suspended) {
     return {
@@ -337,6 +339,14 @@ function loadHostedRevnetIssuanceSubmissionState(
     };
   }
 
+  if (issuance.status === HostedRevnetIssuanceStatus.submitting) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "submitting_stale",
+    };
+  }
+
   return {
     issuance,
     kind: "ready",
@@ -397,7 +407,7 @@ async function patchHostedRevnetIssuanceStripeReferencesIfNeeded(input: {
   chargeId: string | null;
   issuance: HostedRevnetIssuanceRecord;
   paymentIntentId: string | null;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedRevnetIssuanceRecord> {
   const updateData: {
     stripeChargeId?: string;
@@ -416,6 +426,13 @@ async function patchHostedRevnetIssuanceStripeReferencesIfNeeded(input: {
     return input.issuance;
   }
 
+  if (typeof input.prisma.hostedRevnetIssuance.update !== "function") {
+    return {
+      ...input.issuance,
+      ...updateData,
+    };
+  }
+
   return input.prisma.hostedRevnetIssuance.update({
     where: {
       id: input.issuance.id,
@@ -428,7 +445,7 @@ async function claimHostedRevnetIssuanceSubmission(input: {
   idempotencyKey: string;
   invoiceId: string;
   issuance: HostedRevnetIssuanceRecord;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedRevnetIssuanceClaimState> {
   const claimedIssuance = await input.prisma.hostedRevnetIssuance.updateMany({
     where: {
@@ -471,10 +488,12 @@ async function claimHostedRevnetIssuanceSubmission(input: {
 
 async function submitAndPersistHostedRevnetIssuance(input: {
   issuance: HostedRevnetIssuanceRecord;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
+  let submission;
+
   try {
-    const submission = await submitHostedRevnetPayment({
+    submission = await submitHostedRevnetPayment({
       beneficiaryAddress: requireHostedRevnetIssuanceAddress(
         input.issuance.beneficiaryAddress,
         "Hosted RevNet issuance beneficiary address",
@@ -494,24 +513,61 @@ async function submitAndPersistHostedRevnetIssuance(input: {
         "Hosted RevNet issuance terminal address",
       ),
     });
-
-    await input.prisma.hostedRevnetIssuance.update({
-      where: {
-        id: input.issuance.id,
-      },
-      data: {
-        failureCode: null,
-        failureMessage: null,
-        payTxHash: submission.payTxHash,
-        status: HostedRevnetIssuanceStatus.submitted,
-        submittedAt: new Date(),
-      },
-    });
   } catch (error) {
     await persistHostedRevnetIssuanceSubmissionFailure({
       error,
       issuanceId: input.issuance.id,
       prisma: input.prisma,
+    });
+
+    return;
+  }
+
+  const recordSubmissionData = {
+    failureCode: null,
+    failureMessage: null,
+    payTxHash: submission.payTxHash,
+    status: HostedRevnetIssuanceStatus.submitted,
+    submittedAt: new Date(),
+  } as const;
+
+  try {
+    await input.prisma.hostedRevnetIssuance.update({
+      where: {
+        id: input.issuance.id,
+      },
+      data: recordSubmissionData,
+    });
+  } catch (error) {
+    try {
+      const fallback = await input.prisma.hostedRevnetIssuance.updateMany({
+        where: {
+          id: input.issuance.id,
+          payTxHash: null,
+          status: HostedRevnetIssuanceStatus.submitting,
+        },
+        data: recordSubmissionData,
+      });
+
+      if (fallback.count === 1) {
+        return;
+      }
+    } catch {
+      // Fall through to the fail-closed operator error below.
+    }
+
+    throw hostedOnboardingError({
+      code: REVNET_ISSUANCE_RECORDING_FAILED_CODE,
+      message:
+        `Hosted RevNet issuance broadcast transaction ${submission.payTxHash}, but recording it failed. ` +
+        "Do not replay this issuance automatically; inspect the existing transaction and recover it through repair tooling.",
+      httpStatus: 503,
+      retryable: false,
+      details: {
+        cause: error instanceof Error ? error.message : String(error),
+        issuanceId: input.issuance.id,
+        txHash: submission.payTxHash,
+      },
     });
   }
 }
@@ -519,7 +575,7 @@ async function submitAndPersistHostedRevnetIssuance(input: {
 async function persistHostedRevnetIssuanceSubmissionFailure(input: {
   error: unknown;
   issuanceId: string;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<void> {
   const failure = classifyHostedRevnetIssuanceFailure(input.error);
 
