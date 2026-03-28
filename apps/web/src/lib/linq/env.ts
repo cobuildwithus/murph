@@ -1,15 +1,8 @@
-function normalizeString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
+import { normalizeNullableString } from "../device-sync/shared";
 
 function readEnv(source: NodeJS.ProcessEnv, keys: readonly string[]): string | null {
   for (const key of keys) {
-    const value = normalizeString(source[key]);
+    const value = normalizeNullableString(source[key]);
     if (value) {
       return value;
     }

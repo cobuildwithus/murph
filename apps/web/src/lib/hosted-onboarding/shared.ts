@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { normalizeString, sha256Hex } from "../device-sync/shared";
+import { normalizeNullableString as normalizeDeviceSyncNullableString, sha256Hex } from "../device-sync/shared";
 import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
 
 const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
@@ -34,7 +34,9 @@ export function extractLinqTextMessage(input: unknown): string | null {
       }
 
       const value = (part as { type?: unknown; value?: unknown }).type === "text"
-        ? normalizeString(typeof (part as { value?: unknown }).value === "string" ? (part as { value?: string }).value : null)
+        ? normalizeDeviceSyncNullableString(
+            typeof (part as { value?: unknown }).value === "string" ? (part as { value?: string }).value : null,
+          )
         : null;
 
       return value ? [value] : [];
@@ -44,7 +46,7 @@ export function extractLinqTextMessage(input: unknown): string | null {
 }
 
 export function shouldStartHostedOnboarding(text: string | null | undefined): boolean {
-  const normalized = normalizeString(text);
+  const normalized = normalizeDeviceSyncNullableString(text);
 
   if (!normalized) {
     return false;
@@ -98,5 +100,5 @@ export function sessionExpiresAt(now: Date, ttlDays: number): Date {
 }
 
 export function normalizeNullableString(value: unknown): string | null {
-  return typeof value === "string" ? normalizeString(value) : null;
+  return typeof value === "string" ? normalizeDeviceSyncNullableString(value) : null;
 }

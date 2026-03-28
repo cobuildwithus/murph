@@ -1,5 +1,5 @@
 import { decodeHostedEncryptionKey } from "./crypto";
-import { normalizeString, parseCommaSeparatedList } from "./shared";
+import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
 
 export interface HostedOAuthProviderEnvironment {
   clientId: string;
@@ -131,7 +131,7 @@ function readEnv(
   keys: readonly string[],
 ): string | null {
   for (const key of keys) {
-    const value = normalizeString(source[key]);
+    const value = normalizeNullableString(source[key]);
     if (value) {
       return value;
     }
@@ -141,6 +141,6 @@ function readEnv(
 }
 
 function normalizeHeaderName(value: string | null | undefined): string | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
   return normalized ? normalized.toLowerCase() : null;
 }

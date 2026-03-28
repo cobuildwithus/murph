@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
-import { normalizeString } from "./shared";
+import { normalizeNullableString } from "./shared";
 
 const ENCRYPTED_SECRET_PREFIX = "hbds";
 const AES_256_GCM = "aes-256-gcm";
@@ -47,7 +47,7 @@ export function createHostedSecretCodec(input: { key: Buffer; keyVersion: string
     throw new TypeError("Hosted device-sync encryption keys must be 32 bytes.");
   }
 
-  const keyVersion = normalizeString(input.keyVersion);
+  const keyVersion = normalizeNullableString(input.keyVersion);
 
   if (!keyVersion) {
     throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY_VERSION must not be empty.");

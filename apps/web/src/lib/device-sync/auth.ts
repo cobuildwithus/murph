@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { deviceSyncError } from "@murph/device-syncd";
 
 import type { HostedDeviceSyncEnvironment } from "./env";
-import { isRecord, normalizeString, sha256Hex, toIsoTimestamp } from "./shared";
+import { isRecord, normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";
 
 const HOSTED_USER_ASSERTION_SIGNATURE_CONTEXT = "hbds-user-assertion.v1:";
 const HOSTED_USER_ASSERTION_MAX_TTL_SECONDS = 5 * 60;
@@ -320,16 +320,15 @@ function invalidHostedUserHeaders(message: string) {
 }
 
 function normalizeHeaderValue(value: string | null): string | null {
-  const normalized = normalizeString(value);
-  return normalized ? normalized : null;
+  return normalizeNullableString(value);
 }
 
 function normalizeStringClaim(value: unknown): string | null {
-  return typeof value === "string" ? normalizeString(value) : null;
+  return typeof value === "string" ? normalizeNullableString(value) : null;
 }
 
 function normalizeNullableStringClaim(value: unknown): string | null {
-  return typeof value === "string" ? normalizeString(value) : value === null || value === undefined ? null : null;
+  return typeof value === "string" ? normalizeNullableString(value) : null;
 }
 
 function normalizeMethodClaim(value: unknown): string | null {

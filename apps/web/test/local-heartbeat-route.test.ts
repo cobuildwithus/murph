@@ -52,9 +52,11 @@ const deviceSyncd = vi.hoisted(() => ({
       retryable: input.retryable ?? false,
       httpStatus: input.httpStatus ?? 500,
       details: input.details,
-    }),
+  }),
   isDeviceSyncError: (error: unknown) =>
     Boolean(error && typeof error === "object" && "code" in error && "httpStatus" in error),
+  normalizeString: (value: unknown) =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined,
 }));
 
 const mocks = vi.hoisted(() => ({

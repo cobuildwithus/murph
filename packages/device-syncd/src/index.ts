@@ -3,6 +3,7 @@ export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts
 export { createDeviceSyncRegistry } from "./registry.ts";
 export { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 export type { CreateDeviceSyncPublicIngressInput } from "./public-ingress.ts";
+export { toIsoTimestamp } from "./shared.ts";
 export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService } from "./service.ts";
 export type { CreateDeviceSyncServiceInput } from "./service.ts";
 export { loadDeviceSyncEnvironment, createConsoleDeviceSyncLogger } from "./config.ts";

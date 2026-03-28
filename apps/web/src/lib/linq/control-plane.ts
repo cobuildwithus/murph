@@ -1,6 +1,6 @@
 import { getPrisma } from "../prisma";
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
-import { normalizeString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
+import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { readRawBodyBuffer } from "../http";
 import { hostedLinqError } from "./errors";
 import { readHostedLinqEnvironment } from "./env";
@@ -75,7 +75,7 @@ export class HostedLinqControlPlane {
     this.getAuthControlPlane().assertBrowserMutationOrigin();
     const user = await this.getAuthControlPlane().requireAuthenticatedUser();
     const recipientPhone = normalizeRequiredString(body.recipientPhone, "Linq recipientPhone");
-    const label = normalizeString(typeof body.label === "string" ? body.label : null);
+    const label = normalizeNullableString(typeof body.label === "string" ? body.label : null);
 
     return {
       binding: await this.getStore().upsertBinding({
@@ -89,7 +89,7 @@ export class HostedLinqControlPlane {
   async pairAgent(body: Record<string, unknown>) {
     this.getAuthControlPlane().assertBrowserMutationOrigin();
     const user = await this.getAuthControlPlane().requireAuthenticatedUser();
-    const label = normalizeString(typeof body.label === "string" ? body.label : null);
+    const label = normalizeNullableString(typeof body.label === "string" ? body.label : null);
 
     return await this.getAuthControlPlane().pairAgent(user.id, label);
   }
@@ -138,7 +138,7 @@ export class HostedLinqControlPlane {
     }
 
     const messageEvent = requireLinqMessageReceivedEvent(event);
-    const recipientPhone = normalizeString(messageEvent.data.recipient_phone ?? null);
+    const recipientPhone = normalizeNullableString(messageEvent.data.recipient_phone ?? null);
 
     if (!recipientPhone) {
       return {
@@ -176,8 +176,8 @@ export class HostedLinqControlPlane {
       eventId: event.event_id,
       traceId: event.trace_id ?? null,
       eventType: event.event_type,
-      chatId: normalizeString(messageEvent.data.chat_id),
-      messageId: normalizeString(messageEvent.data.message?.id),
+      chatId: normalizeNullableString(messageEvent.data.chat_id),
+      messageId: normalizeNullableString(messageEvent.data.message?.id),
       occurredAt: resolveWebhookOccurredAt(event),
       receivedAt: toIsoTimestamp(new Date()),
     });
@@ -215,7 +215,7 @@ function resolveWebhookOccurredAt(event: LinqWebhookEvent): string | null {
 }
 
 function normalizeIsoTimestamp(value: string | null | undefined): string | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
 
   if (!normalized) {
     return null;
@@ -231,7 +231,7 @@ function normalizeIsoTimestamp(value: string | null | undefined): string | null 
 }
 
 function normalizeRequiredString(value: unknown, label: string): string {
-  const normalized = normalizeString(typeof value === "string" ? value : null);
+  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
 
   if (!normalized) {
     throw hostedLinqError({

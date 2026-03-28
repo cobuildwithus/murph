@@ -15,7 +15,7 @@ import type {
 } from "@murph/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
-import { generatePrefixedId, maybeIsoTimestamp, toIsoTimestamp, toJsonRecord } from "./shared";
+import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toIsoTimestamp, toJsonRecord } from "./shared";
 
 export const hostedConnectionWithSecretArgs = {
   include: {
@@ -256,7 +256,7 @@ class PrismaHostedConnectionStore {
         });
       }
 
-      const connectionId = generatePrefixedId("dsc");
+      const connectionId = generateHostedRandomPrefixedId("dsc");
       await tx.deviceConnection.create({
         data: {
           id: connectionId,
@@ -675,7 +675,7 @@ class PrismaHostedAgentSessionStore {
     const now = input.now ?? toIsoTimestamp(new Date());
     const record = await this.prisma.deviceAgentSession.create({
       data: {
-        id: generatePrefixedId("dsa"),
+        id: generateHostedRandomPrefixedId("dsa"),
         userId: input.user.id,
         label: input.label ?? null,
         tokenHash: input.tokenHash,
@@ -742,7 +742,7 @@ class PrismaHostedAgentSessionStore {
     now: string;
     expiresAt: string;
   }): Promise<HostedAgentSessionRecord> {
-    const replacementSessionId = generatePrefixedId("dsa");
+    const replacementSessionId = generateHostedRandomPrefixedId("dsa");
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.deviceAgentSession.findFirst({

@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
-import { generatePrefixedId, toIsoTimestamp } from "../device-sync/shared";
+import { generateHostedRandomPrefixedId, toIsoTimestamp } from "../device-sync/shared";
 import { hostedLinqError } from "./errors";
 
 export interface HostedLinqBindingRecord {
@@ -116,7 +116,7 @@ export class PrismaLinqControlPlaneStore {
     try {
       const created = await this.prisma.linqRecipientBinding.create({
         data: {
-          id: generatePrefixedId("linqb"),
+          id: generateHostedRandomPrefixedId("linqb"),
           userId: input.userId,
           recipientPhone: input.recipientPhone,
           label: input.label ?? null,

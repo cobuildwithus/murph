@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 
-export function normalizeString(value: string | null | undefined): string | null {
+export { toIsoTimestamp } from "@murph/device-syncd";
+
+export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -16,13 +18,8 @@ export function parseCommaSeparatedList(value: string | null | undefined): strin
 
   return [...new Set(value.split(/[\n,]/u).map((entry) => entry.trim()).filter(Boolean))];
 }
-
-export function toIsoTimestamp(value: Date | string | number): string {
-  return new Date(value).toISOString();
-}
-
 export function maybeDate(value: string | null | undefined): Date | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
 
   if (!normalized) {
     return null;
@@ -36,7 +33,7 @@ export function maybeIsoTimestamp(value: Date | null | undefined): string | null
   return value ? value.toISOString() : null;
 }
 
-export function generatePrefixedId(prefix: string): string {
+export function generateHostedRandomPrefixedId(prefix: string): string {
   return `${prefix}_${randomBytes(12).toString("base64url")}`;
 }
 
@@ -57,7 +54,7 @@ export function toJsonRecord(value: unknown): Record<string, unknown> {
 }
 
 export function parseInteger(value: string | null | undefined): number | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
 
   if (!normalized) {
     return null;
@@ -69,8 +66,4 @@ export function parseInteger(value: string | null | undefined): number | null {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-export function coerceNullableString(value: unknown): string | null {
-  return typeof value === "string" ? value : value === null ? null : null;
 }

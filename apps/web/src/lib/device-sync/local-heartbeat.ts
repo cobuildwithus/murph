@@ -1,7 +1,7 @@
 import { deviceSyncError } from "@murph/device-syncd";
 
 import type { PublicDeviceSyncAccount } from "@murph/device-syncd";
-import { normalizeString } from "./shared";
+import { normalizeNullableString } from "./shared";
 
 const HEARTBEAT_ALLOWED_FIELDS = new Set([
   "lastSyncStartedAt",
@@ -136,7 +136,7 @@ export function buildHostedLocalHeartbeatUpdate(
 }
 
 function parseHeartbeatTimestamp(field: string, value: unknown, now: Date): string {
-  const normalized = normalizeString(typeof value === "string" ? value : null);
+  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
 
   if (!normalized) {
     throw invalidLocalHeartbeat(`Local heartbeat field ${field} must be a non-empty ISO 8601 timestamp string.`);
@@ -160,7 +160,7 @@ function parseHeartbeatTimestamp(field: string, value: unknown, now: Date): stri
 }
 
 function parseHeartbeatString(field: string, value: unknown, maxLength: number): string {
-  const normalized = normalizeString(typeof value === "string" ? value : null);
+  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
 
   if (!normalized) {
     throw invalidLocalHeartbeat(`Local heartbeat field ${field} must be a non-empty string.`);

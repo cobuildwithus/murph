@@ -1,5 +1,5 @@
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
-import { normalizeString, parseInteger } from "../device-sync/shared";
+import { normalizeNullableString, parseInteger } from "../device-sync/shared";
 
 export interface HostedOnboardingEnvironment {
   encryptionKey: Buffer;
@@ -97,7 +97,7 @@ export function readHostedOnboardingEnvironment(
 
 function readEnv(source: HostedOnboardingEnvSource, keys: readonly string[]): string | null {
   for (const key of keys) {
-    const value = normalizeString(source[key]);
+    const value = normalizeNullableString(source[key]);
 
     if (value) {
       return value;
@@ -108,7 +108,7 @@ function readEnv(source: HostedOnboardingEnvSource, keys: readonly string[]): st
 }
 
 function normalizeBaseUrl(value: string | null): string | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
 
   if (!normalized) {
     return null;
@@ -121,7 +121,7 @@ function normalizeBaseUrl(value: string | null): string | null {
 }
 
 function normalizeRpcUrl(value: string | null): string | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
 
   if (!normalized) {
     return null;
@@ -145,7 +145,7 @@ function readPositiveInteger(value: string | null, fallback: number, label: stri
 }
 
 function readBillingMode(value: string | null): "payment" | "subscription" {
-  const normalized = normalizeString(value) ?? "payment";
+  const normalized = normalizeNullableString(value) ?? "payment";
 
   if (normalized !== "payment" && normalized !== "subscription") {
     throw new TypeError("HOSTED_ONBOARDING_STRIPE_BILLING_MODE must be either 'payment' or 'subscription'.");
@@ -155,7 +155,7 @@ function readBillingMode(value: string | null): "payment" | "subscription" {
 }
 
 function readUnsignedIntegerString(value: string | null, label: string): string | null {
-  const normalized = normalizeString(value);
+  const normalized = normalizeNullableString(value);
 
   if (!normalized) {
     return null;
@@ -183,7 +183,7 @@ function readHostedRevnetEnvironment(source: HostedOnboardingEnvSource): {
   const rpcUrl = normalizeRpcUrl(readEnv(source, ["HOSTED_ONBOARDING_REVNET_RPC_URL"]));
   const terminalAddress = readEnv(source, ["HOSTED_ONBOARDING_REVNET_TERMINAL_ADDRESS"]);
   const stripeCurrency =
-    normalizeString(readEnv(source, ["HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY"]))?.toLowerCase() ?? null;
+    normalizeNullableString(readEnv(source, ["HOSTED_ONBOARDING_REVNET_STRIPE_CURRENCY"]))?.toLowerCase() ?? null;
   const treasuryPrivateKey = readEnv(source, ["HOSTED_ONBOARDING_REVNET_TREASURY_PRIVATE_KEY"]);
   const weiPerStripeMinorUnit = readUnsignedIntegerString(
     readEnv(source, ["HOSTED_ONBOARDING_REVNET_WEI_PER_STRIPE_MINOR_UNIT"]),

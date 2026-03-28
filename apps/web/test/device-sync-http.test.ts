@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => {
         new MockDeviceSyncError(options),
     ),
     isDeviceSyncError: vi.fn((error: unknown) => error instanceof MockDeviceSyncError),
+    normalizeString: vi.fn((value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)),
   };
 });
 
