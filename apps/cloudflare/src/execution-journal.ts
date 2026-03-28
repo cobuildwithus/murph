@@ -52,6 +52,7 @@ export function createHostedExecutionJournalStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedExecutionJournalStore {
   return {
     async deleteCommittedResult(userId, eventId) {
@@ -62,6 +63,7 @@ export function createHostedExecutionJournalStore(input: {
       return readEncryptedR2Json({
         bucket: input.bucket,
         cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: committedResultObjectKey(userId, eventId),
         parse(value) {
@@ -88,6 +90,7 @@ export async function persistHostedExecutionCommit(input: {
   eventId: string;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   payload: HostedExecutionCommitPayload;
   userId: string;
 }): Promise<HostedExecutionCommittedResult> {
@@ -95,6 +98,7 @@ export async function persistHostedExecutionCommit(input: {
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
+    keysById: input.keysById,
   }).readCommittedResult(input.userId, input.eventId);
 
   if (existing) {
@@ -105,6 +109,7 @@ export async function persistHostedExecutionCommit(input: {
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
+    keysById: input.keysById,
   });
   const committedAt = new Date().toISOString();
   const committedResult: HostedExecutionCommittedResult = {
@@ -134,6 +139,7 @@ export async function persistHostedExecutionCommit(input: {
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
+    keysById: input.keysById,
   }).writeCommittedResult(input.userId, input.eventId, committedResult);
 
   return committedResult;
@@ -144,6 +150,7 @@ export async function persistHostedExecutionFinalBundles(input: {
   eventId: string;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   payload: HostedExecutionFinalizePayload;
   userId: string;
 }): Promise<HostedExecutionCommittedResult> {
@@ -151,6 +158,7 @@ export async function persistHostedExecutionFinalBundles(input: {
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
+    keysById: input.keysById,
   });
   const existing = await journalStore.readCommittedResult(input.userId, input.eventId);
 
@@ -164,6 +172,7 @@ export async function persistHostedExecutionFinalBundles(input: {
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
+    keysById: input.keysById,
   });
   const nextBundleRefs = {
     agentState: await writeCommittedBundle({

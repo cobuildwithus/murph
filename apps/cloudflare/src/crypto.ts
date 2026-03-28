@@ -44,18 +44,30 @@ export async function decryptHostedBundle(input: {
   envelope: HostedCipherEnvelope;
   expectedKeyId?: string;
   key: Uint8Array;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }): Promise<Uint8Array> {
   if (!isSupportedHostedCipherSchema(input.envelope.schema) || input.envelope.algorithm !== "AES-GCM") {
     throw new Error("Hosted bundle envelope is invalid.");
   }
 
-  if (input.expectedKeyId && input.envelope.keyId !== input.expectedKeyId) {
+  let selectedKey = input.key;
+
+  if (input.keysById) {
+    const keyForEnvelope = input.keysById[input.envelope.keyId];
+
+    if (!keyForEnvelope) {
+      throw new Error(
+        `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId ?? "configured keyring"}, got ${input.envelope.keyId}.`,
+      );
+    }
+    selectedKey = keyForEnvelope;
+  } else if (input.expectedKeyId && input.envelope.keyId !== input.expectedKeyId) {
     throw new Error(
       `Hosted bundle envelope keyId mismatch: expected ${input.expectedKeyId}, got ${input.envelope.keyId}. Multi-key decryption is not implemented.`,
     );
   }
 
-  const cryptoKey = await importAesKey(input.key);
+  const cryptoKey = await importAesKey(selectedKey);
 
   return new Uint8Array(
     await crypto.subtle.decrypt(
@@ -84,6 +96,7 @@ const utf8Encoder = new TextEncoder();
 export async function readEncryptedR2Payload(input: {
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
+  cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
   key: string;
 }): Promise<Uint8Array | null> {
@@ -97,6 +110,7 @@ export async function readEncryptedR2Payload(input: {
     envelope: JSON.parse(utf8Decoder.decode(await object.arrayBuffer())) as HostedCipherEnvelope,
     expectedKeyId: input.expectedKeyId,
     key: input.cryptoKey,
+    keysById: input.cryptoKeysById,
   });
 }
 
@@ -119,6 +133,7 @@ export async function writeEncryptedR2Payload(input: {
 export async function readEncryptedR2Json<T>(input: {
   bucket: EncryptedR2BucketLike;
   cryptoKey: Uint8Array;
+  cryptoKeysById?: Readonly<Record<string, Uint8Array>>;
   expectedKeyId?: string;
   key: string;
   parse(value: unknown): T;
@@ -126,6 +141,7 @@ export async function readEncryptedR2Json<T>(input: {
   const plaintext = await readEncryptedR2Payload({
     bucket: input.bucket,
     cryptoKey: input.cryptoKey,
+    cryptoKeysById: input.cryptoKeysById,
     expectedKeyId: input.expectedKeyId,
     key: input.key,
   });

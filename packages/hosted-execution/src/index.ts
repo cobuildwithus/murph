@@ -1,5 +1,6 @@
 export * from "./auth.ts";
 export * from "./builders.ts";
+export * from "./callback-hosts.ts";
 export * from "./client.ts";
 export * from "./contracts.ts";
 export * from "./dispatch-ref.ts";

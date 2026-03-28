@@ -22,6 +22,7 @@ export interface HostedExecutionWorkerEnvironment {
   allowedUserEnvPrefixes: string | null;
   bundleEncryptionKeyBase64: string;
   bundleEncryptionKeyId: string;
+  bundleEncryptionKeyringJson: string | null;
   controlToken: string | null;
   defaultAlarmDelayMs: number;
   dispatchSigningSecret: string;
@@ -93,6 +94,9 @@ export function readHostedExecutionWorkerEnvironment(
     bundleEncryptionKeyId: normalizeHostedExecutionString(
       source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID,
     ) ?? "v1",
+    bundleEncryptionKeyringJson: normalizeHostedExecutionString(
+      source.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON,
+    ),
     controlToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_CONTROL_TOKEN),
     defaultAlarmDelayMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS),

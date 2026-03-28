@@ -122,6 +122,7 @@ export async function resolveHostedEmailInboundRoute(input: {
   config: HostedEmailConfig;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   to: string;
 }): Promise<HostedEmailInboundRoute | null> {
   if (!input.config.domain || !input.config.signingSecret) {
@@ -145,6 +146,7 @@ export async function resolveHostedEmailInboundRoute(input: {
     bucket: input.bucket,
     key: input.key,
     keyId: input.keyId,
+    keysById: input.keysById,
   });
 
   if (token.scope === "user") {
@@ -178,12 +180,14 @@ export async function readHostedEmailRawMessage(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   rawMessageKey: string;
   userId: string;
 }): Promise<Uint8Array | null> {
   return readEncryptedR2Payload({
     bucket: input.bucket,
     cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
     expectedKeyId: input.keyId,
     key: hostedEmailRawMessageObjectKey(input.userId, input.rawMessageKey),
   });
@@ -309,12 +313,14 @@ function createHostedEmailRouteStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }) {
   return {
     async readThreadRoute(replyKey: string): Promise<HostedEmailThreadRouteRecord | null> {
       return readEncryptedR2Json({
         bucket: input.bucket,
         cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: hostedEmailThreadRouteObjectKey(replyKey),
         parse(value) {
@@ -326,6 +332,7 @@ function createHostedEmailRouteStore(input: {
       return readEncryptedR2Json({
         bucket: input.bucket,
         cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: hostedEmailUserRouteObjectKey(aliasKey),
         parse(value) {

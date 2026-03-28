@@ -128,6 +128,7 @@ export function createRunnerCommitRecovery(input: {
   bucket: import("../bundle-store.js").R2BucketLike;
   bundleEncryptionKey: Uint8Array;
   bundleEncryptionKeyId: string;
+  bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>;
   queueStore: RunnerQueueStore;
   scheduler: RunnerScheduler;
 }): RunnerCommitRecovery {
@@ -138,11 +139,13 @@ export function createRunnerCommitRecovery(input: {
       bucket: input.bucket,
       key: input.bundleEncryptionKey,
       keyId: input.bundleEncryptionKeyId,
+      keysById: input.bundleEncryptionKeysById,
     }),
     new HostedBundleGarbageCollector(
       input.bucket,
       input.bundleEncryptionKey,
       input.bundleEncryptionKeyId,
+      input.bundleEncryptionKeysById,
     ),
   );
 }

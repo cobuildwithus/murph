@@ -284,6 +284,9 @@ export interface HostedExecutionDispatchStateSnapshot {
   poisoned: boolean;
 }
 
+export const HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR =
+  "Hosted execution dispatch is not configured.";
+
 export const HOSTED_EXECUTION_DISPATCH_LIFECYCLE_STATUSES = [
   "pending",
   "accepted",
@@ -355,11 +358,11 @@ export function resolveHostedExecutionDispatchLifecycle(
     case "duplicate_pending":
       return {
         lastError:
-          status.lastError === "Hosted execution dispatch is not configured."
+          status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR
             ? status.lastError
             : event.lastError ?? status.lastError,
         status:
-          status.lastError === "Hosted execution dispatch is not configured."
+          status.lastError === HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR
             ? "pending"
             : "accepted",
       };

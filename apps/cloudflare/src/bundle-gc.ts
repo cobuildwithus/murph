@@ -14,6 +14,7 @@ export class HostedBundleGarbageCollector {
     private readonly bucket: R2BucketLike,
     private readonly bundleEncryptionKey: Uint8Array,
     private readonly bundleEncryptionKeyId: string,
+    private readonly bundleEncryptionKeysById?: Readonly<Record<string, Uint8Array>>,
   ) {}
 
   async cleanupBundleTransition(input: {
@@ -35,6 +36,7 @@ export class HostedBundleGarbageCollector {
       bucket: this.bucket,
       key: this.bundleEncryptionKey,
       keyId: this.bundleEncryptionKeyId,
+      keysById: this.bundleEncryptionKeysById,
     });
 
     await this.cleanupRemovedArtifacts({
@@ -71,6 +73,7 @@ export class HostedBundleGarbageCollector {
       bucket: this.bucket,
       key: this.bundleEncryptionKey,
       keyId: this.bundleEncryptionKeyId,
+      keysById: this.bundleEncryptionKeysById,
       userId: input.userId,
     });
 

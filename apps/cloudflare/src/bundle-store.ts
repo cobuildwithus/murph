@@ -33,6 +33,7 @@ export function createHostedBundleStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedBundleStore {
   return {
     async readBundle(ref) {
@@ -43,6 +44,7 @@ export function createHostedBundleStore(input: {
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: ref.key,
       });
@@ -73,6 +75,7 @@ export function createHostedArtifactStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
   userId: string;
 }): HostedArtifactStore {
   return {
@@ -84,6 +87,7 @@ export function createHostedArtifactStore(input: {
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: artifactObjectKey(input.userId, sha256),
       });
@@ -110,6 +114,7 @@ export function createHostedUserEnvStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedUserEnvStore {
   return {
     async clearUserEnv(userId) {
@@ -120,6 +125,7 @@ export function createHostedUserEnvStore(input: {
       return readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
+        cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: userEnvObjectKey(userId),
       });

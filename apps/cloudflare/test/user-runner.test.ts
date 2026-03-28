@@ -16,6 +16,7 @@ import {
   artifactObjectKey,
   createHostedArtifactStore,
   createHostedBundleStore,
+  createHostedUserEnvStore,
 } from "../src/bundle-store.js";
 import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { encryptHostedBundle } from "../src/crypto.js";
@@ -35,6 +36,9 @@ describe("HostedUserRunner", () => {
     allowedUserEnvPrefixes: null,
     bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
     bundleEncryptionKeyId: "v1",
+    bundleEncryptionKeysById: {
+      v1: Uint8Array.from({ length: 32 }, () => 7),
+    },
     controlToken: null,
     defaultAlarmDelayMs: 60_000,
     dispatchSigningSecret: "dispatch-secret",
@@ -106,6 +110,29 @@ describe("HostedUserRunner", () => {
 
     await expect(bundleStore.readBundle(legacyRef)).rejects.toThrow(
       "Hosted bundle envelope keyId mismatch: expected v2, got v1. Multi-key decryption is not implemented.",
+    );
+  });
+
+  it("reads hosted objects encrypted with previous key ids when a keyring is configured", async () => {
+    const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const currentKey = Uint8Array.from({ length: 32 }, () => 7);
+    const legacyRef = await createHostedBundleStore({
+      bucket: bucket.api,
+      key: previousKey,
+      keyId: "v1",
+    }).writeBundle("vault", new TextEncoder().encode("vault bundle"));
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: currentKey,
+      keyId: "v2",
+      keysById: {
+        v1: previousKey,
+        v2: currentKey,
+      },
+    });
+
+    await expect(bundleStore.readBundle(legacyRef)).resolves.toEqual(
+      new TextEncoder().encode("vault bundle"),
     );
   });
 
@@ -410,6 +437,75 @@ describe("HostedUserRunner", () => {
     await expect(journalStore.readCommittedResult("member_123", "evt_roundtrip")).resolves.toEqual(
       committedResult,
     );
+  });
+
+  it("recovers finalized committed results encrypted with a previous key id after rotation", async () => {
+    const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const rotatedEnvironment = {
+      ...environment,
+      bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
+      bundleEncryptionKeyId: "v2",
+      bundleEncryptionKeysById: {
+        v1: previousKey,
+        v2: Uint8Array.from({ length: 32 }, () => 7),
+      },
+    };
+    const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
+    const dispatch = createDispatch("evt_rotated_commit_recovery");
+
+    seedRunnerQueueState(storage, {
+      activated: true,
+      pendingEvents: [
+        {
+          attempts: 1,
+          availableAt: "2026-03-26T12:00:00.000Z",
+          dispatch,
+          enqueuedAt: "2026-03-26T12:00:00.000Z",
+          lastError: "lost ack",
+        },
+      ],
+      retryingEventId: dispatch.eventId,
+      userId: dispatch.event.userId,
+    });
+
+    await createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: previousKey,
+      keyId: "v1",
+    }).writeCommittedResult(dispatch.event.userId, dispatch.eventId, {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-26T12:00:01.000Z",
+      eventId: dispatch.eventId,
+      finalizedAt: "2026-03-26T12:00:02.000Z",
+      result: {
+        eventsHandled: 1,
+        summary: "recovered",
+      },
+      sideEffects: [],
+      userId: dispatch.event.userId,
+    });
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const status = await runner.dispatch(dispatch);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(status.pendingEventCount).toBe(0);
+    expect(status.retryingEventId).toBeNull();
+    expect(status.lastError).toBeNull();
+    expect(status.lastEventId).toBe(dispatch.eventId);
+    await expect(
+      createHostedExecutionJournalStore({
+        bucket: bucket.api,
+        key: rotatedEnvironment.bundleEncryptionKey,
+        keyId: rotatedEnvironment.bundleEncryptionKeyId,
+        keysById: rotatedEnvironment.bundleEncryptionKeysById,
+      }).readCommittedResult(dispatch.event.userId, dispatch.eventId),
+    ).resolves.toBeNull();
   });
 
   it("dispatches work through the runner endpoint and persists encrypted bundles", async () => {
@@ -1833,6 +1929,84 @@ describe("HostedUserRunner", () => {
     expect(bucket.keys()).toEqual(["users/member_123/user-env.json"]);
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
       configuredUserEnvKeys: ["OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"],
+      userId: "member_123",
+    });
+  });
+
+  it("reads per-user env encrypted with a previous key id after rotation", async () => {
+    const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const rotatedEnvironment = {
+      ...environment,
+      allowedUserEnvKeys: "OPENAI_API_KEY",
+      bundleEncryptionKey: Uint8Array.from({ length: 32 }, () => 7),
+      bundleEncryptionKeyId: "v2",
+      bundleEncryptionKeysById: {
+        v1: previousKey,
+        v2: Uint8Array.from({ length: 32 }, () => 7),
+      },
+    };
+    const runner = new HostedUserRunner(storage.state, rotatedEnvironment, bucket.api);
+
+    await runner.bootstrapUser("member_123");
+    await createHostedUserEnvStore({
+      bucket: bucket.api,
+      key: previousKey,
+      keyId: "v1",
+    }).writeUserEnv(
+      "member_123",
+      new TextEncoder().encode(
+        JSON.stringify({
+          env: {
+            OPENAI_API_KEY: "sk-legacy",
+          },
+          schema: "murph.hosted-user-env.v1",
+          updatedAt: "2026-03-26T12:00:00.000Z",
+        }),
+      ),
+    );
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
+      bucket,
+      environment: rotatedEnvironment,
+      init,
+    })));
+
+    await runner.dispatch(createDispatch("evt_rotated_user_env"));
+
+    const invokePayloads = await Promise.all(
+      storage.runnerContainerFetch.mock.calls
+        .filter(([input]) => {
+          const request = input instanceof Request ? input : new Request(input);
+          return new URL(request.url).pathname === "/internal/invoke";
+        })
+        .map(async ([input]) => {
+          const request = input instanceof Request ? input : new Request(input);
+          const payload = JSON.parse(await request.text()) as {
+            request: {
+              dispatch: {
+                eventId: string;
+              };
+              userEnv: Record<string, string>;
+            };
+          };
+
+          return {
+            eventId: payload.request.dispatch.eventId,
+            userEnv: payload.request.userEnv,
+          };
+        }),
+    );
+
+    expect(invokePayloads).toEqual([
+      {
+        eventId: "evt_rotated_user_env",
+        userEnv: {
+          OPENAI_API_KEY: "sk-legacy",
+        },
+      },
+    ]);
+    await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
+      configuredUserEnvKeys: ["OPENAI_API_KEY"],
       userId: "member_123",
     });
   });

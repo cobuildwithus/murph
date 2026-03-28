@@ -28,6 +28,7 @@ export function createHostedExecutionSideEffectJournalStore(input: {
   bucket: EncryptedR2BucketLike;
   key: Uint8Array;
   keyId: string;
+  keysById?: Readonly<Record<string, Uint8Array>>;
 }): HostedExecutionSideEffectJournalStore {
   return {
     async read(query) {
@@ -61,12 +62,14 @@ async function readRecordAtKey(
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
     keyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
   },
   key: string,
 ): Promise<HostedExecutionSideEffectRecord | null> {
   return readEncryptedR2Json({
     bucket: input.bucket,
     cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
     expectedKeyId: input.keyId,
     key,
     parse(value) {
@@ -80,6 +83,7 @@ async function writeRecordAtKey(
     bucket: EncryptedR2BucketLike;
     key: Uint8Array;
     keyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
   },
   key: string,
   value: HostedExecutionSideEffectRecord,

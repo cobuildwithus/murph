@@ -1,9 +1,9 @@
+import { DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL } from "@murph/hosted-execution";
+
 import {
   fetchHostedJsonResponse,
   summarizeHostedJsonErrorBody,
 } from "./hosted-runtime/internal-http.ts";
-
-const HOSTED_RUNNER_EMAIL_BASE_URL = "http://email.worker";
 
 export interface HostedEmailSendRequest {
   identityId: string | null;
@@ -14,7 +14,7 @@ export interface HostedEmailSendRequest {
 }
 
 export function normalizeHostedEmailBaseUrl(value: string | null | undefined): string {
-  const candidate = value?.trim() ? value.trim() : HOSTED_RUNNER_EMAIL_BASE_URL;
+  const candidate = value?.trim() ? value.trim() : DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL;
   return new URL(candidate).toString();
 }
 
