@@ -1,10 +1,14 @@
+import type {
+  OuraDeviceSyncProviderConfig,
+  WhoopDeviceSyncProviderConfig,
+} from "@murph/device-syncd";
+import {
+  readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredWhoopDeviceSyncProviderConfig,
+} from "@murph/device-syncd";
+
 import { decodeHostedEncryptionKey } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
-
-export interface HostedOAuthProviderEnvironment {
-  clientId: string;
-  clientSecret: string;
-}
 
 export interface HostedDeviceSyncEnvironment {
   allowedMutationOrigins: string[];
@@ -21,8 +25,8 @@ export interface HostedDeviceSyncEnvironment {
   devUserId: string | null;
   devUserName: string | null;
   providers: {
-    whoop: HostedOAuthProviderEnvironment | null;
-    oura: HostedOAuthProviderEnvironment | null;
+    whoop: WhoopDeviceSyncProviderConfig | null;
+    oura: OuraDeviceSyncProviderConfig | null;
   };
 }
 
@@ -59,16 +63,8 @@ const DEVICE_SYNC_TRUSTED_USER_SIGNATURE_HEADER_ENV_KEYS = [
 const DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET",
 ] as const;
-const OURA_CLIENT_ID_ENV_KEYS = ["OURA_CLIENT_ID"] as const;
-const OURA_CLIENT_SECRET_ENV_KEYS = [
-  "OURA_CLIENT_SECRET",
-] as const;
 const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = [
   "OURA_WEBHOOK_VERIFICATION_TOKEN",
-] as const;
-const WHOOP_CLIENT_ID_ENV_KEYS = ["WHOOP_CLIENT_ID"] as const;
-const WHOOP_CLIENT_SECRET_ENV_KEYS = [
-  "WHOOP_CLIENT_SECRET",
 ] as const;
 
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
@@ -98,31 +94,9 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
     devUserId: readEnv(source, DEVICE_SYNC_DEV_USER_ID_ENV_KEYS) ?? null,
     devUserName: readEnv(source, DEVICE_SYNC_DEV_USER_NAME_ENV_KEYS) ?? null,
     providers: {
-      whoop: buildProviderEnvironment(source, WHOOP_CLIENT_ID_ENV_KEYS, WHOOP_CLIENT_SECRET_ENV_KEYS),
-      oura: buildProviderEnvironment(source, OURA_CLIENT_ID_ENV_KEYS, OURA_CLIENT_SECRET_ENV_KEYS),
+      whoop: readConfiguredWhoopDeviceSyncProviderConfig(source),
+      oura: readConfiguredOuraDeviceSyncProviderConfig(source),
     },
-  };
-}
-
-function buildProviderEnvironment(
-  source: NodeJS.ProcessEnv,
-  clientIdKeys: readonly string[],
-  clientSecretKeys: readonly string[],
-): HostedOAuthProviderEnvironment | null {
-  const normalizedClientId = readEnv(source, clientIdKeys);
-  const normalizedClientSecret = readEnv(source, clientSecretKeys);
-
-  if (!normalizedClientId && !normalizedClientSecret) {
-    return null;
-  }
-
-  if (!normalizedClientId || !normalizedClientSecret) {
-    throw new TypeError("Hosted WHOOP/Oura provider configuration must include both client ID and client secret.");
-  }
-
-  return {
-    clientId: normalizedClientId,
-    clientSecret: normalizedClientSecret,
   };
 }
 

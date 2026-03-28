@@ -16,7 +16,6 @@ import {
   createRefreshingApiSession,
   exchangeOAuthAuthorizationCode,
   fetchBearerJson,
-  isTokenNearExpiry,
   parseResponseBody,
   postOAuthTokenRequest,
   refreshOAuthTokens,
@@ -93,11 +92,17 @@ interface WhoopDeleteMarker {
   resource_id: string;
   occurred_at: string;
   source_event_type?: string;
-  payload?: Record<string, unknown>;
 }
 
 type WhoopResourceType = "sleep" | "recovery" | "workout";
 type WhoopWebhookJobKind = "resource" | "delete";
+
+interface WhoopWebhookJobPayload {
+  eventType: string;
+  occurredAt?: string | null;
+  resourceId: string;
+  resourceType: WhoopResourceType;
+}
 
 interface WhoopApiSession {
   account: DeviceSyncAccount;
@@ -234,7 +239,11 @@ function buildDisplayName(profile: Record<string, unknown>): string {
 }
 
 function hasWhoopScope(account: DeviceSyncAccount, scope: string): boolean {
-  return account.scopes.includes(scope);
+  return hasWhoopScopeValue(account.scopes, scope);
+}
+
+function hasWhoopScopeValue(scopes: readonly string[], scope: string): boolean {
+  return scopes.includes(scope);
 }
 
 function constantTimeBase64Equals(expected: string, actual: string): boolean {
@@ -404,12 +413,13 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     now: string,
     payload: Record<string, unknown>,
   ): WhoopDeleteMarker {
+    const occurredAt = normalizeString(payload.occurredAt) ?? now;
+
     return {
       resource_type: resourceType,
       resource_id: resourceId,
-      occurred_at: now,
+      occurred_at: occurredAt,
       source_event_type: normalizeString(payload.eventType),
-      payload: coerceRecord(payload.webhookPayload),
     };
   }
 
@@ -420,6 +430,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     traceId: string,
   ): DeviceSyncJobInput[] {
     const eventDescriptor = WHOOP_WEBHOOK_EVENT_MAP[eventType];
+    const occurredAt = normalizeString(payload.occurred_at ?? payload.occurredAt);
 
     if (!eventDescriptor || !resourceId) {
       return [];
@@ -429,11 +440,11 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       {
         kind: eventDescriptor.kind,
         payload: {
+          eventType,
+          ...(occurredAt ? { occurredAt } : {}),
           resourceType: eventDescriptor.resourceType,
           resourceId,
-          eventType,
-          webhookPayload: payload,
-        },
+        } satisfies WhoopWebhookJobPayload,
         priority: eventDescriptor.priority,
         dedupeKey: `whoop-webhook:${traceId}`,
       },
@@ -451,19 +462,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       : {
           eventType,
         };
-  }
-
-  async function refreshAccountForRevoke(account: DeviceSyncAccount): Promise<string> {
-    if (!isTokenNearExpiry(account) || !account.refreshToken) {
-      return account.accessToken;
-    }
-
-    try {
-      const refreshed = await provider.refreshTokens(account);
-      return refreshed.accessToken;
-    } catch {
-      return account.accessToken;
-    }
   }
 
   function createApiSession(context: ProviderJobContext) {
@@ -496,8 +494,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
     const now = context.now;
     const windowStart = normalizeString(payload.windowStart) ?? subtractDays(now, fallbackWindowDays);
     const windowEnd = normalizeString(payload.windowEnd) ?? now;
-    const includeProfile = payload.includeProfile === true;
-    const includeBodyMeasurement = payload.includeBodyMeasurement === true;
     const api = createApiSession(context);
 
     const snapshot: Record<string, unknown> = {
@@ -508,16 +504,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       cycles: await api.fetchPagedCollection("/v2/cycle", windowStart, windowEnd),
       workouts: await api.fetchPagedCollection("/v2/activity/workout", windowStart, windowEnd),
     };
-
-    if (includeProfile && hasWhoopScope(api.account, "read:profile")) {
-      snapshot.profile = await api.requestJson<Record<string, unknown>>("/v2/user/profile/basic", { optional: false });
-    }
-
-    if (includeBodyMeasurement && hasWhoopScope(api.account, "read:body_measurement")) {
-      snapshot.bodyMeasurement = await api.requestJson<Record<string, unknown>>("/v2/user/measurement/body", {
-        optional: true,
-      });
-    }
 
     await context.importSnapshot(snapshot);
     return {};
@@ -619,13 +605,22 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       }
 
       const grantedScopes = splitScopes(tokenPayload.scope);
+      const effectiveScopes = grantedScopes.length > 0 ? grantedScopes : [...scopes];
+      const bodyMeasurement = hasWhoopScopeValue(effectiveScopes, "read:body_measurement")
+        ? await fetchWhoopJson<Record<string, unknown>>({
+            path: "/v2/user/measurement/body",
+            accessToken: tokens.accessToken,
+            optional: true,
+          })
+        : null;
 
       return {
         externalAccountId,
         displayName: buildDisplayName(profile ?? {}),
-        scopes: grantedScopes.length > 0 ? grantedScopes : [...scopes],
+        scopes: effectiveScopes,
         metadata: {
           profile,
+          ...(bodyMeasurement ? { bodyMeasurement } : {}),
         },
         tokens,
         initialJobs: [
@@ -635,8 +630,6 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
             payload: {
               windowStart: subtractDays(context.now, backfillDays),
               windowEnd: context.now,
-              includeProfile: true,
-              includeBodyMeasurement: true,
             },
           },
         ],
@@ -664,11 +657,10 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       });
     },
     async revokeAccess(account: DeviceSyncAccount): Promise<void> {
-      const accessToken = await refreshAccountForRevoke(account);
       const response = await fetchImpl(`${baseUrl}${WHOOP_API_PREFIX}/v2/user/access`, {
         method: "DELETE",
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${account.accessToken}`,
         },
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -696,10 +688,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
         now,
         reconcileDays,
         reconcileIntervalMs,
-        payload: {
-          includeProfile: false,
-          includeBodyMeasurement: false,
-        },
+        payload: {},
       });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
@@ -768,9 +757,7 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
       const traceId =
         normalizeString(payload.trace_id) ??
         sha256Text(
-          `${timestampNumber}:${externalAccountId}:${eventType}:${
-            resourceId ?? `payload:${sha256Text(context.rawBody.toString("utf8"))}`
-          }`,
+          `${externalAccountId}:${eventType}:${resourceId ?? ""}:${sha256Text(context.rawBody.toString("utf8"))}`,
         );
 
       return {

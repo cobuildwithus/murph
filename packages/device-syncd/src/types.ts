@@ -56,6 +56,8 @@ export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   disconnectGeneration: number;
   accessTokenEncrypted: string;
+  hostedObservedTokenVersion: number | null;
+  hostedObservedUpdatedAt: string | null;
   refreshTokenEncrypted: string | null;
 }
 
@@ -179,6 +181,21 @@ export interface ProviderWebhookResult {
   jobs: DeviceSyncJobInput[];
 }
 
+export interface ProviderWebhookAdminChallengeContext {
+  url: URL;
+  verificationToken: string | null;
+}
+
+export interface ProviderWebhookAdminEnsureContext {
+  publicBaseUrl: string;
+  verificationToken: string | null;
+}
+
+export interface ProviderWebhookAdminCapability {
+  resolveVerificationChallenge?(context: ProviderWebhookAdminChallengeContext): string | null;
+  ensureSubscriptions?(context: ProviderWebhookAdminEnsureContext): Promise<void>;
+}
+
 export interface DeviceSyncPublicIngressConnectionEstablishedInput {
   account: PublicDeviceSyncAccount;
   connection: ProviderConnectionResult;
@@ -202,6 +219,8 @@ export interface DeviceSyncPublicIngressUnknownWebhookInput {
 
 export interface DeviceSyncPublicIngressHooks {
   onConnectionEstablished?(input: DeviceSyncPublicIngressConnectionEstablishedInput): void | Promise<void>;
+  // When present, the hook owns durable webhook acceptance and must complete the claimed trace
+  // transactionally once its side effects are committed.
   onWebhookAccepted?(input: DeviceSyncPublicIngressWebhookAcceptedInput): void | Promise<void>;
   onUnknownWebhook?(input: DeviceSyncPublicIngressUnknownWebhookInput): void | Promise<void>;
 }
@@ -229,6 +248,7 @@ export interface DeviceSyncProvider {
   provider: string;
   callbackPath: string;
   webhookPath?: string;
+  webhookAdmin?: ProviderWebhookAdminCapability;
   defaultScopes: string[];
   buildConnectUrl(input: {
     state: string;

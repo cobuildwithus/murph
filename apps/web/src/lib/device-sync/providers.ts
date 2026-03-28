@@ -11,21 +11,11 @@ export function createHostedDeviceSyncRegistry(env: HostedDeviceSyncEnvironment)
   const registry = createDeviceSyncRegistry();
 
   if (env.providers.whoop) {
-    registry.register(
-      createWhoopDeviceSyncProvider({
-        clientId: env.providers.whoop.clientId,
-        clientSecret: env.providers.whoop.clientSecret,
-      }),
-    );
+    registry.register(createWhoopDeviceSyncProvider(env.providers.whoop));
   }
 
   if (env.providers.oura) {
-    registry.register(
-      createOuraDeviceSyncProvider({
-        clientId: env.providers.oura.clientId,
-        clientSecret: env.providers.oura.clientSecret,
-      }),
-    );
+    registry.register(createOuraDeviceSyncProvider(env.providers.oura));
   }
 
   return registry;

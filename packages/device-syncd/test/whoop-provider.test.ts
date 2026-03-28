@@ -47,6 +47,8 @@ function createStoredAccount(scopes: string[], overrides: Partial<StoredDeviceSy
   return {
     ...createAccount(scopes),
     accessTokenEncrypted: "encrypted-access-token",
+    hostedObservedTokenVersion: null,
+    hostedObservedUpdatedAt: null,
     refreshTokenEncrypted: "encrypted-refresh-token",
     ...overrides,
   };
@@ -158,8 +160,10 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
   assert.equal(connection.tokens.refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["offline", "read:profile", "read:workout"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
-  assert.equal(connection.initialJobs?.[0]?.payload.includeProfile, true);
-  assert.equal(connection.initialJobs?.[0]?.payload.includeBodyMeasurement, true);
+  assert.deepEqual(connection.initialJobs?.[0]?.payload, {
+    windowStart: "2025-12-16T10:00:00.000Z",
+    windowEnd: "2026-03-16T10:00:00.000Z",
+  });
   assert.deepEqual(connection.metadata?.profile, {
     user_id: "whoop-user-1",
     first_name: "Whoop",
@@ -170,6 +174,61 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
     "https://api.prod.whoop.com/oauth/oauth2/token",
     "https://api.prod.whoop.com/developer/v2/user/profile/basic",
   ]);
+});
+
+test("WHOOP provider stores body measurement as connect-time metadata when the granted scope allows it", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input) => {
+      const url = readUrl(input);
+
+      if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
+        return createJsonResponse({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+          scope: "offline read:profile read:body_measurement",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/profile/basic") {
+        return createJsonResponse({
+          user_id: "whoop-user-1",
+          first_name: "Whoop",
+          last_name: "User",
+        });
+      }
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/measurement/body") {
+        return createJsonResponse({
+          height_meter: 1.83,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  const connection = await provider.exchangeAuthorizationCode(
+    {
+      callbackUrl: "https://sync.example.test/device-sync/oauth/whoop/callback",
+      now: "2026-03-16T10:00:00.000Z",
+      grantedScopes: [],
+    },
+    "auth-code-1",
+  );
+
+  assert.deepEqual(connection.metadata, {
+    bodyMeasurement: {
+      height_meter: 1.83,
+    },
+    profile: {
+      first_name: "Whoop",
+      last_name: "User",
+      user_id: "whoop-user-1",
+    },
+  });
 });
 
 test("WHOOP provider keeps the stored refresh token when refresh omits a replacement", async () => {
@@ -228,6 +287,46 @@ test("WHOOP provider requires an existing refresh token before attempting refres
       error.accountStatus === "reauthorization_required",
   );
   assert.equal(fetchCalled, false);
+});
+
+test("WHOOP provider revokes with the persisted access token even when it is near expiry", async () => {
+  const requests: Array<{ authorization: string | null; method: string; url: string }> = [];
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = readUrl(input);
+      requests.push({
+        authorization: readAuthorizationHeader(init),
+        method: init?.method ?? "GET",
+        url,
+      });
+
+      if (url === "https://api.prod.whoop.com/developer/v2/user/access") {
+        return new Response(null, {
+          status: 204,
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+
+  await provider.revokeAccess(
+    createAccount(["offline"], {
+      accessToken: "persisted-access-token",
+      accessTokenExpiresAt: new Date(Date.now() - 60_000).toISOString(),
+      refreshToken: "rotating-refresh-token",
+    }),
+  );
+
+  assert.deepEqual(requests, [
+    {
+      authorization: "Bearer persisted-access-token",
+      method: "DELETE",
+      url: "https://api.prod.whoop.com/developer/v2/user/access",
+    },
+  ]);
 });
 
 test("WHOOP provider backfills snapshot windows and refreshes once after a 401", async () => {
@@ -322,8 +421,6 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
     createJob("backfill", {
       windowStart,
       windowEnd,
-      includeProfile: true,
-      includeBodyMeasurement: true,
     }),
   );
 
@@ -336,14 +433,6 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
     recoveries: [{ id: "recovery-1", cycle_id: "cycle-1", score: 79 }],
     cycles: [{ id: "cycle-1", score: 82 }],
     workouts: [{ id: "workout-1", sport_name: "running" }],
-    profile: {
-      user_id: "whoop-user-1",
-      first_name: "Whoop",
-      last_name: "User",
-    },
-    bodyMeasurement: {
-      height_meter: 1.83,
-    },
   });
   assert.deepEqual(
     requests.slice(0, 2),
@@ -361,7 +450,7 @@ test("WHOOP provider backfills snapshot windows and refreshes once after a 401",
   assert.ok(requests.slice(2).every((request) => request.authorization === "Bearer fresh-access-token"));
 });
 
-test("WHOOP provider schedules reconcile jobs with provider-specific payload flags", () => {
+test("WHOOP provider schedules reconcile jobs without profile/body-measurement sync flags", () => {
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
@@ -381,8 +470,6 @@ test("WHOOP provider schedules reconcile jobs with provider-specific payload fla
   assert.deepEqual(scheduled?.jobs[0]?.payload, {
     windowStart: subtractDays(now, 21),
     windowEnd: now,
-    includeProfile: false,
-    includeBodyMeasurement: false,
   });
   assert.equal(scheduled?.nextReconcileAt, "2026-03-16T16:00:00.000Z");
 });
@@ -434,7 +521,6 @@ test("WHOOP provider maps webhook events to the same job kinds, priorities, and 
           resourceType: testCase.resourceType,
           resourceId: "resource-1",
           eventType: testCase.eventType,
-          webhookPayload,
         },
       },
     ]);
@@ -459,7 +545,9 @@ test("WHOOP provider synthesizes a deterministic trace id and job dedupe key whe
     now: "2026-03-16T10:00:00.000Z",
   });
 
-  const expectedTraceId = sha256Text(`${Number(timestamp)}:whoop-user-1:sleep.updated:resource-1`);
+  const expectedTraceId = sha256Text(
+    `whoop-user-1:sleep.updated:resource-1:${sha256Text(rawBody.toString("utf8"))}`,
+  );
 
   assert.equal(parsed?.traceId, expectedTraceId);
   assert.equal(parsed?.jobs[0]?.dedupeKey, `whoop-webhook:${expectedTraceId}`);
@@ -467,8 +555,37 @@ test("WHOOP provider synthesizes a deterministic trace id and job dedupe key whe
     resourceType: "sleep",
     resourceId: "resource-1",
     eventType: "sleep.updated",
-    webhookPayload,
   });
+});
+
+test("WHOOP provider keeps the same synthetic trace id across retry deliveries with a new signature timestamp", async () => {
+  const provider = createWhoopDeviceSyncProvider({
+    clientId: "whoop-client-id",
+    clientSecret: "whoop-client-secret",
+  });
+  const webhookPayload = {
+    user_id: "whoop-user-1",
+    type: "sleep.deleted",
+    id: "resource-1",
+    occurred_at: "2026-03-16T10:00:00.000Z",
+  };
+  const rawBody = Buffer.from(JSON.stringify(webhookPayload), "utf8");
+  const firstTimestamp = String(Date.parse("2026-03-16T10:00:00.000Z"));
+  const retryTimestamp = String(Date.parse("2026-03-16T10:20:00.000Z"));
+
+  const first = await provider.verifyAndParseWebhook?.({
+    headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, firstTimestamp),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+  const retry = await provider.verifyAndParseWebhook?.({
+    headers: createWhoopWebhookHeaders("whoop-client-secret", rawBody, retryTimestamp),
+    rawBody,
+    now: "2026-03-16T10:20:00.000Z",
+  });
+
+  assert.equal(retry?.traceId, first?.traceId);
+  assert.equal(retry?.jobs[0]?.dedupeKey, first?.jobs[0]?.dedupeKey);
 });
 
 test("WHOOP provider turns missing resource imports into the existing delete snapshot shape", async () => {
@@ -507,11 +624,7 @@ test("WHOOP provider turns missing resource imports into the existing delete sna
       resourceType: "workout",
       resourceId: "workout-404",
       eventType: "workout.updated",
-      webhookPayload: {
-        user_id: "whoop-user-1",
-        type: "workout.updated",
-        id: "workout-404",
-      },
+      occurredAt: "2026-03-15T09:00:00.000Z",
     }),
   );
 
@@ -523,13 +636,8 @@ test("WHOOP provider turns missing resource imports into the existing delete sna
         {
           resource_type: "workout",
           resource_id: "workout-404",
-          occurred_at: "2026-03-16T10:00:00.000Z",
+          occurred_at: "2026-03-15T09:00:00.000Z",
           source_event_type: "workout.updated",
-          payload: {
-            user_id: "whoop-user-1",
-            type: "workout.updated",
-            id: "workout-404",
-          },
         },
       ],
     },
