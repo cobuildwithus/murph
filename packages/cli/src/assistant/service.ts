@@ -1606,36 +1606,31 @@ async function persistAssistantTurnAndSession(input: {
 
   const updatedAt = new Date().toISOString()
   const previousBinding = readAssistantProviderBinding(input.session)
+  const workspaceKey = hashAssistantProviderWorkingDirectory(
+    input.providerResult.workingDirectory,
+  )
+  let nextBinding = resolveNextAssistantProviderBinding({
+    provider: input.providerResult.provider,
+    providerSessionId: input.providerResult.providerSessionId,
+    previousBinding,
+    providerOptions: input.providerResult.providerOptions,
+    routeId: input.providerResult.route.routeId,
+    workspaceKey,
+    providerState: null,
+  })
+
+  if (input.providerResult.provider === 'codex-cli') {
+    nextBinding =
+      writeAssistantCodexPromptVersion(
+        nextBinding,
+        CURRENT_CODEX_PROMPT_VERSION,
+      ) ?? nextBinding
+  }
+
   return saveAssistantSession(input.input.vault, {
     ...input.session,
     provider: input.providerResult.provider,
-    providerBinding: resolveNextAssistantProviderBinding({
-      provider: input.providerResult.provider,
-      providerSessionId: input.providerResult.providerSessionId,
-      previousBinding,
-      providerOptions: input.providerResult.providerOptions,
-      routeId: input.providerResult.route.routeId,
-      workspaceKey: hashAssistantProviderWorkingDirectory(
-        input.providerResult.workingDirectory,
-      ),
-      providerState:
-        input.providerResult.provider === 'codex-cli'
-          ? writeAssistantCodexPromptVersion(
-              resolveNextAssistantProviderBinding({
-                previousBinding,
-                provider: input.providerResult.provider,
-                providerOptions: input.providerResult.providerOptions,
-                providerSessionId: input.providerResult.providerSessionId,
-                routeId: input.providerResult.route.routeId,
-                workspaceKey: hashAssistantProviderWorkingDirectory(
-                  input.providerResult.workingDirectory,
-                ),
-                providerState: null,
-              }),
-              CURRENT_CODEX_PROMPT_VERSION,
-            )?.providerState ?? null
-          : null,
-    }),
+    providerBinding: nextBinding,
     providerOptions: input.providerResult.providerOptions,
     updatedAt,
     lastTurnAt: updatedAt,
@@ -2162,30 +2157,23 @@ function resolveNextAssistantProviderBinding(input: {
       ? input.previousBinding
       : null
   const traits = resolveAssistantProviderTraits(input.provider)
+  const nextProviderSessionId =
+    traits.resumeKeyMode === 'provider-session-id'
+      ? resolveNextAssistantProviderSessionId({
+          previousBinding,
+          providerSessionId: input.providerSessionId,
+          routeId: input.routeId,
+          workspaceKey: input.workspaceKey,
+        })
+      : null
 
   return normalizeAssistantProviderBinding({
     provider: input.provider,
     providerOptions: input.providerOptions,
-    providerSessionId:
-      traits.resumeKeyMode === 'provider-session-id'
-        ? resolveNextAssistantProviderSessionId({
-            previousBinding,
-            providerSessionId: input.providerSessionId,
-            routeId: input.routeId,
-            workspaceKey: input.workspaceKey,
-          })
-        : null,
+    providerSessionId: nextProviderSessionId,
     providerState: resolveNextAssistantProviderState({
       previousBinding,
-      providerSessionId:
-        traits.resumeKeyMode === 'provider-session-id'
-          ? resolveNextAssistantProviderSessionId({
-              previousBinding,
-              providerSessionId: input.providerSessionId,
-              routeId: input.routeId,
-              workspaceKey: input.workspaceKey,
-            })
-          : null,
+      providerSessionId: nextProviderSessionId,
       providerState: input.providerState ?? null,
       routeId: input.routeId,
       workspaceKey: input.workspaceKey,
