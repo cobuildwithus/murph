@@ -26,6 +26,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import {
   hasHostedPrivyPhoneAuthConfig,
   readHostedPrivyIdentityTokenFromCookieStore,
+  requireHostedPrivyCompletionIdentityFromCookies,
   requireHostedPrivyIdentity,
   requireHostedPrivyIdentityFromCookies,
   requireHostedPrivyUserForSession,
@@ -283,6 +284,59 @@ describe("hosted Privy verification", () => {
     await expect(verifyHostedPrivyIdentityToken("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_AUTH_FAILED",
       httpStatus: 401,
+    });
+  });
+
+  it("maps missing server-side phone state to a retryable not-ready error for completion", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
+      code: "PRIVY_PHONE_NOT_READY",
+      httpStatus: 409,
+      retryable: true,
+    });
+  });
+
+  it("maps missing server-side wallet state to a retryable not-ready error for completion", async () => {
+    mocks.cookies.mockResolvedValue({
+      get: vi.fn().mockImplementation((name: string) =>
+        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+    });
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ],
+    });
+
+    await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
+      code: "PRIVY_WALLET_NOT_READY",
+      httpStatus: 409,
+      retryable: true,
     });
   });
 

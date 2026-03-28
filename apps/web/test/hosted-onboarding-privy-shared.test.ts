@@ -8,6 +8,7 @@ import {
   extractHostedPrivyVerifiedEmailAccount,
   extractHostedPrivyWalletAccount,
   isHostedPrivyEmailAccountVerified,
+  resolveHostedPrivyTelegramAccountSelection,
   resolveHostedPrivyLinkedAccountState,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
@@ -104,6 +105,26 @@ describe("hosted Privy identity helpers", () => {
         },
       ]),
     ).toBeNull();
+  });
+
+  it("selects the newest verified phone number instead of trusting linked-account order", () => {
+    expect(
+      extractHostedPrivyPhoneAccount([
+        {
+          latest_verified_at: 1741194300,
+          phone_number: "+1 415 555 0000",
+          type: "phone",
+        },
+        {
+          latest_verified_at: 1741194420,
+          phone_number: "+1 415 555 2671",
+          type: "phone",
+        },
+      ]),
+    ).toEqual({
+      number: "+14155552671",
+      verifiedAt: 1741194420,
+    });
   });
 
   it("extracts a verified email account from either SDK or token linked-account shapes", () => {
@@ -221,6 +242,23 @@ describe("hosted Privy identity helpers", () => {
     ).toBeNull();
   });
 
+  it("fails closed when two verified email accounts tie for the newest verification timestamp", () => {
+    expect(
+      extractHostedPrivyVerifiedEmailAccount([
+        {
+          address: "first@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+        {
+          address: "second@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ]),
+    ).toBeNull();
+  });
+
   it("accepts the compact Privy identity-token verification timestamp field", () => {
     expect(
       extractHostedPrivyPhoneAccount([
@@ -304,6 +342,69 @@ describe("hosted Privy identity helpers", () => {
     ).toBeNull();
   });
 
+  it("selects the lowest-index embedded wallet instead of trusting payload order", () => {
+    expect(
+      extractHostedPrivyWalletAccount([
+        {
+          address: "0x00000000000000000000000000000000000000bb",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 1,
+        },
+        {
+          address: "0x00000000000000000000000000000000000000aa",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ]),
+    ).toEqual({
+      address: "0x00000000000000000000000000000000000000aa",
+      chainType: "ethereum",
+      id: null,
+      type: "wallet",
+    });
+  });
+
+  it("fails closed when multiple embedded wallets are equally primary", () => {
+    expect(
+      extractHostedPrivyWalletAccount([
+        {
+          address: "0x00000000000000000000000000000000000000aa",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+        {
+          address: "0x00000000000000000000000000000000000000bb",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ]),
+    ).toBeNull();
+  });
+
   it("extracts a Telegram account from direct or linked-account Privy shapes", () => {
     expect(extractHostedPrivyTelegramAccount({
       telegram: {
@@ -335,5 +436,41 @@ describe("hosted Privy identity helpers", () => {
       telegramUserId: "456",
       username: "alice",
     });
+  });
+
+  it("fails closed when direct and linked Telegram accounts disagree", () => {
+    expect(resolveHostedPrivyTelegramAccountSelection({
+      linked_accounts: [
+        {
+          first_name: "Alice",
+          id: "456",
+          type: "telegram",
+          username: "alice",
+        },
+      ],
+      telegram: {
+        first_name: "Bob",
+        id: 789,
+        username: "bob",
+      },
+    })).toEqual({
+      account: null,
+      ambiguous: true,
+    });
+    expect(extractHostedPrivyTelegramAccount({
+      linked_accounts: [
+        {
+          first_name: "Alice",
+          id: "456",
+          type: "telegram",
+          username: "alice",
+        },
+      ],
+      telegram: {
+        first_name: "Bob",
+        id: 789,
+        username: "bob",
+      },
+    })).toBeNull();
   });
 });

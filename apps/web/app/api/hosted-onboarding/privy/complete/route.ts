@@ -1,11 +1,11 @@
 import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
-import { requireHostedPrivyIdentityFromCookies } from "@/src/lib/hosted-onboarding/privy";
+import { requireHostedPrivyCompletionIdentityFromCookies } from "@/src/lib/hosted-onboarding/privy";
 import { applyHostedSessionCookie } from "@/src/lib/hosted-onboarding/session";
 
 export async function POST(request: Request) {
   try {
-    const identity = await requireHostedPrivyIdentityFromCookies();
+    const identity = await requireHostedPrivyCompletionIdentityFromCookies();
     const body = await readOptionalJsonObject(request);
     const result = await completeHostedPrivyVerification({
       identity,

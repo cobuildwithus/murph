@@ -113,7 +113,91 @@ describe("createHostedBillingCheckout", () => {
     });
   });
 
-  it("sources a missing checkout wallet from the trusted Privy cookie instead of the request body", async () => {
+  it("requires a stored hosted wallet before checkout instead of binding one from the current Privy cookie", async () => {
+    const prisma: any = {
+      hostedBillingCheckout: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "member_123",
+          stripeCustomerId: null,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+
+    await expect(
+      createHostedBillingCheckout({
+        cookieStore: { get: vi.fn() },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+        sessionRecord: {
+          member: {
+            id: "member_123",
+          },
+        } as any,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_WALLET_ADDRESS_REQUIRED",
+      httpStatus: 400,
+    });
+
+    expect(mocks.requireHostedPrivyUserForSession).toHaveBeenCalledWith(
+      { get: expect.any(Function) },
+      {
+        member: {
+          id: "member_123",
+        },
+      },
+    );
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps checkout wallet handling read-only and only binds the Stripe customer id", async () => {
+    mocks.requireHostedInviteForAuthentication.mockResolvedValue(
+      makeInvite({
+        walletAddress: "0x00000000000000000000000000000000000000aa",
+      }),
+    );
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "0x00000000000000000000000000000000000000bb",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 1,
+        },
+        {
+          address: "0x00000000000000000000000000000000000000aa",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_456",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+
     const prisma: any = {
       hostedBillingCheckout: {
         create: vi.fn().mockResolvedValue({}),
@@ -173,7 +257,6 @@ describe("createHostedBillingCheckout", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           stripeCustomerId: "cus_123",
-          walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
         }),
       }),
     );
@@ -182,7 +265,6 @@ describe("createHostedBillingCheckout", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           stripeCustomerId: "cus_123",
-          walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
         }),
       }),
     );

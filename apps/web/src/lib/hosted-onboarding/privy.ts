@@ -1,7 +1,7 @@
 import { verifyIdentityToken } from "@privy-io/node";
 import { cookies } from "next/headers";
 
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type HostedPrivyLinkedAccountContainer,
@@ -75,6 +75,14 @@ export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPri
   }
 
   return requireHostedPrivyIdentity(identityToken);
+}
+
+export async function requireHostedPrivyCompletionIdentityFromCookies(): Promise<HostedPrivyIdentity> {
+  try {
+    return await requireHostedPrivyIdentityFromCookies();
+  } catch (error) {
+    throw remapHostedPrivyCompletionLagError(error);
+  }
 }
 
 export async function requireHostedPrivyUserForSession(
@@ -179,4 +187,32 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   }
 
   return null;
+}
+
+function remapHostedPrivyCompletionLagError(error: unknown): unknown {
+  if (!isHostedOnboardingError(error)) {
+    return error;
+  }
+
+  if (error.code === "PRIVY_PHONE_REQUIRED") {
+    return hostedOnboardingError({
+      code: "PRIVY_PHONE_NOT_READY",
+      message:
+        "Your verified phone number has not reached the server-side Privy session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+
+  if (error.code === "PRIVY_WALLET_REQUIRED") {
+    return hostedOnboardingError({
+      code: "PRIVY_WALLET_NOT_READY",
+      message:
+        "Your rewards wallet has not reached the server-side Privy session yet. Wait a moment and try again.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+
+  return error;
 }

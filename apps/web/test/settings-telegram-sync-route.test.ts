@@ -76,7 +76,17 @@ describe("settings telegram sync route", () => {
   });
 
   it("verifies the server-side Privy session and links the Telegram identity onto the hosted member", async () => {
-    const response = await settingsTelegramSyncRoute.POST();
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
@@ -112,7 +122,17 @@ describe("settings telegram sync route", () => {
   it("requires an active hosted session before syncing Telegram", async () => {
     mocks.resolveHostedSessionFromCookieStore.mockResolvedValue(null);
 
-    const response = await settingsTelegramSyncRoute.POST();
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
 
     expect(response.status).toBe(401);
     expect(mocks.requireHostedPrivyUserForSession).not.toHaveBeenCalled();
@@ -126,6 +146,25 @@ describe("settings telegram sync route", () => {
     });
   });
 
+  it("requires a client-confirmed Telegram user id before syncing Telegram", async () => {
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.requireHostedPrivyUserForSession).not.toHaveBeenCalled();
+    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "TELEGRAM_USER_ID_REQUIRED",
+        message: "Refresh Privy and confirm the Telegram account you want to sync before continuing.",
+        retryable: false,
+      },
+    });
+  });
+
   it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
     mocks.requireHostedPrivyUserForSession.mockRejectedValue(hostedOnboardingError({
       code: "PRIVY_SESSION_MISMATCH",
@@ -133,7 +172,17 @@ describe("settings telegram sync route", () => {
       message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
     }));
 
-    const response = await settingsTelegramSyncRoute.POST();
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
 
     expect(response.status).toBe(403);
     expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
@@ -155,7 +204,17 @@ describe("settings telegram sync route", () => {
       },
     });
 
-    const response = await settingsTelegramSyncRoute.POST();
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
 
     expect(response.status).toBe(409);
     expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
@@ -171,13 +230,106 @@ describe("settings telegram sync route", () => {
   it("surfaces unique-constraint conflicts when the Telegram identity is already linked elsewhere", async () => {
     mocks.hostedMemberUpdate.mockRejectedValue(createUniqueConstraintError());
 
-    const response = await settingsTelegramSyncRoute.POST();
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "TELEGRAM_IDENTITY_CONFLICT",
         message: "That Telegram account is already linked to a different Murph account. Contact support so we can merge it safely.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("returns a retryable conflict when the server-side Privy cookie is still on an older Telegram account", async () => {
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [
+          {
+            first_name: "Alice",
+            id: 111,
+            type: "telegram",
+            username: "alice_old",
+          },
+        ],
+      },
+    });
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_TELEGRAM_NOT_READY",
+        message: "Your linked Telegram account has not reached the server-side Privy session yet. Wait a moment and try again.",
+        retryable: true,
+      },
+    });
+  });
+
+  it("rejects ambiguous Telegram state when top-level and linked Telegram accounts disagree", async () => {
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [
+          {
+            first_name: "Alice",
+            id: 456,
+            type: "telegram",
+            username: "alice",
+          },
+        ],
+        telegram: {
+          first_name: "Bob",
+          id: 789,
+          username: "bob",
+        },
+      },
+    });
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_TELEGRAM_AMBIGUOUS",
+        message: "The current Privy session has conflicting Telegram accounts. Reconnect Telegram in Privy and try again.",
         retryable: false,
       },
     });

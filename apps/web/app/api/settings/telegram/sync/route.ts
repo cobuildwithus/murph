@@ -3,13 +3,13 @@ import { cookies } from "next/headers";
 
 import { getPrisma } from "@/src/lib/prisma";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
-import { extractHostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
+import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
     const cookieStore = await cookies();
     const hostedSession = await resolveHostedSessionFromCookieStore(cookieStore);
@@ -22,10 +22,36 @@ export async function POST() {
       });
     }
 
-    const { verifiedPrivyUser } = await requireHostedPrivyUserForSession(cookieStore, hostedSession);
-    const telegramAccount = extractHostedPrivyTelegramAccount(verifiedPrivyUser);
+    const body = await readOptionalJsonObject(request);
+    const expectedTelegramUserId = normalizeComparableTelegramUserId(
+      body && typeof body.expectedTelegramUserId === "string" ? body.expectedTelegramUserId : null,
+    );
 
-    if (!telegramAccount) {
+    if (!expectedTelegramUserId) {
+      throw hostedOnboardingError({
+        code: "TELEGRAM_USER_ID_REQUIRED",
+        message: "Refresh Privy and confirm the Telegram account you want to sync before continuing.",
+        httpStatus: 400,
+      });
+    }
+    const { verifiedPrivyUser } = await requireHostedPrivyUserForSession(cookieStore, hostedSession);
+    const telegramSelection = resolveHostedPrivyTelegramAccountSelection(verifiedPrivyUser);
+
+    if (telegramSelection.ambiguous) {
+      throw hostedOnboardingError({
+        code: "PRIVY_TELEGRAM_AMBIGUOUS",
+        message:
+          "The current Privy session has conflicting Telegram accounts. Reconnect Telegram in Privy and try again.",
+        httpStatus: 409,
+      });
+    }
+
+    const telegramAccount = telegramSelection.account;
+
+    if (
+      !telegramAccount
+      || telegramAccount.telegramUserId !== expectedTelegramUserId
+    ) {
       throw hostedOnboardingError({
         code: "PRIVY_TELEGRAM_NOT_READY",
         message: "Your linked Telegram account has not reached the server-side Privy session yet. Wait a moment and try again.",
@@ -66,4 +92,13 @@ export async function POST() {
   } catch (error) {
     return jsonError(error);
   }
+}
+
+function normalizeComparableTelegramUserId(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized || null;
 }

@@ -1,8 +1,21 @@
 interface ApiErrorPayload {
   error: {
-    code: string;
+    code?: string;
     message: string;
+    retryable?: boolean;
   };
+}
+
+export class HostedOnboardingApiError extends Error {
+  readonly code: string | null;
+  readonly retryable: boolean;
+
+  constructor(input: { code: string | null; message: string; retryable?: boolean }) {
+    super(input.message);
+    this.name = "HostedOnboardingApiError";
+    this.code = input.code;
+    this.retryable = input.retryable ?? false;
+  }
 }
 
 export async function requestHostedOnboardingJson<T>(input: {
@@ -24,7 +37,11 @@ export async function requestHostedOnboardingJson<T>(input: {
   const data = (await response.json()) as T | ApiErrorPayload;
 
   if (!response.ok || isApiErrorPayload(data)) {
-    throw new Error(isApiErrorPayload(data) ? data.error.message : "Request failed.");
+    throw new HostedOnboardingApiError({
+      code: isApiErrorPayload(data) && typeof data.error.code === "string" ? data.error.code : null,
+      message: isApiErrorPayload(data) ? data.error.message : "Request failed.",
+      retryable: isApiErrorPayload(data) ? data.error.retryable === true : false,
+    });
   }
 
   return data as T;
