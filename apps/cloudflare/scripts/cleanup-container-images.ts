@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
 
 import {
   parseHostedContainerImageListOutput,
   selectHostedContainerImageTagsForCleanup,
 } from "../src/deploy-automation.js";
+import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
 const args = parseCliArgs(process.argv.slice(2));
 
@@ -58,68 +58,6 @@ for (const entry of tagsToDelete) {
 }
 
 console.log(`Deleted ${tagsToDelete.length} Cloudflare container image tag(s).`);
-
-async function runWranglerLogged(wranglerArgs: string[]): Promise<void> {
-  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(pnpmCommand, ["exec", "wrangler", ...wranglerArgs], {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: "inherit",
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(`wrangler ${wranglerArgs.join(" ")} exited with code ${code ?? "unknown"}.`));
-    });
-  });
-}
-
-async function runWranglerJson(wranglerArgs: string[]): Promise<string> {
-  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn(pnpmCommand, ["exec", "wrangler", ...wranglerArgs], {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ["inherit", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-        return;
-      }
-
-      reject(
-        new Error(
-          `wrangler ${wranglerArgs.join(" ")} exited with code ${code ?? "unknown"}.${
-            stderr.trim().length > 0 ? ` ${stderr.trim()}` : ""
-          }`,
-        ),
-      );
-    });
-  });
-}
 
 function parseCliArgs(argv: string[]): {
   apply: boolean;

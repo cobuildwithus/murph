@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -8,6 +7,7 @@ import {
   runHostedWorkerDeployment,
   type DeploymentStatusPayload,
 } from "./deploy-worker-version.shared.js";
+import { runWranglerJson, runWranglerLogged } from "./wrangler-runner.js";
 
 const args = parseCliArgs(process.argv.slice(2));
 const deployPaths = resolveCloudflareDeployPaths(process.cwd());
@@ -73,7 +73,9 @@ const result = await runHostedWorkerDeployment({
           ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
         ],
         {
-          WRANGLER_OUTPUT_FILE_PATH: outputFilePath,
+          envOverrides: {
+            WRANGLER_OUTPUT_FILE_PATH: outputFilePath,
+          },
         },
       );
 
@@ -120,74 +122,6 @@ async function readCurrentDeployment(
 
     throw error;
   }
-}
-
-async function runWranglerLogged(
-  wranglerArgs: string[],
-  envOverrides: Record<string, string> = {},
-): Promise<void> {
-  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(pnpmCommand, ["exec", "wrangler", ...wranglerArgs], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        ...envOverrides,
-      },
-      stdio: "inherit",
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-
-      reject(new Error(`wrangler ${wranglerArgs.join(" ")} exited with code ${code ?? "unknown"}.`));
-    });
-  });
-}
-
-async function runWranglerJson(wranglerArgs: string[]): Promise<string> {
-  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-
-  return await new Promise<string>((resolve, reject) => {
-    const child = spawn(pnpmCommand, ["exec", "wrangler", ...wranglerArgs], {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ["inherit", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-        return;
-      }
-
-      reject(
-        new Error(
-          `wrangler ${wranglerArgs.join(" ")} exited with code ${code ?? "unknown"}.${
-            stderr.trim().length > 0 ? ` ${stderr.trim()}` : ""
-          }`,
-        ),
-      );
-    });
-  });
 }
 
 async function readWranglerOutputFile(

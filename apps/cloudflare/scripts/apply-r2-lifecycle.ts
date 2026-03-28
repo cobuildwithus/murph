@@ -7,6 +7,7 @@ import {
   createHostedLifecycleWranglerError,
   resolveHostedLifecycleBucketNames,
 } from "../src/r2-lifecycle.js";
+import { resolvePnpmCommand } from "./wrangler-runner.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
@@ -45,8 +46,4 @@ function runWranglerCommand(args: string[]): Promise<void> {
       reject(createHostedLifecycleWranglerError({ code, signal }));
     });
   });
-}
-
-function resolvePnpmCommand(): string {
-  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 }
