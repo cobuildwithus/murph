@@ -1,45 +1,22 @@
 import { Prisma } from "@prisma/client";
 import type {
   HostedExecutionDispatchRequest,
-  HostedExecutionEventKind,
-  HostedExecutionShareReference,
+  HostedExecutionDispatchRef as SharedHostedExecutionDispatchRef,
 } from "@murph/hosted-execution";
-import { HOSTED_EXECUTION_EVENT_KINDS } from "@murph/hosted-execution";
+import {
+  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+  buildHostedExecutionDispatchRef as buildSharedHostedExecutionDispatchRef,
+  readHostedExecutionDispatchRef as readSharedHostedExecutionDispatchRef,
+} from "@murph/hosted-execution";
 
-const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(HOSTED_EXECUTION_EVENT_KINDS);
+export { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murph/hosted-execution";
 
-const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.ref.v1";
-
-type HostedExecutionShareRefJson = Prisma.InputJsonObject & {
-  shareCode: string;
-  shareId: string;
-};
-
-export type HostedExecutionDispatchRef = Prisma.InputJsonObject & {
-  eventId: string;
-  eventKind: HostedExecutionEventKind;
-  occurredAt: string;
-  share?: HostedExecutionShareRefJson;
-  userId: string;
-};
+export type HostedExecutionDispatchRef = Prisma.InputJsonObject & SharedHostedExecutionDispatchRef;
 
 export function buildHostedExecutionDispatchRef(
   dispatch: HostedExecutionDispatchRequest,
 ): HostedExecutionDispatchRef {
-  return {
-    eventId: dispatch.eventId,
-    eventKind: dispatch.event.kind,
-    occurredAt: dispatch.occurredAt,
-    ...(dispatch.event.kind === "vault.share.accepted"
-      ? {
-          share: {
-            shareCode: dispatch.event.share.shareCode,
-            shareId: dispatch.event.share.shareId,
-          } satisfies HostedExecutionShareRefJson,
-        }
-      : {}),
-    userId: dispatch.event.userId,
-  } satisfies HostedExecutionDispatchRef;
+  return buildSharedHostedExecutionDispatchRef(dispatch) as HostedExecutionDispatchRef;
 }
 
 export function serializeHostedExecutionOutboxPayload(
@@ -60,68 +37,9 @@ export function readHostedExecutionDispatchRef(
     userId: string;
   },
 ): HostedExecutionDispatchRef | null {
-  const payloadObject = toHostedExecutionObject(payloadJson);
-  const nestedRef = toHostedExecutionObject(payloadObject.dispatchRef);
-  const schemaVersion = readHostedExecutionText(payloadObject.schemaVersion);
+  const dispatchRef = readSharedHostedExecutionDispatchRef(payloadJson, fallback);
 
-  if (schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION) {
-    return null;
-  }
-
-  const eventId = readHostedExecutionText(nestedRef.eventId) ?? fallback.eventId;
-  const eventKind = readHostedExecutionEventKind(nestedRef.eventKind) ?? readHostedExecutionEventKind(fallback.eventKind);
-  const occurredAt = readHostedExecutionText(nestedRef.occurredAt) ?? fallback.occurredAt;
-  const share = readHostedExecutionShareReference(nestedRef.share);
-  const userId = readHostedExecutionText(nestedRef.userId) ?? fallback.userId;
-
-  if (!eventId || !eventKind || !occurredAt || !userId) {
-    return null;
-  }
-
-  return {
-    eventId,
-    eventKind,
-    occurredAt,
-    ...(share ? { share } : {}),
-    userId,
-  };
-}
-
-function readHostedExecutionEventKind(value: unknown): HostedExecutionEventKind | null {
-  return typeof value === "string" && HOSTED_EXECUTION_EVENT_KIND_SET.has(value as HostedExecutionEventKind)
-    ? value as HostedExecutionEventKind
+  return dispatchRef
+    ? dispatchRef as HostedExecutionDispatchRef
     : null;
-}
-
-function readHostedExecutionShareReference(value: unknown): HostedExecutionShareRefJson | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const record = value as Record<string, unknown>;
-  const shareId = readHostedExecutionText(record.shareId);
-  const shareCode = readHostedExecutionText(record.shareCode);
-
-  if (!shareId || !shareCode) {
-    return undefined;
-  }
-
-  return {
-    shareCode,
-    shareId,
-  } satisfies HostedExecutionShareRefJson;
-}
-
-function readHostedExecutionText(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value
-    : null;
-}
-
-function toHostedExecutionObject(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>
-    : {};
 }

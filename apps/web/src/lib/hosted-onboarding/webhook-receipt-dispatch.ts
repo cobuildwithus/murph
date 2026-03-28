@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client";
 import {
   buildHostedExecutionLinqMessageReceivedDispatch,
+  buildHostedExecutionTelegramMessageReceivedDispatch,
+  readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
 
-import { readHostedExecutionDispatchRef } from "../hosted-execution/outbox-payload";
+import { readHostedWebhookReceiptState } from "./webhook-receipt-codec";
 import { normalizePhoneNumber } from "./phone";
 
 export function readHostedWebhookReceiptDispatchByEventId(
@@ -16,21 +18,26 @@ export function readHostedWebhookReceiptDispatchByEventId(
     userId: string;
   },
 ): HostedExecutionDispatchRequest | null {
-  for (const sideEffect of readHostedWebhookReceiptSideEffects(payloadJson)) {
-    const effectObject = toHostedWebhookReceiptObject(sideEffect);
-    const kind = readHostedWebhookReceiptText(effectObject.kind);
+  const receiptState = readHostedWebhookReceiptState(payloadJson);
 
-    if (kind !== "hosted_execution_dispatch") {
+  for (const sideEffect of receiptState.sideEffects) {
+    if (sideEffect.kind !== "hosted_execution_dispatch") {
       continue;
     }
 
-    const payloadObject = toHostedWebhookReceiptObject(effectObject.payload);
+    if ("dispatch" in sideEffect.payload) {
+      if (sideEffect.payload.dispatch.eventId === eventId) {
+        return sideEffect.payload.dispatch;
+      }
+      continue;
+    }
+
     if (!fallback) {
       continue;
     }
 
     const dispatchRef = readHostedExecutionDispatchRef(
-      payloadObject,
+      sideEffect.payload,
       {
         eventId,
         eventKind: fallback.eventKind,
@@ -55,7 +62,9 @@ export function readHostedWebhookReceiptDispatchByEventId(
     }
 
     if (dispatchRef.eventKind === "linq.message.received") {
-      const linqEvent = readHostedWebhookReceiptLinqEvent(payloadObject.linqEvent);
+      const linqEvent = readHostedWebhookReceiptLinqEvent(
+        sideEffect.payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+      );
       const normalizedPhoneNumber = readHostedWebhookReceiptNormalizedPhoneNumber(linqEvent);
 
       if (!linqEvent || !normalizedPhoneNumber) {
@@ -70,29 +79,37 @@ export function readHostedWebhookReceiptDispatchByEventId(
         userId: dispatchRef.userId,
       });
     }
+
+    if (dispatchRef.eventKind === "telegram.message.received") {
+      const telegramUpdate = readHostedWebhookReceiptTelegramUpdate(
+        sideEffect.payload.telegramUpdate as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+      );
+
+      if (!telegramUpdate) {
+        return null;
+      }
+
+      return buildHostedExecutionTelegramMessageReceivedDispatch({
+        eventId: dispatchRef.eventId,
+        occurredAt: dispatchRef.occurredAt,
+        telegramUpdate,
+        userId: dispatchRef.userId,
+      });
+    }
   }
 
   return null;
 }
 
-function readHostedWebhookReceiptSideEffects(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
-): readonly (Prisma.InputJsonValue | Prisma.JsonValue | null)[] {
-  const payloadObject = toHostedWebhookReceiptObject(payloadJson);
-  const nestedState = toHostedWebhookReceiptObject(payloadObject.receiptState);
-
-  return Array.isArray(nestedState.sideEffects)
-    ? nestedState.sideEffects
-    : [];
-}
-
-function readHostedWebhookReceiptText(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0
-    ? value
+function readHostedWebhookReceiptLinqEvent(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
     : null;
 }
 
-function readHostedWebhookReceiptLinqEvent(
+function readHostedWebhookReceiptTelegramUpdate(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -114,12 +131,4 @@ function readHostedWebhookReceiptNormalizedPhoneNumber(
   }
 
   return normalizePhoneNumber((eventData as Record<string, unknown>).from as string | null | undefined);
-}
-
-function toHostedWebhookReceiptObject(
-  payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null> {
-  return payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson)
-    ? payloadJson as Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>
-    : {};
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ExecutionOutboxStatus } from "@prisma/client";
+import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murph/hosted-execution";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingSecretCodec: () => ({
@@ -175,7 +176,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
-                    schemaVersion: "murph.execution-outbox.ref.v1",
+                    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
                       eventId: "evt_linq_123",
                       eventKind: "linq.message.received",
@@ -200,7 +201,7 @@ describe("hydrateHostedExecutionDispatch", () => {
 
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord({
-        schemaVersion: "murph.execution-outbox.ref.v1",
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
         dispatchRef: {
           eventId: "evt_linq_123",
           eventKind: "linq.message.received",
@@ -245,7 +246,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
-                    schemaVersion: "murph.execution-outbox.ref.v1",
+                    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
                       eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
                       eventKind: "member.activated",
@@ -270,7 +271,7 @@ describe("hydrateHostedExecutionDispatch", () => {
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord(
         {
-          schemaVersion: "murph.execution-outbox.ref.v1",
+          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
           dispatchRef: {
             eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
             eventKind: "member.activated",
@@ -294,6 +295,98 @@ describe("hydrateHostedExecutionDispatch", () => {
         userId: "member_123",
       },
       eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
+      occurredAt: "2026-03-26T12:30:00.000Z",
+    });
+  });
+
+  it("rehydrates hosted Telegram webhook dispatches from minimized sent receipt payloads", async () => {
+    const telegramUpdate = {
+      message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_774_522_600,
+        from: {
+          first_name: "Alice",
+          id: 456,
+        },
+        message_id: 1,
+        text: "hello from Telegram",
+      },
+      update_id: 321,
+    };
+    const prisma = {
+      hostedWebhookReceipt: {
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 321,
+            },
+            receiptState: {
+              attemptCount: 1,
+              attemptId: "attempt_1",
+              completedAt: "2026-03-26T12:30:01.000Z",
+              lastError: null,
+              lastReceivedAt: "2026-03-26T12:30:00.000Z",
+              sideEffects: [
+                {
+                  attemptCount: 1,
+                  effectId: "dispatch:telegram:update:321",
+                  kind: "hosted_execution_dispatch",
+                  lastAttemptAt: "2026-03-26T12:30:00.500Z",
+                  lastError: null,
+                  payload: {
+                    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+                    dispatchRef: {
+                      eventId: "telegram:update:321",
+                      eventKind: "telegram.message.received",
+                      occurredAt: "2026-03-26T12:30:00.000Z",
+                      userId: "member_123",
+                    },
+                    telegramUpdate,
+                  },
+                  result: {
+                    dispatched: true,
+                  },
+                  sentAt: "2026-03-26T12:30:00.750Z",
+                  status: "sent",
+                },
+              ],
+              status: "completed",
+            },
+          },
+        }),
+      },
+    };
+
+    const dispatch = await hydrateHostedExecutionDispatch(
+      buildWebhookOutboxRecord(
+        {
+          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+          dispatchRef: {
+            eventId: "telegram:update:321",
+            eventKind: "telegram.message.received",
+            occurredAt: "2026-03-26T12:30:00.000Z",
+            userId: "member_123",
+          },
+        },
+        {
+          eventId: "telegram:update:321",
+          eventKind: "telegram.message.received",
+          sourceId: "telegram:telegram:update:321",
+        },
+      ) as never,
+      prisma as never,
+    );
+
+    expect(dispatch).toEqual({
+      event: {
+        kind: "telegram.message.received",
+        telegramUpdate,
+        userId: "member_123",
+      },
+      eventId: "telegram:update:321",
       occurredAt: "2026-03-26T12:30:00.000Z",
     });
   });

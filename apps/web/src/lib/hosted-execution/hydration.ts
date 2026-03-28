@@ -1,12 +1,12 @@
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
-import { type HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+import {
+  readHostedExecutionDispatchRef,
+  type HostedExecutionDispatchRef,
+  type HostedExecutionDispatchRequest,
+} from "@murph/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
-import {
-  type HostedExecutionDispatchRef,
-  readHostedExecutionDispatchRef,
-} from "./outbox-payload";
 
 type HostedExecutionHydrationClient = PrismaClient;
 

@@ -1,22 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_EVENT_KINDS,
   buildHostedExecutionAssistantCronTickDispatch,
+  buildHostedExecutionDispatchRef,
   buildHostedExecutionDeviceSyncWakeDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
+  buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionVaultShareAcceptedDispatch,
   parseHostedExecutionEvent,
+  readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionEventKind,
 } from "@murph/hosted-execution";
 
-import { buildHostedExecutionDispatchRef } from "@/src/lib/hosted-execution/outbox-payload";
+import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
 describe("hosted execution contract parity", () => {
-  it("keeps builder, parser, and outbox dispatch refs aligned for every event kind", () => {
+  it("keeps builder, parser, and app-local outbox serialization aligned for every event kind", () => {
     const dispatchBuilders: Record<HostedExecutionEventKind, () => HostedExecutionDispatchRequest> = {
       "assistant.cron.tick": () => buildHostedExecutionAssistantCronTickDispatch({
         eventId: "evt_cron",
@@ -58,6 +62,27 @@ describe("hosted execution contract parity", () => {
         memberId: "member_123",
         occurredAt: "2026-03-26T12:04:00.000Z",
       }),
+      "telegram.message.received": () => buildHostedExecutionTelegramMessageReceivedDispatch({
+        eventId: "evt_telegram",
+        occurredAt: "2026-03-26T12:04:30.000Z",
+        telegramUpdate: {
+          message: {
+            chat: {
+              id: 123,
+              type: "private",
+            },
+            date: 1_774_527_870,
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 1,
+            text: "hello",
+          },
+          update_id: 99,
+        },
+        userId: "member_123",
+      }),
       "vault.share.accepted": () => buildHostedExecutionVaultShareAcceptedDispatch({
         eventId: "evt_share",
         memberId: "member_123",
@@ -74,13 +99,22 @@ describe("hosted execution contract parity", () => {
     for (const kind of HOSTED_EXECUTION_EVENT_KINDS) {
       const dispatch = dispatchBuilders[kind]();
       const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
+      const payload = serializeHostedExecutionOutboxPayload(dispatch);
+      const parsedDispatchRef = readHostedExecutionDispatchRef(payload, {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      });
 
       expect(dispatch.event.kind).toBe(kind);
       expect(parseHostedExecutionEvent(dispatch.event)).toEqual(dispatch.event);
+      expect(payload.schemaVersion).toBe(HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION);
       expect(dispatchRef.eventKind).toBe(kind);
       expect(dispatchRef.eventId).toBe(dispatch.eventId);
       expect(dispatchRef.occurredAt).toBe(dispatch.occurredAt);
       expect(dispatchRef.userId).toBe(dispatch.event.userId);
+      expect(parsedDispatchRef).toEqual(dispatchRef);
     }
   });
 });

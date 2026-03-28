@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+  buildHostedExecutionDispatchRef,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionUserEnvPath,
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
@@ -13,6 +16,7 @@ import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
   parseHostedExecutionDispatchRequest,
+  readHostedExecutionDispatchRef,
   readHostedEmailCapabilities,
   readHostedExecutionControlEnvironment,
   readHostedExecutionDispatchEnvironment,
@@ -237,6 +241,87 @@ describe("@murph/hosted-execution", () => {
       },
       eventId: "email:raw_email_123",
       occurredAt: "2026-03-28T09:00:00.000Z",
+    });
+  });
+
+  it("round-trips hosted Telegram dispatches through the shared builder and parser", () => {
+    expect(parseHostedExecutionDispatchRequest(
+      buildHostedExecutionTelegramMessageReceivedDispatch({
+        eventId: "telegram:update:123",
+        occurredAt: "2026-03-28T09:05:00.000Z",
+        telegramUpdate: {
+          message: {
+            chat: {
+              id: 123,
+              type: "private",
+            },
+            date: 1_774_528_300,
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 1,
+            text: "hello from Telegram",
+          },
+          update_id: 123,
+        },
+        userId: "member_123",
+      }),
+    )).toEqual({
+      event: {
+        kind: "telegram.message.received",
+        telegramUpdate: {
+          message: {
+            chat: {
+              id: 123,
+              type: "private",
+            },
+            date: 1_774_528_300,
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 1,
+            text: "hello from Telegram",
+          },
+          update_id: 123,
+        },
+        userId: "member_123",
+      },
+      eventId: "telegram:update:123",
+      occurredAt: "2026-03-28T09:05:00.000Z",
+    });
+  });
+
+  it("builds and reads minimized dispatch refs without widening the payload body", () => {
+    const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+      envelopeFrom: "alice@example.test",
+      envelopeTo: "assistant+u-member@mail.example.test",
+      eventId: "email:raw_email_123",
+      identityId: "assistant@mail.example.test",
+      occurredAt: "2026-03-28T09:00:00.000Z",
+      rawMessageKey: "raw_email_123",
+      threadTarget: null,
+      userId: "member_123",
+    });
+    const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
+
+    expect(readHostedExecutionDispatchRef(
+      {
+        dispatchRef,
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      },
+      {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+    )).toEqual({
+      eventId: "email:raw_email_123",
+      eventKind: "email.message.received",
+      occurredAt: "2026-03-28T09:00:00.000Z",
+      userId: "member_123",
     });
   });
 

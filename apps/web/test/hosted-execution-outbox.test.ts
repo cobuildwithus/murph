@@ -1,4 +1,5 @@
 import { ExecutionOutboxStatus } from "@prisma/client";
+import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murph/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
@@ -239,7 +240,7 @@ function createOutboxRecord(input: {
     lastStatusJson: null,
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
     payloadJson: {
-      schemaVersion: "murph.execution-outbox.ref.v1",
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
     },
     sourceId: input.sourceType === "hosted_share_link" ? "share_123" : null,
     sourceType: input.sourceType ?? "hosted_execution",
