@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Box, Static, type Key } from 'ink'
@@ -255,6 +255,66 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(firstCall.sessionContext?.binding.channel, 'imessage')
   assert.equal(secondCall.systemPrompt, null)
   assert.equal(secondCall.userPrompt, 'What about today?')
+})
+
+test('sendAssistantMessage does not persist hosted usage records outside hosted runs', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const originalHostedMemberId = process.env.HOSTED_MEMBER_ID
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-usage-123',
+    response: 'usage reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: 12,
+      outputTokens: 7,
+      providerMetadataJson: null,
+      providerName: null,
+      providerRequestId: 'req_123',
+      rawUsageJson: {
+        inputTokens: 12,
+        outputTokens: 7,
+      },
+      reasoningTokens: null,
+      requestedModel: 'gpt-5',
+      servedModel: 'gpt-5',
+      totalTokens: 19,
+    },
+  })
+
+  delete process.env.HOSTED_MEMBER_ID
+
+  try {
+    await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'imessage:bob',
+      channel: 'imessage',
+      identityId: 'assistant:primary',
+      participantId: 'contact:bob',
+      sourceThreadId: 'chat-123',
+      provider: 'codex-cli',
+      prompt: 'Count my tokens.',
+    })
+  } finally {
+    restoreEnvironmentVariable('HOSTED_MEMBER_ID', originalHostedMemberId)
+  }
+
+  const usageEntries = await listDirectoryEntries(
+    resolveAssistantStatePaths(vaultRoot).usagePendingDirectory,
+  )
+
+  assert.deepEqual(usageEntries, [])
 })
 
 test('sendAssistantMessage recovers provider sessions after user interruptions and preserves the interrupt marker', async () => {
@@ -8029,4 +8089,21 @@ function restoreEnvironmentVariable(
   }
 
   process.env[key] = value
+}
+
+async function listDirectoryEntries(directoryPath: string): Promise<string[]> {
+  try {
+    return (await readdir(directoryPath)).sort()
+  } catch (error) {
+    if (
+      error
+      && typeof error === 'object'
+      && 'code' in error
+      && error.code === 'ENOENT'
+    ) {
+      return []
+    }
+
+    throw error
+  }
 }
