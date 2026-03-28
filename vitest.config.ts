@@ -44,6 +44,7 @@ export default defineConfig({
       "packages/importers/test/input-validation.test.ts",
       "packages/hosted-execution/test/hosted-execution.test.ts",
       "packages/runtime-state/test/hosted-bundle.test.ts",
+      "packages/runtime-state/test/assistant-usage.test.ts",
       "packages/runtime-state/test/hosted-execution-reexport.test.ts",
       "packages/runtime-state/test/hosted-user-env.test.ts",
       "packages/runtime-state/test/ulid.test.ts",
@@ -101,6 +102,7 @@ export default defineConfig({
       "packages/cli/test/release-script-coverage-audit.test.ts",
       "packages/cli/test/release-workflow-guards.test.ts",
       "packages/assistant-runtime/test/hosted-email-route.test.ts",
+      "packages/assistant-runtime/test/hosted-runtime-usage.test.ts",
     ],
     coverage: {
       enabled: true,

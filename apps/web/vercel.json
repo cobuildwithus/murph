@@ -5,6 +5,10 @@
       "schedule": "*/1 * * * *"
     },
     {
+      "path": "/api/internal/hosted-execution/usage/cron",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/internal/hosted-onboarding/stripe/cron",
       "schedule": "*/1 * * * *"
     }

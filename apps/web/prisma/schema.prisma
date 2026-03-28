@@ -176,6 +176,7 @@ enum HostedStripeEventStatus {
   processing
   completed
   failed
+  poisoned
 }
 
 enum HostedRevnetIssuanceStatus {
@@ -223,6 +224,7 @@ model HostedMember {
   sessions                     HostedSession[]
   checkouts                    HostedBillingCheckout[]
   revnetIssuances              HostedRevnetIssuance[]
+  aiUsage                      HostedAiUsage[]
 
   @@index([status])
   @@index([billingStatus])
@@ -310,6 +312,7 @@ model HostedStripeEvent {
   receivedAt          DateTime               @map("received_at")
   status              HostedStripeEventStatus @default(pending)
   attemptCount        Int                    @default(0) @map("attempt_count")
+  nextAttemptAt       DateTime               @default(now()) @map("next_attempt_at")
   claimExpiresAt      DateTime?              @map("claim_expires_at")
   processedAt         DateTime?              @map("processed_at")
   lastErrorCode       String?                @map("last_error_code")
@@ -325,6 +328,7 @@ model HostedStripeEvent {
   updatedAt           DateTime               @updatedAt @map("updated_at")
 
   @@index([status, stripeCreatedAt, createdAt])
+  @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
   @@index([claimExpiresAt])
   @@index([customerId, stripeCreatedAt])
   @@index([subscriptionId, stripeCreatedAt])
@@ -349,6 +353,8 @@ model HostedRevnetIssuance {
   stripePaymentCurrency String                     @map("stripe_payment_currency")
   paymentAmount         String                     @map("payment_amount")
   status                HostedRevnetIssuanceStatus @default(pending)
+  attemptCount          Int                        @default(0) @map("attempt_count")
+  nextAttemptAt         DateTime                   @default(now()) @map("next_attempt_at")
   payTxHash             String?                    @unique @map("pay_tx_hash")
   failureCode           String?                    @map("failure_code")
   failureMessage        String?                    @map("failure_message")
@@ -360,6 +366,7 @@ model HostedRevnetIssuance {
 
   @@index([memberId, createdAt])
   @@index([status, createdAt])
+  @@index([status, nextAttemptAt, createdAt])
   @@index([stripePaymentIntentId])
   @@index([stripeChargeId])
   @@map("hosted_revnet_issuance")
@@ -428,6 +435,45 @@ model ExecutionOutbox {
   @@index([status, nextAttemptAt, createdAt])
   @@index([userId, createdAt])
   @@map("execution_outbox")
+}
+
+model HostedAiUsage {
+  id                    String       @id
+  memberId              String       @map("member_id")
+  sessionId             String       @map("session_id")
+  turnId                String       @map("turn_id")
+  attemptCount          Int          @map("attempt_count")
+  occurredAt            DateTime     @map("occurred_at")
+  provider              String
+  routeId               String?      @map("route_id")
+  requestedModel        String?      @map("requested_model")
+  servedModel           String?      @map("served_model")
+  providerName          String?      @map("provider_name")
+  baseUrl               String?      @map("base_url")
+  apiKeyEnv             String?      @map("api_key_env")
+  credentialSource      String?      @map("credential_source")
+  inputTokens           Int?         @map("input_tokens")
+  outputTokens          Int?         @map("output_tokens")
+  reasoningTokens       Int?         @map("reasoning_tokens")
+  cachedInputTokens     Int?         @map("cached_input_tokens")
+  cacheWriteTokens      Int?         @map("cache_write_tokens")
+  totalTokens           Int?         @map("total_tokens")
+  providerSessionId     String?      @map("provider_session_id")
+  providerRequestId     String?      @map("provider_request_id")
+  providerMetadataJson  Json?        @map("provider_metadata_json")
+  rawUsageJson          Json?        @map("raw_usage_json")
+  stripeMeterStatus     String       @default("pending") @map("stripe_meter_status")
+  stripeMeteredAt       DateTime?    @map("stripe_metered_at")
+  stripeMeterIdentifier String?      @map("stripe_meter_identifier")
+  stripeMeterError      String?      @map("stripe_meter_error")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, occurredAt])
+  @@index([stripeMeterStatus, occurredAt])
+  @@index([turnId, attemptCount])
+  @@map("hosted_ai_usage")
 }
 
 model LinqRecipientBinding {

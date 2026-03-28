@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
+  ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
   writePendingAssistantUsageRecord,
 } from '@murph/runtime-state'
@@ -1581,20 +1582,21 @@ async function persistPendingAssistantUsageEvent(input: {
   vault: string
 }): Promise<void> {
   const usage = input.providerResult.usage
+  const hostedMemberId = normalizeNullableString(process.env.HOSTED_MEMBER_ID)
 
-  if (!usage) {
+  if (!usage || !hostedMemberId) {
     return
   }
 
   await writePendingAssistantUsageRecord({
     vault: input.vault,
     record: {
-      schema: 'murph.assistant-usage.v1',
+      schema: ASSISTANT_USAGE_SCHEMA,
       usageId: createAssistantUsageId({
         attemptCount: input.providerResult.attemptCount,
         turnId: input.turnId,
       }),
-      memberId: normalizeNullableString(process.env.HOSTED_MEMBER_ID),
+      memberId: hostedMemberId,
       sessionId: input.session.sessionId,
       turnId: input.turnId,
       attemptCount: input.providerResult.attemptCount,

@@ -31,9 +31,11 @@ import type {
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
 import { summarizeDispatch } from "./summary.ts";
+import { exportHostedPendingAssistantUsage } from "./usage.ts";
 
 export async function executeHostedDispatchForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  internalWorkerFetch?: typeof fetch;
   materializedArtifactPaths?: ReadonlySet<string>;
   request: HostedAssistantRuntimeJobRequest;
   restored: HostedRestoredExecutionContext;
@@ -46,6 +48,7 @@ export async function executeHostedDispatchForCommit(input: {
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
     emailBaseUrl: input.runtime.emailBaseUrl,
+    internalWorkerFetch: input.internalWorkerFetch,
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.restored.vaultRoot,
@@ -53,6 +56,7 @@ export async function executeHostedDispatchForCommit(input: {
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
     dispatch: input.request.dispatch,
+    internalWorkerFetch: input.internalWorkerFetch,
     requestId: input.request.dispatch.eventId,
     timeoutMs: input.runtime.commitTimeoutMs,
     runtimeEnv: input.runtimeEnv,
@@ -62,6 +66,7 @@ export async function executeHostedDispatchForCommit(input: {
   const committedSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
       artifactsBaseUrl: input.runtime.artifactsBaseUrl,
+      fetchImpl: input.internalWorkerFetch,
       knownArtifactHashes: collectHostedBundleArtifactHashes(
         decodeHostedBundleBase64(input.request.bundles.vault),
       ),
@@ -98,10 +103,11 @@ export async function executeHostedDispatchForCommit(input: {
 export async function completeHostedExecutionAfterCommit(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
+  internalWorkerFetch?: typeof fetch;
   materializedArtifactPaths?: ReadonlySet<string>;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv"
+    "artifactsBaseUrl" | "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv" | "webControlPlane"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -111,8 +117,17 @@ export async function completeHostedExecutionAfterCommit(input: {
     commitTimeoutMs: input.runtime.commitTimeoutMs,
     dispatch: input.dispatch,
     emailBaseUrl: input.runtime.emailBaseUrl,
+    fetchImpl: input.internalWorkerFetch,
     sideEffectsBaseUrl: input.runtime.sideEffectsBaseUrl,
     sideEffects: input.committedExecution.committedSideEffects,
+    vaultRoot: input.restored.vaultRoot,
+  });
+  await exportHostedPendingAssistantUsage({
+    baseUrl: input.runtime.webControlPlane.usageBaseUrl ?? null,
+    fetchImpl: input.internalWorkerFetch,
+    internalToken: input.runtime.webControlPlane.internalToken,
+    timeoutMs: input.runtime.commitTimeoutMs,
+    userEnv: input.runtime.userEnv,
     vaultRoot: input.restored.vaultRoot,
   });
   await reconcileHostedVerifiedEmailSelfTarget({
@@ -125,6 +140,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   const finalSnapshot = await snapshotHostedExecutionContext({
     artifactSink: createHostedArtifactUploadSink({
       artifactsBaseUrl: input.runtime.artifactsBaseUrl,
+      fetchImpl: input.internalWorkerFetch,
       knownArtifactHashes: collectHostedBundleArtifactHashes(
         decodeHostedBundleBase64(input.committedExecution.committedResult.bundles.vault),
       ),
@@ -149,12 +165,14 @@ export async function completeHostedExecutionAfterCommit(input: {
     commit: input.commit,
     committedResult: input.committedExecution.committedResult,
     dispatch: input.dispatch,
+    fetchImpl: input.internalWorkerFetch,
     finalResult,
     runtime: input.runtime,
   });
 
   return finalResult;
 }
+
 function collectHostedBundleArtifactHashes(bytes: Uint8Array | null): Set<string> {
   if (!bytes) {
     return new Set();

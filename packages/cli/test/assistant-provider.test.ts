@@ -512,6 +512,22 @@ test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves
     stderr: 'stderr output',
     stdout: 'stdout output',
     rawEvents: [{ type: 'thread.started', thread_id: 'thread-123' }],
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      providerMetadataJson: null,
+      providerName: null,
+      providerRequestId: null,
+      rawUsageJson: null,
+      reasoningTokens: null,
+      requestedModel: 'gpt-oss:20b',
+      servedModel: 'gpt-oss:20b',
+      totalTokens: null,
+    },
   })
 })
 
@@ -606,6 +622,141 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
     stderr: '',
     stdout: '',
     rawEvents: [],
+    usage: {
+      apiKeyEnv: 'OLLAMA_API_KEY',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: null,
+      outputTokens: null,
+      providerMetadataJson: null,
+      providerName: 'ollama',
+      providerRequestId: null,
+      rawUsageJson: null,
+      reasoningTokens: null,
+      requestedModel: 'gpt-oss:20b',
+      servedModel: 'gpt-oss:20b',
+      totalTokens: null,
+    },
+  })
+})
+
+test('executeAssistantProviderTurn surfaces AI SDK usage for OpenAI-compatible providers', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+    totalUsage: {
+      inputTokens: 120,
+      outputTokens: 45,
+      reasoningTokens: 8,
+      cachedInputTokens: 12,
+      cacheWriteTokens: 3,
+      totalTokens: 165,
+    },
+    providerMetadata: {
+      provider: 'venice',
+    },
+    response: {
+      requestId: 'req_123',
+      model: 'venice/deepseek-r1-671b',
+    },
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'https://api.venice.ai/api/v1',
+    apiKeyEnv: 'VENICE_API_KEY',
+    providerName: 'venice',
+    model: 'deepseek-r1-671b',
+    userPrompt: 'hello',
+  })
+
+  assert.deepEqual(result.usage, {
+    apiKeyEnv: 'VENICE_API_KEY',
+    baseUrl: 'https://api.venice.ai/api/v1',
+    cacheWriteTokens: 3,
+    cachedInputTokens: 12,
+    inputTokens: 120,
+    outputTokens: 45,
+    providerMetadataJson: {
+      provider: 'venice',
+    },
+    providerName: 'venice',
+    providerRequestId: 'req_123',
+    rawUsageJson: {
+      inputTokens: 120,
+      outputTokens: 45,
+      reasoningTokens: 8,
+      cachedInputTokens: 12,
+      cacheWriteTokens: 3,
+      totalTokens: 165,
+    },
+    reasoningTokens: 8,
+    requestedModel: 'deepseek-r1-671b',
+    servedModel: 'venice/deepseek-r1-671b',
+    totalTokens: 165,
+  })
+})
+
+test('executeAssistantProviderTurn extracts best-effort Codex usage from the final completion event', async () => {
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [
+      { type: 'thread.started', thread_id: 'thread-123' },
+      {
+        type: 'turn.completed',
+        model: 'gpt-5.4',
+        usage: {
+          input_tokens: 210,
+          cached_input_tokens: 64,
+          output_tokens: 98,
+          total_tokens: 308,
+        },
+      },
+    ],
+    sessionId: 'thread-123',
+    stderr: '',
+    stdout: '',
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    model: 'gpt-5.4',
+    userPrompt: 'hello',
+  })
+
+  assert.deepEqual(result.usage, {
+    apiKeyEnv: null,
+    baseUrl: null,
+    cacheWriteTokens: null,
+    cachedInputTokens: 64,
+    inputTokens: 210,
+    outputTokens: 98,
+    providerMetadataJson: {
+      type: 'turn.completed',
+      model: 'gpt-5.4',
+      usage: {
+        input_tokens: 210,
+        cached_input_tokens: 64,
+        output_tokens: 98,
+        total_tokens: 308,
+      },
+    },
+    providerName: null,
+    providerRequestId: null,
+    rawUsageJson: {
+      input_tokens: 210,
+      cached_input_tokens: 64,
+      output_tokens: 98,
+      total_tokens: 308,
+    },
+    reasoningTokens: null,
+    requestedModel: 'gpt-5.4',
+    servedModel: 'gpt-5.4',
+    totalTokens: 308,
   })
 })
 

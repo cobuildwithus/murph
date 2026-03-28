@@ -33,6 +33,7 @@ import {
   readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
   readHostedExecutionOutboxPayload,
+  parseHostedExecutionSideEffectRecord,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedExecutionWorkerEnvironment,
   normalizeHostedExecutionBaseUrl,
@@ -472,6 +473,63 @@ describe("@murph/hosted-execution", () => {
       schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
       storage: "reference",
     });
+  });
+
+  it("parses legacy hosted assistant delivery side effects without idempotency keys", () => {
+    const record = parseHostedExecutionSideEffectRecord({
+      delivery: {
+        channel: "telegram",
+        messageLength: 12,
+        sentAt: "2026-03-28T10:00:00.000Z",
+        target: "chat_123",
+        targetKind: "explicit",
+      },
+      effectId: "outbox_intent_123",
+      fingerprint: "dedupe_123",
+      intentId: "outbox_intent_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-03-28T10:00:00.000Z",
+    });
+
+    expect(record.delivery.idempotencyKey).toBeNull();
+  });
+
+  it("parses hosted assistant delivery side effects with explicit idempotency keys", () => {
+    const record = parseHostedExecutionSideEffectRecord({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "assistant-outbox:intent_123",
+        messageLength: 12,
+        sentAt: "2026-03-28T10:00:00.000Z",
+        target: "chat_123",
+        targetKind: "explicit",
+      },
+      effectId: "outbox_intent_123",
+      fingerprint: "dedupe_123",
+      intentId: "outbox_intent_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-03-28T10:00:00.000Z",
+    });
+
+    expect(record.delivery.idempotencyKey).toBe("assistant-outbox:intent_123");
+  });
+
+  it("rejects empty hosted assistant delivery idempotency keys", () => {
+    expect(() => parseHostedExecutionSideEffectRecord({
+      delivery: {
+        channel: "telegram",
+        idempotencyKey: "",
+        messageLength: 12,
+        sentAt: "2026-03-28T10:00:00.000Z",
+        target: "chat_123",
+        targetKind: "explicit",
+      },
+      effectId: "outbox_intent_123",
+      fingerprint: "dedupe_123",
+      intentId: "outbox_intent_123",
+      kind: "assistant.delivery",
+      recordedAt: "2026-03-28T10:00:00.000Z",
+    })).toThrow("Hosted assistant side effect record delivery.idempotencyKey must be a non-empty string.");
   });
 
   it("centralizes dispatch outcome and lifecycle mapping", () => {

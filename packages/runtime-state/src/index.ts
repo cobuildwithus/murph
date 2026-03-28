@@ -1,4 +1,5 @@
 export * from "./assistant-state.ts";
+export * from "./assistant-usage.ts";
 export * from "./atomic-write.ts";
 export * from "./device-sync.ts";
 export * from "./hosted-bundle.ts";
