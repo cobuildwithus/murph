@@ -277,6 +277,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    botUserId: "999",
                     storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
@@ -349,6 +350,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    botUserId: "999",
                     storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
@@ -442,6 +444,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    botUserId: "999",
                     storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
@@ -489,11 +492,211 @@ describe("hydrateHostedExecutionDispatch", () => {
 
     expect(dispatch).toEqual({
       event: {
+        botUserId: "999",
         kind: "telegram.message.received",
         telegramUpdate,
         userId: "member_123",
       },
       eventId: "telegram:update:321",
+      occurredAt: "2026-03-26T12:30:00.000Z",
+    });
+  });
+
+  it("rehydrates hosted Telegram webhook dispatches by inferring botUserId from sender_business_bot", async () => {
+    const telegramUpdate = {
+      business_message: {
+        business_connection_id: "bc_123",
+        chat: {
+          id: 123,
+          is_direct_messages: true,
+          type: "private",
+        },
+        date: 1_774_522_601,
+        from: {
+          first_name: "Alice",
+          id: 456,
+        },
+        message_id: 9,
+        sender_business_bot: {
+          id: 999,
+          is_bot: true,
+          username: "murph_bot",
+        },
+        text: "echo",
+      },
+      update_id: 654,
+    };
+    const prisma = {
+      hostedWebhookReceipt: {
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 654,
+            },
+            receiptState: {
+              attemptCount: 1,
+              attemptId: "attempt_1",
+              completedAt: "2026-03-26T12:30:01.000Z",
+              lastError: null,
+              lastReceivedAt: "2026-03-26T12:30:00.000Z",
+              sideEffects: [
+                {
+                  attemptCount: 1,
+                  effectId: "dispatch:telegram:update:654",
+                  kind: "hosted_execution_dispatch",
+                  lastAttemptAt: "2026-03-26T12:30:00.500Z",
+                  lastError: null,
+                  payload: {
+                    storage: "reference",
+                    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+                    dispatchRef: {
+                      eventId: "telegram:update:654",
+                      eventKind: "telegram.message.received",
+                      occurredAt: "2026-03-26T12:30:00.000Z",
+                      userId: "member_123",
+                    },
+                    telegramUpdate,
+                  },
+                  result: {
+                    dispatched: true,
+                  },
+                  sentAt: "2026-03-26T12:30:00.750Z",
+                  status: "sent",
+                },
+              ],
+              status: "completed",
+            },
+          },
+        }),
+      },
+    };
+
+    const dispatch = await hydrateHostedExecutionDispatch(
+      buildWebhookOutboxRecord(
+        {
+          storage: "reference",
+          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+          dispatchRef: {
+            eventId: "telegram:update:654",
+            eventKind: "telegram.message.received",
+            occurredAt: "2026-03-26T12:30:00.000Z",
+            userId: "member_123",
+          },
+        },
+        {
+          eventId: "telegram:update:654",
+          eventKind: "telegram.message.received",
+          sourceId: "telegram:telegram:update:654",
+        },
+      ) as never,
+      prisma as never,
+    );
+
+    expect(dispatch).toEqual({
+      event: {
+        botUserId: "999",
+        kind: "telegram.message.received",
+        telegramUpdate,
+        userId: "member_123",
+      },
+      eventId: "telegram:update:654",
+      occurredAt: "2026-03-26T12:30:00.000Z",
+    });
+  });
+
+  it("rehydrates hosted Telegram webhook dispatches by inferring botUserId from bot sender metadata", async () => {
+    const telegramUpdate = {
+      message: {
+        chat: {
+          id: 123,
+          type: "private",
+        },
+        date: 1_774_522_602,
+        from: {
+          first_name: "murph_bot",
+          id: 999,
+          is_bot: true,
+          username: "murph_bot",
+        },
+        message_id: 10,
+        text: "self echo",
+      },
+      update_id: 655,
+    };
+    const prisma = {
+      hostedWebhookReceipt: {
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 655,
+            },
+            receiptState: {
+              attemptCount: 1,
+              attemptId: "attempt_1",
+              completedAt: "2026-03-26T12:30:01.000Z",
+              lastError: null,
+              lastReceivedAt: "2026-03-26T12:30:00.000Z",
+              sideEffects: [
+                {
+                  attemptCount: 1,
+                  effectId: "dispatch:telegram:update:655",
+                  kind: "hosted_execution_dispatch",
+                  lastAttemptAt: "2026-03-26T12:30:00.500Z",
+                  lastError: null,
+                  payload: {
+                    storage: "reference",
+                    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+                    dispatchRef: {
+                      eventId: "telegram:update:655",
+                      eventKind: "telegram.message.received",
+                      occurredAt: "2026-03-26T12:30:00.000Z",
+                      userId: "member_123",
+                    },
+                    telegramUpdate,
+                  },
+                  result: {
+                    dispatched: true,
+                  },
+                  sentAt: "2026-03-26T12:30:00.750Z",
+                  status: "sent",
+                },
+              ],
+              status: "completed",
+            },
+          },
+        }),
+      },
+    };
+
+    const dispatch = await hydrateHostedExecutionDispatch(
+      buildWebhookOutboxRecord(
+        {
+          storage: "reference",
+          schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+          dispatchRef: {
+            eventId: "telegram:update:655",
+            eventKind: "telegram.message.received",
+            occurredAt: "2026-03-26T12:30:00.000Z",
+            userId: "member_123",
+          },
+        },
+        {
+          eventId: "telegram:update:655",
+          eventKind: "telegram.message.received",
+          sourceId: "telegram:telegram:update:655",
+        },
+      ) as never,
+      prisma as never,
+    );
+
+    expect(dispatch).toEqual({
+      event: {
+        botUserId: "999",
+        kind: "telegram.message.received",
+        telegramUpdate,
+        userId: "member_123",
+      },
+      eventId: "telegram:update:655",
       occurredAt: "2026-03-26T12:30:00.000Z",
     });
   });

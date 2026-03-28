@@ -1,0 +1,10 @@
+{
+  "id": "meal-edit",
+  "command": "vault-cli meal edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/meal-add",
+  "purpose": "Documents patching an existing meal event without bypassing the shared record-mutation flow."
+}

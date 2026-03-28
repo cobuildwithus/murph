@@ -90,14 +90,52 @@ run_workspace_boundary_check() {
 
 run_typecheck_packages() {
   for package_dir in "${typecheck_package_dirs[@]}"; do
-    pnpm --dir "$package_dir" typecheck
+    run_package_command_with_retry "$package_dir" typecheck
+  done
+}
+
+run_repo_build_with_retry() {
+  local attempt=1
+
+  while true; do
+    if pnpm build; then
+      return 0
+    fi
+
+    if [[ "$attempt" -ge 2 ]]; then
+      return 1
+    fi
+
+    attempt=$((attempt + 1))
+    echo "Workspace build failed; retrying once..." >&2
+    sleep 1
+  done
+}
+
+run_package_command_with_retry() {
+  local package_dir="$1"
+  local command="$2"
+  local attempt=1
+
+  while true; do
+    if pnpm --dir "$package_dir" "$command"; then
+      return 0
+    fi
+
+    if [[ "$attempt" -ge 2 ]]; then
+      return 1
+    fi
+
+    attempt=$((attempt + 1))
+    echo "Package command failed for ${package_dir} (${command}); retrying once..." >&2
+    sleep 1
   done
 }
 
 run_test_packages_common() {
   pnpm no-js
   pnpm --dir "packages/contracts" test
-  pnpm build
+  run_repo_build_with_retry
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
@@ -105,7 +143,7 @@ run_test_packages_common() {
 }
 
 refresh_repo_vitest_runtime_artifacts() {
-  pnpm build
+  run_repo_build_with_retry
   tsx "packages/cli/scripts/verify-package-shape.ts"
 }
 
@@ -115,7 +153,7 @@ run_typecheck() {
   run_workspace_boundary_check
   tsc -p "tsconfig.tools.json" --pretty false
   pnpm --dir "packages/contracts" build
-  pnpm build
+  run_repo_build_with_retry
   run_typecheck_packages
 }
 
@@ -136,7 +174,7 @@ run_test_packages_coverage() {
   pnpm no-js
   rimraf "coverage"
   pnpm --dir "packages/contracts" test
-  pnpm build
+  run_repo_build_with_retry
   tsx "packages/cli/scripts/verify-package-shape.ts"
   pnpm --dir "packages/web" test
   pnpm --dir "apps/web" test
@@ -156,7 +194,7 @@ run_verify_cli() {
   pnpm --dir "packages/device-syncd" build
   pnpm --dir "packages/inboxd" build
   pnpm --dir "packages/cli" typecheck
-  pnpm build
+  run_repo_build_with_retry
   tsx "packages/cli/scripts/verify-package-shape.ts"
   vitest run "${cli_verify_test_files[@]}" --no-coverage --maxWorkers 1
 }

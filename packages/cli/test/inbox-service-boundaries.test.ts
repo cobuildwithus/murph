@@ -154,6 +154,72 @@ test('instantiateConnector delegates Linq webhook options through the connector 
   })
 })
 
+test('instantiateConnector delegates Telegram polling through the explicit takeover transport mode', async () => {
+  type TelegramConnectorOptions = {
+    accountId?: string | null
+    backfillLimit?: number
+    downloadAttachments?: boolean
+    id?: string
+    transportMode?: 'take-over-webhook' | 'require-no-webhook'
+  }
+  let received: TelegramConnectorOptions | null = null
+
+  const connector = await instantiateConnector({
+    connector: {
+      id: 'telegram:bot',
+      source: 'telegram',
+      enabled: true,
+      accountId: null,
+      options: {
+        backfillLimit: 42,
+      },
+    },
+    inputLimit: 7,
+    async loadInbox() {
+      return {
+        createTelegramPollConnector(options: {
+          accountId?: string | null
+          backfillLimit?: number
+          downloadAttachments?: boolean
+          id?: string
+          transportMode?: 'take-over-webhook' | 'require-no-webhook'
+        }) {
+          received = options
+          return {
+            id: options.id ?? 'telegram:bot',
+            source: 'telegram',
+            kind: 'poll',
+            capabilities: {
+              attachments: true,
+              backfill: true,
+              ownMessages: true,
+              watch: true,
+              webhooks: false,
+            },
+          }
+        },
+      } as any
+    },
+    async loadImessageDriver() {
+      throw new Error('unreachable')
+    },
+    async loadTelegramDriver() {
+      return {} as any
+    },
+  })
+
+  const captured = received as TelegramConnectorOptions | null
+  assert.equal(connector.id, 'telegram:bot')
+  if (!captured) {
+    throw new Error('expected Telegram connector options to be captured')
+  }
+  assert.equal(captured.accountId, 'bot')
+  assert.equal(captured.backfillLimit, 7)
+  assert.equal(captured.downloadAttachments, true)
+  assert.equal(captured.id, 'telegram:bot')
+  assert.equal(captured.transportMode, 'take-over-webhook')
+})
+
 test.sequential('normalizeDaemonState rewrites stale daemon state records', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-daemon-'))
 

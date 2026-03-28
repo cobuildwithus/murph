@@ -1,0 +1,10 @@
+{
+  "id": "workout-format-log",
+  "command": "vault-cli workout format log <name> --vault <path> [--duration <minutes>] [--type <type>] [--distance-km <km>] [--occurred-at <ts>] [--source <source>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-add",
+  "purpose": "Documents logging a workout from a saved workout format with optional overrides."
+}

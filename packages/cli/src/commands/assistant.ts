@@ -1964,10 +1964,10 @@ export function registerAssistantCommands(
       output: assistantSessionListResultSchema,
       async run(context) {
         const sessions = await listAssistantSessions(context.options.vault)
-        return {
+        return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
           sessions,
-        }
+        })
       },
     })
 
@@ -1983,10 +1983,10 @@ export function registerAssistantCommands(
           context.options.vault,
           context.args.sessionId,
         )
-        return {
+        return assistantSessionShowResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
           session,
-        }
+        })
       },
     })
 

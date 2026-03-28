@@ -317,13 +317,7 @@ function clampVaultBoundAssistantSandbox(
 function serializeAssistantSessionForResult(
   session: AssistantSession,
 ): AssistantSession {
-  const normalized = normalizeAssistantSessionSnapshot(session)
-  const {
-    providerSessionId: _providerSessionId,
-    providerState: _providerState,
-    ...resultSession
-  } = normalized
-  return resultSession
+  return normalizeAssistantSessionSnapshot(session)
 }
 
 function normalizeAssistantAskResultForReturn<T extends AssistantAskResult>(

@@ -425,6 +425,68 @@ test('assistant state schemas expose document ids and JSON input payload flags',
   assert.deepEqual(putSchema.options.required, ['vault', 'input'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
+test('assistant session list schema emits the normalized session output shape', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['assistant', 'session', 'list', '--schema', '--format', 'json']),
+  ) as {
+    output: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('stateRoot' in schema.output.properties, true)
+  assert.equal('sessions' in schema.output.properties, true)
+  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'sessions'])
+
+  const sessions = schema.output.properties.sessions as {
+    items?: {
+      anyOf?: Array<{
+        properties?: Record<string, unknown>
+        required?: string[]
+      }>
+    }
+  }
+  const sessionVariant = sessions.items?.anyOf?.[0]
+
+  assert.notEqual(sessionVariant, undefined)
+  assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), true)
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
+test('assistant session show schema emits the normalized session output shape', async () => {
+  const schema = JSON.parse(
+    await runRawCli(['assistant', 'session', 'show', '--schema', '--format', 'json']),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    output: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('sessionId' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['sessionId'])
+  assert.equal('stateRoot' in schema.output.properties, true)
+  assert.equal('session' in schema.output.properties, true)
+  assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'session'])
+
+  const session = schema.output.properties.session as {
+    anyOf?: Array<{
+      properties?: Record<string, unknown>
+      required?: string[]
+    }>
+  }
+  const sessionVariant = session.anyOf?.[0]
+
+  assert.notEqual(sessionVariant, undefined)
+  assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), true)
+  assert.equal('providerBinding' in (sessionVariant?.properties ?? {}), true)
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
 test('assistant cron help explains when to opt into assistant state', async () => {
   const addHelp = await runRawCli(['assistant', 'cron', 'add', '--help'])
   const presetInstallHelp = await runRawCli(['assistant', 'cron', 'preset', 'install', '--help'])

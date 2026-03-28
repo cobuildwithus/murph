@@ -347,7 +347,7 @@ export interface InboxRuntimeModule {
     accountId?: string | null
     backfillLimit?: number
     downloadAttachments?: boolean
-    resetWebhookOnStart?: boolean
+    transportMode?: 'take-over-webhook' | 'require-no-webhook'
   }): PollConnector
   createEmailPollConnector(input: {
     driver: EmailDriver

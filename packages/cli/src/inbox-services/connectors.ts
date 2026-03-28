@@ -49,7 +49,7 @@ export async function instantiateConnector(input: {
           input.connector.options.backfillLimit ??
           500,
         downloadAttachments: true,
-        resetWebhookOnStart: true,
+        transportMode: 'take-over-webhook',
       })
     }
     case 'email': {

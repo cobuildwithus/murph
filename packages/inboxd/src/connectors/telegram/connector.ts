@@ -21,8 +21,14 @@ export const DEFAULT_TELEGRAM_ALLOWED_UPDATES = [
 ] as const;
 
 const TELEGRAM_WATCH_RETRY_DELAYS_MS = [1000, 3000, 5000, 10000] as const;
+export const TELEGRAM_POLL_TRANSPORT_MODES = [
+  "take-over-webhook",
+  "require-no-webhook",
+] as const;
 
 export type TelegramApiClient = Api<RawApi>;
+export type TelegramPollTransportMode =
+  (typeof TELEGRAM_POLL_TRANSPORT_MODES)[number];
 type TelegramApiSignal = Parameters<TelegramApiClient["getMe"]>[0];
 type TelegramAllowedUpdate =
   NonNullable<Parameters<TelegramApiClient["getUpdates"]>[0]>["allowed_updates"] extends
@@ -64,6 +70,7 @@ export interface TelegramConnectorOptions {
   accountId?: string | null;
   backfillLimit?: number;
   downloadAttachments?: boolean;
+  transportMode?: TelegramPollTransportMode;
   resetWebhookOnStart?: boolean;
 }
 
@@ -74,10 +81,15 @@ export function createTelegramPollConnector({
   accountId,
   backfillLimit = 500,
   downloadAttachments = true,
-  resetWebhookOnStart = true,
+  transportMode,
+  resetWebhookOnStart,
 }: TelegramConnectorOptions) {
   const normalizedAccountId = normalizeTelegramAccountId(accountId);
   const connectorId = id ?? `${source}:${normalizedAccountId ?? "default"}`;
+  const effectiveTransportMode = resolveTelegramPollTransportMode({
+    resetWebhookOnStart,
+    transportMode,
+  });
   let pollingPrepared = false;
 
   const ensurePollingReady = async () => {
@@ -85,7 +97,7 @@ export function createTelegramPollConnector({
       return;
     }
 
-    if (resetWebhookOnStart && driver.deleteWebhook) {
+    if (effectiveTransportMode === "take-over-webhook" && driver.deleteWebhook) {
       await driver.deleteWebhook({ dropPendingUpdates: false });
     }
 
@@ -380,12 +392,25 @@ function rewritePollingConflict(error: unknown): unknown {
 
   if (/409/u.test(error.message) || /webhook/u.test(error.message)) {
     return new Error(
-      "Telegram polling is blocked by an active webhook. Delete the webhook or enable resetWebhookOnStart before running the local poll connector.",
+      'Telegram polling is blocked by an active webhook. Delete the webhook or use transportMode "take-over-webhook" before running the local poll connector.',
       { cause: error },
     );
   }
 
   return error;
+}
+
+function resolveTelegramPollTransportMode(input: {
+  resetWebhookOnStart?: boolean;
+  transportMode?: TelegramPollTransportMode;
+}): TelegramPollTransportMode {
+  if (input.transportMode) {
+    return input.transportMode;
+  }
+
+  return input.resetWebhookOnStart === false
+    ? "require-no-webhook"
+    : "take-over-webhook";
 }
 
 function createTelegramFileDownloader(input: {

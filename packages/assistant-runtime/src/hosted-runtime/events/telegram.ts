@@ -14,6 +14,7 @@ export async function ingestHostedTelegramMessage(
 ): Promise<void> {
   const capture = await normalizeTelegramUpdate({
     accountId: "bot",
+    botUserId: dispatch.event.botUserId,
     update: dispatch.event.telegramUpdate as TelegramUpdateLike,
   });
 

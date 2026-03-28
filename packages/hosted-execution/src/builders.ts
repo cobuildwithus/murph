@@ -44,6 +44,7 @@ export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
 }
 
 export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
+  botUserId: string | null;
   eventId: string;
   occurredAt: string;
   telegramUpdate: Record<string, unknown>;
@@ -51,6 +52,7 @@ export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
+      botUserId: input.botUserId,
       kind: "telegram.message.received",
       telegramUpdate: { ...input.telegramUpdate },
       userId: input.userId,

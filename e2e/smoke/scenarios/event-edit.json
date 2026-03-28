@@ -1,0 +1,10 @@
+{
+  "id": "event-edit",
+  "command": "vault-cli event edit <id> --vault <path> [--input @patch.json] [--set <path=value> ...] [--clear <path> ...] [--day-key-policy keep|recompute] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/show",
+  "purpose": "Documents patching an existing canonical event record through the audited edit surface."
+}

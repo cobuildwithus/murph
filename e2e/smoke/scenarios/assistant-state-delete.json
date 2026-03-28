@@ -1,0 +1,10 @@
+{
+  "id": "assistant-state-delete",
+  "command": "vault-cli assistant state delete <doc> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
+  "purpose": "Documents deleting one assistant scratch-state document."
+}

@@ -1,12 +1,18 @@
 import { timingSafeEqual } from "node:crypto";
 
-import type { TelegramMessageLike, TelegramUpdateLike } from "@murph/inboxd";
+import {
+  extractTelegramMessage,
+  toTelegramChatMessage,
+  type TelegramMessageLike,
+  type TelegramUpdateLike,
+} from "@murph/inboxd";
 
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
 export interface HostedTelegramWebhookSummary {
+  botUserId: string | null;
   chatType: string | null;
   isBotMessage: boolean;
   isDirect: boolean;
@@ -86,26 +92,39 @@ export function parseHostedTelegramWebhookUpdate(rawBody: string): TelegramUpdat
   } as TelegramUpdateLike;
 }
 
-export function summarizeHostedTelegramWebhook(update: TelegramUpdateLike): HostedTelegramWebhookSummary | null {
-  const message = extractHostedTelegramMessage(update);
+export async function summarizeHostedTelegramWebhook(
+  update: TelegramUpdateLike,
+): Promise<HostedTelegramWebhookSummary | null> {
+  const message = extractTelegramMessage(update);
 
   if (!message) {
     return null;
   }
 
+  const botUserId = inferHostedTelegramBotUserId(message);
+  const chatMessage = await toTelegramChatMessage({
+    botUserId,
+    message,
+    update,
+  });
+  const isBotMessage = chatMessage.actor.isSelf || (
+    botUserId !== null
+    && message.sender_business_bot?.id !== undefined
+    && String(message.sender_business_bot.id) === botUserId
+  );
+  const actorId = normalizeNullableString(chatMessage.actor.id ?? null);
   const senderTelegramUserId =
-    !isHostedTelegramBotMessage(message) &&
-    typeof message.from?.id === "number" && Number.isFinite(message.from.id)
-      ? String(message.from.id)
+    !isBotMessage && actorId && /^-?\d+$/u.test(actorId)
+      ? actorId
       : null;
   const chatType = normalizeNullableString(message.chat?.type ?? null);
-  const isDirect = chatType === "private" || message.chat?.is_direct_messages === true;
 
   return {
+    botUserId,
     chatType,
-    isBotMessage: isHostedTelegramBotMessage(message),
-    isDirect,
-    occurredAt: telegramTimestampToIso(message.date) ?? new Date().toISOString(),
+    isBotMessage,
+    isDirect: chatMessage.thread.isDirect === true,
+    occurredAt: chatMessage.occurredAt,
     senderTelegramUserId,
   };
 }
@@ -131,18 +150,20 @@ export function buildHostedTelegramBotLink(start: string | null = null): string 
   return url.toString();
 }
 
-function extractHostedTelegramMessage(update: TelegramUpdateLike): TelegramMessageLike | null {
-  return update.message ?? update.business_message ?? null;
-}
+function inferHostedTelegramBotUserId(message: TelegramMessageLike): string | null {
+  if (typeof message.sender_business_bot?.id === "number" && Number.isFinite(message.sender_business_bot.id)) {
+    return String(message.sender_business_bot.id);
+  }
 
-function isHostedTelegramBotMessage(message: TelegramMessageLike): boolean {
-  return message.from?.is_bot === true || message.sender_business_bot?.is_bot === true;
-}
+  if (
+    message.from?.is_bot === true
+    && typeof message.from.id === "number"
+    && Number.isFinite(message.from.id)
+  ) {
+    return String(message.from.id);
+  }
 
-function telegramTimestampToIso(value: unknown): string | null {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? new Date(value * 1000).toISOString()
-    : null;
+  return null;
 }
 
 function validateOptionalTelegramMessage(

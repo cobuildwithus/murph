@@ -223,6 +223,17 @@ export function shouldAttemptAssistantProviderFailover(input: {
     return false
   }
 
+  const traits = readAssistantProviderFailoverTraits(input.error)
+  if (traits.interrupted) {
+    return false
+  }
+  if (typeof traits.retryable === 'boolean') {
+    return traits.retryable
+  }
+  if (traits.connectionLost) {
+    return true
+  }
+
   const code = readErrorCode(input.error)
   if (!code) {
     return true
@@ -233,6 +244,30 @@ export function shouldAttemptAssistantProviderFailover(input: {
     'ASSISTANT_PROMPT_REQUIRED',
     'invalid_payload',
   ]).has(code)
+}
+
+function readAssistantProviderFailoverTraits(error: unknown): {
+  connectionLost: boolean
+  interrupted: boolean
+  retryable: boolean | null
+} {
+  const context =
+    error && typeof error === 'object' && 'context' in error
+      ? (error as { context?: unknown }).context
+      : null
+  const normalized =
+    context && typeof context === 'object' && !Array.isArray(context)
+      ? (context as Record<string, unknown>)
+      : null
+
+  return {
+    connectionLost:
+      normalized?.connectionLost === true ||
+      normalized?.recoverableConnectionLoss === true,
+    interrupted: normalized?.interrupted === true,
+    retryable:
+      typeof normalized?.retryable === 'boolean' ? normalized.retryable : null,
+  }
 }
 
 function createResolvedAssistantFailoverRoute(input: {

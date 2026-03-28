@@ -79,6 +79,7 @@ describe("hosted execution contract parity", () => {
         occurredAt: "2026-03-26T12:04:00.000Z",
       }),
       "telegram.message.received": () => buildHostedExecutionTelegramMessageReceivedDispatch({
+        botUserId: "999",
         eventId: "evt_telegram",
         occurredAt: "2026-03-26T12:04:30.000Z",
         telegramUpdate: {

@@ -1,0 +1,10 @@
+{
+  "id": "workout-format-list",
+  "command": "vault-cli workout format list --vault <path> [--limit <n>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/workout-add",
+  "purpose": "Documents listing saved workout format templates from the vault-local format registry."
+}

@@ -1,5 +1,10 @@
 import { IMessageSDK } from '@photon-ai/imessage-kit'
 import {
+  parseTelegramThreadTarget,
+  serializeTelegramThreadTarget,
+  type TelegramThreadTarget,
+} from '@murph/inboxd'
+import {
   createAgentmailApiClient,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
@@ -17,8 +22,6 @@ import {
   mapImessageMessagesDbRuntimeError,
 } from '../imessage-readiness.ts'
 import {
-  formatTelegramSendTarget,
-  parseTelegramSendTarget,
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
 } from '../telegram-runtime.ts'
@@ -148,7 +151,7 @@ interface AssistantChannelAdapterSpec {
   targetRequiredMessage: string
 }
 
-type TelegramParsedTarget = ReturnType<typeof parseTelegramSendTarget>
+type TelegramParsedTarget = TelegramThreadTarget
 
 type TelegramSendAttemptResult =
   | {
@@ -351,8 +354,8 @@ async function sendTelegramMessageDetailed(
     /\/$/u,
     '',
   )
-  let target = parseTelegramSendTarget(input.target)
-  let targetLabel = formatTelegramSendTarget(target)
+  let target = parseTelegramTargetOrThrow(input.target)
+  let targetLabel = serializeTelegramThreadTarget(target)
 
   const chunks = splitTelegramMessageText(input.message)
   for (const chunk of chunks) {
@@ -1006,6 +1009,29 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
   return value?.trim() ? value.trim() : null
 }
 
+function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
+  const parsed = parseTelegramThreadTarget(target)
+  if (parsed) {
+    return parsed
+  }
+
+  const normalizedTarget = normalizeOptionalText(target)
+  if (!normalizedTarget) {
+    throw new VaultCliError(
+      'ASSISTANT_TELEGRAM_TARGET_INVALID',
+      'Telegram delivery requires a non-empty chat id, username, or topic target.',
+    )
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_TELEGRAM_TARGET_INVALID',
+    'Telegram targets must use "<chatId>", "<chatId>:topic:<messageThreadId>", "<chatId>:dm-topic:<directMessagesTopicId>", and optional ":business:<businessConnectionId>" routing segments.',
+    {
+      target: normalizedTarget,
+    },
+  )
+}
+
 async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
   fetchImplementation: FetchLike
@@ -1083,7 +1109,7 @@ function resolveTelegramSendAttemptOutcome(input: {
     return {
       kind: 'migrated',
       target: migratedTarget,
-      targetLabel: formatTelegramSendTarget(migratedTarget),
+      targetLabel: serializeTelegramThreadTarget(migratedTarget),
     }
   }
 

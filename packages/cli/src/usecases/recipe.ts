@@ -1,4 +1,4 @@
-import { RECIPE_STATUSES } from '@murph/contracts'
+import { RECIPE_STATUSES, ID_PREFIXES, isContractId } from '@murph/contracts'
 import { z } from 'incur'
 
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -23,8 +23,6 @@ interface RecipeReadModel {
   markdown: string
   [key: string]: unknown
 }
-
-const RECIPE_ID_PATTERN = /^rcp_[0-9A-Za-z]+$/u
 
 interface RecipeCoreRuntime {
   upsertRecipe(input: {
@@ -238,7 +236,7 @@ export async function deleteRecipeRecord(input: {
   try {
     await core.deleteRecipe({
       vaultRoot: input.vault,
-      recipeId: RECIPE_ID_PATTERN.test(normalizedLookup)
+      recipeId: isContractId(normalizedLookup, ID_PREFIXES.recipe)
         ? normalizedLookup
         : recipe.recipeId,
       slug: normalizedLookup,
@@ -330,7 +328,7 @@ async function requireRecipeRecord(vault: string, lookup: string) {
   try {
     return await core.readRecipe({
       vaultRoot: vault,
-      recipeId: RECIPE_ID_PATTERN.test(normalizedLookup) ? normalizedLookup : undefined,
+      recipeId: isContractId(normalizedLookup, ID_PREFIXES.recipe) ? normalizedLookup : undefined,
       slug: normalizedLookup,
     })
   } catch (error) {

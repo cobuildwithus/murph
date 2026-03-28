@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
   ok: true
@@ -180,6 +180,9 @@ async function runCliAttempt<TData = Record<string, unknown>>(
     return result
   } catch (error) {
     const output = commandOutputFromError(error)
+    if (allowRetry && shouldRetryCliExecution(error) && (await waitForCliRuntimeArtifacts())) {
+      return runCliAttempt(args, options, false)
+    }
     if (output !== null) {
       try {
         return JSON.parse(output) as CliEnvelope<TData>
@@ -274,11 +277,38 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
     return
   }
 
+  await rebuildCliRuntimeArtifacts()
+
+  if (await verifyCliRuntimeArtifacts()) {
+    return
+  }
+
   throw createMissingRuntimeArtifactsError()
 }
 
 export async function rebuildCliRuntimeArtifacts(): Promise<void> {
-  await ensureCliRuntimeArtifacts()
+  const packageBuildDirs = [
+    'packages/contracts',
+    'packages/hosted-execution',
+    'packages/runtime-state',
+    'packages/core',
+    'packages/importers',
+    'packages/device-syncd',
+    'packages/query',
+    'packages/inboxd',
+    'packages/parsers',
+    'packages/cli',
+  ] as const
+
+  for (const packageDir of packageBuildDirs) {
+    await execWorkspaceCommand(['--dir', packageDir, 'build'], { retryOnce: true })
+  }
+
+  await execWorkspaceCommand([
+    'exec',
+    'tsx',
+    'packages/cli/scripts/verify-package-shape.ts',
+  ])
 }
 
 function decodeCommandOutput(output: Buffer | string | undefined): string | null {
@@ -411,14 +441,17 @@ function shouldRetryCliOutput(output: string | null): boolean {
   }
 
   const referencesBuiltWorkspaceArtifact =
-    output.includes('/packages/') && output.includes('/dist/')
+    output.includes('/dist/') &&
+    (output.includes('/packages/') || output.includes('/node_modules/@murph/'))
   const isMissingModuleError =
     output.includes('ERR_MODULE_NOT_FOUND') ||
     output.includes('Cannot find module') ||
-    output.includes('Cannot find package')
+    output.includes('Cannot find package') ||
+    output.includes('ENOENT: no such file or directory')
   const isDistStartupFailure =
     referencesBuiltWorkspaceArtifact &&
     (output.includes('file://') ||
+      output.includes('lstat ') ||
       output.includes('does not provide an export named') ||
       output.includes('SyntaxError:') ||
       output.includes('ReferenceError:'))
@@ -448,6 +481,9 @@ async function canImportArtifact(artifactPath: string): Promise<boolean> {
     return false
   }
 
+  const artifactDir = path.dirname(artifactPath)
+  const artifactSpecifier = `./${path.basename(artifactPath)}`
+
   try {
     await new Promise<void>((resolve, reject) => {
       execFile(
@@ -455,10 +491,10 @@ async function canImportArtifact(artifactPath: string): Promise<boolean> {
         [
           '--input-type=module',
           '-e',
-          `import(${JSON.stringify(pathToFileURL(artifactPath).href)}).then(() => {}).catch((error) => { console.error(error); process.exitCode = 1 })`,
+          `import(${JSON.stringify(artifactSpecifier)}).then(() => {}).catch((error) => { console.error(error); process.exitCode = 1 })`,
         ],
         {
-          cwd: repoRoot,
+          cwd: artifactDir,
           encoding: 'utf8',
           env: withoutNodeV8Coverage(selectCliBaseEnv()),
           maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
@@ -478,4 +514,41 @@ async function canImportArtifact(artifactPath: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function execWorkspaceCommand(
+  args: string[],
+  options?: {
+    retryOnce?: boolean
+  },
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const run = (allowRetry: boolean) => {
+      execFile(
+        'pnpm',
+        args,
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(selectCliBaseEnv()),
+          maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
+        },
+        (error) => {
+          if (error) {
+            if (allowRetry) {
+              run(false)
+              return
+            }
+
+            reject(error)
+            return
+          }
+
+          resolve()
+        },
+      )
+    }
+
+    run(options?.retryOnce === true)
+  })
 }

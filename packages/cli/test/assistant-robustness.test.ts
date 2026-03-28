@@ -21,9 +21,9 @@ vi.mock('../src/outbound-channel.js', async () => {
   }
 })
 
-vi.mock('../src/chat-provider.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/chat-provider.js')>(
-    '../src/chat-provider.js',
+vi.mock('../src/assistant-provider.js', async () => {
+  const actual = await vi.importActual<typeof import('../src/assistant-provider.js')>(
+    '../src/assistant-provider.js',
   )
 
   return {
