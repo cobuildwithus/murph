@@ -1459,6 +1459,175 @@ test.sequential(
 )
 
 test.sequential(
+  'food and recipe edit preserve canonical ids when set and clear target the id fields',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-edit-id-boundary-'))
+    const foodPayloadPath = path.join(vaultRoot, 'food.json')
+    const recipePayloadPath = path.join(vaultRoot, 'recipe.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+
+      await writeFile(
+        foodPayloadPath,
+        JSON.stringify({
+          title: 'Regular Acai Bowl',
+          slug: 'regular-acai-bowl',
+          status: 'active',
+          note: 'Typical order.',
+        }),
+        'utf8',
+      )
+      await writeFile(
+        recipePayloadPath,
+        JSON.stringify({
+          title: 'Sheet Pan Salmon Bowls',
+          slug: 'sheet-pan-salmon-bowls',
+          status: 'saved',
+          summary: 'Weeknight salmon bowls.',
+          ingredients: ['2 salmon fillets'],
+          steps: ['Roast the salmon.'],
+        }),
+        'utf8',
+      )
+
+      const foodCreated = await runSliceCli<{ foodId: string }>([
+        'food',
+        'upsert',
+        '--input',
+        `@${foodPayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeCreated = await runSliceCli<{ recipeId: string }>([
+        'recipe',
+        'upsert',
+        '--input',
+        `@${recipePayloadPath}`,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodCreated.ok, true)
+      assert.equal(recipeCreated.ok, true)
+
+      const attemptedFoodId = 'food_PATCHATTEMPT2'
+      const attemptedRecipeId = 'rcp_PATCHATTEMPT2'
+
+      const foodEdited = await runSliceCli<{
+        entity: {
+          id: string
+          title: string | null
+          data: {
+            note?: string
+          }
+        }
+      }>([
+        'food',
+        'edit',
+        requireData(foodCreated).foodId,
+        '--set',
+        `foodId=${attemptedFoodId}`,
+        '--set',
+        'title=Protein Acai Bowl',
+        '--clear',
+        'foodId',
+        '--clear',
+        'note',
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeEdited = await runSliceCli<{
+        entity: {
+          id: string
+          title: string | null
+          data: {
+            summary?: string
+          }
+        }
+      }>([
+        'recipe',
+        'edit',
+        requireData(recipeCreated).recipeId,
+        '--set',
+        `recipeId=${attemptedRecipeId}`,
+        '--set',
+        'title=Sheet Pan Salmon Skillet',
+        '--clear',
+        'recipeId',
+        '--clear',
+        'summary',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodEdited.ok, true)
+      assert.equal(requireData(foodEdited).entity.id, requireData(foodCreated).foodId)
+      assert.equal(requireData(foodEdited).entity.title, 'Protein Acai Bowl')
+      assert.equal(requireData(foodEdited).entity.data.note, undefined)
+
+      assert.equal(recipeEdited.ok, true)
+      assert.equal(requireData(recipeEdited).entity.id, requireData(recipeCreated).recipeId)
+      assert.equal(requireData(recipeEdited).entity.title, 'Sheet Pan Salmon Skillet')
+      assert.equal(requireData(recipeEdited).entity.data.summary, undefined)
+
+      const foodShown = await runSliceCli<{
+        entity: {
+          id: string
+          title: string | null
+        }
+      }>([
+        'food',
+        'show',
+        requireData(foodCreated).foodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeShown = await runSliceCli<{
+        entity: {
+          id: string
+          title: string | null
+        }
+      }>([
+        'recipe',
+        'show',
+        requireData(recipeCreated).recipeId,
+        '--vault',
+        vaultRoot,
+      ])
+      const foodAttemptedReplacement = await runSliceCli([
+        'food',
+        'show',
+        attemptedFoodId,
+        '--vault',
+        vaultRoot,
+      ])
+      const recipeAttemptedReplacement = await runSliceCli([
+        'recipe',
+        'show',
+        attemptedRecipeId,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(foodShown.ok, true)
+      assert.equal(requireData(foodShown).entity.id, requireData(foodCreated).foodId)
+      assert.equal(requireData(foodShown).entity.title, 'Protein Acai Bowl')
+      assert.equal(recipeShown.ok, true)
+      assert.equal(requireData(recipeShown).entity.id, requireData(recipeCreated).recipeId)
+      assert.equal(requireData(recipeShown).entity.title, 'Sheet Pan Salmon Skillet')
+
+      assert.equal(foodAttemptedReplacement.ok, false)
+      assert.equal(foodAttemptedReplacement.error.code, 'not_found')
+      assert.equal(recipeAttemptedReplacement.ok, false)
+      assert.equal(recipeAttemptedReplacement.error.code, 'not_found')
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'provider edit keeps templated markdown body aligned with note updates and body resets',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-provider-body-sync-'))

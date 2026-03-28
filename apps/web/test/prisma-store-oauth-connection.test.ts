@@ -1,4 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const { randomBytesMock } = vi.hoisted(() => ({
+  randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
+}));
+
+vi.mock("node:crypto", async () => {
+  const actual = await vi.importActual<typeof import("node:crypto")>("node:crypto");
+  return {
+    ...actual,
+    randomBytes: randomBytesMock,
+  };
+});
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
@@ -160,6 +172,74 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 });
 
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
+  it("creates new hosted connections with the hosted random id shape", async () => {
+    let createdConnection: MutableConnectionRecord | null = null;
+    let createdSecret: MutableConnectionSecret | null = null;
+
+    const tx = {
+      deviceConnection: {
+        findFirst: async () => null,
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          createdConnection = normalizeCreatedConnection(data);
+          return cloneConnection(createdConnection);
+        },
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          createdConnection && createdConnection.id === where.id ? cloneConnection(createdConnection) : null,
+      },
+      deviceConnectionSecret: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          createdSecret = normalizeConnectionSecret(data);
+          return { ...createdSecret };
+        },
+      },
+    };
+
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        $transaction: async <TResult>(callback: (transaction: typeof tx) => Promise<TResult>) => callback(tx),
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => `enc:${value}`,
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+      },
+    });
+
+    const suffix = hostedRandomSuffix(12);
+    const created = await store.upsertConnection({
+      ownerId: "user-123",
+      provider: "oura",
+      externalAccountId: "acct_456",
+      displayName: "Oura ring",
+      scopes: ["daily"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-03-25T04:00:00.000Z",
+      },
+      metadata: {
+        region: "us",
+      },
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: "2026-03-25T05:00:00.000Z",
+    });
+
+    expect(created.id).toBe(`dsc_${suffix}`);
+    expect(created.id).not.toMatch(/^[a-z0-9-]+_[0-9A-HJKMNP-TV-Z]{26}$/u);
+    expect(createdConnection).toMatchObject({
+      id: `dsc_${suffix}`,
+      userId: "user-123",
+      externalAccountId: "acct_456",
+    });
+    expect(createdSecret).toMatchObject({
+      connectionId: `dsc_${suffix}`,
+      accessTokenEncrypted: "enc:access-token",
+      refreshTokenEncrypted: "enc:refresh-token",
+      tokenVersion: 1,
+      keyVersion: "v1",
+    });
+  });
+
   it("returns the decrypted hosted token bundle for the owning user", async () => {
     const connection = createConnectionRecord();
     const store = new PrismaDeviceSyncControlPlaneStore({
@@ -278,6 +358,61 @@ function createConnectionRecord(): MutableConnectionRecord {
   };
 }
 
+function normalizeCreatedConnection(data: Record<string, unknown>): MutableConnectionRecord {
+  if (
+    typeof data.id !== "string" ||
+    typeof data.userId !== "string" ||
+    typeof data.provider !== "string" ||
+    typeof data.externalAccountId !== "string" ||
+    !(data.connectedAt instanceof Date)
+  ) {
+    throw new TypeError("Invalid hosted connection record.");
+  }
+
+  return {
+    id: data.id,
+    userId: data.userId,
+    provider: data.provider,
+    externalAccountId: data.externalAccountId,
+    displayName: typeof data.displayName === "string" ? data.displayName : null,
+    status: isConnectionStatus(data.status) ? data.status : "active",
+    scopes: Array.isArray(data.scopes) ? data.scopes.filter((value): value is string => typeof value === "string") : [],
+    accessTokenExpiresAt: data.accessTokenExpiresAt instanceof Date ? new Date(data.accessTokenExpiresAt) : null,
+    metadataJson: isRecord(data.metadataJson) ? { ...data.metadataJson } : {},
+    connectedAt: new Date(data.connectedAt),
+    lastWebhookAt: null,
+    lastSyncStartedAt: null,
+    lastSyncCompletedAt: null,
+    lastSyncErrorAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    nextReconcileAt: data.nextReconcileAt instanceof Date ? new Date(data.nextReconcileAt) : null,
+    createdAt: new Date("2026-03-25T00:00:00.000Z"),
+    updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+    secret: null,
+  };
+}
+
+function normalizeConnectionSecret(data: Record<string, unknown>): MutableConnectionSecret {
+  if (
+    typeof data.connectionId !== "string" ||
+    typeof data.accessTokenEncrypted !== "string" ||
+    (data.refreshTokenEncrypted !== null && typeof data.refreshTokenEncrypted !== "string") ||
+    typeof data.tokenVersion !== "number" ||
+    typeof data.keyVersion !== "string"
+  ) {
+    throw new TypeError("Invalid hosted connection secret.");
+  }
+
+  return {
+    connectionId: data.connectionId,
+    accessTokenEncrypted: data.accessTokenEncrypted,
+    refreshTokenEncrypted: data.refreshTokenEncrypted,
+    tokenVersion: data.tokenVersion,
+    keyVersion: data.keyVersion,
+  };
+}
+
 function applyConnectionUpdate(connection: MutableConnectionRecord, data: Record<string, unknown>): void {
   if ("status" in data && isConnectionStatus(data.status)) {
     connection.status = data.status;
@@ -348,6 +483,14 @@ function cloneConnection(record: MutableConnectionRecord): MutableConnectionReco
 
 function cloneDate(value: Date | null): Date | null {
   return value ? new Date(value) : null;
+}
+
+function hostedRandomSuffix(length: number): string {
+  return Buffer.from(Array.from({ length }, (_, index) => index)).toString("base64url");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isConnectionStatus(value: unknown): value is MutableConnectionRecord["status"] {
