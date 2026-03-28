@@ -270,12 +270,14 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
+    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
     const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
     const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
 
+    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "true";
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
     process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
@@ -312,6 +314,7 @@ describe("runHostedExecutionJob", () => {
       expect(automationState.autoReplyChannels).toContain("email");
       expect(automationState.autoReplyChannels).not.toContain("linq");
     } finally {
+      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
       restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
       restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
@@ -1243,7 +1246,7 @@ describe("runHostedExecutionJob", () => {
       },
       userEnv: {
         OPENAI_API_KEY: "sk-user",
-        TELEGRAM_BOT_TOKEN: "bot-token",
+        XAI_API_KEY: "xai-user",
       },
     });
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
@@ -1576,8 +1579,10 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
+    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
+    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "true";
     const intentId = "outbox_hosted_send";
     const createdAt = "2026-03-26T12:00:00.000Z";
     const sentAt = "2026-03-26T12:00:05.000Z";
@@ -1729,61 +1734,68 @@ describe("runHostedExecutionJob", () => {
       }),
     );
 
-    const result = await runHostedExecutionJob({
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
-      commit: {
-        bundleRefs: {
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
           agentState: null,
           vault: null,
         },
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_123",
+        commit: {
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
         },
-        eventId: "evt_outbox_send",
-        occurredAt: "2026-03-26T12:00:00.000Z",
-      },
-    });
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_outbox_send",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
 
-    expect(fetchCalls).toEqual([
-      "POST http://commit.worker/events/evt_outbox_send/commit",
-      "GET http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-      "PUT http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
-      "POST http://commit.worker/events/evt_outbox_send/finalize",
-    ]);
+      expect(fetchCalls).toEqual([
+        "POST http://commit.worker/events/evt_outbox_send/commit",
+        "GET http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+        "PUT http://side-effects.worker/effects/outbox_hosted_send?fingerprint=dedupe_hosted_send&kind=assistant.delivery",
+        "POST http://commit.worker/events/evt_outbox_send/finalize",
+      ]);
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
-    cleanupPaths.push(workspaceRoot);
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
-      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
-      workspaceRoot,
-    });
-    const savedIntent = assistantOutboxIntentSchema.parse(
-      JSON.parse(
-        await readFile(
-          path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
-          "utf8",
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const savedIntent = assistantOutboxIntentSchema.parse(
+        JSON.parse(
+          await readFile(
+            path.join(resolveAssistantStatePaths(restored.vaultRoot).outboxDirectory, `${intentId}.json`),
+            "utf8",
+          ),
         ),
-      ),
-    );
-    const statusSnapshot = JSON.parse(
-      await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
-    ) as {
-      outbox: { pending: number; sent: number };
-      recentTurns: Array<{ deliveryDisposition: string; status: string }>;
-    };
+      );
+      const statusSnapshot = JSON.parse(
+        await readFile(resolveAssistantStatePaths(restored.vaultRoot).statusPath, "utf8"),
+      ) as {
+        outbox: { pending: number; sent: number };
+        recentTurns: Array<{ deliveryDisposition: string; status: string }>;
+      };
 
-    expect(savedIntent.status).toBe("sent");
-    expect(savedIntent.delivery).toEqual(delivery);
-    expect(statusSnapshot.outbox.pending).toBe(0);
-    expect(statusSnapshot.outbox.sent).toBe(1);
-    expect(statusSnapshot.recentTurns).toEqual([]);
+      expect(savedIntent.status).toBe("sent");
+      expect(savedIntent.delivery).toEqual({
+        ...delivery,
+        idempotencyKey: null,
+      });
+      expect(statusSnapshot.outbox.pending).toBe(0);
+      expect(statusSnapshot.outbox.sent).toBe(1);
+      expect(statusSnapshot.recentTurns).toEqual([]);
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
+    }
   });
 
   it("replays committed side effects on resume without rerunning compute or recommitting", async () => {
@@ -2004,7 +2016,10 @@ describe("runHostedExecutionJob", () => {
     };
 
     expect(savedIntent.status).toBe("sent");
-    expect(savedIntent.delivery).toEqual(delivery);
+    expect(savedIntent.delivery).toEqual({
+      ...delivery,
+      idempotencyKey: null,
+    });
     expect(statusSnapshot.outbox.pending).toBe(0);
     expect(statusSnapshot.outbox.sent).toBe(1);
     expect(statusSnapshot.recentTurns).toEqual([]);

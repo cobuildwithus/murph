@@ -12,19 +12,19 @@ describe("hosted user env helpers", () => {
   it("merges allowlisted keys and removes null values", () => {
     const result = applyHostedUserEnvUpdate({
       current: {
-        TELEGRAM_BOT_TOKEN: "old-token",
+        OPENAI_API_KEY: "old-key",
       },
       update: {
         env: {
-          OPENAI_API_KEY: "sk-user",
-          TELEGRAM_BOT_TOKEN: null,
+          OPENAI_API_KEY: null,
+          XAI_API_KEY: "xai-user",
         },
         mode: "merge",
       },
     });
 
     expect(result).toEqual({
-      OPENAI_API_KEY: "sk-user",
+      XAI_API_KEY: "xai-user",
     });
   });
 
@@ -74,22 +74,42 @@ describe("hosted user env helpers", () => {
     })).toThrow(/not allowed/u);
   });
 
-  it("accepts canonical AgentMail and ffmpeg keys but rejects unknown prefixed keys", () => {
+  it("accepts canonical model and parser keys but rejects removed integration keys", () => {
     expect(applyHostedUserEnvUpdate({
       current: {},
       update: {
         env: {
-          AGENTMAIL_API_KEY: "agentmail-secret",
-          AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
           FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+          OPENAI_API_KEY: "sk-user",
+          XAI_API_KEY: "xai-user",
         },
         mode: "replace",
       },
     })).toEqual({
-      AGENTMAIL_API_KEY: "agentmail-secret",
-      AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      OPENAI_API_KEY: "sk-user",
+      XAI_API_KEY: "xai-user",
     });
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          AGENTMAIL_API_KEY: "agentmail-secret",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
+
+    expect(() => applyHostedUserEnvUpdate({
+      current: {},
+      update: {
+        env: {
+          TELEGRAM_BOT_TOKEN: "bot-token",
+        },
+        mode: "replace",
+      },
+    })).toThrow(/not allowed/u);
 
     expect(() => applyHostedUserEnvUpdate({
       current: {},
@@ -128,14 +148,14 @@ describe("hosted user env helpers", () => {
     const payload = encodeHostedUserEnvPayload({
       env: {
         OPENAI_API_KEY: "sk-user",
-        TELEGRAM_BOT_TOKEN: "bot-token",
+        XAI_API_KEY: "xai-user",
       },
       now: "2026-03-26T12:00:00.000Z",
     });
 
     expect(decodeHostedUserEnvPayload(payload)).toEqual({
       OPENAI_API_KEY: "sk-user",
-      TELEGRAM_BOT_TOKEN: "bot-token",
+      XAI_API_KEY: "xai-user",
     });
   });
 

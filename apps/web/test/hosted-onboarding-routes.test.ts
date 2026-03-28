@@ -61,6 +61,10 @@ let hostedOnboardingHttp: HostedOnboardingHttpModule;
 let logoutRoute: LogoutRouteModule;
 let privyCompleteRoute: PrivyCompleteRouteModule;
 
+const SAME_ORIGIN_HEADERS = {
+  origin: "https://join.example.test",
+};
+
 describe("hosted onboarding routes", () => {
   beforeAll(async () => {
     billingCheckoutRoute = await import("../app/api/hosted-onboarding/billing/checkout/route");
@@ -115,6 +119,7 @@ describe("hosted onboarding routes", () => {
         }),
         headers: {
           cookie: "privy-id-token=identity-token; hosted_session=session-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -158,6 +163,7 @@ describe("hosted onboarding routes", () => {
       new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
         headers: {
           cookie: "privy-id-token=identity-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -199,6 +205,7 @@ describe("hosted onboarding routes", () => {
         }),
         headers: {
           cookie: "privy-id-token=cookie-token",
+          origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -240,6 +247,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
+          origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -274,6 +282,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
+          origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -307,6 +316,7 @@ describe("hosted onboarding routes", () => {
           inviteCode: "invite-code",
         }),
         headers: {
+          origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
         method: "POST",
@@ -365,6 +375,7 @@ describe("hosted onboarding routes", () => {
       body: JSON.stringify({
         inviteCode: "invite-code",
       }),
+      headers: SAME_ORIGIN_HEADERS,
       method: "POST",
     });
 
@@ -393,6 +404,7 @@ describe("hosted onboarding routes", () => {
         inviteCode: "invite-code",
         walletAddress: "0x00000000000000000000000000000000000000aa",
       }),
+      headers: SAME_ORIGIN_HEADERS,
       method: "POST",
     });
 
@@ -421,6 +433,7 @@ describe("hosted onboarding routes", () => {
         inviteCode: "invite-code",
         shareCode: "share_123",
       }),
+      headers: SAME_ORIGIN_HEADERS,
       method: "POST",
     });
 
@@ -448,6 +461,7 @@ describe("hosted onboarding routes", () => {
     const request = new Request("https://join.example.test/api/hosted-onboarding/session/logout", {
       headers: {
         cookie: "hosted_session=session-token",
+        origin: SAME_ORIGIN_HEADERS.origin,
       },
       method: "POST",
     });
@@ -499,6 +513,7 @@ describe("hosted onboarding routes", () => {
             inviteCode: "invite-code",
           }),
           headers: {
+            origin: SAME_ORIGIN_HEADERS.origin,
             "user-agent": "test-agent",
           },
           method: "POST",

@@ -4,7 +4,10 @@ import {
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_PROXY_HOSTS,
+  HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
+  normalizeHostedExecutionBaseUrl,
 } from "@murph/hosted-execution";
 import {
   parseHostedExecutionSideEffectRecord,
@@ -36,15 +39,34 @@ type RunnerOutboundUserRunnerStubLike = WorkerUserRunnerStubLike;
 
 export interface RunnerOutboundEnvironmentSource extends WorkerEnvironmentContract {}
 
+const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
+  HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
+  HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.email,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.outbox,
+  HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
+  HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
+]);
+
 export async function handleRunnerOutboundRequest(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   userId: string,
+  internalWorkerProxyToken: string | null = null,
 ): Promise<Response> {
   const environment = readHostedExecutionEnvironment(
     env as unknown as Readonly<Record<string, string | undefined>>,
   );
   const url = new URL(request.url);
+  const authorizationError = requireRunnerInternalProxyAuthorization(
+    request,
+    url.hostname,
+    internalWorkerProxyToken,
+  );
+  if (authorizationError) {
+    return authorizationError;
+  }
 
   if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.commit) {
     const match = /^\/events\/(?<eventId>[^/]+)\/(?<action>commit|finalize)$/u.exec(url.pathname);
@@ -81,7 +103,7 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === "device-sync.worker") {
+  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.deviceSync) {
     return handleRunnerDeviceSyncControlRequest({
       env,
       request,
@@ -90,7 +112,7 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === "share-pack.worker") {
+  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.sharePack) {
     return handleRunnerSharePackRequest({
       env,
       request,
@@ -611,6 +633,30 @@ function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
 }
 
+function requireRunnerInternalProxyAuthorization(
+  request: Request,
+  hostname: string,
+  expectedToken: string | null,
+): Response | null {
+  if (!RUNNER_INTERNAL_PROXY_HOSTNAMES.has(hostname)) {
+    return null;
+  }
+
+  if (!expectedToken) {
+    return json({
+      error: "Hosted runner outbound proxy token is not configured.",
+    }, 503);
+  }
+
+  if (request.headers.get(HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER) !== expectedToken) {
+    return json({
+      error: "Unauthorized",
+    }, 401);
+  }
+
+  return null;
+}
+
 function resolveHostedDeviceSyncWebBaseUrl(
   env: RunnerOutboundEnvironmentSource,
 ): string | null {
@@ -645,12 +691,7 @@ function notFound(): Response {
 }
 
 function normalizeBaseUrl(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const url = new URL(value);
-  url.hash = "";
-  url.search = "";
-  return url.toString().replace(/\/$/u, "");
+  return normalizeHostedExecutionBaseUrl(value, {
+    allowHttpLocalhost: true,
+  });
 }

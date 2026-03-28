@@ -48,6 +48,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `60000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
+- optional non-secret: `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` defaults to disabled; when unset the hosted runner still handles deterministic inbox/parser/device-sync/share-import work but does not forward automation-only provider/channel secrets, does not auto-enable assistant reply channels, and does not run the general assistant automation loop
 - optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container through `src/runner-env.ts`
 
 Current worker routes:
@@ -74,6 +75,8 @@ That means:
 - the Worker's internal control routes call direct Durable Object methods such as `dispatch`, `commit`, `finalizeCommit`, `status`, and per-user env updates instead of routing those control hops back through worker-local `fetch()` URLs
 - the per-user Durable Object invokes a same-name `RunnerContainer` instance on demand
 - the `RunnerContainer` uses the official `@cloudflare/containers` `Container` class to handle startup, port readiness, per-run env injection, and host-specific outbound interception before forwarding the encrypted bundle payloads and dispatch into the internal runner bridge
+- those worker-owned outbound proxy hosts now require an in-memory per-run proxy token from the trusted Worker/container bridge in addition to the bound `userId`, so random code inside one warm runner container cannot call them directly with `curl` or borrowed env
+- worker-owned callback and web-control base URLs now normalize to HTTPS by default and only permit explicit loopback or internal worker-host HTTP exceptions
 - the runner process posts durable commit/finalize and assistant-delivery reconciliation requests to `http://commit.worker` and `http://outbox.worker`; those outbound handlers run inside Workers, call Durable Objects and R2 directly, and never traverse the public Worker URL
 - the container-local bridge is intentionally thin; the execution core lives in `packages/assistant-runtime`
 - the queue Durable Object keeps the per-user container warm across drained batches and relies on the container's configurable `sleepAfter` idle timeout, defaulting to `5m`, instead of forcing immediate teardown after every run
@@ -94,10 +97,12 @@ Current expectations for the container image:
 - Node `>=22.16.0`
 - workspace dependencies installed from this repo
 - writable temp storage for ephemeral hosted bundle restore/snapshot work
+- the baked `/app` tree remains root-owned while the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped source
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, AgentMail, Telegram, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
+- automation-only provider/channel secrets are forwarded only when `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` is explicitly enabled
 - optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when separately encrypted per-user env overrides need to cover additional key names
-- encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process so per-user env overrides no longer force container-wide request serialization
+- encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process launched from a temp cwd rather than `/app` while resolving its `tsx` preload by absolute file URL, so per-user env overrides no longer force container-wide request serialization and the job does not inherit the shipped repo root as its ambient working directory
 
 ## Deployment status
 

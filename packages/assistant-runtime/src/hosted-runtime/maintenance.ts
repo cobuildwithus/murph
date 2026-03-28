@@ -25,6 +25,7 @@ import type {
   HostedMaintenanceMetrics,
   HostedWorkspaceArtifactMaterializer,
 } from "./models.ts";
+import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
 import {
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
@@ -56,7 +57,9 @@ export async function runHostedMaintenanceLoop(input: {
     artifactMaterializer: input.artifactMaterializer ?? null,
     vaultRoot: input.vaultRoot,
   });
-  await runHostedAssistantAutomation(input.vaultRoot, input.requestId);
+  if (hostedAssistantAutomationEnabledFromEnv(input.runtimeEnv)) {
+    await runHostedAssistantAutomation(input.vaultRoot, input.requestId);
+  }
   const assistantCronStatus = await getAssistantCronStatus(input.vaultRoot);
   const deviceSyncResult = await runHostedDeviceSyncPass(
     input.dispatch,

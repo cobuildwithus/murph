@@ -17,6 +17,7 @@ import {
 } from "@murph/assistant-services/store";
 
 import type { HostedBootstrapResult } from "./models.ts";
+import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
 
 export async function prepareHostedDispatchContext(
   vaultRoot: string,
@@ -61,6 +62,13 @@ export async function reconcileHostedAssistantChannelCapabilities(
   vaultRoot: string,
   runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<Pick<HostedBootstrapResult, "emailAutoReplyEnabled" | "telegramAutoReplyEnabled">> {
+  if (!hostedAssistantAutomationEnabledFromEnv(runtimeEnv)) {
+    return {
+      emailAutoReplyEnabled: false,
+      telegramAutoReplyEnabled: false,
+    };
+  }
+
   const automationState = await readAssistantAutomationState(vaultRoot);
   const nextAutoReplyChannels = [...automationState.autoReplyChannels];
   let changed = false;

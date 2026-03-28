@@ -2,7 +2,7 @@ import {
   readHostedSharePackByReference,
   requireHostedShareInternalToken,
 } from "@/src/lib/hosted-share/service";
-import { requireHostedExecutionInternalToken } from "@/src/lib/hosted-execution/internal";
+import { requireHostedExecutionUserId } from "@/src/lib/hosted-execution/internal";
 import { getPrisma } from "@/src/lib/prisma";
 import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
 
@@ -12,11 +12,13 @@ export async function GET(
 ) {
   try {
     authorizeHostedSharePayloadRequest(request);
+    const boundMemberId = requireHostedExecutionUserId(request);
     const { shareId } = await context.params;
     const url = new URL(request.url);
     const shareCode = url.searchParams.get("shareCode") ?? "";
 
     return jsonOk(await readHostedSharePackByReference({
+      boundMemberId,
       prisma: getPrisma(),
       shareCode,
       shareId,
@@ -27,9 +29,5 @@ export async function GET(
 }
 
 function authorizeHostedSharePayloadRequest(request: Request): void {
-  try {
-    requireHostedShareInternalToken(request);
-  } catch {
-    requireHostedExecutionInternalToken(request);
-  }
+  requireHostedShareInternalToken(request);
 }

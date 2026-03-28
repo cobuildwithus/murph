@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 
 import { getPrisma } from "@/src/lib/prisma";
+import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
@@ -11,6 +12,7 @@ import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram
 
 export async function POST(request: Request) {
   try {
+    assertHostedOnboardingMutationOrigin(request);
     const cookieStore = await cookies();
     const hostedSession = await resolveHostedSessionFromCookieStore(cookieStore);
 

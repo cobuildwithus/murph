@@ -5,17 +5,29 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   buildHostedSharePageData: vi.fn(),
   drainHostedExecutionOutbox: vi.fn(),
+  drainHostedAiUsageStripeMetering: vi.fn(),
   getPrisma: vi.fn(),
+  importHostedAiUsageRecords: vi.fn(),
+  requireHostedExecutionInternalToken: vi.fn(),
   requireHostedExecutionSchedulerToken: vi.fn(),
   resolveHostedSessionFromRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/internal", () => ({
+  requireHostedExecutionInternalToken: mocks.requireHostedExecutionInternalToken,
   requireHostedExecutionSchedulerToken: mocks.requireHostedExecutionSchedulerToken,
 }));
 
 vi.mock("@/src/lib/hosted-execution/outbox", () => ({
   drainHostedExecutionOutbox: mocks.drainHostedExecutionOutbox,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage", () => ({
+  importHostedAiUsageRecords: mocks.importHostedAiUsageRecords,
+}));
+
+vi.mock("@/src/lib/hosted-execution/stripe-metering", () => ({
+  drainHostedAiUsageStripeMetering: mocks.drainHostedAiUsageStripeMetering,
 }));
 
 vi.mock("@/src/lib/hosted-share/service", () => ({
@@ -31,19 +43,27 @@ vi.mock("@/src/lib/hosted-onboarding/session", () => ({
 }));
 
 type HostedExecutionCronRouteModule = typeof import("../app/api/internal/hosted-execution/outbox/cron/route");
+type HostedExecutionUsageCronRouteModule = typeof import("../app/api/internal/hosted-execution/usage/cron/route");
+type HostedExecutionUsageRecordRouteModule = typeof import("../app/api/internal/hosted-execution/usage/record/route");
 type HostedShareStatusRouteModule = typeof import("../app/api/hosted-share/[shareCode]/status/route");
 
 let hostedExecutionCronRoute: HostedExecutionCronRouteModule;
+let hostedExecutionUsageCronRoute: HostedExecutionUsageCronRouteModule;
+let hostedExecutionUsageRecordRoute: HostedExecutionUsageRecordRouteModule;
 let hostedShareStatusRoute: HostedShareStatusRouteModule;
 
 describe("hosted execution async routes", () => {
   beforeAll(async () => {
     hostedExecutionCronRoute = await import("../app/api/internal/hosted-execution/outbox/cron/route");
+    hostedExecutionUsageCronRoute = await import("../app/api/internal/hosted-execution/usage/cron/route");
+    hostedExecutionUsageRecordRoute = await import("../app/api/internal/hosted-execution/usage/record/route");
     hostedShareStatusRoute = await import("../app/api/hosted-share/[shareCode]/status/route");
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.requireHostedExecutionInternalToken.mockImplementation(() => {});
+    mocks.requireHostedExecutionSchedulerToken.mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue({ prisma: true });
     mocks.resolveHostedSessionFromRequest.mockResolvedValue({
       member: {
@@ -55,7 +75,6 @@ describe("hosted execution async routes", () => {
       session: {
         active: true,
         authenticated: true,
-        memberId: "member_123",
       },
       share: null,
       stage: "invalid",
@@ -70,6 +89,16 @@ describe("hosted execution async routes", () => {
         status: "accepted",
       },
     ]);
+    mocks.importHostedAiUsageRecords.mockResolvedValue({
+      recordedIds: ["usage_1", "usage_2"],
+      records: [],
+    });
+    mocks.drainHostedAiUsageStripeMetering.mockResolvedValue({
+      configured: true,
+      failed: 0,
+      metered: 1,
+      skipped: 1,
+    });
   });
 
   it("returns drain counts, event ids, and per-event statuses from the cron route", async () => {
@@ -151,6 +180,67 @@ describe("hosted execution async routes", () => {
     });
   });
 
+  it("records posted hosted AI usage rows through the internal route", async () => {
+    const response = await hostedExecutionUsageRecordRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/record", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer internal-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          usage: [
+            {
+              usageId: "usage_1",
+            },
+            {
+              usageId: "usage_2",
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedExecutionInternalToken).toHaveBeenCalledTimes(1);
+    expect(mocks.importHostedAiUsageRecords).toHaveBeenCalledWith({
+      usage: [
+        {
+          usageId: "usage_1",
+        },
+        {
+          usageId: "usage_2",
+        },
+      ],
+    });
+    await expect(response.json()).resolves.toEqual({
+      recorded: 2,
+      usageIds: ["usage_1", "usage_2"],
+    });
+  });
+
+  it("returns the Stripe usage cron drain summary", async () => {
+    const response = await hostedExecutionUsageCronRoute.GET(
+      new Request("https://join.example.test/api/internal/hosted-execution/usage/cron", {
+        headers: {
+          authorization: "Bearer cron-token",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedExecutionSchedulerToken).toHaveBeenCalledTimes(1);
+    expect(mocks.drainHostedAiUsageStripeMetering).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual({
+      configured: true,
+      failed: 0,
+      metered: 1,
+      skipped: 1,
+    });
+  });
+
   it("decodes shareCode, forwards inviteCode, and passes the resolved session into the share status route", async () => {
     const prisma = {
       prisma: true,
@@ -167,7 +257,6 @@ describe("hosted execution async routes", () => {
       session: {
         active: true,
         authenticated: true,
-        memberId: "member_123",
       },
       share: null,
       stage: "invalid",

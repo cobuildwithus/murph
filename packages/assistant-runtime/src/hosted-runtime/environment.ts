@@ -1,10 +1,13 @@
 import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
+  HOSTED_EXECUTION_PROXY_HOSTS,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
   type HostedExecutionWebControlPlaneEnvironment,
@@ -15,6 +18,8 @@ import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
+
+const hostedRuntimeModuleRequire = createRequire(import.meta.url);
 
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
@@ -30,6 +35,7 @@ export function normalizeHostedAssistantRuntimeConfig(
     ),
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     emailBaseUrl: normalizeHostedEmailBaseUrl(input?.emailBaseUrl),
+    internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
     forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
     sideEffectsBaseUrl: normalizeCallbackBaseUrl(
       input?.sideEffectsBaseUrl ?? input?.outboxBaseUrl,
@@ -52,6 +58,22 @@ export function resolveHostedRuntimeChildEntry(): string {
 
 export function resolveHostedRuntimeTsconfigPath(): string {
   return fileURLToPath(new URL("../../../../tsconfig.base.json", import.meta.url));
+}
+
+export function resolveHostedRuntimeTsxImportSpecifier(): string {
+  try {
+    return pathToFileURL(hostedRuntimeModuleRequire.resolve("tsx")).href;
+  } catch {
+    return "tsx";
+  }
+}
+
+export function hostedAssistantAutomationEnabledFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const normalized = normalizeHostedExecutionString(env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION)?.toLowerCase();
+
+  return normalized === "1" || normalized === "true" || normalized === "yes";
 }
 
 export async function withHostedProcessEnvironment<T>(input: {
@@ -88,17 +110,35 @@ export async function withHostedProcessEnvironment<T>(input: {
 
 function normalizeCallbackBaseUrl(value: string | null | undefined, fallback: string): string {
   const candidate = value && value.trim().length > 0 ? value : fallback;
-  return new URL(candidate).toString();
+  const normalized = normalizeHostedExecutionBaseUrl(candidate, {
+    allowHttpHosts: Object.values(HOSTED_EXECUTION_CALLBACK_HOSTS),
+    allowHttpLocalhost: true,
+  });
+
+  if (!normalized) {
+    throw new TypeError("Hosted assistant runtime callback baseUrl must be configured.");
+  }
+
+  return normalized;
 }
 
 function normalizeHostedExecutionWebControlPlaneConfig(
   value: Partial<HostedExecutionWebControlPlaneEnvironment> | null,
 ): HostedExecutionWebControlPlaneEnvironment {
   return {
-    deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(value?.deviceSyncRuntimeBaseUrl),
+    deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(value?.deviceSyncRuntimeBaseUrl, {
+      allowHttpHosts: [HOSTED_EXECUTION_PROXY_HOSTS.deviceSync],
+      allowHttpLocalhost: true,
+    }),
     internalToken: normalizeHostedExecutionString(value?.internalToken),
     schedulerToken: normalizeHostedExecutionString(value?.schedulerToken),
-    shareBaseUrl: normalizeHostedExecutionBaseUrl(value?.shareBaseUrl),
+    shareBaseUrl: normalizeHostedExecutionBaseUrl(value?.shareBaseUrl, {
+      allowHttpHosts: [HOSTED_EXECUTION_PROXY_HOSTS.sharePack],
+      allowHttpLocalhost: true,
+    }),
     shareToken: normalizeHostedExecutionString(value?.shareToken),
+    usageBaseUrl: normalizeHostedExecutionBaseUrl(value?.usageBaseUrl, {
+      allowHttpLocalhost: true,
+    }),
   };
 }

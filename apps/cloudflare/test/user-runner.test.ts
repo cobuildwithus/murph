@@ -72,6 +72,40 @@ describe("HostedUserRunner", () => {
     await expect(bundleStore.readBundle(ref)).resolves.toEqual(plaintext);
   });
 
+  it("does not treat replay-filter false positives as consumed events", async () => {
+    const { RunnerQueueStore } = await import("../src/user-runner/runner-queue-store.js");
+    const sql = createTestSqlStorage();
+    const queueStore = new RunnerQueueStore({
+      storage: {
+        sql,
+      },
+    } as never);
+
+    await queueStore.bootstrapUser("member_false_positive");
+    sql.exec(
+      "INSERT OR REPLACE INTO consumed_event_replay_filter (singleton, bits) VALUES (?, ?)",
+      1,
+      new Uint8Array(2048).fill(255),
+    );
+
+    const result = await queueStore.enqueueDispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "member_false_positive",
+      },
+      eventId: "evt_false_positive",
+      occurredAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.alreadySeen).toBe(false);
+    await expect(queueStore.readEventPresence("evt_false_positive")).resolves.toEqual({
+      consumed: false,
+      pending: true,
+    });
+  });
+
   it("reads legacy hosted bundle envelopes through object storage", async () => {
     const bundleStore = createHostedBundleStore({
       bucket: bucket.api,
@@ -130,10 +164,16 @@ describe("HostedUserRunner", () => {
         v2: currentKey,
       },
     });
+    const writesBeforeRead = bucket.putCount();
 
     await expect(bundleStore.readBundle(legacyRef)).resolves.toEqual(
       new TextEncoder().encode("vault bundle"),
     );
+    expect(bucket.putCount()).toBe(writesBeforeRead + 1);
+    const migratedEnvelope = JSON.parse(
+      Buffer.from(await (await bucket.api.get(legacyRef.key))!.arrayBuffer()).toString("utf8"),
+    ) as { keyId: string };
+    expect(migratedEnvelope.keyId).toBe("v2");
   });
 
   it("cleans up orphaned per-user artifacts without deleting shared bundle objects", async () => {
@@ -1911,24 +1951,27 @@ describe("HostedUserRunner", () => {
   });
 
   it("stores encrypted per-user env config in a dedicated hosted object", async () => {
-    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const runner = new HostedUserRunner(storage.state, {
+      ...environment,
+      allowedUserEnvKeys: "OPENAI_API_KEY,XAI_API_KEY",
+    }, bucket.api);
 
     await runner.bootstrapUser("member_123");
     const saved = await runner.updateUserEnv({
       env: {
         OPENAI_API_KEY: "sk-user",
-        TELEGRAM_BOT_TOKEN: "bot-token",
+        XAI_API_KEY: "xai-user",
       },
       mode: "replace",
     });
 
     expect(saved.configuredUserEnvKeys).toEqual([
       "OPENAI_API_KEY",
-      "TELEGRAM_BOT_TOKEN",
+      "XAI_API_KEY",
     ]);
     expect(bucket.keys()).toEqual(["users/member_123/user-env.json"]);
     await expect(runner.getUserEnvStatus("member_123")).resolves.toEqual({
-      configuredUserEnvKeys: ["OPENAI_API_KEY", "TELEGRAM_BOT_TOKEN"],
+      configuredUserEnvKeys: ["OPENAI_API_KEY", "XAI_API_KEY"],
       userId: "member_123",
     });
   });

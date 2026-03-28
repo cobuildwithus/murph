@@ -90,7 +90,6 @@ export async function getHostedInviteStatus(input: {
   }
 
   const sessionMatchesInvite = input.sessionRecord?.member.id === invite.memberId;
-  const hasWallet = Boolean(invite.member.walletAddress);
   const hasPrivyIdentity = Boolean(invite.member.privyUserId && invite.member.walletAddress);
   const isActive = invite.member.billingStatus === HostedBillingStatus.active;
   const stage =
@@ -116,13 +115,8 @@ export async function getHostedInviteStatus(input: {
       status: inviteStatus,
     },
     member: {
-      billingStatus: invite.member.billingStatus,
-      hasWallet,
       phoneHint: maskPhoneNumber(invite.member.normalizedPhoneNumber),
-      phoneVerified: Boolean(invite.member.phoneNumberVerifiedAt),
       status: invite.member.status,
-      walletAddress: invite.member.walletAddress,
-      walletChainType: invite.member.walletChainType,
     },
     session: {
       authenticated: Boolean(input.sessionRecord),
