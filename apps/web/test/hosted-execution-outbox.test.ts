@@ -15,9 +15,16 @@ vi.mock("@/src/lib/hosted-execution/dispatch", () => ({
   dispatchHostedExecutionStatus: mocks.dispatchHostedExecutionStatus,
 }));
 
-vi.mock("@/src/lib/hosted-execution/hydration", () => ({
-  hydrateHostedExecutionDispatch: mocks.hydrateHostedExecutionDispatch,
-}));
+vi.mock("@/src/lib/hosted-execution/hydration", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-execution/hydration")>(
+    "@/src/lib/hosted-execution/hydration",
+  );
+
+  return {
+    ...actual,
+    hydrateHostedExecutionDispatch: mocks.hydrateHostedExecutionDispatch,
+  };
+});
 
 vi.mock("@/src/lib/hosted-share/shared", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-share/shared")>("@/src/lib/hosted-share/shared");
@@ -160,6 +167,30 @@ describe("drainHostedExecutionOutbox", () => {
     expect(record?.lastError).toBe("poisoned by runner");
   });
 
+  it("marks permanent hydration failures as terminal failed rows instead of retrying forever", async () => {
+    const prisma = createOutboxPrisma(createOutboxRecord({
+      eventId: "evt_tick",
+      eventKind: "assistant.cron.tick",
+      userId: "member_123",
+    }));
+    mocks.hydrateHostedExecutionDispatch.mockRejectedValue(
+      Object.assign(new Error("Device-sync sourceId is required for hosted execution evt_tick."), {
+        code: "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_REQUIRED",
+        permanent: true,
+        retryable: false,
+      }),
+    );
+
+    const [record] = await drainHostedExecutionOutbox({
+      now: "2026-03-28T11:00:00.000Z",
+      prisma,
+    });
+
+    expect(record?.status).toBe(ExecutionOutboxStatus.failed);
+    expect(record?.failedAt).toEqual(new Date("2026-03-28T11:00:00.000Z"));
+    expect(record?.nextAttemptAt).toEqual(new Date("2026-03-28T11:00:00.000Z"));
+  });
+
   it("rejects reused event ids when source metadata changes", async () => {
     const dispatch = createTickDispatch();
     const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
@@ -178,6 +209,45 @@ describe("drainHostedExecutionOutbox", () => {
     })).rejects.toThrow(
       "Hosted execution outbox event evt_tick already exists with conflicting metadata.",
     );
+  });
+
+  it("accepts idempotent re-enqueue when stored payload JSON key order differs", async () => {
+    const dispatch = createShareDispatch();
+    const share = (
+      dispatch.event as Extract<HostedExecutionDispatchRequest["event"], { kind: "vault.share.accepted" }>
+    ).share;
+    const prisma = createEnqueueOutboxPrisma(createOutboxRecord({
+      eventId: dispatch.eventId,
+      eventKind: dispatch.event.kind,
+      payloadJson: {
+        storage: "inline",
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        dispatch: {
+          occurredAt: dispatch.occurredAt,
+          eventId: dispatch.eventId,
+          event: {
+            userId: dispatch.event.userId,
+            share: {
+              shareId: share.shareId,
+              shareCode: share.shareCode,
+            },
+            kind: dispatch.event.kind,
+          },
+        },
+      },
+      sourceId: "share_123",
+      sourceType: "hosted_share_link",
+      userId: dispatch.event.userId,
+    }));
+
+    await expect(enqueueHostedExecutionOutbox({
+      dispatch,
+      sourceId: "share_123",
+      sourceType: "hosted_share_link",
+      tx: prisma as never,
+    })).resolves.toMatchObject({
+      eventId: dispatch.eventId,
+    });
   });
 });
 
@@ -244,6 +314,7 @@ function createDispatchResult(
 function createOutboxRecord(input: {
   eventId: string;
   eventKind: string;
+  payloadJson?: ExecutionOutbox["payloadJson"];
   sourceId?: string | null;
   sourceType?: string;
   userId: string;
@@ -263,7 +334,7 @@ function createOutboxRecord(input: {
     lastError: null,
     lastStatusJson: null,
     nextAttemptAt: new Date("2026-03-28T11:00:00.000Z"),
-    payloadJson: {
+    payloadJson: input.payloadJson ?? {
       storage: "reference",
       dispatchRef: {
         eventId: input.eventId,

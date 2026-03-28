@@ -33,7 +33,12 @@ vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
   issueHostedInviteForPhone: mocks.issueHostedInviteForPhone,
 }));
 
-import { acceptHostedShareLink, buildHostedSharePageData, createHostedShareLink } from "@/src/lib/hosted-share/service";
+import {
+  acceptHostedShareLink,
+  buildHostedSharePageData,
+  createHostedShareLink,
+  readHostedSharePackByReference,
+} from "@/src/lib/hosted-share/service";
 import { finalizeHostedShareAcceptance } from "@/src/lib/hosted-share/shared";
 
 function buildPack(): SharePack {
@@ -250,6 +255,56 @@ describe("hosted share service", () => {
     expect(finalized.imported).toBe(true);
     expect(prisma.rows[0]?.consumedByMemberId).toBe("member_123");
   });
+
+  it("requires the bound hosted member to match the accepted or consumed share owner", async () => {
+    const prisma = createHostedSharePrisma();
+    const created = await createHostedShareLink({
+      prisma: prisma as never,
+      pack: buildPack(),
+      senderMemberId: "member_sender",
+    });
+
+    await expect(readHostedSharePackByReference({
+      boundMemberId: "member_123",
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      shareId: prisma.rows[0]!.id,
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_NOT_FOUND",
+    });
+
+    await acceptHostedShareLink({
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      sessionRecord: {
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+        },
+        session: {
+          expiresAt: new Date("2026-04-01T00:00:00.000Z"),
+        },
+      } as never,
+    });
+
+    await expect(readHostedSharePackByReference({
+      boundMemberId: "member_456",
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      shareId: prisma.rows[0]!.id,
+    })).rejects.toMatchObject({
+      code: "HOSTED_SHARE_NOT_FOUND",
+    });
+
+    await expect(readHostedSharePackByReference({
+      boundMemberId: "member_123",
+      prisma: prisma as never,
+      shareCode: created.shareCode,
+      shareId: prisma.rows[0]!.id,
+    })).resolves.toMatchObject({
+      shareId: prisma.rows[0]!.id,
+    });
+  });
 });
 
 type HostedShareRow = {
@@ -288,7 +343,11 @@ function createHostedSharePrisma() {
         rows.push(row);
         return row;
       },
-      findUnique: async ({ where }: { where: { codeHash: string } }) => rows.find((row) => row.codeHash === where.codeHash) ?? null,
+      findUnique: async ({ where }: { where: { codeHash?: string; id?: string } }) =>
+        rows.find((row) =>
+          (where.codeHash !== undefined && row.codeHash === where.codeHash)
+          || (where.id !== undefined && row.id === where.id)
+        ) ?? null,
       updateMany: async ({ data, where }: { data: Partial<HostedShareRow>; where: { codeHash: string; consumedAt?: null; acceptedByMemberId?: string; OR?: Array<{ acceptedAt?: null; acceptedByMemberId?: string }> } }) => {
         const row = rows.find((entry) => entry.codeHash === where.codeHash);
 

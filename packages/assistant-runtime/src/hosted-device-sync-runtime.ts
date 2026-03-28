@@ -32,6 +32,7 @@ type HostedAccountHydrationInput = Parameters<DeviceSyncService["store"]["hydrat
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
+  fetchImpl?: typeof fetch;
   secret: string;
   service: DeviceSyncService;
   timeoutMs: number | null;
@@ -50,6 +51,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
   const snapshot = await fetchHostedExecutionDeviceSyncRuntimeSnapshot({
     baseUrl,
+    fetchImpl: input.fetchImpl,
     internalToken,
     timeoutMs: input.timeoutMs,
     userId: input.dispatch.event.userId,
@@ -119,6 +121,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
+  fetchImpl?: typeof fetch;
   secret: string;
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
@@ -163,6 +166,7 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
 
   await applyHostedExecutionDeviceSyncRuntimeUpdates({
     baseUrl,
+    fetchImpl: input.fetchImpl,
     internalToken,
     occurredAt: input.dispatch.occurredAt,
     timeoutMs: input.timeoutMs,
