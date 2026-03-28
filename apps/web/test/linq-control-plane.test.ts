@@ -272,6 +272,33 @@ describe("HostedLinqControlPlane", () => {
     expect(mocks.store.upsertBinding).not.toHaveBeenCalled();
   });
 
+  it("fails hosted recipient verification when LINQ_API_TOKEN is missing", async () => {
+    delete process.env.LINQ_API_TOKEN;
+    const authControlPlane = {
+      assertBrowserMutationOrigin: vi.fn(),
+      requireAuthenticatedUser: vi.fn().mockResolvedValue({
+        id: "user-123",
+      }),
+    };
+
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/bindings", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.upsertBinding({
+      recipientPhone: "+15557654321",
+    })).rejects.toMatchObject({
+      code: "LINQ_API_TOKEN_REQUIRED",
+      httpStatus: 500,
+    });
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.store.upsertBinding).not.toHaveBeenCalled();
+  });
+
   it("fails hosted recipient verification when the Linq phone-number probe returns a non-OK response", async () => {
     const authControlPlane = {
       assertBrowserMutationOrigin: vi.fn(),
@@ -300,6 +327,39 @@ describe("HostedLinqControlPlane", () => {
       code: "LINQ_BINDING_PROBE_FAILED",
       httpStatus: 502,
       message: "Linq recipient verification failed with HTTP 503.",
+      retryable: true,
+    });
+    expect(mocks.store.upsertBinding).not.toHaveBeenCalled();
+  });
+
+  it("treats hosted Linq phone-number rate limits as retryable probe failures", async () => {
+    const authControlPlane = {
+      assertBrowserMutationOrigin: vi.fn(),
+      requireAuthenticatedUser: vi.fn().mockResolvedValue({
+        id: "user-123",
+      }),
+    };
+
+    mocks.createHostedDeviceSyncControlPlane.mockReturnValue(authControlPlane);
+    mocks.fetch.mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({}),
+      text: async () => "",
+    });
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/bindings", {
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.upsertBinding({
+      recipientPhone: "+15557654321",
+    })).rejects.toMatchObject({
+      code: "LINQ_BINDING_PROBE_FAILED",
+      httpStatus: 502,
+      message: "Linq recipient verification failed with HTTP 429.",
       retryable: true,
     });
     expect(mocks.store.upsertBinding).not.toHaveBeenCalled();

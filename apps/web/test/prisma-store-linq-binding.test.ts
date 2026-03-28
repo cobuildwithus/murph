@@ -54,6 +54,21 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
         recipientPhone: "+15557654321",
       },
     });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        recipientPhone: {
+          in: ["+15557654321", "15557654321"],
+        },
+      },
+      orderBy: [
+        {
+          createdAt: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    });
     expect(binding.recipientPhone).toBe("+15557654321");
   });
 
@@ -144,6 +159,61 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
         userId: "user-123",
       }),
     );
+  });
+
+  it("updates the preferred canonical row when the same user already has legacy and canonical duplicates", async () => {
+    const records = [
+      createBindingRecord({
+        id: "linqb_legacy",
+        label: "Legacy",
+        recipientPhone: "15557654321",
+        userId: "user-123",
+      }),
+      createBindingRecord({
+        id: "linqb_canonical",
+        label: "Canonical",
+        recipientPhone: "+15557654321",
+        userId: "user-123",
+      }),
+    ];
+    const update = vi.fn().mockImplementation(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const current = records.find((record) => record.id === where.id)!;
+      current.recipientPhone = data.recipientPhone as string;
+      current.label = (data.label as string | null | undefined) ?? null;
+      current.updatedAt = new Date("2026-03-28T12:05:00.000Z");
+      return cloneBindingRecord(current);
+    });
+
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          create: vi.fn(),
+          findMany: vi.fn().mockResolvedValue(records.map(cloneBindingRecord)),
+          update,
+        },
+      } as never,
+    });
+
+    const binding = await store.upsertBinding({
+      userId: "user-123",
+      recipientPhone: "+15557654321",
+      label: "Updated canonical",
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      where: {
+        id: "linqb_canonical",
+      },
+      data: {
+        label: "Updated canonical",
+        recipientPhone: "+15557654321",
+      },
+    });
+    expect(binding).toEqual(expect.objectContaining({
+      id: "linqb_canonical",
+      label: "Updated canonical",
+      recipientPhone: "+15557654321",
+    }));
   });
 
   it("rejects read-path conflicts when canonicalized duplicates belong to different users", async () => {

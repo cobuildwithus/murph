@@ -1,5 +1,5 @@
 export interface LinqWebhookEvent {
-  api_version: 'v3'
+  api_version: string
   event_id: string
   created_at: string
   trace_id?: string | null

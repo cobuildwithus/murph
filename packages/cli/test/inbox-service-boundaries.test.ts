@@ -59,6 +59,7 @@ test('instantiateConnector delegates iMessage defaults through the connector fac
     async loadTelegramDriver() {
       throw new Error('unreachable')
     },
+    linqWebhookSecret: null,
   })
 
   assert.equal(connector.id, 'imessage:self')
@@ -245,6 +246,7 @@ test('instantiateConnector delegates Telegram polling through the explicit takeo
     async loadTelegramDriver() {
       return {} as any
     },
+    linqWebhookSecret: null,
   })
 
   assert.equal(connector.id, 'telegram:bot')

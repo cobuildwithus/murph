@@ -402,10 +402,10 @@ const CHANNEL_SPECS = {
         connectorId: LINQ_SETUP_CONNECTOR_ID,
         dryRunDetail: readyForSetup
           ? 'Would configure the Linq webhook connector and enable assistant auto-reply for Linq direct chats.'
-          : `Linq needs LINQ_API_TOKEN in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
+          : `Linq needs both LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET in the current environment before setup can enable the channel. ${SETUP_RUNTIME_ENV_NOTICE}`,
         dryRunStepDetail: readyForSetup
           ? 'Would verify the Linq API token, add or reuse the linq:default inbox connector, and enable assistant auto-reply for Linq direct chats.'
-          : 'Would configure Linq once LINQ_API_TOKEN is available in the shell or local `.env`.',
+          : 'Would configure Linq once LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET are available in the shell or local `.env`.',
         missingEnv,
         readyForSetup,
       }
@@ -425,11 +425,11 @@ const CHANNEL_SPECS = {
     describeMissingEnv({ existingConnector }) {
       return {
         stepDetail: existingConnector
-          ? `Reused the Linq inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because LINQ_API_TOKEN was not available in the shell or local \`.env\`.`
-          : 'Linq was selected, but setup did not add the connector because LINQ_API_TOKEN was not available in the shell or local `.env`.',
+          ? `Reused the Linq inbox connector "${existingConnector.id}", but did not enable assistant auto-reply because LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET were not both available in the shell or local \`.env\`.`
+          : 'Linq was selected, but setup did not add the connector because LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET were not both available in the shell or local `.env`.',
         detail: existingConnector
-          ? `Reused the Linq connector "${existingConnector.id}", but skipped assistant auto-reply until a Linq API token is available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
-          : `Linq needs LINQ_API_TOKEN in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
+          ? `Reused the Linq connector "${existingConnector.id}", but skipped assistant auto-reply until both a Linq API token and webhook secret are available in the current environment. ${SETUP_RUNTIME_ENV_NOTICE}`
+          : `Linq needs LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET in the current environment before setup can add the connector and enable assistant auto-reply. ${SETUP_RUNTIME_ENV_NOTICE}`,
       }
     },
     describeReused({ connector, readiness }) {

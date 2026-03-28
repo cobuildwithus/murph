@@ -106,18 +106,11 @@ export async function toLinqChatMessage(input: {
 export function requireLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {
-  if (event.event_type !== 'message.received' || !event.data || typeof event.data !== 'object') {
+  if (event.event_type !== 'message.received') {
     throw new TypeError('Linq webhook event does not contain a supported message.received payload.')
   }
 
-  return event as LinqMessageReceivedEvent
-}
-
-export function parseCanonicalLinqMessageReceivedEvent(
-  event: LinqWebhookEvent,
-): LinqMessageReceivedEvent {
-  const messageEvent = requireLinqMessageReceivedEvent(event)
-  const data = toLinqObjectRecord(messageEvent.data, 'Linq message.received data')
+  const data = toLinqObjectRecord(event.data, 'Linq message.received data')
   const message = toLinqObjectRecord(data.message, 'Linq message.received message')
   const parts = message.parts
 
@@ -125,11 +118,12 @@ export function parseCanonicalLinqMessageReceivedEvent(
     throw new TypeError('Linq message.received message.parts must be an array.')
   }
 
-  return {
-    ...messageEvent,
-    created_at: normalizeRequiredTimestamp(messageEvent.created_at, 'Linq webhook created_at'),
-    trace_id: normalizeNullableString(messageEvent.trace_id ?? null),
-    partner_id: normalizeNullableString(messageEvent.partner_id ?? null),
+  const normalizedEvent: LinqMessageReceivedEvent = {
+    ...event,
+    event_type: 'message.received',
+    created_at: normalizeRequiredTimestamp(event.created_at, 'Linq webhook created_at'),
+    trace_id: normalizeNullableString(event.trace_id ?? null),
+    partner_id: normalizeNullableString(event.partner_id ?? null),
     data: {
       chat_id: normalizeRequiredString(data.chat_id, 'Linq message.received chat_id'),
       from: normalizeRequiredString(data.from, 'Linq message.received from'),
@@ -145,6 +139,14 @@ export function parseCanonicalLinqMessageReceivedEvent(
       },
     },
   }
+
+  return normalizedEvent
+}
+
+export function parseCanonicalLinqMessageReceivedEvent(
+  event: LinqWebhookEvent,
+): LinqMessageReceivedEvent {
+  return requireLinqMessageReceivedEvent(event)
 }
 
 export function buildLinqMessageText(
@@ -171,7 +173,7 @@ async function buildLinqAttachments(
       continue
     }
 
-    const data = await downloadLinqAttachmentBestEffort(
+    const data = await downloadLinqAttachmentInlineBestEffort(
       part,
       downloadDriver,
       signal,
@@ -193,7 +195,7 @@ async function buildLinqAttachments(
   return attachments
 }
 
-async function downloadLinqAttachmentBestEffort(
+async function downloadLinqAttachmentInlineBestEffort(
   part: LinqMediaPart,
   downloadDriver: LinqAttachmentDownloadDriver | null,
   signal?: AbortSignal,
@@ -217,7 +219,8 @@ async function downloadLinqAttachmentBestEffort(
 
     return await downloadDriver.downloadUrl(url, signal)
   } catch {
-    // Keep webhook acceptance tied to capture persistence, not best-effort media fetches.
+    // Attachment bytes are optional at persistence time, but this download still happens inline
+    // on the request path until it succeeds, fails, times out, or is aborted by the watch signal.
     return null
   }
 }

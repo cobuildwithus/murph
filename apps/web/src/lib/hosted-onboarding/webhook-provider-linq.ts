@@ -2,7 +2,7 @@ import { HostedBillingStatus } from "@prisma/client";
 
 import {
   buildHostedInviteReply,
-  parseHostedLinqWebhookEvent,
+  type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
   resolveHostedLinqOccurredAt,
   summarizeHostedLinqMessage,
@@ -33,7 +33,7 @@ export type HostedOnboardingLinqWebhookResponse = {
 };
 
 export async function planHostedOnboardingLinqWebhook(input: {
-  event: ReturnType<typeof parseHostedLinqWebhookEvent>;
+  event: HostedLinqWebhookEvent;
   prisma: HostedWebhookReceiptPersistenceClient;
 }): Promise<HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>> {
   if (input.event.event_type !== "message.received") {

@@ -82,7 +82,7 @@ describe("sendHostedLinqChatMessage", () => {
     });
   });
 
-  it("marks 4xx Linq API failures as non-retryable", async () => {
+  it("treats Linq 429 responses as retryable", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: false,
       status: 429,
@@ -98,7 +98,7 @@ describe("sendHostedLinqChatMessage", () => {
       code: "LINQ_SEND_FAILED",
       httpStatus: 502,
       message: "Linq outbound reply failed with HTTP 429.",
-      retryable: false,
+      retryable: true,
     });
   });
 });

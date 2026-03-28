@@ -264,7 +264,7 @@ export class HostedLinqControlPlane {
         code: "LINQ_BINDING_PROBE_FAILED",
         message: `Linq recipient verification failed with HTTP ${response.status}.`,
         httpStatus: 502,
-        retryable: response.status >= 500,
+        retryable: response.status === 429 || response.status >= 500,
       });
     }
 

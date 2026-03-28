@@ -17,7 +17,7 @@ export async function instantiateConnector(input: {
   loadImessageDriver: (config: InboxConnectorConfig) => Promise<ImessageDriver>
   loadTelegramDriver: (config: InboxConnectorConfig) => Promise<TelegramDriver>
   loadEmailDriver?: (config: InboxConnectorConfig) => Promise<EmailDriver>
-  linqWebhookSecret?: string | null
+  linqWebhookSecret: string | null
   ensureImessageReady?: () => Promise<void>
 }): Promise<PollConnector> {
   const inboxd = await input.loadInbox()

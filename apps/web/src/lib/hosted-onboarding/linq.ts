@@ -19,15 +19,10 @@ export function parseHostedLinqWebhookEvent(rawBody: string): HostedLinqWebhookE
   try {
     return parseLinqWebhookEvent(rawBody);
   } catch (error) {
-    if (isLinqWebhookPayloadError(error)) {
-      throw hostedOnboardingError({
-        code: "LINQ_PAYLOAD_INVALID",
-        message: error.message,
-        httpStatus: 400,
-      });
-    }
-
-    throw error;
+    throw mapHostedLinqWebhookError(error, {
+      signaturePresent: true,
+      timestampPresent: true,
+    });
   }
 }
 
@@ -74,37 +69,11 @@ export function verifyAndParseHostedLinqWebhookRequest(input: {
       webhookSecret,
     });
   } catch (error) {
-    if (isLinqWebhookVerificationError(error)) {
-      const code = input.signature && input.timestamp ? "LINQ_SIGNATURE_INVALID" : "LINQ_SIGNATURE_REQUIRED";
-      throw hostedOnboardingError({
-        code,
-        message: error.message,
-        httpStatus: 401,
-      });
-    }
-
-    if (isLinqWebhookPayloadError(error)) {
-      throw hostedOnboardingError({
-        code: "LINQ_PAYLOAD_INVALID",
-        message: error.message,
-        httpStatus: 400,
-      });
-    }
-
-    throw error;
+    throw mapHostedLinqWebhookError(error, {
+      signaturePresent: Boolean(input.signature),
+      timestampPresent: Boolean(input.timestamp),
+    });
   }
-}
-
-export function assertHostedLinqWebhookSignature(input: {
-  payload: string;
-  signature: string | null;
-  timestamp: string | null;
-}): void {
-  verifyAndParseHostedLinqWebhookRequest({
-    rawBody: input.payload,
-    signature: input.signature,
-    timestamp: input.timestamp,
-  });
 }
 
 export async function sendHostedLinqChatMessage(input: {
@@ -159,7 +128,7 @@ export async function sendHostedLinqChatMessage(input: {
       code: "LINQ_SEND_FAILED",
       message: `Linq outbound reply failed with HTTP ${response.status}.`,
       httpStatus: 502,
-      retryable: response.status >= 500,
+      retryable: isRetryableHostedLinqStatus(response.status),
     });
   }
 
@@ -216,4 +185,37 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return normalized;
+}
+
+function isRetryableHostedLinqStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function mapHostedLinqWebhookError(
+  error: unknown,
+  input: {
+    signaturePresent: boolean;
+    timestampPresent: boolean;
+  },
+): never {
+  if (isLinqWebhookVerificationError(error)) {
+    const code = input.signaturePresent && input.timestampPresent
+      ? "LINQ_SIGNATURE_INVALID"
+      : "LINQ_SIGNATURE_REQUIRED";
+    throw hostedOnboardingError({
+      code,
+      message: error.message,
+      httpStatus: 401,
+    });
+  }
+
+  if (isLinqWebhookPayloadError(error)) {
+    throw hostedOnboardingError({
+      code: "LINQ_PAYLOAD_INVALID",
+      message: error.message,
+      httpStatus: 400,
+    });
+  }
+
+  throw error;
 }

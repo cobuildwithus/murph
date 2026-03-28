@@ -221,8 +221,8 @@ async function handleLinqWebhookRequest(input: {
     return
   }
 
-  // Bound synchronous normalization to canonical message parsing and attachment metadata.
-  // Remote media bytes stay best-effort and must not hold the webhook acknowledgement open.
+  // Canonical message parsing and bounded best-effort attachment hydration still happen inline
+  // before persistence. Failed or timed-out media downloads degrade to metadata-only attachments.
   let capture
   try {
     capture = await normalizeLinqWebhookEvent({

@@ -1442,6 +1442,7 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
   assert.deepEqual(
     resolveSetupChannelMissingEnv('linq', {
       LINQ_API_TOKEN: 'linq-token',
+      LINQ_WEBHOOK_SECRET: 'linq-secret',
     }),
     [],
   )
@@ -1450,6 +1451,7 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
   ])
   assert.deepEqual(resolveSetupChannelMissingEnv('linq', {}), [
     'LINQ_API_TOKEN',
+    'LINQ_WEBHOOK_SECRET',
   ])
   assert.deepEqual(
     resolveSetupWearableMissingEnv('oura', {
