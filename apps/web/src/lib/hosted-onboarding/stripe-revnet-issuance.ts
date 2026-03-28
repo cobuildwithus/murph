@@ -41,156 +41,93 @@ type HostedRevnetIssuanceRecord = Pick<
   | "updatedAt"
 >;
 
+type HostedRevnetIssuanceEligibility =
+  | {
+    kind: "skip";
+    reason: "amount_paid_missing" | "member_suspended" | "revnet_disabled";
+  }
+  | {
+    amountPaid: number;
+    beneficiaryAddress: ReturnType<typeof requireHostedMemberWalletAddressForRevnet>;
+    chargeId: string | null;
+    config: ReturnType<typeof requireHostedRevnetConfig>;
+    idempotencyKey: string;
+    invoiceId: string;
+    kind: "ready";
+    memberId: string;
+    paymentAmount: bigint;
+    paymentIntentId: string | null;
+    prisma: PrismaClient;
+  };
+
+type HostedRevnetIssuanceSubmissionState =
+  | {
+    issuance: HostedRevnetIssuanceRecord | null;
+    kind: "skip";
+    reason:
+      | "broadcast_status_unknown"
+      | "confirmed"
+      | "missing"
+      | "pay_tx_hash_recorded"
+      | "submitted"
+      | "submitting_recent";
+  }
+  | {
+    issuance: HostedRevnetIssuanceRecord;
+    kind: "ready";
+  };
+
+type HostedRevnetIssuanceClaimState =
+  | {
+    issuance: HostedRevnetIssuanceRecord;
+    kind: "claimed";
+  }
+  | {
+    issuance: HostedRevnetIssuanceRecord | null;
+    kind: "skip";
+    reason: Extract<HostedRevnetIssuanceSubmissionState, { kind: "skip" }>["reason"];
+  };
+
 export async function maybeIssueHostedRevnetForStripeInvoice(input: {
   invoice: Stripe.Invoice;
   member: HostedMember;
   prisma: PrismaClient;
 }): Promise<void> {
-  if (input.member.status === HostedMemberStatus.suspended) {
+  const eligibility = loadHostedRevnetIssuanceEligibility(input);
+
+  if (eligibility.kind === "skip") {
     return;
   }
 
-  if (!isHostedOnboardingRevnetEnabled()) {
-    return;
-  }
-
-  const amountPaid = typeof input.invoice.amount_paid === "number" ? input.invoice.amount_paid : 0;
-
-  if (amountPaid < 1) {
-    return;
-  }
-
-  const config = requireHostedRevnetConfig();
-  const invoiceCurrency = normalizeNullableString(input.invoice.currency)?.toLowerCase() ?? null;
-
-  if (invoiceCurrency && invoiceCurrency !== config.stripeCurrency) {
-    throw hostedOnboardingError({
-      code: "REVNET_PAYMENT_CURRENCY_MISMATCH",
-      message: `Stripe invoice ${input.invoice.id} used ${invoiceCurrency}, but Hosted RevNet issuance is configured for ${config.stripeCurrency}.`,
-      httpStatus: 502,
-    });
-  }
-
-  const beneficiaryAddress = requireHostedMemberWalletAddressForRevnet(input.member);
-  const idempotencyKey = `stripe:invoice:${input.invoice.id}`;
-  const paymentAmount = convertStripeMinorAmountToRevnetPaymentAmount(
-    amountPaid,
-    config.weiPerStripeMinorUnit,
-  );
-  const paymentIntentId = coerceStripeObjectId(
-    (input.invoice as Stripe.Invoice & { payment_intent?: string | { id?: unknown } | null }).payment_intent ??
-      null,
-  );
-  const chargeId = coerceStripeObjectId(
-    (input.invoice as Stripe.Invoice & { charge?: string | { id?: unknown } | null }).charge ?? null,
-  );
-
-  let issuance = await findOrCreateHostedRevnetIssuance({
-    amountPaid,
-    beneficiaryAddress,
-    chargeId,
-    config,
-    idempotencyKey,
-    invoiceId: input.invoice.id,
-    memberId: input.member.id,
-    paymentAmount,
-    paymentIntentId,
-    prisma: input.prisma,
-  });
-
-  issuance = await patchHostedRevnetIssuanceStripeReferences({
-    chargeId,
+  let issuance = await findOrCreateHostedRevnetIssuance(eligibility);
+  issuance = await patchHostedRevnetIssuanceStripeReferencesIfNeeded({
+    chargeId: eligibility.chargeId,
     issuance,
-    paymentIntentId,
-    prisma: input.prisma,
+    paymentIntentId: eligibility.paymentIntentId,
+    prisma: eligibility.prisma,
   });
 
-  if (shouldSkipHostedRevnetIssuanceSubmission(issuance)) {
+  const submissionState = loadHostedRevnetIssuanceSubmissionState(issuance);
+
+  if (submissionState.kind === "skip") {
     return;
   }
 
-  const claimedIssuance = await input.prisma.hostedRevnetIssuance.updateMany({
-    where: {
-      id: issuance.id,
-      status: issuance.status,
-      updatedAt: issuance.updatedAt,
-    },
-    data: {
-      status: HostedRevnetIssuanceStatus.submitting,
-      failureCode: null,
-      failureMessage: null,
-    },
+  const claimState = await claimHostedRevnetIssuanceSubmission({
+    idempotencyKey: eligibility.idempotencyKey,
+    invoiceId: eligibility.invoiceId,
+    issuance: submissionState.issuance,
+    prisma: eligibility.prisma,
   });
 
-  if (claimedIssuance.count !== 1) {
-    const latestIssuance = await input.prisma.hostedRevnetIssuance.findUnique({
-      where: {
-        idempotencyKey,
-      },
-    });
-
-    if (shouldSkipHostedRevnetIssuanceSubmission(latestIssuance)) {
-      return;
-    }
-
-    throw hostedOnboardingError({
-      code: "REVNET_ISSUANCE_CLAIM_FAILED",
-      message: `Hosted RevNet issuance could not be claimed safely for Stripe invoice ${input.invoice.id}.`,
-      httpStatus: 503,
-      retryable: true,
-    });
+  if (claimState.kind === "skip") {
+    return;
   }
 
-  try {
-    const submission = await submitHostedRevnetPayment({
-      beneficiaryAddress: requireHostedRevnetIssuanceAddress(
-        issuance.beneficiaryAddress,
-        "Hosted RevNet issuance beneficiary address",
-      ),
-      chainId: issuance.chainId,
-      memo: buildHostedRevnetPaymentMemo(issuance.id),
-      paymentAmount: requireHostedRevnetIssuanceBigInt(
-        issuance.paymentAmount,
-        "Hosted RevNet issuance payment amount",
-      ),
-      projectId: requireHostedRevnetIssuanceBigInt(
-        issuance.projectId,
-        "Hosted RevNet issuance project id",
-      ),
-      terminalAddress: requireHostedRevnetIssuanceAddress(
-        issuance.terminalAddress,
-        "Hosted RevNet issuance terminal address",
-      ),
-    });
-
-    await input.prisma.hostedRevnetIssuance.update({
-      where: {
-        id: issuance.id,
-      },
-      data: {
-        failureCode: null,
-        failureMessage: null,
-        payTxHash: submission.payTxHash,
-        status: HostedRevnetIssuanceStatus.submitted,
-        submittedAt: new Date(),
-      },
-    });
-  } catch (error) {
-    const failure = classifyHostedRevnetIssuanceFailure(error);
-
-    await input.prisma.hostedRevnetIssuance.update({
-      where: {
-        id: issuance.id,
-      },
-      data: {
-        failureCode: failure.code,
-        failureMessage: failure.message,
-        status: failure.bucket === "broadcast_unknown"
-          ? HostedRevnetIssuanceStatus.submitting
-          : HostedRevnetIssuanceStatus.failed,
-      },
-    });
-  }
+  await submitAndPersistHostedRevnetIssuance({
+    issuance: claimState.issuance,
+    prisma: eligibility.prisma,
+  });
 }
 
 function buildHostedRevnetPaymentMemo(issuanceId: string): string {
@@ -284,32 +221,131 @@ function isHostedRevnetIssuanceBroadcastStatusUnknown(issuance: HostedRevnetIssu
   );
 }
 
-function shouldSkipHostedRevnetIssuanceSubmission(
-  issuance: HostedRevnetIssuanceRecord | null,
-): boolean {
-  return Boolean(
-    !issuance ||
-      issuance.status === HostedRevnetIssuanceStatus.confirmed ||
-      issuance.status === HostedRevnetIssuanceStatus.submitted ||
-      issuance.payTxHash ||
-      isHostedRevnetIssuanceBroadcastStatusUnknown(issuance) ||
-      (issuance.status === HostedRevnetIssuanceStatus.submitting &&
-        !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt)),
-  );
+function loadHostedRevnetIssuanceEligibility(input: {
+  invoice: Stripe.Invoice;
+  member: HostedMember;
+  prisma: PrismaClient;
+}): HostedRevnetIssuanceEligibility {
+  if (input.member.status === HostedMemberStatus.suspended) {
+    return {
+      kind: "skip",
+      reason: "member_suspended",
+    };
+  }
+
+  if (!isHostedOnboardingRevnetEnabled()) {
+    return {
+      kind: "skip",
+      reason: "revnet_disabled",
+    };
+  }
+
+  const amountPaid = typeof input.invoice.amount_paid === "number" ? input.invoice.amount_paid : 0;
+
+  if (amountPaid < 1) {
+    return {
+      kind: "skip",
+      reason: "amount_paid_missing",
+    };
+  }
+
+  const config = requireHostedRevnetConfig();
+  const invoiceCurrency = normalizeNullableString(input.invoice.currency)?.toLowerCase() ?? null;
+
+  if (invoiceCurrency && invoiceCurrency !== config.stripeCurrency) {
+    throw hostedOnboardingError({
+      code: "REVNET_PAYMENT_CURRENCY_MISMATCH",
+      message: `Stripe invoice ${input.invoice.id} used ${invoiceCurrency}, but Hosted RevNet issuance is configured for ${config.stripeCurrency}.`,
+      httpStatus: 502,
+    });
+  }
+
+  return {
+    amountPaid,
+    beneficiaryAddress: requireHostedMemberWalletAddressForRevnet(input.member),
+    chargeId: coerceStripeObjectId(
+      (input.invoice as Stripe.Invoice & { charge?: string | { id?: unknown } | null }).charge ?? null,
+    ),
+    config,
+    idempotencyKey: `stripe:invoice:${input.invoice.id}`,
+    invoiceId: input.invoice.id,
+    kind: "ready",
+    memberId: input.member.id,
+    paymentAmount: convertStripeMinorAmountToRevnetPaymentAmount(
+      amountPaid,
+      config.weiPerStripeMinorUnit,
+    ),
+    paymentIntentId: coerceStripeObjectId(
+      (input.invoice as Stripe.Invoice & { payment_intent?: string | { id?: unknown } | null }).payment_intent ??
+        null,
+    ),
+    prisma: input.prisma,
+  };
 }
 
-async function findOrCreateHostedRevnetIssuance(input: {
-  amountPaid: number;
-  beneficiaryAddress: ReturnType<typeof requireHostedMemberWalletAddressForRevnet>;
-  chargeId: string | null;
-  config: ReturnType<typeof requireHostedRevnetConfig>;
-  idempotencyKey: string;
-  invoiceId: string;
-  memberId: string;
-  paymentAmount: bigint;
-  paymentIntentId: string | null;
-  prisma: PrismaClient;
-}): Promise<HostedRevnetIssuanceRecord> {
+function loadHostedRevnetIssuanceSubmissionState(
+  issuance: HostedRevnetIssuanceRecord | null,
+): HostedRevnetIssuanceSubmissionState {
+  if (!issuance) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "missing",
+    };
+  }
+
+  if (issuance.status === HostedRevnetIssuanceStatus.confirmed) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "confirmed",
+    };
+  }
+
+  if (issuance.status === HostedRevnetIssuanceStatus.submitted) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "submitted",
+    };
+  }
+
+  if (issuance.payTxHash) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "pay_tx_hash_recorded",
+    };
+  }
+
+  if (isHostedRevnetIssuanceBroadcastStatusUnknown(issuance)) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "broadcast_status_unknown",
+    };
+  }
+
+  if (
+    issuance.status === HostedRevnetIssuanceStatus.submitting &&
+    !isHostedRevnetIssuanceSubmittingStale(issuance.updatedAt)
+  ) {
+    return {
+      issuance,
+      kind: "skip",
+      reason: "submitting_recent",
+    };
+  }
+
+  return {
+    issuance,
+    kind: "ready",
+  };
+}
+
+async function findOrCreateHostedRevnetIssuance(
+  input: Extract<HostedRevnetIssuanceEligibility, { kind: "ready" }>,
+): Promise<HostedRevnetIssuanceRecord> {
   const existingIssuance = await input.prisma.hostedRevnetIssuance.findUnique({
     where: {
       idempotencyKey: input.idempotencyKey,
@@ -357,7 +393,7 @@ async function findOrCreateHostedRevnetIssuance(input: {
   }
 }
 
-async function patchHostedRevnetIssuanceStripeReferences(input: {
+async function patchHostedRevnetIssuanceStripeReferencesIfNeeded(input: {
   chargeId: string | null;
   issuance: HostedRevnetIssuanceRecord;
   paymentIntentId: string | null;
@@ -385,5 +421,118 @@ async function patchHostedRevnetIssuanceStripeReferences(input: {
       id: input.issuance.id,
     },
     data: updateData,
+  });
+}
+
+async function claimHostedRevnetIssuanceSubmission(input: {
+  idempotencyKey: string;
+  invoiceId: string;
+  issuance: HostedRevnetIssuanceRecord;
+  prisma: PrismaClient;
+}): Promise<HostedRevnetIssuanceClaimState> {
+  const claimedIssuance = await input.prisma.hostedRevnetIssuance.updateMany({
+    where: {
+      id: input.issuance.id,
+      status: input.issuance.status,
+      updatedAt: input.issuance.updatedAt,
+    },
+    data: {
+      status: HostedRevnetIssuanceStatus.submitting,
+      failureCode: null,
+      failureMessage: null,
+    },
+  });
+
+  if (claimedIssuance.count === 1) {
+    return {
+      issuance: input.issuance,
+      kind: "claimed",
+    };
+  }
+
+  const latestIssuance = await input.prisma.hostedRevnetIssuance.findUnique({
+    where: {
+      idempotencyKey: input.idempotencyKey,
+    },
+  });
+  const latestSubmissionState = loadHostedRevnetIssuanceSubmissionState(latestIssuance);
+
+  if (latestSubmissionState.kind === "skip") {
+    return latestSubmissionState;
+  }
+
+  throw hostedOnboardingError({
+    code: "REVNET_ISSUANCE_CLAIM_FAILED",
+    message: `Hosted RevNet issuance could not be claimed safely for Stripe invoice ${input.invoiceId}.`,
+    httpStatus: 503,
+    retryable: true,
+  });
+}
+
+async function submitAndPersistHostedRevnetIssuance(input: {
+  issuance: HostedRevnetIssuanceRecord;
+  prisma: PrismaClient;
+}): Promise<void> {
+  try {
+    const submission = await submitHostedRevnetPayment({
+      beneficiaryAddress: requireHostedRevnetIssuanceAddress(
+        input.issuance.beneficiaryAddress,
+        "Hosted RevNet issuance beneficiary address",
+      ),
+      chainId: input.issuance.chainId,
+      memo: buildHostedRevnetPaymentMemo(input.issuance.id),
+      paymentAmount: requireHostedRevnetIssuanceBigInt(
+        input.issuance.paymentAmount,
+        "Hosted RevNet issuance payment amount",
+      ),
+      projectId: requireHostedRevnetIssuanceBigInt(
+        input.issuance.projectId,
+        "Hosted RevNet issuance project id",
+      ),
+      terminalAddress: requireHostedRevnetIssuanceAddress(
+        input.issuance.terminalAddress,
+        "Hosted RevNet issuance terminal address",
+      ),
+    });
+
+    await input.prisma.hostedRevnetIssuance.update({
+      where: {
+        id: input.issuance.id,
+      },
+      data: {
+        failureCode: null,
+        failureMessage: null,
+        payTxHash: submission.payTxHash,
+        status: HostedRevnetIssuanceStatus.submitted,
+        submittedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    await persistHostedRevnetIssuanceSubmissionFailure({
+      error,
+      issuanceId: input.issuance.id,
+      prisma: input.prisma,
+    });
+  }
+}
+
+async function persistHostedRevnetIssuanceSubmissionFailure(input: {
+  error: unknown;
+  issuanceId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const failure = classifyHostedRevnetIssuanceFailure(input.error);
+
+  await input.prisma.hostedRevnetIssuance.update({
+    where: {
+      id: input.issuanceId,
+    },
+    data: {
+      failureCode: failure.code,
+      failureMessage: failure.message,
+      status: failure.bucket === "broadcast_unknown"
+        ? HostedRevnetIssuanceStatus.submitting
+        : HostedRevnetIssuanceStatus.failed,
+    },
   });
 }
