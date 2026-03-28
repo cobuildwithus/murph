@@ -701,6 +701,190 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("hydrates hosted Telegram attachment bytes when runner Telegram env is present", async () => {
+    const previousTelegramApiBaseUrl = process.env.TELEGRAM_API_BASE_URL;
+    const previousTelegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+    const previousTelegramFileBaseUrl = process.env.TELEGRAM_FILE_BASE_URL;
+    process.env.TELEGRAM_API_BASE_URL = "https://telegram-api.example.test";
+    process.env.TELEGRAM_BOT_TOKEN = "telegram-token";
+    process.env.TELEGRAM_FILE_BASE_URL = "https://telegram-files.example.test";
+
+    const attachmentBytes = Uint8Array.from([1, 2, 3, 4]);
+    const artifactBytesByUrl = new Map<string, Uint8Array>();
+    const fetchSpy = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).startsWith("http://artifacts.worker/objects/")) {
+        if (init?.method === "PUT") {
+          const bodyBytes = new Uint8Array(await new Response(init.body).arrayBuffer());
+          artifactBytesByUrl.set(String(url), bodyBytes);
+          return new Response(JSON.stringify({ ok: true }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        if (init?.method === "GET") {
+          const storedBytes = artifactBytesByUrl.get(String(url));
+          if (!storedBytes) {
+            return new Response("Not found", { status: 404 });
+          }
+
+          return new Response(storedBytes, {
+            headers: {
+              "content-type": "application/octet-stream",
+            },
+            status: 200,
+          });
+        }
+      }
+
+      if (String(url) === "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123") {
+        expect(init?.method).toBe("GET");
+        return new Response(JSON.stringify({
+          ok: true,
+          result: {
+            file_id: "file_123",
+            file_path: "photos/file_123.jpg",
+            file_size: attachmentBytes.byteLength,
+            file_unique_id: "photo_unique_123",
+          },
+        }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      }
+
+      if (String(url) === "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg") {
+        expect(init?.method).toBe("GET");
+        return new Response(attachmentBytes, {
+          headers: {
+            "content-type": "image/jpeg",
+          },
+          status: 200,
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${String(url)}`);
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    try {
+      const activation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_telegram_attachment",
+          },
+          eventId: "evt_activation_telegram_attachment",
+          occurredAt: "2026-03-29T09:00:00.000Z",
+        },
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            botUserId: null,
+            kind: "telegram.message.received",
+            telegramUpdate: {
+              update_id: 124,
+              message: {
+                caption: "Photo from hosted Telegram.",
+                chat: {
+                  first_name: "Alice",
+                  id: 456,
+                  type: "private",
+                },
+                date: 1_711_620_001,
+                from: {
+                  first_name: "Alice",
+                  id: 456,
+                  is_bot: false,
+                },
+                message_id: 790,
+                photo: [
+                  {
+                    file_id: "file_123",
+                    file_size: attachmentBytes.byteLength,
+                    file_unique_id: "photo_unique_123",
+                    height: 20,
+                    width: 20,
+                  },
+                ],
+              },
+            },
+            userId: "member_telegram_attachment",
+          },
+          eventId: "evt_telegram_attachment",
+          occurredAt: "2026-03-29T09:05:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-attachment-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        artifactResolver: async ({ ref }) => {
+          const bytes = artifactBytesByUrl.get(`http://artifacts.worker/objects/${ref.sha256}`);
+          if (!bytes) {
+            throw new Error(`Missing artifact ${ref.sha256}.`);
+          }
+
+          return bytes;
+        },
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const runtime = await openInboxRuntime({
+        vaultRoot: restored.vaultRoot,
+      });
+
+      try {
+        await rebuildRuntimeFromVault({
+          runtime,
+          vaultRoot: restored.vaultRoot,
+        });
+        const captureSummary = runtime.listCaptures({ limit: 1 })[0];
+        expect(captureSummary).toBeDefined();
+        const capture = runtime.getCapture(captureSummary!.captureId);
+        const attachment = capture?.attachments[0];
+
+        expect(result.result.summary).toContain("Persisted Telegram capture");
+        expect(capture?.text).toBe("Photo from hosted Telegram.");
+        expect(attachment?.byteSize).toBe(attachmentBytes.byteLength);
+        expect(attachment?.fileName).toBe("photo-photo_unique_123.jpg");
+        expect(attachment?.storedPath).toBeTruthy();
+        await expect(readFile(path.join(restored.vaultRoot, attachment!.storedPath!))).resolves.toEqual(
+          Buffer.from(attachmentBytes),
+        );
+      } finally {
+        runtime.close();
+      }
+
+      const telegramFetchCalls = fetchSpy.mock.calls.filter(([url]) =>
+        String(url).startsWith("https://telegram-"),
+      );
+      expect(telegramFetchCalls).toHaveLength(2);
+      expect(String(telegramFetchCalls[0]?.[0])).toBe(
+        "https://telegram-api.example.test/bottelegram-token/getFile?file_id=file_123",
+      );
+      expect(String(telegramFetchCalls[1]?.[0])).toBe(
+        "https://telegram-files.example.test/bottelegram-token/photos/file_123.jpg",
+      );
+    } finally {
+      restoreEnvVar("TELEGRAM_API_BASE_URL", previousTelegramApiBaseUrl);
+      restoreEnvVar("TELEGRAM_BOT_TOKEN", previousTelegramBotToken);
+      restoreEnvVar("TELEGRAM_FILE_BASE_URL", previousTelegramFileBaseUrl);
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("rejects non-activation hosted events until member activation bootstrap has run", async () => {
     await expect(runHostedExecutionJob({
       bundles: {
@@ -1219,10 +1403,10 @@ describe("runHostedExecutionJob", () => {
       expect(fetchSpy).toHaveBeenCalledWith(
         "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload?shareCode=share_code_proxy",
         expect.objectContaining({
-          headers: {},
           method: "GET",
         }),
       );
+      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization")).toBeNull();
       expect(importedFood).toBeDefined();
       expect(importedFood?.attachedProtocolIds?.length).toBe(1);
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
@@ -1369,12 +1553,10 @@ describe("runHostedExecutionJob", () => {
       expect(fetchSpy).toHaveBeenCalledWith(
         "http://usage.worker/api/internal/hosted-execution/usage/record",
         expect.objectContaining({
-          headers: {
-            "content-type": "application/json",
-          },
           method: "POST",
         }),
       );
+      expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("content-type")).toBe("application/json");
       const usageRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
       expect(typeof usageRequest?.body).toBe("string");
       expect(String(usageRequest?.body)).toContain("\"usageId\":\"turn_usage_proxy.attempt-1\"");
