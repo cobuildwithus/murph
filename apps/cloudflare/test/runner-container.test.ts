@@ -33,7 +33,6 @@ describe("RunnerContainer", () => {
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
         request: createRunnerRequest(),
-        runnerControlToken: "runner-token",
         runnerEnvironment: {
           CUSTOM_API_KEY: "value",
         },
@@ -41,6 +40,7 @@ describe("RunnerContainer", () => {
         userId: "member_123",
       }),
       headers: {
+        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -71,6 +71,12 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
+      "device-sync.worker": {
+        method: "deviceSyncWorker",
+        params: {
+          userId: "member_123",
+        },
+      },
       "artifacts.worker": {
         method: "artifactsWorker",
         params: {
@@ -91,6 +97,12 @@ describe("RunnerContainer", () => {
       },
       "email.worker": {
         method: "emailWorker",
+        params: {
+          userId: "member_123",
+        },
+      },
+      "share-pack.worker": {
+        method: "sharePackWorker",
         params: {
           userId: "member_123",
         },
@@ -117,12 +129,12 @@ describe("RunnerContainer", () => {
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
         request: createRunnerRequest("evt_short_budget"),
-        runnerControlToken: "runner-token",
         runnerEnvironment: {},
         timeoutMs: 1_000,
         userId: "member_123",
       }),
       headers: {
+        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -137,13 +149,12 @@ describe("RunnerContainer", () => {
     }));
   });
 
-  it("rejects invoke requests when the runner control token is missing", async () => {
+  it("rejects invoke requests when wrapper auth is missing", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
         request: createRunnerRequest("evt_no_token"),
-        runnerControlToken: null,
         runnerEnvironment: {},
         timeoutMs: 30_000,
         userId: "member_123",
@@ -154,9 +165,38 @@ describe("RunnerContainer", () => {
       method: "POST",
     }));
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({
-      error: "runnerControlToken must be a non-empty string.",
+      error: "Unauthorized",
+    });
+    expect(startAndWaitForPorts).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it("fails invoke requests closed when the wrapper token is not configured", async () => {
+    const { container, containerFetch, startAndWaitForPorts } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "",
+      },
+    });
+
+    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
+      body: JSON.stringify({
+        request: createRunnerRequest("evt_no_wrapper_token"),
+        runnerEnvironment: {},
+        timeoutMs: 30_000,
+        userId: "member_123",
+      }),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hosted runner control token is not configured.",
     });
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
@@ -193,6 +233,7 @@ describe("RunnerContainer", () => {
         timeoutMs: 0,
       }),
       headers: {
+        authorization: "Bearer runner-token",
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -220,10 +261,20 @@ describe("RunnerContainer", () => {
     });
 
     const runningResponse = await running.container.fetch(
-      new Request("https://runner.internal/internal/destroy", { method: "POST" }),
+      new Request("https://runner.internal/internal/destroy", {
+        headers: {
+          authorization: "Bearer runner-token",
+        },
+        method: "POST",
+      }),
     );
     const stoppedResponse = await stopped.container.fetch(
-      new Request("https://runner.internal/internal/destroy", { method: "POST" }),
+      new Request("https://runner.internal/internal/destroy", {
+        headers: {
+          authorization: "Bearer runner-token",
+        },
+        method: "POST",
+      }),
     );
 
     expect(runningResponse.status).toBe(204);
@@ -257,13 +308,13 @@ describe("RunnerContainer", () => {
     const body = JSON.parse(await request.text()) as Record<string, unknown>;
     expect(body).toEqual({
       request: createRunnerRequest("evt_namespace"),
-      runnerControlToken: "runner-token",
       runnerEnvironment: {
         CUSTOM_API_KEY: "value",
       },
       timeoutMs: 45_000,
       userId: "member_123",
     });
+    expect(request.headers.get("authorization")).toBe("Bearer runner-token");
   });
 
   it("fails before invoking the namespace when the runner control token is missing", async () => {
@@ -296,16 +347,19 @@ describe("RunnerContainer", () => {
           return { fetch };
         },
       },
+      runnerControlToken: "runner-token",
       userId: "member_123",
     });
     await destroyHostedExecutionContainer({
       runnerContainerNamespace: null,
+      runnerControlToken: "runner-token",
       userId: "member_456",
     });
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const request = fetch.mock.calls[0]?.[0] as Request;
     expect(request.method).toBe("POST");
+    expect(request.headers.get("authorization")).toBe("Bearer runner-token");
     await expect(request.text()).resolves.toBe("");
   });
 });
@@ -313,11 +367,15 @@ describe("RunnerContainer", () => {
 function createContainerDouble(input: {
   containerFetch?: ReturnType<typeof vi.fn>;
   destroy?: ReturnType<typeof vi.fn>;
+  env?: Record<string, unknown>;
   getState?: ReturnType<typeof vi.fn>;
   setOutboundByHosts?: ReturnType<typeof vi.fn>;
   startAndWaitForPorts?: ReturnType<typeof vi.fn>;
 } = {}) {
-  const container = new RunnerContainer({} as never, {} as never);
+  const container = new RunnerContainer({} as never, {
+    HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
+    ...(input.env ?? {}),
+  } as never);
   const containerFetch = input.containerFetch ?? vi.fn(async () => new Response(JSON.stringify(
     createRunnerResult(),
   ), {

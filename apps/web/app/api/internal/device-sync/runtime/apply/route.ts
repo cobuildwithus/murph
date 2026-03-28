@@ -1,3 +1,5 @@
+import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murph/hosted-execution";
+
 import {
   applyHostedDeviceSyncRuntimeUpdates,
   parseHostedDeviceSyncRuntimeApplyRequest,
@@ -13,7 +15,10 @@ export async function POST(request: Request) {
     const body = await readJsonObject(request);
     const result = await applyHostedDeviceSyncRuntimeUpdates(
       controlPlane.store,
-      parseHostedDeviceSyncRuntimeApplyRequest(body),
+      parseHostedDeviceSyncRuntimeApplyRequest(
+        body,
+        request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER),
+      ),
     );
     return jsonOk(result);
   } catch (error) {

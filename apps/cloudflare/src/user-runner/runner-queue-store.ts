@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   parseHostedExecutionDispatchRequest,
   type HostedExecutionBundleRef,
@@ -6,7 +8,8 @@ import {
 
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import {
-  CONSUMED_EVENT_TTL_MS,
+  CONSUMED_EVENT_EXACT_TTL_MS,
+  CONSUMED_EVENT_REPLAY_FILTER_BYTES,
   MAX_BACKPRESSURED_EVENT_IDS,
   MAX_PENDING_EVENTS,
   MAX_POISONED_EVENT_IDS,
@@ -64,6 +67,7 @@ interface BundleRefSwapInput {
 }
 
 export class RunnerQueueStore {
+  private consumedReplayFilterCache: Uint8Array | null = null;
   private userId: string | null = null;
 
   constructor(private readonly state: DurableObjectStateLike) {
@@ -256,7 +260,7 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     this.removePendingDispatchSync(committed.eventId);
     this.deletePoisonedEventSync(committed.eventId);
-    this.writeConsumedEventSync(committed.eventId, new Date(Date.now() + CONSUMED_EVENT_TTL_MS).toISOString());
+    this.writeConsumedEventSync(committed.eventId, nextConsumedEventExactExpiryIso());
     assignBundleRefs(meta, committed.bundleRefs);
     meta.backpressured_event_ids_json = JSON.stringify(
       parseStringArray(meta.backpressured_event_ids_json)
@@ -317,7 +321,7 @@ export class RunnerQueueStore {
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
-      this.writeConsumedEventSync(input.eventId, new Date(Date.now() + CONSUMED_EVENT_TTL_MS).toISOString());
+      this.writeConsumedEventSync(input.eventId, nextConsumedEventExactExpiryIso());
       this.writePoisonedEventSync(input.eventId, input.errorMessage, new Date().toISOString());
       meta.retrying_event_id = this.readRetryingEventIdSync();
       this.writeMetaRowSync(meta);
@@ -409,7 +413,7 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     if (!this.hasConsumedEventSync(eventId)) {
-      this.writeConsumedEventSync(eventId, new Date(Date.now() + CONSUMED_EVENT_TTL_MS).toISOString());
+      this.writeConsumedEventSync(eventId, nextConsumedEventExactExpiryIso());
     }
 
     return this.readStateSync();
@@ -480,6 +484,11 @@ export class RunnerQueueStore {
       return;
     }
 
+    if (committed.userId) {
+      await this.bootstrapUser(committed.userId);
+      return;
+    }
+
     const pendingDispatch = this.readPendingDispatchByEventIdSync(committed.eventId);
     if (pendingDispatch) {
       await this.bootstrapUser(pendingDispatch.dispatch.event.userId);
@@ -543,6 +552,12 @@ export class RunnerQueueStore {
       CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
       ON poisoned_events (poisoned_at, event_id)
     `);
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS consumed_event_replay_filter (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        bits BLOB NOT NULL
+      )
+    `);
   }
 
   private pruneExpiredConsumedEventsSync(): void {
@@ -551,10 +566,7 @@ export class RunnerQueueStore {
       "DELETE FROM consumed_events WHERE expires_at <= ?",
       nowIso,
     );
-    this.sql.exec(
-      `DELETE FROM poisoned_events
-        WHERE event_id NOT IN (SELECT event_id FROM consumed_events)`,
-    );
+    this.prunePoisonedEventsSync();
   }
 
   private readStateSync(): RunnerStateRecord {
@@ -797,10 +809,14 @@ export class RunnerQueueStore {
   }
 
   private hasConsumedEventSync(eventId: string): boolean {
-    return this.sql.exec<{ count: DurableObjectSqlValue }>(
+    if (this.sql.exec<{ count: DurableObjectSqlValue }>(
       "SELECT COUNT(*) AS count FROM consumed_events WHERE event_id = ?",
       eventId,
-    ).toArray()[0]?.count === 1;
+    ).toArray()[0]?.count === 1) {
+      return true;
+    }
+
+    return this.replayFilterMayContainEventSync(eventId);
   }
 
   private readPoisonedEventIdsSync(): string[] {
@@ -831,6 +847,7 @@ export class RunnerQueueStore {
   }
 
   private writeConsumedEventSync(eventId: string, expiresAt: string): void {
+    this.rememberConsumedEventInReplayFilterSync(eventId);
     this.sql.exec(
       "INSERT OR REPLACE INTO consumed_events (event_id, expires_at) VALUES (?, ?)",
       eventId,
@@ -849,6 +866,7 @@ export class RunnerQueueStore {
       poisonedAt,
       lastError,
     );
+    this.prunePoisonedEventsSync();
   }
 
   private deletePoisonedEventSync(eventId: string): void {
@@ -862,6 +880,92 @@ export class RunnerQueueStore {
     }
 
     return sql;
+  }
+
+  private prunePoisonedEventsSync(): void {
+    this.sql.exec(
+      `DELETE FROM poisoned_events
+        WHERE event_id NOT IN (
+          SELECT event_id
+          FROM poisoned_events
+          ORDER BY poisoned_at DESC, event_id DESC
+          LIMIT ?
+        )`,
+      MAX_POISONED_EVENT_IDS,
+    );
+  }
+
+  private replayFilterMayContainEventSync(eventId: string): boolean {
+    const bits = this.readConsumedReplayFilterBitsSync();
+    const bitCount = bits.length * 8;
+
+    for (const bitIndex of consumedReplayFilterBitIndexes(eventId, bitCount)) {
+      if ((bits[bitIndex >> 3] & (1 << (bitIndex & 7))) === 0) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private rememberConsumedEventInReplayFilterSync(eventId: string): void {
+    const bits = this.readConsumedReplayFilterBitsSync();
+    const bitCount = bits.length * 8;
+    let changed = false;
+
+    for (const bitIndex of consumedReplayFilterBitIndexes(eventId, bitCount)) {
+      const byteIndex = bitIndex >> 3;
+      const mask = 1 << (bitIndex & 7);
+      if ((bits[byteIndex] & mask) !== 0) {
+        continue;
+      }
+
+      bits[byteIndex] |= mask;
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    this.sql.exec(
+      `INSERT OR REPLACE INTO consumed_event_replay_filter (
+        singleton,
+        bits
+      ) VALUES (?, ?)`,
+      1,
+      bits,
+    );
+  }
+
+  private readConsumedReplayFilterBitsSync(): Uint8Array {
+    if (this.consumedReplayFilterCache) {
+      return this.consumedReplayFilterCache;
+    }
+
+    const row = this.sql.exec<{ bits: DurableObjectSqlValue }>(
+      `SELECT bits
+      FROM consumed_event_replay_filter
+      WHERE singleton = 1`,
+    ).toArray()[0] ?? null;
+
+    const bits = normalizeReplayFilterBits(row?.bits);
+    if (bits) {
+      this.consumedReplayFilterCache = bits;
+      return bits;
+    }
+
+    const empty = new Uint8Array(CONSUMED_EVENT_REPLAY_FILTER_BYTES);
+    this.sql.exec(
+      `INSERT OR REPLACE INTO consumed_event_replay_filter (
+        singleton,
+        bits
+      ) VALUES (?, ?)`,
+      1,
+      empty,
+    );
+    this.consumedReplayFilterCache = empty;
+    return empty;
   }
 }
 
@@ -880,6 +984,35 @@ function normalizePreferredWakeAt(value: string | null): string | null {
   }
 
   return new Date(parsedMs).toISOString();
+}
+
+function nextConsumedEventExactExpiryIso(): string {
+  return new Date(Date.now() + CONSUMED_EVENT_EXACT_TTL_MS).toISOString();
+}
+
+function normalizeReplayFilterBits(value: DurableObjectSqlValue | undefined): Uint8Array | null {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+
+  return null;
+}
+
+function consumedReplayFilterBitIndexes(eventId: string, bitCount: number): number[] {
+  const digest = createHash("sha256").update(eventId).digest();
+  const hashOne = digest.readUInt32BE(0);
+  const hashTwo = digest.readUInt32BE(4) || 0x9e3779b9;
+  const indexes: number[] = [];
+
+  for (let index = 0; index < 7; index += 1) {
+    indexes.push((hashOne + index * hashTwo) % bitCount);
+  }
+
+  return indexes;
 }
 
 function assignBundleRefs(

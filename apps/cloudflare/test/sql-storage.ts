@@ -56,6 +56,7 @@ export function createTestSqlStorage(): TestSqlStorageLike {
         DROP TABLE IF EXISTS runner_meta;
         DROP TABLE IF EXISTS pending_events;
         DROP TABLE IF EXISTS consumed_events;
+        DROP TABLE IF EXISTS consumed_event_replay_filter;
         DROP TABLE IF EXISTS poisoned_events;
       `);
       initializeSchema(database);
@@ -97,6 +98,10 @@ function initializeSchema(database: DatabaseSync): void {
       event_id TEXT PRIMARY KEY,
       poisoned_at TEXT NOT NULL,
       last_error TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS consumed_event_replay_filter (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      bits BLOB NOT NULL
     );
   `);
 }
