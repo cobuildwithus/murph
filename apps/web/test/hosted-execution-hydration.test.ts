@@ -12,7 +12,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
-import { hydrateHostedExecutionDispatch } from "@/src/lib/hosted-execution/hydration";
+import {
+  hydrateHostedExecutionDispatch,
+  isPermanentHostedExecutionHydrationError,
+} from "@/src/lib/hosted-execution/hydration";
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
 function buildShareReference() {
@@ -232,6 +235,30 @@ describe("hydrateHostedExecutionDispatch", () => {
         {} as never,
       ),
     ).rejects.toThrow("missing a dispatch payload");
+  });
+
+  it("marks malformed device-sync source ids as permanent hydration failures", async () => {
+    await expect(
+      hydrateHostedExecutionDispatch(
+        buildDeviceSyncSignalOutboxRecord({
+          sourceId: "not-a-number",
+        }) as never,
+        {} as never,
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_EXECUTION_HYDRATION_SOURCE_ID_INVALID",
+      permanent: true,
+      retryable: false,
+    });
+
+    await expect(
+      hydrateHostedExecutionDispatch(
+        buildDeviceSyncSignalOutboxRecord({
+          sourceId: "not-a-number",
+        }) as never,
+        {} as never,
+      ).catch((error) => isPermanentHostedExecutionHydrationError(error)),
+    ).resolves.toBe(true);
   });
 
   it("rehydrates hosted webhook dispatches from minimized sent receipt payloads", async () => {

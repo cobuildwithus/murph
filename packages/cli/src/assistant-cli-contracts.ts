@@ -375,6 +375,7 @@ export const assistantTranscriptEntrySchema = z.object({
 
 export const assistantChannelDeliverySchema = z.object({
   channel: z.string().min(1),
+  idempotencyKey: z.string().min(1).nullable().default(null),
   target: z.string().min(1),
   targetKind: z.enum(assistantChannelDeliveryTargetKindValues),
   sentAt: isoTimestampSchema,
@@ -492,6 +493,9 @@ export const assistantOutboxIntentSchema = z
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
+    deliveryConfirmationPending: z.boolean().default(false),
+    deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
+    deliveryTransportIdempotent: z.boolean().default(false),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()

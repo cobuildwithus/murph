@@ -448,12 +448,55 @@ test('drainAssistantOutbox keeps post-send hosted journal persistence failures r
     const intents = await listAssistantOutboxIntents(vaultRoot)
     assert.equal(intents[0]?.status, 'retryable')
     assert.equal(intents[0]?.delivery, null)
+    assert.equal(intents[0]?.attemptCount, 1)
+    const firstAttemptAt = intents[0]?.lastAttemptAt
 
     const status = await getAssistantStatus(vaultRoot)
     assert.equal(status.outbox.retryable, 1)
     assert.equal(status.outbox.sent, 0)
     assert.equal(status.outbox.failed, 0)
     assert.equal(status.recentTurns[0]?.deliveryDisposition, 'retryable')
+
+    const secondDrain = await drainAssistantOutbox({
+      now: new Date(Date.now() + 60_000),
+      vault: vaultRoot,
+    })
+    assert.equal(secondDrain.attempted, 1)
+    assert.equal(secondDrain.sent, 0)
+    assert.equal(secondDrain.failed, 0)
+    assert.equal(secondDrain.queued, 1)
+    assert.equal(
+      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
+      1,
+    )
+
+    const retriedIntents = await listAssistantOutboxIntents(vaultRoot)
+    assert.equal(retriedIntents[0]?.attemptCount, 1)
+    assert.equal(retriedIntents[0]?.lastAttemptAt, firstAttemptAt)
+
+    const reconciled = await drainAssistantOutbox({
+      dispatchHooks: {
+        async resolveDeliveredIntent({ intent }) {
+          assert.equal(intent.intentId, result.deliveryIntentId)
+          return {
+            channel: 'telegram',
+            idempotencyKey: intent.deliveryIdempotencyKey,
+            sentAt: new Date().toISOString(),
+            target: 'chat-1',
+            targetKind: 'thread',
+            messageLength: 'assistant reply'.length,
+          }
+        },
+      },
+      now: new Date(Date.now() + 180_000),
+      vault: vaultRoot,
+    })
+    assert.equal(reconciled.attempted, 1)
+    assert.equal(reconciled.sent, 1)
+    assert.equal(
+      robustnessMocks.deliverAssistantMessageOverBinding.mock.calls.length,
+      1,
+    )
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }

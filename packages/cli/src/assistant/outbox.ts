@@ -245,10 +245,7 @@ export async function listAssistantOutboxIntents(
 
     const intent = await readAssistantOutboxIntentInventoryEntry(
       vault,
-      resolveAssistantOutboxIntentPath(
-        paths.outboxDirectory,
-        entry.name.replace(/\.json$/u, ''),
-      ),
+      path.join(paths.outboxDirectory, entry.name),
     )
     if (intent) {
       intents.push(intent)
@@ -279,6 +276,14 @@ export async function dispatchAssistantOutboxIntent(input: {
       return {
         action: 'skip' as const,
         intent,
+      }
+    }
+
+    if (intent.deliveryConfirmationPending && !intent.deliveryTransportIdempotent) {
+      return {
+        action: 'reconcile' as const,
+        intent,
+        intentPath,
       }
     }
 
@@ -321,20 +326,22 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
   }
 
+  const dispatchIntent = prepared.action === 'dispatch' ? prepared.sending : prepared.intent
+  const dispatchIntentPath = prepared.intentPath
   let deliveryMayHaveSucceeded = false
-  let deliveryTransportIdempotent = prepared.sending.deliveryTransportIdempotent
+  let deliveryTransportIdempotent = dispatchIntent.deliveryTransportIdempotent
 
   try {
     const reconciledDelivery =
       (await input.dispatchHooks?.resolveDeliveredIntent?.({
-        intent: prepared.sending,
+        intent: dispatchIntent,
         vault: input.vault,
       })) ?? null
     if (reconciledDelivery) {
       const sentIntent = await markAssistantOutboxIntentSent({
         delivery: reconciledDelivery,
         intent: prepared.intent,
-        intentPath: prepared.intentPath,
+        intentPath: dispatchIntentPath,
         preserveCurrentDispatchMetadata: false,
         vault: input.vault,
       })
@@ -347,14 +354,14 @@ export async function dispatchAssistantOutboxIntent(input: {
     }
 
     if (
-      prepared.sending.deliveryConfirmationPending &&
-      !prepared.sending.deliveryTransportIdempotent
+      dispatchIntent.deliveryConfirmationPending &&
+      !dispatchIntent.deliveryTransportIdempotent
     ) {
       const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
         error: createAssistantDeliveryConfirmationPendingError(),
-        intentPath: prepared.intentPath,
+        intentPath: dispatchIntentPath,
         now,
-        sending: prepared.sending,
+        sending: dispatchIntent,
         vault: input.vault,
       })
       return {
@@ -371,25 +378,25 @@ export async function dispatchAssistantOutboxIntent(input: {
     })
     const delivered = await deliverAssistantMessageOverBinding({
       vault: input.vault,
-      sessionId: prepared.sending.sessionId,
-      message: prepared.sending.message,
-      channel: prepared.sending.channel,
-      idempotencyKey: prepared.sending.deliveryIdempotencyKey,
-      identityId: prepared.sending.identityId,
-      actorId: prepared.sending.actorId,
-      threadId: prepared.sending.threadId,
-      threadIsDirect: prepared.sending.threadIsDirect,
-      replyToMessageId: prepared.sending.replyToMessageId,
-      target: prepared.sending.explicitTarget ?? null,
+      sessionId: dispatchIntent.sessionId,
+      message: dispatchIntent.message,
+      channel: dispatchIntent.channel,
+      idempotencyKey: dispatchIntent.deliveryIdempotencyKey,
+      identityId: dispatchIntent.identityId,
+      actorId: dispatchIntent.actorId,
+      threadId: dispatchIntent.threadId,
+      threadIsDirect: dispatchIntent.threadIsDirect,
+      replyToMessageId: dispatchIntent.replyToMessageId,
+      target: dispatchIntent.explicitTarget ?? null,
       session: {
         binding: {
           conversationKey: null,
-          channel: prepared.sending.channel,
-          identityId: prepared.sending.identityId,
-          actorId: prepared.sending.actorId,
-          threadId: prepared.sending.threadId,
-          threadIsDirect: prepared.sending.threadIsDirect,
-          delivery: prepared.sending.bindingDelivery,
+          channel: dispatchIntent.channel,
+          identityId: dispatchIntent.identityId,
+          actorId: dispatchIntent.actorId,
+          threadId: dispatchIntent.threadId,
+          threadIsDirect: dispatchIntent.threadIsDirect,
+          delivery: dispatchIntent.bindingDelivery,
         },
       },
     }, input.dependencies)
@@ -397,12 +404,12 @@ export async function dispatchAssistantOutboxIntent(input: {
       ...delivered.delivery,
       idempotencyKey:
         delivered.delivery.idempotencyKey ??
-        prepared.sending.deliveryIdempotencyKey,
+        dispatchIntent.deliveryIdempotencyKey,
     })
     deliveryTransportIdempotent = delivered.deliveryTransportIdempotent === true
     deliveryMayHaveSucceeded = true
     const deliveredIntent = assistantOutboxIntentSchema.parse({
-      ...prepared.sending,
+      ...dispatchIntent,
       deliveryTransportIdempotent,
     })
 
@@ -426,7 +433,7 @@ export async function dispatchAssistantOutboxIntent(input: {
     const sentIntent = await markAssistantOutboxIntentSent({
       delivery,
       intent: deliveredIntent,
-      intentPath: prepared.intentPath,
+      intentPath: dispatchIntentPath,
       vault: input.vault,
     })
 
@@ -440,9 +447,9 @@ export async function dispatchAssistantOutboxIntent(input: {
       deliveryMayHaveSucceeded,
       deliveryTransportIdempotent,
       error,
-      intentPath: prepared.intentPath,
+      intentPath: dispatchIntentPath,
       now,
-      sending: prepared.sending,
+      sending: dispatchIntent,
       vault: input.vault,
     })
 
