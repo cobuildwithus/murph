@@ -1,12 +1,16 @@
 import {
   buildHostedExecutionDeviceSyncWakeDispatch,
+  type HostedExecutionDeviceSyncWakeEvent,
   type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
+
+import { toJsonRecord } from "./shared";
 
 export type HostedDeviceSyncWakeSource = "connection-established" | "disconnect" | "webhook-accepted";
 
 export function buildHostedDeviceSyncWakeDispatch(input: {
   connectionId: string;
+  hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
   source: HostedDeviceSyncWakeSource;
@@ -14,22 +18,33 @@ export function buildHostedDeviceSyncWakeDispatch(input: {
   userId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDeviceSyncWakeDispatch({
+    connectionId: input.connectionId,
     eventId: buildHostedDeviceSyncWakeEventId(input),
+    hint: input.hint,
     occurredAt: input.occurredAt,
+    provider: input.provider,
     reason: mapHostedDeviceSyncWakeReason(input.source),
     userId: input.userId,
   });
 }
 
 export function buildHostedDeviceSyncWakeDispatchFromSignal(input: {
+  connectionId: string | null;
   eventId: string;
   occurredAt: string;
+  provider: string | null;
   signalKind: string;
+  signalPayload?: Record<string, unknown> | null;
   userId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDeviceSyncWakeDispatch({
+    connectionId: input.connectionId,
     eventId: input.eventId,
+    hint: input.signalPayload
+      ? toJsonRecord(input.signalPayload) as HostedExecutionDeviceSyncWakeEvent["hint"]
+      : null,
     occurredAt: input.occurredAt,
+    provider: input.provider,
     reason: mapHostedDeviceSyncWakeReasonFromSignalKind(input.signalKind),
     userId: input.userId,
   });

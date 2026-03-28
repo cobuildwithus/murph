@@ -29,8 +29,24 @@ describe("hosted execution contract parity", () => {
         userId: "member_123",
       }),
       "device-sync.wake": () => buildHostedExecutionDeviceSyncWakeDispatch({
+        connectionId: "dsc_123",
         eventId: "evt_device_sync",
+        hint: {
+          jobs: [
+            {
+              dedupeKey: "job_123",
+              kind: "reconcile",
+              payload: {
+                resourceType: "sleep",
+              },
+              priority: 90,
+            },
+          ],
+          occurredAt: "2026-03-26T12:00:30.000Z",
+          traceId: "trace_123",
+        },
         occurredAt: "2026-03-26T12:01:00.000Z",
+        provider: "oura",
         reason: "connected",
         userId: "member_123",
       }),

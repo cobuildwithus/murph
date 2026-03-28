@@ -1,0 +1,528 @@
+import type {
+  DeviceSyncAccountStatus,
+  PublicDeviceSyncAccount,
+} from "@murph/device-syncd";
+
+import {
+  hostedConnectionWithSecretArgs,
+  mapHostedPublicAccountRecord,
+  PrismaDeviceSyncControlPlaneStore,
+  requireHostedConnectionBundleRecord,
+} from "./prisma-store";
+import { toIsoTimestamp, toJsonRecord } from "./shared";
+
+export interface HostedDeviceSyncRuntimeTokenBundle {
+  accessToken: string;
+  accessTokenExpiresAt: string | null;
+  keyVersion: string;
+  refreshToken: string | null;
+  tokenVersion: number;
+}
+
+export interface HostedDeviceSyncRuntimeConnectionSnapshot {
+  connection: PublicDeviceSyncAccount;
+  tokenBundle: HostedDeviceSyncRuntimeTokenBundle | null;
+}
+
+export interface HostedDeviceSyncRuntimeSnapshotRequest {
+  connectionId?: string | null;
+  provider?: string | null;
+  userId: string;
+}
+
+export interface HostedDeviceSyncRuntimeSnapshotResponse {
+  connections: HostedDeviceSyncRuntimeConnectionSnapshot[];
+  generatedAt: string;
+  userId: string;
+}
+
+export interface HostedDeviceSyncRuntimeConnectionUpdate {
+  accessTokenExpiresAt?: string | null;
+  clearError?: boolean;
+  connectionId: string;
+  displayName?: string | null;
+  lastErrorCode?: string | null;
+  lastErrorMessage?: string | null;
+  lastSyncCompletedAt?: string | null;
+  lastSyncErrorAt?: string | null;
+  lastSyncStartedAt?: string | null;
+  lastWebhookAt?: string | null;
+  metadata?: Record<string, unknown>;
+  nextReconcileAt?: string | null;
+  observedTokenVersion?: number | null;
+  scopes?: string[];
+  status?: DeviceSyncAccountStatus;
+  tokenBundle?: HostedDeviceSyncRuntimeTokenBundle | null;
+}
+
+export interface HostedDeviceSyncRuntimeApplyRequest {
+  occurredAt?: string | null;
+  updates: HostedDeviceSyncRuntimeConnectionUpdate[];
+  userId: string;
+}
+
+export interface HostedDeviceSyncRuntimeApplyEntry {
+  connection: PublicDeviceSyncAccount | null;
+  connectionId: string;
+  status: "missing" | "updated";
+  tokenUpdate: "applied" | "cleared" | "missing" | "skipped_version_mismatch" | "unchanged";
+}
+
+export interface HostedDeviceSyncRuntimeApplyResponse {
+  appliedAt: string;
+  updates: HostedDeviceSyncRuntimeApplyEntry[];
+  userId: string;
+}
+
+export async function buildHostedDeviceSyncRuntimeSnapshot(
+  store: PrismaDeviceSyncControlPlaneStore,
+  request: HostedDeviceSyncRuntimeSnapshotRequest,
+): Promise<HostedDeviceSyncRuntimeSnapshotResponse> {
+  const records = await store.prisma.deviceConnection.findMany({
+    where: {
+      userId: request.userId,
+      ...(request.connectionId ? { id: request.connectionId } : {}),
+      ...(request.provider ? { provider: request.provider } : {}),
+    },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    ...hostedConnectionWithSecretArgs,
+  });
+
+  return {
+    connections: records.map((record) => ({
+      connection: mapHostedPublicAccountRecord(record),
+      tokenBundle: record.secret
+        ? (() => {
+            const bundle = requireHostedConnectionBundleRecord(record, store.codec);
+            return {
+              accessToken: bundle.account.accessToken,
+              accessTokenExpiresAt: bundle.account.accessTokenExpiresAt ?? null,
+              keyVersion: bundle.keyVersion,
+              refreshToken: bundle.account.refreshToken ?? null,
+              tokenVersion: bundle.tokenVersion,
+            } satisfies HostedDeviceSyncRuntimeTokenBundle;
+          })()
+        : null,
+    } satisfies HostedDeviceSyncRuntimeConnectionSnapshot)),
+    generatedAt: toIsoTimestamp(new Date()),
+    userId: request.userId,
+  };
+}
+
+export async function applyHostedDeviceSyncRuntimeUpdates(
+  store: PrismaDeviceSyncControlPlaneStore,
+  request: HostedDeviceSyncRuntimeApplyRequest,
+): Promise<HostedDeviceSyncRuntimeApplyResponse> {
+  const appliedAt = request.occurredAt ?? toIsoTimestamp(new Date());
+  const results: HostedDeviceSyncRuntimeApplyEntry[] = [];
+
+  for (const update of request.updates) {
+    const result = await store.withConnectionRefreshLock(update.connectionId, async (tx) => {
+      const existing = await tx.deviceConnection.findFirst({
+        where: {
+          id: update.connectionId,
+          userId: request.userId,
+        },
+        ...hostedConnectionWithSecretArgs,
+      });
+
+      if (!existing) {
+        return {
+          connection: null,
+          connectionId: update.connectionId,
+          status: "missing",
+          tokenUpdate: "missing",
+        } satisfies HostedDeviceSyncRuntimeApplyEntry;
+      }
+
+      if (update.status === "disconnected") {
+        const disconnected = await store.markConnectionDisconnected({
+          connectionId: update.connectionId,
+          userId: request.userId,
+          now: appliedAt,
+          errorCode: update.lastErrorCode ?? null,
+          errorMessage: update.lastErrorMessage ?? null,
+          tx,
+        });
+
+        if (existing.status !== "disconnected") {
+          await store.createSignal({
+            userId: request.userId,
+            connectionId: update.connectionId,
+            provider: disconnected.provider,
+            kind: "disconnected",
+            payload: {
+              occurredAt: appliedAt,
+              reason: "hosted_runtime",
+              ...(update.lastErrorCode ? { lastErrorCode: update.lastErrorCode } : {}),
+              ...(update.lastErrorMessage ? { lastErrorMessage: update.lastErrorMessage } : {}),
+            },
+            createdAt: appliedAt,
+            tx,
+          });
+        }
+
+        return {
+          connection: disconnected,
+          connectionId: update.connectionId,
+          status: "updated",
+          tokenUpdate: existing.secret ? "cleared" : "missing",
+        } satisfies HostedDeviceSyncRuntimeApplyEntry;
+      }
+
+      const nextData: Record<string, unknown> = {
+        ...(update.status ? { status: update.status } : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "displayName")
+          ? { displayName: update.displayName ?? null }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "scopes")
+          ? { scopes: update.scopes ?? [] }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "metadata")
+          ? { metadataJson: toJsonRecord(update.metadata ?? {}) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "accessTokenExpiresAt")
+          ? {
+              accessTokenExpiresAt: update.accessTokenExpiresAt
+                ? new Date(update.accessTokenExpiresAt)
+                : null,
+            }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "nextReconcileAt")
+          ? {
+              nextReconcileAt: update.nextReconcileAt
+                ? new Date(update.nextReconcileAt)
+                : null,
+            }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "lastWebhookAt")
+          ? {
+              lastWebhookAt: update.lastWebhookAt ? new Date(update.lastWebhookAt) : null,
+            }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "lastSyncStartedAt")
+          ? {
+              lastSyncStartedAt: update.lastSyncStartedAt
+                ? new Date(update.lastSyncStartedAt)
+                : null,
+            }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "lastSyncCompletedAt")
+          ? {
+              lastSyncCompletedAt: update.lastSyncCompletedAt
+                ? new Date(update.lastSyncCompletedAt)
+                : null,
+            }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(update, "lastSyncErrorAt")
+          ? {
+              lastSyncErrorAt: update.lastSyncErrorAt
+                ? new Date(update.lastSyncErrorAt)
+                : null,
+            }
+          : {}),
+        ...(update.clearError
+          ? {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+            }
+          : {
+              ...(Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
+                ? { lastErrorCode: update.lastErrorCode ?? null }
+                : {}),
+              ...(Object.prototype.hasOwnProperty.call(update, "lastErrorMessage")
+                ? { lastErrorMessage: update.lastErrorMessage ?? null }
+                : {}),
+            }),
+      };
+
+      const updatedRecord = await tx.deviceConnection.update({
+        where: {
+          id: update.connectionId,
+        },
+        data: nextData,
+      });
+      let tokenUpdate: HostedDeviceSyncRuntimeApplyEntry["tokenUpdate"] = existing.secret
+        ? "unchanged"
+        : "missing";
+
+      if (update.tokenBundle) {
+        if (
+          existing.secret
+          && typeof update.observedTokenVersion === "number"
+          && update.observedTokenVersion > 0
+          && existing.secret.tokenVersion !== update.observedTokenVersion
+        ) {
+          tokenUpdate = "skipped_version_mismatch";
+        } else {
+          const nextAccessTokenEncrypted = store.codec.encrypt(update.tokenBundle.accessToken);
+          const nextRefreshTokenEncrypted = update.tokenBundle.refreshToken
+            ? store.codec.encrypt(update.tokenBundle.refreshToken)
+            : null;
+          const tokenChanged = !existing.secret
+            || existing.secret.accessTokenEncrypted !== nextAccessTokenEncrypted
+            || existing.secret.refreshTokenEncrypted !== nextRefreshTokenEncrypted
+            || updatedRecord.accessTokenExpiresAt?.toISOString() !== update.tokenBundle.accessTokenExpiresAt;
+
+          if (!existing.secret) {
+            await tx.deviceConnectionSecret.create({
+              data: {
+                connectionId: update.connectionId,
+                accessTokenEncrypted: nextAccessTokenEncrypted,
+                refreshTokenEncrypted: nextRefreshTokenEncrypted,
+                tokenVersion: 1,
+                keyVersion: store.codec.keyVersion,
+              },
+            });
+            tokenUpdate = "applied";
+          } else if (tokenChanged) {
+            await tx.deviceConnectionSecret.update({
+              where: {
+                connectionId: update.connectionId,
+              },
+              data: {
+                accessTokenEncrypted: nextAccessTokenEncrypted,
+                refreshTokenEncrypted: nextRefreshTokenEncrypted,
+                tokenVersion: {
+                  increment: 1,
+                },
+                keyVersion: store.codec.keyVersion,
+              },
+            });
+            tokenUpdate = "applied";
+          }
+        }
+      }
+
+      if (update.status === "reauthorization_required" && existing.status !== "reauthorization_required") {
+        await store.createSignal({
+          userId: request.userId,
+          connectionId: update.connectionId,
+          provider: updatedRecord.provider,
+          kind: "reauthorization_required",
+          payload: {
+            occurredAt: appliedAt,
+            reason: "hosted_runtime",
+            ...(update.lastErrorCode ? { lastErrorCode: update.lastErrorCode } : {}),
+            ...(update.lastErrorMessage ? { lastErrorMessage: update.lastErrorMessage } : {}),
+          },
+          createdAt: appliedAt,
+          tx,
+        });
+      }
+
+      return {
+        connection: mapHostedPublicAccountRecord(updatedRecord),
+        connectionId: update.connectionId,
+        status: "updated",
+        tokenUpdate,
+      } satisfies HostedDeviceSyncRuntimeApplyEntry;
+    });
+
+    results.push(result);
+  }
+
+  return {
+    appliedAt,
+    updates: results,
+    userId: request.userId,
+  };
+}
+
+export function parseHostedDeviceSyncRuntimeSnapshotRequest(
+  value: Record<string, unknown>,
+): HostedDeviceSyncRuntimeSnapshotRequest {
+  return {
+    ...(value.connectionId === undefined
+      ? {}
+      : { connectionId: readNullableString(value.connectionId, "connectionId") }),
+    ...(value.provider === undefined
+      ? {}
+      : { provider: readNullableString(value.provider, "provider") }),
+    userId: requireString(value.userId, "userId"),
+  };
+}
+
+export function parseHostedDeviceSyncRuntimeApplyRequest(
+  value: Record<string, unknown>,
+): HostedDeviceSyncRuntimeApplyRequest {
+  return {
+    ...(value.occurredAt === undefined
+      ? {}
+      : { occurredAt: readNullableString(value.occurredAt, "occurredAt") }),
+    updates: requireArray(value.updates, "updates").map((entry, index) =>
+      parseHostedDeviceSyncRuntimeConnectionUpdate(entry, index)
+    ),
+    userId: requireString(value.userId, "userId"),
+  };
+}
+
+function parseHostedDeviceSyncRuntimeConnectionUpdate(
+  value: unknown,
+  index: number,
+): HostedDeviceSyncRuntimeConnectionUpdate {
+  const record = requireObject(value, `updates[${index}]`);
+
+  return {
+    ...(record.accessTokenExpiresAt === undefined
+      ? {}
+      : {
+          accessTokenExpiresAt: readNullableString(
+            record.accessTokenExpiresAt,
+            `updates[${index}].accessTokenExpiresAt`,
+          ),
+        }),
+    ...(record.clearError === undefined
+      ? {}
+      : { clearError: requireBoolean(record.clearError, `updates[${index}].clearError`) }),
+    connectionId: requireString(record.connectionId, `updates[${index}].connectionId`),
+    ...(record.displayName === undefined
+      ? {}
+      : { displayName: readNullableString(record.displayName, `updates[${index}].displayName`) }),
+    ...(record.lastErrorCode === undefined
+      ? {}
+      : { lastErrorCode: readNullableString(record.lastErrorCode, `updates[${index}].lastErrorCode`) }),
+    ...(record.lastErrorMessage === undefined
+      ? {}
+      : { lastErrorMessage: readNullableString(record.lastErrorMessage, `updates[${index}].lastErrorMessage`) }),
+    ...(record.lastSyncCompletedAt === undefined
+      ? {}
+      : {
+          lastSyncCompletedAt: readNullableString(
+            record.lastSyncCompletedAt,
+            `updates[${index}].lastSyncCompletedAt`,
+          ),
+        }),
+    ...(record.lastSyncErrorAt === undefined
+      ? {}
+      : { lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `updates[${index}].lastSyncErrorAt`) }),
+    ...(record.lastSyncStartedAt === undefined
+      ? {}
+      : {
+          lastSyncStartedAt: readNullableString(
+            record.lastSyncStartedAt,
+            `updates[${index}].lastSyncStartedAt`,
+          ),
+        }),
+    ...(record.lastWebhookAt === undefined
+      ? {}
+      : { lastWebhookAt: readNullableString(record.lastWebhookAt, `updates[${index}].lastWebhookAt`) }),
+    ...(record.metadata === undefined
+      ? {}
+      : { metadata: requireObject(record.metadata, `updates[${index}].metadata`) }),
+    ...(record.nextReconcileAt === undefined
+      ? {}
+      : { nextReconcileAt: readNullableString(record.nextReconcileAt, `updates[${index}].nextReconcileAt`) }),
+    ...(record.observedTokenVersion === undefined
+      ? {}
+      : {
+          observedTokenVersion: readNullableNumber(
+            record.observedTokenVersion,
+            `updates[${index}].observedTokenVersion`,
+          ),
+        }),
+    ...(record.scopes === undefined
+      ? {}
+      : { scopes: requireStringArray(record.scopes, `updates[${index}].scopes`) }),
+    ...(record.status === undefined
+      ? {}
+      : { status: parseDeviceSyncStatus(record.status, `updates[${index}].status`) }),
+    ...(record.tokenBundle === undefined
+      ? {}
+      : {
+          tokenBundle: parseHostedDeviceSyncRuntimeTokenBundle(
+            record.tokenBundle,
+            `updates[${index}].tokenBundle`,
+          ),
+        }),
+  };
+}
+
+function parseHostedDeviceSyncRuntimeTokenBundle(
+  value: unknown,
+  label: string,
+): HostedDeviceSyncRuntimeTokenBundle | null {
+  if (value === null) {
+    return null;
+  }
+
+  const record = requireObject(value, label);
+
+  return {
+    accessToken: requireString(record.accessToken, `${label}.accessToken`),
+    accessTokenExpiresAt: readNullableString(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
+    refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
+    tokenVersion: requireNumber(record.tokenVersion, `${label}.tokenVersion`),
+  };
+}
+
+function parseDeviceSyncStatus(value: unknown, label: string): DeviceSyncAccountStatus {
+  const status = requireString(value, label);
+
+  if (status === "active" || status === "reauthorization_required" || status === "disconnected") {
+    return status;
+  }
+
+  throw new TypeError(`${label} must be an active, reauthorization_required, or disconnected status.`);
+}
+
+function requireObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+
+  return value;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError(`${label} must be a non-empty string.`);
+  }
+
+  return value;
+}
+
+function readNullableString(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return requireString(value, label);
+}
+
+function readNullableNumber(value: unknown, label: string): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return requireNumber(value, label);
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number.`);
+  }
+
+  return value;
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function requireStringArray(value: unknown, label: string): string[] {
+  return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));
+}

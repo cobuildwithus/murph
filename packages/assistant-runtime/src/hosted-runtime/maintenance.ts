@@ -23,11 +23,18 @@ import {
 } from "@murph/assistant-services/automation";
 
 import type { HostedMaintenanceMetrics } from "./models.ts";
+import {
+  reconcileHostedDeviceSyncControlPlaneState,
+  syncHostedDeviceSyncControlPlaneState,
+  type HostedDeviceSyncRuntimeSyncState,
+} from "../hosted-device-sync-runtime.ts";
+import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
 
 export async function runHostedMaintenanceLoop(input: {
+  dispatch: HostedExecutionDispatchRequest;
   requestId: string;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
@@ -35,7 +42,11 @@ export async function runHostedMaintenanceLoop(input: {
   const parserResult = await drainHostedParserQueue(input.vaultRoot);
   await runHostedAssistantAutomation(input.vaultRoot, input.requestId);
   const assistantCronStatus = await getAssistantCronStatus(input.vaultRoot);
-  const deviceSyncResult = await runHostedDeviceSyncPass(input.vaultRoot, input.runtimeEnv);
+  const deviceSyncResult = await runHostedDeviceSyncPass(
+    input.dispatch,
+    input.vaultRoot,
+    input.runtimeEnv,
+  );
 
   return {
     deviceSyncProcessed: deviceSyncResult.processedJobs,
@@ -109,6 +120,7 @@ export async function runHostedAssistantAutomation(
 }
 
 export async function runHostedDeviceSyncPass(
+  dispatch: HostedExecutionDispatchRequest,
   vaultRoot: string,
   env: Readonly<Record<string, string>>,
 ): Promise<{ processedJobs: number; skipped: boolean }> {
@@ -124,10 +136,39 @@ export async function runHostedDeviceSyncPass(
     };
   }
 
+  const secret = env.DEVICE_SYNC_SECRET ?? null;
+  let syncState: HostedDeviceSyncRuntimeSyncState = {
+    hostedToLocalAccountIds: new Map(),
+    localToHostedAccountIds: new Map(),
+    observedTokenVersions: new Map(),
+    snapshot: null,
+  };
+
   try {
+    if (secret) {
+      syncState = await syncHostedDeviceSyncControlPlaneState({
+        dispatch,
+        env,
+        secret,
+        service,
+      });
+    }
+
     await service.runSchedulerOnce();
+    const processedJobs = await service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS);
+
+    if (secret) {
+      await reconcileHostedDeviceSyncControlPlaneState({
+        dispatch,
+        env,
+        secret,
+        service,
+        state: syncState,
+      });
+    }
+
     return {
-      processedJobs: await service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS),
+      processedJobs,
       skipped: false,
     };
   } finally {

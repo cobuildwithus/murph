@@ -1,22 +1,45 @@
 import { Prisma } from "@prisma/client";
-import { deviceSyncError, isDeviceSyncError } from "@murph/device-syncd";
-
-import type {
-  DeviceSyncRegistry,
-  ProviderConnectionResult,
-  PublicDeviceSyncAccount,
-} from "@murph/device-syncd";
-import { getPrisma } from "../prisma";
 import {
-  enqueueHostedExecutionOutbox,
-} from "../hosted-execution/outbox";
+  deviceSyncError,
+  isDeviceSyncError,
+  type DeviceSyncJobInput,
+  type DeviceSyncRegistry,
+  type ProviderConnectionResult,
+  type PublicDeviceSyncAccount,
+} from "@murph/device-syncd";
+import type {
+  HostedExecutionDeviceSyncJobHint,
+  HostedExecutionDeviceSyncWakeEvent,
+} from "@murph/hosted-execution";
+
+import { getPrisma } from "../prisma";
+import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import {
   buildHostedDeviceSyncWakeDispatch,
   type HostedDeviceSyncWakeSource,
 } from "./hosted-dispatch";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
-import { toIsoTimestamp } from "./shared";
+import { sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
 
+const HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS = new Set([
+  "access_token",
+  "accessToken",
+  "api_key",
+  "apiKey",
+  "authorization",
+  "bearer_token",
+  "bearerToken",
+  "cookie",
+  "id_token",
+  "idToken",
+  "oauth_access_token",
+  "oauth_refresh_token",
+  "oauthAccessToken",
+  "oauthRefreshToken",
+  "refresh_token",
+  "refreshToken",
+  "webhookPayload",
+]);
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -57,8 +80,13 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   }
 
   const now = toIsoTimestamp(new Date());
+  const hint = {
+    reason: "user_disconnect",
+    ...(warning ? { revokeWarning: warning } : {}),
+  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
   const dispatch = buildHostedDeviceSyncWakeDispatch({
     connectionId: input.connectionId,
+    hint,
     occurredAt: now,
     provider: existing.provider,
     source: "disconnect",
@@ -78,14 +106,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       connectionId: input.connectionId,
       provider: disconnected.provider,
       kind: "disconnected",
-      payload: warning
-        ? {
-            reason: "user_disconnect",
-            revokeWarning: warning,
-          }
-        : {
-            reason: "user_disconnect",
-          },
+      payload: hint,
       createdAt: now,
       tx,
     });
@@ -120,8 +141,20 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     return;
   }
 
+  const hint = {
+    jobs: normalizeHostedDeviceSyncJobHints({
+      connectionId: input.account.id,
+      jobs: input.connection.initialJobs ?? [],
+      occurredAt: input.now,
+      reason: "connected",
+    }),
+    nextReconcileAt: input.connection.nextReconcileAt ?? null,
+    occurredAt: input.now,
+    scopes: input.account.scopes,
+  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
   const dispatch = buildHostedDeviceSyncWakeDispatch({
     connectionId: input.account.id,
+    hint,
     occurredAt: input.now,
     provider: input.account.provider,
     source: "connection-established",
@@ -133,11 +166,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       connectionId: input.account.id,
       provider: input.account.provider,
       kind: "connected",
-      payload: {
-        initialJobs: input.connection.initialJobs ?? [],
-        nextReconcileAt: input.connection.nextReconcileAt ?? null,
-        scopes: input.account.scopes,
-      },
+      payload: hint,
       createdAt: input.now,
       tx,
     });
@@ -159,6 +188,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   webhook: {
     eventType: string;
+    jobs?: readonly DeviceSyncJobInput[];
     occurredAt?: string | null;
     payload?: Record<string, unknown>;
     traceId?: string | null;
@@ -170,8 +200,17 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     return;
   }
 
+  const hint = buildHostedWebhookHintSignal({
+    connectionId: input.account.id,
+    eventType: input.webhook.eventType,
+    jobs: input.webhook.jobs,
+    occurredAt: input.webhook.occurredAt ?? null,
+    payload: input.webhook.payload,
+    traceId: input.webhook.traceId ?? null,
+  });
   const dispatch = buildHostedDeviceSyncWakeDispatch({
     connectionId: input.account.id,
+    hint,
     occurredAt: input.now,
     provider: input.account.provider,
     source: "webhook-accepted",
@@ -184,7 +223,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
       connectionId: input.account.id,
       provider: input.account.provider,
       kind: "webhook_hint",
-      payload: buildHostedWebhookHintSignal(input.webhook),
+      payload: toJsonRecord(hint),
       createdAt: input.now,
       tx,
     });
@@ -202,6 +241,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 
 export async function dispatchHostedDeviceSyncWake(input: {
   connectionId: string;
+  hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   provider: string;
   source: HostedDeviceSyncWakeSource;
@@ -209,7 +249,11 @@ export async function dispatchHostedDeviceSyncWake(input: {
   userId: string;
 }): Promise<{ dispatched: boolean; reason?: string }> {
   const prisma = getPrisma();
-  const dispatch = buildHostedDeviceSyncWakeDispatch(input);
+  const hint = buildHostedDeviceSyncSignalPayload(input);
+  const dispatch = buildHostedDeviceSyncWakeDispatch({
+    ...input,
+    hint,
+  });
 
   await prisma.$transaction(async (tx) => {
     const signal = await tx.deviceSyncSignal.create({
@@ -217,7 +261,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
         connectionId: input.connectionId,
         createdAt: new Date(input.occurredAt),
         kind: mapHostedDeviceSyncSignalKind(input.source),
-        payloadJson: buildHostedDeviceSyncSignalPayload(input),
+        payloadJson: hint,
         provider: input.provider,
         userId: input.userId,
       },
@@ -236,12 +280,16 @@ export async function dispatchHostedDeviceSyncWake(input: {
 }
 
 function buildHostedDeviceSyncSignalPayload(input: {
+  hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
   traceId?: string | null;
 }): Prisma.InputJsonObject {
+  const hint = input.hint ? toJsonRecord(input.hint) : {};
+
   return {
-    occurredAt: input.occurredAt,
-    ...(input.traceId ? { traceId: input.traceId } : {}),
+    ...hint,
+    ...(hint.occurredAt === undefined ? { occurredAt: input.occurredAt } : {}),
+    ...(input.traceId && hint.traceId === undefined ? { traceId: input.traceId } : {}),
   } satisfies Prisma.InputJsonObject;
 }
 
@@ -259,16 +307,13 @@ function mapHostedDeviceSyncSignalKind(source: HostedDeviceSyncWakeSource): stri
 }
 
 function buildHostedWebhookHintSignal(input: {
+  connectionId: string;
   eventType: string;
+  jobs?: readonly DeviceSyncJobInput[];
   traceId?: string | null;
   occurredAt?: string | null;
   payload?: Record<string, unknown>;
-}): Record<string, unknown> {
-  const signal: Record<string, unknown> = {
-    eventType: input.eventType,
-    traceId: input.traceId ?? null,
-    occurredAt: input.occurredAt ?? null,
-  };
+}): HostedExecutionDeviceSyncWakeEvent["hint"] {
   const resourceCategory =
     typeof input.payload?.dataType === "string"
       ? input.payload.dataType
@@ -276,9 +321,69 @@ function buildHostedWebhookHintSignal(input: {
         ? input.payload.resourceType
         : null;
 
-  if (resourceCategory) {
-    signal.resourceCategory = resourceCategory;
+  return {
+    eventType: input.eventType,
+    jobs: normalizeHostedDeviceSyncJobHints({
+      connectionId: input.connectionId,
+      jobs: input.jobs ?? [],
+      occurredAt: input.occurredAt,
+      reason: "webhook_hint",
+      traceId: input.traceId,
+    }),
+    occurredAt: input.occurredAt ?? null,
+    resourceCategory,
+    traceId: input.traceId ?? null,
+  } satisfies HostedExecutionDeviceSyncWakeEvent["hint"];
+}
+
+function normalizeHostedDeviceSyncJobHints(input: {
+  connectionId: string;
+  jobs: readonly DeviceSyncJobInput[];
+  occurredAt?: string | null;
+  reason: HostedExecutionDeviceSyncWakeEvent["reason"];
+  traceId?: string | null;
+}): HostedExecutionDeviceSyncJobHint[] {
+  return input.jobs.map((job, index) => {
+    const payload = sanitizeHostedSignalPayloadValue(job.payload ?? {}) as Record<string, unknown>;
+    const stableSeed = JSON.stringify({
+      connectionId: input.connectionId,
+      index,
+      kind: job.kind,
+      payload,
+      reason: input.reason,
+      traceId: input.traceId ?? null,
+    });
+
+    return {
+      kind: job.kind,
+      ...(job.availableAt ? { availableAt: job.availableAt } : {}),
+      dedupeKey: job.dedupeKey ?? `hosted-device-sync:${sha256Hex(stableSeed)}`,
+      ...(typeof job.maxAttempts === "number" ? { maxAttempts: job.maxAttempts } : {}),
+      payload,
+      ...(typeof job.priority === "number" ? { priority: job.priority } : {}),
+    } satisfies HostedExecutionDeviceSyncJobHint;
+  });
+}
+
+function sanitizeHostedSignalPayloadValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => sanitizeHostedSignalPayloadValue(entry));
   }
 
-  return signal;
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, entry] of Object.entries(record)) {
+    if (HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS.has(key)) {
+      continue;
+    }
+
+    sanitized[key] = sanitizeHostedSignalPayloadValue(entry);
+  }
+
+  return sanitized;
 }

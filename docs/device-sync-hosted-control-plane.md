@@ -162,13 +162,15 @@ Keep secrets in a separate table from user-visible connection metadata.
 - optional small payload/debug JSON with a retention policy
 
 #### `device_sync_signal`
-Append-only mailbox for the local app to poll with a cursor:
+Append-only mailbox for the local app or hosted runner to hydrate with a cursor:
 - `id` / sequence
 - `connection_id`
 - `provider`
 - `kind` (`initial_backfill`, `reconcile_hint`, `resource_changed`, `resource_deleted`, `disconnected`, `reauthorization_required`)
 - `payload_json`
 - `created_at`
+
+`payload_json` should stay sparse and sanitized. It may include normalized hosted job hints and reconcile metadata that let the hosted runner rebuild provider work, but it should not store raw provider webhook bodies or provider tokens.
 
 #### `device_agent_session`
 - `id`
@@ -233,6 +235,15 @@ Authenticated by a local-agent credential, not by browser cookies.
 - `POST /api/device-sync/agent/session/revoke`
 - `POST /api/device-sync/agent/signals/ack` (optional if you keep cursor-only semantics)
 - `POST /api/device-sync/agent/connections/:connectionId/local-heartbeat`
+
+### Hosted internal runner routes
+
+Authenticated by a server-to-server token that is never exposed to the browser.
+
+- `POST /api/internal/device-sync/runtime/snapshot`
+- `POST /api/internal/device-sync/runtime/apply`
+
+These routes let the Cloudflare-hosted runtime hydrate escrowed device-sync connections before a one-shot reconcile pass and then push status/token updates back into Postgres after the pass completes.
 
 Current hosted agent-session behavior:
 - `POST /api/device-sync/agents/pair` creates a 24-hour bearer session.

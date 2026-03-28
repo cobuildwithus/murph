@@ -103,14 +103,20 @@ export function buildHostedExecutionAssistantCronTickDispatch(input: {
 }
 
 export function buildHostedExecutionDeviceSyncWakeDispatch(input: {
+  connectionId?: string | null;
   eventId: string;
+  hint?: HostedExecutionDeviceSyncWakeEvent["hint"] | null;
   occurredAt: string;
+  provider?: string | null;
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
   userId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
+      ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
+      ...(input.hint === undefined ? {} : { hint: input.hint }),
       kind: "device-sync.wake",
+      ...(input.provider === undefined ? {} : { provider: input.provider }),
       reason: input.reason,
       userId: input.userId,
     } satisfies HostedExecutionDeviceSyncWakeEvent,

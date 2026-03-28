@@ -84,7 +84,108 @@ function buildWebhookOutboxRecord(
   };
 }
 
+function buildDeviceSyncSignalOutboxRecord(overrides: Partial<{
+  eventId: string;
+  eventKind: string;
+  sourceId: string;
+  userId: string;
+}> = {}) {
+  const occurredAt = "2026-03-26T12:30:00.000Z";
+
+  return {
+    acceptedAt: null,
+    attemptCount: 0,
+    claimExpiresAt: null,
+    claimToken: null,
+    completedAt: null,
+    createdAt: new Date(occurredAt),
+    eventId: overrides.eventId ?? "evt_device_sync_123",
+    eventKind: overrides.eventKind ?? "device-sync.wake",
+    failedAt: null,
+    id: "execout_device_sync_123",
+    lastAttemptAt: null,
+    lastError: null,
+    lastStatusJson: null,
+    nextAttemptAt: new Date(occurredAt),
+    payloadJson: {
+      dispatchRef: {
+        eventId: overrides.eventId ?? "evt_device_sync_123",
+        eventKind: overrides.eventKind ?? "device-sync.wake",
+        occurredAt,
+        userId: overrides.userId ?? "member_123",
+      },
+      schemaVersion: "murph.execution-outbox.ref.v1",
+    },
+    sourceId: overrides.sourceId ?? "8",
+    sourceType: "device_sync_signal",
+    status: ExecutionOutboxStatus.pending,
+    updatedAt: new Date(occurredAt),
+    userId: overrides.userId ?? "member_123",
+  };
+}
+
 describe("hydrateHostedExecutionDispatch", () => {
+  it("hydrates device-sync wake dispatches from stored signal payloads", async () => {
+    const prisma = {
+      deviceSyncSignal: {
+        findUnique: vi.fn().mockResolvedValue({
+          connectionId: "dsc_123",
+          createdAt: new Date("2026-03-26T12:30:00.000Z"),
+          kind: "webhook_hint",
+          payloadJson: {
+            eventType: "sleep.updated",
+            jobs: [
+              {
+                dedupeKey: "job_123",
+                kind: "reconcile",
+                payload: {
+                  dataType: "daily_sleep",
+                },
+                priority: 90,
+              },
+            ],
+            occurredAt: "2026-03-26T12:29:00.000Z",
+            traceId: "trace_123",
+          },
+          provider: "oura",
+          userId: "member_123",
+        }),
+      },
+    };
+
+    const dispatch = await hydrateHostedExecutionDispatch(
+      buildDeviceSyncSignalOutboxRecord() as never,
+      prisma as never,
+    );
+
+    expect(dispatch).toEqual({
+      event: {
+        connectionId: "dsc_123",
+        hint: {
+          eventType: "sleep.updated",
+          jobs: [
+            {
+              dedupeKey: "job_123",
+              kind: "reconcile",
+              payload: {
+                dataType: "daily_sleep",
+              },
+              priority: 90,
+            },
+          ],
+          occurredAt: "2026-03-26T12:29:00.000Z",
+          traceId: "trace_123",
+        },
+        kind: "device-sync.wake",
+        provider: "oura",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      eventId: "evt_device_sync_123",
+      occurredAt: "2026-03-26T12:30:00.000Z",
+    });
+  });
+
   it("hydrates minimized share outbox refs from the hosted share link payload", async () => {
     const share = buildShareReference();
 

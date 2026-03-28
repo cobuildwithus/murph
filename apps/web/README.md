@@ -16,6 +16,7 @@ This app is intentionally separate from `packages/web`:
 - encrypted provider-token escrow
 - durable `execution_outbox` records for Cloudflare-bound hosted execution intents
 - local-agent pairing plus sparse signal/token routes for hosted integrations
+- internal runner snapshot/apply APIs for hosted device-sync state hydration and reconciliation
 
 ## Non-goals
 
@@ -24,6 +25,7 @@ This app is intentionally separate from `packages/web`:
 - vault imports
 - proxying provider health payloads through the hosted app
 - storing canonical Linq chat captures in Postgres
+- storing raw provider webhook bodies or provider tokens inside hosted device-sync signal payloads
 
 ## Key environment variables
 
@@ -162,8 +164,15 @@ Local-agent routes:
 
 Hosted device-sync agent signals stay sparse by design:
 
-- webhook wake hints expose only minimal metadata such as `eventType`, `traceId`, `occurredAt`, and an optional coarse `resourceCategory`
-- hosted Postgres/API state must not persist or return raw provider webhook payload blobs or local scheduling/job arrays
+- webhook wake hints expose only sparse metadata plus normalized job hints and reconcile metadata that the hosted runner can safely replay
+- hosted Postgres/API state must not persist or return raw provider webhook payload blobs or provider tokens
+
+Hosted internal runner routes:
+
+- `POST /api/internal/device-sync/runtime/snapshot`
+- `POST /api/internal/device-sync/runtime/apply`
+
+These routes are internal-only server-to-server seams for the Cloudflare runner. They let the runner hydrate escrowed device-sync connections before a one-shot pass and reconcile status/token changes back into Postgres afterward.
 
 ## Hosted onboarding routes
 

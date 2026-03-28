@@ -49,8 +49,35 @@ export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBa
   reason: "alarm" | "manual" | "device-sync";
 }
 
+export interface HostedExecutionDeviceSyncJobHint {
+  availableAt?: string;
+  dedupeKey?: string | null;
+  kind: string;
+  maxAttempts?: number;
+  payload?: Record<string, unknown>;
+  priority?: number;
+}
+
+export interface HostedExecutionDeviceSyncWakeHint {
+  eventType?: string | null;
+  jobs?: HostedExecutionDeviceSyncJobHint[];
+  nextReconcileAt?: string | null;
+  occurredAt?: string | null;
+  reason?: string | null;
+  resourceCategory?: string | null;
+  revokeWarning?: {
+    code: string;
+    message: string;
+  } | null;
+  scopes?: string[];
+  traceId?: string | null;
+}
+
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
+  connectionId?: string | null;
+  hint?: HostedExecutionDeviceSyncWakeHint | null;
   kind: "device-sync.wake";
+  provider?: string | null;
   reason: "connected" | "webhook_hint" | "disconnected" | "reauthorization_required";
 }
 

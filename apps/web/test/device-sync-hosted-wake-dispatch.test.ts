@@ -235,7 +235,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
       {
         dispatch: {
           event: {
+            connectionId: "dsc_123",
+            hint: {
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
             kind: "device-sync.wake",
+            provider: "oura",
             reason: "connected",
             userId: "user-123",
           },
@@ -276,6 +281,17 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
+          event: {
+            connectionId: "dsc_123",
+            hint: {
+              occurredAt: "2026-03-26T12:00:00.000Z",
+              traceId: "trace_123",
+            },
+            kind: "device-sync.wake",
+            provider: "oura",
+            reason: "webhook_hint",
+            userId: "user-123",
+          },
           eventId: "device-sync:webhook-accepted:user-123:oura:dsc_123:trace_123",
         }),
         sourceId: "8",
@@ -308,7 +324,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
       expect.objectContaining({
         dispatch: {
           event: {
+            connectionId: "dsc_123",
+            hint: {
+              occurredAt: "2026-03-26T12:00:00.000Z",
+            },
             kind: "device-sync.wake",
+            provider: "oura",
             reason: "disconnected",
             userId: "user-123",
           },
@@ -369,6 +390,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
         connectionId: "dsc_123",
         createdAt: "2026-03-26T12:00:00.000Z",
         kind: "connected",
+        payload: {
+          jobs: [],
+          nextReconcileAt: null,
+          occurredAt: "2026-03-26T12:00:00.000Z",
+          scopes: ["heartrate"],
+        },
         provider: "oura",
         tx: mocks.prismaTx,
         userId: "user-123",
@@ -377,6 +404,19 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
+          event: {
+            connectionId: "dsc_123",
+            hint: {
+              jobs: [],
+              nextReconcileAt: null,
+              occurredAt: "2026-03-26T12:00:00.000Z",
+              scopes: ["heartrate"],
+            },
+            kind: "device-sync.wake",
+            provider: "oura",
+            reason: "connected",
+            userId: "user-123",
+          },
           eventId: "device-sync:connection-established:user-123:oura:dsc_123:2026-03-26T12:00:00.000Z",
         }),
         sourceId: "8",
@@ -423,9 +463,18 @@ describe("dispatchHostedDeviceSyncWake", () => {
         kind: "webhook_hint",
         payload: {
           eventType: "sleep.updated",
-          traceId: "trace_123",
+          jobs: [
+            {
+              dedupeKey: expect.any(String),
+              kind: "reconcile",
+              payload: {
+                windowStart: "2026-03-19T00:00:00.000Z",
+              },
+            },
+          ],
           occurredAt: "2026-03-26T11:59:00.000Z",
           resourceCategory: "daily_sleep",
+          traceId: "trace_123",
         },
         userId: "user-123",
         provider: "oura",
@@ -441,7 +490,24 @@ describe("dispatchHostedDeviceSyncWake", () => {
       expect.objectContaining({
         dispatch: {
           event: {
+            connectionId: "dsc_123",
+            hint: {
+              eventType: "sleep.updated",
+              jobs: [
+                {
+                  dedupeKey: expect.any(String),
+                  kind: "reconcile",
+                  payload: {
+                    windowStart: "2026-03-19T00:00:00.000Z",
+                  },
+                },
+              ],
+              occurredAt: "2026-03-26T11:59:00.000Z",
+              resourceCategory: "daily_sleep",
+              traceId: "trace_123",
+            },
             kind: "device-sync.wake",
+            provider: "oura",
             reason: "webhook_hint",
             userId: "user-123",
           },

@@ -6,6 +6,7 @@ import {
 } from "@murph/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
+import { toJsonRecord } from "../device-sync/shared";
 import { readHostedWebhookReceiptDispatchByEventId } from "../hosted-onboarding/webhook-receipt-dispatch";
 
 type HostedExecutionHydrationClient = PrismaClient;
@@ -129,8 +130,11 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
       id: signalId,
     },
     select: {
+      connectionId: true,
       createdAt: true,
       kind: true,
+      payloadJson: true,
+      provider: true,
       userId: true,
     },
   });
@@ -141,9 +145,12 @@ async function hydrateHostedExecutionDispatchFromDeviceSyncSignal(
 
   return validateHydratedHostedExecutionDispatch(
     buildHostedDeviceSyncWakeDispatchFromSignal({
+      connectionId: signal.connectionId,
       eventId: record.eventId,
       occurredAt: signal.createdAt.toISOString(),
+      provider: signal.provider,
       signalKind: signal.kind,
+      signalPayload: toJsonRecord(signal.payloadJson),
       userId: signal.userId,
     }),
     record,
