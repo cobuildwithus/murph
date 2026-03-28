@@ -26,10 +26,6 @@ import type {
   VaultCliServices,
 } from "./types.js"
 import {
-  createHealthCoreServices,
-  createHealthQueryServices,
-} from "./health-services.js"
-import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
 } from "./explicit-health-family-services.js"
@@ -340,10 +336,6 @@ function createIntegratedCoreServices(): CoreWriteServices {
       const { core } = await loadIntegratedRuntime()
       return { core }
     }),
-    ...createHealthCoreServices(async () => {
-      const { core } = await loadIntegratedRuntime()
-      return { core }
-    }),
     async rebuildCurrentProfile(input: CommandContext) {
       const { vault } = input
       const { core } = await loadIntegratedRuntime()
@@ -432,10 +424,6 @@ function createIntegratedImporterServices(): ImporterServices {
 function createIntegratedQueryServices(): QueryServices {
   return {
     ...createExplicitHealthQueryServices(async () => {
-      const { query } = await loadIntegratedRuntime()
-      return { query }
-    }),
-    ...createHealthQueryServices(async () => {
       const { query } = await loadIntegratedRuntime()
       return { query }
     }),

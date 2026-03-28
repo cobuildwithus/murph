@@ -573,6 +573,120 @@ test.sequential("family descriptor wiring keeps member-specific commands aligned
   }
 });
 
+test.sequential("genetics descriptor wiring keeps variant-specific commands aligned with generic health reads", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "genetics.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "MTHFR C677T",
+        gene: "MTHFR",
+        significance: "risk_factor",
+        sourceFamilyMemberIds: ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli<{
+      variantId: string;
+    }>([
+      "genetics",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const variantId = requireData(upsertResult).variantId;
+
+    const nounShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+        links: Array<{ id: string }>;
+      };
+    }>([
+      "genetics",
+      "show",
+      variantId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const nounList = await runCli<{
+      count: number;
+      items: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    }>([
+      "genetics",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+      };
+    }>([
+      "show",
+      variantId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericList = await runCli<{
+      items: Array<{
+        id: string;
+        kind: string;
+      }>;
+    }>([
+      "list",
+      "--kind",
+      "genetics",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, true);
+    assert.equal(nounShow.ok, true);
+    assert.equal(nounList.ok, true);
+    assert.equal(genericShow.ok, true);
+    assert.equal(genericList.ok, true);
+    assert.equal(requireData(genericShow).entity.id, variantId);
+    assert.equal(requireData(genericShow).entity.kind, "genetics");
+    assert.equal(requireData(nounShow).entity.id, variantId);
+    assert.equal(requireData(nounShow).entity.kind, "genetics");
+    assert.equal(requireData(nounShow).entity.data.gene, "MTHFR");
+    assert.equal(requireData(nounShow).entity.data.significance, "risk_factor");
+    assert.deepEqual(
+      requireData(nounShow).entity.links.map((link) => link.id),
+      ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
+    );
+    assert.equal(requireData(nounList).count, 1);
+    assert.deepEqual(
+      requireData(nounList).items.map((item) => item.id),
+      [variantId],
+    );
+    assert.equal(requireData(nounList).items[0]?.data.gene, "MTHFR");
+    assert.deepEqual(
+      requireData(genericList).items.map((item) => item.id),
+      [variantId],
+    );
+    assert.deepEqual(
+      requireData(genericList).items.map((item) => item.kind),
+      ["genetics"],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("protocol commands keep noun-specific and generic reads aligned", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "protocol.json");

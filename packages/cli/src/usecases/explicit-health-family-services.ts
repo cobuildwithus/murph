@@ -21,12 +21,20 @@ import {
   asListEnvelope,
   assertNoReservedPayloadKeys,
   buildEntityLinks,
+  optionalStringArray,
   readJsonPayload,
   recordPath,
+  requirePayloadObjectField,
 } from "./shared.js";
 import { toVaultCliError } from "./vault-usecase-helpers.js";
 
-type RegistryDocFamilyKind = "goal" | "condition" | "allergy" | "protocol";
+type RegistryDocFamilyKind =
+  | "goal"
+  | "condition"
+  | "allergy"
+  | "protocol"
+  | "family"
+  | "genetics";
 type ExplicitHealthCoreServiceMethodName = Extract<
   keyof HealthCoreServiceMethods,
   string
@@ -35,6 +43,7 @@ type ExplicitHealthQueryServiceMethodName = Extract<
   keyof HealthQueryServiceMethods,
   string
 >;
+type HealthScaffoldKind = RegistryDocFamilyKind | "profile" | "history" | "blood_test";
 
 interface RegistryDocFamilyConfig<TIdField extends string> {
   idField: TIdField;
@@ -174,21 +183,43 @@ const registryDocFamilyConfigs = [
       return query.listProtocols(vaultRoot, options);
     },
   },
+  {
+    idField: "familyMemberId",
+    kind: "family",
+    listServiceMethod: "listFamilyMembers",
+    notFoundLabel: "family member",
+    scaffoldServiceMethod: "scaffoldFamilyMember",
+    showServiceMethod: "showFamilyMember",
+    upsert(core, input) {
+      return core.upsertFamilyMember(input);
+    },
+    upsertServiceMethod: "upsertFamilyMember",
+    show(query, vaultRoot, lookup) {
+      return query.showFamilyMember(vaultRoot, lookup);
+    },
+    list(query, vaultRoot, options) {
+      return query.listFamilyMembers(vaultRoot, options);
+    },
+  },
+  {
+    idField: "variantId",
+    kind: "genetics",
+    listServiceMethod: "listGeneticVariants",
+    notFoundLabel: "genetic variant",
+    scaffoldServiceMethod: "scaffoldGeneticVariant",
+    showServiceMethod: "showGeneticVariant",
+    upsert(core, input) {
+      return core.upsertGeneticVariant(input);
+    },
+    upsertServiceMethod: "upsertGeneticVariant",
+    show(query, vaultRoot, lookup) {
+      return query.showGeneticVariant(vaultRoot, lookup);
+    },
+    list(query, vaultRoot, options) {
+      return query.listGeneticVariants(vaultRoot, options);
+    },
+  },
 ] as const satisfies readonly RegistryDocFamilyConfig<string>[];
-
-export const explicitHealthCoreServiceMethodNames = new Set<ExplicitHealthCoreServiceMethodName>(
-  registryDocFamilyConfigs.flatMap((config) => [
-    config.scaffoldServiceMethod,
-    config.upsertServiceMethod,
-  ]),
-);
-
-export const explicitHealthQueryServiceMethodNames = new Set<ExplicitHealthQueryServiceMethodName>(
-  registryDocFamilyConfigs.flatMap((config) => [
-    config.showServiceMethod,
-    config.listServiceMethod,
-  ]),
-);
 
 function firstNonEmptyString(
   record: JsonObject,
@@ -218,8 +249,14 @@ function firstRawString(
   return null;
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+    : [];
+}
+
 function requireScaffoldTemplate(
-  kind: RegistryDocFamilyKind,
+  kind: HealthScaffoldKind,
 ): JsonObject {
   const template = healthEntityDefinitionByKind.get(kind)?.scaffoldTemplate;
   if (!template) {
@@ -227,6 +264,61 @@ function requireScaffoldTemplate(
   }
 
   return template;
+}
+
+function buildProfileSnapshotRuntimeInput(
+  vault: string,
+  payload: JsonObject,
+) {
+  assertNoReservedPayloadKeys(payload);
+
+  const recordedAtValue = payload.recordedAt;
+  const sourceValue = payload.source;
+  const profileValue = requirePayloadObjectField(payload, "profile");
+
+  return {
+    vaultRoot: vault,
+    recordedAt:
+      typeof recordedAtValue === "string" ||
+      typeof recordedAtValue === "number" ||
+      recordedAtValue instanceof Date
+        ? recordedAtValue
+        : undefined,
+    source: typeof sourceValue === "string" ? sourceValue : undefined,
+    sourceAssessmentIds: optionalStringArray(payload.sourceAssessmentIds, "sourceAssessmentIds"),
+    sourceEventIds: optionalStringArray(payload.sourceEventIds, "sourceEventIds"),
+    profile: profileValue,
+  };
+}
+
+function buildProfileSnapshotUpsertResult(
+  vault: string,
+  result: Awaited<ReturnType<CoreRuntimeModule["appendProfileSnapshot"]>>,
+) {
+  return {
+    vault,
+    snapshotId: String(result.snapshot.id),
+    lookupId: String(result.snapshot.id),
+    ledgerFile: result.ledgerPath,
+    currentProfilePath: result.currentProfile.relativePath,
+    created: true,
+    profile: result.snapshot.profile,
+  };
+}
+
+function buildHistoryUpsertResult(
+  vault: string,
+  result: Awaited<
+    ReturnType<CoreRuntimeModule["appendHistoryEvent"] | CoreRuntimeModule["appendBloodTest"]>
+  >,
+) {
+  return {
+    vault,
+    eventId: String(result.record.id),
+    lookupId: String(result.record.id),
+    ledgerFile: result.relativePath,
+    created: true as const,
+  };
 }
 
 function toRegistryDocEntityData(record: JsonObject) {
@@ -244,6 +336,13 @@ function toRegistryDocReadEntity(
 ) {
   const data = toRegistryDocEntityData(record);
 
+  if (kind === "protocol") {
+    const protocolKind = firstNonEmptyString(record, ["kind"]);
+    if (protocolKind) {
+      data.kind = protocolKind;
+    }
+  }
+
   return {
     id: firstNonEmptyString(record, ["id"]) ?? "",
     kind,
@@ -254,6 +353,115 @@ function toRegistryDocReadEntity(
     data,
     links: buildEntityLinks({
       data,
+    }),
+  };
+}
+
+function toAssessmentReadEntity(record: JsonObject) {
+  const data = toRegistryDocEntityData(record);
+
+  return {
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "assessment" as const,
+    title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, ["recordedAt", "occurredAt", "importedAt"]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
+    }),
+  };
+}
+
+function toProfileReadEntity(record: JsonObject) {
+  const data = toRegistryDocEntityData(record);
+  const title = firstNonEmptyString(record, ["title", "summary", "name", "label"]);
+
+  return {
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "profile" as const,
+    title:
+      title ??
+      (firstNonEmptyString(record, ["id"]) === "current"
+        ? "Current profile"
+        : firstNonEmptyString(record, ["snapshotId", "id"])),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["body", "markdown"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
+    }),
+  };
+}
+
+function toNestedHealthEntityData(record: JsonObject) {
+  const dataSource =
+    typeof record.data === "object" && record.data !== null && !Array.isArray(record.data)
+      ? (record.data as JsonObject)
+      : record;
+
+  return Object.fromEntries(
+    Object.entries(dataSource).filter(
+      ([key, value]) =>
+        !REGISTRY_DOC_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
+    ),
+  );
+}
+
+function toHistoryReadEntity(record: JsonObject) {
+  const data = toNestedHealthEntityData(record);
+
+  return {
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: firstNonEmptyString(record, ["kind"]) ?? "history",
+    title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
+    }),
+  };
+}
+
+function toBloodTestReadEntity(record: JsonObject) {
+  const data = toNestedHealthEntityData(record);
+
+  return {
+    id: firstNonEmptyString(record, ["id"]) ?? "",
+    kind: "blood_test" as const,
+    title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
+    occurredAt: firstNonEmptyString(record, [
+      "occurredAt",
+      "recordedAt",
+      "capturedAt",
+      "updatedAt",
+      "importedAt",
+    ]),
+    path: firstNonEmptyString(record, ["relativePath", "path"]),
+    markdown: firstRawString(record, ["markdown", "body"]),
+    data,
+    links: buildEntityLinks({
+      data,
+      relatedIds: stringArray(record.relatedIds),
     }),
   };
 }
@@ -458,6 +666,58 @@ export function createExplicitHealthCoreServices(
 ) {
   return {
     ...createRegistryDocCoreServices(loadRuntime),
+    async scaffoldProfileSnapshot(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "profile" as const,
+        payload: requireScaffoldTemplate("profile"),
+      };
+    },
+    async upsertProfileSnapshot(input: JsonFileInput) {
+      const payload = await readJsonPayload(input.input);
+      const { core } = await loadRuntime();
+      const result = await core.appendProfileSnapshot(
+        buildProfileSnapshotRuntimeInput(input.vault, payload),
+      );
+
+      return buildProfileSnapshotUpsertResult(input.vault, result);
+    },
+    async scaffoldHistoryEvent(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "history" as const,
+        payload: requireScaffoldTemplate("history"),
+      };
+    },
+    async upsertHistoryEvent(input: JsonFileInput) {
+      const payload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(payload);
+      const { core } = await loadRuntime();
+      const result = await core.appendHistoryEvent({
+        ...payload,
+        vaultRoot: input.vault,
+      });
+
+      return buildHistoryUpsertResult(input.vault, result);
+    },
+    async scaffoldBloodTest(input: CommandContext) {
+      return {
+        vault: input.vault,
+        noun: "blood-test" as const,
+        payload: requireScaffoldTemplate("blood_test"),
+      };
+    },
+    async upsertBloodTest(input: JsonFileInput) {
+      const payload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(payload);
+      const { core } = await loadRuntime();
+      const result = await core.appendBloodTest({
+        ...payload,
+        vaultRoot: input.vault,
+      });
+
+      return buildHistoryUpsertResult(input.vault, result);
+    },
     async scaffoldSupplement(input: CommandContext) {
       return {
         vault: input.vault,
@@ -526,6 +786,8 @@ export function createExplicitHealthCoreServices(
     },
   } as Pick<
     CoreWriteServices,
+    | "scaffoldProfileSnapshot"
+    | "upsertProfileSnapshot"
     | "scaffoldGoal"
     | "upsertGoal"
     | "scaffoldCondition"
@@ -534,6 +796,14 @@ export function createExplicitHealthCoreServices(
     | "upsertAllergy"
     | "scaffoldProtocol"
     | "upsertProtocol"
+    | "scaffoldHistoryEvent"
+    | "upsertHistoryEvent"
+    | "scaffoldBloodTest"
+    | "upsertBloodTest"
+    | "scaffoldFamilyMember"
+    | "upsertFamilyMember"
+    | "scaffoldGeneticVariant"
+    | "upsertGeneticVariant"
     | "scaffoldSupplement"
     | "upsertSupplement"
     | "renameSupplement"
@@ -546,7 +816,123 @@ export function createExplicitHealthQueryServices(
   loadRuntime: () => Promise<{ query: QueryRuntimeModule }>,
 ) {
   return {
+    async showAssessment(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showAssessment(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toAssessmentReadEntity(record) : null,
+        `No assessment found for "${input.id}".`,
+      );
+    },
+    async listAssessments(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listAssessments(input.vault, {
+        from: input.from,
+        to: input.to,
+        status: input.status,
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          from: input.from,
+          to: input.to,
+          status: input.status,
+          limit: input.limit ?? 50,
+        },
+        records.map((record) => toAssessmentReadEntity(record)),
+      );
+    },
+    async showProfile(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showProfile(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toProfileReadEntity(record) : null,
+        `No profile found for "${input.id}".`,
+      );
+    },
+    async listProfileSnapshots(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listProfileSnapshots(input.vault, {
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          limit: input.limit ?? 50,
+        },
+        records.map((record) => toProfileReadEntity(record)),
+      );
+    },
     ...createRegistryDocQueryServices(loadRuntime),
+    async showHistoryEvent(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showHistoryEvent(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toHistoryReadEntity(record) : null,
+        `No history event found for "${input.id}".`,
+      );
+    },
+    async listHistoryEvents(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listHistoryEvents(input.vault, {
+        from: input.from,
+        kind: input.kind,
+        status: input.status,
+        to: input.to,
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          from: input.from,
+          kind: input.kind,
+          status: input.status,
+          to: input.to,
+          limit: input.limit ?? 50,
+        },
+        records.map((record) => toHistoryReadEntity(record)),
+      );
+    },
+    async showBloodTest(input: EntityLookupInput) {
+      const { query } = await loadRuntime();
+      const record = await query.showBloodTest(input.vault, input.id);
+
+      return asEntityEnvelope(
+        input.vault,
+        record ? toBloodTestReadEntity(record) : null,
+        `No blood test found for "${input.id}".`,
+      );
+    },
+    async listBloodTests(input: HealthListInput) {
+      const { query } = await loadRuntime();
+      const records = await query.listBloodTests(input.vault, {
+        from: input.from,
+        status: input.status,
+        to: input.to,
+        limit: input.limit,
+      });
+
+      return asListEnvelope(
+        input.vault,
+        {
+          from: input.from,
+          status: input.status,
+          to: input.to,
+          limit: input.limit ?? 50,
+        },
+        records.map((record) => toBloodTestReadEntity(record)),
+      );
+    },
     async showSupplement(input: CommandContext & { id: string }) {
       const { query } = await loadRuntime();
       const record = await query.showSupplement(input.vault, input.id);
@@ -633,6 +1019,10 @@ export function createExplicitHealthQueryServices(
     },
   } as Pick<
     QueryServices,
+    | "showAssessment"
+    | "listAssessments"
+    | "showProfile"
+    | "listProfileSnapshots"
     | "showGoal"
     | "listGoals"
     | "showCondition"
@@ -641,6 +1031,14 @@ export function createExplicitHealthQueryServices(
     | "listAllergies"
     | "showProtocol"
     | "listProtocols"
+    | "showHistoryEvent"
+    | "listHistoryEvents"
+    | "showBloodTest"
+    | "listBloodTests"
+    | "showFamilyMember"
+    | "listFamilyMembers"
+    | "showGeneticVariant"
+    | "listGeneticVariants"
     | "showSupplement"
     | "listSupplements"
     | "showSupplementCompound"
