@@ -1135,13 +1135,45 @@ test("conditions and allergies are stored as deterministic markdown registry pag
   assert.equal(patchedCondition.record.title, condition.record.title);
   assert.equal(patchedAllergy.record.title, allergy.record.title);
   assert.deepEqual(readConditionRecord.relatedGoalIds, [goal.record.goalId]);
+  assert.deepEqual(readConditionRecord.links, [
+    {
+      type: "related_goal",
+      targetId: goal.record.goalId,
+    },
+    {
+      type: "related_protocol",
+      targetId: protocol.record.protocolId,
+    },
+  ]);
   assert.deepEqual(readAllergyRecord.relatedConditionIds, [condition.record.conditionId]);
+  assert.deepEqual(readAllergyRecord.links, [
+    {
+      type: "related_condition",
+      targetId: condition.record.conditionId,
+    },
+  ]);
   assert.match(readConditionRecord.markdown, /## Related Protocols/);
   assert.match(readAllergyRecord.markdown, /## Related Conditions/);
   assert.deepEqual(patchedCondition.record.relatedGoalIds, [goal.record.goalId]);
   assert.deepEqual(patchedCondition.record.relatedProtocolIds, [protocol.record.protocolId]);
+  assert.deepEqual(patchedCondition.record.links, [
+    {
+      type: "related_goal",
+      targetId: goal.record.goalId,
+    },
+    {
+      type: "related_protocol",
+      targetId: protocol.record.protocolId,
+    },
+  ]);
   assert.equal(patchedCondition.record.note, "Likely worsened by sleep disruption.");
   assert.deepEqual(patchedAllergy.record.relatedConditionIds, [condition.record.conditionId]);
+  assert.deepEqual(patchedAllergy.record.links, [
+    {
+      type: "related_condition",
+      targetId: condition.record.conditionId,
+    },
+  ]);
   assert.equal(patchedAllergy.record.substance, "penicillin");
   assert.equal(
     conditionAuditRecords.filter((record) => (record as { action?: string }).action === "condition_upsert").length,
@@ -1254,6 +1286,76 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
       error instanceof VaultError &&
       error.code === "VAULT_ALLERGY_MISSING" &&
       error.message === "Allergy was not found.",
+  );
+});
+
+test("condition and allergy reads reject non-canonical frontmatter after the hard cut", async () => {
+  const vaultRoot = await makeTempDirectory("murph-condition-allergy-strict-frontmatter");
+  await initializeVault({ vaultRoot });
+
+  await fs.writeFile(
+    path.join(vaultRoot, "bank/conditions/legacy-condition.md"),
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.condition.v1",
+      "docType: condition",
+      "conditionId: cond_01JNYB6M9A6W4K2N8P3Q7R5S4T",
+      "slug: legacy-condition",
+      "title: Legacy condition",
+      "clinicalStatus: active",
+      "owner: coach",
+      "---",
+      "",
+      "# Legacy condition",
+      "",
+      "Out-of-schema condition document.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(vaultRoot, "bank/allergies/legacy-allergy.md"),
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.allergy.v1",
+      "docType: allergy",
+      "allergyId: alg_01JNYB6M9A6W4K2N8P3Q7R5S4T",
+      "slug: legacy-allergy",
+      "title: Legacy allergy",
+      "substance: Peanut",
+      "status: active",
+      "owner: coach",
+      "---",
+      "",
+      "# Legacy allergy",
+      "",
+      "Out-of-schema allergy document.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await assert.rejects(
+    () =>
+      readCondition({
+        vaultRoot,
+        slug: "legacy-condition",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_CONDITION" &&
+      error.message === "Condition registry document has an unexpected shape.",
+  );
+  await assert.rejects(
+    () =>
+      readAllergy({
+        vaultRoot,
+        slug: "legacy-allergy",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_ALLERGY" &&
+      error.message === "Allergy registry document has an unexpected shape.",
   );
 });
 

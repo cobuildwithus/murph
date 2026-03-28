@@ -468,6 +468,12 @@ test("family members are stored as deterministic markdown registry entries", asy
   assert.equal(read.familyMemberId, created.record.familyMemberId);
   assert.match(read.markdown, /## Related Variants/);
   assert.deepEqual(read.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+  assert.deepEqual(read.links, [
+    {
+      type: "related_variant",
+      targetId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    },
+  ]);
   assert.doesNotMatch(read.markdown, /updatedAt:/);
 
   const auditRecords = await readJsonlRecords({
@@ -572,7 +578,6 @@ test("genetic variants are stored in markdown registries and can link to family 
     vaultRoot,
     variantId: created.record.variantId,
     slug: "changed-slug-that-should-not-rename",
-    gene: "APOE",
     title: "APOE e4 allele updated",
     significance: "risk_factor",
     note: "Maintain aggressive cardiometabolic prevention.",
@@ -596,6 +601,12 @@ test("genetic variants are stored in markdown registries and can link to family 
   assert.equal(read.zygosity, "compound_heterozygous");
   assert.equal(read.inheritance, "maternal lineage");
   assert.deepEqual(read.sourceFamilyMemberIds, [familyMember.record.familyMemberId]);
+  assert.deepEqual(read.links, [
+    {
+      type: "source_family_member",
+      targetId: familyMember.record.familyMemberId,
+    },
+  ]);
   assert.match(read.markdown, /## Source Family Members/);
   assert.doesNotMatch(read.markdown, /updatedAt:/);
 
@@ -681,6 +692,55 @@ test("genetic registry listing preserves invalid document shape errors after sha
   });
 
   await fs.writeFile(path.join(vaultRoot, "bank/genetics/invalid-genetic-variant.md"), invalidMarkdown, "utf8");
+
+  await assert.rejects(
+    () => listGeneticVariants(vaultRoot),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_GENETIC_VARIANT" &&
+      error.message === "Genetics registry document has an unexpected shape.",
+  );
+});
+
+test("family and genetics registry reads reject extra noncanonical frontmatter keys under the hard cut", async () => {
+  const vaultRoot = await makeTempDirectory("murph-family-genetics-hard-cut-frontmatter");
+  await initializeVault({ vaultRoot });
+
+  const familyMarkdown = stringifyFrontmatterDocument({
+    attributes: {
+      schemaVersion: "murph.frontmatter.family-member.v1",
+      docType: "family_member",
+      familyMemberId: "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      slug: "mother",
+      title: "Mother",
+      relationship: "mother",
+      lineage: "maternal",
+    },
+    body: "# Mother\n",
+  });
+  const geneticsMarkdown = stringifyFrontmatterDocument({
+    attributes: {
+      schemaVersion: "murph.frontmatter.genetic-variant.v1",
+      docType: "genetic_variant",
+      variantId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+      slug: "apoe-e4",
+      title: "APOE e4 allele",
+      gene: "APOE",
+      updatedAt: "2026-03-12T11:00:00Z",
+    },
+    body: "# APOE e4 allele\n",
+  });
+
+  await fs.writeFile(path.join(vaultRoot, "bank/family/mother.md"), familyMarkdown, "utf8");
+  await fs.writeFile(path.join(vaultRoot, "bank/genetics/apoe-e4.md"), geneticsMarkdown, "utf8");
+
+  await assert.rejects(
+    () => listFamilyMembers(vaultRoot),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_FAMILY_MEMBER" &&
+      error.message === "Family registry document has an unexpected shape.",
+  );
 
   await assert.rejects(
     () => listGeneticVariants(vaultRoot),

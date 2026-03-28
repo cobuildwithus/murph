@@ -1,4 +1,8 @@
 import {
+  allergyRegistryEntityDefinition,
+  conditionRegistryEntityDefinition,
+  familyRegistryEntityDefinition,
+  geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
   healthEntityDefinitionByKind,
   safeParseContract,
@@ -166,42 +170,66 @@ const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] = [
       },
     } satisfies RegistryDocFamilyConfig<"goalId">;
   })(),
-  {
-    idField: "conditionId",
-    kind: "condition",
-    listServiceMethod: "listConditions",
-    notFoundLabel: "condition",
-    scaffoldServiceMethod: "scaffoldCondition",
-    showServiceMethod: "showCondition",
-    upsert(core, input) {
-      return core.upsertCondition(input);
-    },
-    upsertServiceMethod: "upsertCondition",
-    show(query, vaultRoot, lookup) {
-      return query.showCondition(vaultRoot, lookup);
-    },
-    list(query, vaultRoot, options) {
-      return query.listConditions(vaultRoot, options);
-    },
-  },
-  {
-    idField: "allergyId",
-    kind: "allergy",
-    listServiceMethod: "listAllergies",
-    notFoundLabel: "allergy",
-    scaffoldServiceMethod: "scaffoldAllergy",
-    showServiceMethod: "showAllergy",
-    upsert(core, input) {
-      return core.upsertAllergy(input);
-    },
-    upsertServiceMethod: "upsertAllergy",
-    show(query, vaultRoot, lookup) {
-      return query.showAllergy(vaultRoot, lookup);
-    },
-    list(query, vaultRoot, options) {
-      return query.listAllergies(vaultRoot, options);
-    },
-  },
+  (() => {
+    const command = conditionRegistryEntityDefinition.registry.command;
+    const idField = conditionRegistryEntityDefinition.registry.idField;
+
+    if (!command || !idField) {
+      throw new Error('Registry entity "condition" is missing shared command metadata.');
+    }
+
+    return {
+      idField: idField as "conditionId",
+      kind: "condition",
+      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
+      notFoundLabel: conditionRegistryEntityDefinition.noun,
+      parsePayload(payload) {
+        return parseRegistryPayloadWithSharedSchema("condition", payload);
+      },
+      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
+      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
+      upsert(core, input) {
+        return core.upsertCondition(input);
+      },
+      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
+      show(query, vaultRoot, lookup) {
+        return query.showCondition(vaultRoot, lookup);
+      },
+      list(query, vaultRoot, options) {
+        return query.listConditions(vaultRoot, options);
+      },
+    } satisfies RegistryDocFamilyConfig<"conditionId">;
+  })(),
+  (() => {
+    const command = allergyRegistryEntityDefinition.registry.command;
+    const idField = allergyRegistryEntityDefinition.registry.idField;
+
+    if (!command || !idField) {
+      throw new Error('Registry entity "allergy" is missing shared command metadata.');
+    }
+
+    return {
+      idField: idField as "allergyId",
+      kind: "allergy",
+      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
+      notFoundLabel: allergyRegistryEntityDefinition.noun,
+      parsePayload(payload) {
+        return parseRegistryPayloadWithSharedSchema("allergy", payload);
+      },
+      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
+      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
+      upsert(core, input) {
+        return core.upsertAllergy(input);
+      },
+      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
+      show(query, vaultRoot, lookup) {
+        return query.showAllergy(vaultRoot, lookup);
+      },
+      list(query, vaultRoot, options) {
+        return query.listAllergies(vaultRoot, options);
+      },
+    } satisfies RegistryDocFamilyConfig<"allergyId">;
+  })(),
   {
     idField: "protocolId",
     kind: "protocol",
@@ -220,42 +248,66 @@ const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] = [
       return query.listProtocols(vaultRoot, options);
     },
   },
-  {
-    idField: "familyMemberId",
-    kind: "family",
-    listServiceMethod: "listFamilyMembers",
-    notFoundLabel: "family member",
-    scaffoldServiceMethod: "scaffoldFamilyMember",
-    showServiceMethod: "showFamilyMember",
-    upsert(core, input) {
-      return core.upsertFamilyMember(input);
-    },
-    upsertServiceMethod: "upsertFamilyMember",
-    show(query, vaultRoot, lookup) {
-      return query.showFamilyMember(vaultRoot, lookup);
-    },
-    list(query, vaultRoot, options) {
-      return query.listFamilyMembers(vaultRoot, options);
-    },
-  },
-  {
-    idField: "variantId",
-    kind: "genetics",
-    listServiceMethod: "listGeneticVariants",
-    notFoundLabel: "genetic variant",
-    scaffoldServiceMethod: "scaffoldGeneticVariant",
-    showServiceMethod: "showGeneticVariant",
-    upsert(core, input) {
-      return core.upsertGeneticVariant(input);
-    },
-    upsertServiceMethod: "upsertGeneticVariant",
-    show(query, vaultRoot, lookup) {
-      return query.showGeneticVariant(vaultRoot, lookup);
-    },
-    list(query, vaultRoot, options) {
-      return query.listGeneticVariants(vaultRoot, options);
-    },
-  },
+  (() => {
+    const command = familyRegistryEntityDefinition.registry.command;
+    const idField = familyRegistryEntityDefinition.registry.idField;
+
+    if (!command || !idField) {
+      throw new Error('Registry entity "family" is missing shared command metadata.');
+    }
+
+    return {
+      idField: idField as "familyMemberId",
+      kind: "family",
+      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
+      notFoundLabel: familyRegistryEntityDefinition.noun,
+      parsePayload(payload) {
+        return parseRegistryPayloadWithSharedSchema("family", payload);
+      },
+      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
+      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
+      upsert(core, input) {
+        return core.upsertFamilyMember(input);
+      },
+      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
+      show(query, vaultRoot, lookup) {
+        return query.showFamilyMember(vaultRoot, lookup);
+      },
+      list(query, vaultRoot, options) {
+        return query.listFamilyMembers(vaultRoot, options);
+      },
+    } satisfies RegistryDocFamilyConfig<"familyMemberId">;
+  })(),
+  (() => {
+    const command = geneticsRegistryEntityDefinition.registry.command;
+    const idField = geneticsRegistryEntityDefinition.registry.idField;
+
+    if (!command || !idField) {
+      throw new Error('Registry entity "genetics" is missing shared command metadata.');
+    }
+
+    return {
+      idField: idField as "variantId",
+      kind: "genetics",
+      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
+      notFoundLabel: geneticsRegistryEntityDefinition.noun,
+      parsePayload(payload) {
+        return parseRegistryPayloadWithSharedSchema("genetics", payload);
+      },
+      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
+      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
+      upsert(core, input) {
+        return core.upsertGeneticVariant(input);
+      },
+      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
+      show(query, vaultRoot, lookup) {
+        return query.showGeneticVariant(vaultRoot, lookup);
+      },
+      list(query, vaultRoot, options) {
+        return query.listGeneticVariants(vaultRoot, options);
+      },
+    } satisfies RegistryDocFamilyConfig<"variantId">;
+  })(),
 ] as const satisfies readonly RegistryDocFamilyConfig<string>[];
 
 function firstNonEmptyString(

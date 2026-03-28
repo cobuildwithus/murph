@@ -1,3 +1,9 @@
+import {
+  conditionRegistryEntityDefinition,
+  extractHealthEntityRegistryLinks,
+  type ConditionFrontmatter,
+} from "@murph/contracts";
+
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
@@ -33,6 +39,9 @@ import {
 
 import type { FrontmatterObject } from "../types.ts";
 import type {
+  ConditionEntity,
+  ConditionLink,
+  ConditionLinkType,
   ConditionRecord,
   ReadConditionInput,
   UpsertConditionInput,
@@ -40,6 +49,8 @@ import type {
 } from "./types.ts";
 
 function buildBody(record: ConditionRecord): string {
+  const relations = canonicalizeConditionRelations(record);
+
   return buildMarkdownBody(
     record.title,
     detailList([
@@ -51,11 +62,122 @@ function buildBody(record: ConditionRecord): string {
     ]),
     [
       listSection("Body Sites", record.bodySites),
-      listSection("Related Goals", record.relatedGoalIds),
-      listSection("Related Protocols", record.relatedProtocolIds),
+      listSection("Related Goals", relations.relatedGoalIds),
+      listSection("Related Protocols", relations.relatedProtocolIds),
       section("Note", record.note ?? "- none"),
     ],
   );
+}
+
+function parseConditionFrontmatter(
+  attributes: FrontmatterObject,
+): ConditionFrontmatter {
+  const schema = conditionRegistryEntityDefinition.registry.frontmatterSchema;
+
+  if (!schema) {
+    throw new Error("Condition registry definition is missing a frontmatter schema.");
+  }
+
+  const result = schema.safeParse(attributes);
+
+  if (!result.success) {
+    throw new VaultError("VAULT_INVALID_CONDITION", "Condition registry document has an unexpected shape.");
+  }
+
+  return result.data as ConditionFrontmatter;
+}
+
+function normalizeConditionLinkType(value: string): ConditionLinkType | null {
+  switch (value) {
+    case "related_goal":
+    case "related_protocol":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function compareConditionLinks(left: ConditionLink, right: ConditionLink): number {
+  const order: Record<ConditionLinkType, number> = {
+    related_goal: 0,
+    related_protocol: 1,
+  };
+
+  return order[left.type] - order[right.type] || left.targetId.localeCompare(right.targetId);
+}
+
+function buildConditionLinksFromFields(input: {
+  relatedGoalIds?: string[];
+  relatedProtocolIds?: string[];
+}): ConditionLink[] {
+  return [
+    ...(input.relatedGoalIds ?? []).map((targetId) => ({ type: "related_goal", targetId }) satisfies ConditionLink),
+    ...(input.relatedProtocolIds ?? []).map((targetId) => ({
+      type: "related_protocol",
+      targetId,
+    }) satisfies ConditionLink),
+  ];
+}
+
+function normalizeConditionLinks(rawLinks: readonly ConditionLink[]): ConditionLink[] {
+  const sortedLinks = [...rawLinks].sort(compareConditionLinks);
+  const links: ConditionLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseConditionLinks(attributes: FrontmatterObject): ConditionLink[] {
+  return normalizeConditionLinks(
+    extractHealthEntityRegistryLinks("condition", attributes).flatMap((link) => {
+      const type = normalizeConditionLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies ConditionLink] : [];
+    }),
+  );
+}
+
+function conditionRelationsFromLinks(
+  links: readonly ConditionLink[],
+): Pick<ConditionEntity, "relatedGoalIds" | "relatedProtocolIds" | "links"> {
+  const relatedGoalIds = links
+    .filter((link) => link.type === "related_goal")
+    .map((link) => link.targetId);
+  const relatedProtocolIds = links
+    .filter((link) => link.type === "related_protocol")
+    .map((link) => link.targetId);
+
+  return {
+    relatedGoalIds: relatedGoalIds.length > 0 ? relatedGoalIds : undefined,
+    relatedProtocolIds: relatedProtocolIds.length > 0 ? relatedProtocolIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeConditionRelations(input: {
+  links?: readonly ConditionLink[];
+  relatedGoalIds?: string[];
+  relatedProtocolIds?: string[];
+}): Pick<ConditionEntity, "relatedGoalIds" | "relatedProtocolIds" | "links"> {
+  const links = normalizeConditionLinks(
+    (input.links?.length ?? 0) > 0
+      ? [...(input.links ?? [])]
+      : buildConditionLinksFromFields({
+          relatedGoalIds: input.relatedGoalIds,
+          relatedProtocolIds: input.relatedProtocolIds,
+        }),
+  );
+
+  return conditionRelationsFromLinks(links);
 }
 
 function parseConditionRecord(
@@ -63,40 +185,43 @@ function parseConditionRecord(
   relativePath: string,
   markdown: string,
 ): ConditionRecord {
+  const parsed = parseConditionFrontmatter(attributes);
   requireMatchingDocType(
-    attributes,
+    parsed as unknown as FrontmatterObject,
     CONDITION_SCHEMA_VERSION,
     CONDITION_DOC_TYPE,
     "VAULT_INVALID_CONDITION",
     "Condition registry document has an unexpected shape.",
   );
+  const relations = canonicalizeConditionRelations({
+    links: parseConditionLinks(attributes),
+  });
 
   return stripUndefined({
     schemaVersion: CONDITION_SCHEMA_VERSION,
     docType: CONDITION_DOC_TYPE,
-    conditionId: requireString(attributes.conditionId, "conditionId", 64),
-    slug: requireString(attributes.slug, "slug", 160),
-    title: requireString(attributes.title, "title", 160),
+    conditionId: requireString(parsed.conditionId, "conditionId", 64),
+    slug: requireString(parsed.slug, "slug", 160),
+    title: requireString(parsed.title, "title", 160),
     clinicalStatus:
-      optionalEnum(attributes.clinicalStatus, CONDITION_CLINICAL_STATUSES, "clinicalStatus") ?? "active",
-    verificationStatus: optionalEnum(
-      attributes.verificationStatus,
-      CONDITION_VERIFICATION_STATUSES,
-      "verificationStatus",
-    ),
-    assertedOn: optionalDateOnly(attributes.assertedOn as string | undefined, "assertedOn"),
-    resolvedOn: optionalDateOnly(attributes.resolvedOn as string | undefined, "resolvedOn"),
-    severity: optionalEnum(attributes.severity, CONDITION_SEVERITIES, "severity"),
-    bodySites: validateSortedStringList(attributes.bodySites, "bodySites", "bodySite", 16, 120),
-    relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
-    relatedProtocolIds: normalizeRecordIdList(attributes.relatedProtocolIds, "relatedProtocolIds", "prot"),
-    note: optionalString(attributes.note, "note", 4000),
+      optionalEnum(parsed.clinicalStatus, CONDITION_CLINICAL_STATUSES, "clinicalStatus") ?? "active",
+    verificationStatus: optionalEnum(parsed.verificationStatus, CONDITION_VERIFICATION_STATUSES, "verificationStatus"),
+    assertedOn: optionalDateOnly(parsed.assertedOn, "assertedOn"),
+    resolvedOn: optionalDateOnly(parsed.resolvedOn, "resolvedOn"),
+    severity: optionalEnum(parsed.severity, CONDITION_SEVERITIES, "severity"),
+    bodySites: validateSortedStringList(parsed.bodySites, "bodySites", "bodySite", 16, 120),
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedProtocolIds: relations.relatedProtocolIds,
+    note: optionalString(parsed.note, "note", 4000),
+    links: relations.links,
     relativePath,
     markdown,
   });
 }
 
-function buildAttributes(record: ConditionRecord): FrontmatterObject {
+function buildAttributes(record: ConditionEntity | ConditionRecord): FrontmatterObject {
+  const relations = canonicalizeConditionRelations(record);
+
   return stripUndefined({
     schemaVersion: CONDITION_SCHEMA_VERSION,
     docType: CONDITION_DOC_TYPE,
@@ -109,13 +234,13 @@ function buildAttributes(record: ConditionRecord): FrontmatterObject {
     resolvedOn: record.resolvedOn,
     severity: record.severity,
     bodySites: record.bodySites,
-    relatedGoalIds: record.relatedGoalIds,
-    relatedProtocolIds: record.relatedProtocolIds,
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedProtocolIds: relations.relatedProtocolIds,
     note: record.note,
   }) as FrontmatterObject;
 }
 
-function validateConditionTimeline(record: ConditionRecord): ConditionRecord {
+function validateConditionTimeline(record: ConditionEntity): ConditionEntity {
   if (record.resolvedOn && record.clinicalStatus !== "resolved") {
     throw new VaultError("VAULT_INVALID_INPUT", "resolvedOn requires clinicalStatus=resolved.");
   }
@@ -172,6 +297,20 @@ export async function upsertCondition(
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     buildDocument: (target) => {
+      const relatedGoalIds = resolveOptionalUpsertValue(
+        input.relatedGoalIds,
+        existingRecord?.relatedGoalIds,
+        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+      );
+      const relatedProtocolIds = resolveOptionalUpsertValue(
+        input.relatedProtocolIds,
+        existingRecord?.relatedProtocolIds,
+        (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
+      );
+      const relations = canonicalizeConditionRelations({
+        relatedGoalIds,
+        relatedProtocolIds,
+      });
       const attributes = buildAttributes(
         validateConditionTimeline(
           stripUndefined({
@@ -203,20 +342,13 @@ export async function upsertCondition(
             bodySites: resolveOptionalUpsertValue(input.bodySites, existingRecord?.bodySites, (value) =>
               validateSortedStringList(value, "bodySites", "bodySite", 16, 120),
             ),
-            relatedGoalIds: resolveOptionalUpsertValue(
-              input.relatedGoalIds,
-              existingRecord?.relatedGoalIds,
-              (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
-            ),
-            relatedProtocolIds: resolveOptionalUpsertValue(
-              input.relatedProtocolIds,
-              existingRecord?.relatedProtocolIds,
-              (value) => normalizeRecordIdList(value, "relatedProtocolIds", "prot"),
-            ),
+            relatedGoalIds: relations.relatedGoalIds,
+            relatedProtocolIds: relations.relatedProtocolIds,
             note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
               optionalString(value, "note", 4000),
             ),
-          }) as ConditionRecord,
+            links: relations.links,
+          }) as ConditionEntity,
         ),
       );
 

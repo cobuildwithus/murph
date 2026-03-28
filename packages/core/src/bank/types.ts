@@ -324,7 +324,14 @@ export interface ReadGoalInput {
   slug?: string;
 }
 
-export interface ConditionRecord {
+export type ConditionLinkType = "related_goal" | "related_protocol";
+
+export interface ConditionLink {
+  type: ConditionLinkType;
+  targetId: string;
+}
+
+export interface ConditionEntity {
   schemaVersion: typeof CONDITION_SCHEMA_VERSION;
   docType: typeof CONDITION_DOC_TYPE;
   conditionId: string;
@@ -339,9 +346,10 @@ export interface ConditionRecord {
   relatedGoalIds?: string[];
   relatedProtocolIds?: string[];
   note?: string;
-  relativePath: string;
-  markdown: string;
+  links: ConditionLink[];
 }
+
+export type ConditionRecord = ConditionEntity & MarkdownRegistryDocumentEnvelope;
 
 export interface UpsertConditionInput {
   vaultRoot: string;
@@ -371,7 +379,14 @@ export interface ReadConditionInput {
   slug?: string;
 }
 
-export interface AllergyRecord {
+export type AllergyLinkType = "related_condition";
+
+export interface AllergyLink {
+  type: AllergyLinkType;
+  targetId: string;
+}
+
+export interface AllergyEntity {
   schemaVersion: typeof ALLERGY_SCHEMA_VERSION;
   docType: typeof ALLERGY_DOC_TYPE;
   allergyId: string;
@@ -384,9 +399,10 @@ export interface AllergyRecord {
   recordedOn?: string;
   relatedConditionIds?: string[];
   note?: string;
-  relativePath: string;
-  markdown: string;
+  links: AllergyLink[];
 }
+
+export type AllergyRecord = AllergyEntity & MarkdownRegistryDocumentEnvelope;
 
 export interface UpsertAllergyInput {
   vaultRoot: string;

@@ -1,22 +1,19 @@
-import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "@murph/contracts";
+import type { FamilyMemberFrontmatter } from "@murph/contracts";
 
-export const FAMILY_MEMBER_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.familyMemberFrontmatter;
-export const FAMILY_MEMBER_DOC_TYPE = FRONTMATTER_DOC_TYPES.familyMember;
+import type { MarkdownRegistryDocumentEnvelope } from "../bank/types.ts";
 
-export interface FamilyMemberRecord {
-  schemaVersion: typeof FAMILY_MEMBER_SCHEMA_VERSION;
-  docType: typeof FAMILY_MEMBER_DOC_TYPE;
-  familyMemberId: string;
-  slug: string;
-  title: string;
-  relationship: string;
-  conditions?: string[];
-  deceased?: boolean;
-  note?: string;
-  relatedVariantIds?: string[];
-  relativePath: string;
-  markdown: string;
+export type FamilyMemberLinkType = "related_variant";
+
+export interface FamilyMemberLink {
+  type: FamilyMemberLinkType;
+  targetId: string;
 }
+
+export interface FamilyMemberEntity extends FamilyMemberFrontmatter {
+  links: FamilyMemberLink[];
+}
+
+export type FamilyMemberRecord = FamilyMemberEntity & MarkdownRegistryDocumentEnvelope;
 
 export interface UpsertFamilyMemberInput {
   vaultRoot: string;

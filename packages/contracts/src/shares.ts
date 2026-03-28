@@ -1,6 +1,11 @@
 import * as z from "zod";
 
 import {
+  ALLERGY_CRITICALITIES,
+  ALLERGY_STATUSES,
+  CONDITION_CLINICAL_STATUSES,
+  CONDITION_SEVERITIES,
+  CONDITION_VERIFICATION_STATUSES,
   CONTRACT_SCHEMA_VERSION,
   FOOD_STATUSES,
   GOAL_HORIZONS,
@@ -8,10 +13,16 @@ import {
   PROTOCOL_KINDS,
   PROTOCOL_STATUSES,
   RECIPE_STATUSES,
+  VARIANT_SIGNIFICANCES,
+  VARIANT_ZYGOSITIES,
   WORKOUT_FORMAT_STATUSES,
   ID_PREFIXES,
 } from "./constants.ts";
-import { activityStrengthExerciseSchema } from "./zod.ts";
+import {
+  activityStrengthExerciseSchema,
+  FAMILY_MEMBER_LIMITS,
+  GENETIC_VARIANT_LIMITS,
+} from "./zod.ts";
 import { idPattern } from "./ids.ts";
 import { isStrictIsoDate, isStrictIsoDateTime } from "./time.ts";
 
@@ -131,10 +142,13 @@ const GROUP_PATTERN = "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$";
 const SHARE_ENTITY_REF_PATTERN = "^[a-z][a-z0-9:._-]{1,79}$";
 
 const slugSchema = patternedString(SLUG_PATTERN);
+const allergyIdSchema = patternedString(idPattern(ID_PREFIXES.allergy));
+const familyMemberIdSchema = patternedString(idPattern(ID_PREFIXES.family));
 const goalIdSchema = patternedString(idPattern(ID_PREFIXES.goal));
 const conditionIdSchema = patternedString(idPattern(ID_PREFIXES.condition));
 const protocolIdSchema = patternedString(idPattern(ID_PREFIXES.protocol));
 const experimentIdSchema = patternedString(idPattern(ID_PREFIXES.experiment));
+const variantIdSchema = patternedString(idPattern(ID_PREFIXES.variant));
 const shareEntityRefSchema = patternedString(SHARE_ENTITY_REF_PATTERN);
 
 export const attachedProtocolIdsSchema = uniqueArray(protocolIdSchema, {
@@ -286,6 +300,160 @@ export const goalUpsertPatchPayloadSchema = withContractMetadata(
     .strict(),
   "@murph/contracts/goal-upsert-patch-payload.schema.json",
   "Murph Goal Upsert Patch Payload",
+);
+
+export const conditionUpsertPayloadSchema = withContractMetadata(
+  z
+    .object({
+      conditionId: conditionIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, 160),
+      clinicalStatus: z.enum(CONDITION_CLINICAL_STATUSES).default("active"),
+      verificationStatus: z.enum(CONDITION_VERIFICATION_STATUSES).optional(),
+      assertedOn: isoDateString().optional(),
+      resolvedOn: isoDateString().optional(),
+      severity: z.enum(CONDITION_SEVERITIES).optional(),
+      bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).optional(),
+      relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).optional(),
+      relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).optional(),
+      note: boundedString(1, 4000).optional(),
+    })
+    .strict(),
+  "@murph/contracts/condition-upsert-payload.schema.json",
+  "Murph Condition Upsert Payload",
+);
+
+export const conditionUpsertPatchPayloadSchema = withContractMetadata(
+  z
+    .object({
+      conditionId: conditionIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, 160).optional(),
+      clinicalStatus: z.enum(CONDITION_CLINICAL_STATUSES).optional(),
+      verificationStatus: z.enum(CONDITION_VERIFICATION_STATUSES).nullable().optional(),
+      assertedOn: isoDateString().nullable().optional(),
+      resolvedOn: isoDateString().nullable().optional(),
+      severity: z.enum(CONDITION_SEVERITIES).nullable().optional(),
+      bodySites: uniqueArray(boundedString(1, 120), { uniqueItems: true }).nullable().optional(),
+      relatedGoalIds: uniqueArray(goalIdSchema, { uniqueItems: true }).nullable().optional(),
+      relatedProtocolIds: uniqueArray(protocolIdSchema, { uniqueItems: true }).nullable().optional(),
+      note: boundedString(1, 4000).nullable().optional(),
+    })
+    .strict(),
+  "@murph/contracts/condition-upsert-patch-payload.schema.json",
+  "Murph Condition Upsert Patch Payload",
+);
+
+export const allergyUpsertPayloadSchema = withContractMetadata(
+  z
+    .object({
+      allergyId: allergyIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, 160),
+      substance: boundedString(1, 160),
+      status: z.enum(ALLERGY_STATUSES).default("active"),
+      criticality: z.enum(ALLERGY_CRITICALITIES).optional(),
+      reaction: boundedString(1, 160).optional(),
+      recordedOn: isoDateString().optional(),
+      relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
+      note: boundedString(1, 4000).optional(),
+    })
+    .strict(),
+  "@murph/contracts/allergy-upsert-payload.schema.json",
+  "Murph Allergy Upsert Payload",
+);
+
+export const allergyUpsertPatchPayloadSchema = withContractMetadata(
+  z
+    .object({
+      allergyId: allergyIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, 160).optional(),
+      substance: boundedString(1, 160).optional(),
+      status: z.enum(ALLERGY_STATUSES).optional(),
+      criticality: z.enum(ALLERGY_CRITICALITIES).nullable().optional(),
+      reaction: boundedString(1, 160).nullable().optional(),
+      recordedOn: isoDateString().nullable().optional(),
+      relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).nullable().optional(),
+      note: boundedString(1, 4000).nullable().optional(),
+    })
+    .strict(),
+  "@murph/contracts/allergy-upsert-patch-payload.schema.json",
+  "Murph Allergy Upsert Patch Payload",
+);
+
+export const familyMemberUpsertPayloadSchema = withContractMetadata(
+  z
+    .object({
+      familyMemberId: familyMemberIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, FAMILY_MEMBER_LIMITS.title),
+      relationship: boundedString(1, FAMILY_MEMBER_LIMITS.relationship),
+      conditions: uniqueArray(boundedString(1, FAMILY_MEMBER_LIMITS.condition), {
+        uniqueItems: true,
+      }).optional(),
+      deceased: z.boolean().optional(),
+      note: boundedString(1, FAMILY_MEMBER_LIMITS.note).optional(),
+      relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).optional(),
+    })
+    .strict(),
+  "@murph/contracts/family-member-upsert-payload.schema.json",
+  "Murph Family Member Upsert Payload",
+);
+
+export const familyMemberUpsertPatchPayloadSchema = withContractMetadata(
+  z
+    .object({
+      familyMemberId: familyMemberIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, FAMILY_MEMBER_LIMITS.title).optional(),
+      relationship: boundedString(1, FAMILY_MEMBER_LIMITS.relationship).optional(),
+      conditions: uniqueArray(boundedString(1, FAMILY_MEMBER_LIMITS.condition), {
+        uniqueItems: true,
+      }).nullable().optional(),
+      deceased: z.boolean().nullable().optional(),
+      note: boundedString(1, FAMILY_MEMBER_LIMITS.note).nullable().optional(),
+      relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).nullable().optional(),
+    })
+    .strict(),
+  "@murph/contracts/family-member-upsert-patch-payload.schema.json",
+  "Murph Family Member Upsert Patch Payload",
+);
+
+export const geneticVariantUpsertPayloadSchema = withContractMetadata(
+  z
+    .object({
+      variantId: variantIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, GENETIC_VARIANT_LIMITS.title),
+      gene: boundedString(1, GENETIC_VARIANT_LIMITS.gene),
+      zygosity: z.enum(VARIANT_ZYGOSITIES).optional(),
+      significance: z.enum(VARIANT_SIGNIFICANCES).optional(),
+      inheritance: boundedString(1, GENETIC_VARIANT_LIMITS.inheritance).optional(),
+      sourceFamilyMemberIds: uniqueArray(familyMemberIdSchema, { uniqueItems: true }).optional(),
+      note: boundedString(1, GENETIC_VARIANT_LIMITS.note).optional(),
+    })
+    .strict(),
+  "@murph/contracts/genetic-variant-upsert-payload.schema.json",
+  "Murph Genetic Variant Upsert Payload",
+);
+
+export const geneticVariantUpsertPatchPayloadSchema = withContractMetadata(
+  z
+    .object({
+      variantId: variantIdSchema.optional(),
+      slug: slugSchema.optional(),
+      title: boundedString(1, GENETIC_VARIANT_LIMITS.title).optional(),
+      gene: boundedString(1, GENETIC_VARIANT_LIMITS.gene).optional(),
+      zygosity: z.enum(VARIANT_ZYGOSITIES).nullable().optional(),
+      significance: z.enum(VARIANT_SIGNIFICANCES).nullable().optional(),
+      inheritance: boundedString(1, GENETIC_VARIANT_LIMITS.inheritance).nullable().optional(),
+      sourceFamilyMemberIds: uniqueArray(familyMemberIdSchema, { uniqueItems: true }).nullable().optional(),
+      note: boundedString(1, GENETIC_VARIANT_LIMITS.note).nullable().optional(),
+    })
+    .strict(),
+  "@murph/contracts/genetic-variant-upsert-patch-payload.schema.json",
+  "Murph Genetic Variant Upsert Patch Payload",
 );
 
 export const protocolUpsertPayloadSchema = withContractMetadata(
@@ -462,7 +630,15 @@ export const sharePackSchema = withContractMetadata(
 export type FoodUpsertPayload = z.infer<typeof foodUpsertPayloadSchema>;
 export type RecipeUpsertPayload = z.infer<typeof recipeUpsertPayloadSchema>;
 export type WorkoutFormatUpsertPayload = z.infer<typeof workoutFormatUpsertPayloadSchema>;
+export type ConditionUpsertPayload = z.infer<typeof conditionUpsertPayloadSchema>;
+export type ConditionUpsertPatchPayload = z.infer<typeof conditionUpsertPatchPayloadSchema>;
+export type AllergyUpsertPayload = z.infer<typeof allergyUpsertPayloadSchema>;
+export type AllergyUpsertPatchPayload = z.infer<typeof allergyUpsertPatchPayloadSchema>;
 export type ProtocolUpsertPayload = z.infer<typeof protocolUpsertPayloadSchema>;
+export type FamilyMemberUpsertPayload = z.infer<typeof familyMemberUpsertPayloadSchema>;
+export type FamilyMemberUpsertPatchPayload = z.infer<typeof familyMemberUpsertPatchPayloadSchema>;
+export type GeneticVariantUpsertPayload = z.infer<typeof geneticVariantUpsertPayloadSchema>;
+export type GeneticVariantUpsertPatchPayload = z.infer<typeof geneticVariantUpsertPatchPayloadSchema>;
 export type SharePackFoodPayload = z.infer<typeof sharePackFoodPayloadSchema>;
 export type SharePackRecipePayload = z.infer<typeof sharePackRecipePayloadSchema>;
 export type SharePackProtocolPayload = z.infer<typeof sharePackProtocolPayloadSchema>;

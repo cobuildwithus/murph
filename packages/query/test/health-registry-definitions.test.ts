@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 
 import {
+  allergyRegistryEntityDefinition,
+  conditionRegistryEntityDefinition,
   extractHealthEntityRegistryLinks,
   extractHealthEntityRegistryRelatedIds,
+  familyRegistryEntityDefinition,
+  geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
@@ -10,13 +14,18 @@ import {
 import { test } from "vitest";
 
 import {
+  allergyRecordFromEntity,
   allergyRegistryDefinition,
+  conditionRecordFromEntity,
   conditionRegistryDefinition,
+  familyRecordFromEntity,
   goalRecordFromEntity,
   familyRegistryDefinition,
+  geneticsRecordFromEntity,
   geneticsRegistryDefinition,
   goalRegistryDefinition,
   protocolRegistryDefinition,
+  sortRegistryRecords,
   toRegistryRecord,
 } from "../src/health/registries.ts";
 import { projectRegistryEntity } from "../src/canonical-entities.ts";
@@ -105,7 +114,7 @@ test("goal shared registry definition owns payload, command, and relation metada
   });
 
   assert.deepEqual(
-    links.map(({ type, targetId }) => ({ type, targetId })),
+    links.map((link: { type: string; targetId: string }) => ({ type: link.type, targetId: link.targetId })),
     [
       { type: "parent_goal", targetId: "goal_parent_01" },
       { type: "related_goal", targetId: "goal_related_01" },
@@ -120,6 +129,151 @@ test("goal shared registry definition owns payload, command, and relation metada
       relatedExperimentIds: ["exp_related_01"],
     }),
     ["goal_parent_01", "goal_related_01", "exp_related_01"],
+  );
+});
+
+test("condition and allergy shared registry definitions own payload, command, and relation metadata", () => {
+  assert.equal(conditionRegistryEntityDefinition.registry.idField, "conditionId");
+  assert.ok(conditionRegistryEntityDefinition.registry.frontmatterSchema);
+  assert.ok(conditionRegistryEntityDefinition.registry.upsertPayloadSchema);
+  assert.ok(conditionRegistryEntityDefinition.registry.patchPayloadSchema);
+  assert.equal(conditionRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertCondition");
+  assert.equal(conditionRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showCondition");
+  assert.equal(allergyRegistryEntityDefinition.registry.idField, "allergyId");
+  assert.ok(allergyRegistryEntityDefinition.registry.frontmatterSchema);
+  assert.ok(allergyRegistryEntityDefinition.registry.upsertPayloadSchema);
+  assert.ok(allergyRegistryEntityDefinition.registry.patchPayloadSchema);
+  assert.equal(allergyRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertAllergy");
+  assert.equal(allergyRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showAllergy");
+
+  const conditionPayloadSchema = conditionRegistryEntityDefinition.registry.upsertPayloadSchema;
+  const allergyPayloadSchema = allergyRegistryEntityDefinition.registry.upsertPayloadSchema;
+
+  assert.ok(conditionPayloadSchema);
+  assert.ok(allergyPayloadSchema);
+
+  const parsedConditionPayload = conditionPayloadSchema?.safeParse({
+    title: "Migraine",
+  });
+  const parsedAllergyPayload = allergyPayloadSchema?.safeParse({
+    title: "Peanut allergy",
+    substance: "Peanut",
+  });
+
+  assert.equal(parsedConditionPayload?.success, true);
+  assert.equal(parsedAllergyPayload?.success, true);
+
+  if (parsedConditionPayload?.success) {
+    const payload = parsedConditionPayload.data as { clinicalStatus: string };
+
+    assert.equal(payload.clinicalStatus, "active");
+  }
+
+  if (parsedAllergyPayload?.success) {
+    const payload = parsedAllergyPayload.data as { status: string };
+
+    assert.equal(payload.status, "active");
+  }
+
+  const conditionLinks = extractHealthEntityRegistryLinks("condition", {
+    relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+    relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+  });
+  const allergyLinks = extractHealthEntityRegistryLinks("allergy", {
+    relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"],
+  });
+
+  assert.deepEqual(
+    conditionLinks.map((link: { type: string; targetId: string }) => ({
+      type: link.type,
+      targetId: link.targetId,
+    })),
+    [
+      { type: "related_goal", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6R" },
+      { type: "related_protocol", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+    ],
+  );
+  assert.deepEqual(
+    extractHealthEntityRegistryRelatedIds("condition", {
+      relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R", "goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+      relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    }),
+    ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R", "prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+  );
+  assert.deepEqual(
+    allergyLinks.map((link: { type: string; targetId: string }) => ({
+      type: link.type,
+      targetId: link.targetId,
+    })),
+    [{ type: "related_condition", targetId: "cond_01JNY0B2W4VG5C2A0G9S8M7R6T" }],
+  );
+  assert.deepEqual(
+    extractHealthEntityRegistryRelatedIds("allergy", {
+      relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T", "cond_01JNY0B2W4VG5C2A0G9S8M7R6T"],
+    }),
+    ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"],
+  );
+});
+
+test("family and genetics shared registry definitions own payload, command, relation, and sort metadata", () => {
+  assert.equal(familyRegistryEntityDefinition.registry.idField, "familyMemberId");
+  assert.equal(familyRegistryEntityDefinition.noun, "family member");
+  assert.ok(familyRegistryEntityDefinition.registry.frontmatterSchema);
+  assert.ok(familyRegistryEntityDefinition.registry.upsertPayloadSchema);
+  assert.ok(familyRegistryEntityDefinition.registry.patchPayloadSchema);
+  assert.equal(familyRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertFamilyMember");
+  assert.equal(familyRegistryEntityDefinition.registry.sortBehavior, "title");
+
+  const parsedFamilyPayload = familyRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
+    title: "Mother",
+    relationship: "mother",
+  });
+
+  assert.equal(parsedFamilyPayload?.success, true);
+  assert.deepEqual(
+    extractHealthEntityRegistryLinks("family", {
+      relatedVariantIds: ["var_related_01", "var_related_02"],
+    }).map((link: { type: string; targetId: string }) => ({
+      type: link.type,
+      targetId: link.targetId,
+    })),
+    [
+      { type: "related_variant", targetId: "var_related_01" },
+      { type: "related_variant", targetId: "var_related_02" },
+    ],
+  );
+
+  assert.equal(geneticsRegistryEntityDefinition.registry.idField, "variantId");
+  assert.equal(geneticsRegistryEntityDefinition.noun, "genetic variant");
+  assert.ok(geneticsRegistryEntityDefinition.registry.frontmatterSchema);
+  assert.ok(geneticsRegistryEntityDefinition.registry.upsertPayloadSchema);
+  assert.ok(geneticsRegistryEntityDefinition.registry.patchPayloadSchema);
+  assert.equal(geneticsRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertGeneticVariant");
+  assert.equal(geneticsRegistryEntityDefinition.registry.sortBehavior, "gene-title");
+
+  const parsedGeneticsPayload = geneticsRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
+    gene: "APOE",
+    title: "APOE e4 allele",
+  });
+
+  assert.equal(parsedGeneticsPayload?.success, true);
+  assert.deepEqual(
+    extractHealthEntityRegistryLinks("genetics", {
+      sourceFamilyMemberIds: ["fam_related_01", "fam_related_02"],
+    }).map((link: { type: string; targetId: string }) => ({
+      type: link.type,
+      targetId: link.targetId,
+    })),
+    [
+      { type: "source_family_member", targetId: "fam_related_01" },
+      { type: "source_family_member", targetId: "fam_related_02" },
+    ],
+  );
+  assert.deepEqual(
+    extractHealthEntityRegistryRelatedIds("genetics", {
+      sourceFamilyMemberIds: ["fam_related_01", "fam_related_01"],
+    }),
+    ["fam_related_01"],
   );
 });
 
@@ -174,4 +328,179 @@ test("goal query projection round-trips shared Goal relation and window metadata
   assert.deepEqual(roundTripped?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
   assert.deepEqual(roundTripped?.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
   assert.deepEqual(roundTripped?.domains, ["sleep", "recovery"]);
+});
+
+test("family and genetics query projections round-trip shared registry metadata without leaking legacy aliases", () => {
+  const familyRecord = toRegistryRecord(
+    {
+      relativePath: "bank/family/mother.md",
+      markdown: "# Mother",
+      body: "# Mother",
+      attributes: {
+        familyMemberId: "fam_01JNY0B2W4VG5C2A0G9S8M7R6P",
+        slug: "mother",
+        title: "Mother",
+        relationship: "mother",
+        conditions: ["hypertension"],
+        relatedVariantIds: ["var_01JNY0B2W4VG5C2A0G9S8M7R6Q"],
+        familyMemberIds: ["var_should_not_leak"],
+        updatedAt: "2026-03-12T09:00:00Z",
+      },
+    },
+    familyRegistryDefinition,
+  );
+
+  assert.ok(familyRecord);
+  assert.equal("updatedAt" in (familyRecord ?? {}), false);
+
+  const familyEntity = projectRegistryEntity("family", familyRecord!);
+
+  assert.deepEqual(familyEntity.relatedIds, ["var_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
+
+  const familyRoundTrip = familyRecordFromEntity(familyEntity);
+
+  assert.ok(familyRoundTrip);
+  assert.equal("updatedAt" in (familyRoundTrip ?? {}), false);
+  assert.deepEqual(familyRoundTrip?.relatedVariantIds, ["var_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
+
+  const geneticsRecord = toRegistryRecord(
+    {
+      relativePath: "bank/genetics/apoe-e4.md",
+      markdown: "# APOE e4 allele",
+      body: "# APOE e4 allele",
+      attributes: {
+        variantId: "var_01JNY0B2W4VG5C2A0G9S8M7R6R",
+        slug: "apoe-e4",
+        title: "APOE e4 allele",
+        gene: "APOE",
+        significance: "risk_factor",
+        sourceFamilyMemberIds: ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"],
+        updatedAt: "2026-03-12T11:00:00Z",
+      },
+    },
+    geneticsRegistryDefinition,
+  );
+
+  assert.ok(geneticsRecord);
+  assert.equal("updatedAt" in (geneticsRecord ?? {}), false);
+
+  const geneticsEntity = projectRegistryEntity("genetics", geneticsRecord!);
+  const geneticsRoundTrip = geneticsRecordFromEntity(geneticsEntity);
+
+  assert.ok(geneticsRoundTrip);
+  assert.deepEqual(geneticsEntity.relatedIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
+  assert.equal("updatedAt" in (geneticsRoundTrip ?? {}), false);
+  assert.deepEqual(geneticsRoundTrip?.sourceFamilyMemberIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
+
+  const sortedGenetics = sortRegistryRecords(
+    [
+      geneticsRecord!,
+      toRegistryRecord(
+        {
+          relativePath: "bank/genetics/mthfr-c677t.md",
+          markdown: "# MTHFR C677T",
+          body: "# MTHFR C677T",
+          attributes: {
+            variantId: "var_01JNY0B2W4VG5C2A0G9S8M7R6S",
+            slug: "mthfr-c677t",
+            title: "MTHFR C677T",
+            gene: "MTHFR",
+          },
+        },
+        geneticsRegistryDefinition,
+      )!,
+    ],
+    geneticsRegistryDefinition,
+  );
+
+  assert.deepEqual(sortedGenetics.map((record) => record.gene), ["APOE", "MTHFR"]);
+});
+
+test("condition query projection round-trips shared condition relation metadata", () => {
+  const document = {
+    relativePath: "bank/conditions/migraine.md",
+    markdown: "# Migraine",
+    body: "# Migraine",
+    attributes: {
+      conditionId: "cond_01JNY0B2W4VG5C2A0G9S8M7R6Q",
+      slug: "migraine",
+      title: "Migraine",
+      clinicalStatus: "active",
+      verificationStatus: "confirmed",
+      assertedOn: "2026-03-01",
+      severity: "moderate",
+      bodySites: ["head"],
+      relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+      relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      note: "Likely worsened by poor sleep.",
+    },
+  };
+
+  const conditionRecord = toRegistryRecord(document, conditionRegistryDefinition);
+
+  assert.ok(conditionRecord);
+  assert.equal(conditionRecord?.clinicalStatus, "active");
+  assert.equal(conditionRecord?.verificationStatus, "confirmed");
+  assert.deepEqual(conditionRecord?.bodySites, ["head"]);
+  assert.deepEqual(conditionRecord?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(conditionRecord?.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+
+  const entity = projectRegistryEntity("condition", conditionRecord!);
+
+  assert.deepEqual(entity.relatedIds, [
+    "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
+    "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    "cond_01JNY0B2W4VG5C2A0G9S8M7R6Q",
+  ]);
+
+  const roundTripped = conditionRecordFromEntity(entity);
+
+  assert.ok(roundTripped);
+  assert.equal(roundTripped?.clinicalStatus, "active");
+  assert.equal(roundTripped?.verificationStatus, "confirmed");
+  assert.deepEqual(roundTripped?.bodySites, ["head"]);
+  assert.deepEqual(roundTripped?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(roundTripped?.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.equal(roundTripped?.note, "Likely worsened by poor sleep.");
+});
+
+test("allergy query projection round-trips shared allergy relation metadata", () => {
+  const document = {
+    relativePath: "bank/allergies/peanut-allergy.md",
+    markdown: "# Peanut allergy",
+    body: "# Peanut allergy",
+    attributes: {
+      allergyId: "alg_01JNY0B2W4VG5C2A0G9S8M7R6Q",
+      slug: "peanut-allergy",
+      title: "Peanut allergy",
+      substance: "Peanut",
+      status: "active",
+      criticality: "high",
+      reaction: "Hives",
+      recordedOn: "2026-03-02",
+      relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"],
+      note: "Carries an epinephrine auto-injector.",
+    },
+  };
+
+  const allergyRecord = toRegistryRecord(document, allergyRegistryDefinition);
+
+  assert.ok(allergyRecord);
+  assert.equal(allergyRecord?.substance, "Peanut");
+  assert.equal(allergyRecord?.criticality, "high");
+  assert.deepEqual(allergyRecord?.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
+
+  const entity = projectRegistryEntity("allergy", allergyRecord!);
+
+  assert.deepEqual(entity.relatedIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
+
+  const roundTripped = allergyRecordFromEntity(entity);
+
+  assert.ok(roundTripped);
+  assert.equal(roundTripped?.substance, "Peanut");
+  assert.equal(roundTripped?.criticality, "high");
+  assert.equal(roundTripped?.reaction, "Hives");
+  assert.equal(roundTripped?.recordedOn, "2026-03-02");
+  assert.deepEqual(roundTripped?.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
+  assert.equal(roundTripped?.note, "Carries an epinephrine auto-injector.");
 });

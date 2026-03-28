@@ -1,12 +1,11 @@
 import {
-  CONTRACT_SCHEMA_VERSION,
-  FRONTMATTER_DOC_TYPES,
   VARIANT_SIGNIFICANCES as CONTRACT_VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES as CONTRACT_VARIANT_ZYGOSITIES,
+  type GeneticVariantFrontmatter,
 } from "@murph/contracts";
 
-export const GENETIC_VARIANT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter;
-export const GENETIC_VARIANT_DOC_TYPE = FRONTMATTER_DOC_TYPES.geneticVariant;
+import type { MarkdownRegistryDocumentEnvelope } from "../bank/types.ts";
+
 export const VARIANT_ZYGOSITIES = CONTRACT_VARIANT_ZYGOSITIES;
 export const VARIANT_SIGNIFICANCES = CONTRACT_VARIANT_SIGNIFICANCES;
 
@@ -14,27 +13,24 @@ export type VariantZygosity = (typeof VARIANT_ZYGOSITIES)[number];
 export type VariantSignificance = (typeof VARIANT_SIGNIFICANCES)[number];
 export type VariantInheritance = string;
 
-export interface GeneticVariantRecord {
-  schemaVersion: typeof GENETIC_VARIANT_SCHEMA_VERSION;
-  docType: typeof GENETIC_VARIANT_DOC_TYPE;
-  variantId: string;
-  slug: string;
-  gene: string;
-  title: string;
-  zygosity?: VariantZygosity;
-  significance?: VariantSignificance;
-  inheritance?: VariantInheritance;
-  sourceFamilyMemberIds?: string[];
-  note?: string;
-  relativePath: string;
-  markdown: string;
+export type GeneticVariantLinkType = "source_family_member";
+
+export interface GeneticVariantLink {
+  type: GeneticVariantLinkType;
+  targetId: string;
 }
+
+export interface GeneticVariantEntity extends GeneticVariantFrontmatter {
+  links: GeneticVariantLink[];
+}
+
+export type GeneticVariantRecord = GeneticVariantEntity & MarkdownRegistryDocumentEnvelope;
 
 export interface UpsertGeneticVariantInput {
   vaultRoot: string;
   variantId?: string;
   slug?: string;
-  gene: string;
+  gene?: string;
   title?: string;
   zygosity?: VariantZygosity;
   significance?: VariantSignificance;

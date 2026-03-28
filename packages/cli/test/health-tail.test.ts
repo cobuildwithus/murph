@@ -740,6 +740,59 @@ test.sequential("condition and allergy commands keep noun-specific and generic r
   }
 });
 
+test.sequential("condition and allergy upsert validate payloads through the shared schemas", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const conditionPayloadPath = path.join(vaultRoot, "condition-invalid.json");
+  const allergyPayloadPath = path.join(vaultRoot, "allergy-invalid.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      conditionPayloadPath,
+      JSON.stringify({
+        title: "Migraine",
+        relatedGoalIds: ["not-a-goal-id"],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      allergyPayloadPath,
+      JSON.stringify({
+        title: "Peanut allergy",
+        substance: "Peanut",
+        relatedConditionIds: ["not-a-condition-id"],
+      }),
+      "utf8",
+    );
+
+    const conditionUpsertResult = await runCli([
+      "condition",
+      "upsert",
+      "--input",
+      `@${conditionPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const allergyUpsertResult = await runCli([
+      "allergy",
+      "upsert",
+      "--input",
+      `@${allergyPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(conditionUpsertResult.ok, false);
+    assert.equal(conditionUpsertResult.error?.code, "invalid_payload");
+    assert.match(conditionUpsertResult.error?.message ?? "", /condition payload failed validation/i);
+    assert.equal(allergyUpsertResult.ok, false);
+    assert.equal(allergyUpsertResult.error?.code, "invalid_payload");
+    assert.match(allergyUpsertResult.error?.message ?? "", /allergy payload failed validation/i);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family.json");
@@ -842,6 +895,102 @@ test.sequential("family descriptor wiring keeps member-specific commands aligned
       requireData(genericList).items.map((item) => item.kind),
       ["family"],
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("generic family show links ignore the removed familyMemberIds alias", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const familyMemberId = "fam_01JNY0B2W4VG5C2A0G9S8M7R6P";
+  const variantId = "var_01JNY0B2W4VG5C2A0G9S8M7R6Q";
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      path.join(vaultRoot, "bank/family/mother.md"),
+      `---
+schemaVersion: murph.frontmatter.family-member.v1
+docType: family_member
+familyMemberId: ${familyMemberId}
+slug: mother
+title: Mother
+relationship: mother
+relatedVariantIds:
+  - ${variantId}
+familyMemberIds:
+  - var_should_not_leak
+---
+# Mother
+
+Legacy alias coverage fixture.
+`,
+      "utf8",
+    );
+
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        links: Array<{ id: string }>;
+      };
+    }>([
+      "show",
+      familyMemberId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(genericShow.ok, true);
+    assert.equal(requireData(genericShow).entity.id, familyMemberId);
+    assert.equal(requireData(genericShow).entity.kind, "family");
+    assert.deepEqual(
+      requireData(genericShow).entity.links.map((link) => link.id).sort(),
+      [variantId],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("family upsert validates payloads through the shared schema and does not expose a fake status filter", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "family-invalid.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "Mother",
+        relationship: "mother",
+        relatedVariantIds: ["not-a-variant-id"],
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli([
+      "family",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const listResult = await runCli([
+      "family",
+      "list",
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, false);
+    assert.equal(upsertResult.error?.code, "invalid_payload");
+    assert.match(upsertResult.error?.message ?? "", /family payload failed validation/i);
+    assert.equal(listResult.ok, false);
+    assert.match(listResult.error?.message ?? "", /status|unknown option|unexpected option/i);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -956,6 +1105,95 @@ test.sequential("genetics descriptor wiring keeps variant-specific commands alig
       requireData(genericList).items.map((item) => item.kind),
       ["genetics"],
     );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("genetics upsert validates payloads through the shared schema and preserves omitted gene values on patch updates", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const createPayloadPath = path.join(vaultRoot, "genetics-create.json");
+  const patchPayloadPath = path.join(vaultRoot, "genetics-patch.json");
+  const invalidPayloadPath = path.join(vaultRoot, "genetics-invalid.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      createPayloadPath,
+      JSON.stringify({
+        title: "APOE e4 allele",
+        gene: "APOE",
+        significance: "risk_factor",
+      }),
+      "utf8",
+    );
+
+    const created = await runCli<{
+      variantId: string;
+    }>([
+      "genetics",
+      "upsert",
+      "--input",
+      `@${createPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const variantId = requireData(created).variantId;
+
+    await writeFile(
+      patchPayloadPath,
+      JSON.stringify({
+        variantId,
+        title: "APOE e4 allele updated",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      invalidPayloadPath,
+      JSON.stringify({
+        title: "MTHFR C677T",
+        gene: "MTHFR",
+        sourceFamilyMemberIds: ["not-a-family-member-id"],
+      }),
+      "utf8",
+    );
+
+    const patched = await runCli([
+      "genetics",
+      "upsert",
+      "--input",
+      `@${patchPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const shown = await runCli<{
+      entity: {
+        data: Record<string, unknown>;
+      };
+    }>([
+      "genetics",
+      "show",
+      variantId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const invalid = await runCli([
+      "genetics",
+      "upsert",
+      "--input",
+      `@${invalidPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(created.ok, true);
+    assert.equal(patched.ok, true);
+    assert.equal(shown.ok, true);
+    assert.equal(requireData(shown).entity.data.gene, "APOE");
+    assert.equal(requireData(shown).entity.data.title, "APOE e4 allele updated");
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.error?.code, "invalid_payload");
+    assert.match(invalid.error?.message ?? "", /genetics payload failed validation/i);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

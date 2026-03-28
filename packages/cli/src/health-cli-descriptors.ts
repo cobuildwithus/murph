@@ -1,5 +1,9 @@
 import {
+  allergyRegistryEntityDefinition,
   commandNounCapabilityByNoun,
+  conditionRegistryEntityDefinition,
+  familyRegistryEntityDefinition,
+  geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
   healthEntityDefinitions,
   type CommandCapability,
@@ -203,6 +207,55 @@ function buildStatusFilteredRegistryDescriptorExtension(
   };
 }
 
+function buildSharedStatusFilteredRegistryDescriptorExtension(
+  definition:
+    | typeof goalRegistryEntityDefinition
+    | typeof conditionRegistryEntityDefinition
+    | typeof allergyRegistryEntityDefinition
+    | typeof familyRegistryEntityDefinition
+    | typeof geneticsRegistryEntityDefinition,
+): HealthEntityDescriptorExtension {
+  const command = definition.registry.command;
+  const resultIdField = definition.registry.idField;
+  const supportsStatusFilter = definition.registry.statusKeys.length > 0;
+
+  if (!command || !resultIdField) {
+    throw new Error(`Registry entity "${definition.kind}" is missing shared command metadata.`);
+  }
+
+  const extension = buildStatusFilteredRegistryDescriptorExtension({
+    commandDescription: command.commandDescription,
+    commandName: command.commandName as StatusFilteredRegistryDescriptorCommandName,
+    listServiceMethod: command.listServiceMethod as HealthQueryListServiceMethodName,
+    listStatusDescription: supportsStatusFilter ? command.listStatusDescription : undefined,
+    noun: definition.noun,
+    payloadFile: command.payloadFile,
+    pluralNoun: definition.plural,
+    resultIdField,
+    runtimeListMethod: command.runtimeListMethod as HealthQueryRuntimeListMethodName,
+    runtimeMethod: command.runtimeMethod as HealthCoreRuntimeMethodName,
+    runtimeShowMethod: command.runtimeShowMethod as HealthQueryRuntimeShowMethodName,
+    scaffoldServiceMethod: command.scaffoldServiceMethod as HealthCoreScaffoldServiceMethodName,
+    showId: command.showId,
+    showServiceMethod: command.showServiceMethod as HealthQueryShowServiceMethodName,
+    upsertServiceMethod: command.upsertServiceMethod as HealthCoreUpsertServiceMethodName,
+  });
+
+  if (supportsStatusFilter) {
+    return extension;
+  }
+
+  return {
+    ...extension,
+    query: extension.query
+      ? {
+          ...extension.query,
+          genericListFilterCapabilities: [],
+        }
+      : undefined,
+  };
+}
+
 const checkedHealthEntityDescriptorExtensions = {
   assessment: {
     query: {
@@ -284,72 +337,9 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showProfile",
     },
   },
-  goal: (() => {
-    const command = goalRegistryEntityDefinition.registry.command;
-    const resultIdField = goalRegistryEntityDefinition.registry.idField;
-
-    if (!command || !resultIdField) {
-      throw new Error('Registry entity "goal" is missing shared command metadata.');
-    }
-
-    return buildStatusFilteredRegistryDescriptorExtension({
-      commandDescription: command.commandDescription,
-      commandName: command.commandName as StatusFilteredRegistryDescriptorCommandName,
-      listServiceMethod: command.listServiceMethod as HealthQueryListServiceMethodName,
-      listStatusDescription: command.listStatusDescription,
-      noun: goalRegistryEntityDefinition.noun,
-      payloadFile: command.payloadFile,
-      pluralNoun: goalRegistryEntityDefinition.plural,
-      resultIdField,
-      runtimeListMethod: command.runtimeListMethod as HealthQueryRuntimeListMethodName,
-      runtimeMethod: command.runtimeMethod as HealthCoreRuntimeMethodName,
-      runtimeShowMethod: command.runtimeShowMethod as HealthQueryRuntimeShowMethodName,
-      scaffoldServiceMethod: command.scaffoldServiceMethod as HealthCoreScaffoldServiceMethodName,
-      showId: command.showId,
-      showServiceMethod: command.showServiceMethod as HealthQueryShowServiceMethodName,
-      upsertServiceMethod: command.upsertServiceMethod as HealthCoreUpsertServiceMethodName,
-    });
-  })(),
-  condition: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Condition registry commands for the health extension surface.",
-    commandName: "condition",
-    listServiceMethod: "listConditions",
-    listStatusDescription: "Optional condition status to filter by.",
-    noun: "condition",
-    payloadFile: "condition.json",
-    pluralNoun: "conditions",
-    resultIdField: "conditionId",
-    runtimeListMethod: "listConditions",
-    runtimeMethod: "upsertCondition",
-    runtimeShowMethod: "showCondition",
-    scaffoldServiceMethod: "scaffoldCondition",
-    showId: {
-      description: "Condition id or slug to show.",
-      example: "<condition-id>",
-    },
-    showServiceMethod: "showCondition",
-    upsertServiceMethod: "upsertCondition",
-  }),
-  allergy: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Allergy registry commands for the health extension surface.",
-    commandName: "allergy",
-    listServiceMethod: "listAllergies",
-    listStatusDescription: "Optional allergy status to filter by.",
-    noun: "allergy",
-    payloadFile: "allergy.json",
-    pluralNoun: "allergies",
-    resultIdField: "allergyId",
-    runtimeListMethod: "listAllergies",
-    runtimeMethod: "upsertAllergy",
-    runtimeShowMethod: "showAllergy",
-    scaffoldServiceMethod: "scaffoldAllergy",
-    showId: {
-      description: "Allergy id or slug to show.",
-      example: "<allergy-id>",
-    },
-    showServiceMethod: "showAllergy",
-    upsertServiceMethod: "upsertAllergy",
-  }),
+  goal: buildSharedStatusFilteredRegistryDescriptorExtension(goalRegistryEntityDefinition),
+  condition: buildSharedStatusFilteredRegistryDescriptorExtension(conditionRegistryEntityDefinition),
+  allergy: buildSharedStatusFilteredRegistryDescriptorExtension(allergyRegistryEntityDefinition),
   protocol: buildStatusFilteredRegistryDescriptorExtension({
     commandDescription: "Protocol registry commands for the health extension surface.",
     commandName: "protocol",
@@ -442,46 +432,8 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showBloodTest",
     },
   },
-  family: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Family registry commands for the health extension surface.",
-    commandName: "family",
-    listServiceMethod: "listFamilyMembers",
-    listStatusDescription: "Optional family-member status to filter by.",
-    noun: "family member",
-    payloadFile: "family.json",
-    pluralNoun: "family members",
-    resultIdField: "familyMemberId",
-    runtimeListMethod: "listFamilyMembers",
-    runtimeMethod: "upsertFamilyMember",
-    runtimeShowMethod: "showFamilyMember",
-    scaffoldServiceMethod: "scaffoldFamilyMember",
-    showId: {
-      description: "Family member id or slug to show.",
-      example: "<family-member-id>",
-    },
-    showServiceMethod: "showFamilyMember",
-    upsertServiceMethod: "upsertFamilyMember",
-  }),
-  genetics: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Genetic variant commands for the health extension surface.",
-    commandName: "genetics",
-    listServiceMethod: "listGeneticVariants",
-    listStatusDescription: "Optional genetic-variant status to filter by.",
-    noun: "genetic variant",
-    payloadFile: "genetics.json",
-    pluralNoun: "genetic variants",
-    resultIdField: "variantId",
-    runtimeListMethod: "listGeneticVariants",
-    runtimeMethod: "upsertGeneticVariant",
-    runtimeShowMethod: "showGeneticVariant",
-    scaffoldServiceMethod: "scaffoldGeneticVariant",
-    showId: {
-      description: "Genetic variant id or slug to show.",
-      example: "<genetic-variant-id>",
-    },
-    showServiceMethod: "showGeneticVariant",
-    upsertServiceMethod: "upsertGeneticVariant",
-  }),
+  family: buildSharedStatusFilteredRegistryDescriptorExtension(familyRegistryEntityDefinition),
+  genetics: buildSharedStatusFilteredRegistryDescriptorExtension(geneticsRegistryEntityDefinition),
 } as const satisfies Record<HealthEntityKind, HealthEntityDescriptorExtension>;
 
 function requireScaffoldTemplate(definition: HealthEntityDefinition): JsonObject {
