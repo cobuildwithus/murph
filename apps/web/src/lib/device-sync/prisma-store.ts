@@ -309,14 +309,12 @@ class PrismaHostedConnectionStore {
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    await this.prisma.deviceConnection.update({
-      where: {
-        id: accountId,
-      },
-      data: {
-        lastWebhookAt: new Date(now),
-      },
-    });
+    // Use raw SQL so `last_webhook_at` can advance without Prisma bumping `updated_at`.
+    await this.prisma.$executeRaw`
+      update device_connection
+      set last_webhook_at = ${new Date(now)}
+      where id = ${accountId}
+    `;
   }
 
   async listConnectionsForUser(userId: string): Promise<PublicDeviceSyncAccount[]> {

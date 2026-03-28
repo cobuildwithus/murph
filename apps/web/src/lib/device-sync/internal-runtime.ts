@@ -84,6 +84,41 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         } satisfies HostedDeviceSyncRuntimeApplyEntry;
       }
 
+      const requestedAccessTokenExpiresAt = update.tokenBundle
+        ? update.tokenBundle.accessTokenExpiresAt
+        : Object.prototype.hasOwnProperty.call(update, "accessTokenExpiresAt")
+          ? update.accessTokenExpiresAt ?? null
+          : undefined;
+      const connectionMutationRequested = hasHostedDeviceSyncRuntimeConnectionMutation(update);
+      const tokenMutationRequested = update.tokenBundle !== undefined || requestedAccessTokenExpiresAt !== undefined;
+      const connectionVersionMismatch = hasHostedDeviceSyncRuntimeConnectionVersionMismatch(
+        existing.updatedAt,
+        update.observedUpdatedAt,
+        connectionMutationRequested || tokenMutationRequested,
+      );
+      const tokenVersionMismatch = Boolean(
+        tokenMutationRequested
+        && existing.secret
+        && typeof update.observedTokenVersion === "number"
+        && update.observedTokenVersion > 0
+        && existing.secret.tokenVersion !== update.observedTokenVersion,
+      );
+      const tokenBlockedByDisconnectedStatus = Boolean(
+        update.tokenBundle
+        && (existing.status === "disconnected" || update.status === "disconnected"),
+      );
+
+      if (connectionVersionMismatch) {
+        return {
+          connection: normalizeHostedDeviceSyncRuntimeConnection(
+            mapHostedPublicAccountRecord(existing),
+          ),
+          connectionId: update.connectionId,
+          status: "updated",
+          tokenUpdate: existing.secret ? "unchanged" : "missing",
+        } satisfies HostedDeviceSyncRuntimeApplyEntry;
+      }
+
       if (update.status === "disconnected") {
         const disconnected = await store.markConnectionDisconnected({
           connectionId: update.connectionId,
@@ -119,20 +154,6 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         } satisfies HostedDeviceSyncRuntimeApplyEntry;
       }
 
-      const requestedAccessTokenExpiresAt = update.tokenBundle
-        ? update.tokenBundle.accessTokenExpiresAt
-        : Object.prototype.hasOwnProperty.call(update, "accessTokenExpiresAt")
-          ? update.accessTokenExpiresAt ?? null
-          : undefined;
-      const tokenMutationRequested = update.tokenBundle !== undefined || requestedAccessTokenExpiresAt !== undefined;
-      const tokenVersionMismatch = Boolean(
-        tokenMutationRequested
-        && existing.secret
-        && typeof update.observedTokenVersion === "number"
-        && update.observedTokenVersion > 0
-        && existing.secret.tokenVersion !== update.observedTokenVersion,
-      );
-
       const nextData: Record<string, unknown> = {
         ...(update.status ? { status: update.status } : {}),
         ...(Object.prototype.hasOwnProperty.call(update, "displayName")
@@ -144,7 +165,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         ...(Object.prototype.hasOwnProperty.call(update, "metadata")
           ? { metadataJson: toJsonRecord(update.metadata ?? {}) }
           : {}),
-        ...(requestedAccessTokenExpiresAt !== undefined && !tokenVersionMismatch
+        ...(requestedAccessTokenExpiresAt !== undefined && !tokenVersionMismatch && !tokenBlockedByDisconnectedStatus
           ? {
               accessTokenExpiresAt: requestedAccessTokenExpiresAt
                 ? new Date(requestedAccessTokenExpiresAt)
@@ -200,12 +221,14 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
             }),
       };
 
-      const updatedRecord = await tx.deviceConnection.update({
-        where: {
-          id: update.connectionId,
-        },
-        data: nextData,
-      });
+      const updatedRecord = Object.keys(nextData).length === 0
+        ? existing
+        : await tx.deviceConnection.update({
+            where: {
+              id: update.connectionId,
+            },
+            data: nextData,
+          });
       let tokenUpdate: HostedDeviceSyncRuntimeApplyEntry["tokenUpdate"] = existing.secret
         ? "unchanged"
         : "missing";
@@ -213,6 +236,8 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       if (update.tokenBundle) {
         if (tokenVersionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
+        } else if (tokenBlockedByDisconnectedStatus) {
+          tokenUpdate = existing.secret ? "unchanged" : "missing";
         } else {
           const nextAccessTokenEncrypted = store.codec.encrypt(update.tokenBundle.accessToken);
           const nextRefreshTokenEncrypted = update.tokenBundle.refreshToken
@@ -392,6 +417,14 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
     ...(record.nextReconcileAt === undefined
       ? {}
       : { nextReconcileAt: readNullableString(record.nextReconcileAt, `updates[${index}].nextReconcileAt`) }),
+    ...(record.observedUpdatedAt === undefined
+      ? {}
+      : {
+          observedUpdatedAt: readNullableString(
+            record.observedUpdatedAt,
+            `updates[${index}].observedUpdatedAt`,
+          ),
+        }),
     ...(record.observedTokenVersion === undefined
       ? {}
       : {
@@ -454,6 +487,35 @@ function normalizeNullableIsoTimestamp(
   }
 
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function hasHostedDeviceSyncRuntimeConnectionMutation(
+  update: HostedDeviceSyncRuntimeConnectionUpdate,
+): boolean {
+  return update.status !== undefined
+    || Object.prototype.hasOwnProperty.call(update, "displayName")
+    || Object.prototype.hasOwnProperty.call(update, "scopes")
+    || Object.prototype.hasOwnProperty.call(update, "metadata")
+    || Object.prototype.hasOwnProperty.call(update, "nextReconcileAt")
+    || Object.prototype.hasOwnProperty.call(update, "lastWebhookAt")
+    || Object.prototype.hasOwnProperty.call(update, "lastSyncStartedAt")
+    || Object.prototype.hasOwnProperty.call(update, "lastSyncCompletedAt")
+    || Object.prototype.hasOwnProperty.call(update, "lastSyncErrorAt")
+    || Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
+    || Object.prototype.hasOwnProperty.call(update, "lastErrorMessage")
+    || update.clearError === true;
+}
+
+function hasHostedDeviceSyncRuntimeConnectionVersionMismatch(
+  existingUpdatedAt: Date | string | null | undefined,
+  observedUpdatedAt: string | null | undefined,
+  mutationRequested: boolean,
+): boolean {
+  if (!mutationRequested || observedUpdatedAt === undefined || observedUpdatedAt === null) {
+    return false;
+  }
+
+  return normalizeNullableIsoTimestamp(existingUpdatedAt) !== normalizeNullableIsoTimestamp(observedUpdatedAt);
 }
 
 function normalizeHostedDeviceSyncRuntimeConnection(

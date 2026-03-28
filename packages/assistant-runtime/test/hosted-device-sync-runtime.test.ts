@@ -11,12 +11,20 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("../src/hosted-device-sync-control-plane.ts", () => ({
-  applyHostedDeviceSyncRuntimeUpdates: mocks.applyHostedDeviceSyncRuntimeUpdates,
-  fetchHostedDeviceSyncRuntimeSnapshot: mocks.fetchHostedDeviceSyncRuntimeSnapshot,
-  normalizeHostedDeviceSyncJobHints: mocks.normalizeHostedDeviceSyncJobHints,
-  resolveHostedDeviceSyncWakeContext: mocks.resolveHostedDeviceSyncWakeContext,
-}));
+vi.mock("@murph/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murph/hosted-execution")>("@murph/hosted-execution");
+  return {
+    ...actual,
+    applyHostedExecutionDeviceSyncRuntimeUpdates: mocks.applyHostedDeviceSyncRuntimeUpdates,
+    fetchHostedExecutionDeviceSyncRuntimeSnapshot: mocks.fetchHostedDeviceSyncRuntimeSnapshot,
+    HOSTED_EXECUTION_PROXY_HOSTS: {
+      ...actual.HOSTED_EXECUTION_PROXY_HOSTS,
+      deviceSync: "device-sync.worker",
+    },
+    normalizeHostedDeviceSyncJobHints: mocks.normalizeHostedDeviceSyncJobHints,
+    resolveHostedDeviceSyncWakeContext: mocks.resolveHostedDeviceSyncWakeContext,
+  };
+});
 
 describe("hosted device-sync runtime", () => {
   beforeEach(() => {
@@ -374,6 +382,215 @@ describe("hosted device-sync runtime", () => {
     }));
     const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(hydrateInput).not.toHaveProperty("tokens");
+  });
+
+  it("preserves divergent local WHOOP auth state on the first sync when hosted observed markers are still null", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-03-27T09:00:00.000Z",
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Hosted Whoop",
+            externalAccountId: "whoop-rollout-user",
+            id: "hosted_rollout_user",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
+            lastWebhookAt: "2026-03-27T07:50:00.000Z",
+            metadata: {
+              source: "hosted",
+            },
+            nextReconcileAt: "2026-03-27T12:00:00.000Z",
+            provider: "whoop",
+            scopes: ["offline"],
+            status: "active",
+            updatedAt: "2026-03-27T08:00:00.000Z",
+          },
+          tokenBundle: {
+            accessToken: "hosted-access",
+            accessTokenExpiresAt: "2026-03-27T09:00:00.000Z",
+            keyVersion: "v1",
+            refreshToken: "hosted-refresh",
+            tokenVersion: 2,
+          },
+        },
+      ],
+      generatedAt: "2026-03-27T08:05:00.000Z",
+      userId: "user-123",
+    });
+
+    const existing = {
+      id: "local_rollout_user",
+      provider: "whoop",
+      externalAccountId: "whoop-rollout-user",
+      displayName: "Local Whoop",
+      status: "reauthorization_required",
+      scopes: ["offline"],
+      metadata: {
+        source: "local",
+      },
+      connectedAt: "2026-03-26T12:00:00.000Z",
+      lastWebhookAt: "2026-03-27T07:50:00.000Z",
+      lastSyncStartedAt: "2026-03-27T08:10:00.000Z",
+      lastSyncCompletedAt: "2026-03-27T08:20:00.000Z",
+      lastSyncErrorAt: "2026-03-27T08:20:00.000Z",
+      lastErrorCode: "PROVIDER_AUTH",
+      lastErrorMessage: "Reconnect locally",
+      nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      updatedAt: "2026-03-27T08:20:00.000Z",
+      disconnectGeneration: 0,
+      accessTokenEncrypted: "enc:local-access",
+      refreshTokenEncrypted: "enc:local-refresh",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: null,
+    };
+    const hydrateHostedAccount = vi.fn(() => existing);
+    const service = {
+      store: {
+        getAccountByExternalAccount: vi.fn(() => existing),
+        hydrateHostedAccount,
+        markPendingJobsDeadForAccount: vi.fn(),
+      },
+    };
+
+    const { syncHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    await syncHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-123",
+        },
+        eventId: "evt_rollout_user",
+        occurredAt: "2026-03-27T08:25:00.000Z",
+      },
+      secret: "secret-for-tests",
+      service: service as never,
+      timeoutMs: null,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "https://control.example.test",
+        internalToken: "internal-token",
+      },
+    });
+
+    expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
+      displayName: "Local Whoop",
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: null,
+      lastErrorCode: "PROVIDER_AUTH",
+      lastErrorMessage: "Reconnect locally",
+      nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      status: "reauthorization_required",
+      updatedAt: "2026-03-27T08:20:00.000Z",
+    }));
+    const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(hydrateInput).not.toHaveProperty("tokens");
+  });
+
+  it("does not let a webhook-only hosted touch clear fresher local auth errors", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: "2026-03-27T09:00:00.000Z",
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Hosted Whoop",
+            externalAccountId: "whoop-webhook-touch",
+            id: "hosted_webhook_touch",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
+            lastWebhookAt: "2026-03-27T08:24:00.000Z",
+            metadata: {
+              source: "hosted",
+            },
+            nextReconcileAt: "2026-03-27T12:00:00.000Z",
+            provider: "whoop",
+            scopes: ["offline"],
+            status: "active",
+            updatedAt: "2026-03-27T08:00:00.000Z",
+          },
+          tokenBundle: {
+            accessToken: "hosted-access",
+            accessTokenExpiresAt: "2026-03-27T09:00:00.000Z",
+            keyVersion: "v1",
+            refreshToken: "hosted-refresh",
+            tokenVersion: 4,
+          },
+        },
+      ],
+      generatedAt: "2026-03-27T08:25:00.000Z",
+      userId: "user-123",
+    });
+
+    const existing = {
+      id: "local_webhook_touch",
+      provider: "whoop",
+      externalAccountId: "whoop-webhook-touch",
+      displayName: "Local Whoop",
+      status: "reauthorization_required",
+      scopes: ["offline"],
+      metadata: {
+        source: "local",
+      },
+      connectedAt: "2026-03-26T12:00:00.000Z",
+      lastWebhookAt: "2026-03-27T08:20:00.000Z",
+      lastSyncStartedAt: "2026-03-27T08:10:00.000Z",
+      lastSyncCompletedAt: "2026-03-27T08:20:00.000Z",
+      lastSyncErrorAt: "2026-03-27T08:20:00.000Z",
+      lastErrorCode: "PROVIDER_AUTH",
+      lastErrorMessage: "Reconnect locally",
+      nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      updatedAt: "2026-03-27T08:23:00.000Z",
+      disconnectGeneration: 0,
+      accessTokenEncrypted: "enc:local-access",
+      refreshTokenEncrypted: "enc:local-refresh",
+      hostedObservedTokenVersion: 4,
+      hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
+    };
+    const hydrateHostedAccount = vi.fn(() => existing);
+    const service = {
+      store: {
+        getAccountByExternalAccount: vi.fn(() => existing),
+        hydrateHostedAccount,
+        markPendingJobsDeadForAccount: vi.fn(),
+      },
+    };
+
+    const { syncHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    await syncHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-123",
+        },
+        eventId: "evt_webhook_touch",
+        occurredAt: "2026-03-27T08:25:00.000Z",
+      },
+      secret: "secret-for-tests",
+      service: service as never,
+      timeoutMs: null,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "https://control.example.test",
+        internalToken: "internal-token",
+      },
+    });
+
+    expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
+      lastErrorCode: "PROVIDER_AUTH",
+      lastErrorMessage: "Reconnect locally",
+      lastWebhookAt: "2026-03-27T08:24:00.000Z",
+      status: "reauthorization_required",
+      updatedAt: "2026-03-27T08:23:00.000Z",
+    }));
   });
 
   it("treats a hosted snapshot without updatedAt as stale when local state is newer and unacknowledged", async () => {
@@ -1024,6 +1241,7 @@ describe("hosted device-sync runtime", () => {
           lastSyncCompletedAt: "2026-03-27T08:30:00.000Z",
           lastSyncErrorAt: null,
           lastSyncStartedAt: "2026-03-27T08:20:00.000Z",
+          observedUpdatedAt: "2026-03-27T08:25:00.000Z",
           observedTokenVersion: null,
           tokenBundle: expect.objectContaining({
             accessToken: "access",
