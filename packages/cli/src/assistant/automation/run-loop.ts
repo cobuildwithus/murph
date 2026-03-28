@@ -33,10 +33,7 @@ import {
   type AssistantRunEvent,
   waitForAbortOrTimeout,
 } from './shared.js'
-import {
-  scanAssistantAutoReplyOnce,
-  scanAssistantInboxOnce,
-} from './scanner.js'
+import { scanAssistantAutomationOnce } from './scanner.js'
 import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 
 export interface RunAssistantAutomationInput {
@@ -141,112 +138,39 @@ export async function runAssistantAutomation(
       })
       let state = await readAssistantAutomationState(input.vault)
 
-      if (input.modelSpec?.model) {
-        const scanResult = await scanAssistantInboxOnce({
-          inboxServices: input.inboxServices,
-          requestId: input.requestId,
-          vault: input.vault,
-          vaultServices: input.vaultServices,
-          modelSpec: input.modelSpec,
-          maxPerScan: input.maxPerScan,
-          signal: controller.signal,
-          onEvent: input.onEvent,
-          afterCursor: state.inboxScanCursor,
-          oldestFirst: true,
-          async onCursorProgress(cursor) {
-            state = await saveAssistantAutomationState(input.vault, {
-              ...state,
-              inboxScanCursor: cursor,
-              updatedAt: new Date().toISOString(),
-            })
-          },
-        })
-        aggregateRouting.considered += scanResult.considered
-        aggregateRouting.failed += scanResult.failed
-        aggregateRouting.noAction += scanResult.noAction
-        aggregateRouting.routed += scanResult.routed
-        aggregateRouting.skipped += scanResult.skipped
-      }
-
-      if (state.autoReplyChannels.length > 0) {
-        const backlogWasActive = state.autoReplyBacklogChannels.length > 0
-        if (backlogWasActive) {
-          const backlogResult = await scanAssistantAutoReplyOnce({
-            afterCursor: state.autoReplyScanCursor,
-            autoReplyPrimed: true,
-            backlogChannels: state.autoReplyBacklogChannels,
-            enabledChannels: state.autoReplyBacklogChannels,
-            inboxServices: input.inboxServices,
-            maxPerScan: input.maxPerScan,
-            onEvent: input.onEvent,
-            requestId: input.requestId,
-            signal: controller.signal,
-            allowSelfAuthored: input.allowSelfAuthored ?? false,
-            deliveryDispatchMode: input.deliveryDispatchMode,
-            sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-            vault: input.vault,
-            async onStateProgress(next) {
-              state = await saveAssistantAutomationState(input.vault, {
-                ...state,
-                autoReplyScanCursor: next.cursor,
-                autoReplyBacklogChannels:
-                  next.backlogChannels === undefined
-                    ? state.autoReplyBacklogChannels
-                    : [...next.backlogChannels],
-                autoReplyPrimed: next.primed,
-                updatedAt: new Date().toISOString(),
-              })
-            },
+      const scanResult = await scanAssistantAutomationOnce({
+        allowSelfAuthored: input.allowSelfAuthored ?? false,
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        inboxServices: input.inboxServices,
+        maxPerScan: input.maxPerScan,
+        modelSpec: input.modelSpec,
+        onEvent: input.onEvent,
+        requestId: input.requestId,
+        signal: controller.signal,
+        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+        state,
+        vault: input.vault,
+        vaultServices: input.vaultServices,
+        async onStateProgress(next) {
+          state = await saveAssistantAutomationState(input.vault, {
+            ...state,
+            inboxScanCursor: next.inboxScanCursor,
+            autoReplyScanCursor: next.autoReplyScanCursor,
+            autoReplyBacklogChannels: [...next.autoReplyBacklogChannels],
+            autoReplyPrimed: next.autoReplyPrimed,
+            updatedAt: new Date().toISOString(),
           })
-          aggregateReplies.considered += backlogResult.considered
-          aggregateReplies.failed += backlogResult.failed
-          aggregateReplies.replied += backlogResult.replied
-          aggregateReplies.skipped += backlogResult.skipped
-
-          await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
-
-          if (input.once) {
-            break
-          }
-
-          await waitForAbortOrTimeout(
-            controller.signal,
-            normalizeScanInterval(input.scanIntervalMs),
-          )
-          continue
-        }
-
-        const replyResult = await scanAssistantAutoReplyOnce({
-          afterCursor: state.autoReplyScanCursor,
-          autoReplyPrimed: state.autoReplyPrimed,
-          enabledChannels: state.autoReplyChannels,
-          inboxServices: input.inboxServices,
-          maxPerScan: input.maxPerScan,
-          onEvent: input.onEvent,
-          requestId: input.requestId,
-          signal: controller.signal,
-          allowSelfAuthored: input.allowSelfAuthored ?? false,
-          deliveryDispatchMode: input.deliveryDispatchMode,
-          sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
-          vault: input.vault,
-          async onStateProgress(next) {
-            state = await saveAssistantAutomationState(input.vault, {
-              ...state,
-              autoReplyScanCursor: next.cursor,
-              autoReplyBacklogChannels:
-                next.backlogChannels === undefined
-                  ? state.autoReplyBacklogChannels
-                  : [...next.backlogChannels],
-              autoReplyPrimed: next.primed,
-              updatedAt: new Date().toISOString(),
-            })
-          },
-        })
-        aggregateReplies.considered += replyResult.considered
-        aggregateReplies.failed += replyResult.failed
-        aggregateReplies.replied += replyResult.replied
-        aggregateReplies.skipped += replyResult.skipped
-      }
+        },
+      })
+      aggregateRouting.considered += scanResult.routing.considered
+      aggregateRouting.failed += scanResult.routing.failed
+      aggregateRouting.noAction += scanResult.routing.noAction
+      aggregateRouting.routed += scanResult.routing.routed
+      aggregateRouting.skipped += scanResult.routing.skipped
+      aggregateReplies.considered += scanResult.replies.considered
+      aggregateReplies.failed += scanResult.replies.failed
+      aggregateReplies.replied += scanResult.replies.replied
+      aggregateReplies.skipped += scanResult.replies.skipped
 
       await refreshAssistantStatusSnapshot(input.vault).catch(() => undefined)
 

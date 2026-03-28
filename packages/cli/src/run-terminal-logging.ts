@@ -41,7 +41,7 @@ export function formatAssistantRunEventForTerminal(
   if (event.type === 'scan.started') {
     return captureCountFromDetails(event.details) === 0
       ? null
-      : `scanning canonical inbox routing: ${event.details ?? ''}`.trim()
+      : `scanning inbox decisions: ${event.details ?? ''}`.trim()
   }
 
   if (event.type === 'reply.scan.started') {

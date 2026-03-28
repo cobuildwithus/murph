@@ -66,12 +66,14 @@ export {
 } from './assistant/memory.js'
 export type {
   AssistantAutoReplyScanResult,
+  AssistantAutomationScanResult,
   AssistantInboxScanResult,
   AssistantRunEvent,
   RunAssistantAutomationInput,
 } from './assistant/automation.js'
 export {
   runAssistantAutomation,
+  scanAssistantAutomationOnce,
   scanAssistantAutoReplyOnce,
   scanAssistantInboxOnce,
 } from './assistant/automation.js'

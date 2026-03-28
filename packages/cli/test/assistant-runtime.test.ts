@@ -25,6 +25,7 @@ import {
   extractRecoveredAssistantSession,
   isAssistantProviderInterruptedError,
 } from '../src/assistant/provider-turn-recovery.js'
+import { writeAssistantChatResultArtifacts } from '../src/assistant/automation/artifacts.js'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -1419,6 +1420,286 @@ test('scanAssistantAutomationOnce keeps the routing cursor pinned when a capture
   assert.deepEqual(stateProgress, [])
 })
 
+test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred groups and retries them before later captures', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-unified-reply-defer-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const stateProgress: Array<{
+    inboxScanCursor: { occurredAt: string; captureId: string } | null
+    autoReplyScanCursor: { occurredAt: string; captureId: string } | null
+  }> = []
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-unified-1',
+            source: 'email',
+            accountId: 'self',
+            externalId: 'ext-unified-1',
+            threadId: 'thread-unified',
+            threadTitle: 'Deferred thread',
+            actorId: 'deferred@example.com',
+            actorName: 'Deferred User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:04:00Z',
+            receivedAt: null,
+            text: 'First email',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/unified-1.json',
+            eventId: 'evt-unified-1',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-unified-2',
+            source: 'email',
+            accountId: 'self',
+            externalId: 'ext-unified-2',
+            threadId: 'thread-unified',
+            threadTitle: 'Deferred thread',
+            actorId: 'deferred@example.com',
+            actorName: 'Deferred User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:04:30Z',
+            receivedAt: null,
+            text: 'Second email',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/unified-2.json',
+            eventId: 'evt-unified-2',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-unified-later',
+            source: 'imessage',
+            accountId: 'self',
+            externalId: 'ext-unified-later',
+            threadId: 'thread-later',
+            threadTitle: null,
+            actorId: '+15550004444',
+            actorName: 'Later User',
+            actorIsSelf: true,
+            occurredAt: '2026-03-18T09:05:00Z',
+            receivedAt: null,
+            text: 'Later self-authored message',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/unified-later.json',
+            eventId: 'evt-unified-later',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      if (input.captureId === 'cap-unified-later') {
+        return {
+          capture: {
+            captureId: 'cap-unified-later',
+            source: 'imessage',
+            threadTitle: null,
+            threadId: 'thread-later',
+            threadIsDirect: true,
+            actorId: '+15550004444',
+            actorName: 'Later User',
+            actorIsSelf: true,
+            occurredAt: '2026-03-18T09:05:00Z',
+            text: 'Later self-authored message',
+            attachments: [],
+          },
+        }
+      }
+
+      return {
+        capture: {
+          captureId: input.captureId,
+          source: 'email',
+          threadTitle: 'Deferred thread',
+          threadId: 'thread-unified',
+          threadIsDirect: true,
+          actorId: 'deferred@example.com',
+          actorName: 'Deferred User',
+          actorIsSelf: false,
+          occurredAt:
+            input.captureId === 'cap-unified-1'
+              ? '2026-03-18T09:04:00Z'
+              : '2026-03-18T09:04:30Z',
+          text:
+            input.captureId === 'cap-unified-1'
+              ? 'First email'
+              : 'Second email',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  await writeAssistantChatResultArtifacts({
+    captureIds: ['cap-unified-1'],
+    respondedAt: '2026-03-18T09:05:30Z',
+    result: {
+      response: 'seeded unified reply',
+      session: {
+        sessionId: 'seeded-unified-session',
+      },
+      delivery: {
+        channel: 'email',
+        target: 'deferred@example.com',
+      },
+    } as any,
+    vault: vaultRoot,
+  })
+
+  const first = await scanAssistantAutomationOnce({
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push({
+        inboxScanCursor: next.inboxScanCursor,
+        autoReplyScanCursor: next.autoReplyScanCursor,
+      })
+    },
+    state: {
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: ['email', 'imessage'],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: true,
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 2,
+      failed: 0,
+      replied: 0,
+      skipped: 2,
+    },
+  })
+  assert.deepEqual(stateProgress, [])
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+  assert.equal(
+    events.some((event) => event.captureId === 'cap-unified-later'),
+    false,
+  )
+
+  await rm(
+    path.join(
+      vaultRoot,
+      'derived',
+      'inbox',
+      'cap-unified-1',
+      'assistant',
+      'chat-result.json',
+    ),
+  )
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-unified',
+    response: 'unified reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
+    message: 'unified reply',
+    session: {
+      schema: 'murph.assistant-session.v2',
+      sessionId: 'session-unified',
+      provider: 'codex-cli',
+      providerSessionId: 'thread-unified',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:email|thread:thread-unified',
+        channel: 'email',
+        identityId: null,
+        actorId: 'deferred@example.com',
+        threadId: 'thread-unified',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: 'deferred@example.com',
+        },
+      },
+      createdAt: '2026-03-18T09:05:30.000Z',
+      updatedAt: '2026-03-18T09:05:30.000Z',
+      lastTurnAt: '2026-03-18T09:05:30.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'email',
+      target: 'deferred@example.com',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T09:05:30.000Z',
+      messageLength: 'unified reply'.length,
+    },
+  })
+
+  const second = await scanAssistantAutomationOnce({
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push({
+        inboxScanCursor: next.inboxScanCursor,
+        autoReplyScanCursor: next.autoReplyScanCursor,
+      })
+    },
+    state: {
+      inboxScanCursor: null,
+      autoReplyScanCursor: stateProgress[0]?.autoReplyScanCursor ?? null,
+      autoReplyChannels: ['email', 'imessage'],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: true,
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(second, {
+    routing: {
+      considered: 0,
+      failed: 0,
+      noAction: 0,
+      routed: 0,
+      skipped: 0,
+    },
+    replies: {
+      considered: 3,
+      failed: 0,
+      replied: 1,
+      skipped: 1,
+    },
+  })
+  assert.deepEqual(stateProgress[0], {
+    inboxScanCursor: null,
+    autoReplyScanCursor: {
+      occurredAt: '2026-03-18T09:05:00Z',
+      captureId: 'cap-unified-later',
+    },
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+})
+
 test('scanAssistantInboxOnce still waits for unsupported pending HEIC photos', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-scan-heic-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -2783,6 +3064,228 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
   )
 })
 
+test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued for retry instead of advancing past the thread', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-partial-artifact-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const events: Array<{ type: string; captureId?: string; details?: string }> = []
+  const stateProgress: Array<{
+    cursor: { occurredAt: string; captureId: string } | null
+    primed: boolean
+  }> = []
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-partial-1',
+            source: 'email',
+            accountId: 'self',
+            externalId: 'ext-partial-1',
+            threadId: 'chat-partial',
+            threadTitle: null,
+            actorId: 'partial@example.com',
+            actorName: 'Partial User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:02:00Z',
+            receivedAt: null,
+            text: 'First message',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/partial-1.json',
+            eventId: 'evt-partial-1',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-partial-2',
+            source: 'email',
+            accountId: 'self',
+            externalId: 'ext-partial-2',
+            threadId: 'chat-partial',
+            threadTitle: null,
+            actorId: 'partial@example.com',
+            actorName: 'Partial User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:02:30Z',
+            receivedAt: null,
+            text: 'Second message',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/partial-2.json',
+            eventId: 'evt-partial-2',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      return {
+        capture: {
+          captureId: input.captureId,
+          source: 'email',
+          threadTitle: null,
+          threadId: 'chat-partial',
+          threadIsDirect: true,
+          actorId: 'partial@example.com',
+          actorName: 'Partial User',
+          actorIsSelf: false,
+          occurredAt:
+            input.captureId === 'cap-partial-1'
+              ? '2026-03-18T09:02:00Z'
+              : '2026-03-18T09:02:30Z',
+          text:
+            input.captureId === 'cap-partial-1'
+              ? 'First message'
+              : 'Second message',
+          attachments: [],
+        },
+      }
+    },
+  } as any
+
+  await writeAssistantChatResultArtifacts({
+    captureIds: ['cap-partial-1'],
+    respondedAt: '2026-03-18T09:03:00Z',
+    result: {
+      response: 'seeded reply',
+      session: {
+        sessionId: 'seeded-session',
+      },
+      delivery: {
+        channel: 'email',
+        target: 'partial@example.com',
+      },
+    } as any,
+    vault: vaultRoot,
+  })
+
+  const first = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['email'],
+    inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(first, {
+    considered: 2,
+    failed: 0,
+    replied: 0,
+    skipped: 2,
+  })
+  assert.deepEqual(stateProgress[0], {
+    cursor: null,
+    primed: true,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 0)
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-skipped' &&
+        event.captureId === 'cap-partial-1' &&
+        event.details ===
+          'assistant reply artifacts are incomplete; will retry this capture after reply artifacts are rebuilt.',
+    ),
+    true,
+  )
+
+  await rm(
+    path.join(
+      vaultRoot,
+      'derived',
+      'inbox',
+      'cap-partial-1',
+      'assistant',
+      'chat-result.json',
+    ),
+  )
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-partial',
+    response: 'recovered reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
+    message: 'recovered reply',
+    session: {
+      schema: 'murph.assistant-session.v2',
+      sessionId: 'session-partial',
+      provider: 'codex-cli',
+      providerSessionId: 'thread-partial',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      alias: null,
+      binding: {
+        conversationKey: 'channel:email|thread:chat-partial',
+        channel: 'email',
+        identityId: null,
+        actorId: 'partial@example.com',
+        threadId: 'chat-partial',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: 'partial@example.com',
+        },
+      },
+      createdAt: '2026-03-18T09:03:00.000Z',
+      updatedAt: '2026-03-18T09:03:00.000Z',
+      lastTurnAt: '2026-03-18T09:03:00.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'email',
+      target: 'partial@example.com',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T09:03:00.000Z',
+      messageLength: 'recovered reply'.length,
+    },
+  })
+
+  const second = await scanAssistantAutoReplyOnce({
+    afterCursor: stateProgress[0]?.cursor ?? null,
+    autoReplyPrimed: true,
+    enabledChannels: ['email'],
+    inboxServices,
+    async onStateProgress(next) {
+      stateProgress.push(next)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(second, {
+    considered: 2,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+  assert.deepEqual(stateProgress[1], {
+    cursor: {
+      occurredAt: '2026-03-18T09:02:30Z',
+      captureId: 'cap-partial-2',
+    },
+    primed: true,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+})
+
 test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-telegram-scope-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -3525,6 +4028,10 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     cursor: null,
     primed: true,
   })
+  assert.equal(
+    runtimeMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
+    'thread-retry-1',
+  )
   assert.equal(
     events.some(
       (event) =>

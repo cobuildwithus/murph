@@ -53,6 +53,18 @@ export interface AssistantAutomationStateProgress {
   primed: boolean
 }
 
+export interface AssistantAutomationScanStateProgress {
+  autoReplyBacklogChannels: string[]
+  autoReplyPrimed: boolean
+  autoReplyScanCursor: AssistantAutomationCursor | null
+  inboxScanCursor: AssistantAutomationCursor | null
+}
+
+export interface AssistantAutomationScanResult {
+  replies: AssistantAutoReplyScanResult
+  routing: AssistantInboxScanResult
+}
+
 export function cursorFromCapture(capture: {
   captureId: string
   occurredAt: string
@@ -61,6 +73,36 @@ export function cursorFromCapture(capture: {
     occurredAt: capture.occurredAt,
     captureId: capture.captureId,
   }
+}
+
+export function compareAssistantAutomationCursor(
+  left: AssistantAutomationCursor,
+  right: AssistantAutomationCursor,
+): number {
+  return left.occurredAt === right.occurredAt
+    ? left.captureId.localeCompare(right.captureId)
+    : left.occurredAt.localeCompare(right.occurredAt)
+}
+
+export function compareAssistantCaptureOrder(
+  left: { captureId: string; occurredAt: string },
+  right: { captureId: string; occurredAt: string },
+): number {
+  return compareAssistantAutomationCursor(
+    cursorFromCapture(left),
+    cursorFromCapture(right),
+  )
+}
+
+export function isAssistantCaptureAfterCursor(
+  capture: { captureId: string; occurredAt: string },
+  cursor?: AssistantAutomationCursor | null,
+): boolean {
+  if (!cursor) {
+    return true
+  }
+
+  return compareAssistantCaptureOrder(capture, cursor) > 0
 }
 
 export function normalizeEnabledChannels(channels: readonly string[]): string[] {

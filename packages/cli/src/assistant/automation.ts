@@ -1,5 +1,6 @@
 export type {
   AssistantAutoReplyScanResult,
+  AssistantAutomationScanResult,
   AssistantInboxScanResult,
   AssistantRunEvent,
 } from './automation/shared.js'
@@ -8,6 +9,11 @@ export {
   type RunAssistantAutomationInput,
 } from './automation/run-loop.js'
 export {
-  scanAssistantAutoReplyOnce,
-  scanAssistantInboxOnce,
+  scanAssistantAutomationOnce,
 } from './automation/scanner.js'
+export {
+  scanAssistantAutoReplyOnce,
+} from './automation/reply.js'
+export {
+  scanAssistantInboxOnce,
+} from './automation/routing.js'
