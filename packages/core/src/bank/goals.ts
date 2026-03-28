@@ -1,3 +1,9 @@
+import {
+  extractHealthEntityRegistryLinks,
+  goalRegistryEntityDefinition,
+  type GoalFrontmatter,
+} from "@murph/contracts";
+
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
@@ -33,7 +39,16 @@ import {
 } from "./shared.ts";
 
 import type { FrontmatterObject } from "../types.ts";
-import type { GoalRecord, GoalWindow, ReadGoalInput, UpsertGoalInput, UpsertGoalResult } from "./types.ts";
+import type {
+  GoalEntity,
+  GoalLink,
+  GoalLinkType,
+  GoalRecord,
+  GoalWindow,
+  ReadGoalInput,
+  UpsertGoalInput,
+  UpsertGoalResult,
+} from "./types.ts";
 
 function normalizeGoalWindow(value: unknown, fieldName: string): GoalWindow {
   const candidate = requireObject(value, fieldName);
@@ -50,7 +65,152 @@ function normalizeGoalWindow(value: unknown, fieldName: string): GoalWindow {
   });
 }
 
+function parseGoalFrontmatter(attributes: FrontmatterObject): GoalFrontmatter {
+  const schema =
+    goalRegistryEntityDefinition.registry.frontmatterReadSchema ??
+    goalRegistryEntityDefinition.registry.frontmatterSchema;
+
+  if (!schema) {
+    throw new Error("Goal registry definition is missing a frontmatter schema.");
+  }
+
+  const result = schema.safeParse(attributes);
+
+  if (!result.success) {
+    throw new VaultError("VAULT_INVALID_GOAL", "Goal registry document has an unexpected shape.");
+  }
+
+  return result.data as GoalFrontmatter;
+}
+
+function normalizeGoalLinkType(value: string): GoalLinkType | null {
+  switch (value) {
+    case "parent_goal":
+    case "related_goal":
+    case "related_experiment":
+      return value;
+    default:
+      return null;
+  }
+}
+
+function compareGoalLinks(left: GoalLink, right: GoalLink): number {
+  const order: Record<GoalLinkType, number> = {
+    parent_goal: 0,
+    related_goal: 1,
+    related_experiment: 2,
+  };
+
+  return order[left.type] - order[right.type] || left.targetId.localeCompare(right.targetId);
+}
+
+function buildGoalLinksFromFields(input: {
+  parentGoalId?: string | null;
+  relatedGoalIds?: string[];
+  relatedExperimentIds?: string[];
+}): GoalLink[] {
+  return [
+    ...(input.parentGoalId ? [{ type: "parent_goal", targetId: input.parentGoalId } satisfies GoalLink] : []),
+    ...(input.relatedGoalIds ?? []).map((targetId) => ({ type: "related_goal", targetId }) satisfies GoalLink),
+    ...(input.relatedExperimentIds ?? []).map((targetId) => ({
+      type: "related_experiment",
+      targetId,
+    }) satisfies GoalLink),
+  ];
+}
+
+function normalizeGoalLinks(rawLinks: readonly GoalLink[], goalId: string): GoalLink[] {
+  const sortedLinks = [...rawLinks].sort(compareGoalLinks);
+  const links: GoalLink[] = [];
+  let parentGoalId: string | null = null;
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    if (link.type === "parent_goal" && link.targetId === goalId) {
+      throw new VaultError("VAULT_INVALID_INPUT", "parentGoalId may not equal goalId.");
+    }
+
+    if (link.type === "related_goal" && link.targetId === goalId) {
+      throw new VaultError("VAULT_INVALID_INPUT", "relatedGoalIds may not include goalId.");
+    }
+
+    if (link.type === "parent_goal") {
+      if (parentGoalId && parentGoalId !== link.targetId) {
+        throw new VaultError("VAULT_INVALID_INPUT", "Goal may not reference multiple parentGoalId values.");
+      }
+
+      parentGoalId = link.targetId;
+    }
+
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseGoalLinks(attributes: FrontmatterObject, goalId: string): GoalLink[] {
+  const rawLinks = extractHealthEntityRegistryLinks("goal", attributes)
+    .flatMap((link) => {
+      const type = normalizeGoalLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies GoalLink] : [];
+    });
+
+  return normalizeGoalLinks(rawLinks, goalId);
+}
+
+function goalRelationsFromLinks(
+  links: readonly GoalLink[],
+  options: { parentGoalFallback?: string | null } = {},
+): Pick<GoalEntity, "parentGoalId" | "relatedGoalIds" | "relatedExperimentIds" | "links"> {
+  const parentGoalId =
+    links.find((link) => link.type === "parent_goal")?.targetId ?? options.parentGoalFallback;
+  const relatedGoalIds = links
+    .filter((link) => link.type === "related_goal")
+    .map((link) => link.targetId);
+  const relatedExperimentIds = links
+    .filter((link) => link.type === "related_experiment")
+    .map((link) => link.targetId);
+
+  return {
+    parentGoalId,
+    relatedGoalIds: relatedGoalIds.length > 0 ? relatedGoalIds : undefined,
+    relatedExperimentIds: relatedExperimentIds.length > 0 ? relatedExperimentIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeGoalRelations(input: {
+  goalId: string;
+  links?: readonly GoalLink[];
+  parentGoalId?: string | null;
+  relatedGoalIds?: string[];
+  relatedExperimentIds?: string[];
+}): Pick<GoalEntity, "parentGoalId" | "relatedGoalIds" | "relatedExperimentIds" | "links"> {
+  const links = normalizeGoalLinks(
+    (input.links?.length ?? 0) > 0
+      ? [...(input.links ?? [])]
+      : buildGoalLinksFromFields({
+          parentGoalId: input.parentGoalId,
+          relatedGoalIds: input.relatedGoalIds,
+          relatedExperimentIds: input.relatedExperimentIds,
+        }),
+    input.goalId,
+  );
+
+  return goalRelationsFromLinks(links, {
+    parentGoalFallback: input.parentGoalId === null ? null : undefined,
+  });
+}
+
 function buildBody(record: GoalRecord): string {
+  const relations = canonicalizeGoalRelations(record);
+
   return buildMarkdownBody(
     record.title,
     detailList([
@@ -69,48 +229,52 @@ function buildBody(record: GoalRecord): string {
       section(
         "Relationships",
         detailList([
-          ["Parent goal", record.parentGoalId],
+          ["Parent goal", relations.parentGoalId],
         ]),
       ),
-      listSection("Related Goals", record.relatedGoalIds),
-      listSection("Related Experiments", record.relatedExperimentIds),
+      listSection("Related Goals", relations.relatedGoalIds),
+      listSection("Related Experiments", relations.relatedExperimentIds),
       listSection("Domains", record.domains),
     ],
   );
 }
 
 function parseGoalRecord(attributes: FrontmatterObject, relativePath: string, markdown: string): GoalRecord {
+  const parsed = parseGoalFrontmatter(attributes);
   requireMatchingDocType(
-    attributes,
+    parsed as unknown as FrontmatterObject,
     GOAL_SCHEMA_VERSION,
     GOAL_DOC_TYPE,
     "VAULT_INVALID_GOAL",
     "Goal registry document has an unexpected shape.",
   );
+  const links = parseGoalLinks(attributes, parsed.goalId);
+  const relations = canonicalizeGoalRelations({
+    goalId: parsed.goalId,
+    links,
+    parentGoalId: parsed.parentGoalId === null ? null : undefined,
+  });
 
   return stripUndefined({
     schemaVersion: GOAL_SCHEMA_VERSION,
     docType: GOAL_DOC_TYPE,
-    goalId: requireString(attributes.goalId, "goalId", 64),
-    slug: requireString(attributes.slug, "slug", 160),
-    title: requireString(attributes.title, "title", 160),
-    status: optionalEnum(attributes.status, GOAL_STATUSES, "status") ?? "active",
-    horizon: optionalEnum(attributes.horizon, GOAL_HORIZONS, "horizon") ?? "ongoing",
-    priority: normalizePriority(attributes.priority),
-    window: normalizeGoalWindow(attributes.window, "window"),
-    parentGoalId:
-      attributes.parentGoalId === null
-        ? null
-        : normalizeId(attributes.parentGoalId, "parentGoalId", "goal"),
-    relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
-    relatedExperimentIds: normalizeRecordIdList(attributes.relatedExperimentIds, "relatedExperimentIds", "exp"),
-    domains: normalizeDomainList(attributes.domains, "domains"),
+    goalId: requireString(parsed.goalId, "goalId", 64),
+    slug: requireString(parsed.slug, "slug", 160),
+    title: requireString(parsed.title, "title", 160),
+    status: optionalEnum(parsed.status, GOAL_STATUSES, "status") ?? "active",
+    horizon: optionalEnum(parsed.horizon, GOAL_HORIZONS, "horizon") ?? "ongoing",
+    priority: normalizePriority(parsed.priority),
+    window: normalizeGoalWindow(parsed.window, "window"),
+    ...relations,
+    domains: normalizeDomainList(parsed.domains, "domains"),
     relativePath,
     markdown,
   });
 }
 
-function buildAttributes(record: GoalRecord): FrontmatterObject {
+function buildAttributes(record: GoalEntity | GoalRecord): FrontmatterObject {
+  const relations = canonicalizeGoalRelations(record);
+
   return stripUndefined({
     schemaVersion: GOAL_SCHEMA_VERSION,
     docType: GOAL_DOC_TYPE,
@@ -124,9 +288,9 @@ function buildAttributes(record: GoalRecord): FrontmatterObject {
       startAt: record.window.startAt,
       targetAt: record.window.targetAt,
     }) as FrontmatterObject,
-    parentGoalId: record.parentGoalId,
-    relatedGoalIds: record.relatedGoalIds,
-    relatedExperimentIds: record.relatedExperimentIds,
+    parentGoalId: relations.parentGoalId,
+    relatedGoalIds: relations.relatedGoalIds,
+    relatedExperimentIds: relations.relatedExperimentIds,
     domains: record.domains,
   }) as FrontmatterObject;
 }
@@ -160,16 +324,11 @@ const goalRegistryApi = createMarkdownRegistryApi<GoalRecord>({
   },
 });
 
-function ensureGoalLinks(record: GoalRecord): GoalRecord {
-  if (record.parentGoalId && record.parentGoalId === record.goalId) {
-    throw new VaultError("VAULT_INVALID_INPUT", "parentGoalId may not equal goalId.");
-  }
-
-  if (record.relatedGoalIds?.includes(record.goalId)) {
-    throw new VaultError("VAULT_INVALID_INPUT", "relatedGoalIds may not include goalId.");
-  }
-
-  return record;
+function ensureGoalLinks(record: GoalEntity): GoalEntity {
+  return {
+    ...record,
+    ...canonicalizeGoalRelations(record),
+  };
 }
 
 export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResult> {
@@ -189,6 +348,21 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
     requestedSlug,
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     buildDocument: (target) => {
+      const parentGoalId = resolveOptionalUpsertValue(
+        input.parentGoalId,
+        existingRecord?.parentGoalId,
+        (value) => (value === null ? null : normalizeId(value, "parentGoalId", "goal")),
+      );
+      const relatedGoalIds = resolveOptionalUpsertValue(
+        input.relatedGoalIds,
+        existingRecord?.relatedGoalIds,
+        (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
+      );
+      const relatedExperimentIds = resolveOptionalUpsertValue(
+        input.relatedExperimentIds,
+        existingRecord?.relatedExperimentIds,
+        (value) => normalizeRecordIdList(value, "relatedExperimentIds", "exp"),
+      );
       const attributes = buildAttributes(
         ensureGoalLinks(
           stripUndefined({
@@ -212,25 +386,14 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
               },
               "window",
             ),
-            parentGoalId: resolveOptionalUpsertValue(
-              input.parentGoalId,
-              existingRecord?.parentGoalId,
-              (value) => (value === null ? null : normalizeId(value, "parentGoalId", "goal")),
-            ),
-            relatedGoalIds: resolveOptionalUpsertValue(
-              input.relatedGoalIds,
-              existingRecord?.relatedGoalIds,
-              (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
-            ),
-            relatedExperimentIds: resolveOptionalUpsertValue(
-              input.relatedExperimentIds,
-              existingRecord?.relatedExperimentIds,
-              (value) => normalizeRecordIdList(value, "relatedExperimentIds", "exp"),
-            ),
+            parentGoalId,
+            relatedGoalIds,
+            relatedExperimentIds,
             domains: resolveOptionalUpsertValue(input.domains, existingRecord?.domains, (value) =>
               normalizeDomainList(value, "domains"),
             ),
-          }) as GoalRecord,
+            links: [],
+          }) as GoalEntity,
         ),
       );
 

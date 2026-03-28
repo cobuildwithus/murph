@@ -311,6 +311,131 @@ test.sequential("goal descriptor wiring keeps noun-specific and generic reads al
   }
 });
 
+test.sequential("goal show projects shared Goal relations through the noun-specific CLI surface", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const parentPayloadPath = path.join(vaultRoot, "goal-parent.json");
+  const relatedPayloadPath = path.join(vaultRoot, "goal-related.json");
+  const childPayloadPath = path.join(vaultRoot, "goal-child.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      parentPayloadPath,
+      JSON.stringify({
+        title: "Sleep longer",
+      }),
+      "utf8",
+    );
+    await writeFile(
+      relatedPayloadPath,
+      JSON.stringify({
+        title: "Lift consistently",
+      }),
+      "utf8",
+    );
+
+    const parentUpsert = await runCli<{
+      goalId: string;
+    }>([
+      "goal",
+      "upsert",
+      "--input",
+      `@${parentPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const relatedUpsert = await runCli<{
+      goalId: string;
+    }>([
+      "goal",
+      "upsert",
+      "--input",
+      `@${relatedPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    await writeFile(
+      childPayloadPath,
+      JSON.stringify({
+        title: "Recover better",
+        parentGoalId: requireData(parentUpsert).goalId,
+        relatedGoalIds: [requireData(relatedUpsert).goalId],
+        relatedExperimentIds: ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+        domains: ["sleep"],
+      }),
+      "utf8",
+    );
+
+    const childUpsert = await runCli<{
+      goalId: string;
+    }>([
+      "goal",
+      "upsert",
+      "--input",
+      `@${childPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const goalId = requireData(childUpsert).goalId;
+
+    const nounShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+        links: Array<{ id: string }>;
+      };
+    }>([
+      "goal",
+      "show",
+      goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+    const genericShow = await runCli<{
+      entity: {
+        id: string;
+        kind: string;
+        links: Array<{ id: string }>;
+      };
+    }>([
+      "show",
+      goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(nounShow.ok, true);
+    assert.equal(genericShow.ok, true);
+    assert.equal(requireData(nounShow).entity.id, goalId);
+    assert.equal(requireData(nounShow).entity.kind, "goal");
+    assert.equal(requireData(nounShow).entity.data.parentGoalId, requireData(parentUpsert).goalId);
+    assert.deepEqual(requireData(nounShow).entity.data.relatedGoalIds, [requireData(relatedUpsert).goalId]);
+    assert.deepEqual(requireData(nounShow).entity.data.relatedExperimentIds, [
+      "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
+    ]);
+    assert.deepEqual(requireData(nounShow).entity.data.domains, ["sleep"]);
+    assert.deepEqual(
+      requireData(nounShow).entity.links.map((link) => link.id).sort(),
+      [
+        "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
+        requireData(parentUpsert).goalId,
+        requireData(relatedUpsert).goalId,
+      ].sort(),
+    );
+    assert.deepEqual(
+      requireData(genericShow).entity.links.map((link) => link.id).sort(),
+      [
+        ...requireData(nounShow).entity.links.map((link) => link.id),
+        goalId,
+      ].sort(),
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test.sequential("goal upsert rejects reserved vault-root overrides from JSON payloads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const redirectVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
@@ -354,6 +479,130 @@ test.sequential("goal upsert rejects reserved vault-root overrides from JSON pay
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
     await rm(redirectVaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("goal upsert preserves omitted fields on patch updates", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const createPayloadPath = path.join(vaultRoot, "goal-create.json");
+  const patchPriorityPayloadPath = path.join(vaultRoot, "goal-patch-priority.json");
+  const patchTitlePayloadPath = path.join(vaultRoot, "goal-patch-title.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      createPayloadPath,
+      JSON.stringify({
+        title: "Sleep longer",
+        status: "completed",
+        horizon: "short_term",
+      }),
+      "utf8",
+    );
+
+    const created = await runCli<{
+      goalId: string;
+    }>([
+      "goal",
+      "upsert",
+      "--input",
+      `@${createPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const goalId = requireData(created).goalId;
+
+    await writeFile(
+      patchPriorityPayloadPath,
+      JSON.stringify({
+        goalId,
+        priority: 2,
+      }),
+      "utf8",
+    );
+
+    const patchPriority = await runCli([
+      "goal",
+      "upsert",
+      "--input",
+      `@${patchPriorityPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    await writeFile(
+      patchTitlePayloadPath,
+      JSON.stringify({
+        goalId,
+        title: "Sleep deeper",
+      }),
+      "utf8",
+    );
+
+    const patchTitle = await runCli([
+      "goal",
+      "upsert",
+      "--input",
+      `@${patchTitlePayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const shown = await runCli<{
+      entity: {
+        id: string;
+        data: Record<string, unknown>;
+      };
+    }>([
+      "goal",
+      "show",
+      goalId,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(created.ok, true);
+    assert.equal(patchPriority.ok, true);
+    assert.equal(patchTitle.ok, true);
+    assert.equal(shown.ok, true);
+    assert.equal(requireData(shown).entity.id, goalId);
+    assert.equal(requireData(shown).entity.data.title, "Sleep deeper");
+    assert.equal(requireData(shown).entity.data.status, "completed");
+    assert.equal(requireData(shown).entity.data.horizon, "short_term");
+    assert.equal(requireData(shown).entity.data.priority, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.sequential("goal upsert validates payloads through the shared goal schema", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
+  const payloadPath = path.join(vaultRoot, "goal-invalid.json");
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        title: "Sleep longer",
+        parentGoalId: "not-a-goal-id",
+      }),
+      "utf8",
+    );
+
+    const upsertResult = await runCli([
+      "goal",
+      "upsert",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(upsertResult.ok, false);
+    assert.equal(upsertResult.error?.code, "invalid_payload");
+    assert.match(upsertResult.error?.message ?? "", /goal payload failed validation/i);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 

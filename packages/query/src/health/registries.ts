@@ -1,8 +1,6 @@
 import {
   deriveProtocolGroupFromRelativePath,
-  healthEntityDefinitionByKind,
-  hasHealthEntityRegistry,
-  type HealthEntityDefinitionWithRegistry,
+  requireHealthEntityRegistryDefinition,
   type HealthEntityKind,
   type HealthEntityRegistryProjectionHelpers,
   type HealthEntitySortBehavior,
@@ -106,18 +104,6 @@ export function readRegistryStrings(
   return firstStringArray(attributes, keys);
 }
 
-function requireRegistryEntityDefinition(
-  kind: HealthEntityKind,
-): HealthEntityDefinitionWithRegistry {
-  const definition = healthEntityDefinitionByKind.get(kind);
-
-  if (!definition || !hasHealthEntityRegistry(definition)) {
-    throw new Error(`Health entity "${kind}" does not define a registry projection.`);
-  }
-
-  return definition;
-}
-
 function compareRegistryRecords<TRecord extends RegistryMarkdownRecord>(
   sortBehavior: HealthEntitySortBehavior | undefined,
 ): ((left: TRecord, right: TRecord) => number) | undefined {
@@ -131,7 +117,7 @@ function compareRegistryRecords<TRecord extends RegistryMarkdownRecord>(
 function createHealthEntityRegistryDefinition<TRecord extends RegistryMarkdownRecord>(
   kind: HealthEntityKind,
 ): RegistryDefinition<TRecord> {
-  const definition = requireRegistryEntityDefinition(kind);
+  const definition = requireHealthEntityRegistryDefinition(kind);
   const { registry } = definition;
 
   return {
@@ -151,6 +137,13 @@ function createHealthEntityRegistryDefinition<TRecord extends RegistryMarkdownRe
       } as TRecord;
     },
   };
+}
+
+function transformRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+  base: RegistryMarkdownRecord,
+  definition: RegistryDefinition<TRecord>,
+): TRecord {
+  return definition.transform(base, base.attributes);
 }
 
 export function toRegistryRecord<TRecord extends RegistryMarkdownRecord>(
@@ -173,7 +166,7 @@ export function toRegistryRecord<TRecord extends RegistryMarkdownRecord>(
     attributes: document.attributes,
   };
 
-  return definition.transform(base, document.attributes);
+  return transformRegistryRecord(base, definition);
 }
 
 export function sortRegistryRecords<TRecord extends RegistryMarkdownRecord>(
@@ -539,23 +532,7 @@ function registryRecordBaseFromEntity(
 
 export function goalRecordFromEntity(entity: CanonicalEntity): GoalQueryRecord | null {
   const base = registryRecordBaseFromEntity(entity, "goal");
-  if (!base) {
-    return null;
-  }
-
-  const window = base.attributes.window as FrontmatterObject | undefined;
-
-  return {
-    ...base,
-    horizon: firstString(base.attributes, ["horizon"]),
-    priority: readPriority(base.attributes, ["priority"]),
-    windowStartAt: window ? firstString(window, ["startAt"]) : null,
-    windowTargetAt: window ? firstString(window, ["targetAt"]) : null,
-    parentGoalId: firstString(base.attributes, ["parentGoalId"]),
-    relatedGoalIds: readRegistryStrings(base.attributes, ["relatedGoalIds"]),
-    relatedExperimentIds: readRegistryStrings(base.attributes, ["relatedExperimentIds"]),
-    domains: readRegistryStrings(base.attributes, ["domains"]),
-  };
+  return base ? transformRegistryRecord(base, goalRegistryDefinition) : null;
 }
 
 export function conditionRecordFromEntity(

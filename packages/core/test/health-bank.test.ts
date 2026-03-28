@@ -134,6 +134,20 @@ test("goals support multiple active records and preserve relationships in markdo
   assert.equal(read.parentGoalId, primary.record.goalId);
   assert.deepEqual(read.relatedGoalIds, [primary.record.goalId]);
   assert.deepEqual(read.relatedExperimentIds, ["exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+  assert.deepEqual(read.links, [
+    {
+      type: "parent_goal",
+      targetId: primary.record.goalId,
+    },
+    {
+      type: "related_goal",
+      targetId: primary.record.goalId,
+    },
+    {
+      type: "related_experiment",
+      targetId: "exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    },
+  ]);
   assert.equal(read.priority, 6);
   assert.equal(read.window.startAt, "2026-03-05");
   assert.deepEqual(primary.record.domains, ["metabolic-health", "sleep"]);
@@ -146,6 +160,127 @@ test("goals support multiple active records and preserve relationships in markdo
   ]);
   assert.equal(goalOperations.filter((operation) => operation.operationType === "goal_upsert").length, 4);
   assert.ok(goalOperations.every((operation) => operation.status === "committed"));
+});
+
+test("goal updates can clear shared relation fields without leaving stale links behind", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-clear-links");
+  await initializeVault({ vaultRoot });
+
+  const parent = await upsertGoal({
+    vaultRoot,
+    title: "Improve sleep routine",
+    window: {
+      startAt: "2026-03-01",
+    },
+  });
+  const related = await upsertGoal({
+    vaultRoot,
+    title: "Lift consistently",
+    window: {
+      startAt: "2026-03-02",
+    },
+  });
+  const goal = await upsertGoal({
+    vaultRoot,
+    title: "Recover better",
+    window: {
+      startAt: "2026-03-03",
+    },
+    parentGoalId: parent.record.goalId,
+    relatedGoalIds: [related.record.goalId],
+    relatedExperimentIds: ["exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
+  });
+
+  const cleared = await upsertGoal({
+    vaultRoot,
+    goalId: goal.record.goalId,
+    parentGoalId: null,
+    relatedGoalIds: [],
+    relatedExperimentIds: [],
+  });
+  const read = await readGoal({
+    vaultRoot,
+    goalId: goal.record.goalId,
+  });
+
+  assert.equal(cleared.created, false);
+  assert.equal(read.parentGoalId, null);
+  assert.equal(read.relatedGoalIds, undefined);
+  assert.equal(read.relatedExperimentIds, undefined);
+  assert.deepEqual(read.links, []);
+  assert.match(read.markdown, /Parent goal: none/);
+  assert.match(read.markdown, /## Related Goals[\s\S]*- none/);
+  assert.match(read.markdown, /## Related Experiments[\s\S]*- none/);
+  assert.doesNotMatch(read.markdown, new RegExp(parent.record.goalId));
+  assert.doesNotMatch(read.markdown, new RegExp(related.record.goalId));
+  assert.doesNotMatch(read.markdown, /exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
+});
+
+test("goal reads tolerate legacy frontmatter defaults and extra keys", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-legacy-frontmatter");
+  await initializeVault({ vaultRoot });
+
+  const goalId = "goal_01JNYB6M9A6W4K2N8P3Q7R5S4T";
+  const parentGoalId = "goal_01JNYB6M9A6W4K2N8P3Q7R5S4X";
+  const relatedGoalId = "goal_01JNYB6M9A6W4K2N8P3Q7R5S4V";
+  const relatedExperimentId = "exp_01JNYB6M9A6W4K2N8P3Q7R5S4W";
+  const relativePath = "bank/goals/legacy-goal.md";
+
+  await fs.writeFile(
+    path.join(vaultRoot, relativePath),
+    [
+      "---",
+      "schemaVersion: murph.frontmatter.goal.v1",
+      "docType: goal",
+      `goalId: ${goalId}`,
+      "slug: legacy-goal",
+      "title: Legacy goal",
+      "window:",
+      "  startAt: 2026-03-12",
+      `parentGoalId: ${parentGoalId}`,
+      "relatedGoalIds:",
+      `  - ${relatedGoalId}`,
+      "relatedExperimentIds:",
+      `  - ${relatedExperimentId}`,
+      "domains:",
+      "  - sleep",
+      "owner: coach",
+      "---",
+      "",
+      "# Legacy goal",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const read = await readGoal({
+    vaultRoot,
+    goalId,
+  });
+
+  assert.equal(read.goalId, goalId);
+  assert.equal(read.status, "active");
+  assert.equal(read.horizon, "ongoing");
+  assert.equal(read.priority, 5);
+  assert.equal(read.window.startAt, "2026-03-12");
+  assert.equal(read.parentGoalId, parentGoalId);
+  assert.deepEqual(read.relatedGoalIds, [relatedGoalId]);
+  assert.deepEqual(read.relatedExperimentIds, [relatedExperimentId]);
+  assert.deepEqual(read.domains, ["sleep"]);
+  assert.deepEqual(read.links, [
+    {
+      type: "parent_goal",
+      targetId: parentGoalId,
+    },
+    {
+      type: "related_goal",
+      targetId: relatedGoalId,
+    },
+    {
+      type: "related_experiment",
+      targetId: relatedExperimentId,
+    },
+  ]);
 });
 
 test("goal id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {

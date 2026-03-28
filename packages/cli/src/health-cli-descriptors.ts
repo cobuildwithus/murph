@@ -1,5 +1,6 @@
 import {
   commandNounCapabilityByNoun,
+  goalRegistryEntityDefinition,
   healthEntityDefinitions,
   type CommandCapability,
   type CommandCapabilityBundleId,
@@ -283,26 +284,32 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showProfile",
     },
   },
-  goal: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Goal registry commands for the health extension surface.",
-    commandName: "goal",
-    listServiceMethod: "listGoals",
-    listStatusDescription: "Optional goal status to filter by.",
-    noun: "goal",
-    payloadFile: "goal.json",
-    pluralNoun: "goals",
-    resultIdField: "goalId",
-    runtimeListMethod: "listGoals",
-    runtimeMethod: "upsertGoal",
-    runtimeShowMethod: "showGoal",
-    scaffoldServiceMethod: "scaffoldGoal",
-    showId: {
-      description: "Goal id or slug to show.",
-      example: "<goal-id>",
-    },
-    showServiceMethod: "showGoal",
-    upsertServiceMethod: "upsertGoal",
-  }),
+  goal: (() => {
+    const command = goalRegistryEntityDefinition.registry.command;
+    const resultIdField = goalRegistryEntityDefinition.registry.idField;
+
+    if (!command || !resultIdField) {
+      throw new Error('Registry entity "goal" is missing shared command metadata.');
+    }
+
+    return buildStatusFilteredRegistryDescriptorExtension({
+      commandDescription: command.commandDescription,
+      commandName: command.commandName as StatusFilteredRegistryDescriptorCommandName,
+      listServiceMethod: command.listServiceMethod as HealthQueryListServiceMethodName,
+      listStatusDescription: command.listStatusDescription,
+      noun: goalRegistryEntityDefinition.noun,
+      payloadFile: command.payloadFile,
+      pluralNoun: goalRegistryEntityDefinition.plural,
+      resultIdField,
+      runtimeListMethod: command.runtimeListMethod as HealthQueryRuntimeListMethodName,
+      runtimeMethod: command.runtimeMethod as HealthCoreRuntimeMethodName,
+      runtimeShowMethod: command.runtimeShowMethod as HealthQueryRuntimeShowMethodName,
+      scaffoldServiceMethod: command.scaffoldServiceMethod as HealthCoreScaffoldServiceMethodName,
+      showId: command.showId,
+      showServiceMethod: command.showServiceMethod as HealthQueryShowServiceMethodName,
+      upsertServiceMethod: command.upsertServiceMethod as HealthCoreUpsertServiceMethodName,
+    });
+  })(),
   condition: buildStatusFilteredRegistryDescriptorExtension({
     commandDescription: "Condition registry commands for the health extension surface.",
     commandName: "condition",
