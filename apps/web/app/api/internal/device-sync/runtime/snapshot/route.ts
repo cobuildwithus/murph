@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       body,
       request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER),
     );
-    await controlPlane.ensureHostedWebhookSubscriptionsForRuntimeSnapshot(snapshotRequest);
+    await controlPlane.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot(snapshotRequest);
     const snapshot = await buildHostedDeviceSyncRuntimeSnapshot(controlPlane.store, snapshotRequest);
     return jsonOk(snapshot);
   } catch (error) {

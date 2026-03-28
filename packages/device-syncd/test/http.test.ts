@@ -9,6 +9,7 @@ import {
   renderCallbackHtml,
   startDeviceSyncHttpServer,
 } from "../src/http.ts";
+import { createOuraDeviceSyncProvider } from "../src/providers/oura.ts";
 
 import type { DeviceSyncService } from "../src/service.ts";
 
@@ -451,29 +452,10 @@ test("device sync http server serves the Oura webhook verification challenge on 
             return undefined;
           }
 
-          return {
-            callbackPath: "/oauth/oura/callback",
-            defaultScopes: [],
-            executeJob: async () => ({}),
-            exchangeAuthorizationCode: async () => ({
-              externalAccountId: "oura-user-1",
-              tokens: {
-                accessToken: "access-token",
-              },
-            }),
-            provider: "oura",
-            refreshTokens: async () => ({
-              accessToken: "access-token",
-            }),
-            webhookAdmin: {
-              resolveVerificationChallenge({ url, verificationToken }) {
-                const challenge = url.searchParams.get("challenge");
-                const token = url.searchParams.get("verification_token");
-
-                return challenge && token === verificationToken ? challenge : null;
-              },
-            },
-          };
+          return createOuraDeviceSyncProvider({
+            clientId: "oura-client-id",
+            clientSecret: "oura-client-secret",
+          });
         },
       },
     }),
@@ -497,6 +479,91 @@ test("device sync http server serves the Oura webhook verification challenge on 
     assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
     assert.deepEqual(await response.json(), {
       challenge: "random-challenge",
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("device sync http server returns the shared Oura mismatch error on the public verification route", async () => {
+  const server = await startDeviceSyncHttpServer({
+    service: createStubService({
+      registry: {
+        get(provider) {
+          return provider === "oura"
+            ? createOuraDeviceSyncProvider({
+                clientId: "oura-client-id",
+                clientSecret: "oura-client-secret",
+              })
+            : undefined;
+        },
+      },
+    }),
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      controlToken: "control-token-for-tests",
+      publicHost: "127.0.0.1",
+      publicPort: 0,
+      ouraWebhookVerificationToken: "verify-token-for-tests",
+    },
+  });
+
+  try {
+    const publicBaseUrl = `http://127.0.0.1:${server.public?.port}`;
+    const response = await fetch(
+      `${publicBaseUrl}/webhooks/oura?verification_token=wrong-token&challenge=random-challenge`,
+    );
+
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "OURA_WEBHOOK_VERIFICATION_FAILED",
+        message: "Oura webhook verification token did not match the configured verification token.",
+        retryable: false,
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("device sync http server returns the shared Oura missing-token error on the public verification route", async () => {
+  const server = await startDeviceSyncHttpServer({
+    service: createStubService({
+      registry: {
+        get(provider) {
+          return provider === "oura"
+            ? createOuraDeviceSyncProvider({
+                clientId: "oura-client-id",
+                clientSecret: "oura-client-secret",
+              })
+            : undefined;
+        },
+      },
+    }),
+    config: {
+      host: "127.0.0.1",
+      port: 0,
+      controlToken: "control-token-for-tests",
+      publicHost: "127.0.0.1",
+      publicPort: 0,
+    },
+  });
+
+  try {
+    const publicBaseUrl = `http://127.0.0.1:${server.public?.port}`;
+    const response = await fetch(
+      `${publicBaseUrl}/webhooks/oura?verification_token=verify-token-for-tests&challenge=random-challenge`,
+    );
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "OURA_WEBHOOK_VERIFICATION_TOKEN_MISSING",
+        message: "Oura webhook verification requires OURA_WEBHOOK_VERIFICATION_TOKEN.",
+        retryable: false,
+      },
     });
   } finally {
     await server.close();

@@ -52,15 +52,24 @@ export class HostedDeviceSyncControlPlane {
     prisma: getPrisma(),
     codec: this.codec,
   });
-  readonly publicBaseUrl: string;
+  readonly publicIngressBaseUrl: string;
+  readonly webhookAdminCallbackBaseUrl: string;
+  readonly webhookAdminCallbackBaseUrlSource: "configured" | "request";
   readonly allowedReturnOrigins: string[];
   readonly agentSessions: HostedDeviceSyncAgentSessionService;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
 
   constructor(request: Request) {
     this.request = request;
-    this.publicBaseUrl = resolveHostedPublicBaseUrl(request, this.env.publicBaseUrl);
-    this.allowedReturnOrigins = resolveAllowedReturnOrigins(request, this.publicBaseUrl, this.env.allowedReturnOrigins);
+    const publicBaseUrl = resolveHostedPublicBaseUrl(request, this.env.publicBaseUrl);
+    this.publicIngressBaseUrl = publicBaseUrl.baseUrl;
+    this.webhookAdminCallbackBaseUrl = publicBaseUrl.baseUrl;
+    this.webhookAdminCallbackBaseUrlSource = publicBaseUrl.source;
+    this.allowedReturnOrigins = resolveAllowedReturnOrigins(
+      request,
+      this.publicIngressBaseUrl,
+      this.env.allowedReturnOrigins,
+    );
     this.agentSessions = new HostedDeviceSyncAgentSessionService({
       request,
       store: this.store,
@@ -97,17 +106,18 @@ export class HostedDeviceSyncControlPlane {
     };
   }
 
-  async ensureHostedWebhookSubscriptionsForRuntimeSnapshot(input: {
+  async ensureHostedWebhookAdminUpkeepForRuntimeSnapshot(input: {
     userId: string;
     provider?: string | null;
     connectionId?: string | null;
   }): Promise<void> {
-    const providers = await this.resolveActiveWebhookAdminProviders(input.userId, input);
+    const providers = await this.resolveHostedWebhookAdminProvidersForRuntimeSnapshot(input.userId, input);
 
     for (const provider of providers) {
-      await this.ensureHostedWebhookSubscriptions({
+      await this.runHostedWebhookAdminUpkeep({
         bestEffort: false,
         provider,
+        reason: "runtime-snapshot",
       });
     }
   }
@@ -147,13 +157,6 @@ export class HostedDeviceSyncControlPlane {
       error: url.searchParams.get("error"),
       errorDescription: url.searchParams.get("error_description"),
     });
-  }
-
-  resolveWebhookVerificationChallenge(provider: string): string | null {
-    return this.registry.get(provider)?.webhookAdmin?.resolveVerificationChallenge?.({
-      url: new URL(this.request.url),
-      verificationToken: this.env.ouraWebhookVerificationToken,
-    }) ?? null;
   }
 
   async handleWebhook(provider: string): Promise<HandleWebhookResult> {
@@ -257,9 +260,10 @@ export class HostedDeviceSyncControlPlane {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
 
-  private async ensureHostedWebhookSubscriptions(input: {
+  private async runHostedWebhookAdminUpkeep(input: {
     bestEffort: boolean;
     provider: DeviceSyncProvider;
+    reason: "connection-established" | "runtime-snapshot";
   }): Promise<void> {
     const ensureSubscriptions = input.provider.webhookAdmin?.ensureSubscriptions;
 
@@ -269,7 +273,7 @@ export class HostedDeviceSyncControlPlane {
 
     if (!input.bestEffort) {
       await ensureSubscriptions({
-        publicBaseUrl: this.publicBaseUrl,
+        publicBaseUrl: this.webhookAdminCallbackBaseUrl,
         verificationToken: this.env.ouraWebhookVerificationToken,
       });
       return;
@@ -277,54 +281,36 @@ export class HostedDeviceSyncControlPlane {
 
     try {
       await ensureSubscriptions({
-        publicBaseUrl: this.publicBaseUrl,
+        publicBaseUrl: this.webhookAdminCallbackBaseUrl,
         verificationToken: this.env.ouraWebhookVerificationToken,
       });
     } catch (error) {
-      console.error("Failed to ensure hosted webhook subscriptions during connection setup.", {
+      console.error("Failed to ensure hosted webhook admin upkeep.", {
         provider: input.provider.provider,
+        reason: input.reason,
+        callbackBaseUrlSource: this.webhookAdminCallbackBaseUrlSource,
         error,
       });
     }
   }
 
-  private async resolveActiveWebhookAdminProviders(
+  private async resolveHostedWebhookAdminProvidersForRuntimeSnapshot(
     userId: string,
     input: {
       provider?: string | null;
       connectionId?: string | null;
     },
   ): Promise<DeviceSyncProvider[]> {
-    const providerNames = new Set<string>();
-
-    if (input.connectionId) {
-      const connection = await this.store.getConnectionForUser(userId, input.connectionId);
-
-      if (
-        connection
-        && connection.status !== "disconnected"
-        && (!input.provider || connection.provider === input.provider)
-        && this.registry.get(connection.provider)?.webhookAdmin?.ensureSubscriptions
-      ) {
-        providerNames.add(connection.provider);
-      }
-    } else {
-      const connections = await this.store.listConnectionsForUser(userId);
-
-      for (const connection of connections) {
-        if (connection.status === "disconnected") {
-          continue;
-        }
-
-        if (input.provider && connection.provider !== input.provider) {
-          continue;
-        }
-
-        if (this.registry.get(connection.provider)?.webhookAdmin?.ensureSubscriptions) {
-          providerNames.add(connection.provider);
-        }
-      }
-    }
+    const connections = input.connectionId
+      ? [await this.store.getConnectionForUser(userId, input.connectionId)].filter(
+          (connection): connection is PublicDeviceSyncAccount => connection !== null,
+        )
+      : await this.store.listConnectionsForUser(userId);
+    const providerNames = selectHostedWebhookAdminProviderNames({
+      connections,
+      provider: input.provider ?? null,
+      registry: this.registry,
+    });
 
     return [...providerNames]
       .map((providerName) => this.registry.get(providerName))
@@ -333,7 +319,7 @@ export class HostedDeviceSyncControlPlane {
 
   private createIngress() {
     return createDeviceSyncPublicIngress({
-      publicBaseUrl: this.publicBaseUrl,
+      publicBaseUrl: this.publicIngressBaseUrl,
       allowedReturnOrigins: this.allowedReturnOrigins,
       registry: this.registry,
       store: this.store,
@@ -346,9 +332,10 @@ export class HostedDeviceSyncControlPlane {
             store: this.store,
           });
 
-          await this.ensureHostedWebhookSubscriptions({
+          await this.runHostedWebhookAdminUpkeep({
             bestEffort: true,
             provider,
+            reason: "connection-established",
           });
         },
         onWebhookAccepted: async ({ account, webhook, now }) => {
@@ -379,14 +366,53 @@ export async function dispatchHostedDeviceSyncWake(input: {
   return dispatchHostedDeviceSyncWakeInternal(input);
 }
 
-function resolveHostedPublicBaseUrl(request: Request, configuredBaseUrl: string | null): string {
-  return (configuredBaseUrl ?? `${new URL(request.url).origin}/api/device-sync`).replace(/\/+$/u, "");
+function resolveHostedPublicBaseUrl(
+  request: Request,
+  configuredBaseUrl: string | null,
+): { baseUrl: string; source: "configured" | "request" } {
+  if (configuredBaseUrl) {
+    return {
+      baseUrl: configuredBaseUrl.replace(/\/+$/u, ""),
+      source: "configured",
+    };
+  }
+
+  return {
+    baseUrl: `${new URL(request.url).origin}/api/device-sync`,
+    source: "request",
+  };
 }
 
 function resolveAllowedReturnOrigins(request: Request, publicBaseUrl: string, configuredOrigins: readonly string[]): string[] {
   const requestOrigin = new URL(request.url).origin;
   const publicOrigin = new URL(publicBaseUrl).origin;
   return [...new Set([requestOrigin, publicOrigin, ...configuredOrigins])];
+}
+
+function selectHostedWebhookAdminProviderNames(input: {
+  connections: readonly PublicDeviceSyncAccount[];
+  provider: string | null;
+  registry: {
+    get(provider: string): DeviceSyncProvider | undefined;
+  };
+}): Set<string> {
+  const providerNames = new Set<string>();
+
+  for (const connection of input.connections) {
+    if (connection.status === "disconnected") {
+      continue;
+    }
+
+    if (input.provider && connection.provider !== input.provider) {
+      continue;
+    }
+
+    if (input.registry.get(connection.provider)?.webhookAdmin?.ensureSubscriptions) {
+      providerNames.add(connection.provider);
+    }
+  }
+
+  return providerNames;
 }
 
 function resolveHostedAgentSessionExpiry(now: string): string {

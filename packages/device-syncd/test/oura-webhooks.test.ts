@@ -295,3 +295,64 @@ test("Oura webhook subscription ensure re-lists after create and prunes stale ma
     "DELETE https://api.ouraring.com/v2/webhook/subscription/sub-other-callback",
   ]);
 });
+
+test("Oura webhook subscription ensure does not prune managed subscriptions on a different callback path", async () => {
+  const callbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura";
+  const otherPathCallbackUrl = "https://sync.example.test/api/device-sync/webhooks/oura-preview";
+  const later = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+  const operations: string[] = [];
+  const client = createOuraWebhookSubscriptionClient({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input, init) => {
+      const url = resolveUrl(input);
+      const method = init?.method ?? "GET";
+      operations.push(`${method} ${url}`);
+
+      if (url === "https://api.ouraring.com/v2/webhook/subscription" && method === "GET") {
+        return createJsonResponse({
+          data: [
+            {
+              id: "sub-retained-current-path",
+              callback_url: callbackUrl,
+              event_type: "update",
+              data_type: "workout",
+              expiration_time: later,
+            },
+            {
+              id: "sub-retained-other-path",
+              callback_url: otherPathCallbackUrl,
+              event_type: "update",
+              data_type: "workout",
+              expiration_time: later,
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    },
+  });
+
+  const result = await client.ensure({
+    callbackUrl,
+    verificationToken: "verify-token-for-tests",
+    desired: [
+      { eventType: "update", dataType: "workout" },
+    ],
+    pruneDuplicates: true,
+    renewIfExpiringWithinMs: 0,
+  });
+
+  assert.deepEqual(
+    result.retained.map((subscription) => subscription.id),
+    ["sub-retained-current-path"],
+  );
+  assert.deepEqual(result.created, []);
+  assert.deepEqual(result.renewed, []);
+  assert.deepEqual(result.deleted, []);
+  assert.deepEqual(operations, [
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+    "GET https://api.ouraring.com/v2/webhook/subscription",
+  ]);
+});

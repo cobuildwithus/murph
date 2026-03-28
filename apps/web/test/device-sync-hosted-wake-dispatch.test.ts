@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   getConnectionBundleForUser: vi.fn(),
   getConnectionForUser: vi.fn(),
   getConnectionOwnerId: vi.fn(),
+  listConnectionsForUser: vi.fn(),
   markConnectionDisconnected: vi.fn(),
+  registryGet: vi.fn(),
+  registryList: vi.fn(),
   prismaTx: {
     __tx: true,
     deviceSyncSignal: {
@@ -22,11 +25,15 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@murph/device-syncd", () => ({
-  createDeviceSyncPublicIngress: mocks.createDeviceSyncPublicIngress,
-  deviceSyncError: vi.fn((input: { message: string }) => new Error(input.message)),
-  isDeviceSyncError: vi.fn(() => false),
-}));
+vi.mock("@murph/device-syncd", async () => {
+  const actual = await vi.importActual<typeof import("@murph/device-syncd")>("@murph/device-syncd");
+  return {
+    ...actual,
+    createDeviceSyncPublicIngress: mocks.createDeviceSyncPublicIngress,
+    deviceSyncError: vi.fn((input: { message: string }) => new Error(input.message)),
+    isDeviceSyncError: vi.fn(() => false),
+  };
+});
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
@@ -69,8 +76,8 @@ vi.mock("@/src/lib/device-sync/env", () => ({
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
   createHostedDeviceSyncRegistry: vi.fn(() => ({
-    get: vi.fn(() => undefined),
-    list: vi.fn(() => []),
+    get: mocks.registryGet,
+    list: mocks.registryList,
   })),
   requireHostedDeviceSyncProvider: vi.fn(),
 }));
@@ -82,6 +89,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     getConnectionBundleForUser = mocks.getConnectionBundleForUser;
     getConnectionForUser = mocks.getConnectionForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
+    listConnectionsForUser = mocks.listConnectionsForUser;
     markConnectionDisconnected = mocks.markConnectionDisconnected;
     prisma = mocks.prisma;
   },
@@ -191,10 +199,13 @@ describe("dispatchHostedDeviceSyncWake", () => {
       provider: "oura",
     });
     mocks.getConnectionOwnerId.mockResolvedValue("user-123");
+    mocks.listConnectionsForUser.mockResolvedValue([]);
     mocks.markConnectionDisconnected.mockResolvedValue({
       id: "dsc_123",
       provider: "oura",
     });
+    mocks.registryGet.mockReturnValue(undefined);
+    mocks.registryList.mockReturnValue([]);
   });
 
   it("wakes hosted execution with a dedicated device-sync wake event for connection events", async () => {
@@ -446,9 +457,11 @@ describe("dispatchHostedDeviceSyncWake", () => {
       },
     });
     expect(consoleError).toHaveBeenCalledWith(
-      "Failed to ensure hosted webhook subscriptions during connection setup.",
+      "Failed to ensure hosted webhook admin upkeep.",
       expect.objectContaining({
+        callbackBaseUrlSource: "configured",
         provider: "oura",
+        reason: "connection-established",
         error: expect.any(Error),
       }),
     );
@@ -542,6 +555,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
   });
 
   it("skips signal creation and wake dispatch when ingress hooks cannot resolve an owner", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getConnectionOwnerId.mockResolvedValue(null);
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
@@ -557,8 +571,245 @@ describe("dispatchHostedDeviceSyncWake", () => {
 
     await controlPlane.handleWebhook("oura");
 
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Closing hosted device-sync webhook trace without an owner mapping.",
+      expect.objectContaining({
+        connectionId: "dsc_123",
+        provider: "oura",
+        traceId: "trace_123",
+      }),
+    );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.drainHostedExecutionOutboxBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("keeps delete webhook hints narrow across the hosted handoff", async () => {
+    const deleteWebhook = {
+      eventType: "session.deleted",
+      jobs: [
+        {
+          kind: "delete",
+          dedupeKey: "oura-webhook:trace_delete_123",
+          payload: {
+            dataType: "session",
+            objectId: "session-42",
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            sourceEventType: "session.deleted",
+            webhookPayload: {
+              data_type: "session",
+              event_time: "2026-03-26T11:59:00.000Z",
+              event_type: "delete",
+              object_id: "session-42",
+              user_id: "oura-user-1",
+            },
+          },
+        },
+      ],
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      payload: {
+        dataType: "session",
+        operation: "delete",
+      },
+      traceId: "trace_delete_123",
+    };
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+        onWebhookAccepted?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(),
+      handleWebhook: vi.fn(async () => {
+        await input.hooks?.onWebhookAccepted?.({
+          account: {
+            id: "dsc_123",
+            provider: "oura",
+          },
+          now: "2026-03-26T12:00:00.000Z",
+          provider: {
+            provider: "oura",
+          },
+          webhook: deleteWebhook,
+        });
+        return {
+          accepted: true,
+        };
+      }),
+      startConnection: vi.fn(),
+    }));
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "session.deleted",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await controlPlane.handleWebhook("oura");
+
+    const signalInput = mocks.createSignal.mock.calls[0]?.[0];
+    const hintJob = Array.isArray(signalInput?.payload?.jobs) ? signalInput.payload.jobs[0] : null;
+    const hintPayload =
+      hintJob && typeof hintJob === "object" && "payload" in hintJob
+        ? (hintJob.payload as Record<string, unknown>)
+        : null;
+
+    expect(hintJob).toEqual({
+      dedupeKey: "oura-webhook:trace_delete_123",
+      kind: "delete",
+      payload: hintPayload,
+    });
+    expect(hintPayload).toEqual({
+      dataType: "session",
+      objectId: "session-42",
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      sourceEventType: "session.deleted",
+      webhookPayload: {
+        data_type: "session",
+        event_time: "2026-03-26T11:59:00.000Z",
+        event_type: "delete",
+        object_id: "session-42",
+        user_id: "oura-user-1",
+      },
+    });
+    expect(hintPayload).not.toHaveProperty("windowStart");
+    expect(hintPayload).not.toHaveProperty("windowEnd");
+    expect(hintPayload).not.toHaveProperty("includePersonalInfo");
+    expect(signalInput?.payload?.traceId).toBe("trace_delete_123");
+  });
+
+  it("resolves runtime-snapshot webhook admin upkeep from active connections only once per provider", async () => {
+    const ensureOuraSubscriptions = vi.fn().mockResolvedValue(undefined);
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        id: "dsc_123",
+        provider: "oura",
+        status: "active",
+      },
+      {
+        id: "dsc_456",
+        provider: "oura",
+        status: "active",
+      },
+      {
+        id: "dsc_789",
+        provider: "oura",
+        status: "disconnected",
+      },
+      {
+        id: "dsc_987",
+        provider: "whoop",
+        status: "active",
+      },
+    ]);
+    mocks.registryGet.mockImplementation((provider: string) => {
+      if (provider === "oura") {
+        return {
+          provider: "oura",
+          webhookAdmin: {
+            ensureSubscriptions: ensureOuraSubscriptions,
+          },
+        };
+      }
+
+      return {
+        provider,
+      };
+    });
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/internal/device-sync/runtime/snapshot"),
+    );
+
+    await controlPlane.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot({
+      userId: "user-123",
+    });
+
+    expect(ensureOuraSubscriptions).toHaveBeenCalledTimes(1);
+    expect(ensureOuraSubscriptions).toHaveBeenCalledWith({
+      publicBaseUrl: "https://control.example.test/api/device-sync",
+      verificationToken: "verify-token-for-tests",
+    });
+  });
+
+  it("skips runtime-snapshot webhook admin upkeep when the provider filter does not match the selected connection", async () => {
+    const ensureOuraSubscriptions = vi.fn().mockResolvedValue(undefined);
+    mocks.getConnectionForUser.mockResolvedValue({
+      id: "dsc_123",
+      provider: "oura",
+      status: "active",
+    });
+    mocks.registryGet.mockImplementation((provider: string) => {
+      if (provider === "oura") {
+        return {
+          provider: "oura",
+          webhookAdmin: {
+            ensureSubscriptions: ensureOuraSubscriptions,
+          },
+        };
+      }
+
+      return undefined;
+    });
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/internal/device-sync/runtime/snapshot"),
+    );
+
+    await controlPlane.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot({
+      userId: "user-123",
+      provider: "whoop",
+      connectionId: "dsc_123",
+    });
+
+    expect(ensureOuraSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("uses the requested connection for runtime-snapshot webhook admin upkeep instead of scanning all connections", async () => {
+    const ensureOuraSubscriptions = vi.fn().mockResolvedValue(undefined);
+    mocks.getConnectionForUser.mockResolvedValue({
+      id: "dsc_123",
+      provider: "oura",
+      status: "active",
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        id: "dsc_ignore",
+        provider: "whoop",
+        status: "active",
+      },
+    ]);
+    mocks.registryGet.mockImplementation((provider: string) => {
+      if (provider === "oura") {
+        return {
+          provider: "oura",
+          webhookAdmin: {
+            ensureSubscriptions: ensureOuraSubscriptions,
+          },
+        };
+      }
+
+      return {
+        provider,
+      };
+    });
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/internal/device-sync/runtime/snapshot"),
+    );
+
+    await controlPlane.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot({
+      userId: "user-123",
+      connectionId: "dsc_123",
+    });
+
+    expect(mocks.getConnectionForUser).toHaveBeenCalledWith("user-123", "dsc_123");
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    expect(ensureOuraSubscriptions).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
+import { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
 import type { DeviceSyncError } from "./errors.ts";
@@ -240,22 +241,16 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     surface: "public",
     handle({ response, service, url, config, params }) {
       const provider = params.provider ?? "";
-      const challenge = service.registry.get(provider)?.webhookAdmin?.resolveVerificationChallenge?.({
-        url,
-        verificationToken: config?.ouraWebhookVerificationToken ?? null,
-      }) ?? null;
-
-      if (challenge !== null) {
-        sendJson(response, 200, {
-          challenge,
-        });
-        return;
-      }
-
-      sendJson(response, 200, {
-        ok: true,
-        provider,
-      });
+      sendJson(
+        response,
+        200,
+        resolveDeviceSyncWebhookVerificationResponse({
+          provider,
+          registry: service.registry,
+          url,
+          verificationToken: config?.ouraWebhookVerificationToken ?? null,
+        }),
+      );
     },
   }),
   createParameterizedRoute({

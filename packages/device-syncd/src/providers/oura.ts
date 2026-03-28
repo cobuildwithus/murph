@@ -777,6 +777,52 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     };
   }
 
+  function buildOuraWindowJobPayload(input: {
+    now: string;
+    includePersonalInfo: boolean;
+    windowDays: number;
+  }): Record<string, unknown> {
+    return {
+      windowStart: subtractDays(input.now, input.windowDays),
+      windowEnd: input.now,
+      includePersonalInfo: input.includePersonalInfo,
+    };
+  }
+
+  function buildOuraResourceWebhookJobPayload(input: {
+    dataType: string;
+    objectId: string;
+    occurredAt: string;
+    now: string;
+  }): Record<string, unknown> {
+    return {
+      dataType: input.dataType,
+      objectId: input.objectId,
+      occurredAt: input.occurredAt,
+      ...buildOuraWindowJobPayload({
+        now: input.now,
+        includePersonalInfo: false,
+        windowDays: reconcileDays,
+      }),
+    };
+  }
+
+  function buildOuraDeleteWebhookJobPayload(input: {
+    dataType: string;
+    objectId: string;
+    occurredAt: string;
+    sourceEventType: string;
+    webhookPayload: Record<string, unknown>;
+  }): Record<string, unknown> {
+    return {
+      sourceEventType: input.sourceEventType,
+      dataType: input.dataType,
+      objectId: input.objectId,
+      occurredAt: input.occurredAt,
+      webhookPayload: input.webhookPayload,
+    };
+  }
+
   async function executeOuraResourceJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
@@ -905,11 +951,11 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
           {
             kind: "backfill",
             priority: 100,
-            payload: {
-              windowStart: subtractDays(context.now, backfillDays),
-              windowEnd: context.now,
+            payload: buildOuraWindowJobPayload({
+              now: context.now,
               includePersonalInfo: true,
-            },
+              windowDays: backfillDays,
+            }),
           },
         ],
         nextReconcileAt: addMilliseconds(context.now, reconcileIntervalMs),
@@ -1026,16 +1072,27 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
             kind: operation === "delete" ? "delete" : operation ? "resource" : "reconcile",
             priority: operation === "delete" ? OURA_WEBHOOK_DELETE_PRIORITY : OURA_WEBHOOK_RESOURCE_PRIORITY,
             dedupeKey: `oura-webhook:${traceId}`,
-            payload: {
-              sourceEventType: eventType,
-              dataType,
-              objectId,
-              occurredAt,
-              webhookPayload: payload,
-              windowStart: subtractDays(context.now, reconcileDays),
-              windowEnd: context.now,
-              includePersonalInfo: false,
-            },
+            payload:
+              operation === "delete"
+                ? buildOuraDeleteWebhookJobPayload({
+                    sourceEventType: eventType,
+                    dataType,
+                    objectId,
+                    occurredAt,
+                    webhookPayload: payload,
+                  })
+                : operation
+                  ? buildOuraResourceWebhookJobPayload({
+                      dataType,
+                      objectId,
+                      occurredAt,
+                      now: context.now,
+                    })
+                  : buildOuraWindowJobPayload({
+                      now: context.now,
+                      includePersonalInfo: false,
+                      windowDays: reconcileDays,
+                    }),
           },
         ],
       };

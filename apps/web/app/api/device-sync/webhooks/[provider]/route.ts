@@ -1,3 +1,5 @@
+import { resolveDeviceSyncWebhookVerificationResponse } from "@murph/device-syncd";
+
 import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
 import { jsonOk, resolveRouteParams, withJsonError } from "../../../../../src/lib/device-sync/http";
 
@@ -8,22 +10,13 @@ export const GET = withJsonError(async (
   const { provider } = await resolveRouteParams(context.params);
   const decodedProvider = decodeURIComponent(provider);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
-  const challenge = controlPlane.resolveWebhookVerificationChallenge(decodedProvider);
-
-  if (!challenge) {
-    return jsonOk(
-      {
-        ok: true,
-        provider: decodedProvider,
-      },
-      200,
-    );
-  }
-
   return jsonOk(
-    {
-      challenge,
-    },
+    resolveDeviceSyncWebhookVerificationResponse({
+      provider: decodedProvider,
+      registry: controlPlane.registry,
+      url: new URL(request.url),
+      verificationToken: controlPlane.env.ouraWebhookVerificationToken,
+    }),
     200,
   );
 });
