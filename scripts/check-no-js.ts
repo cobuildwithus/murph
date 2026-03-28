@@ -132,6 +132,7 @@ async function scanPath(relativePath: string, offenders: string[]): Promise<void
       if (
         entry.name === "dist" ||
         entry.name === "node_modules" ||
+        entry.name === "coverage" ||
         entry.name === ".next" ||
         entry.name === ".next-dev" ||
         entry.name === ".next-smoke"
