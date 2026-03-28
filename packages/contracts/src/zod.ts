@@ -885,35 +885,6 @@ export const goalFrontmatterSchema = withContractMetadata(
   "Murph Goal Frontmatter",
 );
 
-export const goalFrontmatterReadSchema = z
-  .object({
-    schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.goalFrontmatter),
-    docType: z.literal(FRONTMATTER_DOC_TYPES.goal),
-    goalId: idSchema(ID_PREFIXES.goal),
-    slug: patternedString(SLUG_PATTERN),
-    title: boundedString(1, 160),
-    status: z.enum(GOAL_STATUSES).optional(),
-    horizon: z.enum(GOAL_HORIZONS).optional(),
-    priority: integerSchema(1, 10).optional(),
-    window: z
-      .object({
-        startAt: isoDateString(),
-        targetAt: isoDateString().optional(),
-      })
-      .passthrough(),
-    parentGoalId: z.union([idSchema(ID_PREFIXES.goal), z.null()]).optional(),
-    relatedGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
-    relatedExperimentIds: uniqueArray(idSchema(ID_PREFIXES.experiment), { uniqueItems: true }).optional(),
-    domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
-  })
-  .passthrough()
-  .transform((value) => ({
-    ...value,
-    status: value.status ?? "active",
-    horizon: value.horizon ?? "ongoing",
-    priority: value.priority ?? 5,
-  }));
-
 export const conditionFrontmatterSchema = withContractMetadata(
   z
     .object({
