@@ -892,6 +892,7 @@ test("createTelegramApiPollDriver reads local Bot API file paths directly", asyn
           };
         },
       } as unknown as TelegramApiClient,
+      fileBaseUrl: "http://127.0.0.1:8081/file",
     });
 
     const file = await driver.getFile("file-1");
@@ -901,5 +902,47 @@ test("createTelegramApiPollDriver reads local Bot API file paths directly", asyn
   } finally {
     globalThis.fetch = originalFetch;
     await rm(tempDirectory, { recursive: true, force: true });
+  }
+});
+
+test("createTelegramApiPollDriver rejects local Bot API file paths from untrusted file endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () => {
+    throw new Error("fetch should not be called for rejected local Bot API file paths");
+  }) as typeof fetch;
+
+  try {
+    const driver = createTelegramApiPollDriver({
+      api: {
+        token: "bot-token",
+        async getMe() {
+          return {
+            id: 999,
+            username: "murph_bot",
+          };
+        },
+        async getUpdates() {
+          return [];
+        },
+        async getFile(fileId) {
+          assert.equal(fileId, "file-1");
+          return {
+            file_id: fileId,
+            file_path: "/tmp/telegram/file.txt",
+          };
+        },
+      } as unknown as TelegramApiClient,
+      fileBaseUrl: "https://files.example.test/file",
+    });
+
+    const file = await driver.getFile("file-1");
+
+    await assert.rejects(
+      driver.downloadFile(file.file_path!),
+      /untrusted Bot API file base URL/u,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
