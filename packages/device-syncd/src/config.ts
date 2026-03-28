@@ -7,6 +7,8 @@ import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
 import { DEFAULT_DEVICE_SYNC_HOST, normalizeString } from "./shared.ts";
 
+import type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+import type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
 import type { CreateDeviceSyncServiceInput } from "./service.ts";
 import type {
   DeviceSyncHttpConfig,
@@ -20,12 +22,7 @@ export interface LoadedDeviceSyncEnvironment {
   http: DeviceSyncHttpConfig;
 }
 
-interface DeviceSyncProviderFactoryEntry {
-  label: string;
-  clientIdKeys: readonly string[];
-  clientSecretKeys: readonly string[];
-  create(env: NodeJS.ProcessEnv, credentials: { clientId: string; clientSecret: string }): DeviceSyncProvider;
-}
+type DeviceSyncEnvSource = Readonly<Record<string, string | undefined>>;
 
 const DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS = [
   "DEVICE_SYNC_ALLOWED_RETURN_ORIGINS",
@@ -79,6 +76,9 @@ const OURA_REQUEST_TIMEOUT_MS_ENV_KEYS = [
   "OURA_REQUEST_TIMEOUT_MS",
 ] as const;
 const OURA_SCOPES_ENV_KEYS = ["OURA_SCOPES"] as const;
+const OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS = [
+  "OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
+] as const;
 const WHOOP_BACKFILL_DAYS_ENV_KEYS = ["WHOOP_BACKFILL_DAYS"] as const;
 const WHOOP_BASE_URL_ENV_KEYS = ["WHOOP_BASE_URL"] as const;
 const WHOOP_CLIENT_ID_ENV_KEYS = ["WHOOP_CLIENT_ID"] as const;
@@ -97,52 +97,13 @@ const WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS = [
   "WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS",
 ] as const;
 
-const DEVICE_SYNC_PROVIDER_FACTORIES: readonly DeviceSyncProviderFactoryEntry[] = Object.freeze([
-  {
-    label: "WHOOP",
-    clientIdKeys: WHOOP_CLIENT_ID_ENV_KEYS,
-    clientSecretKeys: WHOOP_CLIENT_SECRET_ENV_KEYS,
-    create(env, credentials) {
-      return createWhoopDeviceSyncProvider({
-        clientId: credentials.clientId,
-        clientSecret: credentials.clientSecret,
-        baseUrl: optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS),
-        scopes: parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS),
-        backfillDays: parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS),
-        reconcileDays: parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS),
-        reconcileIntervalMs: parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS),
-        webhookTimestampToleranceMs: parseIntegerEnv(env, WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
-        requestTimeoutMs: parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS),
-      });
-    },
-  },
-  {
-    label: "Oura",
-    clientIdKeys: OURA_CLIENT_ID_ENV_KEYS,
-    clientSecretKeys: OURA_CLIENT_SECRET_ENV_KEYS,
-    create(env, credentials) {
-      return createOuraDeviceSyncProvider({
-        clientId: credentials.clientId,
-        clientSecret: credentials.clientSecret,
-        authBaseUrl: optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS),
-        apiBaseUrl: optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS),
-        scopes: parseCsvEnv(env, OURA_SCOPES_ENV_KEYS),
-        backfillDays: parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS),
-        reconcileDays: parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS),
-        reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
-        requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
-      });
-    },
-  },
-]);
-
 export function loadDeviceSyncEnvironment(env: NodeJS.ProcessEnv = process.env): LoadedDeviceSyncEnvironment {
   const vaultRoot = requireEnv(env, DEVICE_SYNC_VAULT_ROOT_ENV_KEYS);
   const publicBaseUrl = requireEnv(env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS);
   const secret = requireEnv(env, DEVICE_SYNC_SECRET_ENV_KEYS);
   const controlToken = requireEnv(env, DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS);
   const logger = createConsoleDeviceSyncLogger();
-  const providers = createConfiguredProviders(env);
+  const providers = createConfiguredDeviceSyncProviders(env);
   const publicListener = readOptionalPublicListener(env);
 
   if (providers.length === 0) {
@@ -197,17 +158,75 @@ export function createConsoleDeviceSyncLogger(consoleLike: Console = console): D
   };
 }
 
-function createConfiguredProviders(env: NodeJS.ProcessEnv): DeviceSyncProvider[] {
-  return DEVICE_SYNC_PROVIDER_FACTORIES.flatMap((entry) => {
-    const credentials = readOptionalCredentialPair(
-      env,
-      entry.clientIdKeys,
-      entry.clientSecretKeys,
-      entry.label,
-    );
+export function createConfiguredDeviceSyncProviders(env: DeviceSyncEnvSource): DeviceSyncProvider[] {
+  const providers: DeviceSyncProvider[] = [];
+  const whoopConfig = readConfiguredWhoopDeviceSyncProviderConfig(env);
+  const ouraConfig = readConfiguredOuraDeviceSyncProviderConfig(env);
 
-    return credentials ? [entry.create(env, credentials)] : [];
-  });
+  if (whoopConfig) {
+    providers.push(createWhoopDeviceSyncProvider(whoopConfig));
+  }
+
+  if (ouraConfig) {
+    providers.push(createOuraDeviceSyncProvider(ouraConfig));
+  }
+
+  return providers;
+}
+
+export function readConfiguredWhoopDeviceSyncProviderConfig(
+  env: DeviceSyncEnvSource,
+): WhoopDeviceSyncProviderConfig | null {
+  const credentials = readOptionalCredentialPair(
+    env,
+    WHOOP_CLIENT_ID_ENV_KEYS,
+    WHOOP_CLIENT_SECRET_ENV_KEYS,
+    "WHOOP",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    baseUrl: optionalEnv(env, WHOOP_BASE_URL_ENV_KEYS),
+    scopes: parseCsvEnv(env, WHOOP_SCOPES_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, WHOOP_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, WHOOP_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, WHOOP_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    webhookTimestampToleranceMs: parseIntegerEnv(env, WHOOP_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, WHOOP_REQUEST_TIMEOUT_MS_ENV_KEYS),
+  };
+}
+
+export function readConfiguredOuraDeviceSyncProviderConfig(
+  env: DeviceSyncEnvSource,
+): OuraDeviceSyncProviderConfig | null {
+  const credentials = readOptionalCredentialPair(
+    env,
+    OURA_CLIENT_ID_ENV_KEYS,
+    OURA_CLIENT_SECRET_ENV_KEYS,
+    "Oura",
+  );
+
+  if (!credentials) {
+    return null;
+  }
+
+  return {
+    clientId: credentials.clientId,
+    clientSecret: credentials.clientSecret,
+    authBaseUrl: optionalEnv(env, OURA_AUTH_BASE_URL_ENV_KEYS),
+    apiBaseUrl: optionalEnv(env, OURA_API_BASE_URL_ENV_KEYS),
+    scopes: parseCsvEnv(env, OURA_SCOPES_ENV_KEYS),
+    backfillDays: parseIntegerEnv(env, OURA_BACKFILL_DAYS_ENV_KEYS),
+    reconcileDays: parseIntegerEnv(env, OURA_RECONCILE_DAYS_ENV_KEYS),
+    reconcileIntervalMs: parseIntegerEnv(env, OURA_RECONCILE_INTERVAL_MS_ENV_KEYS),
+    webhookTimestampToleranceMs: parseIntegerEnv(env, OURA_WEBHOOK_TIMESTAMP_TOLERANCE_MS_ENV_KEYS),
+    requestTimeoutMs: parseIntegerEnv(env, OURA_REQUEST_TIMEOUT_MS_ENV_KEYS),
+  };
 }
 
 function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttpConfig, "publicHost" | "publicPort"> {
@@ -231,7 +250,7 @@ function readOptionalPublicListener(env: NodeJS.ProcessEnv): Pick<DeviceSyncHttp
 }
 
 function readOptionalCredentialPair(
-  env: NodeJS.ProcessEnv,
+  env: DeviceSyncEnvSource,
   clientIdKeys: readonly string[],
   clientSecretKeys: readonly string[],
   providerLabel: string,
@@ -252,7 +271,7 @@ function readOptionalCredentialPair(
   return { clientId, clientSecret };
 }
 
-function requireEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): string {
+function requireEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string {
   const value = optionalEnv(env, keys);
 
   if (!value) {
@@ -262,7 +281,7 @@ function requireEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): string {
   return value;
 }
 
-function optionalEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): string | undefined {
+function optionalEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string | undefined {
   for (const key of keys) {
     const value = normalizeString(env[key]);
 
@@ -274,7 +293,7 @@ function optionalEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): string | 
   return undefined;
 }
 
-function parseIntegerEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): number | undefined {
+function parseIntegerEnv(env: DeviceSyncEnvSource, keys: readonly string[]): number | undefined {
   const value = optionalEnv(env, keys);
 
   if (!value) {
@@ -290,7 +309,7 @@ function parseIntegerEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): numbe
   return parsed;
 }
 
-function parseCsvEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): string[] | undefined {
+function parseCsvEnv(env: DeviceSyncEnvSource, keys: readonly string[]): string[] | undefined {
   const value = optionalEnv(env, keys);
 
   if (!value) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vitest";
+import { prepareDeviceProviderSnapshotImport } from "@murph/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";
@@ -63,6 +64,17 @@ function createJob(kind: string, payload: Record<string, unknown>): DeviceSyncJo
     startedAt: null,
     finishedAt: null,
   };
+}
+
+function createOuraWebhookSignature(secret: string, timestamp: string, rawBody: Buffer): string {
+  return createHmac("sha256", secret).update(`${timestamp}${rawBody.toString("utf8")}`).digest("hex");
+}
+
+function createOuraWebhookHeaders(secret: string, timestamp: string, rawBody: Buffer): Headers {
+  return new Headers({
+    "x-oura-signature": createOuraWebhookSignature(secret, timestamp, rawBody),
+    "x-oura-timestamp": timestamp,
+  });
 }
 
 test("Oura provider exchanges an auth code into a refreshable connection", async () => {
@@ -445,7 +457,7 @@ test("Oura provider rejects invalid heartrate window payloads", async () => {
   assert.equal(fetchCalled, false);
 });
 
-test("Oura provider validates webhook signatures and turns notifications into reconcile hints", async () => {
+test("Oura provider validates webhook signatures and turns notifications into resource-scoped hints", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
     clientSecret: "oura-client-secret",
@@ -461,13 +473,9 @@ test("Oura provider validates webhook signatures and turns notifications into re
     "utf8",
   );
   const timestamp = "2026-03-16T09:58:10.000Z";
-  const signature = createHmac("sha256", "oura-client-secret").update(`${timestamp}${rawBody.toString("utf8")}`).digest("hex");
 
   const parsed = await provider.verifyAndParseWebhook?.({
-    headers: new Headers({
-      "x-oura-signature": signature,
-      "x-oura-timestamp": timestamp,
-    }),
+    headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
     rawBody,
     now: "2026-03-16T10:00:00.000Z",
   });
@@ -480,25 +488,33 @@ test("Oura provider validates webhook signatures and turns notifications into re
     payload: {
       eventType: "daily_sleep.updated",
       dataType: "daily_sleep",
+      operation: "update",
     },
     jobs: [
       {
-        kind: "reconcile",
+        kind: "resource",
         priority: 90,
         dedupeKey: parsed?.jobs[0]?.dedupeKey,
         payload: {
-          windowStart: parsed?.jobs[0]?.payload?.windowStart,
-          windowEnd: "2026-03-16T10:00:00.000Z",
-          includePersonalInfo: false,
           sourceEventType: "daily_sleep.updated",
           dataType: "daily_sleep",
           objectId: "daily-sleep-1",
+          occurredAt: "2026-03-16T09:58:00.000Z",
+          webhookPayload: {
+            event_type: "daily_sleep.updated",
+            data_type: "daily_sleep",
+            object_id: "daily-sleep-1",
+            user_id: "oura-user-1",
+            timestamp: "2026-03-16T09:58:00.000Z",
+          },
+          windowStart: "2026-02-23T10:00:00.000Z",
+          windowEnd: "2026-03-16T10:00:00.000Z",
+          includePersonalInfo: false,
         },
       },
     ],
   });
   assert.match(parsed?.traceId ?? "", /^[a-f0-9]{64}$/u);
-  assert.match(String(parsed?.jobs[0]?.payload?.windowStart ?? ""), /^2026-03-09T10:00:00\.000Z$/u);
   assert.equal(parsed?.jobs[0]?.dedupeKey, `oura-webhook:${parsed?.traceId}`);
 });
 
@@ -518,9 +534,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
     "utf8",
   );
   const timestamp = "2026-03-16T09:58:10.000Z";
-  const signature = createHmac("sha256", "oura-client-secret")
-    .update(`${timestamp}${rawBody.toString("utf8")}`)
-    .digest("hex")
+  const signature = createOuraWebhookSignature("oura-client-secret", timestamp, rawBody)
     .toUpperCase();
 
   const parsed = await provider.verifyAndParseWebhook?.({
@@ -532,7 +546,7 @@ test("Oura provider accepts uppercase hexadecimal webhook signatures", async () 
     now: "2026-03-16T10:00:00.000Z",
   });
 
-  assert.equal(parsed?.eventType, "update");
+  assert.equal(parsed?.eventType, "daily_sleep.updated");
   assert.equal(parsed?.payload?.dataType, "daily_sleep");
 });
 
@@ -557,6 +571,250 @@ test("Oura webhook verification challenge helper returns the challenge only for 
   );
 });
 
+test("Oura provider accepts documented numeric-second timestamps, uses event_time, and imports delete webhooks as deletion snapshots", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const rawBody = Buffer.from(
+    JSON.stringify({
+      event_type: "delete",
+      data_type: "session",
+      object_id: "session-42",
+      user_id: "oura-user-1",
+      event_time: "2026-03-16T09:58:00.000Z",
+    }),
+    "utf8",
+  );
+  const timestamp = String(Math.floor(Date.parse("2026-03-16T10:00:00.000Z") / 1000));
+  const parsed = await provider.verifyAndParseWebhook?.({
+    headers: createOuraWebhookHeaders("oura-client-secret", timestamp, rawBody),
+    rawBody,
+    now: "2026-03-16T10:00:00.000Z",
+  });
+
+  assert.deepEqual(parsed, {
+    externalAccountId: "oura-user-1",
+    eventType: "session.deleted",
+    traceId: parsed?.traceId,
+    occurredAt: "2026-03-16T09:58:00.000Z",
+    payload: {
+      eventType: "session.deleted",
+      dataType: "session",
+      operation: "delete",
+    },
+    jobs: [
+      {
+        kind: "delete",
+        priority: 95,
+        dedupeKey: parsed?.jobs[0]?.dedupeKey,
+        payload: {
+          sourceEventType: "session.deleted",
+          dataType: "session",
+          objectId: "session-42",
+          occurredAt: "2026-03-16T09:58:00.000Z",
+          webhookPayload: {
+            event_type: "delete",
+            data_type: "session",
+            object_id: "session-42",
+            user_id: "oura-user-1",
+            event_time: "2026-03-16T09:58:00.000Z",
+          },
+          windowStart: "2026-02-23T10:00:00.000Z",
+          windowEnd: "2026-03-16T10:00:00.000Z",
+          includePersonalInfo: false,
+        },
+      },
+    ],
+  });
+
+  const context: ProviderJobContext = {
+    account: createAccount(["session"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return { ok: true };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refreshAccountTokens should not be called");
+    },
+  };
+
+  await provider.executeJob(context, createJob("delete", parsed?.jobs[0]?.payload ?? {}));
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      deletions: [
+        {
+          resource_type: "session",
+          resource_id: "session-42",
+          occurred_at: "2026-03-16T09:58:00.000Z",
+          source_event_type: "session.deleted",
+          payload: {
+            event_type: "delete",
+            data_type: "session",
+            object_id: "session-42",
+            user_id: "oura-user-1",
+            event_time: "2026-03-16T09:58:00.000Z",
+          },
+        },
+      ],
+    },
+  ]);
+
+  const normalizedPayload = await prepareDeviceProviderSnapshotImport({
+    provider: "oura",
+    snapshot: importedSnapshots[0],
+  });
+  const deletionEvent = normalizedPayload.events?.find((event) => event.externalRef?.facet === "deleted");
+
+  assert.equal(deletionEvent?.externalRef?.resourceType, "session");
+  assert.equal(deletionEvent?.fields?.metric, "external-resource-deleted");
+  assert.equal(deletionEvent?.fields?.sourceEventType, "session.deleted");
+});
+
+test("Oura webhook resource jobs fetch only the hinted collection and keep the matching object id", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url.startsWith("https://api.ouraring.com/v2/usercollection/workout?")) {
+        return createJsonResponse({
+          data: [
+            {
+              id: "workout-2",
+              activity: "running",
+              start_datetime: "2026-03-16T09:00:00.000Z",
+              end_datetime: "2026-03-16T09:45:00.000Z",
+              timestamp: "2026-03-16T09:50:00.000Z",
+            },
+            {
+              id: "workout-3",
+              activity: "cycling",
+              start_datetime: "2026-03-16T11:00:00.000Z",
+              end_datetime: "2026-03-16T11:30:00.000Z",
+              timestamp: "2026-03-16T11:35:00.000Z",
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["workout"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return { ok: true };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refreshAccountTokens should not be called");
+    },
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("resource", {
+      dataType: "workout",
+      objectId: "workout-2",
+      occurredAt: "2026-03-16T09:58:00.000Z",
+      sourceEventType: "workout.updated",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      workouts: [
+        {
+          id: "workout-2",
+          activity: "running",
+          start_datetime: "2026-03-16T09:00:00.000Z",
+          end_datetime: "2026-03-16T09:45:00.000Z",
+          timestamp: "2026-03-16T09:50:00.000Z",
+        },
+      ],
+    },
+  ]);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0] ?? "", /\/v2\/usercollection\/workout\?/u);
+});
+
+test("Oura webhook resource jobs keep object scope even when the hinted object is missing from narrow and broader retries", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+    fetchImpl: async (input) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      requests.push(url);
+
+      if (url.startsWith("https://api.ouraring.com/v2/usercollection/workout?")) {
+        return createJsonResponse({
+          data: [
+            {
+              id: "workout-3",
+              activity: "cycling",
+              start_datetime: "2026-03-16T11:00:00.000Z",
+              end_datetime: "2026-03-16T11:30:00.000Z",
+              timestamp: "2026-03-16T11:35:00.000Z",
+            },
+          ],
+        });
+      }
+
+      throw new Error(`Unexpected request: ${url}`);
+    },
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["workout"]),
+    now: "2026-03-16T10:00:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return { ok: true };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refreshAccountTokens should not be called");
+    },
+  };
+
+  await provider.executeJob(
+    context,
+    createJob("resource", {
+      dataType: "workout",
+      objectId: "workout-2",
+      occurredAt: "2026-03-16T09:58:00.000Z",
+      sourceEventType: "workout.updated",
+    }),
+  );
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-16T10:00:00.000Z",
+      workouts: [],
+    },
+  ]);
+  assert.equal(requests.length, 2);
+  assert.match(requests[0] ?? "", /start_date=2026-03-16/u);
+  assert.match(requests[1] ?? "", /start_date=2026-02-23/u);
+});
+
 test("Oura webhook rejects malformed timestamp headers even when the signature matches", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",
@@ -573,9 +831,7 @@ test("Oura webhook rejects malformed timestamp headers even when the signature m
     "utf8",
   );
   const timestamp = "not-a-real-timestamp";
-  const signature = createHmac("sha256", "oura-client-secret")
-    .update(`${timestamp}${rawBody.toString("utf8")}`)
-    .digest("hex");
+  const signature = createOuraWebhookSignature("oura-client-secret", timestamp, rawBody);
 
   await assert.rejects(
     () =>

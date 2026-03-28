@@ -49,6 +49,9 @@ const DEFAULT_BACKFILL_DAYS = 90;
 const DEFAULT_RECONCILE_DAYS = 21;
 const DEFAULT_RECONCILE_INTERVAL_MS = 6 * 60 * 60_000;
 const DEFAULT_WEBHOOK_TOLERANCE_MS = 5 * 60_000;
+const OURA_SECONDS_TIMESTAMP_THRESHOLD = 10_000_000_000;
+const OURA_WEBHOOK_RESOURCE_PRIORITY = 90;
+const OURA_WEBHOOK_DELETE_PRIORITY = 95;
 const OURA_DEFAULT_SCOPES = Object.freeze([
   "personal",
   "daily",
@@ -69,6 +72,78 @@ interface OuraTokenResponse {
 interface OuraCollectionResponse<TRecord extends Record<string, unknown>> {
   data?: TRecord[];
   next_token?: string | null;
+}
+
+type OuraScope = "daily" | "spo2" | "session" | "workout" | "heartrate";
+type OuraWebhookOperation = "create" | "update" | "delete";
+type OuraWebhookDataType =
+  | "daily_activity"
+  | "daily_readiness"
+  | "daily_sleep"
+  | "daily_spo2"
+  | "heartrate"
+  | "session"
+  | "sleep"
+  | "workout";
+
+interface OuraDeleteMarker {
+  resource_type: string;
+  resource_id: string;
+  occurred_at: string;
+  source_event_type?: string;
+  payload?: Record<string, unknown>;
+}
+
+interface OuraApiSession {
+  account: DeviceSyncAccount;
+  requestJson<T>(path: string, options?: { optional?: boolean }): Promise<T | null>;
+  fetchPagedCollection(
+    path: string,
+    parameters: Record<string, string | null | undefined>,
+  ): Promise<Record<string, unknown>[]>;
+}
+
+interface OuraResourceDescriptor {
+  scope: OuraScope;
+  snapshotKey:
+    | "dailyActivity"
+    | "dailySleep"
+    | "dailyReadiness"
+    | "dailySpO2"
+    | "sleeps"
+    | "sessions"
+    | "workouts"
+    | "heartrate";
+  matchFields: readonly string[];
+  narrowWindowDaysBefore: number;
+  narrowWindowDaysAfter: number;
+  fetch(api: OuraApiSession, windowStart: string, windowEnd: string): Promise<Record<string, unknown>[]>;
+}
+
+const HEARTRATE_CHUNK_MS = 30 * 24 * 60 * 60_000;
+
+async function fetchOuraHeartRateInChunks(
+  api: OuraApiSession,
+  windowStart: string,
+  windowEnd: string,
+): Promise<Record<string, unknown>[]> {
+  const resolvedWindowStart = toDateTimeParameter(windowStart);
+  const resolvedWindowEnd = toDateTimeParameter(windowEnd);
+  const records: Record<string, unknown>[] = [];
+  let chunkStart = Date.parse(resolvedWindowStart);
+  const end = Date.parse(resolvedWindowEnd);
+
+  while (chunkStart < end) {
+    const chunkEnd = Math.min(chunkStart + HEARTRATE_CHUNK_MS, end);
+    const chunk = await api.fetchPagedCollection("/v2/usercollection/heartrate", {
+      start_datetime: new Date(chunkStart).toISOString(),
+      end_datetime: new Date(chunkEnd).toISOString(),
+    });
+    records.push(...chunk);
+    chunkStart = chunkEnd;
+  }
+
+  return records;
 }
 
 export interface OuraDeviceSyncProviderConfig {
@@ -176,12 +251,259 @@ function parseTimestampMillis(value: string | null): number | null {
   const numeric = Number(normalized);
 
   if (Number.isFinite(numeric)) {
-    return numeric;
+    return numeric < OURA_SECONDS_TIMESTAMP_THRESHOLD ? numeric * 1000 : numeric;
   }
 
   const parsed = Date.parse(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  const normalized = normalizeString(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function startOfUtcDay(timestamp: string): string {
+  const date = new Date(timestamp);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())).toISOString();
+}
+
+function endOfUtcDay(timestamp: string): string {
+  return addMilliseconds(startOfUtcDay(timestamp), 24 * 60 * 60_000 - 1);
+}
+
+function buildOuraWebhookWindow(
+  occurredAt: string,
+  descriptor: Pick<OuraResourceDescriptor, "narrowWindowDaysBefore" | "narrowWindowDaysAfter">,
+): { windowStart: string; windowEnd: string } {
+  const dayStart = startOfUtcDay(occurredAt);
+  const dayEnd = endOfUtcDay(occurredAt);
+
+  return {
+    windowStart:
+      descriptor.narrowWindowDaysBefore > 0
+        ? subtractDays(dayStart, descriptor.narrowWindowDaysBefore)
+        : dayStart,
+    windowEnd:
+      descriptor.narrowWindowDaysAfter > 0
+        ? addMilliseconds(dayEnd, descriptor.narrowWindowDaysAfter * 24 * 60 * 60_000)
+        : dayEnd,
+  };
+}
+
+function pickOuraRecordCandidates(record: Record<string, unknown>, fields: readonly string[]): string[] {
+  const candidates = new Set<string>();
+
+  for (const field of fields) {
+    const value = normalizeString(record[field]);
+
+    if (value) {
+      candidates.add(value);
+    }
+  }
+
+  return [...candidates];
+}
+
+function filterOuraResourceRecords(
+  records: readonly Record<string, unknown>[],
+  descriptor: OuraResourceDescriptor,
+  objectId: string | null,
+): Record<string, unknown>[] {
+  if (!objectId) {
+    return [...records];
+  }
+
+  return records.filter((record) => pickOuraRecordCandidates(record, descriptor.matchFields).includes(objectId));
+}
+
+async function populateOuraSnapshotCollections(
+  api: OuraApiSession,
+  snapshot: Record<string, unknown>,
+  windowStart: string,
+  windowEnd: string,
+  dataTypes?: readonly OuraWebhookDataType[],
+): Promise<void> {
+  const descriptors = dataTypes
+    ? dataTypes
+        .map((dataType) => OURA_RESOURCE_DESCRIPTORS[dataType])
+        .filter((descriptor): descriptor is OuraResourceDescriptor => Boolean(descriptor))
+    : Object.values(OURA_RESOURCE_DESCRIPTORS);
+
+  for (const descriptor of descriptors) {
+    if (!hasOuraScope(api.account, descriptor.scope)) {
+      continue;
+    }
+
+    snapshot[descriptor.snapshotKey] = await descriptor.fetch(api, windowStart, windowEnd);
+  }
+}
+
+function normalizeOuraWebhookOperation(value: string | null): OuraWebhookOperation | null {
+  const normalized = normalizeString(value)?.toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "create" || normalized === "created") {
+    return "create";
+  }
+
+  if (normalized === "update" || normalized === "updated") {
+    return "update";
+  }
+
+  if (normalized === "delete" || normalized === "deleted") {
+    return "delete";
+  }
+
+  const suffix = normalized.split(".").at(-1);
+  return suffix ? normalizeOuraWebhookOperation(suffix) : null;
+}
+
+function buildOuraSourceEventType(
+  rawEventType: string | null,
+  dataType: string,
+  operation: OuraWebhookOperation | null,
+): string {
+  const normalized = normalizeString(rawEventType);
+
+  if (normalized?.includes(".")) {
+    return normalized;
+  }
+
+  if (!operation) {
+    return normalized ?? dataType;
+  }
+
+  const suffix =
+    operation === "create" ? "created" : operation === "update" ? "updated" : "deleted";
+
+  return `${dataType}.${suffix}`;
+}
+
+function buildOuraDeleteSnapshot(
+  account: DeviceSyncAccount,
+  now: string,
+  marker: OuraDeleteMarker,
+): Record<string, unknown> {
+  return {
+    accountId: account.externalAccountId,
+    importedAt: now,
+    deletions: [marker],
+  };
+}
+
+const OURA_RESOURCE_DESCRIPTORS: Readonly<Record<OuraWebhookDataType, OuraResourceDescriptor>> = Object.freeze({
+  daily_activity: {
+    scope: "daily",
+    snapshotKey: "dailyActivity",
+    matchFields: ["id", "day", "date"],
+    narrowWindowDaysBefore: 0,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/daily_activity", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+  daily_readiness: {
+    scope: "daily",
+    snapshotKey: "dailyReadiness",
+    matchFields: ["id", "day", "date"],
+    narrowWindowDaysBefore: 0,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/daily_readiness", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+  daily_sleep: {
+    scope: "daily",
+    snapshotKey: "dailySleep",
+    matchFields: ["id", "day", "date"],
+    narrowWindowDaysBefore: 1,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/daily_sleep", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+  daily_spo2: {
+    scope: "spo2",
+    snapshotKey: "dailySpO2",
+    matchFields: ["id", "day", "date"],
+    narrowWindowDaysBefore: 0,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/daily_spo2", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+  heartrate: {
+    scope: "heartrate",
+    snapshotKey: "heartrate",
+    matchFields: ["id", "timestamp", "recorded_at", "recordedAt"],
+    narrowWindowDaysBefore: 0,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return fetchOuraHeartRateInChunks(api, windowStart, windowEnd);
+    },
+  },
+  session: {
+    scope: "session",
+    snapshotKey: "sessions",
+    matchFields: ["id", "day", "date", "start_datetime", "start_time", "start"],
+    narrowWindowDaysBefore: 0,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/session", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+  sleep: {
+    scope: "daily",
+    snapshotKey: "sleeps",
+    matchFields: ["id", "day", "date", "sleep_date", "start_datetime", "bedtime_start"],
+    narrowWindowDaysBefore: 1,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/sleep", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+  workout: {
+    scope: "workout",
+    snapshotKey: "workouts",
+    matchFields: ["id", "day", "date", "start_datetime", "start_time", "start"],
+    narrowWindowDaysBefore: 0,
+    narrowWindowDaysAfter: 0,
+    fetch(api, windowStart, windowEnd) {
+      return api.fetchPagedCollection("/v2/usercollection/workout", {
+        start_date: toDateParameter(windowStart),
+        end_date: toDateParameter(windowEnd),
+      });
+    },
+  },
+});
 
 export function resolveOuraWebhookVerificationChallenge(input: {
   url: URL;
@@ -317,7 +639,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
     return coerceRecord(personalInfo);
   }
 
-  function createApiSession(context: ProviderJobContext) {
+  function createApiSession(context: ProviderJobContext): OuraApiSession {
     const session = createRefreshingApiSession({
       context,
       requestJsonWithAccessToken: <T>(accessToken: string, path: string, options: { optional?: boolean }) =>
@@ -337,32 +659,6 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         return fetchPagedCollection(session.requestJson, path, parameters);
       },
     };
-  }
-
-  const HEARTRATE_CHUNK_MS = 30 * 24 * 60 * 60_000;
-
-  async function fetchOuraHeartRateInChunks(
-    api: { fetchPagedCollection(path: string, parameters: Record<string, string | null | undefined>): Promise<Record<string, unknown>[]> },
-    windowStart: string,
-    windowEnd: string,
-  ): Promise<Record<string, unknown>[]> {
-    const resolvedWindowStart = toDateTimeParameter(windowStart);
-    const resolvedWindowEnd = toDateTimeParameter(windowEnd);
-    const records: Record<string, unknown>[] = [];
-    let chunkStart = Date.parse(resolvedWindowStart);
-    const end = Date.parse(resolvedWindowEnd);
-
-    while (chunkStart < end) {
-      const chunkEnd = Math.min(chunkStart + HEARTRATE_CHUNK_MS, end);
-      const chunk = await api.fetchPagedCollection("/v2/usercollection/heartrate", {
-        start_datetime: new Date(chunkStart).toISOString(),
-        end_datetime: new Date(chunkEnd).toISOString(),
-      });
-      records.push(...chunk);
-      chunkStart = chunkEnd;
-    }
-
-    return records;
   }
 
   async function executeWindowImport(
@@ -386,49 +682,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
       );
     }
 
-    if (hasOuraScope(api.account, "daily")) {
-      snapshot.dailyActivity = await api.fetchPagedCollection("/v2/usercollection/daily_activity", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-      snapshot.dailySleep = await api.fetchPagedCollection("/v2/usercollection/daily_sleep", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-      snapshot.dailyReadiness = await api.fetchPagedCollection("/v2/usercollection/daily_readiness", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-      snapshot.sleeps = await api.fetchPagedCollection("/v2/usercollection/sleep", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-    }
-
-    if (hasOuraScope(api.account, "spo2")) {
-      snapshot.dailySpO2 = await api.fetchPagedCollection("/v2/usercollection/daily_spo2", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-    }
-
-    if (hasOuraScope(api.account, "session")) {
-      snapshot.sessions = await api.fetchPagedCollection("/v2/usercollection/session", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-    }
-
-    if (hasOuraScope(api.account, "workout")) {
-      snapshot.workouts = await api.fetchPagedCollection("/v2/usercollection/workout", {
-        start_date: toDateParameter(windowStart),
-        end_date: toDateParameter(windowEnd),
-      });
-    }
-
-    if (hasOuraScope(api.account, "heartrate")) {
-      snapshot.heartrate = await fetchOuraHeartRateInChunks(api, windowStart, windowEnd);
-    }
+    await populateOuraSnapshotCollections(api, snapshot, windowStart, windowEnd);
 
     await context.importSnapshot(snapshot);
 
@@ -440,6 +694,101 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
             }
           : undefined,
     };
+  }
+
+  async function fetchOuraResourceSnapshot(
+    api: OuraApiSession,
+    input: {
+      dataType: string | null;
+      objectId: string | null;
+      occurredAt: string;
+      now: string;
+    },
+  ): Promise<Record<string, unknown> | null> {
+    if (!input.dataType) {
+      return null;
+    }
+
+    const descriptor = OURA_RESOURCE_DESCRIPTORS[input.dataType as OuraWebhookDataType];
+
+    if (!descriptor || !hasOuraScope(api.account, descriptor.scope)) {
+      return null;
+    }
+
+    const narrowWindow = buildOuraWebhookWindow(input.occurredAt, descriptor);
+    const narrowRecords = await descriptor.fetch(api, narrowWindow.windowStart, narrowWindow.windowEnd);
+    const filteredNarrowRecords = filterOuraResourceRecords(narrowRecords, descriptor, input.objectId);
+
+    if (filteredNarrowRecords.length > 0 || !input.objectId) {
+      return {
+        accountId: api.account.externalAccountId,
+        importedAt: input.now,
+        [descriptor.snapshotKey]: filteredNarrowRecords,
+      };
+    }
+
+    const broaderRecords = await descriptor.fetch(api, subtractDays(input.now, reconcileDays), input.now);
+    const filteredBroaderRecords = filterOuraResourceRecords(broaderRecords, descriptor, input.objectId);
+
+    return {
+      accountId: api.account.externalAccountId,
+      importedAt: input.now,
+      [descriptor.snapshotKey]: filteredBroaderRecords,
+    };
+  }
+
+  async function executeOuraResourceJob(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+  ): Promise<ProviderJobResult> {
+    const dataType = normalizeString(job.payload.dataType) ?? null;
+    const objectId = normalizeIdentifier(job.payload.objectId) ?? null;
+    const occurredAt = normalizeIsoTimestamp(job.payload.occurredAt) ?? context.now;
+    const api = createApiSession(context);
+    const snapshot = await fetchOuraResourceSnapshot(api, {
+      dataType,
+      objectId,
+      occurredAt,
+      now: context.now,
+    });
+
+    if (!snapshot) {
+      return executeWindowImport(context, job.payload, reconcileDays);
+    }
+
+    await context.importSnapshot(snapshot);
+    return {};
+  }
+
+  async function executeOuraDeleteJob(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+  ): Promise<ProviderJobResult> {
+    const dataType = normalizeString(job.payload.dataType);
+    const objectId = normalizeIdentifier(job.payload.objectId);
+    const occurredAt = normalizeIsoTimestamp(job.payload.occurredAt) ?? context.now;
+    const sourceEventType = normalizeString(job.payload.sourceEventType) ?? undefined;
+    const webhookPayload = coerceRecord(job.payload.webhookPayload);
+
+    if (!dataType || !objectId) {
+      throw deviceSyncError({
+        code: "OURA_DELETE_JOB_INVALID",
+        message: "Oura delete job did not include a dataType and objectId.",
+        retryable: false,
+      });
+    }
+
+    await context.importSnapshot(
+      buildOuraDeleteSnapshot(context.account, context.now, {
+        resource_type: dataType,
+        resource_id: objectId,
+        occurred_at: occurredAt,
+        source_event_type: sourceEventType,
+        payload: webhookPayload,
+      }),
+    );
+
+    return {};
   }
 
   const provider: DeviceSyncProvider = {
@@ -597,10 +946,12 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
       const payload = parseOuraWebhookPayload(context.rawBody);
       const externalAccountId = normalizeIdentifier(payload.user_id ?? payload.userId);
-      const eventType = normalizeString(payload.event_type ?? payload.eventType);
-      const dataType = normalizeString(payload.data_type ?? payload.dataType);
+      const rawEventType = normalizeString(payload.event_type ?? payload.eventType) ?? null;
+      const dataType = normalizeString(payload.data_type ?? payload.dataType) ?? null;
       const objectId = normalizeIdentifier(payload.object_id ?? payload.objectId ?? payload.id);
-      const occurredAt = normalizeString(payload.timestamp) ?? context.now;
+      const operation = normalizeOuraWebhookOperation(rawEventType);
+      const eventType = dataType ? buildOuraSourceEventType(rawEventType, dataType, operation) : rawEventType;
+      const occurredAt = normalizeIsoTimestamp(payload.event_time ?? payload.eventTime ?? payload.timestamp) ?? context.now;
 
       if (!externalAccountId || !eventType || !dataType || !objectId) {
         throw deviceSyncError({
@@ -623,19 +974,22 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         payload: {
           eventType,
           dataType,
+          operation,
         },
         jobs: [
           {
-            kind: "reconcile",
-            priority: 90,
+            kind: operation === "delete" ? "delete" : operation ? "resource" : "reconcile",
+            priority: operation === "delete" ? OURA_WEBHOOK_DELETE_PRIORITY : OURA_WEBHOOK_RESOURCE_PRIORITY,
             dedupeKey: `oura-webhook:${traceId}`,
             payload: {
-              windowStart: subtractDays(context.now, Math.min(7, reconcileDays)),
-              windowEnd: context.now,
-              includePersonalInfo: false,
               sourceEventType: eventType,
               dataType,
               objectId,
+              occurredAt,
+              webhookPayload: payload,
+              windowStart: subtractDays(context.now, reconcileDays),
+              windowEnd: context.now,
+              includePersonalInfo: false,
             },
           },
         ],
@@ -660,6 +1014,14 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
       if (job.kind === "reconcile") {
         return executeWindowImport(context, job.payload, reconcileDays);
+      }
+
+      if (job.kind === "resource") {
+        return executeOuraResourceJob(context, job);
+      }
+
+      if (job.kind === "delete") {
+        return executeOuraDeleteJob(context, job);
       }
 
       throw deviceSyncError({
