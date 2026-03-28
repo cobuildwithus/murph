@@ -14,6 +14,7 @@ const HOSTED_INTERNAL_WORKER_HOSTNAMES = new Set<string>([
   HOSTED_EXECUTION_CALLBACK_HOSTS.outbox,
   HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
   HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
+  HOSTED_EXECUTION_PROXY_HOSTS.usage,
 ]);
 
 export interface HostedJsonHttpResponse {

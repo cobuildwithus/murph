@@ -1,5 +1,6 @@
 import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import {
+  HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   buildHostedExecutionSharePayloadPath,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -47,6 +48,7 @@ const RUNNER_INTERNAL_PROXY_HOSTNAMES = new Set<string>([
   HOSTED_EXECUTION_CALLBACK_HOSTS.outbox,
   HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
   HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
+  HOSTED_EXECUTION_PROXY_HOSTS.usage,
 ]);
 
 export async function handleRunnerOutboundRequest(
@@ -114,6 +116,15 @@ export async function handleRunnerOutboundRequest(
 
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.sharePack) {
     return handleRunnerSharePackRequest({
+      env,
+      request,
+      url,
+      userId,
+    });
+  }
+
+  if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
+    return handleRunnerUsageRecordRequest({
       env,
       request,
       url,
@@ -441,6 +452,29 @@ async function handleRunnerSharePackRequest(input: {
   });
 }
 
+async function handleRunnerUsageRecordRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  if (input.request.method !== "POST" || input.url.pathname !== HOSTED_EXECUTION_AI_USAGE_RECORD_PATH) {
+    return input.url.pathname === HOSTED_EXECUTION_AI_USAGE_RECORD_PATH
+      ? methodNotAllowed()
+      : notFound();
+  }
+
+  return forwardRunnerWebControlRequest({
+    actualBaseUrl: resolveHostedUsageWebBaseUrl(input.env),
+    body: JSON.stringify(await readJsonObject(input.request)),
+    method: "POST",
+    pathname: input.url.pathname,
+    search: input.url.search,
+    token: readHostedDeviceSyncWebControlToken(input.env),
+    userId: input.userId,
+  });
+}
+
 async function forwardRunnerWebControlRequest(input: {
   actualBaseUrl: string | null;
   body?: string;
@@ -669,6 +703,13 @@ function resolveHostedDeviceSyncWebBaseUrl(
 function resolveHostedShareWebBaseUrl(env: RunnerOutboundEnvironmentSource): string | null {
   return normalizeBaseUrl(
     readOptionalString(env.HOSTED_SHARE_API_BASE_URL, "HOSTED_SHARE_API_BASE_URL")
+      ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
+  );
+}
+
+function resolveHostedUsageWebBaseUrl(env: RunnerOutboundEnvironmentSource): string | null {
+  return normalizeBaseUrl(
+    readOptionalString(env.HOSTED_AI_USAGE_BASE_URL, "HOSTED_AI_USAGE_BASE_URL")
       ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
   );
 }
