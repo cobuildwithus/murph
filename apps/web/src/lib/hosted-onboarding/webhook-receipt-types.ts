@@ -5,6 +5,7 @@ import type {
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 export type HostedWebhookEventPayload = Prisma.InputJsonObject;
+export type HostedWebhookResponsePayload = Prisma.InputJsonObject;
 
 export type HostedWebhookReceiptErrorState = {
   message: string;
@@ -18,7 +19,7 @@ export type HostedWebhookSideEffectErrorState = {
   retryable: boolean | null;
 };
 
-export type HostedWebhookSideEffectStatus = "pending" | "sent";
+export type HostedWebhookSideEffectStatus = "pending" | "sent" | "sent_unconfirmed";
 
 export type HostedWebhookDispatchSideEffectPayload =
   | {
@@ -27,6 +28,7 @@ export type HostedWebhookDispatchSideEffectPayload =
   | {
       schemaVersion: string;
       dispatchRef: HostedExecutionDispatchRef;
+      storage?: "reference";
       linqEvent?: Record<string, unknown> | null;
       telegramUpdate?: Record<string, unknown> | null;
     };
@@ -55,6 +57,7 @@ export type HostedWebhookLinqMessageSideEffect = {
     chatId: string;
     inviteId: string | null;
     message: string;
+    replyToMessageId: string | null;
   };
   result: {
     chatId: string | null;
@@ -77,6 +80,8 @@ export type HostedWebhookReceiptState = {
   eventPayload: HostedWebhookEventPayload;
   lastError: HostedWebhookReceiptErrorState | null;
   lastReceivedAt: string | null;
+  plannedAt: string | null;
+  response: HostedWebhookResponsePayload | null;
   sideEffects: HostedWebhookSideEffect[];
   status: HostedWebhookReceiptStatus | null;
 };
@@ -96,6 +101,7 @@ export type HostedWebhookDispatchEnqueueInput = {
   dispatch: HostedExecutionDispatchRequest;
   eventId: string;
   nextPayloadJson: Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput;
+  nextStatus: HostedWebhookReceiptStatus | null;
   previousClaim: HostedWebhookReceiptClaim;
   prismaOrTransaction: HostedWebhookReceiptPersistenceClient;
   source: string;
@@ -115,7 +121,7 @@ export type HostedWebhookReceiptHandlers = {
   ) => Promise<HostedWebhookSideEffectResult>;
 };
 
-export type HostedWebhookPlan<TResult> = {
+export type HostedWebhookPlan<TResult extends HostedWebhookResponsePayload> = {
   desiredSideEffects: HostedWebhookSideEffect[];
   response: TResult;
 };
@@ -154,6 +160,7 @@ export function createHostedWebhookLinqMessageSideEffect(input: {
   chatId: string;
   inviteId: string | null;
   message: string;
+  replyToMessageId?: string | null;
   sourceEventId: string;
 }): HostedWebhookLinqMessageSideEffect {
   return {
@@ -166,6 +173,7 @@ export function createHostedWebhookLinqMessageSideEffect(input: {
       chatId: input.chatId,
       inviteId: input.inviteId,
       message: input.message,
+      replyToMessageId: input.replyToMessageId ?? null,
     },
     result: null,
     sentAt: null,

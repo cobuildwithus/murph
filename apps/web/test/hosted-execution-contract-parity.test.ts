@@ -126,11 +126,18 @@ describe("hosted execution contract parity", () => {
       expect(dispatch.event.kind).toBe(kind);
       expect(parseHostedExecutionEvent(dispatch.event)).toEqual(dispatch.event);
       expect(payload.schemaVersion).toBe(HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION);
+      expect(payload.storage).toBe(
+        kind === "linq.message.received"
+          || kind === "telegram.message.received"
+          || kind === "email.message.received"
+          ? "reference"
+          : "inline",
+      );
       expect(dispatchRef.eventKind).toBe(kind);
       expect(dispatchRef.eventId).toBe(dispatch.eventId);
       expect(dispatchRef.occurredAt).toBe(dispatch.occurredAt);
       expect(dispatchRef.userId).toBe(dispatch.event.userId);
-      expect(parsedDispatchRef).toEqual(dispatchRef);
+      expect(parsedDispatchRef).toEqual(payload.storage === "reference" ? dispatchRef : null);
     }
   });
 });

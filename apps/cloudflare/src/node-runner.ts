@@ -5,7 +5,9 @@ import {
   type HostedAssistantRuntimeJobRequest,
 } from "@murph/assistant-runtime";
 import {
+  readHostedExecutionWebControlPlaneEnvironment,
   readHostedEmailCapabilities,
+  type HostedExecutionWebControlPlaneEnvironment,
   type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
 
@@ -22,6 +24,7 @@ let hostedExecutionCallbackBaseUrlsForTests: {
   sharePackBaseUrl?: string | null;
   sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
+  webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
 } | null = null;
 
 export interface HostedExecutionRunnerJobRequest extends HostedAssistantRuntimeJobRequest {
@@ -46,6 +49,7 @@ export function setHostedExecutionCallbackBaseUrlsForTests(input: {
   sharePackBaseUrl?: string | null;
   sharePackToken?: string | null;
   sideEffectsBaseUrl?: string | null;
+  webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
 } | null): void {
   hostedExecutionCallbackBaseUrlsForTests = input;
 }
@@ -58,18 +62,29 @@ export async function runHostedExecutionJob(
   const emailCapabilities = readHostedEmailCapabilities(
     process.env as Readonly<Record<string, string | undefined>>,
   );
+  const forwardedEnv = {
+    ...buildHostedRunnerContainerEnv(process.env),
+    HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
+    HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
+  };
 
   const runtime = {
     ...callbackBaseUrls,
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
       Number.parseInt(process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
-    forwardedEnv: {
-      ...buildHostedRunnerContainerEnv(process.env),
-      HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
-      HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
-    },
+    forwardedEnv,
     userEnv: normalizeHostedUserEnv(input.userEnv ?? {}, process.env),
+    webControlPlane: {
+      ...readHostedExecutionWebControlPlaneEnvironment(forwardedEnv),
+      ...(callbackBaseUrls?.sharePackBaseUrl || callbackBaseUrls?.sharePackToken
+        ? {
+            shareBaseUrl: callbackBaseUrls?.sharePackBaseUrl ?? null,
+            shareToken: callbackBaseUrls?.sharePackToken ?? null,
+          }
+        : {}),
+      ...(callbackBaseUrls?.webControlPlane ?? {}),
+    },
   };
 
   if (hostedExecutionRunModeForTests === "in-process") {

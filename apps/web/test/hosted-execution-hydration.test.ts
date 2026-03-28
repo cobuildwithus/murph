@@ -231,7 +231,7 @@ describe("hydrateHostedExecutionDispatch", () => {
         }) as never,
         {} as never,
       ),
-    ).rejects.toThrow("missing a dispatch ref");
+    ).rejects.toThrow("missing a dispatch payload");
   });
 
   it("rehydrates hosted webhook dispatches from minimized sent receipt payloads", async () => {
@@ -277,6 +277,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
                       eventId: "evt_linq_123",
@@ -302,6 +303,7 @@ describe("hydrateHostedExecutionDispatch", () => {
 
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord({
+        storage: "reference",
         schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
         dispatchRef: {
           eventId: "evt_linq_123",
@@ -347,6 +349,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
                       eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
@@ -372,6 +375,7 @@ describe("hydrateHostedExecutionDispatch", () => {
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord(
         {
+          storage: "reference",
           schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
           dispatchRef: {
             eventId: "member.activated:stripe.invoice.paid:member_123:evt_stripe_123",
@@ -438,6 +442,7 @@ describe("hydrateHostedExecutionDispatch", () => {
                   lastAttemptAt: "2026-03-26T12:30:00.500Z",
                   lastError: null,
                   payload: {
+                    storage: "reference",
                     schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
                     dispatchRef: {
                       eventId: "telegram:update:321",
@@ -464,6 +469,7 @@ describe("hydrateHostedExecutionDispatch", () => {
     const dispatch = await hydrateHostedExecutionDispatch(
       buildWebhookOutboxRecord(
         {
+          storage: "reference",
           schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
           dispatchRef: {
             eventId: "telegram:update:321",

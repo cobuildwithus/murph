@@ -1,8 +1,21 @@
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { writeHostedBundleTextFile } from "@murph/runtime-state";
+import {
+  listHostedBundleArtifacts,
+  snapshotHostedBundleRoots,
+  writeHostedBundleTextFile,
+} from "@murph/runtime-state";
 
-import { createHostedBundleStore } from "../src/bundle-store.js";
+import {
+  createHostedArtifactStore,
+  createHostedBundleStore,
+} from "../src/bundle-store.js";
+import { HostedBundleGarbageCollector } from "../src/bundle-gc.js";
 import { encryptHostedBundle } from "../src/crypto.js";
 import {
   createHostedExecutionJournalStore,
@@ -76,6 +89,125 @@ describe("HostedUserRunner", () => {
     })).resolves.toEqual(plaintext);
   });
 
+  it("fails clearly when reading hosted objects encrypted with a different key id", async () => {
+    const bundleStore = createHostedBundleStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: "v2",
+    });
+    const plaintext = new TextEncoder().encode("vault bundle");
+    const legacyRef = await createHostedBundleStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: "v1",
+    }).writeBundle("vault", plaintext);
+
+    await expect(bundleStore.readBundle(legacyRef)).rejects.toThrow(
+      "Hosted bundle envelope keyId mismatch: expected v2, got v1. Multi-key decryption is not implemented.",
+    );
+  });
+
+  it("cleans up superseded bundle objects and orphaned per-user artifacts after a bundle transition", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-bundle-gc-"));
+
+    try {
+      const previousVaultRoot = path.join(workspaceRoot, "previous-vault");
+      const nextVaultRoot = path.join(workspaceRoot, "next-vault");
+      const previousRawAttachmentPath = path.join(
+        previousVaultRoot,
+        "raw",
+        "inbox",
+        "example",
+        "photo.jpg",
+      );
+      await mkdir(path.dirname(previousRawAttachmentPath), { recursive: true });
+      await mkdir(nextVaultRoot, { recursive: true });
+      await writeFile(path.join(previousVaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+      await writeFile(previousRawAttachmentPath, Buffer.from("image-bytes-placeholder\n", "utf8"));
+      await writeFile(path.join(nextVaultRoot, "vault.json"), "{\"schema\":\"vault\",\"next\":true}\n");
+
+      const artifactStore = createHostedArtifactStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        userId: "member_gc",
+      });
+      const previousVaultBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (artifact) => {
+          const ref = {
+            byteSize: artifact.bytes.byteLength,
+            sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
+          };
+          await artifactStore.writeArtifact(ref.sha256, artifact.bytes);
+          return ref;
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: previousVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const nextVaultBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [
+          {
+            root: nextVaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const bundleStore = createHostedBundleStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+      });
+      const [previousArtifact] = listHostedBundleArtifacts({
+        bytes: previousVaultBundle!,
+        expectedKind: "vault",
+      });
+      const previousVaultRef = await bundleStore.writeBundle("vault", previousVaultBundle!);
+      const nextVaultRef = await bundleStore.writeBundle("vault", nextVaultBundle!);
+      const previousAgentRef = await bundleStore.writeBundle(
+        "agent-state",
+        new TextEncoder().encode("agent-state-previous"),
+      );
+      const nextAgentRef = await bundleStore.writeBundle(
+        "agent-state",
+        new TextEncoder().encode("agent-state-next"),
+      );
+
+      const collector = new HostedBundleGarbageCollector(
+        bucket.api,
+        environment.bundleEncryptionKey,
+        environment.bundleEncryptionKeyId,
+      );
+
+      await collector.cleanupBundleTransition({
+        nextBundleRefs: {
+          agentState: nextAgentRef,
+          vault: nextVaultRef,
+        },
+        previousBundleRefs: {
+          agentState: previousAgentRef,
+          vault: previousVaultRef,
+        },
+        userId: "member_gc",
+      });
+
+      expect(bucket.keys()).not.toContain(previousAgentRef.key);
+      expect(bucket.keys()).not.toContain(previousVaultRef.key);
+      expect(bucket.keys()).not.toContain(
+        `users/member_gc/artifacts/${previousArtifact!.ref.sha256}.artifact.bin`,
+      );
+      expect(bucket.keys()).toContain(nextAgentRef.key);
+      expect(bucket.keys()).toContain(nextVaultRef.key);
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   it("roundtrips committed execution journal records through object storage", async () => {
     const journalStore = createHostedExecutionJournalStore({
       bucket: bucket.api,
@@ -95,6 +227,7 @@ describe("HostedUserRunner", () => {
         summary: "ok",
       },
       sideEffects: [],
+      userId: "member_123",
     };
 
     await journalStore.writeCommittedResult("member_123", "evt_roundtrip", committedResult);
@@ -647,6 +780,60 @@ describe("HostedUserRunner", () => {
     expect(final.lastError).toContain("HTTP 503");
   });
 
+  it("continues past a rescheduled head event and runs later due work in the same pass", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    const fetchMock = vi.fn(async (_url, init) => {
+      const requestBody = JSON.parse(String(init?.body)) as {
+        dispatch: {
+          eventId: string;
+        };
+      };
+
+      if (requestBody.dispatch.eventId === "evt_retry_head") {
+        return new Response("runner failed", {
+          status: 503,
+        });
+      }
+
+      return createCommittedRunnerSuccessResponse({
+        bucket,
+        environment,
+        init,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    seedRunnerQueueState(storage, {
+      pendingEvents: [
+        {
+          attempts: 0,
+          availableAt: "2026-03-26T12:00:00.000Z",
+          dispatch: createDispatch("evt_retry_head"),
+          enqueuedAt: "2026-03-26T12:00:00.000Z",
+          lastError: null,
+        },
+        {
+          attempts: 0,
+          availableAt: "2026-03-26T12:00:00.000Z",
+          dispatch: createDispatch("evt_tail"),
+          enqueuedAt: "2026-03-26T12:00:01.000Z",
+          lastError: null,
+        },
+      ],
+      userId: "member_123",
+    });
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    await runner.alarm();
+
+    expect(readDispatchedEventIds(fetchMock)).toEqual(["evt_retry_head", "evt_tail"]);
+    await expect(runner.status("member_123")).resolves.toMatchObject({
+      lastEventId: "evt_tail",
+      pendingEventCount: 1,
+      poisonedEventIds: [],
+    });
+  });
+
   it("backpressures new overflow events instead of evicting the oldest pending work", async () => {
     const firstRun = createDeferred<void>();
     const fetchMock = vi.fn()
@@ -897,7 +1084,7 @@ describe("HostedUserRunner", () => {
     firstRun.resolve(new Response("runner failed", { status: 503 }));
     const failed = await firstDispatch;
 
-    expect(failed.pendingEventCount).toBe(64);
+    expect(failed.pendingEventCount).toBe(1);
     expect(failed.backpressuredEventIds).toEqual(["evt_fail_backpressured"]);
     expect(failed.poisonedEventIds).toEqual([]);
     expect(failed.retryingEventId).toBe("evt_000");
@@ -1146,7 +1333,7 @@ describe("HostedUserRunner", () => {
 
     expect(firstStatus.pendingEventCount).toBe(1);
     expect(firstStatus.poisonedEventIds).toEqual([]);
-    expect(firstStatus.retryingEventId).toBe("evt_missing_runner_token");
+    expect(firstStatus.retryingEventId).toBeNull();
     expect(firstStatus.lastError).toBe(
       "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
     );
@@ -1158,7 +1345,7 @@ describe("HostedUserRunner", () => {
     const retryStatus = await misconfiguredRunner.status("member_123");
     expect(retryStatus.pendingEventCount).toBe(1);
     expect(retryStatus.poisonedEventIds).toEqual([]);
-    expect(retryStatus.retryingEventId).toBe("evt_missing_runner_token");
+    expect(retryStatus.retryingEventId).toBeNull();
     expect(retryStatus.lastError).toBe(
       "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
     );
@@ -1200,7 +1387,7 @@ describe("HostedUserRunner", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("allows a consumed event id again after the replay TTL expires without refresh on read", async () => {
+  it("keeps consumed event ids blocked even after the old replay TTL window passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     const fetchSpy = vi.fn().mockImplementation(async (_url, init) => createCommittedRunnerSuccessResponse({
@@ -1235,10 +1422,10 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-04-02T12:00:01.000Z",
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("clears stale poisoned status after TTL expiry and a successful replay", async () => {
+  it("keeps poisoned event ids blocked even after the old replay TTL window passes", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
     vi.stubGlobal(
@@ -1283,7 +1470,7 @@ describe("HostedUserRunner", () => {
       occurredAt: "2026-04-02T12:00:31.000Z",
     });
 
-    expect(replayed.poisonedEventIds).not.toContain("evt_poison_expiry");
+    expect(replayed.poisonedEventIds).toContain("evt_poison_expiry");
   });
 
   it("stores encrypted per-user env config in a dedicated hosted object", async () => {

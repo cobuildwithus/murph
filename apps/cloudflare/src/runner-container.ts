@@ -15,6 +15,7 @@ const RUNNER_READY_TIMEOUT_MS = 20_000;
 const RUNNER_INVOKE_URL = "https://runner.internal/internal/invoke";
 const RUNNER_DESTROY_URL = "https://runner.internal/internal/destroy";
 const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
+const RUNNER_CONTROL_AUTH_SCHEME = "Bearer";
 
 export class HostedExecutionConfigurationError extends Error {
   constructor(message: string) {
@@ -25,10 +26,14 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest<TRequest extends HostedExecutionRunnerRequest> {
   request: TRequest;
-  runnerControlToken: string;
   runnerEnvironment: Record<string, string>;
   timeoutMs: number;
   userId: string;
+}
+
+interface HostedExecutionContainerInvokeInput<TRequest extends HostedExecutionRunnerRequest>
+  extends HostedExecutionContainerInvokeRequest<TRequest> {
+  runnerControlToken: string;
 }
 
 interface HostedExecutionContainerRunnerInput<TRequest extends HostedExecutionRunnerRequest> {
@@ -52,19 +57,24 @@ type RunnerOutboundHandlerContext = OutboundHandlerContext<{ userId?: unknown } 
 
 interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unknown>> {
   HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
+  HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN?: string;
 }
 
 type RunnerOutboundHandlerName =
   | "artifactsWorker"
   | "commitWorker"
+  | "deviceSyncWorker"
   | "emailWorker"
-  | "outboxWorker";
+  | "outboxWorker"
+  | "sharePackWorker";
 
 const RUNNER_OUTBOUND_HOSTS = {
   "artifacts.worker": "artifactsWorker",
   "commit.worker": "commitWorker",
+  "device-sync.worker": "deviceSyncWorker",
   "email.worker": "emailWorker",
   "outbox.worker": "outboxWorker",
+  "share-pack.worker": "sharePackWorker",
   "side-effects.worker": "outboxWorker",
 } as const satisfies Record<string, RunnerOutboundHandlerName>;
 
@@ -72,8 +82,10 @@ export class RunnerContainer extends Container {
   static override outboundHandlers = {
     artifactsWorker: createRunnerOutboundHandler(),
     commitWorker: createRunnerOutboundHandler(),
+    deviceSyncWorker: createRunnerOutboundHandler(),
     emailWorker: createRunnerOutboundHandler(),
     outboxWorker: createRunnerOutboundHandler(),
+    sharePackWorker: createRunnerOutboundHandler(),
   };
 
   defaultPort = RUNNER_PORT;
@@ -81,10 +93,12 @@ export class RunnerContainer extends Container {
   pingEndpoint = RUNNER_PING_ENDPOINT;
   // Keep instances warm across short bursts, but let deploy config tune the idle window explicitly.
   sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
+  private readonly runnerControlToken: string | null;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.sleepAfter = readContainerSleepAfter(env);
+    this.runnerControlToken = readOptionalString(env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -95,8 +109,16 @@ export class RunnerContainer extends Container {
         return json({ error: "Method not allowed." }, 405);
       }
 
+      const authorizationError = requireRunnerContainerAuthorization(
+        request,
+        this.runnerControlToken,
+      );
+      if (authorizationError) {
+        return authorizationError;
+      }
+
       try {
-        return await this.handleInvokeRequest(await readJsonObject(request));
+        return await this.handleInvokeRequest(await readJsonObject(request), this.runnerControlToken);
       } catch (error) {
         if (error instanceof SyntaxError || error instanceof TypeError) {
           return json({ error: error.message }, 400);
@@ -111,6 +133,14 @@ export class RunnerContainer extends Container {
         return json({ error: "Method not allowed." }, 405);
       }
 
+      const authorizationError = requireRunnerContainerAuthorization(
+        request,
+        this.runnerControlToken,
+      );
+      if (authorizationError) {
+        return authorizationError;
+      }
+
       await this.destroyIfRunning();
       return new Response(null, { status: 204 });
     }
@@ -120,10 +150,11 @@ export class RunnerContainer extends Container {
 
   private async handleInvokeRequest(
     payload: Record<string, unknown>,
+    runnerControlToken: string | null,
   ): Promise<Response> {
     const result = await this.invokeHostedExecution({
       request: requireRecord(payload.request, "request") as unknown as HostedExecutionRunnerRequest,
-      runnerControlToken: readRunnerControlToken(payload.runnerControlToken),
+      runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
       runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
       timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
       userId: requireString(payload.userId, "payload.userId"),
@@ -133,7 +164,7 @@ export class RunnerContainer extends Container {
   }
 
   private async invokeHostedExecution<TRequest extends HostedExecutionRunnerRequest>(
-    input: HostedExecutionContainerInvokeRequest<TRequest>,
+    input: HostedExecutionContainerInvokeInput<TRequest>,
   ): Promise<HostedExecutionRunnerResult> {
     const startTime = Date.now();
     const readinessTimeoutMs = Math.min(input.timeoutMs, RUNNER_READY_TIMEOUT_MS);
@@ -214,12 +245,12 @@ export async function invokeHostedExecutionContainerRunner<
     new Request(RUNNER_INVOKE_URL, {
       body: JSON.stringify({
         request: input.request,
-        runnerControlToken,
         runnerEnvironment: input.runnerEnvironment,
         timeoutMs: input.timeoutMs,
         userId: input.userId,
       } satisfies HostedExecutionContainerInvokeRequest<TRequest>),
       headers: {
+        authorization: `${RUNNER_CONTROL_AUTH_SCHEME} ${runnerControlToken}`,
         "content-type": "application/json; charset=utf-8",
       },
       method: "POST",
@@ -249,6 +280,7 @@ function createRunnerOutboundHandler() {
 
 export async function destroyHostedExecutionContainer(input: {
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
+  runnerControlToken: string | null;
   userId: string;
 }): Promise<void> {
   if (!input.runnerContainerNamespace) {
@@ -256,8 +288,12 @@ export async function destroyHostedExecutionContainer(input: {
   }
 
   try {
+    const runnerControlToken = requireHostedExecutionRunnerControlToken(input.runnerControlToken);
     await input.runnerContainerNamespace.getByName(input.userId).fetch(
       new Request(RUNNER_DESTROY_URL, {
+        headers: {
+          authorization: `${RUNNER_CONTROL_AUTH_SCHEME} ${runnerControlToken}`,
+        },
         method: "POST",
       }),
     );
@@ -289,14 +325,6 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
-function readRunnerControlToken(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError("runnerControlToken must be a non-empty string.");
-  }
-
-  return value;
-}
-
 function requireHostedExecutionRunnerControlToken(value: string | null): string {
   if (!value) {
     throw new HostedExecutionConfigurationError(
@@ -305,6 +333,25 @@ function requireHostedExecutionRunnerControlToken(value: string | null): string 
   }
 
   return value;
+}
+
+function requireRunnerContainerAuthorization(
+  request: Request,
+  expectedToken: string | null,
+): Response | null {
+  if (!expectedToken) {
+    return json({
+      error: "Hosted runner control token is not configured.",
+    }, 503);
+  }
+
+  if (request.headers.get("authorization") !== `${RUNNER_CONTROL_AUTH_SCHEME} ${expectedToken}`) {
+    return json({
+      error: "Unauthorized",
+    }, 401);
+  }
+
+  return null;
 }
 
 function readRunnerEnvironment(value: unknown): Record<string, string> {
@@ -332,4 +379,13 @@ function toStringRecord(value: Record<string, unknown>): Record<string, string> 
     .filter(([, entryValue]) => typeof entryValue === "string") as Array<[string, string]>;
 
   return Object.fromEntries(entries);
+}
+
+function readOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }

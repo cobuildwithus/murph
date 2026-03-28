@@ -14,6 +14,7 @@ import type {
   HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptErrorState,
+  HostedWebhookResponsePayload,
   HostedWebhookReceiptState,
   HostedWebhookReceiptStatus,
   HostedWebhookSideEffect,
@@ -37,6 +38,8 @@ export function claimHostedWebhookReceipt(input: {
       ),
       lastError: null,
       lastReceivedAt: input.receivedAt.toISOString(),
+      plannedAt: input.previousState?.plannedAt ?? null,
+      response: input.previousState?.response ?? null,
       sideEffects: input.previousState?.sideEffects ?? [],
       status: "processing",
     }),
@@ -46,12 +49,18 @@ export function claimHostedWebhookReceipt(input: {
 export function queueHostedWebhookReceiptSideEffects(
   currentState: HostedWebhookReceiptState,
   desiredSideEffects: readonly HostedWebhookSideEffect[],
+  input?: {
+    plannedAt: string;
+    response: HostedWebhookResponsePayload;
+  },
 ): HostedWebhookReceiptState {
   if (desiredSideEffects.length === 0) {
     return currentState;
   }
 
   return updateHostedWebhookReceiptState(currentState, {
+    plannedAt: input?.plannedAt ?? currentState.plannedAt,
+    response: input?.response ?? currentState.response,
     sideEffects: mergeHostedWebhookSideEffects(currentState.sideEffects, desiredSideEffects),
   });
 }
@@ -80,16 +89,39 @@ export function markHostedWebhookReceiptSideEffectSent(
   );
 }
 
+export function markHostedWebhookReceiptSideEffectSentUnconfirmed(
+  currentState: HostedWebhookReceiptState,
+  effectId: string,
+  input: {
+    error: unknown;
+    result: HostedWebhookSideEffectResult;
+    sentAt: string;
+  },
+): HostedWebhookReceiptState {
+  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) => ({
+    ...markHostedWebhookSideEffectSent(effect, input.result, input.sentAt),
+    lastError: serializeHostedWebhookSideEffectError(input.error),
+    status: "sent_unconfirmed",
+  }));
+}
+
 export function markHostedWebhookReceiptSideEffectFailed(
   currentState: HostedWebhookReceiptState,
   effectId: string,
   error: unknown,
 ): HostedWebhookReceiptState {
-  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) => ({
-    ...effect,
-    lastError: serializeHostedWebhookSideEffectError(error),
-    status: "pending",
-  }));
+  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) =>
+    effect.status === "pending"
+      ? {
+          ...effect,
+          lastError: serializeHostedWebhookSideEffectError(error),
+          status: "pending",
+        }
+      : {
+          ...effect,
+          lastError: serializeHostedWebhookSideEffectError(error),
+        },
+  );
 }
 
 export function completeHostedWebhookReceipt(
@@ -154,6 +186,8 @@ function buildHostedWebhookReceiptState(input: {
   eventPayload: HostedWebhookEventPayload;
   lastError: HostedWebhookReceiptErrorState | null;
   lastReceivedAt: string | null;
+  plannedAt: string | null;
+  response: HostedWebhookResponsePayload | null;
   sideEffects: HostedWebhookSideEffect[];
   status: HostedWebhookReceiptStatus | null;
 }): HostedWebhookReceiptState {
@@ -164,6 +198,8 @@ function buildHostedWebhookReceiptState(input: {
     eventPayload: input.eventPayload,
     lastError: input.status === "failed" ? input.lastError : null,
     lastReceivedAt: input.lastReceivedAt,
+    plannedAt: input.plannedAt,
+    response: input.response,
     sideEffects: input.sideEffects,
     status: input.status,
   };
@@ -180,6 +216,8 @@ function updateHostedWebhookReceiptState(
     eventPayload: "eventPayload" in overrides ? overrides.eventPayload ?? {} : currentState.eventPayload,
     lastError: "lastError" in overrides ? overrides.lastError ?? null : currentState.lastError,
     lastReceivedAt: "lastReceivedAt" in overrides ? overrides.lastReceivedAt ?? null : currentState.lastReceivedAt,
+    plannedAt: "plannedAt" in overrides ? overrides.plannedAt ?? null : currentState.plannedAt,
+    response: "response" in overrides ? overrides.response ?? null : currentState.response,
     sideEffects: "sideEffects" in overrides ? overrides.sideEffects ?? [] : currentState.sideEffects,
     status: "status" in overrides ? overrides.status ?? null : currentState.status,
   });
@@ -246,32 +284,42 @@ function mergeHostedWebhookSideEffect(
   switch (desiredEffect.kind) {
     case "hosted_execution_dispatch": {
       const currentDispatchEffect = currentEffect as HostedWebhookDispatchSideEffect;
+      const terminalStatus = readHostedWebhookSideEffectTerminalStatus(currentDispatchEffect.status);
       return {
         ...desiredEffect,
         attemptCount: currentDispatchEffect.attemptCount,
         lastAttemptAt: currentDispatchEffect.lastAttemptAt,
-        lastError: currentDispatchEffect.status === "sent" ? null : currentDispatchEffect.lastError,
-        payload: currentDispatchEffect.status === "sent" ? currentDispatchEffect.payload : desiredEffect.payload,
-        result: currentDispatchEffect.status === "sent" ? currentDispatchEffect.result : null,
-        sentAt: currentDispatchEffect.status === "sent" ? currentDispatchEffect.sentAt : null,
-        status: currentDispatchEffect.status === "sent" ? "sent" : "pending",
+        lastError: terminalStatus === "sent" ? null : currentDispatchEffect.lastError,
+        payload: terminalStatus ? currentDispatchEffect.payload : desiredEffect.payload,
+        result: terminalStatus ? currentDispatchEffect.result : null,
+        sentAt: terminalStatus ? currentDispatchEffect.sentAt : null,
+        status: terminalStatus ?? "pending",
       };
     }
     case "linq_message_send": {
       const currentLinqEffect = currentEffect as HostedWebhookLinqMessageSideEffect;
+      const terminalStatus = readHostedWebhookSideEffectTerminalStatus(currentLinqEffect.status);
       return {
         ...desiredEffect,
         attemptCount: currentLinqEffect.attemptCount,
         lastAttemptAt: currentLinqEffect.lastAttemptAt,
-        lastError: currentLinqEffect.status === "sent" ? null : currentLinqEffect.lastError,
-        result: currentLinqEffect.status === "sent" ? currentLinqEffect.result : null,
-        sentAt: currentLinqEffect.status === "sent" ? currentLinqEffect.sentAt : null,
-        status: currentLinqEffect.status === "sent" ? "sent" : "pending",
+        lastError: terminalStatus === "sent" ? null : currentLinqEffect.lastError,
+        result: terminalStatus ? currentLinqEffect.result : null,
+        sentAt: terminalStatus ? currentLinqEffect.sentAt : null,
+        status: terminalStatus ?? "pending",
       };
     }
     default:
       return desiredEffect;
   }
+}
+
+function readHostedWebhookSideEffectTerminalStatus(
+  status: HostedWebhookSideEffect["status"],
+): Exclude<HostedWebhookSideEffect["status"], "pending"> | null {
+  return status === "sent" || status === "sent_unconfirmed"
+    ? status
+    : null;
 }
 
 function markHostedWebhookSideEffectSent(
@@ -390,6 +438,7 @@ function minimizeHostedWebhookDispatchPayload(
       dispatchRef: buildHostedExecutionDispatchRef(dispatch),
       linqEvent: { ...dispatch.event.linqEvent },
       schemaVersion: serializedDispatch.schemaVersion as string,
+      storage: "reference",
     };
   }
 
@@ -397,6 +446,7 @@ function minimizeHostedWebhookDispatchPayload(
     return {
       dispatchRef: buildHostedExecutionDispatchRef(dispatch),
       schemaVersion: serializedDispatch.schemaVersion as string,
+      storage: "reference",
       telegramUpdate: { ...dispatch.event.telegramUpdate },
     };
   }
@@ -404,5 +454,6 @@ function minimizeHostedWebhookDispatchPayload(
   return {
     dispatchRef: buildHostedExecutionDispatchRef(dispatch),
     schemaVersion: serializedDispatch.schemaVersion as string,
+    storage: "reference",
   };
 }

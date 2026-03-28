@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+  HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   buildHostedExecutionDispatchRef,
+  buildHostedExecutionOutboxPayload,
+  buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionUserEnvPath,
@@ -21,7 +24,11 @@ import {
   readHostedExecutionControlEnvironment,
   readHostedExecutionDispatchEnvironment,
   readHostedExecutionSignatureHeaders,
+  readHostedExecutionOutboxPayload,
+  readHostedExecutionWebControlPlaneEnvironment,
   readHostedExecutionWorkerEnvironment,
+  resolveHostedExecutionDispatchLifecycle,
+  resolveHostedExecutionDispatchOutcomeState,
   verifyHostedExecutionSignature,
 } from "@murph/hosted-execution";
 
@@ -138,6 +145,37 @@ describe("@murph/hosted-execution", () => {
     ).toEqual({
       baseUrl: null,
       controlToken: null,
+    });
+  });
+
+  it("reads hosted web control plane env from split internal, scheduler, and share settings", () => {
+    expect(
+      readHostedExecutionWebControlPlaneEnvironment({
+        CRON_SECRET: "cron-token",
+        HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://device-sync.example.test/",
+        HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test/",
+        HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
+      }),
+    ).toEqual({
+      deviceSyncRuntimeBaseUrl: "https://device-sync.example.test",
+      internalToken: "internal-token",
+      schedulerToken: "cron-token",
+      shareBaseUrl: "https://join.example.test",
+      shareToken: "share-token",
+    });
+
+    expect(
+      readHostedExecutionWebControlPlaneEnvironment({
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test/",
+        HOSTED_SHARE_API_BASE_URL: "https://share.example.test/internal/",
+      }),
+    ).toEqual({
+      deviceSyncRuntimeBaseUrl: "https://join.example.test",
+      internalToken: null,
+      schedulerToken: null,
+      shareBaseUrl: "https://share.example.test/internal",
+      shareToken: null,
     });
   });
 
@@ -293,7 +331,7 @@ describe("@murph/hosted-execution", () => {
     });
   });
 
-  it("builds and reads minimized dispatch refs without widening the payload body", () => {
+  it("builds minimized dispatch refs and only reads current-schema refs when storage is explicit", () => {
     const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
       envelopeFrom: "alice@example.test",
       envelopeTo: "assistant+u-member@mail.example.test",
@@ -317,11 +355,173 @@ describe("@murph/hosted-execution", () => {
         occurredAt: dispatch.occurredAt,
         userId: dispatch.event.userId,
       },
-    )).toEqual({
+    )).toBeNull();
+    expect(readHostedExecutionDispatchRef(
+      {
+        dispatchRef,
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        storage: "reference",
+      },
+      {
+        eventId: dispatch.eventId,
+        eventKind: dispatch.event.kind,
+        occurredAt: dispatch.occurredAt,
+        userId: dispatch.event.userId,
+      },
+    )).toEqual(dispatchRef);
+    expect(dispatchRef).toEqual({
       eventId: "email:raw_email_123",
       eventKind: "email.message.received",
       occurredAt: "2026-03-28T09:00:00.000Z",
       userId: "member_123",
+    });
+  });
+
+  it("builds and reads inline, reference, and legacy outbox payloads", () => {
+    const inlineDispatch = buildHostedExecutionAssistantCronTickDispatch({
+      eventId: "evt_cron",
+      occurredAt: "2026-03-28T09:10:00.000Z",
+      reason: "manual",
+      userId: "member_123",
+    });
+    const referenceDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
+      envelopeFrom: "alice@example.test",
+      envelopeTo: "assistant+u-member@mail.example.test",
+      eventId: "email:raw_email_456",
+      identityId: "assistant@mail.example.test",
+      occurredAt: "2026-03-28T09:15:00.000Z",
+      rawMessageKey: "raw_email_456",
+      threadTarget: null,
+      userId: "member_123",
+    });
+
+    const inlinePayload = buildHostedExecutionOutboxPayload(inlineDispatch);
+    const referencePayload = buildHostedExecutionOutboxPayload(referenceDispatch);
+
+    expect(inlinePayload).toEqual({
+      dispatch: inlineDispatch,
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "inline",
+    });
+    expect(referencePayload).toEqual({
+      dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    });
+    expect(
+      readHostedExecutionOutboxPayload(inlinePayload, {
+        eventId: inlineDispatch.eventId,
+        eventKind: inlineDispatch.event.kind,
+        occurredAt: inlineDispatch.occurredAt,
+        userId: inlineDispatch.event.userId,
+      }),
+    ).toEqual(inlinePayload);
+    expect(
+      readHostedExecutionOutboxPayload(referencePayload, {
+        eventId: referenceDispatch.eventId,
+        eventKind: referenceDispatch.event.kind,
+        occurredAt: referenceDispatch.occurredAt,
+        userId: referenceDispatch.event.userId,
+      }),
+    ).toEqual(referencePayload);
+    expect(
+      readHostedExecutionOutboxPayload(
+        {
+          dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
+          schemaVersion: HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        },
+        {
+          eventId: referenceDispatch.eventId,
+          eventKind: referenceDispatch.event.kind,
+          occurredAt: referenceDispatch.occurredAt,
+          userId: referenceDispatch.event.userId,
+        },
+      ),
+    ).toEqual({
+      dispatchRef: buildHostedExecutionDispatchRef(referenceDispatch),
+      schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+      storage: "reference",
+    });
+  });
+
+  it("centralizes dispatch outcome and lifecycle mapping", () => {
+    expect(
+      resolveHostedExecutionDispatchOutcomeState({
+        initialState: {
+          backpressured: false,
+          consumed: false,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+        nextState: {
+          backpressured: false,
+          consumed: true,
+          lastError: null,
+          pending: false,
+          poisoned: false,
+        },
+      }),
+    ).toBe("completed");
+
+    expect(
+      resolveHostedExecutionDispatchLifecycle({
+        event: {
+          eventId: "evt_queued",
+          lastError: null,
+          state: "queued",
+          userId: "member_123",
+        },
+        status: {
+          backpressuredEventIds: [],
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: false,
+          lastError: null,
+          lastEventId: "evt_queued",
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 1,
+          poisonedEventIds: [],
+          retryingEventId: null,
+          userId: "member_123",
+        },
+      }),
+    ).toEqual({
+      lastError: null,
+      status: "accepted",
+    });
+
+    expect(
+      resolveHostedExecutionDispatchLifecycle({
+        event: {
+          eventId: "evt_poisoned",
+          lastError: null,
+          state: "poisoned",
+          userId: "member_123",
+        },
+        status: {
+          backpressuredEventIds: [],
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          inFlight: false,
+          lastError: "runner failed repeatedly",
+          lastEventId: "evt_poisoned",
+          lastRunAt: null,
+          nextWakeAt: null,
+          pendingEventCount: 0,
+          poisonedEventIds: ["evt_poisoned"],
+          retryingEventId: null,
+          userId: "member_123",
+        },
+      }),
+    ).toEqual({
+      lastError: "runner failed repeatedly",
+      status: "failed",
     });
   });
 
@@ -426,6 +626,36 @@ describe("@murph/hosted-execution", () => {
     expect(fetchImpl.mock.calls[0]?.[1]?.signal).toBeUndefined();
   });
 
+  it("dispatch client uses the global fetch fallback and an explicit timestamp override", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify(buildDispatchResultFixture("evt_456")),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+    const client = createHostedExecutionDispatchClient({
+      baseUrl: "https://runner.example.test/",
+      now: () => "2026-03-27T10:30:00.000Z",
+      signingSecret: "secret",
+    });
+
+    await client.dispatch({
+      event: {
+        kind: "assistant.cron.tick",
+        reason: "manual",
+        userId: "user-123",
+      },
+      eventId: "evt_456",
+      occurredAt: "2026-03-20T12:00:00.000Z",
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(
+      new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get(HOSTED_EXECUTION_TIMESTAMP_HEADER),
+    ).toBe("2026-03-27T10:30:00.000Z");
+  });
+
   it("control client uses bearer auth and shared control routes", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(
@@ -466,35 +696,13 @@ describe("@murph/hosted-execution", () => {
     }));
   });
 
-  it("control client omits bearer auth when no control token is configured", async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          bundleRefs: {
-            agentState: null,
-            vault: null,
-          },
-          inFlight: false,
-          lastError: null,
-          lastEventId: "evt_123",
-          lastRunAt: null,
-          nextWakeAt: null,
-          pendingEventCount: 0,
-          poisonedEventIds: [],
-          retryingEventId: null,
-          userId: "user-123",
-        }),
-        { status: 200 },
-      ),
-    );
-    const client = createHostedExecutionControlClient({
-      baseUrl: "https://worker.example.test/",
-      fetchImpl,
-    });
-
-    await client.getStatus("user-123");
-
-    expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get("authorization")).toBeNull();
+  it("control client requires a configured bearer token", () => {
+    expect(() =>
+      createHostedExecutionControlClient({
+        baseUrl: "https://worker.example.test/",
+        controlToken: "",
+      }),
+    ).toThrow("Hosted execution controlToken must be configured.");
   });
 
   it("control client uses the remaining shared control routes", async () => {
@@ -590,6 +798,7 @@ describe("@murph/hosted-execution", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("runner unavailable", { status: 503 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
+      controlToken: "control-token",
       fetchImpl,
     });
 
@@ -598,10 +807,25 @@ describe("@murph/hosted-execution", () => {
     );
   });
 
+  it("uses the global fetch fallback and omits the error suffix for blank non-ok responses", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("", { status: 503 }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const client = createHostedExecutionControlClient({
+      baseUrl: "https://worker.example.test/",
+      controlToken: "control-token",
+    });
+
+    await expect(client.getStatus("user-123")).rejects.toThrow(
+      "Hosted execution status failed with HTTP 503.",
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["", "   \n"])("rejects blank success JSON bodies", async (body) => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(body, { status: 200 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
+      controlToken: "control-token",
       fetchImpl,
     });
 
@@ -614,6 +838,7 @@ describe("@murph/hosted-execution", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("{", { status: 200 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
+      controlToken: "control-token",
       fetchImpl,
     });
 
@@ -626,6 +851,7 @@ describe("@murph/hosted-execution", () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("[]", { status: 200 }));
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
+      controlToken: "control-token",
       fetchImpl,
     });
 

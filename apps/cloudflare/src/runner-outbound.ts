@@ -1,5 +1,11 @@
 import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import {
+  buildHostedExecutionSharePayloadPath,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
+  HOSTED_EXECUTION_USER_ID_HEADER,
+} from "@murph/hosted-execution";
+import {
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
   type HostedEmailSendRequest,
@@ -74,6 +80,24 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
+  if (url.hostname === "device-sync.worker") {
+    return handleRunnerDeviceSyncControlRequest({
+      env,
+      request,
+      url,
+      userId,
+    });
+  }
+
+  if (url.hostname === "share-pack.worker") {
+    return handleRunnerSharePackRequest({
+      env,
+      request,
+      url,
+      userId,
+    });
+  }
+
   if (url.hostname === "outbox.worker" || url.hostname === "side-effects.worker") {
     const match = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(url.pathname);
     if (!match?.groups) {
@@ -138,6 +162,7 @@ async function handleRunnerEmailMessageReadRequest(input: {
   const payload = await readHostedEmailRawMessage({
     bucket: input.bucket,
     key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
     rawMessageKey: input.rawMessageKey,
     userId: input.userId,
   });
@@ -308,6 +333,11 @@ async function handleRunnerSideEffectRequest(input: {
   }
 
   const nextRecord = parseHostedExecutionSideEffectRecord(await readJsonObject(input.request));
+  if (nextRecord.effectId !== input.effectId) {
+    return json({
+      error: `effectId mismatch: expected ${input.effectId}, received ${nextRecord.effectId}.`,
+    }, 400);
+  }
   const savedRecord = await journalStore.write({
     record: nextRecord,
     userId: input.userId,
@@ -316,6 +346,107 @@ async function handleRunnerSideEffectRequest(input: {
   return json({
     effectId: savedRecord.effectId,
     record: savedRecord,
+  });
+}
+
+async function handleRunnerDeviceSyncControlRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  if (input.request.method !== "POST") {
+    return methodNotAllowed();
+  }
+
+  if (
+    input.url.pathname !== HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH
+    && input.url.pathname !== HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH
+  ) {
+    return notFound();
+  }
+
+  const payload = {
+    ...await readJsonObject(input.request),
+    userId: input.userId,
+  };
+
+  return forwardRunnerWebControlRequest({
+    actualBaseUrl: resolveHostedDeviceSyncWebBaseUrl(input.env),
+    body: JSON.stringify(payload),
+    method: "POST",
+    search: input.url.search,
+    token: readHostedDeviceSyncWebControlToken(input.env),
+    userId: input.userId,
+    pathname: input.url.pathname,
+  });
+}
+
+async function handleRunnerSharePackRequest(input: {
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string;
+}): Promise<Response> {
+  if (input.request.method !== "GET") {
+    return methodNotAllowed();
+  }
+
+  const match = /^\/api\/hosted-share\/internal\/(?<shareId>[^/]+)\/payload$/u.exec(input.url.pathname);
+  if (!match) {
+    return notFound();
+  }
+
+  const shareId = decodeRouteParam(match.groups?.shareId ?? "");
+  if (input.url.pathname !== buildHostedExecutionSharePayloadPath(shareId, "").replace(/\?.*$/u, "")) {
+    return notFound();
+  }
+
+  return forwardRunnerWebControlRequest({
+    actualBaseUrl: resolveHostedShareWebBaseUrl(input.env),
+    method: "GET",
+    search: input.url.search,
+    token: readHostedShareWebControlToken(input.env),
+    userId: input.userId,
+    pathname: input.url.pathname,
+  });
+}
+
+async function forwardRunnerWebControlRequest(input: {
+  actualBaseUrl: string | null;
+  body?: string;
+  method: "GET" | "POST";
+  pathname: string;
+  search: string;
+  token: string | null;
+  userId: string;
+}): Promise<Response> {
+  if (!input.actualBaseUrl) {
+    return json({
+      error: "Hosted web control base URL is not configured.",
+    }, 503);
+  }
+
+  if (!input.token) {
+    return json({
+      error: "Hosted web control token is not configured.",
+    }, 503);
+  }
+
+  const targetUrl = new URL(input.pathname, input.actualBaseUrl);
+  targetUrl.search = input.search;
+  return fetch(targetUrl, {
+    body: input.body,
+    headers: {
+      authorization: `Bearer ${input.token}`,
+      ...(input.body
+        ? {
+            "content-type": "application/json; charset=utf-8",
+          }
+        : {}),
+      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+    },
+    method: input.method,
   });
 }
 
@@ -473,10 +604,45 @@ function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
 }
 
+function resolveHostedDeviceSyncWebBaseUrl(
+  env: RunnerOutboundEnvironmentSource,
+): string | null {
+  return normalizeBaseUrl(
+    readOptionalString(env.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL, "HOSTED_DEVICE_SYNC_CONTROL_BASE_URL")
+      ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
+  );
+}
+
+function resolveHostedShareWebBaseUrl(env: RunnerOutboundEnvironmentSource): string | null {
+  return normalizeBaseUrl(
+    readOptionalString(env.HOSTED_SHARE_API_BASE_URL, "HOSTED_SHARE_API_BASE_URL")
+      ?? readOptionalString(env.HOSTED_ONBOARDING_PUBLIC_BASE_URL, "HOSTED_ONBOARDING_PUBLIC_BASE_URL"),
+  );
+}
+
+function readHostedDeviceSyncWebControlToken(env: RunnerOutboundEnvironmentSource): string | null {
+  return readOptionalString(env.HOSTED_EXECUTION_INTERNAL_TOKEN, "HOSTED_EXECUTION_INTERNAL_TOKEN");
+}
+
+function readHostedShareWebControlToken(env: RunnerOutboundEnvironmentSource): string | null {
+  return readOptionalString(env.HOSTED_SHARE_INTERNAL_TOKEN, "HOSTED_SHARE_INTERNAL_TOKEN");
+}
+
 function methodNotAllowed(): Response {
   return json({ error: "Method not allowed." }, 405);
 }
 
 function notFound(): Response {
   return json({ error: "Not found" }, 404);
+}
+
+function normalizeBaseUrl(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const url = new URL(value);
+  url.hash = "";
+  url.search = "";
+  return url.toString().replace(/\/$/u, "");
 }

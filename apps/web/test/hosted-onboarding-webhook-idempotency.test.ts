@@ -343,6 +343,11 @@ describe("hosted onboarding webhook retry safety", () => {
               eventType: "message.received",
             },
             lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              ok: true,
+              reason: "dispatched-active-member",
+            }),
             sideEffects: [
               buildDispatchSideEffect({
                 attemptCount: 1,
@@ -480,6 +485,11 @@ describe("hosted onboarding webhook retry safety", () => {
               type: "invoice.paid",
             },
             lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              ok: true,
+              type: "invoice.paid",
+            }),
             sideEffects: [
               buildMemberActivationDispatchSideEffect({
                 attemptCount: 1,
@@ -935,16 +945,21 @@ describe("hosted onboarding webhook retry safety", () => {
               attemptId: expect.any(String),
               completedAt: expect.any(String),
               lastReceivedAt: expect.any(String),
+              plannedAt: expect.any(String),
+              response: expect.objectContaining({
+                ok: true,
+                reason: "dispatched-active-member",
+              }),
               sideEffects: expect.arrayContaining([
                 expect.objectContaining({
                   attemptCount: 1,
                   effectId: "dispatch:evt_123",
                   kind: "hosted_execution_dispatch",
-                  lastAttemptAt: "2026-03-26T12:00:00.250Z",
+                  lastAttemptAt: expect.any(String),
                   result: {
                     dispatched: true,
                   },
-                  sentAt: "2026-03-26T12:00:00.400Z",
+                  sentAt: expect.any(String),
                   status: "sent",
                 }),
               ]),
@@ -1219,6 +1234,12 @@ describe("hosted onboarding webhook retry safety", () => {
               name: "Error",
             },
             lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              inviteCode: "join_123",
+              joinUrl: "https://join.example.test/join/join_123",
+              ok: true,
+            }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 1,
@@ -1231,6 +1252,7 @@ describe("hosted onboarding webhook retry safety", () => {
                   retryable: null,
                 },
                 message: expect.any(String),
+                replyToMessageId: "msg_123",
                 status: "pending",
               }),
             ],
@@ -1272,12 +1294,19 @@ describe("hosted onboarding webhook retry safety", () => {
               eventType: "message.received",
             },
             lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              inviteCode: "join_123",
+              joinUrl: "https://join.example.test/join/join_123",
+              ok: true,
+            }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 2,
                 inviteId: "invite_123",
                 lastAttemptAt: expect.any(String),
                 message: expect.any(String),
+                replyToMessageId: "msg_123",
                 sentAt: expect.any(String),
                 status: "sent",
               }),
@@ -1436,12 +1465,19 @@ describe("hosted onboarding webhook retry safety", () => {
               eventType: "message.received",
             },
             lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              inviteCode: "join_123",
+              joinUrl: "https://join.example.test/join/join_123",
+              ok: true,
+            }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 1,
                 inviteId: "invite_123",
                 lastAttemptAt: "2026-03-26T12:00:00.250Z",
                 message: expect.any(String),
+                replyToMessageId: "msg_123",
                 sentAt: "2026-03-26T12:00:00.400Z",
                 status: "sent",
               }),
@@ -2755,17 +2791,23 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "refund.created",
     });
 
-    expect(mocks.stripePaymentIntentsRetrieve).toHaveBeenCalledWith("pi_123");
-    expect(prisma.hostedMember.update).toHaveBeenCalledWith({
-      where: {
-        id: "member_123",
-      },
-      data: {
-        billingStatus: HostedBillingStatus.unpaid,
-        status: HostedMemberStatus.suspended,
-        stripeCustomerId: "cus_123",
-      },
-    });
+    expect(mocks.stripeChargesRetrieve).toHaveBeenCalledWith("ch_123");
+    expect(mocks.stripePaymentIntentsRetrieve).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "member_123",
+          OR: expect.any(Array),
+        }),
+        data: expect.objectContaining({
+          billingStatus: HostedBillingStatus.unpaid,
+          status: HostedMemberStatus.suspended,
+          stripeCustomerId: "cus_123",
+          stripeLatestBillingEventCreatedAt: expect.any(Date),
+          stripeLatestBillingEventId: "evt_stripe_refund_123",
+        }),
+      }),
+    );
     expect(prisma.hostedSession.updateMany).toHaveBeenCalledWith({
       where: {
         expiresAt: {
@@ -3163,7 +3205,7 @@ function buildMemberActivationDispatchSideEffect(input: {
     payload:
       input.status === "sent"
         ? {
-            storage: "inline",
+            storage: "reference",
             schemaVersion: "murph.execution-outbox.v2",
             dispatchRef: {
               eventId: String(eventId).replace(/^dispatch:/u, ""),
