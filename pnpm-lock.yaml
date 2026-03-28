@@ -187,9 +187,6 @@ importers:
 
   packages/assistant-services:
     dependencies:
-      '@murph/runtime-state':
-        specifier: workspace:*
-        version: link:../runtime-state
       murph:
         specifier: workspace:*
         version: link:../cli
@@ -333,11 +330,7 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
 
-  packages/runtime-state:
-    dependencies:
-      '@murph/hosted-execution':
-        specifier: workspace:*
-        version: link:../hosted-execution
+  packages/runtime-state: {}
 
   packages/web:
     dependencies:

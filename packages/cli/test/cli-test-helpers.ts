@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
   ok: true
@@ -92,6 +92,12 @@ const requiredRuntimeArtifactPaths = [
   cliIndexPath,
   path.join(repoRoot, 'packages/cli/dist/vault-cli-contracts.js'),
   path.join(repoRoot, 'packages/cli/dist/inbox-cli-contracts.js'),
+]
+const importSmokeArtifactPaths = [
+  ...requiredRuntimeArtifactPaths.filter((artifactPath) => artifactPath.endsWith('.js') && artifactPath !== binPath),
+  path.join(repoRoot, 'packages/cli/dist/operator-config.js'),
+  path.join(repoRoot, 'packages/cli/dist/setup-cli.js'),
+  path.join(repoRoot, 'packages/cli/dist/setup-runtime-env.js'),
 ]
 let cliRuntimeArtifactsVerified = false
 const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
@@ -231,7 +237,14 @@ export function commandOutputFromError(error: unknown): string | null {
 }
 
 export async function ensureCliRuntimeArtifacts(): Promise<void> {
+  return ensureCliRuntimeArtifactsWithOptions()
+}
+
+export async function ensureCliRuntimeArtifactsWithOptions(options?: {
+  forceReverify?: boolean
+}): Promise<void> {
   if (
+    options?.forceReverify !== true &&
     cliRuntimeArtifactsVerified &&
     requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))
   ) {
@@ -336,9 +349,14 @@ async function execCliProcess(
 }
 
 async function verifyCliRuntimeArtifacts(): Promise<boolean> {
-  cliRuntimeArtifactsVerified = requiredRuntimeArtifactPaths.every((artifactPath) =>
-    existsSync(artifactPath),
-  )
+  if (!requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))) {
+    cliRuntimeArtifactsVerified = false
+    return false
+  }
+
+  cliRuntimeArtifactsVerified = (
+    await Promise.all(importSmokeArtifactPaths.map((artifactPath) => canImportArtifact(artifactPath)))
+  ).every(Boolean)
   return cliRuntimeArtifactsVerified
 }
 
@@ -357,7 +375,7 @@ async function waitForCliRuntimeArtifacts(): Promise<boolean> {
 }
 
 function shouldRetryCliExecution(error: unknown): boolean {
-  return shouldRetryCliOutput(commandOutputFromError(error))
+  return isRetryableCliRuntimeArtifactError(commandOutputFromError(error))
 }
 
 function shouldRetryCliEnvelope(result: CliEnvelope<unknown>): boolean {
@@ -365,7 +383,11 @@ function shouldRetryCliEnvelope(result: CliEnvelope<unknown>): boolean {
     return false
   }
 
-  return shouldRetryCliOutput(result.error.message ?? result.error.code ?? null)
+  return isRetryableCliRuntimeArtifactError(result.error.message ?? result.error.code ?? null)
+}
+
+export function isRetryableCliRuntimeArtifactError(output: string | null): boolean {
+  return shouldRetryCliOutput(output)
 }
 
 function shouldRetryCliOutput(output: string | null): boolean {
@@ -395,4 +417,41 @@ function createMissingRuntimeArtifactsError(): Error {
   return new Error(
     `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build\` before invoking CLI integration tests.`,
   )
+}
+
+async function canImportArtifact(artifactPath: string): Promise<boolean> {
+  if (!existsSync(artifactPath)) {
+    return false
+  }
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import(${JSON.stringify(pathToFileURL(artifactPath).href)}).then(() => {}).catch((error) => { console.error(error); process.exitCode = 1 })`,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(selectCliBaseEnv()),
+          maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
+        },
+        (error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+
+          resolve()
+        },
+      )
+    })
+
+    return true
+  } catch {
+    return false
+  }
 }

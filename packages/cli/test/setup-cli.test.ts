@@ -52,7 +52,10 @@ import {
   type SetupWizardResult,
 } from '../src/setup-wizard.js'
 import {
+  commandOutputFromError,
   ensureCliRuntimeArtifacts,
+  ensureCliRuntimeArtifactsWithOptions,
+  isRetryableCliRuntimeArtifactError,
   repoRoot,
   requireData,
   type CliEnvelope,
@@ -864,19 +867,38 @@ async function runSetupAliasRaw(
     )
     await chmod(aliasPath, 0o755)
 
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      [aliasPath, ...args],
-      {
-        cwd: options?.cwd ?? repoRoot,
-        encoding: 'utf8',
-        env: withoutNodeV8Coverage({
-          ...process.env,
-          ...options?.env,
-        }),
-      },
-    )
-    return stdout.trim()
+    const execOptions = {
+      cwd: options?.cwd ?? repoRoot,
+      encoding: 'utf8' as const,
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        ...options?.env,
+      }),
+    }
+
+    try {
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [aliasPath, ...args],
+        execOptions,
+      )
+      return stdout.trim()
+    } catch (error) {
+      const output = commandOutputFromError(error)
+      const shouldRetry = isRetryableCliRuntimeArtifactError(output)
+
+      if (!shouldRetry) {
+        throw error
+      }
+
+      await ensureCliRuntimeArtifactsWithOptions({ forceReverify: true })
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [aliasPath, ...args],
+        execOptions,
+      )
+      return stdout.trim()
+    }
   } finally {
     await rm(aliasRoot, { recursive: true, force: true })
   }
