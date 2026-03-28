@@ -216,14 +216,11 @@ test("goal updates can clear shared relation fields without leaving stale links 
   assert.doesNotMatch(read.markdown, /exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
 });
 
-test("goal reads tolerate legacy frontmatter defaults and extra keys", async () => {
-  const vaultRoot = await makeTempDirectory("murph-goal-legacy-frontmatter");
+test("goal reads reject non-canonical frontmatter after the hard cut", async () => {
+  const vaultRoot = await makeTempDirectory("murph-goal-strict-frontmatter");
   await initializeVault({ vaultRoot });
 
   const goalId = "goal_01JNYB6M9A6W4K2N8P3Q7R5S4T";
-  const parentGoalId = "goal_01JNYB6M9A6W4K2N8P3Q7R5S4X";
-  const relatedGoalId = "goal_01JNYB6M9A6W4K2N8P3Q7R5S4V";
-  const relatedExperimentId = "exp_01JNYB6M9A6W4K2N8P3Q7R5S4W";
   const relativePath = "bank/goals/legacy-goal.md";
 
   await fs.writeFile(
@@ -237,13 +234,6 @@ test("goal reads tolerate legacy frontmatter defaults and extra keys", async () 
       "title: Legacy goal",
       "window:",
       "  startAt: 2026-03-12",
-      `parentGoalId: ${parentGoalId}`,
-      "relatedGoalIds:",
-      `  - ${relatedGoalId}`,
-      "relatedExperimentIds:",
-      `  - ${relatedExperimentId}`,
-      "domains:",
-      "  - sleep",
       "owner: coach",
       "---",
       "",
@@ -253,34 +243,17 @@ test("goal reads tolerate legacy frontmatter defaults and extra keys", async () 
     "utf8",
   );
 
-  const read = await readGoal({
-    vaultRoot,
-    goalId,
-  });
-
-  assert.equal(read.goalId, goalId);
-  assert.equal(read.status, "active");
-  assert.equal(read.horizon, "ongoing");
-  assert.equal(read.priority, 5);
-  assert.equal(read.window.startAt, "2026-03-12");
-  assert.equal(read.parentGoalId, parentGoalId);
-  assert.deepEqual(read.relatedGoalIds, [relatedGoalId]);
-  assert.deepEqual(read.relatedExperimentIds, [relatedExperimentId]);
-  assert.deepEqual(read.domains, ["sleep"]);
-  assert.deepEqual(read.links, [
-    {
-      type: "parent_goal",
-      targetId: parentGoalId,
-    },
-    {
-      type: "related_goal",
-      targetId: relatedGoalId,
-    },
-    {
-      type: "related_experiment",
-      targetId: relatedExperimentId,
-    },
-  ]);
+  await assert.rejects(
+    () =>
+      readGoal({
+        vaultRoot,
+        goalId,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_GOAL" &&
+      error.message === "Goal registry document has an unexpected shape.",
+  );
 });
 
 test("goal id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {

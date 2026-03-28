@@ -66,9 +66,7 @@ function normalizeGoalWindow(value: unknown, fieldName: string): GoalWindow {
 }
 
 function parseGoalFrontmatter(attributes: FrontmatterObject): GoalFrontmatter {
-  const schema =
-    goalRegistryEntityDefinition.registry.frontmatterReadSchema ??
-    goalRegistryEntityDefinition.registry.frontmatterSchema;
+  const schema = goalRegistryEntityDefinition.registry.frontmatterSchema;
 
   if (!schema) {
     throw new Error("Goal registry definition is missing a frontmatter schema.");

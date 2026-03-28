@@ -2,7 +2,7 @@ import type { ZodTypeAny } from "zod";
 
 import { ID_PREFIXES } from "./constants.ts";
 import { goalUpsertPatchPayloadSchema, goalUpsertPayloadSchema } from "./shares.ts";
-import { goalFrontmatterReadSchema, goalFrontmatterSchema } from "./zod.ts";
+import { goalFrontmatterSchema } from "./zod.ts";
 
 export type HealthEntityKind =
   | "assessment"
@@ -87,7 +87,6 @@ export interface HealthEntityRegistryMetadata {
   titleKeys: readonly string[];
   statusKeys: readonly string[];
   frontmatterSchema?: ZodTypeAny;
-  frontmatterReadSchema?: ZodTypeAny;
   upsertPayloadSchema?: ZodTypeAny;
   patchPayloadSchema?: ZodTypeAny;
   relationKeys?: readonly HealthEntityRegistryLinkMetadata[];
@@ -263,7 +262,6 @@ const checkedHealthEntityDefinitions = [
       domains: ["sleep"],
     },
     registry: {
-      frontmatterReadSchema: goalFrontmatterReadSchema,
       frontmatterSchema: goalFrontmatterSchema,
       directory: "bank/goals",
       idField: "goalId",

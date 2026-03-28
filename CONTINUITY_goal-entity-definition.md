@@ -8,6 +8,7 @@ Constraints/Assumptions:
 
 Key decisions:
 - UNCONFIRMED: whether the shared definition should live entirely in `packages/contracts/src/health-entities.ts` or be split between contracts and core-specific adapters.
+- Goal read compatibility is now a hard cut: Goal frontmatter reads use the strict shared schema only, while the omission-safe Goal patch payload schema remains in place for explicit CLI partial updates.
 
 State:
 - Completed.
@@ -28,6 +29,17 @@ Done:
   - `pnpm exec vitest run packages/cli/test/health-tail.test.ts --no-coverage --maxWorkers 1`
   - a source-level explicit Goal CLI service scenario proving omission-safe patching and invalid relation-id rejection
 - Ran the repo-required checks `pnpm typecheck`, `pnpm test`, and `pnpm test:coverage`; they remain blocked outside Goal scope by pre-existing failures in `packages/cli` assistant tests and `apps/web` hosted execution typing.
+- Removed the temporary tolerant Goal read schema and updated the Goal read regression to assert strict non-canonical frontmatter rejection.
+- Re-verified the hard cut with:
+  - `pnpm --dir packages/contracts build && node packages/contracts/dist/scripts/verify.js`
+  - `pnpm --dir packages/core typecheck`
+  - `pnpm --dir packages/query typecheck`
+  - `pnpm exec vitest run packages/core/test/health-bank.test.ts --no-coverage --maxWorkers 1`
+  - `pnpm exec vitest run packages/cli/test/health-tail.test.ts --no-coverage --maxWorkers 1`
+- Re-ran the repo-required checks after the hard cut:
+  - `pnpm typecheck` is currently blocked by unrelated `packages/contracts/scripts/*` resolution/type errors in the shared tree
+  - `pnpm test` is currently blocked by the repo's large-dirty-tree active-plan guard
+  - `pnpm test:coverage` is currently blocked by unrelated `apps/web/src/lib/hosted-execution/hydration.ts` typing
 
 Now:
 - Preparing final commit cleanup.
