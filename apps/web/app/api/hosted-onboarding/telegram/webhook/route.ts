@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
-import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/service";
+import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 export async function GET() {
   return jsonOk({

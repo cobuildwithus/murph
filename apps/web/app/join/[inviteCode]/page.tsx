@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { resolveHostedPrivyClientAppId } from "@/src/lib/hosted-onboarding/landing";
-import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/service";
+import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/member-service";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 
 export const dynamic = "force-dynamic";

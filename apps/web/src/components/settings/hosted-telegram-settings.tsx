@@ -5,7 +5,6 @@ import { useState } from "react";
 
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { HostedPrivyProvider } from "../hosted-onboarding/privy-provider";
 import {
   resolveHostedTelegramSettingsDisplayState,
   syncHostedLinkedTelegram,
@@ -13,20 +12,17 @@ import {
 
 interface HostedTelegramSettingsProps {
   expectedPrivyUserId: string;
-  privyAppId?: string;
 }
 
 type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
   linkTelegram?: (input?: unknown) => Promise<unknown>;
 };
 
-export function HostedTelegramSettings({ privyAppId, ...props }: HostedTelegramSettingsProps) {
-  const content = <HostedTelegramSettingsInner {...props} />;
-
-  return privyAppId ? <HostedPrivyProvider appId={privyAppId}>{content}</HostedPrivyProvider> : content;
+export function HostedTelegramSettings(props: HostedTelegramSettingsProps) {
+  return <HostedTelegramSettingsInner {...props} />;
 }
 
-function HostedTelegramSettingsInner({ expectedPrivyUserId }: Omit<HostedTelegramSettingsProps, "privyAppId">) {
+function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSettingsProps) {
   const { authenticated, linkTelegram, logout, ready } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser, user } = useUser();
   const [botLink, setBotLink] = useState<string | null>(null);

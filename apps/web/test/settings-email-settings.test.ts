@@ -19,12 +19,6 @@ vi.mock("@privy-io/react-auth", () => ({
   useUser: mocks.useUser,
 }));
 
-vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
-  HostedPrivyProvider(input: { children: React.ReactNode }) {
-    return React.createElement(React.Fragment, null, input.children);
-  },
-}));
-
 vi.mock("@radix-ui/react-dialog", () => ({
   Close(input: { asChild?: boolean; children: React.ReactNode }) {
     return input.asChild ? input.children : React.createElement("div", null, input.children);
@@ -89,7 +83,6 @@ describe("HostedEmailSettings", () => {
     const markup = renderToStaticMarkup(
       React.createElement(HostedEmailSettings, {
         expectedPrivyUserId: "did:privy:user_123",
-        privyAppId: "cm_app_123",
       }),
     );
 

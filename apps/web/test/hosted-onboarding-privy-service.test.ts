@@ -43,7 +43,7 @@ vi.mock("@/src/lib/hosted-onboarding/session", async () => {
   };
 });
 
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/service";
+import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 
 const NOW = new Date("2026-03-26T12:00:00.000Z");
 

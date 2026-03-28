@@ -4,7 +4,7 @@ import { assertContract, sharePackSchema, type SharePack } from "@murph/contract
 import { getPrisma } from "../prisma";
 import {
   issueHostedInviteForPhone,
-} from "../hosted-onboarding/service";
+} from "../hosted-onboarding/member-service";
 import type { HostedSessionRecord } from "../hosted-onboarding/session";
 import {
   getHostedOnboardingSecretCodec,

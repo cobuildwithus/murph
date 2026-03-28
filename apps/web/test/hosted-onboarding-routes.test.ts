@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   createHostedBillingCheckout: vi.fn(),
   clearHostedSessionCookie: vi.fn(),
   requireHostedPrivyIdentityFromCookies: vi.fn(),
-  requireHostedSessionFromRequest: vi.fn(),
+  requireHostedSessionFromCookieStore: vi.fn(),
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
@@ -32,9 +32,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => mocks.runtimeEnv,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/service", () => ({
-  attachHostedSessionCookie: mocks.applyHostedSessionCookie,
+vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
   completeHostedPrivyVerification: mocks.completeHostedPrivyVerification,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/billing-service", () => ({
   createHostedBillingCheckout: mocks.createHostedBillingCheckout,
 }));
 
@@ -43,8 +45,9 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/session", () => ({
+  applyHostedSessionCookie: mocks.applyHostedSessionCookie,
   clearHostedSessionCookie: mocks.clearHostedSessionCookie,
-  requireHostedSessionFromRequest: mocks.requireHostedSessionFromRequest,
+  requireHostedSessionFromCookieStore: mocks.requireHostedSessionFromCookieStore,
   revokeHostedSessionFromRequest: mocks.revokeHostedSessionFromRequest,
 }));
 
@@ -97,7 +100,7 @@ describe("hosted onboarding routes", () => {
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
     });
-    mocks.requireHostedSessionFromRequest.mockResolvedValue({
+    mocks.requireHostedSessionFromCookieStore.mockResolvedValue({
       member: { id: "member_123" },
       session: { id: "session_123" },
     });
@@ -137,11 +140,11 @@ describe("hosted onboarding routes", () => {
       inviteCode: "invite-code",
       userAgent: "test-agent",
     });
-    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith({
-      expiresAt: new Date("2026-03-27T12:00:00.000Z"),
-      response: expect.anything(),
-      token: "session-token",
-    });
+    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith(
+      expect.anything(),
+      "session-token",
+      new Date("2026-03-27T12:00:00.000Z"),
+    );
     await expect(response.json()).resolves.toEqual({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
@@ -180,11 +183,11 @@ describe("hosted onboarding routes", () => {
       inviteCode: null,
       userAgent: "test-agent",
     });
-    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith({
-      expiresAt: new Date("2026-03-27T12:00:00.000Z"),
-      response: expect.anything(),
-      token: "session-token",
-    });
+    expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith(
+      expect.anything(),
+      "session-token",
+      new Date("2026-03-27T12:00:00.000Z"),
+    );
   });
 
   it("ignores any body identity token and keeps the cookie authoritative", async () => {
@@ -336,8 +339,9 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
+      cookieStore: { get: expect.any(Function) },
       inviteCode: "invite-code",
       sessionRecord: {
         member: { id: "member_123" },
@@ -363,8 +367,9 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
+      cookieStore: { get: expect.any(Function) },
       inviteCode: "invite-code",
       sessionRecord: {
         member: { id: "member_123" },
@@ -390,8 +395,9 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedSessionFromRequest).toHaveBeenCalledWith(request);
+    expect(mocks.requireHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
     expect(mocks.createHostedBillingCheckout).toHaveBeenCalledWith({
+      cookieStore: { get: expect.any(Function) },
       inviteCode: "invite-code",
       shareCode: "share_123",
       sessionRecord: {

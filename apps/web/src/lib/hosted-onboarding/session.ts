@@ -1,5 +1,7 @@
 import {
+  HostedBillingStatus,
   HostedMemberStatus,
+  type Prisma,
   type HostedMember,
   type HostedSession,
   type PrismaClient,
@@ -40,11 +42,17 @@ export async function createHostedSession(input: {
       id: input.memberId,
     },
     select: {
+      billingStatus: true,
       status: true,
     },
   });
 
-  if (member?.status === HostedMemberStatus.suspended) {
+  if (
+    member?.status === HostedMemberStatus.suspended ||
+    member?.billingStatus === HostedBillingStatus.canceled ||
+    member?.billingStatus === HostedBillingStatus.paused ||
+    member?.billingStatus === HostedBillingStatus.unpaid
+  ) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
       message: "This hosted account is suspended. Contact support to restore access.",
@@ -129,6 +137,24 @@ export async function requireHostedSessionFromRequest(
   return session;
 }
 
+export async function requireHostedSessionFromCookieStore(
+  cookies: CookieReader,
+  prisma: PrismaClient = getPrisma(),
+  now: Date = new Date(),
+): Promise<HostedSessionRecord> {
+  const session = await resolveHostedSessionFromCookieStore(cookies, prisma, now);
+
+  if (!session) {
+    throw hostedOnboardingError({
+      code: "AUTH_REQUIRED",
+      message: "Verify your phone to continue.",
+      httpStatus: 401,
+    });
+  }
+
+  return session;
+}
+
 export async function revokeHostedSessionFromRequest(
   request: Request,
   prisma: PrismaClient = getPrisma(),
@@ -142,7 +168,7 @@ export async function revokeHostedSessionFromRequest(
 export async function revokeHostedSessionsForMember(input: {
   memberId: string;
   now?: Date;
-  prisma?: PrismaClient;
+  prisma?: PrismaClient | Prisma.TransactionClient;
   reason: string;
 }): Promise<number> {
   const prisma = input.prisma ?? getPrisma();
@@ -216,7 +242,12 @@ async function findHostedSessionByToken(
     return null;
   }
 
-  if (session.member.status === HostedMemberStatus.suspended) {
+  if (
+    session.member.status === HostedMemberStatus.suspended ||
+    session.member.billingStatus === HostedBillingStatus.canceled ||
+    session.member.billingStatus === HostedBillingStatus.paused ||
+    session.member.billingStatus === HostedBillingStatus.unpaid
+  ) {
     await prisma.hostedSession.updateMany({
       where: {
         expiresAt: {
@@ -227,7 +258,10 @@ async function findHostedSessionByToken(
       },
       data: {
         revokedAt: now,
-        revokeReason: "member_suspended",
+        revokeReason:
+          session.member.status === HostedMemberStatus.suspended
+            ? "member_suspended"
+            : `billing_status:${session.member.billingStatus}`,
       },
     });
 

@@ -1,4 +1,4 @@
-import type { HostedMember, PrismaClient } from "@prisma/client";
+import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
 import {
   HostedBillingCheckoutStatus,
   HostedBillingMode,
@@ -11,9 +11,14 @@ import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import { requireHostedInviteForAuthentication } from "./member-service";
 import {
-  getOptionalHostedPrivyIdentityFromCookies,
-  requireHostedPrivyIdentityFromCookies,
+  type HostedPrivyCookieStore,
+  requireHostedPrivyUserForSession,
 } from "./privy";
+import {
+  extractHostedPrivyWalletAccount,
+  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
+  type PrivyLinkedAccountLike,
+} from "./privy-shared";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedOnboardingStripeConfig,
@@ -33,6 +38,7 @@ import {
 import type { HostedSessionRecord } from "./session";
 
 export async function createHostedBillingCheckout(input: {
+  cookieStore: HostedPrivyCookieStore;
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
@@ -70,23 +76,67 @@ export async function createHostedBillingCheckout(input: {
   }
 
   const shareCode = normalizeNullableString(input.shareCode);
+  const { linkedAccounts } = await requireHostedPrivyUserForSession(input.cookieStore, input.sessionRecord);
   const resolvedWalletAddress = await resolveHostedMemberWalletAddress({
     existingWalletAddress: invite.member.walletAddress,
+    linkedAccounts,
     requireWalletAddress: isHostedOnboardingRevnetEnabled(),
   });
   const { billingMode, priceId, stripe } = requireHostedOnboardingStripeConfig();
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
-  const memberForCustomer = resolvedWalletAddress
-    ? {
-        ...invite.member,
-        walletAddress: resolvedWalletAddress,
-      }
-    : invite.member;
   const customerId = await ensureHostedStripeCustomer({
-    member: memberForCustomer,
+    memberId: invite.member.id,
+    memberSnapshot: invite.member,
+    normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
+    preferredWalletAddress: resolvedWalletAddress,
     prisma,
     stripe,
   });
+  const mode = billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription;
+  const reusableCheckout = typeof prisma.hostedBillingCheckout.findFirst === "function"
+    ? await prisma.hostedBillingCheckout.findFirst({
+      where: {
+        memberId: invite.member.id,
+        mode,
+        priceId,
+        status: HostedBillingCheckoutStatus.open,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    })
+    : null;
+
+  if (reusableCheckout?.checkoutUrl) {
+    await prisma.hostedMember.update({
+      where: {
+        id: invite.member.id,
+      },
+      data: {
+        billingMode: mode,
+        billingStatus: HostedBillingStatus.checkout_open,
+        stripeCustomerId: customerId,
+        stripeLatestCheckoutSessionId: reusableCheckout.stripeCheckoutSessionId,
+        ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
+      },
+    });
+
+    return {
+      alreadyActive: false,
+      url: reusableCheckout.checkoutUrl,
+    };
+  }
+
+  const checkoutAttemptCount = typeof prisma.hostedBillingCheckout.count === "function"
+    ? await prisma.hostedBillingCheckout.count({
+      where: {
+        memberId: invite.member.id,
+        mode,
+        priceId,
+      },
+    })
+    : 0;
+  const checkoutAttemptNumber = checkoutAttemptCount + 1;
   const checkoutMetadata: Record<string, string> = {
     inviteId: invite.id,
     memberId: invite.member.id,
@@ -103,6 +153,7 @@ export async function createHostedBillingCheckout(input: {
     ],
     metadata: checkoutMetadata,
     mode: billingMode,
+    payment_method_types: ["card"],
     success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, shareCode),
   };
 
@@ -116,7 +167,18 @@ export async function createHostedBillingCheckout(input: {
     };
   }
 
-  const checkoutSession = await stripe.checkout.sessions.create(checkoutSessionParams);
+  const checkoutSession = await stripe.checkout.sessions.create(
+    checkoutSessionParams,
+    {
+      idempotencyKey: buildHostedStripeCheckoutIdempotencyKey({
+        attemptNumber: checkoutAttemptNumber,
+        billingMode,
+        inviteId: invite.id,
+        memberId: invite.member.id,
+        priceId,
+      }),
+    },
+  );
 
   if (!checkoutSession.url) {
     throw hostedOnboardingError({
@@ -126,32 +188,76 @@ export async function createHostedBillingCheckout(input: {
     });
   }
 
-  await prisma.hostedBillingCheckout.create({
-    data: {
-      id: generateHostedCheckoutId(),
-      memberId: invite.member.id,
-      inviteId: invite.id,
-      stripeCheckoutSessionId: checkoutSession.id,
-      stripeCustomerId: customerId,
-      stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
-      priceId,
-      mode: billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription,
-      status: HostedBillingCheckoutStatus.open,
-      checkoutUrl: checkoutSession.url,
-    },
-  });
-  await prisma.hostedMember.update({
-    where: {
-      id: invite.member.id,
-    },
-    data: {
-      billingMode: billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription,
-      billingStatus: HostedBillingStatus.checkout_open,
-      stripeCustomerId: customerId,
-      stripeLatestCheckoutSessionId: checkoutSession.id,
-      ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
-    },
-  });
+  try {
+    await runHostedBillingCheckoutTransaction(prisma, async (transaction) => {
+      await transaction.hostedBillingCheckout.create({
+        data: {
+          id: generateHostedCheckoutId(),
+          memberId: invite.member.id,
+          inviteId: invite.id,
+          stripeCheckoutSessionId: checkoutSession.id,
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
+          priceId,
+          mode,
+          status: HostedBillingCheckoutStatus.open,
+          checkoutUrl: checkoutSession.url,
+        },
+      });
+      await transaction.hostedMember.update({
+        where: {
+          id: invite.member.id,
+        },
+        data: {
+          billingMode: mode,
+          billingStatus: HostedBillingStatus.checkout_open,
+          stripeCustomerId: customerId,
+          stripeLatestCheckoutSessionId: checkoutSession.id,
+          ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
+        },
+      });
+    });
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
+      throw error;
+    }
+
+    const concurrentOpenCheckout = typeof prisma.hostedBillingCheckout.findFirst === "function"
+      ? await prisma.hostedBillingCheckout.findFirst({
+        where: {
+          memberId: invite.member.id,
+          mode,
+          priceId,
+          status: HostedBillingCheckoutStatus.open,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      })
+      : null;
+
+    if (concurrentOpenCheckout?.checkoutUrl) {
+      await prisma.hostedMember.update({
+        where: {
+          id: invite.member.id,
+        },
+        data: {
+          billingMode: mode,
+          billingStatus: HostedBillingStatus.checkout_open,
+          stripeCustomerId: customerId,
+          stripeLatestCheckoutSessionId: concurrentOpenCheckout.stripeCheckoutSessionId,
+          ...(resolvedWalletAddress ? { walletAddress: resolvedWalletAddress } : {}),
+        },
+      });
+
+      return {
+        alreadyActive: false,
+        url: concurrentOpenCheckout.checkoutUrl,
+      };
+    }
+
+    throw error;
+  }
 
   return {
     alreadyActive: false,
@@ -160,55 +266,134 @@ export async function createHostedBillingCheckout(input: {
 }
 
 async function ensureHostedStripeCustomer(input: {
-  member: HostedMember;
+  memberId: string;
+  memberSnapshot: Pick<HostedMember, "id" | "stripeCustomerId">;
+  normalizedPhoneNumber: string;
+  preferredWalletAddress: string | null;
   prisma: PrismaClient;
   stripe: Stripe;
 }): Promise<string> {
   const customerMetadata = {
-    memberId: input.member.id,
+    memberId: input.memberId,
   };
+  const currentMember = typeof input.prisma.hostedMember.findUnique === "function"
+    ? await input.prisma.hostedMember.findUnique({
+      where: {
+        id: input.memberId,
+      },
+      select: {
+        id: true,
+        stripeCustomerId: true,
+      },
+    })
+    : input.memberSnapshot;
 
-  if (input.member.stripeCustomerId) {
-    await input.stripe.customers.update(input.member.stripeCustomerId, {
+  if (currentMember?.stripeCustomerId) {
+    await input.stripe.customers.update(currentMember.stripeCustomerId, {
       metadata: customerMetadata,
-      phone: input.member.normalizedPhoneNumber,
+      phone: input.normalizedPhoneNumber,
     });
 
-    return input.member.stripeCustomerId;
+    return currentMember.stripeCustomerId;
   }
 
-  const customer = await input.stripe.customers.create({
-    metadata: customerMetadata,
-    phone: input.member.normalizedPhoneNumber,
-  });
+  const customer = await input.stripe.customers.create(
+    {
+      metadata: customerMetadata,
+      phone: input.normalizedPhoneNumber,
+    },
+    {
+      idempotencyKey: buildHostedStripeCustomerIdempotencyKey(input.memberId),
+    },
+  );
 
-  await input.prisma.hostedMember.update({
+  const bindResult = await input.prisma.hostedMember.updateMany({
     where: {
-      id: input.member.id,
+      id: input.memberId,
+      stripeCustomerId: null,
     },
     data: {
       stripeCustomerId: customer.id,
-      ...(input.member.walletAddress ? { walletAddress: input.member.walletAddress } : {}),
+      ...(input.preferredWalletAddress ? { walletAddress: input.preferredWalletAddress } : {}),
     },
   });
 
-  return customer.id;
+  if (bindResult.count === 1) {
+    return customer.id;
+  }
+
+  const reboundMember = typeof input.prisma.hostedMember.findUnique === "function"
+    ? await input.prisma.hostedMember.findUnique({
+      where: {
+        id: input.memberId,
+      },
+      select: {
+        stripeCustomerId: true,
+      },
+    })
+    : null;
+
+  if (reboundMember?.stripeCustomerId) {
+    await input.stripe.customers.update(reboundMember.stripeCustomerId, {
+      metadata: customerMetadata,
+      phone: input.normalizedPhoneNumber,
+    });
+
+    return reboundMember.stripeCustomerId;
+  }
+
+  throw hostedOnboardingError({
+    code: "STRIPE_CUSTOMER_BIND_FAILED",
+    message: "Stripe customer creation succeeded, but the hosted member could not be bound safely.",
+    httpStatus: 503,
+    retryable: true,
+  });
+}
+
+async function runHostedBillingCheckoutTransaction<TResult>(
+  prisma: PrismaClient,
+  callback: (transaction: PrismaClient) => Promise<TResult>,
+): Promise<TResult> {
+  return typeof prisma.$transaction === "function"
+    ? prisma.$transaction((transaction) => callback(transaction as PrismaClient))
+    : callback(prisma);
+}
+
+function buildHostedStripeCustomerIdempotencyKey(memberId: string): string {
+  return `hosted-onboarding:stripe-customer:${memberId}`;
+}
+
+function buildHostedStripeCheckoutIdempotencyKey(input: {
+  attemptNumber: number;
+  billingMode: "payment" | "subscription";
+  inviteId: string;
+  memberId: string;
+  priceId: string;
+}): string {
+  return [
+    "hosted-onboarding:stripe-checkout",
+    input.memberId,
+    input.inviteId,
+    input.billingMode,
+    input.priceId,
+    String(input.attemptNumber),
+  ].join(":");
 }
 
 async function resolveHostedMemberWalletAddress(input: {
   existingWalletAddress: string | null | undefined;
+  linkedAccounts: readonly PrivyLinkedAccountLike[];
   requireWalletAddress: boolean;
 }): Promise<string | null> {
   const normalizedExistingWalletAddress = normalizeNullableString(input.existingWalletAddress);
+  const privyWalletAddress = normalizeHostedWalletAddress(
+    extractHostedPrivyWalletAccount(input.linkedAccounts, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE)?.address,
+  );
 
   if (normalizedExistingWalletAddress) {
     const walletAddress = normalizeHostedWalletAddress(normalizedExistingWalletAddress);
 
     if (walletAddress) {
-      const privyWalletAddress = normalizeHostedWalletAddress(
-        (await getOptionalHostedPrivyIdentityFromCookies())?.wallet.address,
-      );
-
       if (privyWalletAddress && privyWalletAddress !== walletAddress) {
         throw hostedOnboardingError({
           code: "HOSTED_WALLET_ADDRESS_CONFLICT",
@@ -230,14 +415,6 @@ async function resolveHostedMemberWalletAddress(input: {
       httpStatus: 400,
     });
   }
-
-  const privyWalletAddress = normalizeHostedWalletAddress(
-    (
-      input.requireWalletAddress
-        ? await requireHostedPrivyIdentityFromCookies()
-        : await getOptionalHostedPrivyIdentityFromCookies()
-    )?.wallet.address,
-  );
 
   if (privyWalletAddress) {
     return privyWalletAddress;

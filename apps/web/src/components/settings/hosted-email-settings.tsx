@@ -10,7 +10,6 @@ import {
   resolveHostedPrivyLinkedAccounts,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
-import { HostedPrivyProvider } from "../hosted-onboarding/privy-provider";
 import {
   isValidEmailAddress,
   normalizeComparableEmail,
@@ -21,16 +20,13 @@ import {
 
 interface HostedEmailSettingsProps {
   expectedPrivyUserId: string;
-  privyAppId?: string;
 }
 
-export function HostedEmailSettings({ privyAppId, ...props }: HostedEmailSettingsProps) {
-  const content = <HostedEmailSettingsInner {...props} />;
-
-  return privyAppId ? <HostedPrivyProvider appId={privyAppId}>{content}</HostedPrivyProvider> : content;
+export function HostedEmailSettings(props: HostedEmailSettingsProps) {
+  return <HostedEmailSettingsInner {...props} />;
 }
 
-function HostedEmailSettingsInner({ expectedPrivyUserId }: Omit<HostedEmailSettingsProps, "privyAppId">) {
+function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsProps) {
   const { authenticated, logout, ready } = usePrivy();
   const { refreshUser, user } = useUser();
   const { sendCode, state, verifyCode } = useUpdateEmail();

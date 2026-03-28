@@ -3,19 +3,26 @@
 import { PrivyProvider } from "@privy-io/react-auth";
 import type { ReactNode } from "react";
 
+import {
+  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
+  HOSTED_PRIVY_EMBEDDED_WALLET_CREATE_ON_LOGIN,
+  HOSTED_PRIVY_SHOW_WALLET_UIS,
+  HOSTED_PRIVY_WALLET_CHAIN_APPEARANCE,
+} from "@/src/lib/hosted-onboarding/privy-shared";
+
 export function HostedPrivyProvider(input: { appId: string; children: ReactNode }) {
   return (
     <PrivyProvider
       appId={input.appId}
       config={{
         appearance: {
-          walletChainType: "ethereum-only",
+          walletChainType: HOSTED_PRIVY_WALLET_CHAIN_APPEARANCE,
         },
         embeddedWallets: {
-          ethereum: {
-            createOnLogin: "users-without-wallets",
+          [HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE]: {
+            createOnLogin: HOSTED_PRIVY_EMBEDDED_WALLET_CREATE_ON_LOGIN,
           },
-          showWalletUIs: false,
+          showWalletUIs: HOSTED_PRIVY_SHOW_WALLET_UIS,
         },
       }}
     >

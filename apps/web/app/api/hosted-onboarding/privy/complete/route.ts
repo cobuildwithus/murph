@@ -1,6 +1,7 @@
 import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { requireHostedPrivyIdentityFromCookies } from "@/src/lib/hosted-onboarding/privy";
-import { attachHostedSessionCookie, completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/service";
+import { applyHostedSessionCookie } from "@/src/lib/hosted-onboarding/session";
 
 export async function POST(request: Request) {
   try {
@@ -18,11 +19,7 @@ export async function POST(request: Request) {
       stage: result.stage,
     });
 
-    attachHostedSessionCookie({
-      expiresAt: result.expiresAt,
-      response,
-      token: result.token,
-    });
+    applyHostedSessionCookie(response, result.token, result.expiresAt);
 
     return response;
   } catch (error) {

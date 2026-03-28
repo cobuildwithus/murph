@@ -46,7 +46,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/service";
+import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("handleHostedOnboardingTelegramWebhook", () => {
   beforeEach(() => {
@@ -57,7 +57,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("reuses an existing transaction when dispatching linked active-member Telegram messages", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
-    const prisma = asPrismaTransactionClient({
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockResolvedValue({}),
         findUnique: vi.fn().mockResolvedValue({
@@ -80,7 +80,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           status: HostedMemberStatus.active,
         }),
       },
-    });
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
 
     const response = await handleHostedOnboardingTelegramWebhook({
       prisma,
@@ -294,6 +294,107 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       ok: true,
       reason: "suspended-member",
     });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("ignores business-account self messages flagged through sender_business_bot", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              updateId: 654,
+            },
+            receiptState: {
+              attemptCount: 1,
+              status: "processing",
+            },
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+
+    const response = await handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        business_message: {
+          business_connection_id: "bc_123",
+          chat: {
+            id: 123,
+            is_direct_messages: true,
+            type: "private",
+          },
+          date: 1_774_522_601,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 9,
+          sender_business_bot: {
+            id: 999,
+            is_bot: true,
+            username: "murph_bot",
+          },
+          text: "echo",
+        },
+        update_id: 654,
+      }),
+      secretToken: "telegram-secret",
+    });
+
+    expect(response).toEqual({
+      ignored: true,
+      ok: true,
+      reason: "own-message",
+    });
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed Telegram message payloads before receipt persistence", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedWebhookReceiptCreate = vi.fn();
+    const hostedMemberFindUnique = vi.fn();
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: hostedWebhookReceiptCreate,
+        findUnique: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+    }) as unknown as Parameters<typeof handleHostedOnboardingTelegramWebhook>[0]["prisma"];
+
+    await expect(
+      handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: JSON.stringify({
+          message: {
+            chat: 123,
+            date: 1_774_522_600,
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 1,
+            text: "hello",
+          },
+          update_id: 321,
+        }),
+        secretToken: "telegram-secret",
+      }),
+    ).rejects.toThrowError(new TypeError("message.chat must be a JSON object."));
+
+    expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 });
