@@ -215,6 +215,50 @@ describe("hosted device-sync runtime", () => {
     });
   });
 
+  it("forwards a custom fetch implementation into hosted device-sync snapshot reads", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 }));
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+      connections: [],
+      generatedAt: "2026-03-27T08:05:00.000Z",
+      userId: "user-123",
+    });
+    const service = {
+      store: {
+        getAccountByExternalAccount: vi.fn(),
+        hydrateHostedAccount: vi.fn(),
+        markPendingJobsDeadForAccount: vi.fn(),
+      },
+    };
+
+    const { syncHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    await syncHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-123",
+        },
+        eventId: "evt_forward_snapshot_fetch",
+        occurredAt: "2026-03-27T08:05:00.000Z",
+      },
+      fetchImpl: fetchImpl as typeof fetch,
+      secret: "secret-for-tests",
+      service: service as never,
+      timeoutMs: 5_000,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
+        internalToken: null,
+      },
+    });
+
+    expect(mocks.fetchHostedDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: "http://device-sync.worker",
+      fetchImpl,
+      internalToken: null,
+      timeoutMs: 5_000,
+      userId: "user-123",
+    }));
+  });
+
   it("ignores hosted wake hints whose connection id was never reconciled to a local account id", async () => {
     mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
       connections: [],
@@ -1359,6 +1403,106 @@ describe("hosted device-sync runtime", () => {
     };
     expect(applyInput?.updates[0]).not.toHaveProperty("lastErrorCode");
     expect(applyInput?.updates[0]).not.toHaveProperty("lastErrorMessage");
+  });
+
+  it("forwards a custom fetch implementation into hosted device-sync apply calls", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 }));
+    const service = {
+      store: {
+        getAccountById: vi.fn(() => ({
+          accessTokenEncrypted: "",
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          createdAt: "2026-03-26T12:00:00.000Z",
+          disconnectGeneration: 1,
+          displayName: "Alice Oura",
+          externalAccountId: "oura_alice",
+          hostedObservedTokenVersion: null,
+          hostedObservedUpdatedAt: "2026-03-27T08:25:00.000Z",
+          id: "local_fetch_impl",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: "2026-03-27T08:30:00.000Z",
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: "2026-03-27T08:20:00.000Z",
+          lastWebhookAt: "2026-03-27T08:00:00.000Z",
+          metadata: {
+            source: "hosted",
+          },
+          nextReconcileAt: null,
+          provider: "oura",
+          refreshTokenEncrypted: null,
+          scopes: ["heartrate"],
+          status: "disconnected",
+          updatedAt: "2026-03-27T08:30:00.000Z",
+        })),
+      },
+    };
+
+    const { reconcileHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    await reconcileHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-123",
+        },
+        eventId: "evt_forward_apply_fetch",
+        occurredAt: "2026-03-27T08:35:00.000Z",
+      },
+      fetchImpl: fetchImpl as typeof fetch,
+      secret: "secret-for-tests",
+      service: service as never,
+      state: {
+        hostedToLocalAccountIds: new Map([["hosted_fetch_impl", "local_fetch_impl"]]),
+        localToHostedAccountIds: new Map([["local_fetch_impl", "hosted_fetch_impl"]]),
+        observedTokenVersions: new Map([["hosted_fetch_impl", null]]),
+        snapshot: {
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-03-26T12:00:00.000Z",
+                createdAt: "2026-03-26T12:00:00.000Z",
+                displayName: "Alice Oura",
+                externalAccountId: "oura_alice",
+                id: "hosted_fetch_impl",
+                lastErrorCode: "STALE",
+                lastErrorMessage: "stale hosted error",
+                lastSyncCompletedAt: "2026-03-27T08:10:00.000Z",
+                lastSyncErrorAt: "2026-03-27T08:05:00.000Z",
+                lastSyncStartedAt: "2026-03-27T08:15:00.000Z",
+                lastWebhookAt: "2026-03-27T08:25:00.000Z",
+                metadata: {
+                  source: "hosted",
+                },
+                nextReconcileAt: null,
+                provider: "oura",
+                scopes: ["heartrate"],
+                status: "disconnected",
+                updatedAt: "2026-03-27T08:25:00.000Z",
+              },
+              tokenBundle: null,
+            },
+          ],
+          generatedAt: "2026-03-27T08:35:00.000Z",
+          userId: "user-123",
+        },
+      },
+      timeoutMs: 7_000,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
+        internalToken: null,
+      },
+    });
+
+    expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: "http://device-sync.worker",
+      fetchImpl,
+      internalToken: null,
+      occurredAt: "2026-03-27T08:35:00.000Z",
+      timeoutMs: 7_000,
+      userId: "user-123",
+    }));
   });
 
   it("clears only the stale disconnected hosted error field that the local mirror removed", async () => {
