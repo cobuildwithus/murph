@@ -22,11 +22,13 @@ import {
   splitScopes,
   tokenResponseToAuthTokens as sharedTokenResponseToAuthTokens,
 } from "./shared-oauth.ts";
+import { createOuraWebhookSubscriptionClient, OURA_DEFAULT_WEBHOOK_TARGETS } from "./oura-webhooks.ts";
 
 import type {
   DeviceSyncAccount,
   DeviceSyncJobRecord,
   DeviceSyncProvider,
+  ProviderWebhookAdminCapability,
   ProviderAuthTokens,
   ProviderCallbackContext,
   ProviderConnectionResult,
@@ -37,6 +39,7 @@ import type {
   ProviderWebhookResult,
   StoredDeviceSyncAccount,
 } from "../types.ts";
+import type { OuraWebhookSubscriptionClient } from "./oura-webhooks.ts";
 
 const OURA_AUTH_BASE_URL = "https://cloud.ouraring.com";
 const OURA_API_BASE_URL = "https://api.ouraring.com";
@@ -561,6 +564,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const reconcileIntervalMs = Math.max(60_000, config.reconcileIntervalMs ?? DEFAULT_RECONCILE_INTERVAL_MS);
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
   const webhookTimestampToleranceMs = Math.max(1_000, config.webhookTimestampToleranceMs ?? DEFAULT_WEBHOOK_TOLERANCE_MS);
+  let webhookSubscriptionClient: OuraWebhookSubscriptionClient | null = null;
 
   async function postTokenRequest(parameters: Record<string, string>): Promise<OuraTokenResponse> {
     return postOAuthTokenRequest<OuraTokenResponse>({
@@ -638,6 +642,42 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
     return coerceRecord(personalInfo);
   }
+
+  function getWebhookSubscriptionClient(): OuraWebhookSubscriptionClient {
+    if (!webhookSubscriptionClient) {
+      webhookSubscriptionClient = createOuraWebhookSubscriptionClient({
+        clientId: config.clientId,
+        clientSecret: config.clientSecret,
+        apiBaseUrl,
+        fetchImpl,
+        timeoutMs,
+      });
+    }
+
+    return webhookSubscriptionClient;
+  }
+
+  const webhookAdmin: ProviderWebhookAdminCapability = {
+    resolveVerificationChallenge(context) {
+      return resolveOuraWebhookVerificationChallenge(context);
+    },
+    async ensureSubscriptions(context) {
+      const verificationToken = normalizeString(context.verificationToken);
+
+      if (!verificationToken) {
+        return;
+      }
+
+      const callbackUrl = new URL(OURA_WEBHOOK_PATH.replace(/^\/+/u, ""), `${context.publicBaseUrl}/`).toString();
+      await getWebhookSubscriptionClient().ensure({
+        callbackUrl,
+        verificationToken,
+        desired: OURA_DEFAULT_WEBHOOK_TARGETS,
+        renewIfExpiringWithinMs: 7 * 24 * 60 * 60_000,
+        pruneDuplicates: true,
+      });
+    },
+  };
 
   function createApiSession(context: ProviderJobContext): OuraApiSession {
     const session = createRefreshingApiSession({
@@ -794,6 +834,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
   const provider: DeviceSyncProvider = {
     provider: "oura",
     callbackPath: OURA_CALLBACK_PATH,
+    webhookAdmin,
     defaultScopes: scopes,
     buildConnectUrl(context) {
       return buildOAuthConnectUrl({
@@ -964,7 +1005,11 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
       const traceId =
         normalizeString(payload.trace_id ?? payload.traceId ?? payload.event_id ?? payload.eventId) ??
-        sha256Text(`${timestamp}:${externalAccountId}:${eventType}:${dataType}:${objectId}`);
+        sha256Text(
+          `${externalAccountId}:${eventType}:${dataType}:${objectId}:${
+            normalizeString(payload.event_time ?? payload.eventTime ?? payload.timestamp) ?? ""
+          }`,
+        );
 
       return {
         externalAccountId,

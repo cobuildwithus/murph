@@ -111,12 +111,24 @@ function normalizeOuraWebhookCallbackUrl(value: string): string {
   return url.toString();
 }
 
+function normalizeOuraWebhookCallbackPath(value: string): string {
+  const pathname = new URL(value).pathname.replace(/\/+$/u, "");
+  return pathname || "/";
+}
+
 function createOuraWebhookSubscriptionKey(input: {
   callbackUrl: string;
   eventType: OuraWebhookOperation;
   dataType: OuraWebhookDataType;
 }): string {
   return `${normalizeOuraWebhookCallbackUrl(input.callbackUrl)}|${input.eventType}|${input.dataType}`;
+}
+
+function createOuraWebhookTargetKey(input: {
+  eventType: OuraWebhookOperation;
+  dataType: OuraWebhookDataType;
+}): string {
+  return `${input.eventType}|${input.dataType}`;
 }
 
 function parseExpirationTime(value: string | null): number | null {
@@ -128,8 +140,23 @@ function parseExpirationTime(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function choosePrimarySubscription(subscriptions: readonly OuraWebhookSubscription[]): OuraWebhookSubscription {
+function choosePrimarySubscription(
+  subscriptions: readonly OuraWebhookSubscription[],
+  preferredCallbackUrl?: string,
+): OuraWebhookSubscription {
+  const normalizedPreferredCallbackUrl = preferredCallbackUrl
+    ? normalizeOuraWebhookCallbackUrl(preferredCallbackUrl)
+    : null;
   return [...subscriptions].sort((left, right) => {
+    if (normalizedPreferredCallbackUrl) {
+      const leftPreferred = normalizeOuraWebhookCallbackUrl(left.callbackUrl) === normalizedPreferredCallbackUrl;
+      const rightPreferred = normalizeOuraWebhookCallbackUrl(right.callbackUrl) === normalizedPreferredCallbackUrl;
+
+      if (leftPreferred !== rightPreferred) {
+        return leftPreferred ? -1 : 1;
+      }
+    }
+
     const leftExpiration = parseExpirationTime(left.expirationTime);
     const rightExpiration = parseExpirationTime(right.expirationTime);
 
@@ -145,8 +172,18 @@ function choosePrimarySubscription(subscriptions: readonly OuraWebhookSubscripti
       return rightExpiration - leftExpiration;
     }
 
-    return 0;
+    const callbackCompare = left.callbackUrl.localeCompare(right.callbackUrl);
+
+    if (callbackCompare !== 0) {
+      return callbackCompare;
+    }
+
+    return left.id.localeCompare(right.id);
   })[0]!;
+}
+
+function hasManagedCallbackPath(subscription: OuraWebhookSubscription, callbackUrl: string): boolean {
+  return normalizeOuraWebhookCallbackPath(subscription.callbackUrl) === normalizeOuraWebhookCallbackPath(callbackUrl);
 }
 
 function shouldRenewSubscription(subscription: OuraWebhookSubscription, renewIfExpiringWithinMs: number): boolean {
@@ -277,6 +314,7 @@ export function createOuraWebhookSubscriptionClient(
     method: "GET" | "POST" | "PUT" | "DELETE";
     path: string;
     body?: Record<string, unknown>;
+    acceptStatuses?: readonly number[];
     buildError: (response: Response, body: string) => Error;
   }): Promise<T | null> {
     const headers = new Headers({
@@ -296,6 +334,10 @@ export function createOuraWebhookSubscriptionClient(
     });
 
     if (!response.ok) {
+      if (options.acceptStatuses?.includes(response.status)) {
+        return null;
+      }
+
       throw options.buildError(response, await parseResponseBody(response));
     }
 
@@ -405,6 +447,7 @@ export function createOuraWebhookSubscriptionClient(
     await requestJson<unknown>({
       method: "DELETE",
       path: `${OURA_WEBHOOK_SUBSCRIPTION_PATH}/${encodeURIComponent(normalizedId)}`,
+      acceptStatuses: [404],
       buildError: (response, body) =>
         buildOuraWebhookSubscriptionApiError(
           "OURA_WEBHOOK_SUBSCRIPTION_DELETE_FAILED",
@@ -448,6 +491,10 @@ export function createOuraWebhookSubscriptionClient(
     const desiredKeys = new Set<string>();
 
     for (const subscription of existing) {
+      if (subscription.callbackUrl !== callbackUrl) {
+        continue;
+      }
+
       const key = createOuraWebhookSubscriptionKey(subscription);
       const bucket = existingByKey.get(key);
 
@@ -459,13 +506,18 @@ export function createOuraWebhookSubscriptionClient(
     }
 
     for (const target of desiredTargets) {
-      const key = createOuraWebhookSubscriptionKey({
+      const exactKey = createOuraWebhookSubscriptionKey({
         callbackUrl,
         eventType: target.eventType,
         dataType: target.dataType,
       });
-      desiredKeys.add(key);
-      const matching = existingByKey.get(key) ?? [];
+      desiredKeys.add(
+        createOuraWebhookTargetKey({
+          eventType: target.eventType,
+          dataType: target.dataType,
+        }),
+      );
+      const matching = existingByKey.get(exactKey) ?? [];
 
       if (matching.length === 0) {
         created.push(
@@ -479,7 +531,7 @@ export function createOuraWebhookSubscriptionClient(
         continue;
       }
 
-      let active = choosePrimarySubscription(matching);
+      let active = choosePrimarySubscription(matching, callbackUrl);
 
       if (shouldRenewSubscription(active, renewIfExpiringWithinMs)) {
         active = await renew(active.id);
@@ -501,19 +553,54 @@ export function createOuraWebhookSubscriptionClient(
     }
 
     if (options.pruneDuplicates) {
-      for (const subscription of existing) {
-        if (subscription.callbackUrl !== callbackUrl) {
+      const current = await list();
+      const deletedIds = new Set<string>(deleted.map((subscription) => subscription.id));
+      const managedByKey = new Map<string, OuraWebhookSubscription[]>();
+
+      for (const subscription of current) {
+        if (!hasManagedCallbackPath(subscription, callbackUrl)) {
           continue;
         }
 
-        const key = createOuraWebhookSubscriptionKey(subscription);
+        const key = createOuraWebhookTargetKey({
+          eventType: subscription.eventType,
+          dataType: subscription.dataType,
+        });
+        const bucket = managedByKey.get(key);
 
+        if (bucket) {
+          bucket.push(subscription);
+        } else {
+          managedByKey.set(key, [subscription]);
+        }
+      }
+
+      for (const [key, matching] of managedByKey.entries()) {
         if (desiredKeys.has(key)) {
+          const active = choosePrimarySubscription(matching, callbackUrl);
+
+          for (const duplicate of matching) {
+            if (duplicate.id === active.id || deletedIds.has(duplicate.id)) {
+              continue;
+            }
+
+            await remove(duplicate.id);
+            deleted.push(duplicate);
+            deletedIds.add(duplicate.id);
+          }
+
           continue;
         }
 
-        await remove(subscription.id);
-        deleted.push(subscription);
+        for (const stale of matching) {
+          if (deletedIds.has(stale.id)) {
+            continue;
+          }
+
+          await remove(stale.id);
+          deleted.push(stale);
+          deletedIds.add(stale.id);
+        }
       }
     }
 

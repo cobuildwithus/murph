@@ -3,10 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   completeWebhookTrace: vi.fn(),
   createDeviceSyncPublicIngress: vi.fn(),
-  createOuraWebhookSubscriptionClient: vi.fn(),
   createSignal: vi.fn(),
   drainHostedExecutionOutboxBestEffort: vi.fn(),
-  ensureOuraWebhookSubscriptions: vi.fn(),
+  ensureWebhookSubscriptions: vi.fn(),
   enqueueHostedExecutionOutbox: vi.fn(),
   getConnectionBundleForUser: vi.fn(),
   getConnectionForUser: vi.fn(),
@@ -24,16 +23,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murph/device-syncd", () => ({
-  OURA_DEFAULT_WEBHOOK_TARGETS: [
-    { eventType: "create", dataType: "daily_sleep" },
-    { eventType: "update", dataType: "daily_sleep" },
-  ],
   createDeviceSyncPublicIngress: mocks.createDeviceSyncPublicIngress,
-  createOuraWebhookSubscriptionClient: mocks.createOuraWebhookSubscriptionClient,
   deviceSyncError: vi.fn((input: { message: string }) => new Error(input.message)),
   isDeviceSyncError: vi.fn(() => false),
-  normalizeString: vi.fn((value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)),
-  resolveOuraWebhookVerificationChallenge: vi.fn(() => null),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -114,15 +106,7 @@ import {
 describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createOuraWebhookSubscriptionClient.mockReturnValue({
-      ensure: mocks.ensureOuraWebhookSubscriptions,
-    });
-    mocks.ensureOuraWebhookSubscriptions.mockResolvedValue({
-      created: [],
-      deleted: [],
-      retained: [],
-      renewed: [],
-    });
+    mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
       callback(mocks.prismaTx),
     );
@@ -147,7 +131,9 @@ describe("dispatchHostedDeviceSyncWake", () => {
           now: "2026-03-26T12:00:00.000Z",
           provider: {
             provider: "oura",
-            webhookPath: "/webhooks/oura",
+            webhookAdmin: {
+              ensureSubscriptions: mocks.ensureWebhookSubscriptions,
+            },
           },
         });
         return {
@@ -439,18 +425,8 @@ describe("dispatchHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
-    expect(mocks.createOuraWebhookSubscriptionClient).toHaveBeenCalledWith({
-      clientId: "oura-client-id",
-      clientSecret: "oura-client-secret",
-    });
-    expect(mocks.ensureOuraWebhookSubscriptions).toHaveBeenCalledWith({
-      callbackUrl: "https://control.example.test/api/device-sync/webhooks/oura",
-      desired: [
-        { eventType: "create", dataType: "daily_sleep" },
-        { eventType: "update", dataType: "daily_sleep" },
-      ],
-      pruneDuplicates: true,
-      renewIfExpiringWithinMs: 604800000,
+    expect(mocks.ensureWebhookSubscriptions).toHaveBeenCalledWith({
+      publicBaseUrl: "https://control.example.test/api/device-sync",
       verificationToken: "verify-token-for-tests",
     });
   });

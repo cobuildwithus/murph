@@ -3,7 +3,6 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
-import { resolveOuraWebhookVerificationChallenge } from "./providers/oura.ts";
 import { DEFAULT_DEVICE_SYNC_HOST } from "./shared.ts";
 
 import type { IncomingHttpHeaders, IncomingMessage, Server, ServerResponse } from "node:http";
@@ -239,9 +238,12 @@ const DEVICE_SYNC_HTTP_ROUTES = [
     pattern: /^\/webhooks\/([^/]+)$/u,
     paramNames: ["provider"],
     surface: "public",
-    handle({ response, url, config, params }) {
+    handle({ response, service, url, config, params }) {
       const provider = params.provider ?? "";
-      const challenge = resolveWebhookVerificationChallenge(provider, url, config);
+      const challenge = service.registry.get(provider)?.webhookAdmin?.resolveVerificationChallenge?.({
+        url,
+        verificationToken: config?.ouraWebhookVerificationToken ?? null,
+      }) ?? null;
 
       if (challenge !== null) {
         sendJson(response, 200, {
@@ -651,21 +653,6 @@ function redirect(response: ServerResponse, location: string): void {
   response.statusCode = 302;
   response.setHeader("Location", location);
   response.end();
-}
-
-function resolveWebhookVerificationChallenge(
-  provider: string,
-  url: URL,
-  config: DeviceSyncHttpConfig | undefined,
-): string | null {
-  if (provider !== "oura") {
-    return null;
-  }
-
-  return resolveOuraWebhookVerificationChallenge({
-    url,
-    verificationToken: config?.ouraWebhookVerificationToken ?? null,
-  });
 }
 
 export function buildCallbackErrorRedirectLocation(input: {

@@ -1,9 +1,6 @@
 import {
   createDeviceSyncPublicIngress,
-  createOuraWebhookSubscriptionClient,
   deviceSyncError,
-  OURA_DEFAULT_WEBHOOK_TARGETS,
-  resolveOuraWebhookVerificationChallenge,
 } from "@murph/device-syncd";
 
 import type {
@@ -11,7 +8,6 @@ import type {
   CompleteConnectionResult,
   DeviceSyncProvider,
   HandleWebhookResult,
-  OuraWebhookSubscriptionClient,
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
 } from "@murph/device-syncd";
@@ -60,7 +56,6 @@ export class HostedDeviceSyncControlPlane {
   readonly allowedReturnOrigins: string[];
   readonly agentSessions: HostedDeviceSyncAgentSessionService;
   private authenticatedUserPromise: Promise<AuthenticatedHostedUser> | null = null;
-  private ouraWebhookSubscriptionClient: OuraWebhookSubscriptionClient | null | undefined;
 
   constructor(request: Request) {
     this.request = request;
@@ -102,6 +97,21 @@ export class HostedDeviceSyncControlPlane {
     };
   }
 
+  async ensureHostedWebhookSubscriptionsForRuntimeSnapshot(input: {
+    userId: string;
+    provider?: string | null;
+    connectionId?: string | null;
+  }): Promise<void> {
+    const providers = await this.resolveActiveWebhookAdminProviders(input.userId, input);
+
+    for (const provider of providers) {
+      await this.ensureHostedWebhookSubscriptions({
+        bestEffort: false,
+        provider,
+      });
+    }
+  }
+
   async getConnectionStatus(userId: string, connectionId: string) {
     const connection = await this.store.getConnectionForUser(userId, connectionId);
 
@@ -140,14 +150,10 @@ export class HostedDeviceSyncControlPlane {
   }
 
   resolveWebhookVerificationChallenge(provider: string): string | null {
-    if (provider !== "oura") {
-      return null;
-    }
-
-    return resolveOuraWebhookVerificationChallenge({
+    return this.registry.get(provider)?.webhookAdmin?.resolveVerificationChallenge?.({
       url: new URL(this.request.url),
       verificationToken: this.env.ouraWebhookVerificationToken,
-    });
+    }) ?? null;
   }
 
   async handleWebhook(provider: string): Promise<HandleWebhookResult> {
@@ -251,64 +257,77 @@ export class HostedDeviceSyncControlPlane {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
   }
 
-  private getOuraWebhookSubscriptionClient(): OuraWebhookSubscriptionClient | null {
-    if (this.ouraWebhookSubscriptionClient !== undefined) {
-      return this.ouraWebhookSubscriptionClient;
-    }
-
-    const provider = this.env.providers.oura;
-
-    if (!provider) {
-      this.ouraWebhookSubscriptionClient = null;
-      return null;
-    }
-
-    this.ouraWebhookSubscriptionClient = createOuraWebhookSubscriptionClient({
-      clientId: provider.clientId,
-      clientSecret: provider.clientSecret,
-    });
-
-    return this.ouraWebhookSubscriptionClient;
-  }
-
-  private resolveProviderWebhookUrl(provider: Pick<DeviceSyncProvider, "webhookPath">): string | null {
-    if (!provider.webhookPath) {
-      return null;
-    }
-
-    return new URL(provider.webhookPath.replace(/^\/+/u, ""), `${this.publicBaseUrl}/`).toString();
-  }
-
-  private async ensureHostedOuraWebhookSubscriptions(input: {
-    account: PublicDeviceSyncAccount;
+  private async ensureHostedWebhookSubscriptions(input: {
+    bestEffort: boolean;
     provider: DeviceSyncProvider;
   }): Promise<void> {
-    if (input.provider.provider !== "oura") {
+    const ensureSubscriptions = input.provider.webhookAdmin?.ensureSubscriptions;
+
+    if (!ensureSubscriptions) {
       return;
     }
 
-    const client = this.getOuraWebhookSubscriptionClient();
-    const verificationToken = this.env.ouraWebhookVerificationToken;
-    const webhookUrl = this.resolveProviderWebhookUrl(input.provider);
+    const operation = ensureSubscriptions({
+      publicBaseUrl: this.publicBaseUrl,
+      verificationToken: this.env.ouraWebhookVerificationToken,
+    });
 
-    if (!client || !verificationToken || !webhookUrl) {
+    if (!input.bestEffort) {
+      await operation;
       return;
     }
 
     try {
-      await client.ensure({
-        callbackUrl: webhookUrl,
-        verificationToken,
-        desired: OURA_DEFAULT_WEBHOOK_TARGETS,
-        renewIfExpiringWithinMs: 7 * 24 * 60 * 60_000,
-        pruneDuplicates: true,
-      });
+      await operation;
     } catch (error) {
-      console.warn("Failed to ensure hosted Oura webhook subscriptions.", {
-        accountId: input.account.id,
+      console.error("Failed to ensure hosted webhook subscriptions during connection setup.", {
+        provider: input.provider.provider,
         error,
       });
     }
+  }
+
+  private async resolveActiveWebhookAdminProviders(
+    userId: string,
+    input: {
+      provider?: string | null;
+      connectionId?: string | null;
+    },
+  ): Promise<DeviceSyncProvider[]> {
+    const providerNames = new Set<string>();
+
+    if (input.connectionId) {
+      const connection = await this.store.getConnectionForUser(userId, input.connectionId);
+
+      if (
+        connection
+        && connection.status !== "disconnected"
+        && (!input.provider || connection.provider === input.provider)
+        && this.registry.get(connection.provider)?.webhookAdmin?.ensureSubscriptions
+      ) {
+        providerNames.add(connection.provider);
+      }
+    } else {
+      const connections = await this.store.listConnectionsForUser(userId);
+
+      for (const connection of connections) {
+        if (connection.status === "disconnected") {
+          continue;
+        }
+
+        if (input.provider && connection.provider !== input.provider) {
+          continue;
+        }
+
+        if (this.registry.get(connection.provider)?.webhookAdmin?.ensureSubscriptions) {
+          providerNames.add(connection.provider);
+        }
+      }
+    }
+
+    return [...providerNames]
+      .map((providerName) => this.registry.get(providerName))
+      .filter((provider): provider is DeviceSyncProvider => Boolean(provider));
   }
 
   private createIngress() {
@@ -326,8 +345,8 @@ export class HostedDeviceSyncControlPlane {
             store: this.store,
           });
 
-          await this.ensureHostedOuraWebhookSubscriptions({
-            account,
+          await this.ensureHostedWebhookSubscriptions({
+            bestEffort: true,
             provider,
           });
         },
