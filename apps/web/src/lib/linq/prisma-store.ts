@@ -236,7 +236,7 @@ export class PrismaLinqControlPlaneStore {
 
   private async findBindingsByCanonicalRecipientPhone(recipientPhone: string): Promise<LinqBindingPrismaRecord[]> {
     const canonicalRecipientPhone = normalizeCanonicalRecipientPhone(recipientPhone);
-    const records = await this.prisma.linqRecipientBinding.findMany({
+    const exactCandidateRecords = await this.prisma.linqRecipientBinding.findMany({
       where: {
         recipientPhone: {
           in: buildRecipientPhoneLookupCandidates(canonicalRecipientPhone),
@@ -252,7 +252,30 @@ export class PrismaLinqControlPlaneStore {
       ],
     });
 
-    return records.filter((record) => normalizeStoredRecipientPhone(record.recipientPhone) === canonicalRecipientPhone);
+    const matchingExactCandidates = exactCandidateRecords.filter(
+      (record) => normalizeStoredRecipientPhone(record.recipientPhone) === canonicalRecipientPhone,
+    );
+    if (matchingExactCandidates.length > 0) {
+      return matchingExactCandidates;
+    }
+
+    // Compatibility fallback for older rows that may have been stored with punctuation or
+    // spacing differences before canonicalization was enforced. Keep this scoped to the
+    // cold-miss path so normal webhook routing and browser upserts stay off the full scan.
+    const fallbackRecords = await this.prisma.linqRecipientBinding.findMany({
+      orderBy: [
+        {
+          createdAt: "asc",
+        },
+        {
+          id: "asc",
+        },
+      ],
+    });
+
+    return fallbackRecords.filter(
+      (record) => normalizeStoredRecipientPhone(record.recipientPhone) === canonicalRecipientPhone,
+    );
   }
 }
 
