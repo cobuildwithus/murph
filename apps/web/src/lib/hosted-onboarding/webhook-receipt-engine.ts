@@ -1,10 +1,5 @@
-import { hostedOnboardingError } from "./errors";
 import {
-  readHostedWebhookReceiptState,
-  requireHostedWebhookDispatchEffectDispatch,
-  toHostedWebhookReceiptJsonInput,
-} from "./webhook-receipt-codec";
-import {
+  markHostedWebhookDispatchEffectQueued,
   markHostedWebhookReceiptCompleted,
   markHostedWebhookReceiptFailed,
   queueHostedWebhookReceiptSideEffects,
@@ -13,13 +8,11 @@ import {
 } from "./webhook-receipt-store";
 import {
   getHostedWebhookSideEffect,
-  markHostedWebhookReceiptSideEffectFailed,
   markHostedWebhookReceiptSideEffectSent,
+  markHostedWebhookReceiptSideEffectFailed,
   startHostedWebhookReceiptSideEffect,
-  toHostedWebhookReceiptClaim,
 } from "./webhook-receipt-transitions";
 import type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookPlan,
   HostedWebhookReceiptClaim,
@@ -168,69 +161,6 @@ async function drainHostedWebhookReceiptSideEffects(input: {
   }
 
   return currentClaim;
-}
-
-async function markHostedWebhookDispatchEffectQueued(input: {
-  claimedReceipt: HostedWebhookReceiptClaim;
-  dispatchEffect: HostedWebhookDispatchSideEffect;
-  enqueueDispatchEffect: HostedWebhookReceiptHandlers["enqueueDispatchEffect"];
-  eventId: string;
-  prisma: import("@prisma/client").PrismaClient;
-  sentAt: string;
-  source: string;
-}): Promise<HostedWebhookReceiptClaim> {
-  let currentClaim = input.claimedReceipt;
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const nextClaim = toHostedWebhookReceiptClaim(
-      markHostedWebhookReceiptSideEffectSent(
-        currentClaim.state,
-        input.dispatchEffect.effectId,
-        { dispatched: true },
-        input.sentAt,
-      ),
-    );
-    const updatedCount = await input.enqueueDispatchEffect({
-      dispatch: requireHostedWebhookDispatchEffectDispatch(input.dispatchEffect),
-      eventId: input.eventId,
-      nextPayloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
-      previousClaim: currentClaim,
-      prisma: input.prisma,
-      source: input.source,
-    });
-
-    if (updatedCount === 1) {
-      return nextClaim;
-    }
-
-    const latestReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
-      where: {
-        source_eventId: {
-          eventId: input.eventId,
-          source: input.source,
-        },
-      },
-      select: {
-        payloadJson: true,
-      },
-    });
-
-    if (!latestReceipt) {
-      break;
-    }
-
-    currentClaim = {
-      payloadJson: latestReceipt.payloadJson,
-      state: readHostedWebhookReceiptState(latestReceipt.payloadJson),
-    };
-  }
-
-  throw hostedOnboardingError({
-    code: "WEBHOOK_RECEIPT_UPDATE_FAILED",
-    message: "Hosted webhook receipt could not be updated safely.",
-    httpStatus: 503,
-    retryable: true,
-  });
 }
 
 function readHostedWebhookReceiptDrainError(

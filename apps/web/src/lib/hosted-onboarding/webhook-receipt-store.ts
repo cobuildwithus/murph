@@ -3,18 +3,22 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedWebhookReceiptState,
+  requireHostedWebhookDispatchEffectDispatch,
   toHostedWebhookReceiptJsonInput,
 } from "./webhook-receipt-codec";
 import {
   claimHostedWebhookReceipt,
   completeHostedWebhookReceipt,
   failHostedWebhookReceipt,
+  markHostedWebhookReceiptSideEffectSent,
   queueHostedWebhookReceiptSideEffects as queueHostedWebhookReceiptStateSideEffects,
   toHostedWebhookReceiptClaim,
 } from "./webhook-receipt-transitions";
 import type {
+  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookReceiptClaim,
+  HostedWebhookReceiptHandlers,
   HostedWebhookReceiptState,
   HostedWebhookSideEffect,
 } from "./webhook-receipt-types";
@@ -114,55 +118,80 @@ export async function updateHostedWebhookReceiptClaim(input: {
   prisma: PrismaClient;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
-  let currentClaim = input.claimedReceipt;
+  return compareAndSwapHostedWebhookReceiptClaim({
+    claimedReceipt: input.claimedReceipt,
+    decide: (currentClaim) => {
+      const nextState = input.mutate(currentClaim.state);
+      const nextClaim = toHostedWebhookReceiptClaim(nextState);
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const nextState = input.mutate(currentClaim.state);
-    const nextClaim = toHostedWebhookReceiptClaim(nextState);
-    const updatedReceipt = await input.prisma.hostedWebhookReceipt.updateMany({
-      where: {
-        source: input.source,
+      return {
+        nextClaim,
+        result: nextClaim,
+        type: "compare-and-swap",
+      };
+    },
+    eventId: input.eventId,
+    failure: buildHostedWebhookReceiptUpdateError,
+    prisma: input.prisma,
+    source: input.source,
+    updateReceipt: async ({ currentClaim, nextClaim }) =>
+      (
+        await input.prisma.hostedWebhookReceipt.updateMany({
+          where: {
+            source: input.source,
+            eventId: input.eventId,
+            payloadJson: {
+              equals: currentClaim.payloadJson ?? Prisma.JsonNull,
+            },
+          },
+          data: {
+            payloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+          },
+        })
+      ).count,
+  });
+}
+
+export async function markHostedWebhookDispatchEffectQueued(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  dispatchEffect: HostedWebhookDispatchSideEffect;
+  enqueueDispatchEffect: HostedWebhookReceiptHandlers["enqueueDispatchEffect"];
+  eventId: string;
+  prisma: PrismaClient;
+  sentAt: string;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim> {
+  return compareAndSwapHostedWebhookReceiptClaim({
+    claimedReceipt: input.claimedReceipt,
+    decide: (currentClaim) => {
+      const nextClaim = toHostedWebhookReceiptClaim(
+        markHostedWebhookReceiptSideEffectSent(
+          currentClaim.state,
+          input.dispatchEffect.effectId,
+          { dispatched: true },
+          input.sentAt,
+        ),
+      );
+
+      return {
+        nextClaim,
+        result: nextClaim,
+        type: "compare-and-swap",
+      };
+    },
+    eventId: input.eventId,
+    failure: buildHostedWebhookReceiptUpdateError,
+    prisma: input.prisma,
+    source: input.source,
+    updateReceipt: ({ currentClaim, nextClaim }) =>
+      input.enqueueDispatchEffect({
+        dispatch: requireHostedWebhookDispatchEffectDispatch(input.dispatchEffect),
         eventId: input.eventId,
-        payloadJson: {
-          equals: currentClaim.payloadJson ?? Prisma.JsonNull,
-        },
-      },
-      data: {
-        payloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
-      },
-    });
-
-    if (updatedReceipt.count === 1) {
-      return nextClaim;
-    }
-
-    const latestReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
-      where: {
-        source_eventId: {
-          eventId: input.eventId,
-          source: input.source,
-        },
-      },
-      select: {
-        payloadJson: true,
-      },
-    });
-
-    if (!latestReceipt) {
-      break;
-    }
-
-    currentClaim = {
-      payloadJson: latestReceipt.payloadJson,
-      state: readHostedWebhookReceiptState(latestReceipt.payloadJson),
-    };
-  }
-
-  throw hostedOnboardingError({
-    code: "WEBHOOK_RECEIPT_UPDATE_FAILED",
-    message: "Hosted webhook receipt could not be updated safely.",
-    httpStatus: 503,
-    retryable: true,
+        nextPayloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+        previousClaim: currentClaim,
+        prismaOrTransaction: input.prisma,
+        source: input.source,
+      }),
   });
 }
 
@@ -211,42 +240,58 @@ async function reclaimHostedWebhookReceipt(
         throw error;
       }
     }
-
-    const existingState = readHostedWebhookReceiptState(existingReceipt.payloadJson);
-
-    if (existingState.status === "completed" || existingState.status === "processing") {
-      return null;
-    }
-
-    const nextReceipt = claimHostedWebhookReceipt({
-      eventPayload: input.eventPayload,
-      previousState: existingState,
-      receivedAt,
-    });
-    const updatedReceipt = await input.prisma.hostedWebhookReceipt.updateMany({
-      where: {
-        source: input.source,
-        eventId: input.eventId,
-        payloadJson: {
-          equals: existingReceipt.payloadJson ?? Prisma.JsonNull,
-        },
+    return compareAndSwapHostedWebhookReceiptClaim({
+      claimedReceipt: {
+        payloadJson: existingReceipt.payloadJson,
+        state: readHostedWebhookReceiptState(existingReceipt.payloadJson),
       },
-      data: {
-        payloadJson: toHostedWebhookReceiptJsonInput(nextReceipt.payloadJson),
-      },
-    });
+      decide: (currentClaim) => {
+        if (
+          currentClaim.state.status === "completed" ||
+          currentClaim.state.status === "processing"
+        ) {
+          return {
+            result: null,
+            type: "return",
+          };
+        }
 
-    if (updatedReceipt.count === 1) {
-      return nextReceipt;
-    }
+        const nextClaim = claimHostedWebhookReceipt({
+          eventPayload: input.eventPayload,
+          previousState: currentClaim.state,
+          receivedAt,
+        });
+
+        return {
+          nextClaim,
+          result: nextClaim,
+          type: "compare-and-swap",
+        };
+      },
+      eventId: input.eventId,
+      failure: buildHostedWebhookReceiptClaimError,
+      maxAttempts: 3 - attempt,
+      prisma: input.prisma,
+      source: input.source,
+      updateReceipt: async ({ currentClaim, nextClaim }) =>
+        (
+          await input.prisma.hostedWebhookReceipt.updateMany({
+            where: {
+              source: input.source,
+              eventId: input.eventId,
+              payloadJson: {
+                equals: currentClaim.payloadJson ?? Prisma.JsonNull,
+              },
+            },
+            data: {
+              payloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
+            },
+          })
+        ).count,
+    });
   }
 
-  throw hostedOnboardingError({
-    code: "WEBHOOK_RECEIPT_CLAIM_FAILED",
-    message: "Hosted webhook receipt could not be claimed safely for processing.",
-    httpStatus: 503,
-    retryable: true,
-  });
+  throw buildHostedWebhookReceiptClaimError();
 }
 
 async function updateHostedWebhookReceiptStatus(input: {
@@ -275,5 +320,111 @@ async function updateHostedWebhookReceiptStatus(input: {
           }),
     prisma: input.prisma,
     source: input.source,
+  });
+}
+
+type HostedWebhookReceiptCompareAndSwapDecision<TResult> =
+  | {
+      result: TResult;
+      type: "return";
+    }
+  | {
+      nextClaim: HostedWebhookReceiptClaim;
+      result: TResult;
+      type: "compare-and-swap";
+    };
+
+async function compareAndSwapHostedWebhookReceiptClaim<TResult>(input: {
+  claimedReceipt: HostedWebhookReceiptClaim;
+  decide: (
+    currentClaim: HostedWebhookReceiptClaim,
+  ) => HostedWebhookReceiptCompareAndSwapDecision<TResult>;
+  eventId: string;
+  failure: () => Error;
+  maxAttempts?: number;
+  prisma: PrismaClient;
+  source: string;
+  updateReceipt: (input: {
+    currentClaim: HostedWebhookReceiptClaim;
+    nextClaim: HostedWebhookReceiptClaim;
+  }) => Promise<number>;
+}): Promise<TResult> {
+  let currentClaim = input.claimedReceipt;
+  const maxAttempts = Math.max(Math.trunc(input.maxAttempts ?? 3), 1);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const decision = input.decide(currentClaim);
+
+    if (decision.type === "return") {
+      return decision.result;
+    }
+
+    const updatedCount = await input.updateReceipt({
+      currentClaim,
+      nextClaim: decision.nextClaim,
+    });
+
+    if (updatedCount === 1) {
+      return decision.result;
+    }
+
+    const latestClaim = await readHostedWebhookReceiptClaim({
+      eventId: input.eventId,
+      prisma: input.prisma,
+      source: input.source,
+    });
+
+    if (!latestClaim) {
+      break;
+    }
+
+    currentClaim = latestClaim;
+  }
+
+  throw input.failure();
+}
+
+async function readHostedWebhookReceiptClaim(input: {
+  eventId: string;
+  prisma: PrismaClient;
+  source: string;
+}): Promise<HostedWebhookReceiptClaim | null> {
+  const latestReceipt = await input.prisma.hostedWebhookReceipt.findUnique({
+    where: {
+      source_eventId: {
+        eventId: input.eventId,
+        source: input.source,
+      },
+    },
+    select: {
+      payloadJson: true,
+    },
+  });
+
+  if (!latestReceipt) {
+    return null;
+  }
+
+  return {
+    payloadJson: latestReceipt.payloadJson,
+    state: readHostedWebhookReceiptState(latestReceipt.payloadJson),
+  };
+}
+
+function buildHostedWebhookReceiptClaimError(): Error {
+  return hostedOnboardingError({
+    code: "WEBHOOK_RECEIPT_CLAIM_FAILED",
+    message: "Hosted webhook receipt could not be claimed safely for processing.",
+    httpStatus: 503,
+    retryable: true,
+  });
+}
+
+function buildHostedWebhookReceiptUpdateError(): Error {
+  return hostedOnboardingError({
+    code: "WEBHOOK_RECEIPT_UPDATE_FAILED",
+    message: "Hosted webhook receipt could not be updated safely.",
+    httpStatus: 503,
+    retryable: true,
   });
 }
