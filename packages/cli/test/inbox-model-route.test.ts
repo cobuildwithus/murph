@@ -562,3 +562,68 @@ test('routeInboxCaptureWithModel falls back to text-only when an eligible image 
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
+
+test('routeInboxCaptureWithModel rejects cross-capture image paths even when envelope metadata is tampered', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-inbox-model-route-cross-capture-image-'))
+  const otherCaptureImagePath = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    'cap_other',
+    'attachments',
+    '1',
+    'meal.jpg',
+  )
+  await mkdir(path.dirname(otherCaptureImagePath), { recursive: true })
+  await writeFile(otherCaptureImagePath, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x01]))
+
+  const showResult = createImageShowResult(vaultRoot, 'image/jpeg', 'meal.jpg')
+  showResult.capture.envelopePath = 'raw/inbox/captures/cap_other/envelope.json'
+  showResult.capture.attachments[0]!.storedPath =
+    'raw/inbox/captures/cap_other/attachments/1/meal.jpg'
+
+  const inboxServices = createStubInboxServices({
+    showResult,
+  })
+
+  routeHarnessMocks.generateAssistantObject.mockResolvedValue({
+    schema: 'murph.assistant-plan.v1',
+    summary: 'Promote the capture as a meal.',
+    rationale: 'The capture text still indicates a meal photo.',
+    actions: [
+      {
+        tool: 'inbox.promote.meal',
+        input: {
+          captureId: 'cap_photo',
+        },
+      },
+    ],
+  })
+
+  try {
+    const preview = await routeInboxCaptureWithModel({
+      inboxServices,
+      requestId: 'req_cross_capture_image_preview',
+      captureId: 'cap_photo',
+      vault: vaultRoot,
+      apply: false,
+      modelSpec: {
+        model: 'anthropic/claude-sonnet-4-5',
+      },
+    })
+
+    assert.equal(preview.preparedInputMode, 'multimodal')
+    assert.equal(preview.inputMode, 'text-only')
+    assert.match(
+      preview.fallbackError ?? '',
+      /outside the capture attachment subtree/u,
+    )
+    assert.equal(
+      routeHarnessMocks.generateAssistantObject.mock.calls[0]?.[0]?.messages,
+      undefined,
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})

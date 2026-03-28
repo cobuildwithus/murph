@@ -332,7 +332,6 @@ async function prepareInboxPlacementInput(input: {
   const routingImages = await readPreparedRoutingImages({
     attachments: input.capture.attachments,
     captureId: input.capture.captureId,
-    envelopePath: input.capture.envelopePath,
     vaultRoot: input.vaultRoot,
   })
 
@@ -658,7 +657,6 @@ async function readRelativeTextFile(
 async function readPreparedRoutingImages(input: {
   attachments: InboxShowResult['capture']['attachments']
   captureId: string
-  envelopePath: string
   vaultRoot: string
 }): Promise<{
   images: PreparedRoutingImage[]
@@ -669,9 +667,9 @@ async function readPreparedRoutingImages(input: {
 
   for (const attachment of input.attachments) {
     const routingImage = getRoutingImageEligibility(attachment)
-    const storedPath = normalizeAnchoredVaultRelativePath(
+    const storedPath = normalizeCaptureStoredAttachmentPath(
       attachment.storedPath ?? null,
-      buildAllowedStoredPrefixes(input.captureId, input.envelopePath),
+      input.captureId,
     )
     if (!routingImage.eligible || !attachment.storedPath) {
       continue
@@ -738,30 +736,37 @@ function buildAllowedDerivedPrefixes(
   return prefixes.map((prefix) => `${prefix}/`)
 }
 
-function buildAllowedStoredPrefixes(
+function normalizeCaptureStoredAttachmentPath(
+  candidatePath: string | null | undefined,
   captureId: string,
-  envelopePath: string,
-): string[] {
-  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
+): string | null {
+  const normalizedCandidate = normalizeNullableString(candidatePath)
+  if (!normalizedCandidate) {
+    return null
+  }
 
-  const prefixes = [
-    normalizeRelativeVaultPath(
-      path.posix.join(
-        path.posix.dirname(normalizeRelativeVaultPath(envelopePath)),
-        'attachments',
-      ),
-    ),
-    normalizeRelativeVaultPath(
-      path.posix.join(
-        'raw',
-        'inbox',
-        'captures',
-        normalizedCaptureId,
-        'attachments',
-      ),
-    )
-  ]
-  return prefixes.map((prefix) => `${prefix}/`)
+  try {
+    const normalized = normalizeRelativeVaultPath(normalizedCandidate)
+    return isCaptureStoredAttachmentPath(normalized, captureId) ? normalized : null
+  } catch {
+    return null
+  }
+}
+
+function isCaptureStoredAttachmentPath(
+  normalizedStoredPath: string,
+  captureId: string,
+): boolean {
+  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
+  const segments = normalizedStoredPath.split('/')
+  const attachmentsIndex = segments.indexOf('attachments')
+  return (
+    segments[0] === 'raw' &&
+    segments[1] === 'inbox' &&
+    attachmentsIndex >= 3 &&
+    attachmentsIndex < segments.length - 1 &&
+    segments[attachmentsIndex - 1] === normalizedCaptureId
+  )
 }
 
 function normalizeAnchoredVaultRelativePath(

@@ -2886,6 +2886,59 @@ test('sendAssistantMessage blocks when the trusted guard payload copy no longer 
   assert.equal(session.session.providerSessionId, null)
 })
 
+test('sendAssistantMessage blocks rogue guard receipts that have no matching operation metadata file', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-rogue-guard-receipt-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+  await initializeVault({ vaultRoot })
+  const targetRelativePath = 'bank/rogue-receipt-target.md'
+  const targetPath = path.join(vaultRoot, targetRelativePath)
+  const operationId = 'op_fake_guard_receipt_without_metadata'
+
+  serviceMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    await mkdir(path.dirname(targetPath), { recursive: true })
+    await writeFile(targetPath, 'provider direct write\n', 'utf8')
+    await writeGuardReceipt({
+      operationId,
+      createdAt: '2026-03-28T00:00:00.000Z',
+      updatedAt: '2026-03-28T00:00:01.000Z',
+      actions: [
+        {
+          kind: 'text_write',
+          targetRelativePath,
+          payload: 'provider direct write\n',
+        },
+      ],
+    })
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'thread-rogue-guard-receipt',
+      response: 'assistant reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:rogue-guard-receipt',
+    prompt: 'Try to authorize a direct write with a rogue guard receipt.',
+  })
+
+  assertBlockedAssistantResult(result, {
+    guardFailureReason: 'invalid_write_operation_metadata',
+    guardFailurePathPattern: /^op_fake_guard_receipt_without_metadata\.json$/u,
+    paths: [targetRelativePath],
+  })
+  await assert.rejects(readFile(targetPath, 'utf8'), /ENOENT/u)
+})
+
 test('sendAssistantMessage blocks brand-new fake committed metadata from authorizing direct bank writes', async () => {
   const parent = await mkdtemp(
     path.join(tmpdir(), 'murph-assistant-service-fake-committed-metadata-'),

@@ -383,13 +383,12 @@ export async function resolvePromotionAttachmentFilePath(
 
 function normalizeAnchoredPromotionAttachmentPath(
   capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
-  attachment: RuntimeAttachmentRecord,
+  _attachment: RuntimeAttachmentRecord,
   storedPath: string,
 ): string | null {
   try {
     const normalizedStoredPath = normalizeRelativeVaultPath(storedPath)
-    const prefixes = buildAllowedPromotionAttachmentPrefixes(capture, attachment)
-    return prefixes.some((prefix) => normalizedStoredPath.startsWith(prefix))
+    return isCaptureAttachmentSubtreePath(normalizedStoredPath, capture.captureId)
       ? normalizedStoredPath
       : null
   } catch {
@@ -397,21 +396,20 @@ function normalizeAnchoredPromotionAttachmentPath(
   }
 }
 
-function buildAllowedPromotionAttachmentPrefixes(
-  capture: Pick<RuntimeCaptureRecord, 'captureId' | 'envelopePath'>,
-  attachment: RuntimeAttachmentRecord,
-): string[] {
-  const captureId = normalizeOpaquePathSegment(capture.captureId, 'Capture id')
-  const envelopePath = normalizeRelativeVaultPath(capture.envelopePath)
-  const prefixes = [
-    normalizeRelativeVaultPath(
-      path.posix.join(path.posix.dirname(envelopePath), 'attachments'),
-    ),
-    normalizeRelativeVaultPath(
-      path.posix.join('raw', 'inbox', 'captures', captureId, 'attachments'),
-    ),
-  ]
-  return prefixes.map((prefix) => `${prefix}/`)
+function isCaptureAttachmentSubtreePath(
+  normalizedStoredPath: string,
+  captureId: string,
+): boolean {
+  const normalizedCaptureId = normalizeOpaquePathSegment(captureId, 'Capture id')
+  const segments = normalizedStoredPath.split('/')
+  const attachmentsIndex = segments.indexOf('attachments')
+  return (
+    segments[0] === 'raw' &&
+    segments[1] === 'inbox' &&
+    attachmentsIndex >= 3 &&
+    attachmentsIndex < segments.length - 1 &&
+    segments[attachmentsIndex - 1] === normalizedCaptureId
+  )
 }
 
 const canonicalMealManifestSchema = z.object({

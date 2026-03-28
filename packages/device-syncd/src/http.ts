@@ -678,6 +678,7 @@ export function buildCallbackErrorRedirectLocation(input: {
   }
 
   const destination = new URL(input.returnTo);
+  destination.searchParams.delete("deviceSyncErrorMessage");
   destination.searchParams.set("deviceSyncStatus", "error");
   destination.searchParams.set("deviceSyncProvider", input.provider);
   destination.searchParams.set("deviceSyncError", input.errorCode);

@@ -242,4 +242,29 @@ describe("device sync callback redirect helpers", () => {
     expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_CALLBACK_REJECTED");
     expect(destination.searchParams.get("deviceSyncErrorMessage")).toBeNull();
   });
+
+  it("scrubs stale callback error text already present in returnTo", () => {
+    const response = httpModule.errorToCallbackRedirect({
+      returnTo:
+        "https://app.example.test/settings/devices?tab=wearables&deviceSyncErrorMessage=leak",
+      provider: "demo",
+      error: mocks.deviceSyncError({
+        code: "OAUTH_CALLBACK_REJECTED",
+        message: "The user canceled the OAuth flow.",
+        retryable: false,
+        httpStatus: 400,
+      }),
+    });
+
+    expect(response).not.toBeNull();
+
+    const location = response?.headers.get("location");
+
+    expect(location).toBeTruthy();
+
+    const destination = new URL(location!);
+    expect(destination.searchParams.get("tab")).toBe("wearables");
+    expect(destination.searchParams.get("deviceSyncError")).toBe("OAUTH_CALLBACK_REJECTED");
+    expect(destination.searchParams.get("deviceSyncErrorMessage")).toBeNull();
+  });
 });
