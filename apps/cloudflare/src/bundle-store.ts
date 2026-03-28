@@ -17,6 +17,11 @@ export interface HostedBundleStore {
   writeBundle(kind: HostedExecutionBundleKind, plaintext: Uint8Array): Promise<HostedExecutionBundleRef>;
 }
 
+export interface HostedArtifactStore {
+  readArtifact(sha256: string): Promise<Uint8Array | null>;
+  writeArtifact(sha256: string, plaintext: Uint8Array): Promise<void>;
+}
+
 export interface HostedUserEnvStore {
   clearUserEnv(userId: string): Promise<void>;
   readUserEnv(userId: string): Promise<Uint8Array | null>;
@@ -62,6 +67,38 @@ export function createHostedBundleStore(input: {
   };
 }
 
+export function createHostedArtifactStore(input: {
+  bucket: R2BucketLike;
+  key: Uint8Array;
+  keyId: string;
+  userId: string;
+}): HostedArtifactStore {
+  return {
+    async readArtifact(sha256) {
+      return readEncryptedR2Payload({
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: artifactObjectKey(input.userId, sha256),
+      });
+    },
+
+    async writeArtifact(sha256, plaintext) {
+      const actualSha256 = sha256Hex(plaintext);
+      if (actualSha256 !== sha256) {
+        throw new Error(`Hosted artifact hash mismatch: expected ${sha256}, got ${actualSha256}.`);
+      }
+
+      await writeEncryptedR2Payload({
+        bucket: input.bucket,
+        cryptoKey: input.key,
+        key: artifactObjectKey(input.userId, sha256),
+        keyId: input.keyId,
+        plaintext,
+      });
+    },
+  };
+}
+
 export function createHostedUserEnvStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
@@ -94,6 +131,10 @@ export function createHostedUserEnvStore(input: {
 
 function bundleObjectKey(kind: HostedExecutionBundleKind, hash: string): string {
   return `bundles/${kind}/${hash}.bundle.json`;
+}
+
+function artifactObjectKey(userId: string, sha256: string): string {
+  return `users/${encodeURIComponent(userId)}/artifacts/${sha256}.artifact.bin`;
 }
 
 function userEnvObjectKey(userId: string): string {

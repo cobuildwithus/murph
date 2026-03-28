@@ -3,21 +3,57 @@ import path from "node:path";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
 
-import type { HostedExecutionBundleKind } from "./hosted-execution.ts";
-
-export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v1";
+export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v2";
+export const HOSTED_BUNDLE_LEGACY_SCHEMA = "murph.hosted-bundle.v1";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 
-interface HostedBundleArchiveFile {
+export type HostedExecutionBundleKind = "vault" | "agent-state";
+
+export interface HostedExecutionBundleRef {
+  hash: string;
+  key: string;
+  size: number;
+  updatedAt: string;
+}
+
+export interface HostedBundleArtifactRef {
+  byteSize: number;
+  sha256: string;
+}
+
+export interface HostedBundleArtifactLocation {
+  path: string;
+  ref: HostedBundleArtifactRef;
+  root: string;
+}
+
+export interface HostedBundleArtifactSnapshotInput {
+  absolutePath: string;
+  bytes: Uint8Array;
+  path: string;
+  root: string;
+}
+
+export interface HostedBundleArtifactRestoreInput extends HostedBundleArtifactLocation {}
+
+interface HostedBundleArchiveInlineFile {
   contentsBase64: string;
   path: string;
   root: string;
 }
 
+interface HostedBundleArchiveExternalFile {
+  artifact: HostedBundleArtifactRef;
+  path: string;
+  root: string;
+}
+
+type HostedBundleArchiveFile = HostedBundleArchiveInlineFile | HostedBundleArchiveExternalFile;
+
 interface HostedBundleArchive {
   files: HostedBundleArchiveFile[];
   kind: HostedExecutionBundleKind;
-  schema: typeof HOSTED_BUNDLE_SCHEMA;
+  schema: typeof HOSTED_BUNDLE_SCHEMA | typeof HOSTED_BUNDLE_LEGACY_SCHEMA;
 }
 
 export interface HostedBundleSnapshotRootInput {
@@ -32,6 +68,7 @@ export interface HostedBundleRestoreRootMap {
 }
 
 export async function snapshotHostedBundleRoots(input: {
+  externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   kind: HostedExecutionBundleKind;
   roots: readonly HostedBundleSnapshotRootInput[];
 }): Promise<Uint8Array | null> {
@@ -50,6 +87,7 @@ export async function snapshotHostedBundleRoots(input: {
     includedRootCount += 1;
     files.push(
       ...(await collectBundleFiles({
+        externalizeFile: input.externalizeFile,
         root: root.root,
         rootKey: root.rootKey,
         shouldIncludeRelativePath: root.shouldIncludeRelativePath ?? (() => true),
@@ -69,6 +107,7 @@ export async function snapshotHostedBundleRoots(input: {
 }
 
 export async function restoreHostedBundleRoots(input: {
+  artifactResolver?: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
   bytes: Uint8Array | ArrayBuffer;
   expectedKind: HostedExecutionBundleKind;
   ignoredRoots?: readonly string[];
@@ -96,6 +135,33 @@ export async function restoreHostedBundleRoots(input: {
 
     const absolutePath = resolveHostedBundleRestorePath(root, file.path);
     await mkdir(path.dirname(absolutePath), { recursive: true });
+
+    if (isHostedBundleArtifactEntry(file)) {
+      if (!input.artifactResolver) {
+        throw new Error(
+          `Hosted bundle artifact ${file.root}:${file.path} requires an artifact resolver.`,
+        );
+      }
+
+      const resolved = await input.artifactResolver({
+        path: file.path,
+        ref: file.artifact,
+        root: file.root,
+      });
+      const resolvedBytes = toHostedBundleBytes(resolved);
+      assertHostedBundleArtifactIntegrity({
+        bytes: resolvedBytes,
+        path: file.path,
+        ref: file.artifact,
+        root: file.root,
+      });
+      await writeFile(
+        absolutePath,
+        Buffer.from(resolvedBytes),
+      );
+      continue;
+    }
+
     await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
   }
 }
@@ -124,7 +190,7 @@ export function readHostedBundleTextFile(input: {
     && entry.path === normalizedPath
   ));
 
-  if (!file) {
+  if (!file || isHostedBundleArtifactEntry(file)) {
     return null;
   }
 
@@ -169,6 +235,31 @@ export function writeHostedBundleTextFile(input: {
   });
 }
 
+export function listHostedBundleArtifacts(input: {
+  bytes: Uint8Array | ArrayBuffer | null;
+  expectedKind: HostedExecutionBundleKind;
+}): HostedBundleArtifactLocation[] {
+  if (!input.bytes) {
+    return [];
+  }
+
+  const archive = parseHostedBundleArchive(input.bytes);
+
+  if (archive.kind !== input.expectedKind) {
+    throw new Error(
+      `Hosted bundle kind mismatch: expected ${input.expectedKind}, got ${archive.kind}.`,
+    );
+  }
+
+  return archive.files
+    .filter(isHostedBundleArtifactEntry)
+    .map((entry) => ({
+      path: entry.path,
+      ref: entry.artifact,
+      root: entry.root,
+    }));
+}
+
 export function encodeHostedBundleBase64(value: Uint8Array | ArrayBuffer | null): string | null {
   if (!value) {
     return null;
@@ -189,9 +280,14 @@ export function sha256HostedBundleHex(bytes: Uint8Array | ArrayBuffer): string {
 
 function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundleArchive {
   const buffer = Buffer.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
-  const parsed = JSON.parse(gunzipSync(buffer).toString("utf8")) as Partial<HostedBundleArchive>;
+  const parsed = JSON.parse(gunzipSync(buffer).toString("utf8")) as Partial<HostedBundleArchive> & {
+    schema?: string;
+  };
 
-  if (parsed.schema !== HOSTED_BUNDLE_SCHEMA || !Array.isArray(parsed.files)) {
+  if (
+    (parsed.schema !== HOSTED_BUNDLE_SCHEMA && parsed.schema !== HOSTED_BUNDLE_LEGACY_SCHEMA)
+    || !Array.isArray(parsed.files)
+  ) {
     throw new Error("Hosted bundle archive is invalid.");
   }
 
@@ -200,25 +296,52 @@ function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundle
   }
 
   return {
-    files: sortHostedBundleFiles(parsed.files.map((file) => {
-      if (
-        !file
-        || typeof file.path !== "string"
-        || typeof file.root !== "string"
-        || typeof file.contentsBase64 !== "string"
-      ) {
-        throw new Error("Hosted bundle archive contains an invalid file entry.");
-      }
-
-      return {
-        contentsBase64: file.contentsBase64,
-        path: normalizeBundlePath(file.path),
-        root: file.root,
-      };
-    })),
+    files: sortHostedBundleFiles(parsed.files.map((file) => parseHostedBundleArchiveFile(file))),
     kind: parsed.kind,
     schema: HOSTED_BUNDLE_SCHEMA,
   };
+}
+
+function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
+  if (!file || typeof file !== "object" || Array.isArray(file)) {
+    throw new Error("Hosted bundle archive contains an invalid file entry.");
+  }
+
+  const record = file as Record<string, unknown>;
+  if (typeof record.path !== "string" || typeof record.root !== "string") {
+    throw new Error("Hosted bundle archive contains an invalid file entry.");
+  }
+
+  const normalized = {
+    path: normalizeBundlePath(record.path),
+    root: record.root,
+  };
+
+  if (typeof record.contentsBase64 === "string") {
+    return {
+      contentsBase64: record.contentsBase64,
+      ...normalized,
+    };
+  }
+
+  const artifactRecord = record.artifact;
+  if (
+    artifactRecord
+    && typeof artifactRecord === "object"
+    && !Array.isArray(artifactRecord)
+    && typeof (artifactRecord as Record<string, unknown>).sha256 === "string"
+    && typeof (artifactRecord as Record<string, unknown>).byteSize === "number"
+  ) {
+    return {
+      artifact: {
+        byteSize: (artifactRecord as Record<string, unknown>).byteSize as number,
+        sha256: (artifactRecord as Record<string, unknown>).sha256 as string,
+      },
+      ...normalized,
+    };
+  }
+
+  throw new Error("Hosted bundle archive contains an invalid file entry.");
 }
 
 function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array {
@@ -236,6 +359,7 @@ function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array 
 }
 
 async function collectBundleFiles(input: {
+  externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
   root: string;
   rootKey: string;
   shouldIncludeRelativePath: (relativePath: string) => boolean;
@@ -271,9 +395,29 @@ async function collectBundleFiles(input: {
       continue;
     }
 
+    const bytes = new Uint8Array(await readFile(absolutePath));
+    const normalizedPath = normalizeBundlePath(relativePath);
+    const artifact = input.externalizeFile
+      ? await input.externalizeFile({
+          absolutePath,
+          bytes,
+          path: normalizedPath,
+          root: input.rootKey,
+        })
+      : null;
+
+    if (artifact) {
+      files.push({
+        artifact,
+        path: normalizedPath,
+        root: input.rootKey,
+      });
+      continue;
+    }
+
     files.push({
-      contentsBase64: (await readFile(absolutePath)).toString("base64"),
-      path: normalizeBundlePath(relativePath),
+      contentsBase64: Buffer.from(bytes).toString("base64"),
+      path: normalizedPath,
       root: input.rootKey,
     });
   }
@@ -334,6 +478,36 @@ function sortHostedBundleFiles(files: readonly HostedBundleArchiveFile[]): Hoste
 
     return left.path.localeCompare(right.path);
   });
+}
+
+function isHostedBundleArtifactEntry(
+  value: HostedBundleArchiveFile,
+): value is HostedBundleArchiveExternalFile {
+  return "artifact" in value;
+}
+
+function assertHostedBundleArtifactIntegrity(input: {
+  bytes: Uint8Array;
+  path: string;
+  ref: HostedBundleArtifactRef;
+  root: string;
+}): void {
+  if (input.bytes.byteLength !== input.ref.byteSize) {
+    throw new Error(
+      `Hosted bundle artifact ${input.root}:${input.path} size mismatch: expected ${input.ref.byteSize}, got ${input.bytes.byteLength}.`,
+    );
+  }
+
+  const actualSha256 = sha256HostedBundleHex(input.bytes);
+  if (actualSha256 !== input.ref.sha256) {
+    throw new Error(
+      `Hosted bundle artifact ${input.root}:${input.path} hash mismatch: expected ${input.ref.sha256}, got ${actualSha256}.`,
+    );
+  }
+}
+
+function toHostedBundleBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
+  return value instanceof Uint8Array ? value : new Uint8Array(value);
 }
 
 async function directoryExists(directoryPath: string): Promise<boolean> {

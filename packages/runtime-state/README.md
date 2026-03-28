@@ -14,7 +14,9 @@ machine-local storage next to a vault.
 ## Contract
 
 - runtime state under vault `.runtime/**` is local-only and rebuildable
-- hosted `agent-state` snapshots do not bundle vault `.runtime/**`; they keep only sibling `assistant-state` data plus the minimal operator-home hosted config needed for explicit `member.activated` bootstrap, while hosted per-user env overrides live in a separate encrypted object
+- hosted execution now snapshots one encrypted workspace bundle in the `vault` slot: canonical `vault/**`, durable `vault/.runtime/**`, sibling `assistant-state/**`, and the minimal operator-home hosted config needed for explicit `member.activated` bootstrap
+- large raw artifacts under `vault/raw/**` may be externalized into separate encrypted content-addressed objects and restored back onto disk during hosted execution
+- hosted per-user env overrides live in a separate encrypted object and are not folded into the workspace snapshot
 - canonical health truth never moves into `.runtime`
 - downstream packages should consume these helpers instead of inventing their
   own per-package runtime path conventions

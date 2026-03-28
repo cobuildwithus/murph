@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
@@ -5,30 +6,79 @@ import { resolveAssistantStatePaths } from "./assistant-state.ts";
 import {
   restoreHostedBundleRoots,
   snapshotHostedBundleRoots,
+  type HostedBundleArtifactRef,
+  type HostedBundleArtifactRestoreInput,
+  type HostedBundleArtifactSnapshotInput,
 } from "./hosted-bundle.ts";
 
-const AGENT_STATE_ASSISTANT_ROOT = "assistant-state";
-const AGENT_STATE_OPERATOR_HOME_ROOT = "operator-home";
+const WORKSPACE_ASSISTANT_ROOT = "assistant-state";
+const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
+const LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT = "vault-runtime";
+const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
+
+export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
+  ref: HostedBundleArtifactRef;
+}
+
+export type HostedWorkspaceArtifactResolver = (
+  input: HostedBundleArtifactRestoreInput,
+) => Promise<Uint8Array | ArrayBuffer>;
 
 export async function snapshotHostedExecutionContext(input: {
+  artifactSink?: (input: HostedWorkspaceArtifactPersistInput) => Promise<void>;
   operatorHomeRoot?: string | null;
   vaultRoot: string;
 }): Promise<{
-  agentStateBundle: Uint8Array | null;
+  agentStateBundle: null;
   vaultBundle: Uint8Array;
 }> {
   const vaultRoot = path.resolve(input.vaultRoot);
   const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
+  const artifactSink = input.artifactSink;
   const vaultBundle = await snapshotHostedBundleRoots({
+    externalizeFile: artifactSink
+      ? (() => {
+          const persistArtifact = artifactSink;
+          return async (artifact) => {
+            if (!shouldExternalizeWorkspaceArtifact(artifact)) {
+              return null;
+            }
+
+            const ref = createHostedWorkspaceArtifactRef(artifact.bytes);
+            await persistArtifact({
+              ...artifact,
+              ref,
+            });
+            return ref;
+          };
+        })()
+      : undefined,
     kind: "vault",
     roots: [
       {
         root: vaultRoot,
         rootKey: "vault",
         shouldIncludeRelativePath(relativePath) {
-          return !shouldSkipVaultRelativePath(relativePath);
+          return shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath);
         },
       },
+      {
+        optional: true,
+        root: assistantStateRoot,
+        rootKey: WORKSPACE_ASSISTANT_ROOT,
+      },
+      ...(input.operatorHomeRoot
+        ? [
+            {
+              optional: true,
+              root: path.resolve(input.operatorHomeRoot),
+              rootKey: WORKSPACE_OPERATOR_HOME_ROOT,
+              shouldIncludeRelativePath(relativePath: string) {
+                return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
+              },
+            },
+          ]
+        : []),
     ],
   });
 
@@ -37,19 +87,14 @@ export async function snapshotHostedExecutionContext(input: {
   }
 
   return {
-    agentStateBundle: await snapshotHostedBundleRoots({
-      kind: "agent-state",
-      roots: buildHostedAgentStateRoots({
-        assistantStateRoot,
-        operatorHomeRoot: input.operatorHomeRoot,
-      }),
-    }),
+    agentStateBundle: null,
     vaultBundle,
   };
 }
 
 export async function restoreHostedExecutionContext(input: {
   agentStateBundle?: Uint8Array | ArrayBuffer | null;
+  artifactResolver?: HostedWorkspaceArtifactResolver;
   vaultBundle?: Uint8Array | ArrayBuffer | null;
   workspaceRoot: string;
 }): Promise<{
@@ -68,9 +113,12 @@ export async function restoreHostedExecutionContext(input: {
 
   if (input.vaultBundle) {
     await restoreHostedBundleRoots({
+      artifactResolver: input.artifactResolver,
       bytes: input.vaultBundle,
       expectedKind: "vault",
       roots: {
+        [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
+        [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
         vault: vaultRoot,
       },
     });
@@ -80,9 +128,10 @@ export async function restoreHostedExecutionContext(input: {
     await restoreHostedBundleRoots({
       bytes: input.agentStateBundle,
       expectedKind: "agent-state",
+      ignoredRoots: [LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT],
       roots: {
-        [AGENT_STATE_ASSISTANT_ROOT]: assistantStateRoot,
-        [AGENT_STATE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
+        [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
+        [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,
       },
     });
   }
@@ -94,42 +143,49 @@ export async function restoreHostedExecutionContext(input: {
   };
 }
 
-function shouldSkipVaultRelativePath(relativePath: string): boolean {
+function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {
   return (
-    relativePath === ".git"
-    || relativePath.startsWith(`.git${path.posix.sep}`)
-    || relativePath === ".runtime"
-    || relativePath.startsWith(`.runtime${path.posix.sep}`)
-    || relativePath === "exports/packs"
-    || relativePath.startsWith(`exports/packs${path.posix.sep}`)
-    || path.posix.basename(relativePath) === ".env"
+    !isDotGitRelativePath(relativePath)
+    && !isEnvironmentRelativePath(relativePath)
+    && !isExportPackRelativePath(relativePath)
+    && !isEphemeralVaultRuntimeRelativePath(relativePath)
+  );
+}
+
+function isDotGitRelativePath(relativePath: string): boolean {
+  return relativePath === ".git" || relativePath.startsWith(`.git${path.posix.sep}`);
+}
+
+function isEnvironmentRelativePath(relativePath: string): boolean {
+  return (
+    path.posix.basename(relativePath) === ".env"
     || path.posix.basename(relativePath).startsWith(".env.")
   );
 }
 
-function buildHostedAgentStateRoots(input: {
-  assistantStateRoot: string;
-  operatorHomeRoot?: string | null;
-}) {
-  return [
-    {
-      optional: true,
-      root: input.assistantStateRoot,
-      rootKey: AGENT_STATE_ASSISTANT_ROOT,
-    },
-    ...(input.operatorHomeRoot
-      ? [
-          {
-            optional: true,
-            root: path.resolve(input.operatorHomeRoot),
-            rootKey: AGENT_STATE_OPERATOR_HOME_ROOT,
-            shouldIncludeRelativePath(relativePath: string) {
-              return shouldIncludeHostedOperatorHomeRelativePath(relativePath);
-            },
-          },
-        ]
-      : []),
-  ];
+function isExportPackRelativePath(relativePath: string): boolean {
+  return (
+    relativePath === "exports/packs"
+    || relativePath.startsWith(`exports/packs${path.posix.sep}`)
+  );
+}
+
+function isEphemeralVaultRuntimeRelativePath(relativePath: string): boolean {
+  if (!(relativePath === ".runtime" || relativePath.startsWith(`.runtime${path.posix.sep}`))) {
+    return false;
+  }
+
+  const baseName = path.posix.basename(relativePath);
+  return (
+    relativePath.startsWith(`.runtime/tmp${path.posix.sep}`)
+    || relativePath.startsWith(`.runtime/cache${path.posix.sep}`)
+    || baseName === "stdout.log"
+    || baseName === "stderr.log"
+    || baseName.endsWith(".pid")
+    || baseName.endsWith(".lock")
+    || baseName.endsWith(".sock")
+    || baseName.endsWith(".tmp")
+  );
 }
 
 function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): boolean {
@@ -138,3 +194,74 @@ function shouldIncludeHostedOperatorHomeRelativePath(relativePath: string): bool
     || relativePath === ".murph/config.json"
   );
 }
+
+function shouldExternalizeWorkspaceArtifact(input: HostedBundleArtifactSnapshotInput): boolean {
+  if (input.root !== "vault" || !input.path.startsWith(`raw${path.posix.sep}`)) {
+    return false;
+  }
+
+  if (isDefinitelyBinaryRawArtifact(input.path)) {
+    return true;
+  }
+
+  if (input.bytes.byteLength < RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES) {
+    return false;
+  }
+
+  return !isLikelyTextBytes(input.bytes);
+}
+
+function isDefinitelyBinaryRawArtifact(relativePath: string): boolean {
+  const extension = path.posix.extname(relativePath).toLowerCase();
+  return BINARY_RAW_ARTIFACT_EXTENSIONS.has(extension);
+}
+
+function isLikelyTextBytes(bytes: Uint8Array): boolean {
+  const sample = bytes.subarray(0, Math.min(bytes.byteLength, 8 * 1024));
+
+  for (const value of sample) {
+    if (value === 0) {
+      return false;
+    }
+  }
+
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(sample);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createHostedWorkspaceArtifactRef(bytes: Uint8Array): HostedBundleArtifactRef {
+  return {
+    byteSize: bytes.byteLength,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+const BINARY_RAW_ARTIFACT_EXTENSIONS = new Set([
+  ".aac",
+  ".avi",
+  ".bmp",
+  ".doc",
+  ".docx",
+  ".gif",
+  ".heic",
+  ".heif",
+  ".jpeg",
+  ".jpg",
+  ".m4a",
+  ".mov",
+  ".mp3",
+  ".mp4",
+  ".ogg",
+  ".opus",
+  ".pdf",
+  ".png",
+  ".tif",
+  ".tiff",
+  ".wav",
+  ".webm",
+  ".webp",
+]);

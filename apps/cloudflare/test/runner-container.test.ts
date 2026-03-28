@@ -71,6 +71,12 @@ describe("RunnerContainer", () => {
           userId: "member_123",
         },
       },
+      "artifacts.worker": {
+        method: "artifactsWorker",
+        params: {
+          userId: "member_123",
+        },
+      },
       "outbox.worker": {
         method: "outboxWorker",
         params: {

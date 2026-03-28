@@ -18,6 +18,7 @@ export interface HostedExecutionCommitCallback {
 }
 
 export interface HostedAssistantRuntimeConfig {
+  artifactsBaseUrl?: string | null;
   commitBaseUrl?: string | null;
   commitTimeoutMs?: number | null;
   emailBaseUrl?: string | null;
@@ -51,6 +52,7 @@ export interface HostedBootstrapResult {
 }
 
 export interface NormalizedHostedAssistantRuntimeConfig {
+  artifactsBaseUrl: string;
   commitBaseUrl: string;
   commitTimeoutMs: number | null;
   emailBaseUrl: string;

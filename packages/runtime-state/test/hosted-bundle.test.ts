@@ -3,12 +3,13 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
-import { test } from "vitest";
+import { expect, test } from "vitest";
 
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   HOSTED_BUNDLE_SCHEMA,
+  listHostedBundleArtifacts,
   readHostedBundleTextFile,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
@@ -76,43 +77,74 @@ test("hosted bundle helpers round-trip multi-root archives and base64 helpers", 
   }
 });
 
-test("hosted execution bundles keep only assistant state and operator config inside agent-state", async () => {
+test("hosted execution snapshots collapse into one workspace bundle and externalize raw artifacts", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-"));
   const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-restore-"));
+  const artifacts = new Map<string, Uint8Array>();
 
   try {
     const vaultRoot = path.join(workspaceRoot, "vault");
     const assistantStateRoot = resolveAssistantStatePaths(vaultRoot).assistantStateRoot;
     const operatorHomeRoot = path.join(workspaceRoot, "home");
+    const rawAttachmentPath = path.join(
+      vaultRoot,
+      "raw",
+      "inbox",
+      "2026-03-28",
+      "capture_123",
+      "attachments",
+      "report.pdf",
+    );
     await mkdir(path.join(vaultRoot, ".runtime", "device-syncd"), { recursive: true });
-    await mkdir(path.join(vaultRoot, ".runtime", "inboxd"), { recursive: true });
-    await mkdir(path.join(vaultRoot, ".runtime", "parsers"), { recursive: true });
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
     await mkdir(path.join(vaultRoot, "exports", "packs"), { recursive: true });
     await mkdir(assistantStateRoot, { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      await writeFile(path.join(vaultRoot, ".runtime", artifact.relativePath), artifact.contents);
-    }
+    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "control-token"), "control-token\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "stdout.log"), "skip-log\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
     await writeFile(path.join(vaultRoot, "exports", "packs", "bundle.zip"), "skip-me\n");
+    await writeFile(path.join(vaultRoot, "raw", "notes.json"), "{\"keep\":true}\n");
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
     await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
     await writeFile(
       path.join(operatorHomeRoot, ".murph", "hosted", "user-env.json"),
-      "{\"schema\":\"murph.hosted-user-env.v1\",\"updatedAt\":\"2026-03-26T12:00:00.000Z\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
+      "{\"schema\":\"murph.hosted-user-env.v1\",\"env\":{\"OPENAI_API_KEY\":\"sk-user\"}}\n",
     );
 
     const bundles = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
       operatorHomeRoot,
       vaultRoot,
     });
 
-    assert.ok(bundles.agentStateBundle);
+    assert.equal(bundles.agentStateBundle, null);
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.agentStateBundle,
-        expectedKind: "agent-state",
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
+        path: "vault.json",
+        root: "vault",
+      }),
+      "{\"schema\":\"vault\"}\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
+        path: ".runtime/device-syncd/control-token",
+        root: "vault",
+      }),
+      "control-token\n",
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
         path: "automation.json",
         root: "assistant-state",
       }),
@@ -120,8 +152,8 @@ test("hosted execution bundles keep only assistant state and operator config ins
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.agentStateBundle,
-        expectedKind: "agent-state",
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
         path: ".murph/config.json",
         root: "operator-home",
       }),
@@ -129,26 +161,42 @@ test("hosted execution bundles keep only assistant state and operator config ins
     );
     assert.equal(
       readHostedBundleTextFile({
-        bytes: bundles.agentStateBundle,
-        expectedKind: "agent-state",
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
         path: ".murph/hosted/user-env.json",
         root: "operator-home",
       }),
       null,
     );
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      assert.equal(
-        readHostedBundleTextFile({
-          bytes: bundles.agentStateBundle,
-          expectedKind: "agent-state",
-          path: artifact.relativePath,
-          root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
-        }),
-        null,
-      );
-    }
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
+        path: "raw/inbox/2026-03-28/capture_123/attachments/report.pdf",
+        root: "vault",
+      }),
+      null,
+    );
+
+    const artifactRefs = listHostedBundleArtifacts({
+      bytes: bundles.vaultBundle,
+      expectedKind: "vault",
+    });
+    assert.deepEqual(
+      artifactRefs.map((artifact) => artifact.path),
+      ["raw/inbox/2026-03-28/capture_123/attachments/report.pdf"],
+    );
+    assert.equal(artifacts.has(artifactRefs[0]!.ref.sha256), true);
 
     const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error(`Missing artifact ${ref.sha256}.`);
+        }
+
+        return bytes;
+      },
       agentStateBundle: bundles.agentStateBundle,
       vaultBundle: bundles.vaultBundle,
       workspaceRoot: restoreRoot,
@@ -159,6 +207,10 @@ test("hosted execution bundles keep only assistant state and operator config ins
       "{\"schema\":\"vault\"}\n",
     );
     assert.equal(
+      await readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "control-token"), "utf8"),
+      "control-token\n",
+    );
+    assert.equal(
       await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
       "{\"autoReplyChannels\":[\"linq\"]}\n",
     );
@@ -166,14 +218,16 @@ test("hosted execution bundles keep only assistant state and operator config ins
       await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
       "{\"schema\":\"cfg\"}\n",
     );
+    assert.deepEqual(
+      await readFile(
+        path.join(restored.vaultRoot, "raw", "inbox", "2026-03-28", "capture_123", "attachments", "report.pdf"),
+      ),
+      Buffer.from("pdf-binary-artifact\n", "utf8"),
+    );
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     );
-    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
-      await assert.rejects(
-        readFile(path.join(restored.vaultRoot, ".runtime", artifact.relativePath), "utf8"),
-      );
-    }
+    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "stdout.log"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));
   } finally {
@@ -182,7 +236,129 @@ test("hosted execution bundles keep only assistant state and operator config ins
   }
 });
 
-test("hosted execution restore rejects legacy vault-runtime roots in incoming agent-state bundles", async () => {
+test("hosted execution snapshots externalize large non-text raw files but keep large UTF-8 text inline", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-raw-heuristics-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-raw-heuristics-restore-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
+    const binaryRawPath = path.join(vaultRoot, "raw", "captures", "payload");
+    const textRawPath = path.join(vaultRoot, "raw", "captures", "notes.txt");
+    const binaryBytes = Uint8Array.from({ length: 256 * 1024 + 16 }, (_, index) => index % 251);
+    binaryBytes[0] = 0;
+    binaryBytes[17] = 255;
+    const textBytes = Buffer.from("notes-line\n".repeat(30_000), "utf8");
+
+    await mkdir(path.dirname(binaryRawPath), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
+    await writeFile(binaryRawPath, binaryBytes);
+    await writeFile(textRawPath, textBytes);
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    const artifactRefs = listHostedBundleArtifacts({
+      bytes: snapshot.vaultBundle,
+      expectedKind: "vault",
+    });
+    assert.deepEqual(
+      artifactRefs.map((artifact) => artifact.path),
+      ["raw/captures/payload"],
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.vaultBundle,
+        expectedKind: "vault",
+        path: "raw/captures/payload",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: snapshot.vaultBundle,
+        expectedKind: "vault",
+        path: "raw/captures/notes.txt",
+        root: "vault",
+      }),
+      textBytes.toString("utf8"),
+    );
+
+    const restored = await restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error(`Missing artifact ${ref.sha256}.`);
+        }
+
+        return bytes;
+      },
+      vaultBundle: snapshot.vaultBundle,
+      workspaceRoot: restoreRoot,
+    });
+
+    await expect(readFile(path.join(restored.vaultRoot, "raw", "captures", "payload"))).resolves.toEqual(
+      Buffer.from(binaryBytes),
+    );
+    await expect(readFile(path.join(restored.vaultRoot, "raw", "captures", "notes.txt"))).resolves.toEqual(
+      textBytes,
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution restore rejects externalized artifacts whose bytes do not match the snapshot ref", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-artifact-integrity-"));
+  const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-artifact-integrity-restore-"));
+  const artifacts = new Map<string, Uint8Array>();
+
+  try {
+    const vaultRoot = path.join(workspaceRoot, "vault");
+    const operatorHomeRoot = path.join(workspaceRoot, "home");
+    const rawAttachmentPath = path.join(vaultRoot, "raw", "captures", "report.pdf");
+
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await mkdir(path.join(operatorHomeRoot, ".murph"), { recursive: true });
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+    await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
+
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot,
+      vaultRoot,
+    });
+
+    await expect(restoreHostedExecutionContext({
+      artifactResolver: async ({ ref }) => {
+        const bytes = artifacts.get(ref.sha256);
+        if (!bytes) {
+          throw new Error(`Missing artifact ${ref.sha256}.`);
+        }
+
+        return Buffer.from("corrupt-artifact\n", "utf8");
+      },
+      vaultBundle: snapshot.vaultBundle,
+      workspaceRoot: restoreRoot,
+    })).rejects.toThrow("Hosted bundle artifact vault:raw/captures/report.pdf");
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+    await rm(restoreRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted execution restore ignores legacy vault-runtime roots in incoming agent-state bundles", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-root-"));
   const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-legacy-root-restore-"));
 
@@ -197,26 +373,54 @@ test("hosted execution restore rejects legacy vault-runtime roots in incoming ag
     await writeFile(path.join(assistantStateRoot, "automation.json"), "{\"autoReplyChannels\":[\"linq\"]}\n");
     await writeFile(path.join(operatorHomeRoot, ".murph", "config.json"), "{\"schema\":\"cfg\"}\n");
 
-    const bundles = await snapshotHostedExecutionContext({
-      operatorHomeRoot,
-      vaultRoot,
-    });
-    const agentStateBundleWithLegacyRoot = writeHostedBundleTextFile({
-      bytes: bundles.agentStateBundle,
+    let legacyAgentStateBundle = await snapshotHostedBundleRoots({
       kind: "agent-state",
-      path: "device-syncd/control-token",
-      root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
-      text: "legacy-token\n",
+      roots: [
+        {
+          root: assistantStateRoot,
+          rootKey: "assistant-state",
+        },
+        {
+          optional: true,
+          root: operatorHomeRoot,
+          rootKey: "operator-home",
+          shouldIncludeRelativePath(relativePath) {
+            return relativePath === ".murph" || relativePath === ".murph/config.json";
+          },
+        },
+      ],
+    });
+    assert.ok(legacyAgentStateBundle);
+
+    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
+      legacyAgentStateBundle = writeHostedBundleTextFile({
+        bytes: legacyAgentStateBundle,
+        kind: "agent-state",
+        path: artifact.relativePath,
+        root: LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT,
+        text: artifact.contents,
+      });
+    }
+
+    const restored = await restoreHostedExecutionContext({
+      agentStateBundle: legacyAgentStateBundle,
+      vaultBundle: null,
+      workspaceRoot: restoreRoot,
     });
 
-    await assert.rejects(
-      restoreHostedExecutionContext({
-        agentStateBundle: agentStateBundleWithLegacyRoot,
-        vaultBundle: bundles.vaultBundle,
-        workspaceRoot: restoreRoot,
-      }),
-      /Hosted bundle root "vault-runtime" is not mapped for restore\./u,
+    assert.equal(
+      await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      "{\"autoReplyChannels\":[\"linq\"]}\n",
     );
+    assert.equal(
+      await readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
+      "{\"schema\":\"cfg\"}\n",
+    );
+    for (const artifact of LOCAL_RUNTIME_ARTIFACTS) {
+      await assert.rejects(
+        readFile(path.join(restored.vaultRoot, ".runtime", artifact.relativePath), "utf8"),
+      );
+    }
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
     await rm(restoreRoot, { force: true, recursive: true });

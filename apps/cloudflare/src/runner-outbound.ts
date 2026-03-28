@@ -5,6 +5,7 @@ import {
   type HostedExecutionSideEffectRecord,
 } from "@murph/assistant-runtime";
 
+import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommitPayload,
@@ -88,6 +89,25 @@ export async function handleRunnerOutboundRequest(
     return match.groups.action === "commit"
       ? forwardRunnerCommit(userId, eventId, await readJsonObject(request), env)
       : forwardRunnerFinalize(userId, eventId, await readJsonObject(request), env);
+  }
+
+  if (url.hostname === "artifacts.worker") {
+    const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
+    if (!match?.groups) {
+      return notFound();
+    }
+
+    if (request.method !== "GET" && request.method !== "PUT") {
+      return methodNotAllowed();
+    }
+
+    return handleRunnerArtifactRequest({
+      bucket: env.BUNDLES,
+      environment,
+      request,
+      sha256: match.groups.sha256,
+      userId,
+    });
   }
 
   if (url.hostname === "outbox.worker" || url.hostname === "side-effects.worker") {
@@ -251,6 +271,44 @@ async function forwardRunnerFinalize(
       payload: parseHostedExecutionFinalizeRequest(payload),
     }),
     ok: true,
+  });
+}
+
+async function handleRunnerArtifactRequest(input: {
+  bucket: RunnerOutboundEnvironmentSource["BUNDLES"];
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  request: Request;
+  sha256: string;
+  userId: string;
+}): Promise<Response> {
+  const artifactStore = createHostedArtifactStore({
+    bucket: input.bucket,
+    key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
+    userId: input.userId,
+  });
+
+  if (input.request.method === "GET") {
+    const bytes = await artifactStore.readArtifact(input.sha256);
+
+    if (!bytes) {
+      return notFound();
+    }
+
+    return new Response(copyBytesToArrayBuffer(bytes), {
+      headers: {
+        "content-type": "application/octet-stream",
+      },
+      status: 200,
+    });
+  }
+
+  const bytes = new Uint8Array(await input.request.arrayBuffer());
+  await artifactStore.writeArtifact(input.sha256, bytes);
+  return json({
+    ok: true,
+    sha256: input.sha256,
+    size: bytes.byteLength,
   });
 }
 

@@ -1,13 +1,13 @@
 import {
-  type HostedExecutionRunnerResult,
-} from "@murph/runtime-state";
-import {
   readHostedRunnerCommitTimeoutMs,
   runHostedAssistantRuntimeJobInProcess,
   runHostedAssistantRuntimeJobIsolated,
   type HostedAssistantRuntimeJobRequest,
 } from "@murph/assistant-runtime";
-import { readHostedEmailCapabilities } from "@murph/hosted-execution";
+import {
+  readHostedEmailCapabilities,
+  type HostedExecutionRunnerResult,
+} from "@murph/hosted-execution";
 
 import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";
@@ -15,6 +15,7 @@ import { normalizeHostedUserEnv } from "./user-env.ts";
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
 let hostedExecutionCallbackBaseUrlsForTests: {
+  artifactsBaseUrl?: string | null;
   commitBaseUrl?: string | null;
   emailBaseUrl?: string | null;
   outboxBaseUrl?: string | null;
@@ -38,6 +39,7 @@ export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null
 }
 
 export function setHostedExecutionCallbackBaseUrlsForTests(input: {
+  artifactsBaseUrl?: string | null;
   commitBaseUrl?: string | null;
   emailBaseUrl?: string | null;
   outboxBaseUrl?: string | null;

@@ -16,6 +16,7 @@ import {
   readHostedRunnerCommitTimeoutMs,
   resumeHostedCommittedExecution,
 } from "./hosted-runtime/callbacks.ts";
+import { createHostedArtifactResolver } from "./hosted-runtime/artifacts.ts";
 import {
   normalizeHostedAssistantRuntimeConfig,
   resolveHostedRuntimeChildEntry,
@@ -58,9 +59,14 @@ export async function runHostedAssistantRuntimeJobInProcess(
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
 
   try {
+    const incomingVaultBundle = decodeHostedBundleBase64(input.request.bundles.vault);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: decodeHostedBundleBase64(input.request.bundles.agentState),
-      vaultBundle: decodeHostedBundleBase64(input.request.bundles.vault),
+      artifactResolver: createHostedArtifactResolver({
+        baseUrl: runtime.artifactsBaseUrl,
+        timeoutMs: runtime.commitTimeoutMs,
+      }),
+      vaultBundle: incomingVaultBundle,
       workspaceRoot,
     });
     const runtimeEnv = {

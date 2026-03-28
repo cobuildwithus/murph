@@ -8,12 +8,17 @@ import type {
 } from "./models.ts";
 
 const HOSTED_RUNNER_COMMIT_BASE_URL = "http://commit.worker";
+const HOSTED_RUNNER_ARTIFACTS_BASE_URL = "http://artifacts.worker";
 const HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL = "http://side-effects.worker";
 
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
 ): NormalizedHostedAssistantRuntimeConfig {
   return {
+    artifactsBaseUrl: normalizeCallbackBaseUrl(
+      input?.artifactsBaseUrl,
+      HOSTED_RUNNER_ARTIFACTS_BASE_URL,
+    ),
     commitBaseUrl: normalizeCallbackBaseUrl(
       input?.commitBaseUrl,
       HOSTED_RUNNER_COMMIT_BASE_URL,

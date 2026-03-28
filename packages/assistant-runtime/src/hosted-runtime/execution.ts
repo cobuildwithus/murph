@@ -1,5 +1,7 @@
 import {
+  decodeHostedBundleBase64,
   encodeHostedBundleBase64,
+  listHostedBundleArtifacts,
   snapshotHostedExecutionContext,
 } from "@murph/runtime-state";
 import type {
@@ -11,6 +13,7 @@ import {
 } from "@murph/assistant-services/status";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
+import { createHostedArtifactUploadSink } from "./artifacts.ts";
 import {
   collectHostedExecutionSideEffects,
   drainHostedCommittedSideEffectsAfterCommit,
@@ -32,7 +35,7 @@ export async function executeHostedDispatchForCommit(input: {
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "emailBaseUrl" | "sharePackBaseUrl" | "sharePackToken"
+    "artifactsBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sharePackBaseUrl" | "sharePackToken"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
@@ -44,11 +47,19 @@ export async function executeHostedDispatchForCommit(input: {
     vaultRoot: input.restored.vaultRoot,
   });
   const maintenanceMetrics = await runHostedMaintenanceLoop({
+    dispatch: input.request.dispatch,
     requestId: input.request.dispatch.eventId,
     runtimeEnv: input.runtimeEnv,
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSnapshot = await snapshotHostedExecutionContext({
+    artifactSink: createHostedArtifactUploadSink({
+      artifactsBaseUrl: input.runtime.artifactsBaseUrl,
+      knownArtifactHashes: collectHostedBundleArtifactHashes(
+        decodeHostedBundleBase64(input.request.bundles.vault),
+      ),
+      timeoutMs: input.runtime.commitTimeoutMs,
+    }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
@@ -78,7 +89,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   dispatch: HostedExecutionDispatchRequest;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv"
+    "artifactsBaseUrl" | "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv"
   >;
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
@@ -100,6 +111,13 @@ export async function completeHostedExecutionAfterCommit(input: {
   await refreshAssistantStatusSnapshot(input.restored.vaultRoot);
 
   const finalSnapshot = await snapshotHostedExecutionContext({
+    artifactSink: createHostedArtifactUploadSink({
+      artifactsBaseUrl: input.runtime.artifactsBaseUrl,
+      knownArtifactHashes: collectHostedBundleArtifactHashes(
+        decodeHostedBundleBase64(input.committedExecution.committedResult.bundles.vault),
+      ),
+      timeoutMs: input.runtime.commitTimeoutMs,
+    }),
     operatorHomeRoot: input.restored.operatorHomeRoot,
     vaultRoot: input.restored.vaultRoot,
   });
@@ -120,4 +138,20 @@ export async function completeHostedExecutionAfterCommit(input: {
   });
 
   return finalResult;
+}
+function collectHostedBundleArtifactHashes(bytes: Uint8Array | null): Set<string> {
+  if (!bytes) {
+    return new Set();
+  }
+
+  try {
+    return new Set(
+      listHostedBundleArtifacts({
+        bytes,
+        expectedKind: "vault",
+      }).map((artifact) => artifact.ref.sha256),
+    );
+  } catch {
+    return new Set();
+  }
 }

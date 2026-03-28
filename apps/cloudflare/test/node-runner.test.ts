@@ -9,6 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
 import { openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
 import {
+  decodeHostedBundleBase64,
+  encodeHostedBundleBase64,
   parseHostedEmailThreadTarget,
   resolveAssistantStatePaths,
   restoreHostedExecutionContext,
@@ -94,7 +96,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
@@ -178,7 +180,7 @@ describe("runHostedExecutionJob", () => {
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-partial-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
-        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
@@ -241,7 +243,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-ingress-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
@@ -297,7 +299,7 @@ describe("runHostedExecutionJob", () => {
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
-        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
@@ -348,7 +350,7 @@ describe("runHostedExecutionJob", () => {
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-no-domain-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
-        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
@@ -417,7 +419,7 @@ describe("runHostedExecutionJob", () => {
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-late-env-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
-        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
@@ -590,7 +592,7 @@ describe("runHostedExecutionJob", () => {
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-alias-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
-        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
@@ -668,7 +670,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-telegram-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
@@ -742,6 +744,229 @@ describe("runHostedExecutionJob", () => {
     });
 
     expect(followUp.result.summary).toContain("Processed assistant cron tick (manual)");
+  });
+
+  it("restores externalized raw artifacts and skips re-uploading unchanged hashes", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_artifacts",
+        },
+        eventId: "evt_activation_artifacts",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+    const activationWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-activation-"));
+    cleanupPaths.push(activationWorkspaceRoot);
+    const restoredActivation = await restoreHostedExecutionContext({
+      agentStateBundle: decodeHostedBundleBase64(activation.bundles.agentState),
+      vaultBundle: Buffer.from(activation.bundles.vault!, "base64"),
+      workspaceRoot: activationWorkspaceRoot,
+    });
+    const rawAttachmentPath = path.join(
+      restoredActivation.vaultRoot,
+      "raw",
+      "inbox",
+      "2026-03-28",
+      "capture_123",
+      "attachments",
+      "report.pdf",
+    );
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+
+    const artifacts = new Map<string, Uint8Array>();
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot: restoredActivation.operatorHomeRoot,
+      vaultRoot: restoredActivation.vaultRoot,
+    });
+    const [artifactHash] = [...artifacts.keys()];
+    expect(artifactHash).toBeDefined();
+
+    const requests: string[] = [];
+    const server = createServer(async (request, response) => {
+      requests.push(`${request.method ?? "GET"} ${request.url ?? ""}`);
+
+      if (request.method === "GET" && request.url === `/objects/${artifactHash}`) {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/octet-stream");
+        response.end(Buffer.from(artifacts.get(artifactHash!) ?? []));
+        return;
+      }
+
+      if (request.method === "PUT" && request.url === `/objects/${artifactHash}`) {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted artifact test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        artifactsBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
+          vault: encodeHostedBundleBase64(snapshot.vaultBundle),
+        },
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_artifacts",
+          },
+          eventId: "evt_artifact_tick",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+
+      expect(requests).toEqual([`GET /objects/${artifactHash}`]);
+
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-restored-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        artifactResolver: async ({ ref }) => {
+          const bytes = artifacts.get(ref.sha256);
+          if (!bytes) {
+            throw new Error(`Missing artifact ${ref.sha256}.`);
+          }
+
+          return bytes;
+        },
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+
+      await expect(readFile(path.join(
+        restored.vaultRoot,
+        "raw",
+        "inbox",
+        "2026-03-28",
+        "capture_123",
+        "attachments",
+        "report.pdf",
+      ))).resolves.toEqual(Buffer.from("pdf-binary-artifact\n", "utf8"));
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("fails hosted execution when an externalized artifact cannot be fetched", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_artifacts_missing",
+        },
+        eventId: "evt_activation_artifacts_missing",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+    const activationWorkspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-missing-"));
+    cleanupPaths.push(activationWorkspaceRoot);
+    const restoredActivation = await restoreHostedExecutionContext({
+      agentStateBundle: decodeHostedBundleBase64(activation.bundles.agentState),
+      vaultBundle: Buffer.from(activation.bundles.vault!, "base64"),
+      workspaceRoot: activationWorkspaceRoot,
+    });
+    const rawAttachmentPath = path.join(
+      restoredActivation.vaultRoot,
+      "raw",
+      "inbox",
+      "2026-03-28",
+      "capture_404",
+      "attachments",
+      "report.pdf",
+    );
+    await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+    await writeFile(rawAttachmentPath, Buffer.from("pdf-binary-artifact\n", "utf8"));
+
+    const artifacts = new Map<string, Uint8Array>();
+    const snapshot = await snapshotHostedExecutionContext({
+      artifactSink: async (artifact) => {
+        artifacts.set(artifact.ref.sha256, artifact.bytes);
+      },
+      operatorHomeRoot: restoredActivation.operatorHomeRoot,
+      vaultRoot: restoredActivation.vaultRoot,
+    });
+    const [artifactHash] = [...artifacts.keys()];
+    expect(artifactHash).toBeDefined();
+
+    const server = createServer((request, response) => {
+      if (request.method === "GET" && request.url === `/objects/${artifactHash}`) {
+        response.statusCode = 404;
+        response.end("Not found");
+        return;
+      }
+
+      response.statusCode = 500;
+      response.end("Unexpected request");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted artifact test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        artifactsBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
+
+      await expect(runHostedExecutionJob({
+        bundles: {
+          agentState: encodeHostedBundleBase64(snapshot.agentStateBundle),
+          vault: encodeHostedBundleBase64(snapshot.vaultBundle),
+        },
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_artifacts_missing",
+          },
+          eventId: "evt_artifact_missing_tick",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      })).rejects.toThrow(
+        `Hosted runner artifact fetch failed for ${artifactHash} with HTTP 404.`,
+      );
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      server.close();
+      await once(server, "close");
+    }
   });
 
   it("imports a shared food bundle with attached supplement protocols", async () => {
@@ -838,7 +1063,7 @@ describe("runHostedExecutionJob", () => {
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
-        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
         vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
         workspaceRoot,
       });
@@ -879,7 +1104,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
@@ -1153,7 +1378,7 @@ describe("runHostedExecutionJob", () => {
 
     const result = await runHostedExecutionJob({
       bundles: {
-        agentState: Buffer.from(initialSnapshot.agentStateBundle).toString("base64"),
+        agentState: encodeHostedBundleBase64(initialSnapshot.agentStateBundle),
         vault: Buffer.from(initialSnapshot.vaultBundle).toString("base64"),
       },
       commit: {
@@ -1181,7 +1406,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
@@ -1390,7 +1615,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });
@@ -1563,7 +1788,7 @@ describe("runHostedExecutionJob", () => {
 
     const result = await runHostedExecutionJob({
       bundles: {
-        agentState: Buffer.from(initialSnapshot.agentStateBundle).toString("base64"),
+        agentState: encodeHostedBundleBase64(initialSnapshot.agentStateBundle),
         vault: Buffer.from(initialSnapshot.vaultBundle).toString("base64"),
       },
       commit: {
@@ -1614,7 +1839,7 @@ describe("runHostedExecutionJob", () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+      agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
       vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
       workspaceRoot,
     });

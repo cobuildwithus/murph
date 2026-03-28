@@ -11,7 +11,7 @@ This app is intentionally separate from `apps/web`:
 
 - verify signed internal dispatch from `apps/web`
 - coordinate per-user runs through a `USER_RUNNER` Durable Object
-- store encrypted hosted `vault` and broader `agent-state` bundle snapshots in the `BUNDLES` R2 bucket
+- store one encrypted hosted workspace snapshot in the existing `vault` bundle slot plus separately encrypted raw-artifact objects in the `BUNDLES` R2 bucket
 - perform durable hosted bootstrap explicitly on `member.activated` instead of mutating vault/assistant config during every run
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
@@ -31,7 +31,7 @@ Current worker bindings read directly by `src/index.ts`:
 
 - `USER_RUNNER`: Durable Object namespace for per-user coordination, queue state, and hosted execution orchestration
 - `RUNNER_CONTAINER`: Durable Object namespace for the companion `RunnerContainer` class that owns container startup, port readiness, and idle lifecycle
-- `BUNDLES`: R2 bucket for encrypted `vault` and `agent-state` bundle blobs
+- `BUNDLES`: R2 bucket for encrypted hosted workspace snapshots in the `vault` slot, separately encrypted artifact objects, transient journals, and encrypted per-user env objects
 
 Current worker env/config names read directly by `src/env.ts`:
 
@@ -129,7 +129,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 - The worker never stores plaintext vault material in Durable Object storage. It stores only per-user coordination state plus encrypted bundle references.
 - Hosted bundle reads/writes and per-user env object updates happen outside the Durable Object's SQLite mutation step; only the final bundle-ref/version compare-and-swap is committed inside Durable Object storage.
-- `vault` and `agent-state` are always written back as encrypted R2 blobs. `agent-state` includes sibling `assistant-state` plus the minimal operator-home config needed for explicit `member.activated` bootstrap. Vault `.runtime/**` stays local-only and is not bundled into hosted `agent-state`, and per-user runner env overrides live in their own encrypted hosted object.
+- Hosted execution now writes one encrypted workspace snapshot back through the existing `vault` bundle slot. That workspace snapshot includes canonical `vault/**`, durable `vault/.runtime/**`, sibling `assistant-state/**`, and the minimal operator-home config needed for explicit `member.activated` bootstrap. Large raw artifacts under `vault/raw/**` are externalized into separately encrypted content-addressed objects and materialized back onto disk during restore so the runtime still sees normal local files. Per-user runner env overrides live in their own encrypted hosted object.
 - Bundle writes are skipped when the bundle content hash and byte length are unchanged, which helps avoid unnecessary R2 write churn on no-op assistant/device-sync passes.
 - Hosted one-shot runs now collect due outward side effects with the committed hosted result, then the runner drains those committed side effects after the durable commit succeeds. Assistant replies are the first concrete side-effect kind on that path and still originate from the assistant outbox intents in `assistant-state/`.
 - Broad hosted idempotency no longer depends on that runner lane alone: `apps/web` uses the shared Postgres `execution_outbox` for Cloudflare dispatches, hosted webhook receipts keep their own durable side-effect state for Linq replies, and RevNet issuance stays on its invoice-owned idempotency path.

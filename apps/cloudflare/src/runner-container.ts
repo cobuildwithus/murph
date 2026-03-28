@@ -2,7 +2,7 @@ import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import type {
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-} from "@murph/runtime-state";
+} from "@murph/hosted-execution";
 
 import { json, readJsonObject } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
@@ -54,41 +54,26 @@ interface RunnerContainerEnvironmentSource extends Readonly<Record<string, unkno
   HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER?: string;
 }
 
+type RunnerOutboundHandlerName =
+  | "artifactsWorker"
+  | "commitWorker"
+  | "emailWorker"
+  | "outboxWorker";
+
+const RUNNER_OUTBOUND_HOSTS = {
+  "artifacts.worker": "artifactsWorker",
+  "commit.worker": "commitWorker",
+  "email.worker": "emailWorker",
+  "outbox.worker": "outboxWorker",
+  "side-effects.worker": "outboxWorker",
+} as const satisfies Record<string, RunnerOutboundHandlerName>;
+
 export class RunnerContainer extends Container {
   static override outboundHandlers = {
-    async commitWorker(
-      request: Request,
-      env: unknown,
-      ctx: RunnerOutboundHandlerContext,
-    ): Promise<Response> {
-      return handleRunnerOutboundRequest(
-        request,
-        env as RunnerOutboundEnvironmentSource,
-        requireString(ctx.params?.userId, "ctx.params.userId"),
-      );
-    },
-    async outboxWorker(
-      request: Request,
-      env: unknown,
-      ctx: RunnerOutboundHandlerContext,
-    ): Promise<Response> {
-      return handleRunnerOutboundRequest(
-        request,
-        env as RunnerOutboundEnvironmentSource,
-        requireString(ctx.params?.userId, "ctx.params.userId"),
-      );
-    },
-    async emailWorker(
-      request: Request,
-      env: unknown,
-      ctx: RunnerOutboundHandlerContext,
-    ): Promise<Response> {
-      return handleRunnerOutboundRequest(
-        request,
-        env as RunnerOutboundEnvironmentSource,
-        requireString(ctx.params?.userId, "ctx.params.userId"),
-      );
-    },
+    artifactsWorker: createRunnerOutboundHandler(),
+    commitWorker: createRunnerOutboundHandler(),
+    emailWorker: createRunnerOutboundHandler(),
+    outboxWorker: createRunnerOutboundHandler(),
   };
 
   defaultPort = RUNNER_PORT;
@@ -190,32 +175,19 @@ export class RunnerContainer extends Container {
   }
 
   private async installOutboundHandlers(userId: string): Promise<void> {
-    await this.setOutboundByHosts({
-      "commit.worker": {
-        method: "commitWorker",
-        params: {
-          userId,
-        },
-      },
-      "outbox.worker": {
-        method: "outboxWorker",
-        params: {
-          userId,
-        },
-      },
-      "side-effects.worker": {
-        method: "outboxWorker",
-        params: {
-          userId,
-        },
-      },
-      "email.worker": {
-        method: "emailWorker",
-        params: {
-          userId,
-        },
-      },
-    });
+    await this.setOutboundByHosts(
+      Object.fromEntries(
+        Object.entries(RUNNER_OUTBOUND_HOSTS).map(([host, method]) => [
+          host,
+          {
+            method,
+            params: {
+              userId,
+            },
+          },
+        ]),
+      ),
+    );
   }
 
   private async destroyIfRunning(): Promise<void> {
@@ -259,6 +231,20 @@ export async function invokeHostedExecutionContainerRunner<
   }
 
   return (await response.json()) as HostedExecutionRunnerResult;
+}
+
+function createRunnerOutboundHandler() {
+  return async (
+    request: Request,
+    env: unknown,
+    ctx: RunnerOutboundHandlerContext,
+  ): Promise<Response> => {
+    return handleRunnerOutboundRequest(
+      request,
+      env as RunnerOutboundEnvironmentSource,
+      requireString(ctx.params?.userId, "ctx.params.userId"),
+    );
+  };
 }
 
 export async function destroyHostedExecutionContainer(input: {

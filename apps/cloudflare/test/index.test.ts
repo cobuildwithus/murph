@@ -238,6 +238,93 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("stores and reads encrypted hosted artifact objects through the outbound artifacts.worker handler", async () => {
+    const harness = createUserRunnerDurableObject();
+    const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
+
+    const writeResponse = await callRunnerOutbound(
+      new Request("http://artifacts.worker/objects/fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b", {
+        body: artifactBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        method: "PUT",
+      }),
+      harness.env,
+    );
+
+    expect(writeResponse.status).toBe(200);
+    await expect(writeResponse.json()).resolves.toMatchObject({
+      ok: true,
+      sha256: "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+      size: artifactBytes.byteLength,
+    });
+
+    const readResponse = await callRunnerOutbound(
+      new Request("http://artifacts.worker/objects/fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b", {
+        method: "GET",
+      }),
+      harness.env,
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(Buffer.from(await readResponse.arrayBuffer())).toEqual(artifactBytes);
+    expect(harness.bucket.keys()).toEqual([
+      "users/member_123/artifacts/fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b.artifact.bin",
+    ]);
+  });
+
+  it("rejects artifact writes when the request hash does not match the payload", async () => {
+    const harness = createUserRunnerDurableObject();
+
+    await expect(() => callRunnerOutbound(
+      new Request("http://artifacts.worker/objects/fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b", {
+        body: Buffer.from("wrong-payload\n", "utf8"),
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        method: "PUT",
+      }),
+      harness.env,
+    )).rejects.toThrow(
+      "Hosted artifact hash mismatch: expected fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b",
+    );
+    expect(harness.bucket.keys()).toEqual([]);
+  });
+
+  it("keeps hosted artifact objects isolated per user", async () => {
+    const harness = createUserRunnerDurableObject();
+    const artifactBytes = Buffer.from("artifact-payload\n", "utf8");
+    const artifactSha256 = "fec80655c7d8a98cd92de1c1a21057808541e5fd289183d3c9f99f20c60c6d2b";
+
+    const writeResponse = await callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        body: artifactBytes,
+        headers: {
+          "content-type": "application/octet-stream",
+        },
+        method: "PUT",
+      }),
+      harness.env,
+      "member_alpha",
+    );
+
+    expect(writeResponse.status).toBe(200);
+
+    const readResponse = await callRunnerOutbound(
+      new Request(`http://artifacts.worker/objects/${artifactSha256}`, {
+        method: "GET",
+      }),
+      harness.env,
+      "member_bravo",
+    );
+
+    expect(readResponse.status).toBe(404);
+    expect(harness.bucket.keys()).toEqual([
+      `users/member_alpha/artifacts/${artifactSha256}.artifact.bin`,
+    ]);
+  });
+
   it("persists finalized runner bundles through the outbound commit.worker handler", async () => {
     const harness = createUserRunnerDurableObject();
 
@@ -1099,8 +1186,9 @@ function createWorkerEnv(
 function callRunnerOutbound(
   request: Request,
   env: Record<string, unknown>,
+  userId = "member_123",
 ): Promise<Response> {
-  return handleRunnerOutboundRequest(request, env as never, "member_123");
+  return handleRunnerOutboundRequest(request, env as never, userId);
 }
 
 function createBucketStore(input: {
