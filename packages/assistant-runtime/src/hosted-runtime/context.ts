@@ -29,11 +29,6 @@ export async function prepareHostedDispatchContext(
 
   await requireHostedBootstrapForDispatch(vaultRoot, dispatch);
   await prepareHostedLocalRuntime(vaultRoot, dispatch.eventId);
-
-  if (dispatch.event.kind !== "member.activated") {
-    await reconcileHostedAssistantChannelCapabilities(vaultRoot, runtimeEnv);
-  }
-
   return bootstrapResult;
 }
 

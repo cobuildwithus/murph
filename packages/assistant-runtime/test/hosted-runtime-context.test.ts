@@ -100,3 +100,53 @@ test("hosted dispatch context still requires member activation bootstrap before 
     await rm(workspaceRoot, { force: true, recursive: true });
   }
 });
+
+test("hosted dispatch context does not enable new auto-reply channels on non-activation follow-up events", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
+  const vaultRoot = path.join(workspaceRoot, "vault");
+
+  try {
+    await prepareHostedDispatchContext(
+      vaultRoot,
+      {
+        event: {
+          kind: "member.activated",
+          userId: "member_123",
+        },
+        eventId: "evt_activation",
+        occurredAt: "2026-03-28T09:05:00.000Z",
+      },
+      {},
+    );
+
+    await prepareHostedDispatchContext(
+      vaultRoot,
+      {
+        event: {
+          kind: "assistant.cron.tick",
+          reason: "manual",
+          userId: "member_123",
+        },
+        eventId: "evt_tick_after_bootstrap",
+        occurredAt: "2026-03-28T09:10:00.000Z",
+      },
+      {
+        HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+        HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+        HOSTED_EMAIL_DOMAIN: "mail.example.test",
+        HOSTED_EMAIL_LOCAL_PART: "assistant",
+        HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+    );
+
+    assert.deepEqual(
+      JSON.parse(
+        await readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
+      ).autoReplyChannels,
+      [],
+    );
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});

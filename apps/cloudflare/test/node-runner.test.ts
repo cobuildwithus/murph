@@ -367,6 +367,75 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
+  it("does not enable hosted auto-reply on non-activation events after bootstrap", async () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    delete process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    delete process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    delete process.env.HOSTED_EMAIL_DOMAIN;
+    delete process.env.HOSTED_EMAIL_LOCAL_PART;
+    delete process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    try {
+      const activation = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_email_late_env",
+          },
+          eventId: "evt_activation_email_late_env",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+
+      process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
+      process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
+      process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+      process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+      process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            kind: "assistant.cron.tick",
+            reason: "manual",
+            userId: "member_email_late_env",
+          },
+          eventId: "evt_tick_email_late_env",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-late-env-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("Processed assistant cron tick");
+      expect(automationState.autoReplyChannels).not.toContain("email");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
   it("fetches raw hosted email through the email worker bridge when processing inbound email events", async () => {
     const activation = await runHostedExecutionJob({
       bundles: {
