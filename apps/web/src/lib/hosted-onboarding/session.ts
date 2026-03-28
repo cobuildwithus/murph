@@ -9,6 +9,7 @@ import {
 import { NextResponse } from "next/server";
 
 import { getPrisma } from "../prisma";
+import { deriveHostedEntitlement } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import {
@@ -48,10 +49,12 @@ export async function createHostedSession(input: {
   });
 
   if (
-    member?.status === HostedMemberStatus.suspended ||
-    member?.billingStatus === HostedBillingStatus.canceled ||
-    member?.billingStatus === HostedBillingStatus.paused ||
-    member?.billingStatus === HostedBillingStatus.unpaid
+    member &&
+    !deriveHostedEntitlement({
+      billingMode: null,
+      billingStatus: member.billingStatus,
+      memberStatus: member.status,
+    }).accessAllowed
   ) {
     throw hostedOnboardingError({
       code: "HOSTED_MEMBER_SUSPENDED",
@@ -243,10 +246,11 @@ async function findHostedSessionByToken(
   }
 
   if (
-    session.member.status === HostedMemberStatus.suspended ||
-    session.member.billingStatus === HostedBillingStatus.canceled ||
-    session.member.billingStatus === HostedBillingStatus.paused ||
-    session.member.billingStatus === HostedBillingStatus.unpaid
+    !deriveHostedEntitlement({
+      billingMode: session.member.billingMode,
+      billingStatus: session.member.billingStatus,
+      memberStatus: session.member.status,
+    }).accessAllowed
   ) {
     await prisma.hostedSession.updateMany({
       where: {

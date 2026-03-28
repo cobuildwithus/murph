@@ -3,6 +3,10 @@
     {
       "path": "/api/internal/hosted-execution/outbox/cron",
       "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/internal/hosted-onboarding/stripe/cron",
+      "schedule": "*/1 * * * *"
     }
   ]
 }

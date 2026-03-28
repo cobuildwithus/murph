@@ -49,6 +49,44 @@ export function coerceStripeSubscriptionId(value: string | Stripe.Subscription |
   return null;
 }
 
+export function coerceStripeInvoiceSubscriptionId(
+  invoice:
+    | Stripe.Invoice
+    | {
+      lines?: {
+        data?: Array<{
+          subscription?: unknown;
+        }> | null;
+      } | null;
+      parent?: {
+        subscription_details?: {
+          subscription?: unknown;
+        } | null;
+      } | null;
+      subscription?: unknown;
+    },
+): string | null {
+  const directSubscriptionId = coerceStripeSubscriptionId(
+    (invoice as Stripe.Invoice & { subscription?: unknown }).subscription as never,
+  );
+
+  if (directSubscriptionId) {
+    return directSubscriptionId;
+  }
+
+  const lineSubscriptionId = Array.isArray(invoice.lines?.data)
+    ? invoice.lines.data
+      .map((line) => coerceStripeSubscriptionId(line.subscription as never))
+      .find((value) => value !== null) ?? null
+    : null;
+
+  if (lineSubscriptionId) {
+    return lineSubscriptionId;
+  }
+
+  return coerceStripeSubscriptionId(invoice.parent?.subscription_details?.subscription as never);
+}
+
 export function buildStripeSuccessUrl(baseUrl: string, inviteCode: string, shareCode?: string | null): string {
   const params = new URLSearchParams({
     session_id: "{CHECKOUT_SESSION_ID}",

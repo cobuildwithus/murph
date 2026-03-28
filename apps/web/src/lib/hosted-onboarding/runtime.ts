@@ -60,19 +60,32 @@ export function requireHostedOnboardingPublicBaseUrl(): string {
   return publicBaseUrl;
 }
 
-export function requireHostedOnboardingStripeConfig(): {
-  billingMode: "payment" | "subscription";
-  priceId: string;
-  stripe: Stripe;
-  webhookSecret: string | null;
-} {
+export function requireHostedStripeApi(): Stripe {
   const environment = getHostedOnboardingEnvironment();
   const stripe = getHostedOnboardingStripe();
 
-  if (!stripe || !environment.stripePriceId) {
+  if (!stripe) {
     throw hostedOnboardingError({
-      code: "STRIPE_CONFIG_REQUIRED",
-      message: "STRIPE_SECRET_KEY and HOSTED_ONBOARDING_STRIPE_PRICE_ID must be configured for billing.",
+      code: "STRIPE_SECRET_KEY_REQUIRED",
+      message: "STRIPE_SECRET_KEY must be configured for Stripe billing and webhook processing.",
+      httpStatus: 500,
+    });
+  }
+
+  return stripe;
+}
+
+export function requireHostedStripeCheckoutConfig(): {
+  billingMode: "payment" | "subscription";
+  priceId: string;
+  stripe: Stripe;
+} {
+  const environment = getHostedOnboardingEnvironment();
+
+  if (!environment.stripePriceId) {
+    throw hostedOnboardingError({
+      code: "STRIPE_PRICE_ID_REQUIRED",
+      message: "HOSTED_ONBOARDING_STRIPE_PRICE_ID must be configured for Stripe checkout creation.",
       httpStatus: 500,
     });
   }
@@ -80,7 +93,18 @@ export function requireHostedOnboardingStripeConfig(): {
   return {
     billingMode: environment.stripeBillingMode,
     priceId: environment.stripePriceId,
-    stripe,
+    stripe: requireHostedStripeApi(),
+  };
+}
+
+export function requireHostedStripeWebhookVerificationConfig(): {
+  stripe: Stripe;
+  webhookSecret: string | null;
+} {
+  const environment = getHostedOnboardingEnvironment();
+
+  return {
+    stripe: requireHostedStripeApi(),
     webhookSecret: environment.stripeWebhookSecret,
   };
 }
@@ -88,7 +112,6 @@ export function requireHostedOnboardingStripeConfig(): {
 export function requireHostedOnboardingLinqConfig(): {
   apiBaseUrl: string;
   apiToken: string;
-  webhookSecret: string | null;
 } {
   const environment = getHostedOnboardingEnvironment();
 
@@ -103,6 +126,5 @@ export function requireHostedOnboardingLinqConfig(): {
   return {
     apiBaseUrl: environment.linqApiBaseUrl,
     apiToken: environment.linqApiToken,
-    webhookSecret: environment.linqWebhookSecret,
   };
 }
