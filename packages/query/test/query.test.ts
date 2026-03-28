@@ -128,6 +128,41 @@ test(
       assert.equal(vault.events.length, 3);
       assert.equal(vault.samples.length, 5);
       assert.equal(vault.audits.length, 1);
+      assert.deepEqual(vault.byFamily.core?.map((record) => record.displayId), [
+        vault.coreDocument?.displayId,
+      ]);
+      assert.deepEqual(
+        vault.byFamily.experiment?.map((record) => record.displayId),
+        vault.experiments.map((record) => record.displayId),
+      );
+      assert.deepEqual(
+        vault.byFamily.journal?.map((record) => record.displayId),
+        vault.journalEntries.map((record) => record.displayId),
+      );
+      assert.deepEqual(
+        vault.byFamily.event?.map((record) => record.displayId),
+        vault.events.map((record) => record.displayId),
+      );
+      assert.deepEqual(
+        vault.byFamily.sample?.map((record) => record.displayId),
+        vault.samples.map((record) => record.displayId),
+      );
+      assert.deepEqual(
+        vault.byFamily.audit?.map((record) => record.displayId),
+        vault.audits.map((record) => record.displayId),
+      );
+      assert.deepEqual(
+        vault.byFamily.family?.map((record) => record.displayId),
+        vault.records
+          .filter((record) => record.recordType === "family")
+          .map((record) => record.displayId),
+      );
+      assert.deepEqual(
+        vault.byFamily.genetics?.map((record) => record.displayId),
+        vault.records
+          .filter((record) => record.recordType === "genetics")
+          .map((record) => record.displayId),
+      );
 
       const experiment = getExperiment(vault, "low-carb");
       assert.equal(experiment?.title, "Low Carb Trial");
@@ -165,6 +200,27 @@ test(
     }
   },
 );
+
+test("readVault keeps legacy convenience arrays isolated from byFamily buckets", async () => {
+  const vaultRoot = await createFixtureVault();
+
+  try {
+    const vault = await readVault(vaultRoot);
+
+    assert.notStrictEqual(vault.experiments, vault.byFamily.experiment);
+    assert.notStrictEqual(vault.events, vault.byFamily.event);
+
+    vault.experiments.pop();
+    vault.events.pop();
+
+    assert.equal(vault.experiments.length, 0);
+    assert.equal(vault.events.length, 2);
+    assert.equal(vault.byFamily.experiment?.length, 1);
+    assert.equal(vault.byFamily.event?.length, 3);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("list helpers apply date, tag, text, and kind filters against contract data", async () => {
   const vaultRoot = await createFixtureVault();
@@ -262,6 +318,7 @@ test("listRecords prefers stored local day keys over UTC-derived dates", () => {
 
   vault.samples = [sample];
   vault.records = [sample];
+  syncVaultDerivedFields(vault);
 
   assert.deepEqual(
     listRecords(vault, {
@@ -277,6 +334,29 @@ test("listRecords prefers stored local day keys over UTC-derived dates", () => {
     }).map((record) => record.displayId),
     [],
   );
+});
+
+test("syncVaultDerivedFields keeps manual query fixtures aligned with byFamily", () => {
+  const vault = createEmptyReadModel();
+  const sample = createSampleRecord({
+    id: "smp_sync_01",
+    occurredAt: "2026-03-27T08:00:00.000Z",
+    date: "2026-03-27",
+    sourcePath: "ledger/samples/glucose/2026/2026-03.jsonl",
+    data: {
+      value: 88,
+      unit: "mg_dL",
+    },
+  });
+
+  vault.samples = [sample];
+  syncVaultDerivedFields(vault);
+
+  assert.deepEqual(vault.records.map((record) => record.displayId), ["smp_sync_01"]);
+  assert.deepEqual(vault.byFamily.sample?.map((record) => record.displayId), [
+    "smp_sync_01",
+  ]);
+  assert.deepEqual(vault.samples.map((record) => record.displayId), ["smp_sync_01"]);
 });
 
 test("buildExportPack produces derived exports payloads without touching the vault", async () => {
@@ -450,6 +530,7 @@ test("summarizeDailySamples honors filters and ignores incomplete sample records
       data: { value: 110, unit: "mg_dL" },
     }),
   ];
+  syncVaultDerivedFields(vault);
 
   const summaries = summarizeDailySamples(vault, {
     from: "2026-03-10",
@@ -627,6 +708,7 @@ test("buildExportPack renders experiment, journal, timeline, and meal prompts fo
   vault.events = [meal, note];
   vault.samples = [sampleA, sampleB];
   vault.records = [experiment, journal, sampleA, meal, sampleB, note];
+  syncVaultDerivedFields(vault);
 
   const pack = buildExportPack(vault, {
     from: "2026-03-10",
@@ -709,6 +791,7 @@ test("model helpers return null or empty results for unmatched ids and filters",
   vault.experiments = [experiment];
   vault.journalEntries = [journal];
   vault.records = [experiment, journal, orphanEvent];
+  syncVaultDerivedFields(vault);
 
   assert.equal(lookupRecordById(vault, "unknown-id"), null);
   assert.equal(getExperiment(vault, "missing"), null);
@@ -769,6 +852,7 @@ test("searchVault ranks body and structured matches while excluding raw samples 
   vault.events = [meal];
   vault.samples = [sample];
   vault.records = [journal, meal, sample];
+  syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "afternoon crash pasta", {
     limit: 10,
@@ -800,6 +884,7 @@ test("searchVault includes sample rows when the caller scopes by sample record t
 
   vault.samples = [sample];
   vault.records = [sample];
+  syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "glucose spike", {
     streams: ["glucose"],
@@ -896,6 +981,7 @@ test("overview selectors move cleanly onto the query read model", () => {
     completedExperiment,
     activeExperiment,
   ];
+  syncVaultDerivedFields(vault);
 
   assert.deepEqual(
     buildOverviewMetrics(vault).map((metric) => [metric.label, metric.value]),
@@ -1041,6 +1127,7 @@ test("buildOverviewWeeklyStats keeps same-stream units separate across timezone 
       previousHours,
       previousMinutes,
     ];
+    syncVaultDerivedFields(vault);
 
     assert.deepEqual(buildOverviewWeeklyStats(vault, "Australia/Melbourne"), [
       {
@@ -1093,6 +1180,7 @@ test("buildOverviewWeeklyStats returns null delta when previous week avg is zero
     });
 
     vault.samples = [currentWeek, previousWeek];
+    syncVaultDerivedFields(vault);
 
     assert.deepEqual(buildOverviewWeeklyStats(vault, "Australia/Melbourne"), [
       {
@@ -1136,6 +1224,7 @@ test("searchVaultSafe omits raw path terms and path fields by construction", () 
 
   vault.events = [pathOnly, visible];
   vault.records = [pathOnly, visible];
+  syncVaultDerivedFields(vault);
 
   const fullSearch = searchVault(vault, "path-only-token-probe", {
     includeSamples: true,
@@ -1209,6 +1298,7 @@ test("buildTimeline merges journals, events, and daily sample summaries into a d
   vault.events = [event];
   vault.samples = [sampleA, sampleB];
   vault.records = [journal, sampleA, event, sampleB];
+  syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
     from: "2026-03-12",
@@ -1307,6 +1397,7 @@ test("searchVault supports blank queries, structured-only matches, and filter no
     missingTag,
   ];
   vault.records = vault.events;
+  syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "labcorp ferritin", {
     recordTypes: ["event"],
@@ -1353,6 +1444,7 @@ test("searchVault orders equal scores by recency and trims long snippets around 
 
   vault.events = [older, newer];
   vault.records = [older, newer];
+  syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "caffeine");
 
@@ -1547,6 +1639,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     sampleFallback,
     sampleOtherExperiment,
   ];
+  syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
     from: "2026-03-13",
@@ -1620,6 +1713,7 @@ test("buildTimeline breaks sort ties by date then id when timestamps match", () 
 
   vault.events = [olderDate, laterId, earlierId];
   vault.records = [olderDate, laterId, earlierId];
+  syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
     includeJournal: false,
@@ -1675,6 +1769,7 @@ test("buildTimeline excludes records outside the requested date and experiment w
   vault.events = [event];
   vault.samples = [sample];
   vault.records = [journal, event, sample];
+  syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
     from: "2026-03-15",
@@ -2110,29 +2205,122 @@ Steady energy through the afternoon.
 }
 
 function createEmptyReadModel(): Awaited<ReturnType<typeof readVault>> {
+  return createReadModelFromRecords([]);
+}
+
+function createReadModelFromRecords(
+  records: Awaited<ReturnType<typeof readVault>>["records"],
+): Awaited<ReturnType<typeof readVault>> {
+  const byFamily = groupRecordsByFamily(records);
+
   return {
     format: "murph.query.v1",
     vaultRoot: "/tmp/empty-vault",
     metadata: null,
-    entities: [],
-    coreDocument: null,
-    experiments: [],
-    journalEntries: [],
-    events: [],
-    samples: [],
-    audits: [],
-    assessments: [],
-    profileSnapshots: [],
-    currentProfile: null,
-    goals: [],
-    conditions: [],
-    allergies: [],
-    protocols: [],
-    history: [],
-    familyMembers: [],
-    geneticVariants: [],
-    records: [],
+    entities: records.map((record) => ({
+      entityId: record.displayId,
+      primaryLookupId: record.primaryLookupId,
+      lookupIds: [...record.lookupIds],
+      family: record.recordType,
+      kind: record.kind ?? record.recordType,
+      status: record.status ?? null,
+      occurredAt: record.occurredAt,
+      date: record.date,
+      path: record.sourcePath,
+      title: record.title,
+      body: record.body,
+      attributes: record.data,
+      frontmatter: record.frontmatter,
+      relatedIds: record.relatedIds ?? [],
+      stream: record.stream,
+      experimentSlug: record.experimentSlug,
+      tags: [...record.tags],
+    })),
+    byFamily,
+    coreDocument: byFamily.core?.[0] ?? null,
+    experiments: byFamily.experiment?.slice() ?? [],
+    journalEntries: byFamily.journal?.slice() ?? [],
+    events: byFamily.event?.slice() ?? [],
+    samples: byFamily.sample?.slice() ?? [],
+    audits: byFamily.audit?.slice() ?? [],
+    assessments: byFamily.assessment?.slice() ?? [],
+    profileSnapshots: byFamily.profile_snapshot?.slice() ?? [],
+    currentProfile: byFamily.current_profile?.[0] ?? null,
+    goals: byFamily.goal?.slice() ?? [],
+    conditions: byFamily.condition?.slice() ?? [],
+    allergies: byFamily.allergy?.slice() ?? [],
+    protocols: byFamily.protocol?.slice() ?? [],
+    history: byFamily.history?.slice() ?? [],
+    familyMembers: byFamily.family?.slice() ?? [],
+    geneticVariants: byFamily.genetics?.slice() ?? [],
+    records: records.slice(),
   };
+}
+
+function syncVaultDerivedFields(vault: Awaited<ReturnType<typeof readVault>>): void {
+  const canonicalRecords =
+    vault.records.length > 0 ? vault.records.slice() : collectVaultRecords(vault);
+  const next = createReadModelFromRecords(canonicalRecords);
+
+  vault.entities = next.entities;
+  vault.byFamily = next.byFamily;
+  vault.coreDocument = next.coreDocument;
+  vault.experiments = next.experiments;
+  vault.journalEntries = next.journalEntries;
+  vault.events = next.events;
+  vault.samples = next.samples;
+  vault.audits = next.audits;
+  vault.assessments = next.assessments;
+  vault.profileSnapshots = next.profileSnapshots;
+  vault.currentProfile = next.currentProfile;
+  vault.goals = next.goals;
+  vault.conditions = next.conditions;
+  vault.allergies = next.allergies;
+  vault.protocols = next.protocols;
+  vault.history = next.history;
+  vault.familyMembers = next.familyMembers;
+  vault.geneticVariants = next.geneticVariants;
+  vault.records = next.records;
+}
+
+function collectVaultRecords(
+  vault: Awaited<ReturnType<typeof readVault>>,
+): Awaited<ReturnType<typeof readVault>>["records"] {
+  return [
+    ...(vault.coreDocument ? [vault.coreDocument] : []),
+    ...vault.experiments,
+    ...vault.journalEntries,
+    ...vault.events,
+    ...vault.samples,
+    ...vault.audits,
+    ...vault.assessments,
+    ...vault.profileSnapshots,
+    ...(vault.currentProfile ? [vault.currentProfile] : []),
+    ...vault.goals,
+    ...vault.conditions,
+    ...vault.allergies,
+    ...vault.protocols,
+    ...vault.history,
+    ...vault.familyMembers,
+    ...vault.geneticVariants,
+  ];
+}
+
+function groupRecordsByFamily(
+  records: Awaited<ReturnType<typeof readVault>>["records"],
+): Awaited<ReturnType<typeof readVault>>["byFamily"] {
+  return records.reduce<Awaited<ReturnType<typeof readVault>>["byFamily"]>(
+    (byFamily, record) => {
+      const familyRecords = byFamily[record.recordType];
+      if (familyRecords) {
+        familyRecords.push(record);
+      } else {
+        byFamily[record.recordType] = [record];
+      }
+      return byFamily;
+    },
+    {},
+  );
 }
 
 function createSampleRecord(overrides: {
