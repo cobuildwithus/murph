@@ -6,6 +6,7 @@ import { afterEach, test } from 'vitest'
 import { runAssistantDoctor } from '../src/assistant/doctor.js'
 import { drainAssistantOutbox, readAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { getAssistantStatus } from '../src/assistant/status.js'
+import { readAssistantStatusSnapshot } from '../src/assistant-runtime.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
 import { deliverAssistantMessage } from '../src/outbound-channel.js'
 
@@ -95,7 +96,108 @@ test('assistant doctor flags malformed transcript lines without breaking status'
   assert.equal(transcriptCheck?.status, 'fail')
 })
 
-test('assistant outbox inventory paths reject legacy intent payloads after the hard cut', async () => {
+test('assistant status defaults torn local state files and doctor surfaces recovered JSONL tails', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-torn-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  await Promise.all([
+    mkdir(statePaths.transcriptsDirectory, { recursive: true }),
+    mkdir(statePaths.turnsDirectory, { recursive: true }),
+    mkdir(statePaths.diagnosticsDirectory, { recursive: true }),
+  ])
+
+  await writeFile(
+    path.join(statePaths.transcriptsDirectory, 'session-a.jsonl'),
+    `${JSON.stringify({
+      schema: 'murph.assistant-transcript-entry.v1',
+      at: '2026-03-29T10:00:00.000Z',
+      kind: 'user',
+      text: 'hello',
+    })}\n{"schema":"murph.assistant-transcript-entry.v1","at":"2026-03-29T10:00:01.000Z","kind":"assistant"`,
+    'utf8',
+  )
+  await writeFile(
+    statePaths.diagnosticEventsPath,
+    `${JSON.stringify({
+      schema: 'murph.assistant-diagnostic-event.v1',
+      at: '2026-03-29T10:00:00.000Z',
+      level: 'info',
+      component: 'automation',
+      kind: 'automation.scan.started',
+      message: 'scan started',
+      code: null,
+      sessionId: null,
+      turnId: null,
+      intentId: null,
+      dataJson: null,
+    })}\n{"schema":"murph.assistant-diagnostic-event.v1","at":"2026-03-29T10:00:01.000Z","level":"warn"`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(statePaths.turnsDirectory, 'turn-broken.json'),
+    '{"schema":"murph.assistant-turn-receipt.v1"',
+    'utf8',
+  )
+  await writeFile(statePaths.automationPath, '{"version":2', 'utf8')
+  await writeFile(
+    statePaths.diagnosticSnapshotPath,
+    '{"schema":"murph.assistant-diagnostics.v1"',
+    'utf8',
+  )
+  await writeFile(
+    statePaths.failoverStatePath,
+    '{"schema":"murph.assistant-failover-state.v1"',
+    'utf8',
+  )
+  await writeFile(
+    statePaths.statusPath,
+    '{"vault":"redacted"',
+    'utf8',
+  )
+
+  const status = await getAssistantStatus({
+    vault: vaultRoot,
+    limit: 5,
+  })
+
+  assert.equal(status.automation.inboxScanCursor, null)
+  assert.equal(status.diagnostics.counters.turnsStarted, 0)
+  assert.deepEqual(status.failover.routes, [])
+  assert.equal(status.recentTurns.length, 0)
+  assert.equal(await readAssistantStatusSnapshot(vaultRoot), null)
+
+  const doctor = await runAssistantDoctor(vaultRoot)
+  assert.equal(doctor.ok, false)
+  assert.equal(
+    doctor.checks.find((check) => check.name === 'automation-state')?.status,
+    'fail',
+  )
+  assert.equal(
+    doctor.checks.find((check) => check.name === 'diagnostics-snapshot')?.status,
+    'fail',
+  )
+  assert.equal(
+    doctor.checks.find((check) => check.name === 'failover-state')?.status,
+    'fail',
+  )
+  assert.equal(
+    doctor.checks.find((check) => check.name === 'turn-receipts')?.status,
+    'fail',
+  )
+  assert.equal(
+    doctor.checks.find((check) => check.name === 'transcript-files')?.status,
+    'fail',
+  )
+  assert.equal(
+    doctor.checks.find((check) => check.name === 'diagnostic-events')?.status,
+    'warn',
+  )
+})
+
+test('assistant outbox inventory paths quarantine legacy intent payloads without breaking status, drain, or new replies', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-legacy-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -132,17 +234,38 @@ test('assistant outbox inventory paths reject legacy intent payloads after the h
   )
 
   await assert.rejects(() => readAssistantOutboxIntent(vaultRoot, 'legacy-intent'))
-  await assert.rejects(() =>
-    getAssistantStatus({
+  const status = await getAssistantStatus({
+    vault: vaultRoot,
+    limit: 5,
+  })
+  assert.equal(status.outbox.total, 0)
+  assert.equal(status.recentTurns.length, 0)
+
+  const drained = await drainAssistantOutbox({
+    vault: vaultRoot,
+  })
+  assert.equal(drained.attempted, 0)
+  assert.equal(drained.sent, 0)
+
+  await deliverAssistantMessage(
+    {
       vault: vaultRoot,
-      limit: 5,
-    }),
+      channel: 'imessage',
+      participantId: '+15551234567',
+      message: 'Lunch is still logged.',
+    },
+    {
+      sendImessage: async () => {},
+    },
   )
-  await assert.rejects(() =>
-    drainAssistantOutbox({
-      vault: vaultRoot,
-    }),
-  )
+
+  const recoveredStatus = await getAssistantStatus({
+    vault: vaultRoot,
+    limit: 5,
+  })
+  assert.equal(recoveredStatus.outbox.total, 1)
+  assert.equal(recoveredStatus.outbox.sent, 1)
+  assert.equal(recoveredStatus.recentTurns[0]?.deliveryDisposition, 'sent')
 
   const doctor = await runAssistantDoctor(vaultRoot)
   const outboxCheck = doctor.checks.find(
@@ -150,6 +273,10 @@ test('assistant outbox inventory paths reject legacy intent payloads after the h
   )
   assert.equal(doctor.ok, false)
   assert.equal(outboxCheck?.status, 'fail')
+  assert.equal(
+    String(outboxCheck?.message).includes('quarantined'),
+    true,
+  )
 })
 
 test('assistant status ignores expired cooldown warnings and can find an older requested session beyond the global recent-turn window', async () => {

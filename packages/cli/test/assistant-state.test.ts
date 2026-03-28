@@ -1033,6 +1033,43 @@ test('assistant transcripts are stored separately from session metadata', async 
   assert.equal('lastAssistantMessage' in persistedSession, false)
 })
 
+test('resolveAssistantSession rebuilds torn indexes from session files and listAssistantSessions skips torn session JSON', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-index-rebuild-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:rebuild-index',
+  })
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+
+  await writeFile(
+    statePaths.indexesPath,
+    '{"version":2,"aliases":{"chat:rebuild-index"',
+    'utf8',
+  )
+  await writeFile(
+    path.join(statePaths.sessionsDirectory, 'broken-session.json'),
+    '{"schema":"murph.assistant-session.v3"',
+    'utf8',
+  )
+
+  const rebound = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:rebuild-index',
+    createIfMissing: false,
+  })
+  const sessions = await listAssistantSessions(vaultRoot)
+
+  assert.equal(rebound.session.sessionId, resolved.session.sessionId)
+  assert.deepEqual(
+    sessions.map((session) => session.sessionId),
+    [resolved.session.sessionId],
+  )
+})
+
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void
   let reject!: (reason?: unknown) => void

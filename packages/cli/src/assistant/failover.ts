@@ -21,7 +21,12 @@ import {
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import { resolveAssistantProviderLabel } from './provider-registry.js'
-import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
+import {
+  isJsonSyntaxError,
+  isMissingFileError,
+  normalizeNullableString,
+  writeJsonFileAtomic,
+} from './shared.js'
 
 const ASSISTANT_FAILOVER_STATE_SCHEMA = 'murph.assistant-failover-state.v1'
 const DEFAULT_FAILOVER_COOLDOWN_MS = 60_000
@@ -46,7 +51,7 @@ export async function readAssistantFailoverState(
     const raw = await readFile(paths.failoverStatePath, 'utf8')
     return assistantFailoverStateSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
-    if (!isMissingFileError(error)) {
+    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
       throw error
     }
   }

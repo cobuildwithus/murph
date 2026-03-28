@@ -17,8 +17,11 @@ import {
   type AssistantBindingPatch,
 } from '../bindings.js'
 import {
+  isJsonSyntaxError,
   isMissingFileError,
   normalizeNullableString,
+  parseAssistantJsonLinesWithTailSalvage,
+  readAssistantJsonFile,
   writeTextFileAtomic,
   writeJsonFileAtomic,
 } from '../shared.js'
@@ -54,6 +57,12 @@ export async function ensureAssistantState(
     mkdir(paths.stateDirectory, {
       recursive: true,
     }),
+    mkdir(paths.usageDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.usagePendingDirectory, {
+      recursive: true,
+    }),
   ])
 }
 
@@ -64,12 +73,19 @@ export async function readAssistantSession(input: {
   const sessionPath = resolveAssistantSessionPath(input.paths, input.sessionId)
 
   try {
-    const raw = await readFile(sessionPath, 'utf8')
-    return normalizeAssistantSessionSnapshot(
-      parseAssistantSessionRecord(JSON.parse(raw) as unknown),
-    )
+    return (
+      await readAssistantJsonFile({
+        filePath: sessionPath,
+        parse(value) {
+          return normalizeAssistantSessionSnapshot(parseAssistantSessionRecord(value))
+        },
+      })
+    ).value
   } catch (error) {
     if (isMissingFileError(error)) {
+      return null
+    }
+    if (isJsonSyntaxError(error)) {
       return null
     }
     throw error
@@ -95,11 +111,16 @@ export async function readAssistantTranscriptEntries(
 
   try {
     const raw = await readFile(transcriptPath, 'utf8')
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) => assistantTranscriptEntrySchema.parse(JSON.parse(line) as unknown))
+    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+      assistantTranscriptEntrySchema.parse(value),
+    )
+    if (parsed.malformedLineCount > 0) {
+      throw new VaultCliError(
+        'ASSISTANT_TRANSCRIPT_CORRUPTED',
+        'Assistant transcript contains malformed committed entries.',
+      )
+    }
+    return parsed.values
   } catch (error) {
     if (isMissingFileError(error)) {
       return []
@@ -325,19 +346,24 @@ export async function readAssistantIndexStore(
   paths: AssistantStatePaths,
 ): Promise<AssistantAliasStore> {
   try {
-    const raw = await readFile(paths.indexesPath, 'utf8')
-    return assistantAliasStoreSchema.parse(JSON.parse(raw) as unknown)
+    return (
+      await readAssistantJsonFile({
+        filePath: paths.indexesPath,
+        parse(value) {
+          return assistantAliasStoreSchema.parse(value)
+        },
+      })
+    ).value
   } catch (error) {
     if (!isMissingFileError(error)) {
+      if (isJsonSyntaxError(error)) {
+        return rebuildAssistantIndexStore(paths)
+      }
       throw error
     }
   }
 
-  const initial = assistantAliasStoreSchema.parse({
-    version: ASSISTANT_INDEX_STORE_VERSION,
-    aliases: {},
-    conversationKeys: {},
-  })
+  const initial = createInitialAssistantIndexStore()
   await writeJsonFileAtomic(paths.indexesPath, initial)
   return initial
 }
@@ -384,15 +410,78 @@ export async function readAutomationState(
   paths: AssistantStatePaths,
 ): Promise<AssistantAutomationState> {
   try {
-    const raw = await readFile(paths.automationPath, 'utf8')
-    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    return (
+      await readAssistantJsonFile({
+        filePath: paths.automationPath,
+        parse(value) {
+          return assistantAutomationStateSchema.parse(value)
+        },
+      })
+    ).value
   } catch (error) {
     if (!isMissingFileError(error)) {
+      if (isJsonSyntaxError(error)) {
+        return createInitialAutomationState()
+      }
       throw error
     }
   }
 
-  const initial = assistantAutomationStateSchema.parse({
+  const initial = createInitialAutomationState()
+  await writeJsonFileAtomic(paths.automationPath, initial)
+  return initial
+}
+
+function createInitialAssistantIndexStore(): AssistantAliasStore {
+  return assistantAliasStoreSchema.parse({
+    version: ASSISTANT_INDEX_STORE_VERSION,
+    aliases: {},
+    conversationKeys: {},
+  })
+}
+
+async function rebuildAssistantIndexStore(
+  paths: AssistantStatePaths,
+): Promise<AssistantAliasStore> {
+  const entries = await readdir(paths.sessionsDirectory, {
+    withFileTypes: true,
+  })
+  const aliases: Record<string, string> = {}
+  const conversationKeys: Record<string, string> = {}
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue
+    }
+
+    try {
+      const session = await readAssistantSession({
+        paths,
+        sessionId: entry.name.replace(/\.json$/u, ''),
+      })
+      if (!session) {
+        continue
+      }
+      if (session.alias) {
+        aliases[session.alias] = session.sessionId
+      }
+      if (session.binding.conversationKey) {
+        conversationKeys[session.binding.conversationKey] = session.sessionId
+      }
+    } catch {
+      // Doctor will still flag the malformed session file; skip it while rebuilding indexes.
+    }
+  }
+
+  return assistantAliasStoreSchema.parse({
+    version: ASSISTANT_INDEX_STORE_VERSION,
+    aliases,
+    conversationKeys,
+  })
+}
+
+function createInitialAutomationState(): AssistantAutomationState {
+  return assistantAutomationStateSchema.parse({
     version: ASSISTANT_AUTOMATION_STATE_VERSION,
     inboxScanCursor: null,
     autoReplyScanCursor: null,
@@ -402,6 +491,4 @@ export async function readAutomationState(
     autoReplyPrimed: true,
     updatedAt: new Date().toISOString(),
   })
-  await writeJsonFileAtomic(paths.automationPath, initial)
-  return initial
 }
