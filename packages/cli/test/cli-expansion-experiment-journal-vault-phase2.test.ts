@@ -47,12 +47,12 @@ async function runSliceCli<TData>(
 test.sequential(
   'experiment update, checkpoint, and stop mutate the experiment page and append lifecycle events',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-experiment-phase2-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-phase2-'))
     const updatePayloadPath = path.join(vaultRoot, 'experiment-update.json')
     const checkpointPayloadPath = path.join(vaultRoot, 'experiment-checkpoint.json')
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
       const created = await runSliceCli<{
         experimentId: string
         slug: string
@@ -198,12 +198,12 @@ test.sequential(
 test.sequential(
   'journal append plus typed link and unlink flags mutate body and frontmatter collections',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-journal-phase2-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-phase2-'))
     const firstEventId = 'evt_01JNV422Y2M5ZBV64ZP4N1DRB1'
     const secondEventId = 'evt_01JNV422Y2M5ZBV64ZP4N1DRB2'
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
 
       const appended = await runSliceCli<{
         created: boolean
@@ -405,10 +405,10 @@ test.sequential(
 test.sequential(
   'vault update repairs additive metadata drift while mutating vault.json and CORE.md title and timezone fields',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-vault-phase2-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-phase2-'))
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
       const metadataPath = path.join(vaultRoot, 'vault.json')
       const staleMetadata = JSON.parse(
         await readFile(metadataPath, 'utf8'),
@@ -488,10 +488,10 @@ test.sequential(
 test.sequential(
   'vault repair restores additive metadata fields and missing scaffold directories',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-vault-repair-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-repair-'))
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
       const metadataPath = path.join(vaultRoot, 'vault.json')
       const staleMetadata = JSON.parse(
         await readFile(metadataPath, 'utf8'),
@@ -562,10 +562,10 @@ test.sequential(
 test.sequential(
   'journal unlink returns a stable not_found error when the journal day does not exist',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-journal-missing-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-missing-'))
 
     try {
-      await runSliceCli(['init', '--vault', vaultRoot])
+      await runSliceCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
 
       const unlinkEvent = await runSliceCli([
         'journal',

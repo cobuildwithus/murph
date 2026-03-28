@@ -7,16 +7,13 @@ import {
   optionalTimestampSchema,
   optionalTrimmedStringSchema,
   parseInputObject,
-  resolveVaultRootAlias,
   stripUndefined,
-  vaultRootAliasSchemaFields,
 } from "./shared.ts";
 
 export interface MealImportInput {
   photoPath?: string;
   audioPath?: string;
   vaultRoot?: string;
-  vault?: string;
   occurredAt?: string | number | Date;
   note?: string;
   source?: string;
@@ -30,7 +27,7 @@ const mealImportInputSchema = z
   .object({
     photoPath: optionalTrimmedStringSchema("photoPath"),
     audioPath: optionalTrimmedStringSchema("audioPath"),
-    ...vaultRootAliasSchemaFields,
+    vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
     occurredAt: optionalTimestampSchema("occurredAt"),
     note: optionalTrimmedStringSchema("note"),
     source: optionalTrimmedStringSchema("source"),
@@ -57,7 +54,7 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
     : undefined;
 
   return stripUndefined({
-    vaultRoot: resolveVaultRootAlias(request),
+    vaultRoot: request.vaultRoot,
     photoPath: photo?.sourcePath,
     audioPath: audio?.sourcePath,
     occurredAt: request.occurredAt,
@@ -66,11 +63,18 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
   });
 }
 
-export async function importMeal<TResult = unknown>(
+export async function addMeal<TResult = unknown>(
   input: unknown,
   { corePort }: ImporterExecutionOptions = {},
 ): Promise<TResult> {
-  const writer = assertCanonicalWritePort(corePort, ["importMeal"]);
+  const writer = assertCanonicalWritePort(corePort, ["addMeal"]);
   const payload = await prepareMealImport(input);
-  return (await writer.importMeal(payload)) as TResult;
+  return (await writer.addMeal(payload)) as TResult;
+}
+
+export async function importMeal<TResult = unknown>(
+  input: unknown,
+  options: ImporterExecutionOptions = {},
+): Promise<TResult> {
+  return await addMeal<TResult>(input, options);
 }

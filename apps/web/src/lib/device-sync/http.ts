@@ -2,7 +2,7 @@ import {
   buildPublicDeviceSyncErrorPayload,
   DeviceSyncError,
   isDeviceSyncError,
-} from "@healthybob/device-syncd";
+} from "@murph/device-syncd";
 import { NextResponse } from "next/server";
 
 import {
@@ -61,6 +61,7 @@ export function providerCallbackRedirect(input: {
   }
 
   const destination = new URL(input.returnTo);
+  clearDeviceSyncRedirectState(destination);
   destination.searchParams.set("deviceSyncStatus", "connected");
   destination.searchParams.set("deviceSyncProvider", input.provider);
   destination.searchParams.set("deviceSyncConnectionId", input.connectionId);
@@ -77,10 +78,19 @@ export function errorToCallbackRedirect(input: {
   }
 
   const destination = new URL(input.returnTo);
+  clearDeviceSyncRedirectState(destination);
   destination.searchParams.set("deviceSyncStatus", "error");
   destination.searchParams.set("deviceSyncProvider", input.provider);
   destination.searchParams.set("deviceSyncError", input.error.code);
   return redirectTo(destination.toString());
+}
+
+function clearDeviceSyncRedirectState(destination: URL): void {
+  destination.searchParams.delete("deviceSyncConnectionId");
+  destination.searchParams.delete("deviceSyncError");
+  destination.searchParams.delete("deviceSyncErrorMessage");
+  destination.searchParams.delete("deviceSyncProvider");
+  destination.searchParams.delete("deviceSyncStatus");
 }
 
 function escapeHtml(value: string): string {

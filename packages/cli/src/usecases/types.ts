@@ -917,6 +917,28 @@ export interface ImportersRuntime {
       id: string
     }
   }>
+  addMeal(input: {
+    photoPath?: string
+    audioPath?: string
+    vaultRoot: string
+    occurredAt?: string
+    note?: string
+    source?: string
+  }): Promise<{
+    mealId: string
+    event: {
+      id: string
+      occurredAt?: string | null
+      note?: string | null
+    }
+    photo: {
+      relativePath: string
+    } | null
+    audio?: {
+      relativePath: string
+    } | null
+    manifestPath: string
+  }>
   importMeal(input: {
     photoPath?: string
     audioPath?: string

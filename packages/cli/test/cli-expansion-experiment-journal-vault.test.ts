@@ -18,10 +18,16 @@ test('experiment help uses generic id selectors while journal keeps date selecto
 test.sequential(
   'experiment create accepts richer frontmatter options and experiment reads resolve by slug or id',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-experiment-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-'))
 
     try {
-      const initResult = await runCli<{ created: boolean }>(['init', '--vault', vaultRoot])
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--timezone',
+        'UTC',
+        '--vault',
+        vaultRoot,
+      ])
       assert.equal(initResult.ok, true)
       assert.equal(requireData(initResult).created, true)
 
@@ -148,10 +154,10 @@ test.sequential(
 test.sequential(
   'journal show and list read journal pages by day and date range',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-journal-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-'))
 
     try {
-      await runCli(['init', '--vault', vaultRoot])
+      await runCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
 
       const firstJournal = await runCli([
         'journal',
@@ -236,10 +242,10 @@ test.sequential(
 test.sequential(
   'vault show, stats, and paths surface read-only vault metadata and counts',
   async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-vault-'))
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-'))
 
     try {
-      await runCli(['init', '--vault', vaultRoot])
+      await runCli(['init', '--timezone', 'UTC', '--vault', vaultRoot])
       await runCli([
         'experiment',
         'create',
@@ -300,7 +306,7 @@ test.sequential(
 
       assert.equal(showResult.ok, true)
       assert.equal(showResult.meta?.command, 'vault show')
-      assert.match(requireData(showResult).schemaVersion ?? '', /^hb\./u)
+      assert.match(requireData(showResult).schemaVersion ?? '', /^murph\./u)
       assert.match(requireData(showResult).vaultId ?? '', /^vault_/u)
       assert.equal(requireData(showResult).corePath, 'CORE.md')
       assert.equal(requireData(showResult).title !== null, true)

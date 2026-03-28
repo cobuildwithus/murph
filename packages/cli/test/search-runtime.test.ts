@@ -24,13 +24,13 @@ interface RetrievalFixture {
 }
 
 async function makeCanonicalHealthFixture(): Promise<string> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-canonical-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-canonical-'))
 
   await writeVaultFile(
     vaultRoot,
     'ledger/assessments/2026/2026-03.jsonl',
     `${JSON.stringify({
-      schemaVersion: 'hb.assessment-response.v1',
+      schemaVersion: 'murph.assessment-response.v1',
       id: 'asmt_health_01',
       assessmentType: 'full-intake',
       recordedAt: '2026-03-12T13:00:00Z',
@@ -49,7 +49,7 @@ async function makeCanonicalHealthFixture(): Promise<string> {
     vaultRoot,
     'ledger/profile-snapshots/2026/2026-03.jsonl',
     `${JSON.stringify({
-      schemaVersion: 'hb.profile-snapshot.v1',
+      schemaVersion: 'murph.profile-snapshot.v1',
       id: 'psnap_health_01',
       recordedAt: '2026-03-12T14:00:00Z',
       source: 'assessment_projection',
@@ -66,7 +66,7 @@ async function makeCanonicalHealthFixture(): Promise<string> {
     vaultRoot,
     'ledger/events/2026/2026-03.jsonl',
     `${JSON.stringify({
-      schemaVersion: 'hb.event.v1',
+      schemaVersion: 'murph.event.v1',
       id: 'evt_history_01',
       kind: 'encounter',
       occurredAt: '2026-03-12T12:45:00Z',
@@ -98,7 +98,7 @@ Reduce sleep latency and improve recovery.
 }
 
 async function makeRetrievalFixture(): Promise<RetrievalFixture> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-retrieval-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-retrieval-'))
   const csvPath = path.join(vaultRoot, 'heart-rate.csv')
 
   await writeFile(
@@ -114,6 +114,8 @@ async function makeRetrievalFixture(): Promise<RetrievalFixture> {
 
   const initResult = await runCli<{ created: boolean }>([
     'init',
+    '--timezone',
+    'UTC',
     '--vault',
     vaultRoot,
   ])
@@ -184,7 +186,7 @@ Steady energy. Afternoon crash after pasta lunch and coffee.
 }
 
 async function makeSourceRetrievalFixture(): Promise<RetrievalFixture> {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-cli-retrieval-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-retrieval-'))
   const csvPath = path.join(vaultRoot, 'heart-rate.csv')
 
   await writeFile(
@@ -200,6 +202,8 @@ async function makeSourceRetrievalFixture(): Promise<RetrievalFixture> {
 
   const initResult = await runSourceCli<{ created: boolean }>([
     'init',
+    '--timezone',
+    'UTC',
     '--vault',
     vaultRoot,
   ])

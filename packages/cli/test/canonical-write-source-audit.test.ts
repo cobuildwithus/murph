@@ -48,6 +48,8 @@ const VAULT_RESOLUTION_PATTERNS = [
 
 const CANONICAL_TARGET_PATTERNS = [
   /WORKOUT_FORMATS_DIRECTORY/u,
+  /\blistProtectedCanonicalPaths\(/u,
+  /\blistWriteOperationMetadataPaths\(/u,
   /['"`]bank\//u,
   /['"`]journal\//u,
   /['"`]ledger\//u,
@@ -100,6 +102,17 @@ test('canonical mutator matcher catches representative bypass shapes and ignores
       const resolved = await resolveVaultPathOnDisk(vaultRoot, relativePath)
       await writeFile(resolved.absolutePath, markdown, 'utf8')
       const root = WORKOUT_FORMATS_DIRECTORY
+    `),
+    true,
+  )
+
+  assert.equal(
+    isCanonicalMutatorSource(`
+      const protectedPaths = await listProtectedCanonicalPaths(vaultRoot)
+      for (const relativePath of protectedPaths) {
+        const absolutePath = resolveVaultPath(vaultRoot, relativePath).absolutePath
+        await writeFile(absolutePath, markdown, 'utf8')
+      }
     `),
     true,
   )

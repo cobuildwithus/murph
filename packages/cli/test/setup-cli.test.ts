@@ -117,7 +117,7 @@ test('setup wizard scheduled updates default to the starter bundle', () => {
 })
 
 test('setup scheduled updates defer preset-backed jobs until an explicit delivery route is configured', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-scheduled-updates-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-scheduled-updates-'))
   const steps: SetupResult['steps'] = []
 
   try {
@@ -129,6 +129,7 @@ test('setup scheduled updates defer preset-backed jobs until an explicit deliver
         'weekly-health-snapshot',
       ],
       steps,
+      vault: vaultRoot,
     })
 
     assert.deepEqual(
@@ -151,10 +152,13 @@ test('setup scheduled updates defer preset-backed jobs until an explicit deliver
 })
 
 test('setup scheduled updates keep returning deferred recommendations on repeated onboarding runs', async () => {
+  const vaultRoot = '/tmp/murph-setup-scheduled-updates-repeat'
+
   await configureSetupScheduledUpdates({
     dryRun: false,
     presetIds: ['environment-health-watch'],
     steps: [],
+    vault: vaultRoot,
   })
 
   const steps: SetupResult['steps'] = []
@@ -162,6 +166,7 @@ test('setup scheduled updates keep returning deferred recommendations on repeate
     dryRun: false,
     presetIds: ['environment-health-watch'],
     steps,
+    vault: vaultRoot,
   })
 
   assert.deepEqual(
@@ -171,12 +176,13 @@ test('setup scheduled updates keep returning deferred recommendations on repeate
   assert.equal(steps[0]?.status, 'skipped')
 })
 
-test('setup scheduled updates surface deferred recommendation details without prompt templates and keep dry-run wording', () => {
+test('setup scheduled updates surface deferred recommendation details without prompt templates and keep dry-run wording', async () => {
   const steps: SetupResult['steps'] = []
-  const scheduledUpdates = configureSetupScheduledUpdates({
+  const scheduledUpdates = await configureSetupScheduledUpdates({
     dryRun: true,
     presetIds: ['weekly-health-snapshot'],
     steps,
+    vault: '/tmp/murph-setup-scheduled-updates-dry-run',
   })
 
   assert.equal(scheduledUpdates.length, 1)
@@ -193,16 +199,16 @@ test('setup scheduled updates surface deferred recommendation details without pr
   )
 })
 
-test('setup scheduled updates propagate unknown preset errors without mutating steps', () => {
+test('setup scheduled updates propagate unknown preset errors without mutating steps', async () => {
   const steps: SetupResult['steps'] = []
 
-  assert.throws(
-    () =>
-      configureSetupScheduledUpdates({
-        dryRun: false,
-        presetIds: ['missing-preset'],
-        steps,
-      }),
+  await assert.rejects(
+    configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: ['missing-preset'],
+      steps,
+      vault: '/tmp/murph-setup-scheduled-updates-missing',
+    }),
     (error: unknown) => {
       assert.equal(
         typeof error === 'object' &&
@@ -225,6 +231,7 @@ test('setup scheduled updates can be fully opted out during onboarding', async (
     dryRun: false,
     presetIds: [],
     steps,
+    vault: '/tmp/murph-setup-scheduled-updates-opt-out',
   })
 
   assert.deepEqual(scheduledUpdates, [])
@@ -326,7 +333,7 @@ test('public URL review stays hidden when a public device-sync base is already c
 })
 
 test('interactive onboarding treats public URL guidance as informational and never forwards a strategy into setup', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-public-url-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-public-url-'))
   const receivedInputs: Array<{
     channels: string[] | null
     publicUrlStrategy: string | null
@@ -334,7 +341,7 @@ test('interactive onboarding treats public URL guidance as informational and nev
     wearables: string[] | null
   }> = []
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     runtimeEnv: {
       getCurrentEnv() {
         return {}
@@ -506,7 +513,10 @@ async function writeExecutable(
   await chmod(absolutePath, 0o755)
 }
 
-function buildExpectedCliShimScript(cliBinPath: string): string {
+function buildExpectedCliShimScript(
+  cliBinPath: string,
+  shimName: 'murph' | 'vault-cli' = 'murph',
+): string {
   const cliSourceBinPath = path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
   const cliPackageRoot = path.resolve(path.dirname(cliBinPath), '..')
   const repoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
@@ -606,18 +616,18 @@ is_discovery_invocation() {
 
 if is_discovery_invocation "$@"; then
   if [ "$cli_dist_ready" = true ]; then
-    run_supervised node '${cliBinPath}' "$@"
+    run_supervised env SETUP_PROGRAM_NAME='${shimName}' node '${cliBinPath}' "$@"
     exit $?
   fi
 
   if [ -f '${cliSourceBinPath}' ]; then
     if command -v pnpm >/dev/null 2>&1; then
-      run_supervised pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+      run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
       exit $?
     fi
 
     if command -v corepack >/dev/null 2>&1; then
-      run_supervised corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+      run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
       exit $?
     fi
   fi
@@ -646,23 +656,23 @@ cli_dist_ready=true
 ${cliDistCheckLines}
 
 if [ "$cli_dist_ready" = true ]; then
-  run_supervised node '${cliBinPath}' "$@"
+  run_supervised env SETUP_PROGRAM_NAME='${shimName}' node '${cliBinPath}' "$@"
   exit $?
 fi
 
 if [ -f '${cliSourceBinPath}' ]; then
   if command -v pnpm >/dev/null 2>&1; then
-    run_supervised pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
     exit $?
   fi
 
   if command -v corepack >/dev/null 2>&1; then
-    run_supervised corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
     exit $?
   fi
 fi
 
-printf '%s\n' 'Healthy Bob CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
+printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
 exit 1
 `
 }
@@ -792,13 +802,13 @@ function makeSetupResult(
         title: 'Inbox bootstrap',
       },
     ],
-    toolchainRoot: '~/.healthybob/toolchain',
+    toolchainRoot: '~/.murph/toolchain',
     tools: {
       ffmpegCommand: '/usr/local/bin/ffmpeg',
       paddleocrCommand: '/usr/local/bin/paddlex',
       pdftotextCommand: '/usr/local/bin/pdftotext',
       whisperCommand: '/usr/local/bin/whisper-cli',
-      whisperModelPath: '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+      whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     },
     vault,
     wearables: [],
@@ -812,7 +822,7 @@ async function runSetupCli<TData>(
   services:
     | ReturnType<typeof createSetupServices>
     | { setupHost?(input: any): Promise<any>; setupMacos(input: any): Promise<any> },
-  commandName = 'healthybob',
+  commandName = 'murph',
 ): Promise<CliEnvelope<TData>> {
   const cli = createSetupCli({
     commandName,
@@ -841,7 +851,7 @@ async function runSetupAliasRaw(
 ): Promise<string> {
   await ensureCliRuntimeArtifacts()
 
-  const aliasRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-alias-'))
+  const aliasRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-alias-'))
   const aliasPath = path.join(aliasRoot, aliasName)
   const builtBinPath = JSON.stringify(path.join(repoRoot, 'packages/cli/dist/bin.js'))
 
@@ -924,7 +934,7 @@ async function readOptionalText(absolutePath: string): Promise<string> {
 }
 
 test.sequential('setup CLI dry-run returns a macOS plan without mutating services', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-home-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-home-'))
   const vaultRoot = path.join(homeRoot, 'vault')
   let coreInitCalls = 0
   let bootstrapCalls = 0
@@ -1016,7 +1026,7 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
 })
 
 test.sequential('setup CLI dry-run reuses an existing vault without mutating services', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-existing-dryrun-home-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-existing-dryrun-home-'))
   const vaultRoot = path.join(homeRoot, 'vault')
   let coreInitCalls = 0
   let bootstrapCalls = 0
@@ -1107,7 +1117,7 @@ test.sequential('setup CLI defaults the vault to ./vault when omitted', async ()
   assert.equal(receivedVault, './vault')
 })
 
-test.sequential('setup CLI keeps post-setup CTAs usable when invoked as healthybob', async () => {
+test.sequential('setup CLI keeps post-setup CTAs usable when invoked as murph', async () => {
   const result = await runSetupCli<SetupResult>(
     ['setup', '--vault', './vault'],
     {
@@ -1120,15 +1130,15 @@ test.sequential('setup CLI keeps post-setup CTAs usable when invoked as healthyb
   assert.equal(result.ok, true)
   assert.equal(
     result.meta.cta?.commands[0]?.command,
-    'healthybob assistant chat',
+    'murph assistant chat',
   )
   assert.equal(
     result.meta.cta?.commands[1]?.command,
-    'healthybob inbox doctor',
+    'murph inbox doctor',
   )
   assert.equal(
     result.meta.cta?.commands[2]?.command,
-    'healthybob inbox source add imessage --id imessage:self --account self --includeOwn',
+    'murph inbox source add imessage --id imessage:self --account self --includeOwn',
   )
 })
 
@@ -1138,7 +1148,7 @@ test.sequential('setup CLI reports successful setup metadata for post-setup chat
   }
 
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     onSetupSuccess(context) {
       handoffContext.current = context
     },
@@ -1170,7 +1180,7 @@ test.sequential('setup CLI does not report a handoff for dry-run setup', async (
   let handoffCalls = 0
 
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     onSetupSuccess() {
       handoffCalls += 1
     },
@@ -1239,7 +1249,7 @@ test('setup wizard gating only enables interactive human onboarding runs', () =>
 })
 
 test('onboard invokes the wizard for interactive runs and skips it for explicit JSON output', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-'))
   let wizardCalls = 0
   const wizardInitialChannels: Array<string[]> = []
   const wizardInitialScheduledUpdates: Array<string[]> = []
@@ -1247,7 +1257,7 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
   const receivedScheduledUpdates: Array<string[] | null> = []
   const receivedWearables: Array<string[] | null> = []
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     platform: () => 'darwin',
     terminal: {
       stdinIsTTY: true,
@@ -1316,13 +1326,13 @@ test('onboard invokes the wizard for interactive runs and skips it for explicit 
 })
 
 test('interactive onboarding on Linux starts without the macOS-only iMessage default', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-linux-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-linux-'))
   const wizardInitialChannels: Array<string[]> = []
   const wizardInitialScheduledUpdates: Array<string[]> = []
   const wizardPlatforms: Array<string | undefined> = []
 
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     platform: () => 'linux',
     terminal: {
       stdinIsTTY: true,
@@ -1375,7 +1385,7 @@ test('interactive onboarding on Linux starts without the macOS-only iMessage def
 })
 
 test('resolveInitialSetupWizardChannels reuses saved preferred email channels even when auto-reply is disabled', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-'))
   const initialState = await readAssistantAutomationState(vaultRoot)
 
   await saveAssistantAutomationState(vaultRoot, {
@@ -1437,7 +1447,7 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
     }),
     [
       {
-        detail: 'Selected WHOOP. Healthy Bob can open the connect flow after setup.',
+        detail: 'Selected WHOOP. Murph can open the connect flow after setup.',
         enabled: true,
         missingEnv: [],
         ready: true,
@@ -1448,7 +1458,7 @@ test('runtime env helpers honor channel aliases and require explicit wearable cl
 })
 
 test('interactive onboarding prompts for missing channel and wearable credentials and passes them into setup', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wizard-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-'))
   const promptedInputs: Array<{
     channels: string[]
     env: NodeJS.ProcessEnv
@@ -1467,7 +1477,7 @@ test('interactive onboarding prompts for missing channel and wearable credential
     OURA_CLIENT_SECRET: process.env.OURA_CLIENT_SECRET,
   }
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     runtimeEnv: {
       getCurrentEnv() {
         return {}
@@ -1598,7 +1608,7 @@ test('setup resolves assistant defaults from explicit assistant options when the
   const resolvedAssistants: any[] = []
   const receivedAssistants: any[] = []
   const cli = createSetupCli({
-    commandName: 'healthybob',
+    commandName: 'murph',
     terminal: {
       stdinIsTTY: false,
       stderrIsTTY: false,
@@ -1746,7 +1756,7 @@ test('setup handoff keeps the post-setup flow in assistant chat when a selected 
 })
 
 test.sequential('setup service configures Telegram and enables assistant auto-reply when a bot token is present', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-telegram-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-telegram-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
@@ -1917,7 +1927,7 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
 })
 
 test.sequential('setup service keeps Telegram configured but disables auto-reply when the bot token fails readiness checks', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-telegram-fail-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-telegram-fail-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
@@ -2132,12 +2142,12 @@ test('setup auto-chat gating only enables the handoff for interactive default-fo
 })
 
 test.sequential('setup service provisions formulas, downloads the model, and bootstraps the vault', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-real-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-real-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
   const expectedWhisperModelPath = path.join(
     homeRoot,
-    '.healthybob',
+    '.murph',
     'toolchain',
     'models',
     'whisper',
@@ -2157,7 +2167,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
   const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const healthybobShimPath = path.join(homeRoot, '.local', 'bin', 'healthybob')
+  const murphShimPath = path.join(homeRoot, '.local', 'bin', 'murph')
   const vaultCliShimPath = path.join(homeRoot, '.local', 'bin', 'vault-cli')
   const shellProfilePath = path.join(homeRoot, '.zshrc')
   const installedFormulas = new Set<string>()
@@ -2321,16 +2331,16 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     )
     assert.equal(
       result.tools.whisperModelPath,
-      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+      '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
     assert.match(
       String(bootstrapCalls[0]?.paddleocrCommand),
       /paddlex-ocr\/bin\/paddlex$/u,
     )
-    assert.equal(result.toolchainRoot, '~/.healthybob/toolchain')
+    assert.equal(result.toolchainRoot, '~/.murph/toolchain')
     assert.equal(
       result.tools.paddleocrCommand,
-      '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex',
+      '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex',
     )
     assert.equal(installedFormulas.has('ffmpeg'), true)
     assert.equal(installedFormulas.has('poppler'), true)
@@ -2353,7 +2363,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       true,
     )
     assert.equal(
-      result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
+      result.notes.includes('Open a new shell or run source ~/.zshrc to use murph immediately.'),
       true,
     )
 
@@ -2371,25 +2381,29 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
             } | null
           } | null
         } | null
-        model?: string | null
+        defaultsByProvider?: {
+          'codex-cli'?: {
+            model?: string | null
+          } | null
+        } | null
         provider?: string | null
       } | null
       defaultVault: string | null
     }
-    const healthybobShim = await readFile(healthybobShimPath, 'utf8')
+    const murphShim = await readFile(murphShimPath, 'utf8')
     const vaultCliShim = await readFile(vaultCliShimPath, 'utf8')
     const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
     assert.equal(operatorConfig.defaultVault, '~/vault')
     assert.equal(operatorConfig.assistant?.provider, 'codex-cli')
-    assert.equal(operatorConfig.assistant?.model, 'gpt-5.4')
+    assert.equal(operatorConfig.assistant?.defaultsByProvider?.['codex-cli']?.model, 'gpt-5.4')
     assert.equal(operatorConfig.assistant?.account?.kind, 'account')
     assert.equal(operatorConfig.assistant?.account?.planCode, 'plus')
     assert.equal(operatorConfig.assistant?.account?.planName, 'Plus')
     assert.equal(operatorConfig.assistant?.account?.quota?.creditsRemaining, 18)
     assert.equal(operatorConfig.assistant?.account?.quota?.primaryWindow?.remainingPercent, 55)
-    assert.equal(healthybobShim, buildExpectedCliShimScript(cliBinPath))
-    assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath))
+    assert.equal(murphShim, buildExpectedCliShimScript(cliBinPath, 'murph'))
+    assert.equal(vaultCliShim, buildExpectedCliShimScript(cliBinPath, 'vault-cli'))
     assert.match(shellProfile, /export PATH="\$HOME\/\.local\/bin:\$PATH"/u)
     assert.equal(
       runCalls.some(
@@ -2402,130 +2416,11 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   }
 })
 
-test.sequential('setup service reuses existing Healthy Bob shims and PATH wiring', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-shim-reuse-'))
-  const homeRoot = path.join(tempRoot, 'home')
-  const vaultRoot = path.join(tempRoot, 'vault')
-  const homebrewBin = path.join(tempRoot, 'brew', 'bin')
-  const formulaPrefixes = {
-    ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
-    poppler: path.join(tempRoot, 'Cellar', 'poppler'),
-    'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
-  }
-  const brewCommand = path.join(homebrewBin, 'brew')
-  const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
-  const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
-  const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const userBinDirectory = path.join(homeRoot, '.local', 'bin')
-  const shellProfilePath = path.join(homeRoot, '.zshrc')
-  const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
-  let bootstrapCalls = 0
-
-  await mkdir(vaultRoot, { recursive: true })
-  await writeFile(path.join(vaultRoot, 'vault.json'), '{}\n', 'utf8')
-  await writeExecutable(brewCommand)
-  await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
-  await writeExecutable(whisperCommand)
-  await mkdir(userBinDirectory, { recursive: true })
-  await writeExecutable(
-    path.join(userBinDirectory, 'healthybob'),
-    buildExpectedCliShimScript(cliBinPath),
-  )
-  await writeExecutable(
-    path.join(userBinDirectory, 'vault-cli'),
-    buildExpectedCliShimScript(cliBinPath),
-  )
-  await writeFile(
-    shellProfilePath,
-    `# >>> Healthy Bob PATH >>>
-export PATH="$HOME/.local/bin:$PATH"
-# <<< Healthy Bob PATH <<<
-`,
-    'utf8',
-  )
-  await saveDefaultVaultConfig(vaultRoot, homeRoot)
-
-  const services = createSetupServices({
-    arch: () => 'x64',
-    downloadFile: async (_url, destinationPath) => {
-      await mkdir(path.dirname(destinationPath), { recursive: true })
-      await writeFile(destinationPath, 'model', 'utf8')
-    },
-    env: () => ({ PATH: `${userBinDirectory}${path.delimiter}${homebrewBin}`, SHELL: '/bin/zsh' }),
-    getHomeDirectory: () => homeRoot,
-    inboxServices: {
-      async bootstrap() {
-        bootstrapCalls += 1
-        return makeBootstrapResult(vaultRoot)
-      },
-    },
-    log() {},
-    platform: () => 'darwin',
-    resolveCliBinPath: () => cliBinPath,
-    runCommand: async ({ file, args }) => {
-      const baseName = path.basename(file)
-
-      if (baseName === 'brew' && args[0] === 'list' && args[1] === '--versions') {
-        const formula = args[2] ?? ''
-        return {
-          exitCode: installedFormulas.has(formula) ? 0 : 1,
-          stderr: '',
-          stdout: installedFormulas.has(formula) ? `${formula} 1.0.0\n` : '',
-        }
-      }
-
-      if (baseName === 'brew' && args[0] === '--prefix') {
-        const formula = args[1] as keyof typeof formulaPrefixes
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: `${formulaPrefixes[formula]}\n`,
-        }
-      }
-
-      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
-    },
-    vaultServices: {
-      core: {
-        async init() {
-          throw new Error('init should not be called for an existing vault')
-        },
-      },
-    } as any,
-  })
-
-  try {
-    const result = await services.setupMacos({
-      skipOcr: true,
-      vault: vaultRoot,
-      whisperModel: 'base.en',
-    })
-
-    assert.equal(bootstrapCalls, 1)
-    assert.equal(
-      result.steps.some((step) => step.id === 'cli-shims' && step.status === 'reused'),
-      true,
-    )
-    assert.equal(
-      result.steps.some((step) => step.id === 'default-vault' && step.status === 'reused'),
-      true,
-    )
-    assert.equal(
-      result.notes.includes('Open a new shell or run source ~/.zshrc to use healthybob immediately.'),
-      false,
-    )
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
 test.sequential('CLI shim rebuilds missing workspace package dist outputs before launching the built CLI', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-repair-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-repair-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const shimPath = path.join(tempRoot, 'healthybob')
+  const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
   const childPidPath = path.join(tempRoot, 'child.pid')
   const runtimeStateDistIndexPath = path.join(
@@ -2599,7 +2494,7 @@ fi
 exit 1
 `,
     )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
 
     const result = await execFileAsync(shimPath, [], {
       env: withoutNodeV8Coverage({
@@ -2616,7 +2511,7 @@ exit 1
 })
 
 test.sequential('CLI shim serves discovery commands without rebuilding missing workspace dist artifacts', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-discovery-help-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-discovery-help-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
   const cliDistRoot = path.join(cliPackageRoot, 'dist')
@@ -2667,7 +2562,7 @@ printf '%s\\n' invoked > ${JSON.stringify(buildMarkerPath)}
 exit 23
 `,
     )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
 
     const result = await execFileAsync(shimPath, ['assistant', 'memory', 'upsert', '--help'], {
       env: withoutNodeV8Coverage({
@@ -2685,12 +2580,12 @@ exit 23
 })
 
 test.sequential('CLI shim rebuilds missing cli dist artifacts before launching the built CLI', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-cli-repair-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-cli-repair-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
   const cliDistRoot = path.join(cliPackageRoot, 'dist')
   const cliBinPath = path.join(cliDistRoot, 'bin.js')
-  const shimPath = path.join(tempRoot, 'healthybob')
+  const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
   const rebuiltMarkerPath = path.join(tempRoot, 'cli-rebuilt.txt')
 
@@ -2744,7 +2639,7 @@ fi
 exit 1
 `,
     )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
 
     const result = await execFileAsync(shimPath, [], {
       env: withoutNodeV8Coverage({
@@ -2762,10 +2657,10 @@ exit 1
 })
 
 test.sequential('CLI shim force-stops a stubborn built child after SIGINT', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-shim-sigint-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-sigint-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliBinPath = path.join(repoRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const shimPath = path.join(tempRoot, 'healthybob')
+  const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
   const childPidPath = path.join(tempRoot, 'child.pid')
 
@@ -2816,7 +2711,7 @@ while true; do
 done
 `,
     )
-    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath))
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
 
     const child = spawn(shimPath, [], {
       detached: true,
@@ -2875,7 +2770,7 @@ done
 })
 
 test.sequential('setup service reuses an existing vault and still bootstraps inbox runtime', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-existing-vault-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-existing-vault-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
@@ -2989,7 +2884,7 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
 })
 
 test.sequential('setup service redacts nested bootstrap toolchain paths under the home directory', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-redaction-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-redaction-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(homeRoot, 'vault')
   const homebrewBin = path.join(tempRoot, 'brew', 'bin')
@@ -3002,16 +2897,16 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
   const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperFormulaCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const homeWhisperCommand = path.join(homeRoot, '.healthybob', 'toolchain', 'bin', 'whisper-cli')
+  const homeWhisperCommand = path.join(homeRoot, '.murph', 'toolchain', 'bin', 'whisper-cli')
   const homeWhisperModel = path.join(
     homeRoot,
-    '.healthybob',
+    '.murph',
     'toolchain',
     'models',
     'whisper',
     'ggml-base.en.bin',
   )
-  const homePaddle = path.join(homeRoot, '.healthybob', 'toolchain', 'venvs', 'paddlex-ocr', 'bin', 'paddlex')
+  const homePaddle = path.join(homeRoot, '.murph', 'toolchain', 'venvs', 'paddlex-ocr', 'bin', 'paddlex')
   const siblingPrefixPath = path.join(tempRoot, 'homebrew', 'bin', 'ffmpeg')
   const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
   let bootstrapCalls = 0
@@ -3035,7 +2930,7 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
       async bootstrap() {
         bootstrapCalls += 1
         return makeBootstrapResult(vaultRoot, {
-          createdPaths: [path.join(homeRoot, '.healthybob', 'toolchain'), '.runtime/inboxd'],
+          createdPaths: [path.join(homeRoot, '.murph', 'toolchain'), '.runtime/inboxd'],
           doctorChecks: [
             {
               details: {
@@ -3093,32 +2988,32 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
 
     assert.equal(bootstrapCalls, 1)
     assert.equal(result.bootstrap?.vault, '~/vault')
-    assert.deepEqual(result.bootstrap?.init.createdPaths, ['~/.healthybob/toolchain', '.runtime/inboxd'])
+    assert.deepEqual(result.bootstrap?.init.createdPaths, ['~/.murph/toolchain', '.runtime/inboxd'])
     assert.equal(
       result.bootstrap?.setup.tools.whisper.command,
-      '~/.healthybob/toolchain/bin/whisper-cli',
+      '~/.murph/toolchain/bin/whisper-cli',
     )
     assert.equal(
       result.bootstrap?.setup.tools.whisper.modelPath,
-      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+      '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
     assert.equal(
       result.bootstrap?.doctor.parserToolchain?.tools.whisper.command,
-      '~/.healthybob/toolchain/bin/whisper-cli',
+      '~/.murph/toolchain/bin/whisper-cli',
     )
     assert.equal(
       result.bootstrap?.doctor.parserToolchain?.tools.whisper.modelPath,
-      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+      '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
     assert.equal(
       result.bootstrap?.doctor.parserToolchain?.tools.paddleocr.command,
-      '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex',
+      '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex',
     )
     assert.deepEqual(
       result.bootstrap?.doctor.checks[0]?.details?.artifactPaths,
       [
-        '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
-        '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex',
+        '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
+        '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex',
         siblingPrefixPath,
       ],
     )
@@ -3130,32 +3025,32 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
 test('setup routing helpers keep the setup alias stable', () => {
   assert.equal(isSetupInvocation(['setup', '--dryRun']), true)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
-  assert.equal(isSetupInvocation([], 'healthybob'), true)
-  assert.equal(isSetupInvocation(['--help'], 'healthybob'), true)
-  assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'healthybob'), true)
+  assert.equal(isSetupInvocation([], 'murph'), true)
+  assert.equal(isSetupInvocation(['--help'], 'murph'), true)
+  assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'murph'), true)
   assert.equal(
-    isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'healthybob'),
+    isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'murph'),
     true,
   )
   assert.equal(
-    isSetupInvocation(['--filter-output', 'steps[0].title', '--help'], 'healthybob'),
+    isSetupInvocation(['--filter-output', 'steps[0].title', '--help'], 'murph'),
     true,
   )
   assert.equal(
-    isSetupInvocation(['--token-limit', '10', '--help'], 'healthybob'),
+    isSetupInvocation(['--token-limit', '10', '--help'], 'murph'),
     true,
   )
   assert.equal(
-    isSetupInvocation(['--token-offset', '5', 'setup', '--dry-run'], 'healthybob'),
+    isSetupInvocation(['--token-offset', '5', 'setup', '--dry-run'], 'murph'),
     true,
   )
-  assert.equal(isSetupInvocation(['inbox', 'doctor'], 'healthybob'), false)
+  assert.equal(isSetupInvocation(['inbox', 'doctor'], 'murph'), false)
   assert.equal(
-    isSetupInvocation(['--format', 'json', 'inbox', 'doctor'], 'healthybob'),
+    isSetupInvocation(['--format', 'json', 'inbox', 'doctor'], 'murph'),
     false,
   )
   assert.equal(
-    isSetupInvocation(['--token-limit', '10', 'inbox', 'doctor'], 'healthybob'),
+    isSetupInvocation(['--token-limit', '10', 'inbox', 'doctor'], 'murph'),
     false,
   )
   assert.equal(
@@ -3163,44 +3058,44 @@ test('setup routing helpers keep the setup alias stable', () => {
     true,
   )
   assert.equal(
-    detectSetupProgramName('/usr/local/bin/healthybob'),
-    'healthybob',
+    detectSetupProgramName('/usr/local/bin/murph'),
+    'murph',
   )
   assert.equal(
     detectSetupProgramName('/tmp/packages/cli/dist/bin.js'),
     'vault-cli',
   )
 
-  const cli = createSetupCli({ commandName: 'healthybob' })
+  const cli = createSetupCli({ commandName: 'murph' })
   assert.ok(cli)
 })
 
-test.sequential('healthybob alias routes empty and help invocations to setup help', async () => {
-  const help = await runSetupAliasRaw('healthybob', ['--help'])
-  const onboardHelp = await runSetupAliasRaw('healthybob', ['onboard', '--help'])
-  const emptyInvocation = await runSetupAliasRaw('healthybob', [])
-  const inboxHelp = await runSetupAliasRaw('healthybob', ['inbox', 'doctor', '--help'])
+test.sequential('murph alias routes empty and help invocations to setup help', async () => {
+  const help = await runSetupAliasRaw('murph', ['--help'])
+  const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
+  const emptyInvocation = await runSetupAliasRaw('murph', [])
+  const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
 
-  assert.match(help, /Healthy Bob local machine setup helpers\./u)
+  assert.match(help, /Murph local machine setup helpers\./u)
   assert.match(help, /setup\s+Provision the local parser\/runtime toolchain for macOS or Linux/u)
   assert.match(onboardHelp, /onboard\s+[—-]\s+Alias for setup/u)
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
-  assert.match(emptyInvocation, /Healthy Bob local machine setup helpers\./u)
-  assert.doesNotMatch(inboxHelp, /Healthy Bob local machine setup helpers\./u)
+  assert.match(emptyInvocation, /Murph local machine setup helpers\./u)
+  assert.doesNotMatch(inboxHelp, /Murph local machine setup helpers\./u)
   assert.match(inboxHelp, /vault-cli inbox doctor/u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
-test.sequential('healthybob loads VAULT from a local .env file', async () => {
+test.sequential('murph loads VAULT from a local .env file', async () => {
   const originalVault = process.env.VAULT
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-vault-'))
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-home-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-vault-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-home-'))
   const envVault = path.join(tempRoot, 'vault-from-dotenv')
 
   delete process.env.VAULT
   await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
 
   try {
-    await runSetupAliasRaw('healthybob', ['init'], {
+    await runSetupAliasRaw('murph', ['init'], {
       cwd: tempRoot,
       env: {
         HOME: homeRoot,
@@ -3221,10 +3116,10 @@ test.sequential('healthybob loads VAULT from a local .env file', async () => {
   }
 })
 
-test.sequential('healthybob keeps exported VAULT values ahead of local .env files', async () => {
+test.sequential('murph keeps exported VAULT values ahead of local .env files', async () => {
   const originalVault = process.env.VAULT
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-precedence-'))
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-precedence-home-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-precedence-home-'))
   const shellVault = path.join(tempRoot, 'vault-from-shell')
   const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
 
@@ -3232,7 +3127,7 @@ test.sequential('healthybob keeps exported VAULT values ahead of local .env file
   await writeFile(path.join(tempRoot, '.env'), 'VAULT=./vault-from-dotenv\n', 'utf8')
 
   try {
-    await runSetupAliasRaw('healthybob', ['init'], {
+    await runSetupAliasRaw('murph', ['init'], {
       cwd: tempRoot,
       env: {
         VAULT: './vault-from-shell',
@@ -3254,10 +3149,10 @@ test.sequential('healthybob keeps exported VAULT values ahead of local .env file
   }
 })
 
-test.sequential('healthybob prefers .env.local values over .env defaults', async () => {
+test.sequential('murph prefers .env.local values over .env defaults', async () => {
   const originalVault = process.env.VAULT
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-local-'))
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-dotenv-local-home-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-local-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-dotenv-local-home-'))
   const localVault = path.join(tempRoot, 'vault-from-dotenv-local')
   const dotenvVault = path.join(tempRoot, 'vault-from-dotenv')
 
@@ -3270,7 +3165,7 @@ test.sequential('healthybob prefers .env.local values over .env defaults', async
   )
 
   try {
-    await runSetupAliasRaw('healthybob', ['init'], {
+    await runSetupAliasRaw('murph', ['init'], {
       cwd: tempRoot,
       env: {
         HOME: homeRoot,
@@ -3292,7 +3187,7 @@ test.sequential('healthybob prefers .env.local values over .env defaults', async
 })
 
 test.sequential('setup-macos wrapper rejects non-macOS hosts before bootstrapping', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wrapper-linux-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wrapper-linux-'))
   const stubBin = path.join(tempRoot, 'bin')
   const callLog = path.join(tempRoot, 'calls.log')
   const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
@@ -3331,7 +3226,7 @@ test.sequential('setup-macos wrapper rejects non-macOS hosts before bootstrappin
 })
 
 test.sequential('setup-macos wrapper stays macOS-only even for dry-run invocations', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wrapper-linux-dryrun-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wrapper-linux-dryrun-'))
   const stubBin = path.join(tempRoot, 'bin')
   const callLog = path.join(tempRoot, 'calls.log')
   const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
@@ -3370,7 +3265,7 @@ test.sequential('setup-macos wrapper stays macOS-only even for dry-run invocatio
 })
 
 test.sequential('setup-macos wrapper dry-run prints a plan without mutating the machine', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-wrapper-dryrun-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wrapper-dryrun-'))
   const stubBin = path.join(tempRoot, 'bin')
   const callLog = path.join(tempRoot, 'calls.log')
   const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
@@ -3397,7 +3292,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     })
 
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /Healthy Bob macOS setup will install or reuse:/u)
+    assert.match(result.stdout, /Murph macOS setup will install or reuse:/u)
     assert.match(
       result.stdout,
       /Homebrew, Node >= 22\.16\.0, and pnpm@9\.15\.9 via corepack/u,
@@ -3408,7 +3303,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     )
     assert.match(
       result.stdout,
-      /the final Healthy Bob setup flow: vault bootstrap, default vault config, user-level healthybob\/vault-cli shims, onboarding channel selection, and assistant automation\/chat handoff/u,
+      /the final Murph setup flow: vault bootstrap, default vault config, user-level murph\/vault-cli shims, onboarding channel selection, and assistant automation\/chat handoff/u,
     )
     assert.match(result.stdout, /Ensure Node >= 22\.16\.0/u)
     assert.match(result.stdout, /corepack pnpm install/u)
@@ -3424,7 +3319,7 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
 })
 
 test.sequential('setup service dry-run on Linux keeps cross-platform channels and skips iMessage cleanly', async () => {
-  const homeRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-home-'))
+  const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-home-'))
   const services = createSetupServices({
     arch: () => 'x64',
     env: () => ({ AGENTMAIL_API_KEY: 'agentmail-key', PATH: '' }),
@@ -3455,7 +3350,7 @@ test.sequential('setup service dry-run on Linux keeps cross-platform channels an
 })
 
 test.sequential('Linux dry-run still plans PaddleX OCR when PATH Python lacks venv support', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-python-dryrun-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-python-dryrun-'))
   const homeRoot = path.join(tempRoot, 'home')
   const binRoot = path.join(tempRoot, 'bin')
   const ffmpegCommand = path.join(binRoot, 'ffmpeg')
@@ -3530,7 +3425,7 @@ test.sequential('Linux dry-run still plans PaddleX OCR when PATH Python lacks ve
 })
 
 test.sequential('Linux setup reuses one apt update across declarative tool installs', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-apt-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-apt-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
@@ -3541,7 +3436,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
   const whisperCommand = path.join(binRoot, 'whisper-cli')
   const expectedWhisperModelPath = path.join(
     homeRoot,
-    '.healthybob',
+    '.murph',
     'toolchain',
     'models',
     'whisper',
@@ -3662,7 +3557,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
     assert.equal(result.tools.whisperCommand, whisperCommand)
     assert.equal(
       result.tools.whisperModelPath,
-      '~/.healthybob/toolchain/models/whisper/ggml-base.en.bin',
+      '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
     assert.equal(result.tools.paddleocrCommand, null)
     assert.equal(
@@ -3699,7 +3594,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
 })
 
 test.sequential('Linux setup provisions Python OCR tooling through the shared requirement spec', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-ocr-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-ocr-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
@@ -3711,7 +3606,7 @@ test.sequential('Linux setup provisions Python OCR tooling through the shared re
   const pythonCommand = path.join(binRoot, 'python3')
   const expectedWhisperModelPath = path.join(
     homeRoot,
-    '.healthybob',
+    '.murph',
     'toolchain',
     'models',
     'whisper',
@@ -3719,7 +3614,7 @@ test.sequential('Linux setup provisions Python OCR tooling through the shared re
   )
   const expectedPaddlexCommand = path.join(
     homeRoot,
-    '.healthybob',
+    '.murph',
     'toolchain',
     'venvs',
     'paddlex-ocr',
@@ -3881,7 +3776,7 @@ test.sequential('Linux setup provisions Python OCR tooling through the shared re
     assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
     assert.equal(bootstrapCalls[0]?.whisperModelPath, expectedWhisperModelPath)
     assert.equal(bootstrapCalls[0]?.paddleocrCommand, expectedPaddlexCommand)
-    assert.equal(result.tools.paddleocrCommand, '~/.healthybob/toolchain/venvs/paddlex-ocr/bin/paddlex')
+    assert.equal(result.tools.paddleocrCommand, '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex')
     assert.equal(
       result.steps.some(
         (step) =>
@@ -3907,7 +3802,7 @@ test.sequential('Linux setup provisions Python OCR tooling through the shared re
 })
 
 test.sequential('Linux setup preserves existing iMessage state while adding Telegram on the same vault', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-linux-preserve-imessage-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-preserve-imessage-'))
   const homeRoot = path.join(tempRoot, 'home')
   const vaultRoot = path.join(tempRoot, 'vault')
   const binRoot = path.join(tempRoot, 'bin')
@@ -4102,7 +3997,7 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
 })
 
 test.sequential('setup-host wrapper dry-run prints the Linux bootstrap plan without mutating the machine', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'healthybob-setup-host-linux-dryrun-'))
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-host-linux-dryrun-'))
   const stubBin = path.join(tempRoot, 'bin')
   const callLog = path.join(tempRoot, 'calls.log')
   const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
@@ -4155,8 +4050,8 @@ exit 99
     })
 
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /Healthy Bob Linux setup will install or reuse:/u)
-    assert.match(result.stdout, /download Node 22\.16\.0 under ~\/\.healthybob\/bootstrap/u)
+    assert.match(result.stdout, /Murph Linux setup will install or reuse:/u)
+    assert.match(result.stdout, /download Node 22\.16\.0 under ~\/\.murph\/bootstrap/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(result.stdout, /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u)
     assert.match(result.stdout, /iMessage remains macOS-only/u)

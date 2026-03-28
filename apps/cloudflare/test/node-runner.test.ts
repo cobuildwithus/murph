@@ -6,12 +6,15 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
+import { openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
 import {
-  assistantOutboxIntentSchema,
+  parseHostedEmailThreadTarget,
   resolveAssistantStatePaths,
-} from "@healthybob/assistant-runtime";
-import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@healthybob/core";
-import { restoreHostedExecutionContext, snapshotHostedExecutionContext } from "@healthybob/runtime-state";
+  restoreHostedExecutionContext,
+  snapshotHostedExecutionContext,
+} from "@murph/runtime-state";
+import { assistantOutboxIntentSchema } from "murph";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
@@ -19,16 +22,25 @@ const hostedCliMocks = vi.hoisted(() => ({
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("healthybob", async () => {
-  const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
+vi.mock("murph/assistant/automation", async () => {
+  const actual = await vi.importActual<typeof import("murph/assistant/automation")>(
+    "murph/assistant/automation",
+  );
+  return {
+    ...actual,
+    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
+      hostedCliMocks.runAssistantAutomation(...args),
+  };
+});
+
+vi.mock("murph/assistant/outbox", async () => {
+  const actual = await vi.importActual<typeof import("murph/assistant/outbox")>(
+    "murph/assistant/outbox",
+  );
   return {
     ...actual,
     dispatchAssistantOutboxIntent: (...args: Parameters<typeof actual.dispatchAssistantOutboxIntent>) =>
       hostedCliMocks.dispatchAssistantOutboxIntent(...args),
-    drainAssistantOutbox: (...args: Parameters<typeof actual.drainAssistantOutbox>) =>
-      hostedCliMocks.drainAssistantOutbox(...args),
-    runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
-      hostedCliMocks.runAssistantAutomation(...args),
   };
 });
 
@@ -37,7 +49,7 @@ import {
   setHostedExecutionCallbackBaseUrlsForTests,
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
-} from "../src/node-runner.js";
+} from "../src/node-runner.ts";
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
@@ -46,11 +58,16 @@ describe("runHostedExecutionJob", () => {
     vi.restoreAllMocks();
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actual = await vi.importActual<typeof import("healthybob")>("healthybob");
+    const actualAutomation = await vi.importActual<typeof import("murph/assistant/automation")>(
+      "murph/assistant/automation",
+    );
+    const actualOutbox = await vi.importActual<typeof import("murph/assistant/outbox")>(
+      "murph/assistant/outbox",
+    );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
-      actual.dispatchAssistantOutboxIntent(input));
-    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actual.runAssistantAutomation(input));
-    hostedCliMocks.drainAssistantOutbox.mockImplementation((input) => actual.drainAssistantOutbox(input));
+      actualOutbox.dispatchAssistantOutboxIntent(input));
+    hostedCliMocks.runAssistantAutomation.mockImplementation((input) => actualAutomation.runAssistantAutomation(input));
+    hostedCliMocks.drainAssistantOutbox.mockReset();
   });
 
   afterEach(async () => {
@@ -75,7 +92,7 @@ describe("runHostedExecutionJob", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
       },
     });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-test-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -88,14 +105,15 @@ describe("runHostedExecutionJob", () => {
 
     expect(result.result.summary).toContain("Processed member activation");
     expect(result.result.summary).toContain("created the canonical vault");
-    expect(result.result.summary).toContain("enabled Linq auto-reply");
+    expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
     expect(result.result.summary).toContain("Parser jobs: 0.");
-    expect(automationState.autoReplyChannels).toContain("linq");
+    expect(automationState.autoReplyChannels).not.toContain("linq");
+    expect(automationState.autoReplyChannels).not.toContain("email");
     await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "config.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "config.json"), "utf8"),
     ).rejects.toThrow();
     await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     ).rejects.toThrow();
     await expect(readFile(path.join(restored.vaultRoot, "vault.json"), "utf8")).resolves.toContain("{");
   });
@@ -130,7 +148,337 @@ describe("runHostedExecutionJob", () => {
 
     expect(secondActivation.result.summary).toContain("Processed member activation");
     expect(secondActivation.result.summary).toContain("reused the canonical vault");
-    expect(secondActivation.result.summary).toContain("kept Linq auto-reply enabled");
+    expect(secondActivation.result.summary).toContain("kept hosted email auto-reply unchanged");
+  });
+
+
+  it("does not bootstrap hosted email auto-reply when ingress is configured but send credentials are missing", async () => {
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_email_partial",
+          },
+          eventId: "evt_activation_email_partial",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-partial-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(automationState.autoReplyChannels).not.toContain("email");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("bootstraps hosted email auto-reply when the hosted email bridge is configured", async () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
+    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_email",
+          },
+          eventId: "evt_activation_email",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("enabled hosted email auto-reply");
+      expect(automationState.autoReplyChannels).toContain("email");
+      expect(automationState.autoReplyChannels).not.toContain("linq");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("does not bootstrap hosted email auto-reply when sender credentials exist without a hosted email domain", async () => {
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailFromAddress = process.env.HOSTED_EMAIL_FROM_ADDRESS;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
+    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
+    process.env.HOSTED_EMAIL_FROM_ADDRESS = "assistant@mail.example.test";
+    delete process.env.HOSTED_EMAIL_DOMAIN;
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_email_no_domain",
+          },
+          eventId: "evt_activation_email_no_domain",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-bootstrap-no-domain-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(automationState.autoReplyChannels).not.toContain("email");
+    } finally {
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_FROM_ADDRESS", previousHostedEmailFromAddress);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
+    }
+  });
+
+  it("fetches raw hosted email through the email worker bridge when processing inbound email events", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          linqChatId: "chat_email_fetch",
+          normalizedPhoneNumber: "+15551230001",
+          userId: "member_email_fetch",
+        },
+        eventId: "evt_activation_email_fetch",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const raw = [
+      'From: Alice Example <alice@example.test>',
+      'To: assistant@mail.example.test',
+      'Subject: Hosted inbox hello',
+      'Message-ID: <msg_email_fetch@example.test>',
+      'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+      '',
+      'Hello from a hosted inbound email.',
+      '',
+    ].join('\r\n');
+    const requests: string[] = [];
+    const server = createServer((request, response) => {
+      requests.push(`${request.method ?? "GET"} ${request.url ?? ""}`);
+
+      if (request.url === "/messages/raw_email_123") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "message/rfc822");
+        response.end(raw);
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted email test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        emailBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            envelopeFrom: "alice@example.test",
+            envelopeTo: "assistant+u-member@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_email_123",
+            threadTarget: null,
+            userId: "member_email_fetch",
+          },
+          eventId: "evt_email_fetch",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+
+      expect(result.result.summary).toContain("Persisted hosted email capture");
+      expect(requests).toEqual(["GET /messages/raw_email_123"]);
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      server.close();
+      await once(server, "close");
+    }
+  });
+
+  it("persists hosted stable-alias email captures with Reply-To-based thread targets", async () => {
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_email_alias",
+        },
+        eventId: "evt_activation_email_alias",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
+
+    const raw = [
+      'From: Alice Example <alice@example.test>',
+      'Reply-To: Alice Replies <reply@example.test>, Team Replies <team@example.test>',
+      'To: assistant+u-member_email_alias@mail.example.test',
+      'Cc: assistant@mail.example.test',
+      'Subject: Hosted alias hello',
+      'Message-ID: <msg_email_alias@example.test>',
+      'Date: Thu, 26 Mar 2026 12:00:00 +0000',
+      '',
+      'Hello from the hosted stable alias path.',
+      '',
+    ].join('\r\n');
+    const server = createServer((request, response) => {
+      if (request.url === "/messages/raw_email_alias") {
+        response.statusCode = 200;
+        response.setHeader("content-type", "message/rfc822");
+        response.end(raw);
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, () => resolve());
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted email test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        emailBaseUrl: `http://127.0.0.1:${address.port}`,
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            envelopeFrom: "alice@example.test",
+            envelopeTo: "assistant+u-member_email_alias@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_email_alias",
+            threadTarget: null,
+            userId: "member_email_alias",
+          },
+          eventId: "evt_email_alias",
+          occurredAt: "2026-03-26T12:05:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-alias-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const runtime = await openInboxRuntime({
+        vaultRoot: restored.vaultRoot,
+      });
+
+      try {
+        await rebuildRuntimeFromVault({
+          runtime,
+          vaultRoot: restored.vaultRoot,
+        });
+        const capture = runtime.listCaptures({ limit: 1 })[0];
+        const threadTarget = parseHostedEmailThreadTarget(capture?.thread.id ?? null);
+
+        expect(capture?.actor.id).toBe("alice@example.test");
+        expect(capture?.thread.isDirect).toBe(true);
+        expect(threadTarget?.to).toEqual(["reply@example.test"]);
+        expect(threadTarget?.cc).toEqual(["team@example.test"]);
+      } finally {
+        runtime.close();
+      }
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      server.close();
+      await once(server, "close");
+    }
   });
 
   it("rejects non-activation hosted events until member activation bootstrap has run", async () => {
@@ -186,7 +534,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("imports a shared food bundle with attached supplement protocols", async () => {
-    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-source-"));
+    const sourceVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-source-"));
     cleanupPaths.push(sourceVaultRoot);
     await initializeVault({ vaultRoot: sourceVaultRoot });
 
@@ -214,6 +562,27 @@ describe("runHostedExecutionJob", () => {
         food: { id: smoothie.record.foodId },
       },
     });
+    const sharePayloadServer = createServer((request, response) => {
+      if (
+        request.url
+        === "/api/hosted-share/internal/share_123/payload?shareCode=share_code_123"
+        && request.headers.authorization === "Bearer share-pack-token"
+      ) {
+        response.statusCode = 200;
+        response.setHeader("content-type", "application/json; charset=utf-8");
+        response.end(JSON.stringify({
+          pack,
+          shareId: "share_123",
+        }));
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      sharePayloadServer.listen(0, () => resolve());
+    });
     const activation = await runHostedExecutionJob({
       bundles: {
         agentState: null,
@@ -229,31 +598,123 @@ describe("runHostedExecutionJob", () => {
       },
     });
 
-    const result = await runHostedExecutionJob({
-      bundles: activation.bundles,
+    try {
+      const address = sharePayloadServer.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted share payload test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        sharePackBaseUrl: `http://127.0.0.1:${address.port}`,
+        sharePackToken: "share-pack-token",
+      });
+
+      const result = await runHostedExecutionJob({
+        bundles: activation.bundles,
+        dispatch: {
+          event: {
+            kind: "vault.share.accepted",
+            share: {
+              shareCode: "share_code_123",
+              shareId: "share_123",
+            },
+            userId: "member_456",
+          },
+          eventId: "evt_share_123",
+          occurredAt: "2026-03-26T12:30:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
+
+      expect(result.result.summary).toBe(
+        `Imported share pack "${pack.title}" (1 foods, 1 protocols, 0 recipes). Logged one meal entry from the shared food. Parser jobs: 0. Device sync jobs: 0 (skipped: providers not configured).`,
+      );
+      expect(importedFood).toBeDefined();
+      expect(importedFood.attachedProtocolIds?.length).toBe(1);
+      expect(importedFood.autoLogDaily?.time).toBe("08:00");
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      sharePayloadServer.close();
+      await once(sharePayloadServer, "close");
+    }
+  });
+
+  it("surfaces hosted share payload HTTP failures before attempting to parse JSON", async () => {
+    const sharePayloadServer = createServer((request, response) => {
+      if (
+        request.url
+        === "/api/hosted-share/internal/share_404/payload?shareCode=share_code_404"
+        && request.headers.authorization === "Bearer share-pack-token"
+      ) {
+        response.statusCode = 502;
+        response.setHeader("content-type", "text/plain; charset=utf-8");
+        response.end("upstream gateway exploded");
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not found");
+    });
+    await new Promise<void>((resolve) => {
+      sharePayloadServer.listen(0, () => resolve());
+    });
+    const activation = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
       dispatch: {
         event: {
-          kind: "vault.share.accepted",
-          pack,
-          userId: "member_456",
+          kind: "member.activated",
+          userId: "member_404",
         },
-        eventId: "evt_share_123",
-        occurredAt: "2026-03-26T12:30:00.000Z",
+        eventId: "evt_activation_share_404",
+        occurredAt: "2026-03-26T12:25:00.000Z",
       },
     });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-share-"));
-    cleanupPaths.push(workspaceRoot);
-    const restored = await restoreHostedExecutionContext({
-      agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
-      vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
-      workspaceRoot,
-    });
-    const importedFood = (await listFoods(restored.vaultRoot)).find((food) => food.title === "Morning Smoothie");
 
-    expect(result.result.summary).toContain('Imported share pack');
-    expect(importedFood).toBeDefined();
-    expect(importedFood.attachedProtocolIds?.length).toBe(1);
-    expect(importedFood.autoLogDaily?.time).toBe("08:00");
+    try {
+      const address = sharePayloadServer.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted share payload test server to expose a TCP port.");
+      }
+
+      setHostedExecutionCallbackBaseUrlsForTests({
+        sharePackBaseUrl: `http://127.0.0.1:${address.port}`,
+        sharePackToken: "share-pack-token",
+      });
+
+      await expect(
+        runHostedExecutionJob({
+          bundles: activation.bundles,
+          dispatch: {
+            event: {
+              kind: "vault.share.accepted",
+              share: {
+                shareCode: "share_code_404",
+                shareId: "share_404",
+              },
+              userId: "member_404",
+            },
+            eventId: "evt_share_404",
+            occurredAt: "2026-03-26T12:30:00.000Z",
+          },
+        }),
+      ).rejects.toThrow(
+        "Hosted share payload fetch failed with HTTP 502: upstream gateway exploded.",
+      );
+    } finally {
+      setHostedExecutionCallbackBaseUrlsForTests(null);
+      sharePayloadServer.close();
+      await once(sharePayloadServer, "close");
+    }
   });
 
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {
@@ -275,7 +736,7 @@ describe("runHostedExecutionJob", () => {
         TELEGRAM_BOT_TOKEN: "bot-token",
       },
     });
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-test-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-test-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -284,7 +745,7 @@ describe("runHostedExecutionJob", () => {
     });
 
     await expect(
-      readFile(path.join(restored.operatorHomeRoot, ".healthybob", "hosted", "user-env.json"), "utf8"),
+      readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     ).rejects.toThrow();
   });
 
@@ -465,7 +926,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("reconciles journaled hosted assistant deliveries only after the durable commit callback", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
     cleanupPaths.push(parent);
@@ -479,7 +940,7 @@ describe("runHostedExecutionJob", () => {
     await writeFile(
       path.join(statePaths.outboxDirectory, `${intentId}.json`),
       `${JSON.stringify(assistantOutboxIntentSchema.parse({
-        schema: "healthybob.assistant-outbox-intent.v1",
+        schema: "murph.assistant-outbox-intent.v1",
         intentId,
         sessionId: "sess_hosted",
         turnId: "turn_hosted",
@@ -577,7 +1038,7 @@ describe("runHostedExecutionJob", () => {
       "POST http://commit.worker/events/evt_outbox/finalize",
     ]);
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-restored-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -605,7 +1066,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("journals hosted assistant deliveries after the durable commit before finalizing returned bundles", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-"));
     cleanupPaths.push(parent);
     const intentId = "outbox_hosted_send";
     const createdAt = "2026-03-26T12:00:00.000Z";
@@ -623,7 +1084,7 @@ describe("runHostedExecutionJob", () => {
       await writeFile(
         path.join(statePaths.outboxDirectory, `${intentId}.json`),
         `${JSON.stringify(assistantOutboxIntentSchema.parse({
-          schema: "healthybob.assistant-outbox-intent.v1",
+          schema: "murph.assistant-outbox-intent.v1",
           intentId,
           sessionId: "sess_hosted",
           turnId: "turn_hosted",
@@ -786,7 +1247,7 @@ describe("runHostedExecutionJob", () => {
       "POST http://commit.worker/events/evt_outbox_send/finalize",
     ]);
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-journal-restored-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-journal-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
@@ -816,7 +1277,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   it("replays committed side effects on resume without rerunning compute or recommitting", async () => {
-    const parent = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-resume-"));
+    const parent = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-"));
     const operatorHomeRoot = path.join(parent, "home");
     const vaultRoot = path.join(parent, "vault");
     cleanupPaths.push(parent);
@@ -838,7 +1299,7 @@ describe("runHostedExecutionJob", () => {
     await writeFile(
       path.join(statePaths.outboxDirectory, `${intentId}.json`),
       `${JSON.stringify(assistantOutboxIntentSchema.parse({
-        schema: "healthybob.assistant-outbox-intent.v1",
+        schema: "murph.assistant-outbox-intent.v1",
         intentId,
         sessionId: "sess_hosted",
         turnId: "turn_hosted",
@@ -1010,7 +1471,7 @@ describe("runHostedExecutionJob", () => {
       summary: "committed",
     });
 
-    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "healthybob-cloudflare-outbox-resume-restored-"));
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-outbox-resume-restored-"));
     cleanupPaths.push(workspaceRoot);
     const restored = await restoreHostedExecutionContext({
       agentStateBundle: Buffer.from(result.bundles.agentState!, "base64"),
