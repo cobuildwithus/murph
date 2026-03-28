@@ -37,17 +37,19 @@ export function verifyAndParseLinqWebhookRequest(
   const rawBody = normalizeLinqWebhookRawBody(input.rawBody)
   const webhookSecret = normalizeNullableString(input.webhookSecret)
 
-  if (webhookSecret) {
-    const timestamp = readLinqWebhookHeader(input.headers, 'x-webhook-timestamp')
-    const signature = readLinqWebhookHeader(input.headers, 'x-webhook-signature')
+  if (!webhookSecret) {
+    throw new LinqWebhookVerificationError('Linq webhook secret is required.')
+  }
 
-    if (!timestamp || !signature) {
-      throw new LinqWebhookVerificationError('Missing Linq webhook signature headers.')
-    }
+  const timestamp = readLinqWebhookHeader(input.headers, 'x-webhook-timestamp')
+  const signature = readLinqWebhookHeader(input.headers, 'x-webhook-signature')
 
-    if (!verifyLinqWebhookSignature(webhookSecret, rawBody, timestamp, signature)) {
-      throw new LinqWebhookVerificationError('Invalid Linq webhook signature.')
-    }
+  if (!timestamp || !signature) {
+    throw new LinqWebhookVerificationError('Missing Linq webhook signature headers.')
+  }
+
+  if (!verifyLinqWebhookSignature(webhookSecret, rawBody, timestamp, signature)) {
+    throw new LinqWebhookVerificationError('Invalid Linq webhook signature.')
   }
 
   return parseLinqWebhookEvent(rawBody)

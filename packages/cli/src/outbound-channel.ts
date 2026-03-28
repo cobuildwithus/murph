@@ -50,6 +50,7 @@ export interface DeliverAssistantMessageInput {
   identityId?: string | null
   message: string
   participantId?: string | null
+  replyToMessageId?: string | null
   sessionId?: string | null
   sourceThreadId?: string | null
   target?: string | null
@@ -94,6 +95,7 @@ export async function deliverAssistantMessage(
       actorId: resolved.session.binding.actorId,
       threadId: resolved.session.binding.threadId,
       threadIsDirect: resolved.session.binding.threadIsDirect,
+      replyToMessageId: input.replyToMessageId ?? null,
       bindingDelivery: resolved.session.binding.delivery,
       explicitTarget: explicitTarget ?? null,
       dependencies,
@@ -231,6 +233,7 @@ export async function deliverAssistantMessageOverBinding(
     channel?: string | null
     identityId?: string | null
     message: string
+    replyToMessageId?: string | null
     sessionId?: string | null
     session?: Pick<AssistantSession, 'binding'>
     target?: string | null
@@ -277,6 +280,7 @@ export async function deliverAssistantMessageOverBinding(
       explicitTarget,
       identityId: binding.identityId,
       message: input.message,
+      replyToMessageId: input.replyToMessageId ?? null,
     },
     dependencies,
   )

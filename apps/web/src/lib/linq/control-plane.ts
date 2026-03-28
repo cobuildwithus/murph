@@ -1,6 +1,7 @@
 import { getPrisma } from "../prisma";
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
+import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readRawBodyBuffer } from "../http";
 import { hostedLinqError } from "./errors";
 import { readHostedLinqEnvironment } from "./env";
@@ -74,8 +75,9 @@ export class HostedLinqControlPlane {
   async upsertBinding(body: Record<string, unknown>) {
     this.getAuthControlPlane().assertBrowserMutationOrigin();
     const user = await this.getAuthControlPlane().requireAuthenticatedUser();
-    const recipientPhone = normalizeRequiredString(body.recipientPhone, "Linq recipientPhone");
+    const recipientPhone = normalizeRequiredRecipientPhone(body.recipientPhone);
     const label = normalizeNullableString(typeof body.label === "string" ? body.label : null);
+    await this.assertRecipientPhoneOwnedByConfiguredAccount(recipientPhone);
 
     return {
       binding: await this.getStore().upsertBinding({
@@ -138,7 +140,7 @@ export class HostedLinqControlPlane {
     }
 
     const messageEvent = requireLinqMessageReceivedEvent(event);
-    const recipientPhone = normalizeNullableString(messageEvent.data.recipient_phone ?? null);
+    const recipientPhone = normalizeOptionalRecipientPhone(messageEvent.data.recipient_phone ?? null);
 
     if (!recipientPhone) {
       return {
@@ -194,6 +196,59 @@ export class HostedLinqControlPlane {
       queueId: queued.event.id,
     };
   }
+
+  private async assertRecipientPhoneOwnedByConfiguredAccount(recipientPhone: string): Promise<void> {
+    const ownedRecipientPhones = await this.listOwnedRecipientPhones();
+
+    if (ownedRecipientPhones.has(recipientPhone)) {
+      return;
+    }
+
+    throw hostedLinqError({
+      code: "LINQ_BINDING_RECIPIENT_UNVERIFIED",
+      message: `Configured Linq account does not control recipient phone ${recipientPhone}.`,
+      httpStatus: 403,
+      details: {
+        recipientPhone,
+      },
+    });
+  }
+
+  private async listOwnedRecipientPhones(): Promise<Set<string>> {
+    if (!this.env.apiToken) {
+      throw hostedLinqError({
+        code: "LINQ_API_TOKEN_REQUIRED",
+        message: "LINQ_API_TOKEN is required to verify hosted Linq recipient bindings.",
+        httpStatus: 500,
+      });
+    }
+
+    const response = await fetch(new URL("phonenumbers", `${this.env.apiBaseUrl}/`), {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${this.env.apiToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw hostedLinqError({
+        code: "LINQ_BINDING_PROBE_FAILED",
+        message: `Linq recipient verification failed with HTTP ${response.status}.`,
+        httpStatus: 502,
+        retryable: response.status >= 500,
+      });
+    }
+
+    const payload = (await response.json()) as {
+      phone_numbers?: Array<{ phone_number?: string | null }> | null;
+    };
+
+    return new Set(
+      (payload.phone_numbers ?? [])
+        .map((entry) => normalizeOptionalRecipientPhone(entry.phone_number ?? null))
+        .filter((value): value is string => value !== null),
+    );
+  }
 }
 
 export function createHostedLinqControlPlane(request: Request): HostedLinqControlPlane {
@@ -242,4 +297,22 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return normalized;
+}
+
+function normalizeOptionalRecipientPhone(value: unknown): string | null {
+  return normalizePhoneNumber(typeof value === "string" ? value : null);
+}
+
+function normalizeRequiredRecipientPhone(value: unknown): string {
+  const normalized = normalizeOptionalRecipientPhone(value);
+
+  if (normalized) {
+    return normalized;
+  }
+
+  throw hostedLinqError({
+    code: "LINQ_RECIPIENT_PHONE_INVALID",
+    message: "Linq recipientPhone must be a valid phone number.",
+    httpStatus: 400,
+  });
 }

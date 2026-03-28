@@ -171,6 +171,41 @@ export const assistantCodexProviderStateSchema = z
 export const assistantSessionProviderStateSchema = z
   .object({
     codexCli: assistantCodexProviderStateSchema.nullable().default(null),
+    resumeRouteId: z.string().min(1).nullable().default(null),
+    resumeWorkspaceKey: z.string().min(1).nullable().default(null),
+  })
+  .strict()
+
+export const assistantProviderSessionOptionsSchema = z.object({
+  model: z.string().min(1).nullable(),
+  reasoningEffort: z.string().min(1).nullable().default(null),
+  sandbox: z.enum(assistantSandboxValues).nullable(),
+  approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
+  profile: z.string().min(1).nullable(),
+  oss: z.boolean(),
+  baseUrl: z.string().min(1).nullable().optional(),
+  apiKeyEnv: z.string().min(1).nullable().optional(),
+  providerName: z.string().min(1).nullable().optional(),
+  headers: assistantHeadersSchema.nullable().optional(),
+})
+
+export const assistantProviderRouteRecoveryEntrySchema = z
+  .object({
+    routeId: z.string().min(1),
+    provider: z.enum(assistantChatProviderValues),
+    providerSessionId: z.string().min(1),
+    providerOptions: assistantProviderSessionOptionsSchema,
+    providerState: assistantSessionProviderStateSchema.nullable().default(null),
+    recoveredAt: isoTimestampSchema,
+  })
+  .strict()
+
+export const assistantProviderRouteRecoverySchema = z
+  .object({
+    schema: z.literal('murph.assistant-provider-route-recovery.v1'),
+    sessionId: z.string().min(1),
+    updatedAt: isoTimestampSchema,
+    routes: z.array(assistantProviderRouteRecoveryEntrySchema),
   })
   .strict()
 
@@ -192,19 +227,6 @@ export const assistantProviderFailoverRouteSchema = z
     cooldownMs: z.number().int().positive().nullable().default(null),
   })
   .strict()
-
-export const assistantProviderSessionOptionsSchema = z.object({
-  model: z.string().min(1).nullable(),
-  reasoningEffort: z.string().min(1).nullable().default(null),
-  sandbox: z.enum(assistantSandboxValues).nullable(),
-  approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
-  profile: z.string().min(1).nullable(),
-  oss: z.boolean(),
-  baseUrl: z.string().min(1).nullable().optional(),
-  apiKeyEnv: z.string().min(1).nullable().optional(),
-  providerName: z.string().min(1).nullable().optional(),
-  headers: assistantHeadersSchema.nullable().optional(),
-})
 
 export const assistantAliasStoreSchema = z
   .object({
@@ -229,7 +251,34 @@ export const assistantSessionBindingSchema = z.object({
   delivery: assistantBindingDeliverySchema.nullable(),
 })
 
+export const assistantProviderBindingSchema = z
+  .object({
+    provider: z.enum(assistantChatProviderValues),
+    providerSessionId: z.string().min(1).nullable(),
+    providerState: assistantSessionProviderStateSchema.nullable().optional(),
+    providerOptions: assistantProviderSessionOptionsSchema,
+  })
+  .strict()
+
 export const assistantSessionSchema = z
+  .object({
+    schema: z.literal('murph.assistant-session.v3'),
+    sessionId: z.string().min(1),
+    provider: z.enum(assistantChatProviderValues),
+    providerOptions: assistantProviderSessionOptionsSchema,
+    providerBinding: assistantProviderBindingSchema.nullable().default(null),
+    providerSessionId: z.string().min(1).nullable().optional(),
+    providerState: assistantSessionProviderStateSchema.nullable().optional(),
+    alias: z.string().min(1).nullable(),
+    binding: assistantSessionBindingSchema,
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+    lastTurnAt: isoTimestampSchema.nullable(),
+    turnCount: z.number().int().nonnegative(),
+  })
+  .strict()
+
+const assistantLegacySessionSchema = z
   .object({
     schema: z.literal('murph.assistant-session.v2'),
     sessionId: z.string().min(1),
@@ -245,6 +294,72 @@ export const assistantSessionSchema = z
     turnCount: z.number().int().nonnegative(),
   })
   .strict()
+
+export function parseAssistantSessionRecord(value: unknown): AssistantSession {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    const schema = record.schema
+    const hasProviderBinding = 'providerBinding' in record
+
+    if (schema === 'murph.assistant-session.v3' || hasProviderBinding) {
+      return assistantSessionSchema.parse({
+        ...record,
+        schema: 'murph.assistant-session.v3',
+      })
+    }
+  }
+
+  const legacy = assistantLegacySessionSchema.parse(value)
+  const providerBinding = shouldCreateAssistantLegacyProviderBinding(legacy)
+    ? assistantProviderBindingSchema.parse({
+        provider: legacy.provider,
+        providerSessionId: legacy.providerSessionId,
+        providerState: legacy.providerState ?? null,
+        providerOptions: legacy.providerOptions,
+      })
+    : null
+
+  return assistantSessionSchema.parse({
+    schema: 'murph.assistant-session.v3',
+    sessionId: legacy.sessionId,
+    provider: legacy.provider,
+    providerOptions: legacy.providerOptions,
+    providerBinding,
+    alias: legacy.alias,
+    binding: legacy.binding,
+    createdAt: legacy.createdAt,
+    updatedAt: legacy.updatedAt,
+    lastTurnAt: legacy.lastTurnAt,
+    turnCount: legacy.turnCount,
+  })
+}
+
+function shouldCreateAssistantLegacyProviderBinding(input: {
+  lastTurnAt: string | null
+  providerSessionId: string | null
+  providerState?: AssistantSessionProviderState | null
+  turnCount: number
+}): boolean {
+  return (
+    input.providerSessionId !== null ||
+    input.providerState !== null ||
+    input.lastTurnAt !== null ||
+    input.turnCount > 0
+  )
+}
+
+export function normalizeAssistantSessionRecord(value: unknown): AssistantSession {
+  const session = parseAssistantSessionRecord(value)
+  return {
+    ...session,
+    providerSessionId: session.providerBinding?.providerSessionId ?? null,
+    providerState: session.providerBinding?.providerState ?? null,
+  }
+}
+
+export const assistantSessionCompatSchema = z
+  .unknown()
+  .transform((value) => normalizeAssistantSessionRecord(value))
 
 export const assistantTranscriptEntrySchema = z.object({
   schema: z.literal('murph.assistant-transcript-entry.v1'),
@@ -368,6 +483,7 @@ export const assistantOutboxIntentSchema = z
     actorId: z.string().min(1).nullable(),
     threadId: z.string().min(1).nullable(),
     threadIsDirect: z.boolean().nullable(),
+    replyToMessageId: z.string().min(1).nullable().default(null),
     bindingDelivery: assistantBindingDeliverySchema.nullable(),
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
@@ -691,7 +807,7 @@ export const assistantAskResultSchema = z.object({
   status: z.enum(assistantAskResultStatusValues).default('completed'),
   prompt: z.string().min(1),
   response: z.string(),
-  session: assistantSessionSchema,
+  session: assistantSessionCompatSchema,
   delivery: assistantChannelDeliverySchema.nullable(),
   deliveryDeferred: z.boolean().default(false),
   deliveryIntentId: z.string().min(1).nullable().default(null),
@@ -704,26 +820,26 @@ export const assistantChatResultSchema = z.object({
   startedAt: isoTimestampSchema,
   stoppedAt: isoTimestampSchema,
   turns: z.number().int().nonnegative(),
-  session: assistantSessionSchema,
+  session: assistantSessionCompatSchema,
 })
 
 export const assistantDeliverResultSchema = z.object({
   vault: pathSchema,
   message: z.string().min(1),
-  session: assistantSessionSchema,
+  session: assistantSessionCompatSchema,
   delivery: assistantChannelDeliverySchema,
 })
 
 export const assistantSessionListResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  sessions: z.array(assistantSessionSchema),
+  sessions: z.array(assistantSessionCompatSchema),
 })
 
 export const assistantSessionShowResultSchema = z.object({
   vault: pathSchema,
   stateRoot: pathSchema,
-  session: assistantSessionSchema,
+  session: assistantSessionCompatSchema,
 })
 
 export const assistantMemorySearchResultSchema = z.object({
@@ -958,7 +1074,25 @@ export type AssistantBindingDelivery = z.infer<
 export type AssistantSessionBinding = z.infer<
   typeof assistantSessionBindingSchema
 >
-export type AssistantSession = z.infer<typeof assistantSessionSchema>
+export type AssistantProviderBinding = z.infer<
+  typeof assistantProviderBindingSchema
+>
+type AssistantSessionRecord = z.infer<typeof assistantSessionSchema>
+export type AssistantSession = Omit<
+  AssistantSessionRecord,
+  'providerBinding' | 'schema'
+> & {
+  schema: AssistantSessionRecord['schema'] | 'murph.assistant-session.v2'
+  providerBinding?: AssistantProviderBinding | null
+  providerSessionId?: string | null
+  providerState?: AssistantSessionProviderState | null
+}
+export type AssistantProviderRouteRecovery = z.infer<
+  typeof assistantProviderRouteRecoverySchema
+>
+export type AssistantProviderRouteRecoveryEntry = z.infer<
+  typeof assistantProviderRouteRecoveryEntrySchema
+>
 export type AssistantTranscriptEntry = z.infer<
   typeof assistantTranscriptEntrySchema
 >
@@ -997,8 +1131,10 @@ export type AssistantProviderRouteState = z.infer<
 export type AssistantFailoverState = z.infer<
   typeof assistantFailoverStateSchema
 >
-export type AssistantAskResult = z.infer<typeof assistantAskResultSchema>
-export type AssistantChatResult = z.infer<typeof assistantChatResultSchema>
+type AssistantAskResultRecord = z.infer<typeof assistantAskResultSchema>
+export type AssistantAskResult = AssistantAskResultRecord
+type AssistantChatResultRecord = z.infer<typeof assistantChatResultSchema>
+export type AssistantChatResult = AssistantChatResultRecord
 export type AssistantDeliverResult = z.infer<
   typeof assistantDeliverResultSchema
 >
@@ -1184,6 +1320,7 @@ export type AssistantDoctorCheckStatus =
 export type AssistantProviderSessionOptions = z.infer<
   typeof assistantProviderSessionOptionsSchema
 >
-export type AssistantSessionProviderState = z.infer<
+type AssistantSessionProviderStateRecord = z.infer<
   typeof assistantSessionProviderStateSchema
 >
+export type AssistantSessionProviderState = AssistantSessionProviderStateRecord

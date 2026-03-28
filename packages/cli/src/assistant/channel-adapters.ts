@@ -87,7 +87,7 @@ export interface AssistantChannelDependencies {
       }
     | void
   >
-  sendLinq?: (input: { message: string; target: string }) => Promise<void>
+  sendLinq?: (input: { message: string; replyToMessageId?: string | null; target: string }) => Promise<void>
   sendEmail?: (input: {
     identityId: string | null
     message: string
@@ -120,6 +120,7 @@ export interface AssistantChannelAdapter {
     explicitTarget: string | null
     identityId: string | null
     message: string
+    replyToMessageId?: string | null
   }, dependencies: AssistantChannelDependencies) => Promise<
     ReturnType<typeof assistantChannelDeliverySchema.parse>
   >
@@ -137,6 +138,7 @@ interface AssistantChannelAdapterSpec {
     dependencies: AssistantChannelDependencies
     identityId: string | null
     message: string
+    replyToMessageId?: string | null
   }) => Promise<
     | {
         target?: string | null
@@ -291,6 +293,7 @@ export async function sendTelegramMessage(
 export async function sendLinqMessage(
   input: {
     message: string
+    replyToMessageId?: string | null
     target: string
   },
   dependencies: LinqRuntimeDependencies = {},
@@ -308,6 +311,7 @@ export async function sendLinqMessage(
     {
       chatId: input.target,
       message: input.message,
+      replyToMessageId: input.replyToMessageId ?? null,
     },
     {
       env,
@@ -505,11 +509,12 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   },
   targetRequiredMessage:
     'Linq delivery requires an explicit chat id or a stored thread binding.',
-  async sendMessage({ candidate, dependencies, message }) {
+  async sendMessage({ candidate, dependencies, message, replyToMessageId }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
     await send({
       target: candidate.target,
       message,
+      replyToMessageId: replyToMessageId ?? null,
     })
   },
 })
@@ -913,6 +918,7 @@ function createAssistantChannelAdapter(
         dependencies,
         identityId: normalizeOptionalText(input.identityId),
         message: input.message,
+        replyToMessageId: normalizeOptionalText(input.replyToMessageId),
       })
 
       return assistantChannelDeliverySchema.parse({

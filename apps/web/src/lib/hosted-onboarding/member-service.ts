@@ -288,9 +288,8 @@ export async function ensureHostedMemberForPhone(input: {
         id: existingMember.id,
       },
       data: {
-        linqChatId: input.linqChatId,
+        linqChatId: input.linqChatId ?? undefined,
         phoneNumber: input.originalPhoneNumber,
-        phoneNumberVerifiedAt: new Date(),
         encryptedBootstrapSecret:
           existingMember.encryptedBootstrapSecret
             ? undefined
@@ -308,7 +307,6 @@ export async function ensureHostedMemberForPhone(input: {
       id: generateHostedMemberId(),
       phoneNumber: input.originalPhoneNumber,
       normalizedPhoneNumber: input.normalizedPhoneNumber,
-      phoneNumberVerifiedAt: new Date(),
       status: HostedMemberStatus.invited,
       billingStatus: HostedBillingStatus.not_started,
       linqChatId: input.linqChatId,

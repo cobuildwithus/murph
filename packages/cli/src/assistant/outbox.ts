@@ -77,6 +77,7 @@ export async function createAssistantOutboxIntent(input: {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
@@ -95,6 +96,7 @@ export async function createAssistantOutboxIntent(input: {
       identityId: input.identityId,
       actorId: input.actorId,
       threadId: input.threadId,
+      replyToMessageId: input.replyToMessageId,
       explicitTarget: input.explicitTarget,
       bindingDelivery: input.bindingDelivery,
     })
@@ -122,6 +124,7 @@ export async function createAssistantOutboxIntent(input: {
         identityId: input.identityId,
         actorId: input.actorId,
         threadId: input.threadId,
+        replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
       }),
@@ -131,6 +134,7 @@ export async function createAssistantOutboxIntent(input: {
       threadId: normalizeNullableString(input.threadId),
       threadIsDirect:
         typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
+      replyToMessageId: normalizeNullableString(input.replyToMessageId),
       bindingDelivery: input.bindingDelivery ?? null,
       explicitTarget: normalizeNullableString(input.explicitTarget),
       delivery: null,
@@ -339,6 +343,7 @@ export async function dispatchAssistantOutboxIntent(input: {
       actorId: prepared.sending.actorId,
       threadId: prepared.sending.threadId,
       threadIsDirect: prepared.sending.threadIsDirect,
+      replyToMessageId: prepared.sending.replyToMessageId,
       target: prepared.sending.explicitTarget ?? null,
       session: {
         binding: {
@@ -461,6 +466,7 @@ export async function deliverAssistantOutboxMessage(input: {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
   threadIsDirect?: boolean | null
@@ -474,6 +480,7 @@ export async function deliverAssistantOutboxMessage(input: {
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     message: input.message,
+    replyToMessageId: input.replyToMessageId,
     sessionId: input.sessionId,
     threadId: input.threadId,
     threadIsDirect: input.threadIsDirect,
@@ -848,6 +855,7 @@ function hashAssistantOutboxIdentity(input: {
   explicitTarget?: string | null
   identityId?: string | null
   message: string
+  replyToMessageId?: string | null
   sessionId: string
   threadId?: string | null
   turnId: string
@@ -862,6 +870,7 @@ function hashAssistantOutboxIdentity(input: {
         identityId: input.identityId,
         actorId: input.actorId,
         threadId: input.threadId,
+        replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
       }),
@@ -875,6 +884,7 @@ function hashAssistantOutboxTargetFingerprint(input: {
   channel?: string | null
   explicitTarget?: string | null
   identityId?: string | null
+  replyToMessageId?: string | null
   threadId?: string | null
 }): string {
   return createHash('sha1')
@@ -884,6 +894,7 @@ function hashAssistantOutboxTargetFingerprint(input: {
         identityId: input.identityId,
         actorId: input.actorId,
         threadId: input.threadId,
+        replyToMessageId: input.replyToMessageId,
         explicitTarget: input.explicitTarget,
         bindingDelivery: input.bindingDelivery,
       }),

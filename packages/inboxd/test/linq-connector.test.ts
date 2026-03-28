@@ -183,6 +183,88 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
   }
 });
 
+test("createLinqWebhookConnector still accepts a webhook when attachment download fails", async () => {
+  const port = await reservePort();
+  const controller = new AbortController();
+  const emitted: InboundCapture[] = [];
+
+  const connector = createLinqWebhookConnector({
+    accountId: "default",
+    host: "127.0.0.1",
+    path: "/hooks/linq",
+    port,
+    webhookSecret: "secret-123",
+    fetchImplementation: async () => ({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+      text: async () => "",
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }) as Response,
+  });
+
+  const watchPromise = connector.watch(
+    null,
+    async (capture) => {
+      emitted.push(capture);
+      return createPersistedCapture(capture);
+    },
+    controller.signal,
+  );
+
+  try {
+    const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
+    await waitForWebhookListener(listenerUrl);
+
+    const payload = JSON.stringify({
+      api_version: "v3",
+      event_id: "evt_download_failure",
+      created_at: "2026-03-24T11:00:05.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_456",
+        from: "+15550001111",
+        recipient_phone: "+15559990000",
+        received_at: "2026-03-24T11:00:00.000Z",
+        is_from_me: false,
+        service: "iMessage",
+        message: {
+          id: "msg_456",
+          parts: [
+            {
+              type: "media",
+              url: "https://cdn.example.test/att_2.pdf",
+              attachment_id: "att_2",
+              filename: "summary.pdf",
+              mime_type: "application/pdf",
+            },
+          ],
+        },
+      },
+    });
+    const timestamp = "1711278000";
+    const response = await fetch(listenerUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+        "x-webhook-timestamp": timestamp,
+      },
+      body: payload,
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0]?.externalId, "linq:msg_456");
+    assert.equal(emitted[0]?.attachments[0]?.externalId, "att_2");
+    assert.equal(emitted[0]?.attachments[0]?.data ?? null, null);
+  } finally {
+    controller.abort();
+    await watchPromise;
+    await connector.close?.();
+  }
+});
+
 async function reservePort(): Promise<number> {
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();

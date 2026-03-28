@@ -166,9 +166,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("opens a Prisma transaction when dispatching an active-member Linq message from a root client", async () => {
     const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const transactionHostedMemberFindUnique = vi.fn().mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      invites: [],
+      linqChatId: "chat_123",
+      normalizedPhoneNumber: "+15551234567",
+    });
     const transactionClient = {
       hostedWebhookReceipt: {
         updateMany: transactionReceiptUpdateMany,
+      },
+      hostedMember: {
+        findUnique: transactionHostedMemberFindUnique,
       },
     };
     const prisma = withPrismaTransaction({
@@ -230,6 +240,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "dispatched-active-member",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transactionHostedMemberFindUnique).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -244,8 +255,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         tx: transactionClient,
       }),
     );
-    expect(transactionReceiptUpdateMany).toHaveBeenCalledTimes(1);
-    expect(transactionReceiptUpdateMany).toHaveBeenCalledWith(
+    const receiptUpdateWrites = transactionReceiptUpdateMany.mock.calls.map(
+      (call) => call[0] as Record<string, unknown>,
+    );
+    expect(receiptUpdateWrites).toContainEqual(
       expect.objectContaining({
         data: expect.objectContaining({
           payloadJson: expect.objectContaining({

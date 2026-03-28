@@ -124,7 +124,7 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ message: string; target: string }> = []
+  const sent: Array<{ message: string; replyToMessageId?: string | null; target: string }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -509,7 +509,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
       message: 'Linq thread reply.',
     },
     {
-      sendLinq: async (input: { message: string; target: string }) => {
+      sendLinq: async (input: { message: string; replyToMessageId?: string | null; target: string }) => {
         sent.push(input)
       },
     },
@@ -519,6 +519,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
   assert.deepEqual(sent[0], {
     target: 'chat_123',
     message: 'Linq thread reply.',
+    replyToMessageId: null,
   })
   assert.equal(result.delivery.channel, 'linq')
   assert.equal(result.delivery.target, 'chat_123')
@@ -530,6 +531,40 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
   assert.equal(result.session.binding.delivery?.target, 'chat_123')
   assert.equal('lastAssistantMessage' in result.session, false)
   assert.equal(result.session.turnCount, 0)
+})
+
+test('deliverAssistantMessage forwards Linq reply anchors when one is available', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-linq-reply-to-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const sent: Array<{ message: string; replyToMessageId?: string | null; target: string }> = []
+  await deliverAssistantMessage(
+    {
+      vault: vaultRoot,
+      channel: 'linq',
+      identityId: 'default',
+      participantId: '+15551234567',
+      sourceThreadId: 'chat_123',
+      threadIsDirect: true,
+      message: 'Anchored Linq reply.',
+      replyToMessageId: 'msg_parent_123',
+    },
+    {
+      sendLinq: async (input) => {
+        sent.push(input)
+      },
+    },
+  )
+
+  assert.deepEqual(sent, [
+    {
+      target: 'chat_123',
+      message: 'Anchored Linq reply.',
+      replyToMessageId: 'msg_parent_123',
+    },
+  ])
 })
 
 test('deliverAssistantMessage uses stored email thread bindings so one assistant session can reply back into the same email thread', async () => {
@@ -970,6 +1005,55 @@ test('sendLinqMessage posts Linq chat message payloads to the configured API bas
       ],
     },
   })
+})
+
+test('sendLinqMessage includes reply_to when a parent Linq message id is provided', async () => {
+  const requests: Array<Record<string, unknown>> = []
+
+  await sendLinqMessage(
+    {
+      message: 'Queued the Linq reply.',
+      replyToMessageId: 'msg_parent_123',
+      target: 'chat_123',
+    },
+    {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: async (_url, init) => {
+        requests.push(JSON.parse(init.body ?? '{}') as Record<string, unknown>)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            chat_id: 'chat_123',
+            message: {
+              id: 'msg_1',
+            },
+          }),
+          text: async () => '',
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      },
+    },
+  )
+
+  assert.deepEqual(requests, [
+    {
+      message: {
+        parts: [
+          {
+            type: 'text',
+            value: 'Queued the Linq reply.',
+          },
+        ],
+        reply_to: {
+          message_id: 'msg_parent_123',
+        },
+      },
+    },
+  ])
 })
 
 test('sendLinqMessage retries Linq sends after a 429 response', async () => {

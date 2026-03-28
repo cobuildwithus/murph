@@ -22,7 +22,7 @@ export interface HostedLinqMessageReceivedData {
   is_from_me: boolean;
   service?: string | null;
   message: {
-    id?: string | null;
+    id: string;
     parts?: unknown;
   };
 }
@@ -72,6 +72,11 @@ export function requireHostedLinqMessageReceivedEvent(
   }
 
   const data = event.data as Record<string, unknown>;
+  const message = data.message;
+
+  if (!message || typeof message !== "object") {
+    throw new TypeError("Linq message.received payload is missing message data.");
+  }
 
   return {
     ...event,
@@ -83,13 +88,10 @@ export function requireHostedLinqMessageReceivedEvent(
       received_at: normalizeNullableString(data.received_at),
       is_from_me: Boolean(data.is_from_me),
       service: normalizeNullableString(data.service),
-      message:
-        data.message && typeof data.message === "object"
-          ? {
-              id: normalizeNullableString((data.message as Record<string, unknown>).id),
-              parts: (data.message as Record<string, unknown>).parts,
-            }
-          : {},
+      message: {
+        id: normalizeRequiredString((message as Record<string, unknown>).id, "Linq message.received message.id"),
+        parts: (message as Record<string, unknown>).parts,
+      },
     },
   };
 }
@@ -118,7 +120,11 @@ export function assertHostedLinqWebhookSignature(input: {
   const { linqWebhookSecret: webhookSecret } = getHostedOnboardingEnvironment();
 
   if (!webhookSecret) {
-    return;
+    throw hostedOnboardingError({
+      code: "LINQ_WEBHOOK_SECRET_MISSING",
+      message: "LINQ_WEBHOOK_SECRET must be configured for the hosted Linq webhook.",
+      httpStatus: 500,
+    });
   }
 
   if (!input.signature || !input.timestamp) {
@@ -141,9 +147,11 @@ export function assertHostedLinqWebhookSignature(input: {
 export async function sendHostedLinqChatMessage(input: {
   chatId: string;
   message: string;
+  replyToMessageId?: string | null;
   signal?: AbortSignal;
 }): Promise<{ chatId: string | null; messageId: string | null }> {
   const { apiBaseUrl, apiToken } = requireHostedOnboardingLinqConfig();
+  const replyToMessageId = normalizeNullableString(input.replyToMessageId);
   const response = await fetch(
     new URL(`chats/${encodeURIComponent(normalizeRequiredString(input.chatId, "chat id"))}/messages`, `${apiBaseUrl}/`),
     {
@@ -160,6 +168,13 @@ export async function sendHostedLinqChatMessage(input: {
               value: normalizeRequiredString(input.message, "message"),
             },
           ],
+          ...(replyToMessageId
+            ? {
+                reply_to: {
+                  message_id: replyToMessageId,
+                },
+              }
+            : {}),
         },
       }),
       signal: input.signal,
@@ -188,15 +203,21 @@ export async function sendHostedLinqChatMessage(input: {
 export function summarizeHostedLinqMessage(event: HostedLinqMessageReceivedEvent): {
   chatId: string;
   isFromMe: boolean;
+  messageId: string;
   phoneNumber: string;
   text: string | null;
 } {
   return {
     chatId: event.data.chat_id,
     isFromMe: event.data.is_from_me,
+    messageId: event.data.message.id,
     phoneNumber: event.data.from,
     text: extractLinqTextMessage(event.data.message),
   };
+}
+
+export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEvent): string {
+  return normalizeRequiredString(event.data.received_at ?? event.created_at, "Linq webhook occurredAt");
 }
 
 export function buildHostedInviteReply(input: {
