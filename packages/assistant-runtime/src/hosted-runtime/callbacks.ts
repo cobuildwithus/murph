@@ -22,6 +22,9 @@ import type {
   HostedExecutionCommitCallback,
   HostedAssistantRuntimeJobRequest,
 } from "./models.ts";
+import { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
+
+export { readHostedRunnerCommitTimeoutMs } from "./timeouts.ts";
 
 const HOSTED_MAX_COMMITTED_SIDE_EFFECTS = 20;
 
@@ -161,14 +164,6 @@ export async function drainHostedCommittedSideEffectsAfterCommit(input: {
       vaultRoot: input.vaultRoot,
     });
   }
-}
-
-export function readHostedRunnerCommitTimeoutMs(timeoutMs: number | null): number {
-  if (timeoutMs !== null && Number.isFinite(timeoutMs) && timeoutMs > 0) {
-    return timeoutMs;
-  }
-
-  return 30_000;
 }
 
 async function dispatchHostedCommittedSideEffect(input: {

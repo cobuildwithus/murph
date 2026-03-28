@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -6,10 +6,12 @@ import {
   type AssistantSelfDeliveryTarget,
 } from "murph";
 import {
+  writeJsonFileAtomic,
+} from "@murph/runtime-state";
+import {
   readOperatorConfig,
   resolveOperatorConfigPath,
   resolveOperatorHomeDirectory,
-  type AssistantOperatorDefaults,
   type OperatorConfig,
 } from "murph/operator-config";
 
@@ -49,10 +51,9 @@ export async function saveAssistantSelfDeliveryTarget(
   const configPath = resolveOperatorConfigPath(homeDirectory);
 
   await mkdir(path.dirname(configPath), { recursive: true });
-  await writeFile(
+  await writeJsonFileAtomic(
     configPath,
-    `${JSON.stringify(nextConfig, null, 2)}\n`,
-    "utf8",
+    nextConfig,
   );
 
   return normalizedTarget;
@@ -62,29 +63,25 @@ function buildOperatorConfig(input: {
   existing: OperatorConfig | null;
   selfDeliveryTargets: Record<string, AssistantSelfDeliveryTarget> | null;
 }): OperatorConfig {
+  const existingAssistant = input.existing?.assistant;
+
   return {
     schema: "murph.operator-config.v1",
     defaultVault: input.existing?.defaultVault ?? null,
-    assistant: {
-      ...normalizeAssistantOperatorDefaults(input.existing?.assistant ?? null),
-      selfDeliveryTargets: input.selfDeliveryTargets,
-    },
+    assistant: existingAssistant
+      ? {
+          ...existingAssistant,
+          selfDeliveryTargets: input.selfDeliveryTargets,
+        }
+      : {
+          provider: null,
+          defaultsByProvider: null,
+          identityId: null,
+          failoverRoutes: null,
+          account: null,
+          selfDeliveryTargets: input.selfDeliveryTargets,
+        },
     updatedAt: new Date().toISOString(),
-  };
-}
-
-function normalizeAssistantOperatorDefaults(
-  defaults: AssistantOperatorDefaults | null,
-): AssistantOperatorDefaults {
-  return {
-    provider: defaults?.provider ?? null,
-    defaultsByProvider: defaults?.defaultsByProvider ?? null,
-    identityId: defaults?.identityId ?? null,
-    failoverRoutes: defaults?.failoverRoutes ?? null,
-    account: defaults?.account ?? null,
-    selfDeliveryTargets: normalizeAssistantSelfDeliveryTargetMap(
-      defaults?.selfDeliveryTargets ?? null,
-    ),
   };
 }
 

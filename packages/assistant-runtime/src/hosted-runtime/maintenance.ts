@@ -1,8 +1,7 @@
 import {
+  createConfiguredDeviceSyncProviders,
   createDeviceSyncRegistry,
   createDeviceSyncService,
-  createOuraDeviceSyncProvider,
-  createWhoopDeviceSyncProvider,
 } from "@murph/device-syncd";
 import {
   openInboxRuntime,
@@ -31,7 +30,13 @@ import {
   syncHostedDeviceSyncControlPlaneState,
   type HostedDeviceSyncRuntimeSyncState,
 } from "../hosted-device-sync-runtime.ts";
-import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+import type {
+  HostedExecutionDispatchRequest,
+  HostedExecutionWebControlPlaneEnvironment,
+} from "@murph/hosted-execution";
+import {
+  readHostedExecutionWebControlPlaneEnvironment,
+} from "@murph/hosted-execution";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;
@@ -42,8 +47,11 @@ export async function runHostedMaintenanceLoop(input: {
   requestId: string;
   timeoutMs: number | null;
   runtimeEnv: Readonly<Record<string, string>>;
+  webControlPlane?: HostedExecutionWebControlPlaneEnvironment;
   vaultRoot: string;
 }): Promise<HostedMaintenanceMetrics> {
+  const webControlPlane = input.webControlPlane
+    ?? readHostedExecutionWebControlPlaneEnvironment(input.runtimeEnv);
   const parserResult = await drainHostedParserQueue({
     artifactMaterializer: input.artifactMaterializer ?? null,
     vaultRoot: input.vaultRoot,
@@ -54,6 +62,7 @@ export async function runHostedMaintenanceLoop(input: {
     input.dispatch,
     input.vaultRoot,
     input.runtimeEnv,
+    webControlPlane,
     input.timeoutMs,
   );
 
@@ -168,6 +177,7 @@ export async function runHostedDeviceSyncPass(
   dispatch: HostedExecutionDispatchRequest,
   vaultRoot: string,
   env: Readonly<Record<string, string>>,
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment,
   timeoutMs: number | null,
 ): Promise<{ nextWakeAt: string | null; processedJobs: number; skipped: boolean }> {
   const service = createHostedDeviceSyncRuntime({
@@ -198,10 +208,10 @@ export async function runHostedDeviceSyncPass(
       try {
         syncState = await syncHostedDeviceSyncControlPlaneState({
           dispatch,
-          env,
           secret,
           service,
           timeoutMs,
+          webControlPlane,
         });
         controlPlaneSynced = true;
       } catch (error) {
@@ -220,11 +230,11 @@ export async function runHostedDeviceSyncPass(
       try {
         await reconcileHostedDeviceSyncControlPlaneState({
           dispatch,
-          env,
           secret,
           service,
           state: syncState,
           timeoutMs,
+          webControlPlane,
         });
       } catch (error) {
         if (failHardOnControlPlaneError) {
@@ -266,25 +276,9 @@ function createHostedDeviceSyncRuntime(input: {
   env: Readonly<Record<string, string>>;
   vaultRoot: string;
 }) {
-  const registry = createDeviceSyncRegistry();
-
-  if (input.env.WHOOP_CLIENT_ID && input.env.WHOOP_CLIENT_SECRET) {
-    registry.register(
-      createWhoopDeviceSyncProvider({
-        clientId: input.env.WHOOP_CLIENT_ID,
-        clientSecret: input.env.WHOOP_CLIENT_SECRET,
-      }),
-    );
-  }
-
-  if (input.env.OURA_CLIENT_ID && input.env.OURA_CLIENT_SECRET) {
-    registry.register(
-      createOuraDeviceSyncProvider({
-        clientId: input.env.OURA_CLIENT_ID,
-        clientSecret: input.env.OURA_CLIENT_SECRET,
-      }),
-    );
-  }
+  const registry = createDeviceSyncRegistry(
+    createConfiguredDeviceSyncProviders(input.env),
+  );
 
   if (registry.list().length === 0) {
     return null;

@@ -6,6 +6,7 @@ import path from "node:path";
 import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  createConfiguredDeviceSyncProviders: vi.fn(() => []),
   createConfiguredParserRegistry: vi.fn(async () => ({
     ffmpeg: null,
     registry: {},
@@ -70,10 +71,9 @@ vi.mock("@murph/assistant-services/vault-services", () => ({
 }));
 
 vi.mock("@murph/device-syncd", () => ({
+  createConfiguredDeviceSyncProviders: mocks.createConfiguredDeviceSyncProviders,
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
   createDeviceSyncService: mocks.createDeviceSyncService,
-  createOuraDeviceSyncProvider: vi.fn(),
-  createWhoopDeviceSyncProvider: vi.fn(),
 }));
 
 vi.mock("@murph/inboxd", () => ({
@@ -94,6 +94,11 @@ vi.mock("../src/hosted-device-sync-runtime.ts", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
 });
+
+const hostedWebControlPlane = {
+  deviceSyncRuntimeBaseUrl: "https://control.example.test",
+  internalToken: "internal-token",
+};
 
 test("hosted maintenance loop preserves the empty-vault no-op baseline after activation bootstrap", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-maintenance-"));
@@ -128,6 +133,7 @@ test("hosted maintenance loop preserves the empty-vault no-op baseline after act
       requestId: "evt_activation",
       timeoutMs: null,
       runtimeEnv: {},
+      webControlPlane: hostedWebControlPlane,
       vaultRoot,
     });
 
@@ -182,6 +188,7 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
         OURA_CLIENT_ID: "oura-client-id",
         OURA_CLIENT_SECRET: "oura-client-secret",
       },
+      webControlPlane: hostedWebControlPlane,
       vaultRoot,
     });
 
@@ -206,13 +213,12 @@ test("non-device-sync maintenance continues when the hosted control-plane snapsh
   };
 
   try {
-    mocks.createDeviceSyncRegistry.mockImplementation(() => {
-      const providers: unknown[] = [];
+    mocks.createConfiguredDeviceSyncProviders.mockReturnValue([{} as never]);
+    mocks.createDeviceSyncRegistry.mockImplementation((providers: unknown[] = []) => {
+      const configured = [...providers];
       return {
-        list: vi.fn(() => providers),
-        register: vi.fn((provider: unknown) => {
-          providers.push(provider);
-        }),
+        list: vi.fn(() => configured),
+        register: vi.fn(),
       };
     });
     mocks.createDeviceSyncService.mockReturnValue(deviceSyncService);
@@ -241,6 +247,7 @@ test("non-device-sync maintenance continues when the hosted control-plane snapsh
         WHOOP_CLIENT_ID: "whoop-client",
         WHOOP_CLIENT_SECRET: "whoop-secret",
       },
+      hostedWebControlPlane,
       9_000,
     );
 
@@ -269,8 +276,9 @@ test("non-device-sync maintenance continues when the hosted control-plane apply 
   };
 
   try {
-    mocks.createDeviceSyncRegistry.mockImplementation(() => {
-      const providers: unknown[] = [];
+    mocks.createConfiguredDeviceSyncProviders.mockReturnValue([{} as never]);
+    mocks.createDeviceSyncRegistry.mockImplementation((initialProviders: unknown[] = []) => {
+      const providers = [...initialProviders];
       return {
         list: vi.fn(() => providers),
         register: vi.fn((provider: unknown) => {
@@ -300,6 +308,7 @@ test("non-device-sync maintenance continues when the hosted control-plane apply 
         WHOOP_CLIENT_ID: "whoop-client",
         WHOOP_CLIENT_SECRET: "whoop-secret",
       },
+      hostedWebControlPlane,
       12_000,
     );
 
@@ -324,8 +333,9 @@ test("device-sync wake maintenance still fails hard on hosted control-plane erro
     runSchedulerOnce: vi.fn(async () => undefined),
   };
 
-  mocks.createDeviceSyncRegistry.mockImplementation(() => {
-    const providers: unknown[] = [];
+  mocks.createConfiguredDeviceSyncProviders.mockReturnValue([{} as never]);
+  mocks.createDeviceSyncRegistry.mockImplementation((initialProviders: unknown[] = []) => {
+    const providers = [...initialProviders];
     return {
       list: vi.fn(() => providers),
       register: vi.fn((provider: unknown) => {
@@ -360,6 +370,7 @@ test("device-sync wake maintenance still fails hard on hosted control-plane erro
           WHOOP_CLIENT_ID: "whoop-client",
           WHOOP_CLIENT_SECRET: "whoop-secret",
         },
+        hostedWebControlPlane,
         15_000,
       ),
     /snapshot unavailable/,
