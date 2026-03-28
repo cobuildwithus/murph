@@ -4,12 +4,13 @@ import type Stripe from "stripe";
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
 import {
-  assertHostedLinqWebhookSignature,
-  parseHostedLinqWebhookEvent,
+  requireHostedLinqMessageReceivedEvent,
+  verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import {
   requireHostedOnboardingStripeClient,
 } from "./runtime";
+import { recordHostedStripeEvent } from "./stripe-event-queue";
 import { assertHostedTelegramWebhookSecret, buildHostedTelegramWebhookEventId, parseHostedTelegramWebhookUpdate } from "./telegram";
 import { runHostedWebhookWithReceipt } from "./webhook-receipts";
 import {
@@ -21,7 +22,6 @@ import {
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
 import {
-  planHostedStripeWebhook,
   type HostedStripeWebhookResponse,
 } from "./webhook-provider-stripe";
 import { createHostedWebhookReceiptHandlers } from "./webhook-transport";
@@ -33,14 +33,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   prisma?: PrismaClient;
   signal?: AbortSignal;
 }): Promise<HostedOnboardingLinqWebhookResponse> {
-  assertHostedLinqWebhookSignature({
-    payload: input.rawBody,
+  const event = verifyAndParseHostedLinqWebhookRequest({
+    rawBody: input.rawBody,
     signature: input.signature,
     timestamp: input.timestamp,
   });
-
   const prisma = input.prisma ?? getPrisma();
-  const event = parseHostedLinqWebhookEvent(input.rawBody);
+  if (event.event_type === "message.received") {
+    requireHostedLinqMessageReceivedEvent(event);
+  }
   return runHostedWebhookWithReceipt({
     duplicateResponse: {
       ok: true,
@@ -54,7 +55,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     plan: (transaction) =>
       planHostedOnboardingLinqWebhook({
         event,
-        prisma: transaction as PrismaClient,
+        prisma: transaction,
       }),
     prisma,
     signal: input.signal,
@@ -85,7 +86,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     handlers: createHostedWebhookReceiptHandlers(),
     plan: (transaction) =>
       planHostedOnboardingTelegramWebhook({
-        prisma: transaction as PrismaClient,
+        prisma: transaction,
         update,
       }),
     prisma,
@@ -125,25 +126,16 @@ export async function handleHostedStripeWebhook(input: {
     webhookSecret,
   });
 
-  return runHostedWebhookWithReceipt({
-    duplicateResponse: {
-      ok: true,
-      duplicate: true,
-      type: event.type,
-    },
-    eventId: event.id,
-    eventPayload: {
-      type: event.type,
-    },
-    handlers: createHostedWebhookReceiptHandlers(),
-    plan: (transaction) =>
-      planHostedStripeWebhook({
-        event,
-        prisma: transaction as PrismaClient,
-      }),
+  const recorded = await recordHostedStripeEvent({
+    event,
     prisma,
-    source: "stripe",
   });
+
+  return {
+    duplicate: recorded.duplicate || undefined,
+    ok: true,
+    type: recorded.type,
+  };
 }
 
 function constructStripeWebhookEvent(input: {

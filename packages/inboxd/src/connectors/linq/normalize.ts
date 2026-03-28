@@ -2,7 +2,12 @@ import path from 'node:path'
 import type { InboundAttachment, InboundCapture } from '../../contracts/capture.ts'
 import type { ChatMessage } from '../chat/message.ts'
 import { createInboundCaptureFromChatMessage } from '../chat/message.ts'
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from '../../shared.ts'
+import {
+  normalizeTextValue,
+  relayAbort,
+  sanitizeRawMetadata,
+  toIsoTimestamp,
+} from '../../shared.ts'
 import type {
   LinqMediaPart,
   LinqMessagePart,
@@ -21,6 +26,7 @@ export interface NormalizeLinqWebhookEventInput {
   defaultAccountId?: string | null
   downloadDriver?: LinqAttachmentDownloadDriver | null
   signal?: AbortSignal
+  attachmentDownloadTimeoutMs?: number | null
 }
 
 export async function normalizeLinqWebhookEvent({
@@ -29,14 +35,16 @@ export async function normalizeLinqWebhookEvent({
   defaultAccountId = null,
   downloadDriver = null,
   signal,
+  attachmentDownloadTimeoutMs = null,
 }: NormalizeLinqWebhookEventInput): Promise<InboundCapture> {
-  const messageEvent = requireLinqMessageReceivedEvent(event)
+  const messageEvent = parseCanonicalLinqMessageReceivedEvent(event)
   const accountId =
     normalizeTextValue(messageEvent.data.recipient_phone ?? null) ?? defaultAccountId
   const message = await toLinqChatMessage({
     event: messageEvent,
     downloadDriver,
     signal,
+    attachmentDownloadTimeoutMs,
   })
 
   return createInboundCaptureFromChatMessage({
@@ -50,9 +58,12 @@ export async function toLinqChatMessage(input: {
   event: LinqMessageReceivedEvent
   downloadDriver?: LinqAttachmentDownloadDriver | null
   signal?: AbortSignal
+  attachmentDownloadTimeoutMs?: number | null
 }): Promise<ChatMessage> {
-  const { event, downloadDriver = null, signal } = input
+  const { event, downloadDriver = null, signal, attachmentDownloadTimeoutMs = null } = input
   const data = event.data
+  const receivedAt = normalizeTextValue(data.received_at)
+  const createdAt = normalizeTextValue(event.created_at)
   const messageId = normalizeTextValue(data.message.id)
   if (!messageId) {
     throw new TypeError('Linq message.received event is missing a stable message id.')
@@ -75,16 +86,19 @@ export async function toLinqChatMessage(input: {
       displayName: null,
       isSelf: Boolean(data.is_from_me),
     },
-    occurredAt: toIsoTimestamp(
-      normalizeTextValue(data.received_at) ?? normalizeTextValue(event.created_at) ?? new Date(),
-    ),
-    receivedAt: normalizeTextValue(data.received_at)
-      ? toIsoTimestamp(data.received_at)
-      : normalizeTextValue(event.created_at)
-        ? toIsoTimestamp(event.created_at)
+    occurredAt: toIsoTimestamp(receivedAt ?? createdAt ?? new Date()),
+    receivedAt: receivedAt
+      ? toIsoTimestamp(receivedAt)
+      : createdAt
+        ? toIsoTimestamp(createdAt)
         : null,
     text: buildLinqMessageText(data.message.parts),
-    attachments: await buildLinqAttachments(data.message.parts, downloadDriver, signal),
+    attachments: await buildLinqAttachments(
+      data.message.parts,
+      downloadDriver,
+      signal,
+      attachmentDownloadTimeoutMs,
+    ),
     raw: sanitizeRawLinqEvent(event),
   }
 }
@@ -97,6 +111,40 @@ export function requireLinqMessageReceivedEvent(
   }
 
   return event as LinqMessageReceivedEvent
+}
+
+export function parseCanonicalLinqMessageReceivedEvent(
+  event: LinqWebhookEvent,
+): LinqMessageReceivedEvent {
+  const messageEvent = requireLinqMessageReceivedEvent(event)
+  const data = toLinqObjectRecord(messageEvent.data, 'Linq message.received data')
+  const message = toLinqObjectRecord(data.message, 'Linq message.received message')
+  const parts = message.parts
+
+  if (!Array.isArray(parts)) {
+    throw new TypeError('Linq message.received message.parts must be an array.')
+  }
+
+  return {
+    ...messageEvent,
+    created_at: normalizeRequiredTimestamp(messageEvent.created_at, 'Linq webhook created_at'),
+    trace_id: normalizeNullableString(messageEvent.trace_id ?? null),
+    partner_id: normalizeNullableString(messageEvent.partner_id ?? null),
+    data: {
+      chat_id: normalizeRequiredString(data.chat_id, 'Linq message.received chat_id'),
+      from: normalizeRequiredString(data.from, 'Linq message.received from'),
+      recipient_phone: normalizeNullableString(data.recipient_phone),
+      received_at: normalizeOptionalTimestamp(data.received_at, 'Linq message.received received_at'),
+      is_from_me: normalizeRequiredBoolean(data.is_from_me, 'Linq message.received is_from_me'),
+      service: normalizeNullableString(data.service),
+      message: {
+        id: normalizeRequiredString(message.id, 'Linq message.received message.id'),
+        parts: parts.map((part, index) => parseLinqMessagePart(part, index)),
+        effect: parseOptionalMessageEffect(message.effect),
+        reply_to: parseOptionalReplyTo(message.reply_to),
+      },
+    },
+  }
 }
 
 export function buildLinqMessageText(
@@ -114,6 +162,7 @@ async function buildLinqAttachments(
   parts: ReadonlyArray<LinqMessagePart> | null | undefined,
   downloadDriver: LinqAttachmentDownloadDriver | null,
   signal?: AbortSignal,
+  attachmentDownloadTimeoutMs?: number | null,
 ): Promise<InboundAttachment[]> {
   const attachments: InboundAttachment[] = []
 
@@ -122,7 +171,12 @@ async function buildLinqAttachments(
       continue
     }
 
-    const data = await downloadLinqAttachmentBestEffort(part, downloadDriver, signal)
+    const data = await downloadLinqAttachmentBestEffort(
+      part,
+      downloadDriver,
+      signal,
+      attachmentDownloadTimeoutMs,
+    )
     const fileName = normalizeTextValue(part.filename ?? null) ?? inferAttachmentFileName(part)
     const mime = normalizeTextValue(part.mime_type ?? null)
 
@@ -143,6 +197,7 @@ async function downloadLinqAttachmentBestEffort(
   part: LinqMediaPart,
   downloadDriver: LinqAttachmentDownloadDriver | null,
   signal?: AbortSignal,
+  attachmentDownloadTimeoutMs?: number | null,
 ): Promise<Uint8Array | null> {
   const url = normalizeTextValue(part.url ?? null)
   if (!downloadDriver || !url) {
@@ -150,11 +205,61 @@ async function downloadLinqAttachmentBestEffort(
   }
 
   try {
+    const normalizedTimeoutMs = normalizeAttachmentDownloadTimeout(attachmentDownloadTimeoutMs)
+    if (normalizedTimeoutMs !== null) {
+      return await downloadLinqAttachmentWithTimeout(
+        downloadDriver,
+        url,
+        normalizedTimeoutMs,
+        signal,
+      )
+    }
+
     return await downloadDriver.downloadUrl(url, signal)
   } catch {
     // Keep webhook acceptance tied to capture persistence, not best-effort media fetches.
     return null
   }
+}
+
+async function downloadLinqAttachmentWithTimeout(
+  downloadDriver: LinqAttachmentDownloadDriver,
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array | null> {
+  const controller = new AbortController()
+  const releaseRelay = signal ? relayAbort(signal, controller) : () => {}
+
+  try {
+    return await new Promise<Uint8Array | null>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        controller.abort()
+        resolve(null)
+      }, timeoutMs)
+
+      void downloadDriver
+        .downloadUrl(url, controller.signal)
+        .then((data) => {
+          clearTimeout(timeout)
+          resolve(data)
+        })
+        .catch((error) => {
+          clearTimeout(timeout)
+          reject(error)
+        })
+    })
+  } finally {
+    releaseRelay()
+  }
+}
+
+function normalizeAttachmentDownloadTimeout(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null
+  }
+
+  return Math.max(0, Math.floor(value))
 }
 
 function buildLinqThreadTitle(data: LinqMessageReceivedData): string | null {
@@ -278,4 +383,117 @@ function pickLinqMessagePart(part: LinqMessagePart): Record<string, unknown> {
 
 function compactRecord(fields: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined))
+}
+
+function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
+  const record = toLinqObjectRecord(part, `Linq message.received message.parts[${index}]`)
+  const type = normalizeRequiredString(record.type, `Linq message.received message.parts[${index}] type`)
+
+  if (type === 'text') {
+    return {
+      type,
+      value: normalizeRequiredString(
+        record.value,
+        `Linq message.received message.parts[${index}] value`,
+      ),
+    }
+  }
+
+  if (type === 'media') {
+    return {
+      type,
+      url: normalizeNullableString(record.url),
+      attachment_id: normalizeNullableString(record.attachment_id),
+      filename: normalizeNullableString(record.filename),
+      mime_type: normalizeNullableString(record.mime_type),
+      size: normalizeNullableNumber(record.size),
+    }
+  }
+
+  throw new TypeError(
+    `Linq message.received message.parts[${index}] type must be "text" or "media".`,
+  )
+}
+
+function parseOptionalMessageEffect(value: unknown): LinqMessageReceivedData['message']['effect'] {
+  if (value == null) {
+    return null
+  }
+
+  const record = toLinqObjectRecord(value, 'Linq message.received message.effect')
+  return {
+    type: normalizeNullableString(record.type),
+    name: normalizeNullableString(record.name),
+  }
+}
+
+function parseOptionalReplyTo(value: unknown): LinqMessageReceivedData['message']['reply_to'] {
+  if (value == null) {
+    return null
+  }
+
+  const record = toLinqObjectRecord(value, 'Linq message.received message.reply_to')
+  return {
+    message_id: normalizeNullableString(record.message_id),
+    part_index: normalizeNullableNumber(record.part_index),
+  }
+}
+
+function toLinqObjectRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object.`)
+  }
+
+  return value as Record<string, unknown>
+}
+
+function normalizeRequiredString(value: unknown, label: string): string {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    throw new TypeError(`${label} is required.`)
+  }
+
+  return normalized
+}
+
+function normalizeRequiredTimestamp(value: unknown, label: string): string {
+  return normalizeTimestamp(normalizeRequiredString(value, label), label)
+}
+
+function normalizeOptionalTimestamp(value: unknown, label: string): string | null {
+  const normalized = normalizeNullableString(value)
+  return normalized ? normalizeTimestamp(normalized, label) : null
+}
+
+function normalizeTimestamp(value: string, label: string): string {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    throw new TypeError(`${label} must be a valid timestamp.`)
+  }
+
+  return value
+}
+
+function normalizeRequiredBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new TypeError(`${label} must be a boolean.`)
+  }
+
+  return value
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  if (value == null) {
+    return null
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new TypeError('Linq media size must be a finite number when provided.')
+  }
+
+  return Math.floor(value)
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  return normalizeTextValue(value)
 }

@@ -18,7 +18,7 @@ export function createHostedWebhookReceiptHandlers(): HostedWebhookReceiptHandle
       prisma,
     }: {
       effect: HostedWebhookSideEffect;
-      prisma: PrismaClient;
+      prisma: HostedWebhookReceiptPersistenceClient;
     }) => {
       if (effect.kind === "linq_message_send" && effect.payload.inviteId) {
         await markHostedInviteSentBestEffort(effect.payload.inviteId, prisma);
@@ -75,7 +75,7 @@ async function enqueueHostedWebhookDispatchEffectWithTransaction(
 async function performHostedWebhookSideEffect(
   effect: HostedWebhookSideEffect,
   options: {
-    prisma: PrismaClient;
+    prisma: HostedWebhookReceiptPersistenceClient;
     signal?: AbortSignal;
   },
 ): Promise<
@@ -125,7 +125,7 @@ async function performHostedWebhookSideEffect(
 
 async function markHostedInviteSentBestEffort(
   inviteId: string,
-  prisma: PrismaClient,
+  prisma: HostedWebhookReceiptPersistenceClient,
 ): Promise<void> {
   try {
     await prisma.hostedInvite.update({

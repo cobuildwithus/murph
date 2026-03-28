@@ -274,7 +274,7 @@ export async function ensureHostedMemberForPhone(input: {
   linqChatId: string | null;
   normalizedPhoneNumber: string;
   originalPhoneNumber: string;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember> {
   const existingMember = await input.prisma.hostedMember.findUnique({
     where: {
@@ -490,7 +490,7 @@ export async function issueHostedInvite(input: {
   linqChatId: string | null;
   linqEventId: string | null;
   memberId: string;
-  prisma: PrismaClient;
+  prisma: PrismaClient | Prisma.TransactionClient;
   triggerText: string | null;
 }): Promise<HostedInvite> {
   const now = new Date();

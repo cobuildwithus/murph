@@ -28,7 +28,7 @@ export function isLinqWebhookPayloadError(error: unknown): error is LinqWebhookP
 export interface VerifyAndParseLinqWebhookRequestInput {
   headers: Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>
   rawBody: Buffer | Uint8Array | ArrayBuffer | string
-  webhookSecret?: string | null
+  webhookSecret: string
 }
 
 export function verifyAndParseLinqWebhookRequest(

@@ -39,7 +39,7 @@ export function createLinqWebhookConnector({
   const normalizedHost = normalizeRequiredString(host, 'Linq webhook host')
   const normalizedPath = normalizeWebhookPath(path)
   const normalizedPort = normalizeWebhookPort(port)
-  const normalizedSecret = normalizeNullableString(webhookSecret)
+  const normalizedSecret = normalizeRequiredWebhookSecret(webhookSecret)
   const connectorId =
     normalizeNullableString(id) ??
     `${normalizedSource}:${normalizedAccountId ?? normalizedHost.replace(/[:.]/gu, '-')}:${normalizedPort}`
@@ -95,6 +95,7 @@ export function createLinqWebhookConnector({
             source: normalizedSource,
             emit,
             downloadDriver,
+            signal,
           })
         } catch (error) {
           respondJson(response, 500, {
@@ -145,11 +146,12 @@ async function handleLinqWebhookRequest(input: {
   request: IncomingMessage
   response: ServerResponse<IncomingMessage>
   webhookPath: string
-  webhookSecret: string | null
+  webhookSecret: string
   accountId: string | null
   source: string
   emit: EmitCapture
   downloadDriver: LinqAttachmentDownloadDriver | null
+  signal: AbortSignal
 }): Promise<void> {
   const method = normalizeNullableString(input.request.method)?.toUpperCase() ?? 'GET'
   const pathname = new URL(
@@ -214,12 +216,26 @@ async function handleLinqWebhookRequest(input: {
     return
   }
 
-  const capture = await normalizeLinqWebhookEvent({
-    event: payload,
-    source: input.source,
-    defaultAccountId: input.accountId,
-    downloadDriver: input.downloadDriver,
-  })
+  // Bound synchronous normalization to canonical message parsing and attachment metadata.
+  // Remote media bytes stay best-effort and must not hold the webhook acknowledgement open.
+  let capture
+  try {
+    capture = await normalizeLinqWebhookEvent({
+      event: payload,
+      source: input.source,
+      defaultAccountId: input.accountId,
+      downloadDriver: input.downloadDriver,
+      signal: input.signal,
+      attachmentDownloadTimeoutMs: 0,
+    })
+  } catch (error) {
+    respondJson(input.response, error instanceof TypeError ? 400 : 500, {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return
+  }
+
   await input.emit(capture)
   respondJson(input.response, 202, {
     ok: true,
@@ -276,4 +292,13 @@ function normalizeWebhookPort(value: number): number {
   }
 
   return value
+}
+
+function normalizeRequiredWebhookSecret(value: unknown): string {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    throw new TypeError('Linq webhook secret is required.')
+  }
+
+  return normalized
 }

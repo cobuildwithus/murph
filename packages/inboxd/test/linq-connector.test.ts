@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { createServer } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import {
   createLinqWebhookConnector,
@@ -88,6 +88,16 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
     capture: InboundCapture;
     checkpoint: Record<string, unknown> | null | undefined;
   }> = [];
+  const fetchImplementation = vi.fn(async (url) => {
+    assert.equal(url, "https://cdn.example.test/att_2.pdf");
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+      text: async () => "",
+      arrayBuffer: async () => Uint8Array.from([9, 8, 7, 6]).buffer,
+    } as Response;
+  });
 
   const connector = createLinqWebhookConnector({
     accountId: "default",
@@ -95,16 +105,7 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
     path: "/hooks/linq",
     port,
     webhookSecret: "secret-123",
-    fetchImplementation: async (url) => {
-      assert.equal(url, "https://cdn.example.test/att_2.pdf");
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({}),
-        text: async () => "",
-        arrayBuffer: async () => Uint8Array.from([9, 8, 7, 6]).buffer,
-      } as Response;
-    },
+    fetchImplementation,
   });
 
   const watchPromise = connector.watch(
@@ -176,6 +177,7 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
     assert.equal(emitted[0]?.capture.text, "Webhook payload");
     assert.equal(emitted[0]?.capture.attachments[0]?.kind, "document");
     assert.deepEqual(Array.from(emitted[0]?.capture.attachments[0]?.data ?? []), [9, 8, 7, 6]);
+    assert.equal(fetchImplementation.mock.calls.length, 1);
   } finally {
     controller.abort();
     await watchPromise;
@@ -183,10 +185,31 @@ test("createLinqWebhookConnector accepts signed webhook requests and emits captu
   }
 });
 
+test("createLinqWebhookConnector fails closed before starting when the webhook secret is missing", () => {
+  assert.throws(
+    () =>
+      createLinqWebhookConnector({
+        accountId: "default",
+        host: "127.0.0.1",
+        path: "/hooks/linq",
+        port: 9911,
+        webhookSecret: null,
+      }),
+    /Linq webhook secret is required/u,
+  );
+});
+
 test("createLinqWebhookConnector still accepts a webhook when attachment download fails", async () => {
   const port = await reservePort();
   const controller = new AbortController();
   const emitted: InboundCapture[] = [];
+  const fetchImplementation = vi.fn(async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({}),
+    text: async () => "",
+    arrayBuffer: async () => new ArrayBuffer(0),
+  }) as Response);
 
   const connector = createLinqWebhookConnector({
     accountId: "default",
@@ -194,13 +217,7 @@ test("createLinqWebhookConnector still accepts a webhook when attachment downloa
     path: "/hooks/linq",
     port,
     webhookSecret: "secret-123",
-    fetchImplementation: async () => ({
-      ok: false,
-      status: 503,
-      json: async () => ({}),
-      text: async () => "",
-      arrayBuffer: async () => new ArrayBuffer(0),
-    }) as Response,
+    fetchImplementation,
   });
 
   const watchPromise = connector.watch(
@@ -258,6 +275,157 @@ test("createLinqWebhookConnector still accepts a webhook when attachment downloa
     assert.equal(emitted[0]?.externalId, "linq:msg_456");
     assert.equal(emitted[0]?.attachments[0]?.externalId, "att_2");
     assert.equal(emitted[0]?.attachments[0]?.data ?? null, null);
+    assert.equal(fetchImplementation.mock.calls.length, 1);
+  } finally {
+    controller.abort();
+    await watchPromise;
+    await connector.close?.();
+  }
+});
+
+test("createLinqWebhookConnector acknowledges webhooks promptly even when attachment downloads hang", async () => {
+  const port = await reservePort();
+  const controller = new AbortController();
+  const emitted: InboundCapture[] = [];
+
+  const connector = createLinqWebhookConnector({
+    accountId: "default",
+    host: "127.0.0.1",
+    path: "/hooks/linq",
+    port,
+    webhookSecret: "secret-123",
+    fetchImplementation: async (_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
+      }),
+  });
+
+  const watchPromise = connector.watch(
+    null,
+    async (capture) => {
+      emitted.push(capture);
+      return createPersistedCapture(capture);
+    },
+    controller.signal,
+  );
+
+  try {
+    const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
+    await waitForWebhookListener(listenerUrl);
+
+    const payload = JSON.stringify({
+      api_version: "v3",
+      event_id: "evt_abort_download",
+      created_at: "2026-03-24T11:00:05.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_456",
+        from: "+15550001111",
+        recipient_phone: "+15559990000",
+        received_at: "2026-03-24T11:00:00.000Z",
+        is_from_me: false,
+        service: "iMessage",
+        message: {
+          id: "msg_abort_download",
+          parts: [
+            {
+              type: "media",
+              url: "https://cdn.example.test/att_2.pdf",
+              attachment_id: "att_2",
+              filename: "summary.pdf",
+              mime_type: "application/pdf",
+            },
+          ],
+        },
+      },
+    });
+    const timestamp = "1711278000";
+    const responsePromise = fetch(listenerUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+        "x-webhook-timestamp": timestamp,
+      },
+      body: payload,
+    });
+
+    const response = await Promise.race([
+      responsePromise,
+      delay(200).then(() => {
+        throw new Error("Timed out waiting for Linq webhook response.");
+      }),
+    ]);
+
+    assert.equal(response.status, 202);
+    assert.equal(emitted.length, 1);
+    assert.equal(emitted[0]?.externalId, "linq:msg_abort_download");
+    assert.equal(emitted[0]?.attachments[0]?.data ?? null, null);
+  } finally {
+    controller.abort();
+    await watchPromise;
+    await connector.close?.();
+  }
+});
+
+test("createLinqWebhookConnector rejects signed payloads that fail strict Linq message validation", async () => {
+  const port = await reservePort();
+  const controller = new AbortController();
+
+  const connector = createLinqWebhookConnector({
+    accountId: "default",
+    host: "127.0.0.1",
+    path: "/hooks/linq",
+    port,
+    webhookSecret: "secret-123",
+  });
+
+  const watchPromise = connector.watch(
+    null,
+    async (capture) => createPersistedCapture(capture),
+    controller.signal,
+  );
+
+  try {
+    const listenerUrl = `http://127.0.0.1:${port}/hooks/linq`;
+    await waitForWebhookListener(listenerUrl);
+
+    const payload = JSON.stringify({
+      api_version: "v3",
+      event_id: "evt_bad_parts",
+      created_at: "2026-03-24T11:00:05.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_456",
+        from: "+15550001111",
+        recipient_phone: "+15559990000",
+        received_at: "2026-03-24T11:00:00.000Z",
+        is_from_me: false,
+        message: {
+          id: "msg_456",
+          parts: "not-an-array",
+        },
+      },
+    });
+    const timestamp = "1711278000";
+    const response = await fetch(listenerUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+        "x-webhook-timestamp": timestamp,
+      },
+      body: payload,
+    });
+
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /message\.parts must be an array/u);
   } finally {
     controller.abort();
     await watchPromise;

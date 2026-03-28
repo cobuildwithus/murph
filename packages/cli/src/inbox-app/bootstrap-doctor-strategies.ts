@@ -369,14 +369,20 @@ const runLinqDoctorChecks: DoctorStrategy = async (
   )
 
   context.checks.push(
-    passCheck(
-      'webhook-listener',
-      'The Linq webhook listener is configured for local watch mode.',
-      describeLinqConnectorEndpoint(connector),
-    ),
+    webhookSecret
+      ? passCheck(
+          'webhook-listener',
+          'The Linq webhook listener is configured for local watch mode.',
+          describeLinqConnectorEndpoint(connector),
+        )
+      : failCheck(
+          'webhook-listener',
+          'The Linq webhook listener cannot start until LINQ_WEBHOOK_SECRET is configured.',
+          describeLinqConnectorEndpoint(connector),
+        ),
   )
 
-  if (!token) {
+  if (!token || !webhookSecret) {
     return
   }
 

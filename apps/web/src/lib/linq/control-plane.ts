@@ -4,10 +4,11 @@ import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readRawBodyBuffer } from "../http";
 import { hostedLinqError } from "./errors";
+import { fetchLinqApi, LinqApiTimeoutError } from "./api";
 import { readHostedLinqEnvironment } from "./env";
 import { PrismaLinqControlPlaneStore } from "./prisma-store";
 import {
-  requireLinqMessageReceivedEvent,
+  parseCanonicalLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
   type LinqWebhookEvent,
 } from "@murph/inboxd";
@@ -139,7 +140,21 @@ export class HostedLinqControlPlane {
       };
     }
 
-    const messageEvent = requireLinqMessageReceivedEvent(event);
+    let messageEvent: ReturnType<typeof parseCanonicalLinqMessageReceivedEvent>;
+    try {
+      messageEvent = parseCanonicalLinqMessageReceivedEvent(event);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw hostedLinqError({
+          code: "LINQ_PAYLOAD_INVALID",
+          message: error.message,
+          httpStatus: 400,
+          cause: error,
+        });
+      }
+
+      throw error;
+    }
     const recipientPhone = normalizeOptionalRecipientPhone(messageEvent.data.recipient_phone ?? null);
 
     if (!recipientPhone) {
@@ -223,12 +238,26 @@ export class HostedLinqControlPlane {
       });
     }
 
-    const response = await fetch(new URL("phonenumbers", `${this.env.apiBaseUrl}/`), {
-      method: "GET",
-      headers: {
-        authorization: `Bearer ${this.env.apiToken}`,
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetchLinqApi({
+        apiBaseUrl: this.env.apiBaseUrl,
+        apiToken: this.env.apiToken,
+        path: "phonenumbers",
+        signal: this.request.signal,
+      });
+    } catch (error) {
+      if (error instanceof LinqApiTimeoutError) {
+        throw hostedLinqError({
+          code: "LINQ_BINDING_PROBE_FAILED",
+          message: "Linq recipient verification timed out.",
+          httpStatus: 502,
+          retryable: true,
+        });
+      }
+
+      throw error;
+    }
 
     if (!response.ok) {
       throw hostedLinqError({
@@ -283,20 +312,6 @@ function normalizeIsoTimestamp(value: string | null | undefined): string | null 
   }
 
   return parsed.toISOString();
-}
-
-function normalizeRequiredString(value: unknown, label: string): string {
-  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
-
-  if (!normalized) {
-    throw hostedLinqError({
-      code: "LINQ_REQUIRED_FIELD_MISSING",
-      message: `${label} is required.`,
-      httpStatus: 400,
-    });
-  }
-
-  return normalized;
 }
 
 function normalizeOptionalRecipientPhone(value: unknown): string | null {

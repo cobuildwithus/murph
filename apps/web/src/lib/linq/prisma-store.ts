@@ -66,7 +66,7 @@ export class PrismaLinqControlPlaneStore {
       ],
     });
 
-    return records.map(mapHostedLinqBindingRecord);
+    return collapsePreferredBindings(records).map(mapHostedLinqBindingRecord);
   }
 
   async getBindingByRecipientPhone(recipientPhone: string): Promise<HostedLinqBindingRecord | null> {
@@ -311,4 +311,19 @@ function normalizeStoredRecipientPhone(recipientPhone: string | null | undefined
 
 function choosePreferredBindingRecord(records: LinqBindingPrismaRecord[]): LinqBindingPrismaRecord | null {
   return records.find((record) => normalizeStoredRecipientPhone(record.recipientPhone) === record.recipientPhone) ?? records[0] ?? null;
+}
+
+function collapsePreferredBindings(records: LinqBindingPrismaRecord[]): LinqBindingPrismaRecord[] {
+  const groups = new Map<string, LinqBindingPrismaRecord[]>();
+
+  for (const record of records) {
+    const canonicalPhone = normalizeStoredRecipientPhone(record.recipientPhone) ?? `raw:${record.id}`;
+    const existing = groups.get(canonicalPhone) ?? [];
+    existing.push(record);
+    groups.set(canonicalPhone, existing);
+  }
+
+  return Array.from(groups.values())
+    .map((group) => choosePreferredBindingRecord(group))
+    .filter((record): record is LinqBindingPrismaRecord => record !== null);
 }

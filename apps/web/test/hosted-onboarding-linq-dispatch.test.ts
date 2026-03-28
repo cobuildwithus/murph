@@ -18,6 +18,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
   return {
     ...actual,
     assertHostedLinqWebhookSignature: vi.fn(),
+    verifyAndParseHostedLinqWebhookRequest: vi.fn((input: { rawBody: string }) =>
+      actual.parseHostedLinqWebhookEvent(input.rawBody),
+    ),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
   };
 });
@@ -88,9 +91,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         created_at: "2026-03-26T12:00:00.000Z",
         data: {
           chat_id: "chat_123",
+          extra_field: "discard-me",
           from: "+15551234567",
           is_from_me: false,
           message: {
+            extra_message_field: "discard-me-too",
             id: "msg_123",
             parts: [
               {
@@ -152,6 +157,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
                     }),
                     linqEvent: expect.objectContaining({
                       event_id: "evt_123",
+                      data: expect.not.objectContaining({
+                        extra_field: "discard-me",
+                      }),
                     }),
                   }),
                 }),
@@ -160,6 +168,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
           }),
         }),
       }),
+    );
+    const persistedLinqEvent = receiptWrites.at(-1)?.data &&
+      typeof receiptWrites.at(-1)?.data === "object" &&
+      "payloadJson" in (receiptWrites.at(-1)?.data as Record<string, unknown>)
+      ? (((((receiptWrites.at(-1)?.data as Record<string, unknown>).payloadJson as Record<string, unknown>)
+          .receiptState as Record<string, unknown>).sideEffects as Array<Record<string, unknown>>)[0]
+          ?.payload as Record<string, unknown>)?.linqEvent as Record<string, unknown> | undefined
+      : undefined;
+    expect(persistedLinqEvent?.data).not.toHaveProperty("extra_field");
+    expect((persistedLinqEvent?.data as { message?: Record<string, unknown> } | undefined)?.message).not.toHaveProperty(
+      "extra_message_field",
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -249,6 +268,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             userId: "member_123",
           }),
           eventId: "evt_123",
+          occurredAt: "2026-03-26T12:00:00.000Z",
         }),
         sourceId: "linq:evt_123",
         sourceType: "hosted_webhook_receipt",
@@ -289,6 +309,202 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
     );
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed message.received events before journaling or side effects", async () => {
+    const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
+    const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const hostedMemberFindUnique = vi.fn().mockResolvedValue(null);
+    const prisma = {
+      hostedWebhookReceipt: {
+        create: hostedWebhookReceiptCreate,
+        updateMany: hostedWebhookReceiptUpdateMany,
+      },
+      hostedMember: {
+        findUnique: hostedMemberFindUnique,
+      },
+    } as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: null,
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+          recipient_phone: "+15550000000",
+          received_at: "2026-03-26T12:00:05.000Z",
+          service: "sms",
+        },
+        event_id: "evt_missing_message_id",
+        event_type: "message.received",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("Linq message.received message.id");
+
+    expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
+    expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("prefers received_at when building active-member dispatch metadata", async () => {
+    const transactionReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const transactionClient = {
+      hostedWebhookReceipt: {
+        updateMany: transactionReceiptUpdateMany,
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+      },
+    };
+    const prisma = withPrismaTransaction({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+      },
+    }, transactionClient) as unknown as Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"] & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+
+    await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: "msg_123",
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+          recipient_phone: "+15550000000",
+          received_at: "2026-03-26T12:00:05.000Z",
+          service: "sms",
+        },
+        event_id: "evt_456",
+        event_type: "message.received",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          eventId: "evt_456",
+          occurredAt: "2026-03-26T12:00:05.000Z",
+        }),
+      }),
+    );
+    expect(transactionReceiptUpdateMany.mock.calls).toEqual(
+      expect.arrayContaining([
+        [
+          expect.objectContaining({
+            data: expect.objectContaining({
+              payloadJson: expect.objectContaining({
+                receiptState: expect.objectContaining({
+                  sideEffects: expect.arrayContaining([
+                    expect.objectContaining({
+                      payload: expect.objectContaining({
+                        dispatchRef: expect.objectContaining({
+                          occurredAt: "2026-03-26T12:00:05.000Z",
+                        }),
+                      }),
+                    }),
+                  ]),
+                }),
+              }),
+            }),
+          }),
+        ],
+      ]),
+    );
+  });
+
+  it("rejects malformed Linq message payloads with the hosted payload error surface", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: "false",
+          message: {
+            id: "msg_123",
+            parts: "not-an-array",
+          },
+        },
+        event_id: "evt_invalid_payload",
+        event_type: "message.received",
+      }),
+      signature: null,
+      timestamp: null,
+    })).rejects.toMatchObject({
+      code: "LINQ_PAYLOAD_INVALID",
+      httpStatus: 400,
+    });
   });
 });
 
