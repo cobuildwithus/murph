@@ -14,6 +14,12 @@ review_gpt_register_dir_preset "architecture" "architecture-review.md" \
   "architecture-review" \
   "data-model" \
   "refactor-architecture"
+review_gpt_register_dir_preset "data-model-composability" "data-model-composability-review.md" \
+  "Review Murph's data structures and data model for simpler, more composable, and more scalable shapes." \
+  "data-structures" \
+  "data-model-review" \
+  "composable-data-model" \
+  "scalable-data-model"
 review_gpt_register_dir_preset "simplify" "complexity-simplification.md" \
   "Behavior-preserving simplification pass for Murph." \
   "complexity" \
