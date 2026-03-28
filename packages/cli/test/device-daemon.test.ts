@@ -24,12 +24,23 @@ function readAuthorizationHeader(headers?: HeadersInit): string | null {
   return headers ? new Headers(headers).get('Authorization') : null
 }
 
+function readRequestUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') {
+    return input
+  }
+  if (input instanceof URL) {
+    return input.toString()
+  }
+  return input.url
+}
+
 test.sequential(
   'startManagedDeviceSyncDaemon keeps launcher state non-secret and persists the managed bearer separately',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     const livePids = new Set<number>()
     const healthCheckAuthorizations: Array<string | null> = []
+    const healthCheckUrls: string[] = []
     let healthy = false
     let spawned: SpawnProcessInput | null = null
 
@@ -40,7 +51,8 @@ test.sequential(
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
         },
         dependencies: {
-          fetchImpl: async (_input, init) => {
+          fetchImpl: async (input, init) => {
+            healthCheckUrls.push(readRequestUrl(input))
             healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
             return (
               new Response(
@@ -116,11 +128,16 @@ test.sequential(
         null,
         'Bearer control-token-for-tests',
       ])
+      assert.deepEqual(healthCheckUrls, [
+        'http://localhost:8788/healthz',
+        'http://localhost:8788/healthz',
+      ])
 
       const reusedControlPlane = await ensureManagedDeviceSyncControlPlane({
         vault: vaultRoot,
         dependencies: {
-          fetchImpl: async (_input, init) => {
+          fetchImpl: async (input, init) => {
+            healthCheckUrls.push(readRequestUrl(input))
             healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
             return (
               new Response(
@@ -144,6 +161,11 @@ test.sequential(
         null,
         'Bearer control-token-for-tests',
         'Bearer control-token-for-tests',
+      ])
+      assert.deepEqual(healthCheckUrls, [
+        'http://localhost:8788/healthz',
+        'http://localhost:8788/healthz',
+        'http://localhost:8788/healthz',
       ])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
@@ -251,6 +273,7 @@ test.sequential(
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
     const healthCheckAuthorizations: Array<string | null> = []
+    const healthCheckUrls: string[] = []
     let healthy = false
 
     try {
@@ -283,7 +306,8 @@ test.sequential(
       const status = await getManagedDeviceSyncDaemonStatus({
         vault: vaultRoot,
         dependencies: {
-          fetchImpl: async (_input, init) => {
+          fetchImpl: async (input, init) => {
+            healthCheckUrls.push(readRequestUrl(input))
             healthCheckAuthorizations.push(readAuthorizationHeader(init?.headers))
             return new Response(
               JSON.stringify({
@@ -307,6 +331,7 @@ test.sequential(
       )
       assert.equal(status.statePath, '.runtime/device-syncd/launcher.json')
       assert.deepEqual(healthCheckAuthorizations, ['Bearer control-token-for-tests'])
+      assert.deepEqual(healthCheckUrls, ['http://localhost:8788/healthz'])
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
