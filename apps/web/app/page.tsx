@@ -22,7 +22,7 @@ const capabilities = [
   },
   {
     title: "Wearable sync",
-    body: "Pulls sleep, activity, and recovery data from Oura, WHOOP, and Garmin automatically.",
+    body: "Pulls sleep, activity, and recovery data from Oura and WHOOP automatically, and can import Garmin snapshot exports.",
   },
   {
     title: "Persistent memory",
@@ -64,7 +64,7 @@ const conversations = [
 ] as const;
 
 const integrations = [
-  "iMessage", "Telegram", "Email", "Oura", "WHOOP", "Garmin",
+  "iMessage", "Telegram", "Email", "Oura", "WHOOP", "Garmin exports",
 ] as const;
 
 const faqItems = [
@@ -74,7 +74,7 @@ const faqItems = [
   },
   {
     question: "How does wearable syncing work?",
-    answer: "You connect your Oura, WHOOP, or Garmin account once. Murph automatically pulls your sleep, activity, and recovery data going forward.",
+    answer: "You connect Oura or WHOOP once for ongoing sync. Garmin data is currently supported through snapshot imports rather than a live account connection.",
   },
   {
     question: "Is my health data private?",
