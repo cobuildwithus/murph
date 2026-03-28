@@ -18,6 +18,10 @@ import {
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
 } from "../query-runtime.js"
+import {
+  applyRecordPatch,
+  type JsonObject as RecordMutationJsonObject,
+} from "./record-mutations.js"
 
 import type {
   HealthEntityEnvelope,
@@ -128,7 +132,47 @@ export async function readJsonPayload(
   filePath: string,
   label = "payload",
 ): Promise<JsonObject> {
-  return loadJsonInputObject(filePath, label)
+  return loadJsonInputFile(filePath, label)
+}
+
+export async function loadJsonInputFile(
+  input: string,
+  label: string,
+): Promise<JsonObject> {
+  return loadJsonInputObject(input, label)
+}
+
+export async function preparePatchedUpsertPayload<TPayload extends JsonObject>(input: {
+  record: TPayload
+  entityIdField: keyof TPayload & string
+  entityId: string
+  inputFile?: string
+  set?: readonly string[]
+  clear?: readonly string[]
+  patchLabel: string
+  parsePayload(value: unknown): TPayload
+}): Promise<{
+  payload: TPayload
+  clearedFields: ReadonlySet<string>
+  allowSlugRename: boolean
+}> {
+  const patched = await applyRecordPatch({
+    record: structuredClone(input.record) as RecordMutationJsonObject,
+    inputFile: input.inputFile,
+    set: input.set,
+    clear: input.clear,
+    patchLabel: input.patchLabel,
+  })
+  const payload = input.parsePayload({
+    ...patched.record,
+    [input.entityIdField]: input.entityId,
+  })
+
+  return {
+    payload,
+    clearedFields: patched.clearedFields,
+    allowSlugRename: patched.touchedTopLevelFields.has("slug"),
+  }
 }
 
 export function assertNoReservedPayloadKeys(payload: JsonObject) {

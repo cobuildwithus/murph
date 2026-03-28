@@ -5,7 +5,6 @@ import {
   addAssistantCronJob,
   listAssistantCronJobs,
 } from '../assistant/cron.js'
-import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
@@ -19,8 +18,9 @@ import {
 import {
   asListEnvelope,
   buildEntityLinks,
+  loadJsonInputFile,
+  preparePatchedUpsertPayload,
 } from './shared.js'
-import { applyRecordPatch } from './record-mutations.js'
 import {
   compactObject,
   toVaultCliError,
@@ -137,10 +137,6 @@ export function parseFoodPayload(value: unknown) {
   return result.data
 }
 
-async function loadJsonInputFile(input: string, label: string) {
-  return loadJsonInputObject(input, label)
-}
-
 export async function upsertFoodRecord(input: {
   vault: string
   payload: FoodPayload
@@ -203,24 +199,22 @@ export async function editFoodRecord(input: {
   clear?: string[]
 }) {
   const food = await requireFoodRecord(input.vault, input.lookup)
-  const payload = buildFoodPayload(food)
-  const patched = await applyRecordPatch({
-    record: payload,
+  const patched = await preparePatchedUpsertPayload({
+    record: buildFoodPayload(food),
+    entityIdField: 'foodId',
+    entityId: food.foodId,
     inputFile: input.inputFile,
     set: input.set,
     clear: input.clear,
     patchLabel: 'food payload',
-  })
-  const patchedPayload = parseFoodPayload({
-    ...patched.record,
-    foodId: food.foodId,
+    parsePayload: parseFoodPayload,
   })
 
   await upsertFoodRecord({
     vault: input.vault,
-    payload: patchedPayload,
+    payload: patched.payload,
     clearedFields: patched.clearedFields,
-    allowSlugRename: patched.touchedTopLevelFields.has('slug'),
+    allowSlugRename: patched.allowSlugRename,
   })
 
   return showFoodRecord(input.vault, food.foodId)

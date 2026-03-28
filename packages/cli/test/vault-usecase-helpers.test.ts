@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
+import {
+  loadJsonInputFile,
+  preparePatchedUpsertPayload,
+} from '../src/usecases/shared.js'
 import {
   compactObject,
   inferVaultLinkKind,
@@ -108,4 +112,77 @@ test('path resolution fails fast when the selected vault root does not exist', a
           error.message === 'Vault root does not exist on disk.',
       ),
   )
+})
+
+test('shared JSON payload reader loads object input for record scaffolding usecases', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-shared-json-'))
+  const payloadPath = path.join(tempDir, 'payload.json')
+
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      title: 'Sheet Pan Salmon Bowls',
+      status: 'saved',
+    }))
+
+    const payload = await loadJsonInputFile(`@${payloadPath}`, 'recipe payload')
+
+    assert.deepEqual(payload, {
+      title: 'Sheet Pan Salmon Bowls',
+      status: 'saved',
+    })
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('shared patched-upsert helper preserves canonical ids while surfacing cleared fields and slug edits', async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-shared-edit-'))
+  const patchPath = path.join(tempDir, 'patch.json')
+
+  try {
+    await writeFile(patchPath, JSON.stringify({
+      foodId: 'food_patch_attempt',
+      title: 'Protein Acai Bowl',
+      slug: 'protein-acai-bowl',
+    }))
+    const originalRecord = {
+      foodId: 'food_123',
+      title: 'Regular Acai Bowl',
+      slug: 'regular-acai-bowl',
+      note: 'Usual order.',
+    }
+
+    const result = await preparePatchedUpsertPayload({
+      record: originalRecord,
+      entityIdField: 'foodId',
+      entityId: 'food_123',
+      inputFile: `@${patchPath}`,
+      clear: ['note'],
+      patchLabel: 'food payload',
+      parsePayload(value) {
+        return value as {
+          foodId: string
+          title: string
+          slug: string
+          note?: string
+        }
+      },
+    })
+
+    assert.deepEqual(result.payload, {
+      foodId: 'food_123',
+      title: 'Protein Acai Bowl',
+      slug: 'protein-acai-bowl',
+    })
+    assert.equal(result.allowSlugRename, true)
+    assert.deepEqual([...result.clearedFields], ['note'])
+    assert.deepEqual(originalRecord, {
+      foodId: 'food_123',
+      title: 'Regular Acai Bowl',
+      slug: 'regular-acai-bowl',
+      note: 'Usual order.',
+    })
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
 })

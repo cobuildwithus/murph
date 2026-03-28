@@ -1,14 +1,14 @@
 import { RECIPE_STATUSES } from '@murph/contracts'
 import { z } from 'incur'
 
-import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   asListEnvelope,
   buildEntityLinks,
+  loadJsonInputFile,
+  preparePatchedUpsertPayload,
 } from './shared.js'
-import { applyRecordPatch } from './record-mutations.js'
 import {
   compactObject,
   toVaultCliError,
@@ -144,10 +144,6 @@ export function parseRecipePayload(value: unknown) {
   return result.data
 }
 
-async function loadJsonInputFile(input: string, label: string) {
-  return loadJsonInputObject(input, label)
-}
-
 export async function upsertRecipeRecord(input: {
   vault: string
   payload: RecipePayload
@@ -210,24 +206,22 @@ export async function editRecipeRecord(input: {
   clear?: string[]
 }) {
   const recipe = await requireRecipeRecord(input.vault, input.lookup)
-  const payload = buildRecipePayload(recipe)
-  const patched = await applyRecordPatch({
-    record: payload,
+  const patched = await preparePatchedUpsertPayload({
+    record: buildRecipePayload(recipe),
+    entityIdField: 'recipeId',
+    entityId: recipe.recipeId,
     inputFile: input.inputFile,
     set: input.set,
     clear: input.clear,
     patchLabel: 'recipe payload',
-  })
-  const patchedPayload = parseRecipePayload({
-    ...patched.record,
-    recipeId: recipe.recipeId,
+    parsePayload: parseRecipePayload,
   })
 
   await upsertRecipeRecord({
     vault: input.vault,
-    payload: patchedPayload,
+    payload: patched.payload,
     clearedFields: patched.clearedFields,
-    allowSlugRename: patched.touchedTopLevelFields.has('slug'),
+    allowSlugRename: patched.allowSlugRename,
   })
 
   return showRecipeRecord(input.vault, recipe.recipeId)

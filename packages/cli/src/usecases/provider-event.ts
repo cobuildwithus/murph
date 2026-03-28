@@ -1,6 +1,5 @@
 import { EVENT_KINDS } from '@murph/contracts'
 import { z } from 'incur'
-import { loadJsonInputObject } from '../json-input.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
   loadQueryRuntime,
@@ -9,7 +8,10 @@ import {
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-import { asListEnvelope } from './shared.js'
+import {
+  asListEnvelope,
+  loadJsonInputFile,
+} from './shared.js'
 import { applyRecordPatch } from './record-mutations.js'
 import {
   compactObject,
@@ -296,13 +298,6 @@ export function parseProviderPayload(value: unknown) {
   }
 
   return result.data
-}
-
-export async function loadJsonInputFile(
-  input: string,
-  label: string,
-): Promise<JsonObject> {
-  return loadJsonInputObject(input, label)
 }
 
 export function scaffoldEventPayload(
