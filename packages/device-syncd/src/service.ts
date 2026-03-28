@@ -291,6 +291,21 @@ export class DeviceSyncService {
     };
   }
 
+  getNextWakeAt(now = toIsoTimestamp(new Date())): string | null {
+    const nextWakeAt = earliestIsoTimestamp(
+      this.store.readNextActiveReconcileAt(),
+      this.store.readNextJobWakeAt(),
+    );
+
+    if (!nextWakeAt) {
+      return null;
+    }
+
+    return Date.parse(nextWakeAt) <= Date.parse(now)
+      ? addMilliseconds(now, 1_000)
+      : nextWakeAt;
+  }
+
   async runSchedulerOnce(): Promise<void> {
     if (this.schedulerTickInFlight) {
       return;
@@ -584,6 +599,12 @@ export function createDefaultImporterPort(): DeviceSyncImporterPort {
 
 export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): DeviceSyncService {
   return new DeviceSyncService(input);
+}
+
+function earliestIsoTimestamp(...values: Array<string | null | undefined>): string | null {
+  return values
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
 }
 
 function normalizeExecutionError(error: unknown): {

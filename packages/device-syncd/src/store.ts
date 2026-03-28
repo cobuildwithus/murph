@@ -42,6 +42,30 @@ interface AccountPatchInput {
   clearErrors?: boolean;
 }
 
+interface HostedAccountHydrationInput {
+  connectedAt: string;
+  displayName: string | null;
+  externalAccountId: string;
+  hostedObservedTokenVersion: number | null;
+  hostedObservedUpdatedAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncCompletedAt: string | null;
+  lastSyncErrorAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastWebhookAt: string | null;
+  metadata: Record<string, unknown>;
+  nextReconcileAt: string | null;
+  provider: string;
+  scopes: string[];
+  status: DeviceSyncAccountStatus;
+  updatedAt: string;
+  tokens?: ProviderAuthTokens & {
+    accessTokenEncrypted: string;
+    refreshTokenEncrypted?: string | null;
+  };
+}
+
 interface EnqueueJobInput extends DeviceSyncJobInput {
   provider: string;
   accountId: string;
@@ -58,6 +82,8 @@ interface StoredAccountRow {
   access_token_encrypted: string;
   refresh_token_encrypted: string | null;
   access_token_expires_at: string | null;
+  hosted_observed_updated_at: string | null;
+  hosted_observed_token_version: number | null;
   metadata_json: string | null;
   connected_at: string;
   last_webhook_at: string | null;
@@ -123,6 +149,8 @@ function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccou
     scopes: JSON.parse(row.scopes_json ?? "[]") as string[],
     disconnectGeneration: row.disconnect_generation,
     accessTokenEncrypted: row.access_token_encrypted,
+    hostedObservedTokenVersion: row.hosted_observed_token_version,
+    hostedObservedUpdatedAt: row.hosted_observed_updated_at,
     refreshTokenEncrypted: row.refresh_token_encrypted,
     accessTokenExpiresAt: row.access_token_expires_at,
     metadata: maybeParseJsonObject(row.metadata_json),
@@ -197,6 +225,38 @@ function ensureColumn(
   database.exec(`alter table ${table} add column ${column} ${columnDefinition}`);
 }
 
+function resolveHydratedHostedAccountTokens(input: {
+  existing: StoredDeviceSyncAccount | null;
+  inputTokens: HostedAccountHydrationInput["tokens"];
+  shouldClearTokens: boolean;
+}): {
+  accessTokenEncrypted: string;
+  refreshTokenEncrypted: string | null;
+  accessTokenExpiresAt: string | null;
+} {
+  if (input.inputTokens) {
+    return {
+      accessTokenEncrypted: input.inputTokens.accessTokenEncrypted,
+      refreshTokenEncrypted: input.inputTokens.refreshTokenEncrypted ?? null,
+      accessTokenExpiresAt: input.inputTokens.accessTokenExpiresAt ?? null,
+    };
+  }
+
+  if (input.shouldClearTokens) {
+    return {
+      accessTokenEncrypted: "",
+      refreshTokenEncrypted: null,
+      accessTokenExpiresAt: null,
+    };
+  }
+
+  return {
+    accessTokenEncrypted: input.existing?.accessTokenEncrypted ?? "",
+    refreshTokenEncrypted: input.existing?.refreshTokenEncrypted ?? null,
+    accessTokenExpiresAt: input.existing?.accessTokenExpiresAt ?? null,
+  };
+}
+
 export class SqliteDeviceSyncStore {
   readonly databasePath: string;
   readonly database: DatabaseSync;
@@ -228,6 +288,8 @@ export class SqliteDeviceSyncStore {
         access_token_encrypted text not null,
         refresh_token_encrypted text,
         access_token_expires_at text,
+        hosted_observed_updated_at text,
+        hosted_observed_token_version integer,
         metadata_json text not null,
         connected_at text not null,
         last_webhook_at text,
@@ -293,6 +355,8 @@ export class SqliteDeviceSyncStore {
     `);
 
     ensureColumn(this.database, "device_account", "disconnect_generation", "integer not null default 0");
+    ensureColumn(this.database, "device_account", "hosted_observed_updated_at", "text");
+    ensureColumn(this.database, "device_account", "hosted_observed_token_version", "integer");
     ensureColumn(this.database, "webhook_trace", "status", "text not null default 'processed'");
     ensureColumn(this.database, "webhook_trace", "processing_expires_at", "text");
     this.database.exec("update webhook_trace set status = 'processed' where status is null");
@@ -512,6 +576,7 @@ export class SqliteDeviceSyncStore {
             scopes_json = ?,
             metadata_json = ?,
             next_reconcile_at = ?,
+            last_sync_error_at = ?,
             last_error_code = ?,
             last_error_message = ?,
             updated_at = ?
@@ -522,6 +587,7 @@ export class SqliteDeviceSyncStore {
         stringifyJson(scopes),
         stringifyJson(metadata),
         nextReconcileAt,
+        patch.clearErrors ? null : existing.lastSyncErrorAt,
         patch.clearErrors ? null : existing.lastErrorCode,
         patch.clearErrors ? null : existing.lastErrorMessage,
         now,
@@ -563,11 +629,147 @@ export class SqliteDeviceSyncStore {
     return this.getAccountById(accountId)!;
   }
 
+  hydrateHostedAccount(input: HostedAccountHydrationInput): StoredDeviceSyncAccount | null {
+    return withImmediateTransaction(this.database, () => {
+      const existing = this.getAccountByExternalAccount(input.provider, input.externalAccountId);
+
+      if (!existing && input.tokens === undefined) {
+        return null;
+      }
+
+      const shouldClearTokens = input.status === "disconnected" && input.tokens === undefined;
+      const { accessTokenEncrypted, refreshTokenEncrypted, accessTokenExpiresAt } = resolveHydratedHostedAccountTokens({
+        existing,
+        inputTokens: input.tokens,
+        shouldClearTokens,
+      });
+      const hostedObservedUpdatedAt = input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null;
+      const hostedObservedTokenVersion = input.hostedObservedTokenVersion ?? existing?.hostedObservedTokenVersion ?? null;
+      const disconnectGeneration = existing
+        ? input.status === "disconnected" && existing.status !== "disconnected"
+          ? existing.disconnectGeneration + 1
+          : existing.disconnectGeneration
+        : input.status === "disconnected"
+          ? 1
+          : 0;
+
+      if (existing) {
+        this.database.prepare(`
+          update device_account
+          set display_name = ?,
+              status = ?,
+              scopes_json = ?,
+              disconnect_generation = ?,
+              access_token_encrypted = ?,
+              refresh_token_encrypted = ?,
+              access_token_expires_at = ?,
+              hosted_observed_updated_at = ?,
+              hosted_observed_token_version = ?,
+              metadata_json = ?,
+              connected_at = ?,
+              last_webhook_at = ?,
+              last_sync_started_at = ?,
+              last_sync_completed_at = ?,
+              last_sync_error_at = ?,
+              last_error_code = ?,
+              last_error_message = ?,
+              next_reconcile_at = ?,
+              updated_at = ?
+          where id = ?
+        `).run(
+          input.displayName,
+          input.status,
+          stringifyJson(input.scopes),
+          disconnectGeneration,
+          accessTokenEncrypted,
+          refreshTokenEncrypted,
+          accessTokenExpiresAt,
+          hostedObservedUpdatedAt,
+          hostedObservedTokenVersion,
+          stringifyJson(input.metadata),
+          input.connectedAt,
+          input.lastWebhookAt,
+          input.lastSyncStartedAt,
+          input.lastSyncCompletedAt,
+          input.lastSyncErrorAt,
+          input.lastErrorCode,
+          input.lastErrorMessage,
+          input.nextReconcileAt,
+          input.updatedAt,
+          existing.id,
+        );
+
+        return this.getAccountById(existing.id)!;
+      }
+
+      const id = generatePrefixedId("dsa");
+      this.database.prepare(`
+        insert into device_account (
+          id,
+          provider,
+          external_account_id,
+          display_name,
+          status,
+          scopes_json,
+          disconnect_generation,
+          access_token_encrypted,
+          refresh_token_encrypted,
+          access_token_expires_at,
+          hosted_observed_updated_at,
+          hosted_observed_token_version,
+          metadata_json,
+          connected_at,
+          last_webhook_at,
+          last_sync_started_at,
+          last_sync_completed_at,
+          last_sync_error_at,
+          last_error_code,
+          last_error_message,
+          next_reconcile_at,
+          created_at,
+          updated_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        input.provider,
+        input.externalAccountId,
+        input.displayName,
+        input.status,
+        stringifyJson(input.scopes),
+        disconnectGeneration,
+        accessTokenEncrypted,
+        refreshTokenEncrypted,
+        accessTokenExpiresAt,
+        hostedObservedUpdatedAt,
+        hostedObservedTokenVersion,
+        stringifyJson(input.metadata),
+        input.connectedAt,
+        input.lastWebhookAt,
+        input.lastSyncStartedAt,
+        input.lastSyncCompletedAt,
+        input.lastSyncErrorAt,
+        input.lastErrorCode,
+        input.lastErrorMessage,
+        input.nextReconcileAt,
+        input.updatedAt,
+        input.updatedAt,
+      );
+
+      return this.getAccountById(id)!;
+    });
+  }
+
   disconnectAccount(accountId: string, now: string): StoredDeviceSyncAccount {
     this.database.prepare(`
       update device_account
       set status = 'disconnected',
           disconnect_generation = disconnect_generation + 1,
+          access_token_encrypted = '',
+          refresh_token_encrypted = null,
+          access_token_expires_at = null,
+          last_sync_error_at = null,
+          last_error_code = null,
+          last_error_message = null,
           next_reconcile_at = null,
           updated_at = ?
       where id = ?
@@ -684,6 +886,38 @@ export class SqliteDeviceSyncStore {
   getJobById(jobId: string): DeviceSyncJobRecord | null {
     const row = this.database.prepare(`select * from device_job where id = ?`).get(jobId) as StoredJobRow | undefined;
     return mapJobRow(row);
+  }
+
+  readNextActiveReconcileAt(): string | null {
+    const row = this.database.prepare(`
+      select next_reconcile_at
+      from device_account
+      where status = 'active'
+        and next_reconcile_at is not null
+      order by next_reconcile_at asc, updated_at asc, id asc
+      limit 1
+    `).get() as { next_reconcile_at?: string | null } | undefined;
+    return row?.next_reconcile_at ?? null;
+  }
+
+  readNextJobWakeAt(): string | null {
+    const row = this.database.prepare(`
+      select wake_at
+      from (
+        select available_at as wake_at
+        from device_job
+        where status = 'queued'
+        union all
+        select lease_expires_at as wake_at
+        from device_job
+        where status = 'running'
+          and lease_expires_at is not null
+          and attempts < max_attempts
+      )
+      order by wake_at asc
+      limit 1
+    `).get() as { wake_at?: string | null } | undefined;
+    return row?.wake_at ?? null;
   }
 
   claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {
