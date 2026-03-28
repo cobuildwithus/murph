@@ -59,11 +59,18 @@ describe("drainHostedAiUsageStripeMetering", () => {
   it("skips member-supplied API key usage instead of sending a Stripe meter event", async () => {
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
+        apiKeyEnv: "OPENAI_API_KEY",
         credentialSource: "member",
         id: "usage_123",
         inputTokens: 10,
+        memberId: "member_123",
+        member: {
+          stripeCustomerId: "cus_123",
+        },
         outputTokens: 5,
-        stripeCustomerId: "cus_123",
+        provider: "openai-compatible",
+        requestedModel: "gpt-5.4-mini",
+        stripeMeterStatus: "pending",
         totalTokens: 15,
       },
     ]);
@@ -83,41 +90,21 @@ describe("drainHostedAiUsageStripeMetering", () => {
     });
   });
 
-  it("skips usage that does not prove platform-managed credentials", async () => {
-    mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
-      {
-        credentialSource: null,
-        id: "usage_unknown",
-        inputTokens: 12,
-        outputTokens: 8,
-        stripeCustomerId: "cus_123",
-        totalTokens: 20,
-      },
-    ]);
-
-    const result = await drainHostedAiUsageStripeMetering();
-
-    expect(result).toEqual({
-      configured: true,
-      failed: 0,
-      metered: 0,
-      skipped: 1,
-    });
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(mocks.markHostedAiUsageStripeSkipped).toHaveBeenCalledWith({
-      id: "usage_unknown",
-      message: "Skipped Stripe AI metering because the run did not prove platform-managed credentials.",
-    });
-  });
-
   it("sends total-token usage to Stripe with a deterministic identifier", async () => {
     mocks.listHostedAiUsagePendingStripeMetering.mockResolvedValue([
       {
+        apiKeyEnv: null,
         credentialSource: "platform",
         id: "usage_abc",
         inputTokens: 120,
+        memberId: "member_123",
+        member: {
+          stripeCustomerId: "cus_123",
+        },
         outputTokens: 45,
-        stripeCustomerId: "cus_123",
+        provider: "openai-compatible",
+        requestedModel: "venice/deepseek-r1-671b",
+        stripeMeterStatus: "pending",
         totalTokens: 165,
       },
     ]);

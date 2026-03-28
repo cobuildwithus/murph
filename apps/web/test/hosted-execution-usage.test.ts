@@ -86,6 +86,11 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
     expect(findMany).toHaveBeenCalledWith({
       where: {
         stripeMeterStatus: "pending",
+        member: {
+          stripeCustomerId: {
+            not: null,
+          },
+        },
       },
       orderBy: [
         {
@@ -97,10 +102,15 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
       ],
       take: 16,
       select: {
+        apiKeyEnv: true,
         credentialSource: true,
         id: true,
         inputTokens: true,
+        memberId: true,
         outputTokens: true,
+        provider: true,
+        requestedModel: true,
+        stripeMeterStatus: true,
         totalTokens: true,
         member: {
           select: {
