@@ -24,7 +24,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });\" && tsc -b tsconfig.build.json",
+    "build": "rimraf dist && tsc -b tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.build.json --noEmit --pretty false",
     "test": "pnpm --dir ../.. exec vitest run packages/core/test/canonical-mutations-boundary.test.ts packages/core/test/core.test.ts packages/core/test/device-import.test.ts packages/core/test/profile.test.ts packages/core/test/health-bank.test.ts packages/core/test/share-pack.test.ts packages/core/test/health-history-family.test.ts --no-coverage"
   },

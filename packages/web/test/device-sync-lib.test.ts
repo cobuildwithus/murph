@@ -131,7 +131,7 @@ test("beginDeviceConnection posts the return target with control-plane auth", as
   assert.equal(result.authorizationUrl, "https://whoop.test/oauth?state=state_01");
   assert.deepEqual(observedRequests, [
     {
-      url: "http://127.0.0.1:8788/providers/whoop/connect",
+      url: "http://localhost:8788/providers/whoop/connect",
       method: "POST",
       cache: "no-store",
       authorization: "Bearer control-token-for-tests",
