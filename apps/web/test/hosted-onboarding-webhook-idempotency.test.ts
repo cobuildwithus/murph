@@ -958,6 +958,132 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
+  it("fails dispatch queueing after three stale compare-and-swap misses", async () => {
+    const startedReceiptPayload = buildWebhookReceiptPayload({
+      attemptCount: 1,
+      attemptId: "attempt-1",
+      eventPayload: {
+        eventType: "message.received",
+      },
+      lastReceivedAt: "2026-03-26T12:00:00.000Z",
+      sideEffects: [
+        buildDispatchSideEffect({
+          attemptCount: 1,
+          eventId: "evt_123",
+          lastAttemptAt: "2026-03-26T12:00:00.250Z",
+          status: "pending",
+        }),
+      ],
+      status: "processing",
+    });
+    const hostedWebhookReceiptUpdateMany = vi
+      .fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 1 });
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: startedReceiptPayload,
+        }),
+        updateMany: hostedWebhookReceiptUpdateMany,
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue(makeActiveMember()),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "WEBHOOK_RECEIPT_UPDATE_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+      ([payload]: [Record<string, unknown>]) => payload,
+    );
+    const dispatchQueueCalls = receiptCalls.slice(2, 5);
+    expect(dispatchQueueCalls).toHaveLength(3);
+    for (const call of dispatchQueueCalls) {
+      expect(call).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            eventId: "evt_123",
+            payloadJson: {
+              equals: expect.objectContaining({
+                eventPayload: {
+                  eventType: "message.received",
+                },
+                receiptState: expect.objectContaining({
+                  attemptCount: 1,
+                  sideEffects: expect.arrayContaining([
+                    expect.objectContaining({
+                      attemptCount: 1,
+                      effectId: "dispatch:evt_123",
+                      kind: "hosted_execution_dispatch",
+                      result: null,
+                      status: "pending",
+                    }),
+                  ]),
+                  status: "processing",
+                }),
+              }),
+            },
+          }),
+          data: expect.objectContaining({
+            payloadJson: expect.objectContaining({
+              receiptState: expect.objectContaining({
+                sideEffects: expect.arrayContaining([
+                  expect.objectContaining({
+                    effectId: "dispatch:evt_123",
+                    kind: "hosted_execution_dispatch",
+                    result: {
+                      dispatched: true,
+                    },
+                    status: "sent",
+                  }),
+                ]),
+                status: "processing",
+              }),
+            }),
+          }),
+        }),
+      );
+    }
+    expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(3);
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(3);
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(receiptCalls.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            receiptState: expect.objectContaining({
+              status: "failed",
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("allows a Linq invite reply webhook to retry after a Linq send failure", async () => {
     mocks.sendHostedLinqChatMessage
       .mockRejectedValueOnce(new Error("linq unavailable"))
@@ -1471,6 +1597,60 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails reclaiming malformed Linq receipts after three stale compare-and-swap misses", async () => {
+    const malformedReceiptPayload = {
+      receiptState: {
+        attemptCount: "bad",
+        status: 42,
+      },
+      strayLegacyField: "keep-me-if-possible",
+    };
+    const prisma: any = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: malformedReceiptPayload,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn(),
+      },
+    };
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody(),
+        signature: null,
+        timestamp: null,
+      }),
+    ).rejects.toMatchObject({
+      code: "WEBHOOK_RECEIPT_CLAIM_FAILED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    const reclaimCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+      ([payload]: [Record<string, unknown>]) => payload,
+    );
+    expect(reclaimCalls).toHaveLength(3);
+    for (const call of reclaimCalls) {
+      expect(call).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            payloadJson: {
+              equals: malformedReceiptPayload,
+            },
+          }),
+        }),
+      );
+    }
+    expect(prisma.hostedWebhookReceipt.findUnique).toHaveBeenCalledTimes(4);
+    expect(prisma.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
   it("submits an inline RevNet payment exactly once for a paid invoice", async () => {
