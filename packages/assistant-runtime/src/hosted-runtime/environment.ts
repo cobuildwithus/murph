@@ -2,6 +2,9 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
+  DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
   type HostedExecutionWebControlPlaneEnvironment,
@@ -13,28 +16,24 @@ import type {
   NormalizedHostedAssistantRuntimeConfig,
 } from "./models.ts";
 
-const HOSTED_RUNNER_COMMIT_BASE_URL = "http://commit.worker";
-const HOSTED_RUNNER_ARTIFACTS_BASE_URL = "http://artifacts.worker";
-const HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL = "http://side-effects.worker";
-
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
 ): NormalizedHostedAssistantRuntimeConfig {
   return {
     artifactsBaseUrl: normalizeCallbackBaseUrl(
       input?.artifactsBaseUrl,
-      HOSTED_RUNNER_ARTIFACTS_BASE_URL,
+      DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
     ),
     commitBaseUrl: normalizeCallbackBaseUrl(
       input?.commitBaseUrl,
-      HOSTED_RUNNER_COMMIT_BASE_URL,
+      DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
     ),
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
     emailBaseUrl: normalizeHostedEmailBaseUrl(input?.emailBaseUrl),
     forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
     sideEffectsBaseUrl: normalizeCallbackBaseUrl(
       input?.sideEffectsBaseUrl ?? input?.outboxBaseUrl,
-      HOSTED_RUNNER_SIDE_EFFECTS_BASE_URL,
+      DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
     ),
     userEnv: { ...(input?.userEnv ?? {}) },
     webControlPlane: normalizeHostedExecutionWebControlPlaneConfig(input?.webControlPlane ?? null),

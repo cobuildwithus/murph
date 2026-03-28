@@ -42,6 +42,7 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` defaults to `v1`
+- optional secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON` may provide a JSON object of `{ keyId: base64Key }` entries so older encrypted hosted objects remain readable during key rotation
 - optional non-secret: `HOSTED_EXECUTION_DEFAULT_ALARM_DELAY_MS` defaults to `21600000` in the checked-in Wrangler scaffold
 - optional non-secret: `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` defaults to `3`
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
@@ -142,7 +143,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 - Manual deploy smoke no longer stops at `POST /run` acceptance. It now polls the operator status route until the queue drains, `lastRunAt` advances, and durable bundle refs exist, so a broken containerized run does not look healthy just because the enqueue succeeded.
 - The checked-in Wrangler scaffold and rendered deploy config now declare the four required hosted runtime secrets through Wrangler's experimental `secrets.required` support, so local `wrangler` validation and deploy/version uploads fail early when those names are unset. Keep that list tight and treat optional provider secrets as separately managed Worker configuration.
 - The repo now ships `apps/cloudflare/r2-bundles-lifecycle.json` plus `pnpm --dir apps/cloudflare r2:lifecycle:apply` so the configured bundles buckets can expire transient execution journals and committed side-effect journal objects under `transient/execution-journal/` and `transient/side-effects/` after 30 days.
-- Stored ciphertext envelopes now fail closed when their embedded `keyId` does not match the configured runtime key id. The repo still uses one active bundle key at a time, so changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID` in place is not a supported rotation path yet.
+- Stored ciphertext envelopes now decrypt by their embedded `keyId` through the configured keyring. The repo still writes with one active bundle key at a time, so rotations should stage the old keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON` until older objects age out or are rewritten; missing keyring entries still fail closed.
 
 ## Runtime boundary
 

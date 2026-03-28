@@ -38,6 +38,7 @@ export class RunnerBundleSync {
     private readonly bucket: R2BucketLike,
     private readonly bundleEncryptionKey: Uint8Array,
     private readonly bundleEncryptionKeyId: string,
+    private readonly bundleEncryptionKeysById: Readonly<Record<string, Uint8Array>>,
     private readonly queueStore: RunnerQueueStore,
     private readonly userEnvSource: Readonly<Record<string, string | undefined>>,
   ) {
@@ -45,6 +46,7 @@ export class RunnerBundleSync {
       bucket,
       bundleEncryptionKey,
       bundleEncryptionKeyId,
+      bundleEncryptionKeysById,
     );
   }
 
@@ -163,6 +165,7 @@ export class RunnerBundleSync {
       bucket: this.bucket,
       key: this.bundleEncryptionKey,
       keyId: this.bundleEncryptionKeyId,
+      keysById: this.bundleEncryptionKeysById,
     });
   }
 
@@ -171,6 +174,7 @@ export class RunnerBundleSync {
       bucket: this.bucket,
       key: this.bundleEncryptionKey,
       keyId: this.bundleEncryptionKeyId,
+      keysById: this.bundleEncryptionKeysById,
     });
   }
 

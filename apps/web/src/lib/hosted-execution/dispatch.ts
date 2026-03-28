@@ -1,5 +1,6 @@
 import {
   createHostedExecutionDispatchClient,
+  HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchEnvironment,
@@ -68,7 +69,7 @@ function buildHostedExecutionNotConfiguredStatus(
       vault: null,
     },
     inFlight: false,
-    lastError: "Hosted execution dispatch is not configured.",
+    lastError: HOSTED_EXECUTION_DISPATCH_NOT_CONFIGURED_ERROR,
     lastEventId: null,
     lastRunAt: null,
     nextWakeAt: null,

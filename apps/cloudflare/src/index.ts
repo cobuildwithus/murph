@@ -407,6 +407,7 @@ async function handleHostedEmailIngress(
     config,
     key: environment.bundleEncryptionKey,
     keyId: environment.bundleEncryptionKeyId,
+    keysById: environment.bundleEncryptionKeysById,
     to: message.to,
   });
 

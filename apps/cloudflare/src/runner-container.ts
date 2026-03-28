@@ -1,7 +1,8 @@
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
-import type {
-  HostedExecutionRunnerRequest,
-  HostedExecutionRunnerResult,
+import {
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
+  type HostedExecutionRunnerRequest,
+  type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
 
 import { json, readJsonObject } from "./json.ts";
@@ -69,13 +70,13 @@ type RunnerOutboundHandlerName =
   | "sharePackWorker";
 
 const RUNNER_OUTBOUND_HOSTS = {
-  "artifacts.worker": "artifactsWorker",
-  "commit.worker": "commitWorker",
+  [HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts]: "artifactsWorker",
+  [HOSTED_EXECUTION_CALLBACK_HOSTS.commit]: "commitWorker",
   "device-sync.worker": "deviceSyncWorker",
-  "email.worker": "emailWorker",
-  "outbox.worker": "outboxWorker",
+  [HOSTED_EXECUTION_CALLBACK_HOSTS.email]: "emailWorker",
+  [HOSTED_EXECUTION_CALLBACK_HOSTS.outbox]: "outboxWorker",
   "share-pack.worker": "sharePackWorker",
-  "side-effects.worker": "outboxWorker",
+  [HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects]: "outboxWorker",
 } as const satisfies Record<string, RunnerOutboundHandlerName>;
 
 export class RunnerContainer extends Container {

@@ -70,6 +70,7 @@ export class HostedUserRunner {
       bucket,
       env.bundleEncryptionKey,
       env.bundleEncryptionKeyId,
+      env.bundleEncryptionKeysById,
       this.queueStore,
       this.readUserEnvSource(),
     );
@@ -77,6 +78,7 @@ export class HostedUserRunner {
       bucket,
       bundleEncryptionKey: env.bundleEncryptionKey,
       bundleEncryptionKeyId: env.bundleEncryptionKeyId,
+      bundleEncryptionKeysById: env.bundleEncryptionKeysById,
       queueStore: this.queueStore,
       scheduler: this.scheduler,
     });
@@ -469,6 +471,7 @@ export class HostedUserRunner {
       eventId: input.eventId,
       key: this.env.bundleEncryptionKey,
       keyId: this.env.bundleEncryptionKeyId,
+      keysById: this.env.bundleEncryptionKeysById,
       payload: input.payload,
       userId,
     });
@@ -484,6 +487,7 @@ export class HostedUserRunner {
       eventId: input.eventId,
       key: this.env.bundleEncryptionKey,
       keyId: this.env.bundleEncryptionKeyId,
+      keysById: this.env.bundleEncryptionKeysById,
       payload: input.payload,
       userId,
     });

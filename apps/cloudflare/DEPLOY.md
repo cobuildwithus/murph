@@ -115,13 +115,17 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_EXECUTION_CONTROL_TOKEN`
 - `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN`
 
+Optional secret for staged bundle-key rotation:
+
+- `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`
+
 The checked-in scaffold and rendered deploy config both declare those four names in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
 Both control tokens are treated as required runtime inputs now, not just deploy-time placeholders:
 
 - missing `HOSTED_EXECUTION_CONTROL_TOKEN` makes `/internal/users/:userId/{status,run,env}` fail closed
 - missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` makes native container invoke requests fail closed before the runner job starts
-- changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place is still unsupported; the runtime now fails closed on `keyId` mismatch instead of pretending multi-key decryption exists
+- changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
 
 ### Optional provider/runtime secrets
 

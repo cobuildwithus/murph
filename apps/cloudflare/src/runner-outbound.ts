@@ -1,6 +1,7 @@
 import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import {
   buildHostedExecutionSharePayloadPath,
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_USER_ID_HEADER,
@@ -45,7 +46,7 @@ export async function handleRunnerOutboundRequest(
   );
   const url = new URL(request.url);
 
-  if (url.hostname === "commit.worker") {
+  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.commit) {
     const match = /^\/events\/(?<eventId>[^/]+)\/(?<action>commit|finalize)$/u.exec(url.pathname);
     if (!match?.groups) {
       return notFound();
@@ -61,7 +62,7 @@ export async function handleRunnerOutboundRequest(
       : forwardRunnerFinalize(userId, eventId, await readJsonObject(request), env);
   }
 
-  if (url.hostname === "artifacts.worker") {
+  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts) {
     const match = /^\/objects\/(?<sha256>[a-f0-9]{64})$/u.exec(url.pathname);
     if (!match?.groups) {
       return notFound();
@@ -98,7 +99,10 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === "outbox.worker" || url.hostname === "side-effects.worker") {
+  if (
+    url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.outbox ||
+    url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects
+  ) {
     const match = /^\/(?:intents|effects)\/(?<effectId>[^/]+)$/u.exec(url.pathname);
     if (!match?.groups) {
       return notFound();
@@ -118,7 +122,7 @@ export async function handleRunnerOutboundRequest(
     });
   }
 
-  if (url.hostname === "email.worker") {
+  if (url.hostname === HOSTED_EXECUTION_CALLBACK_HOSTS.email) {
     if (url.pathname === "/send") {
       if (request.method !== "POST") {
         return methodNotAllowed();
@@ -163,6 +167,7 @@ async function handleRunnerEmailMessageReadRequest(input: {
     bucket: input.bucket,
     key: input.environment.bundleEncryptionKey,
     keyId: input.environment.bundleEncryptionKeyId,
+    keysById: input.environment.bundleEncryptionKeysById,
     rawMessageKey: input.rawMessageKey,
     userId: input.userId,
   });
@@ -269,6 +274,7 @@ async function handleRunnerArtifactRequest(input: {
     bucket: input.bucket,
     key: input.environment.bundleEncryptionKey,
     keyId: input.environment.bundleEncryptionKeyId,
+    keysById: input.environment.bundleEncryptionKeysById,
     userId: input.userId,
   });
 
@@ -308,6 +314,7 @@ async function handleRunnerSideEffectRequest(input: {
     bucket: input.bucket,
     key: input.environment.bundleEncryptionKey,
     keyId: input.environment.bundleEncryptionKeyId,
+    keysById: input.environment.bundleEncryptionKeysById,
   });
 
   if (input.request.method === "GET") {

@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
   buildHostedExecutionDispatchRef,
   buildHostedExecutionOutboxPayload,
   buildHostedExecutionAssistantCronTickDispatch,
@@ -196,6 +201,7 @@ describe("@murph/hosted-execution", () => {
       allowedUserEnvPrefixes: null,
       bundleEncryptionKeyBase64: "Zm9v",
       bundleEncryptionKeyId: "v1",
+      bundleEncryptionKeyringJson: null,
       controlToken: null,
       defaultAlarmDelayMs: 15 * 60 * 1000,
       dispatchSigningSecret: "dispatch-secret",
@@ -204,6 +210,20 @@ describe("@murph/hosted-execution", () => {
       runnerControlToken: null,
       runnerTimeoutMs: 60_000,
     });
+  });
+
+  it("exports the shared hosted callback hosts and default callback base urls", () => {
+    expect(HOSTED_EXECUTION_CALLBACK_HOSTS).toEqual({
+      artifacts: "artifacts.worker",
+      commit: "commit.worker",
+      email: "email.worker",
+      outbox: "outbox.worker",
+      sideEffects: "side-effects.worker",
+    });
+    expect(DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL).toBe("http://artifacts.worker");
+    expect(DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL).toBe("http://commit.worker");
+    expect(DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL).toBe("http://email.worker");
+    expect(DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL).toBe("http://side-effects.worker");
   });
 
   it("reads hosted email capabilities with separate ingress and send readiness", () => {
