@@ -1,11 +1,12 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
-  readHostedPrivyIdentityTokenFromCookieStore: vi.fn(),
+  requireHostedPrivyUserForSession: vi.fn(),
   resolveHostedSessionFromCookieStore: vi.fn(),
   syncHostedVerifiedEmailToHostedExecution: vi.fn(),
-  verifyHostedPrivyIdentityToken: vi.fn(),
 }));
 
 vi.mock("next/headers", () => ({
@@ -17,8 +18,7 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  readHostedPrivyIdentityTokenFromCookieStore: mocks.readHostedPrivyIdentityTokenFromCookieStore,
-  verifyHostedPrivyIdentityToken: mocks.verifyHostedPrivyIdentityToken,
+  requireHostedPrivyUserForSession: mocks.requireHostedPrivyUserForSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/session", () => ({
@@ -39,22 +39,23 @@ describe("settings email sync route", () => {
     mocks.cookies.mockResolvedValue({
       get: vi.fn(),
     });
-    mocks.readHostedPrivyIdentityTokenFromCookieStore.mockReturnValue("identity-token");
     mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({
       member: {
         id: "member_123",
         privyUserId: "did:privy:user_123",
       },
     });
-    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
         {
           address: "user@example.com",
           latest_verified_at: 1743064200,
           type: "email",
         },
       ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
     mocks.syncHostedVerifiedEmailToHostedExecution.mockResolvedValue({
       emailAddress: "user@example.com",
@@ -76,7 +77,15 @@ describe("settings email sync route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.resolveHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
-    expect(mocks.verifyHostedPrivyIdentityToken).toHaveBeenCalledWith("identity-token");
+    expect(mocks.requireHostedPrivyUserForSession).toHaveBeenCalledWith(
+      { get: expect.any(Function) },
+      {
+        member: {
+          id: "member_123",
+          privyUserId: "did:privy:user_123",
+        },
+      },
+    );
     expect(mocks.syncHostedVerifiedEmailToHostedExecution).toHaveBeenCalledWith({
       emailAddress: "user@example.com",
       userId: "member_123",
@@ -106,16 +115,11 @@ describe("settings email sync route", () => {
   });
 
   it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
-    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_other",
-      linked_accounts: [
-        {
-          address: "user@example.com",
-          latest_verified_at: 1743064200,
-          type: "email",
-        },
-      ],
-    });
+    mocks.requireHostedPrivyUserForSession.mockRejectedValue(hostedOnboardingError({
+      code: "PRIVY_SESSION_MISMATCH",
+      httpStatus: 403,
+      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+    }));
 
     const response = await settingsEmailSyncRoute.POST(
       new Request("https://join.example.test/api/settings/email/sync", {
@@ -135,14 +139,16 @@ describe("settings email sync route", () => {
   });
 
   it("returns a retryable conflict while the updated verified email has not reached the server-side cookie yet", async () => {
-    mocks.verifyHostedPrivyIdentityToken.mockResolvedValue({
-      id: "did:privy:user_123",
-      linked_accounts: [
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
         {
           address: "user@example.com",
           type: "email",
         },
       ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
     });
 
     const response = await settingsEmailSyncRoute.POST(
@@ -175,7 +181,7 @@ describe("settings email sync route", () => {
     );
 
     expect(response.status).toBe(401);
-    expect(mocks.verifyHostedPrivyIdentityToken).not.toHaveBeenCalled();
+    expect(mocks.requireHostedPrivyUserForSession).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "AUTH_REQUIRED",

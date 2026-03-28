@@ -15,11 +15,10 @@ const mocks = vi.hoisted(() => {
   };
 
   return {
-    getOptionalHostedPrivyIdentityFromCookies: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
     requireHostedOnboardingPublicBaseUrl: vi.fn(),
     requireHostedOnboardingStripeConfig: vi.fn(),
-    requireHostedPrivyIdentityFromCookies: vi.fn(),
+    requireHostedPrivyUserForSession: vi.fn(),
     stripe,
   };
 });
@@ -29,8 +28,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", () => ({
-  getOptionalHostedPrivyIdentityFromCookies: mocks.getOptionalHostedPrivyIdentityFromCookies,
-  requireHostedPrivyIdentityFromCookies: mocks.requireHostedPrivyIdentityFromCookies,
+  requireHostedPrivyUserForSession: mocks.requireHostedPrivyUserForSession,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -61,6 +59,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     telegramWebhookSecret: null,
   }),
   requireHostedOnboardingPublicBaseUrl: mocks.requireHostedOnboardingPublicBaseUrl,
+  requireHostedOnboardingStripeClient: () => ({
+    stripe: mocks.stripe,
+    webhookSecret: "whsec_123",
+  }),
   requireHostedOnboardingStripeConfig: mocks.requireHostedOnboardingStripeConfig,
 }));
 
@@ -71,24 +73,29 @@ const NOW = new Date("2026-03-27T12:00:00.000Z");
 describe("createHostedBillingCheckout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getOptionalHostedPrivyIdentityFromCookies.mockResolvedValue(null);
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedOnboardingStripeConfig.mockReturnValue({
       billingMode: "subscription",
       priceId: "price_123",
       stripe: mocks.stripe,
     });
-    mocks.requireHostedPrivyIdentityFromCookies.mockResolvedValue({
-      phone: {
-        number: "+15551234567",
-        verifiedAt: 1742990400,
-      },
-      userId: "did:privy:user_123",
-      wallet: {
-        address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-        chainType: "ethereum",
-        id: "wallet_123",
-        type: "wallet",
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
       },
     });
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(
@@ -112,11 +119,17 @@ describe("createHostedBillingCheckout", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "member_123",
+          stripeCustomerId: null,
+        }),
         update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
 
     const result = await createHostedBillingCheckout({
+      cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
@@ -132,7 +145,14 @@ describe("createHostedBillingCheckout", () => {
       url: "https://billing.example.test/session_123",
     });
     const createdCustomerMetadata = mocks.stripe.customers.create.mock.calls[0]?.[0]?.metadata;
-    expect(mocks.requireHostedPrivyIdentityFromCookies).toHaveBeenCalledTimes(1);
+    expect(mocks.requireHostedPrivyUserForSession).toHaveBeenCalledWith(
+      { get: expect.any(Function) },
+      {
+        member: {
+          id: "member_123",
+        },
+      },
+    );
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: {
@@ -140,12 +160,23 @@ describe("createHostedBillingCheckout", () => {
           memberId: "member_123",
         },
       }),
+      expect.objectContaining({
+        idempotencyKey: "hosted-onboarding:stripe-checkout:member_123:invite_123:subscription:price_123:1",
+      }),
     );
     expect(createdCustomerMetadata).toEqual({
       memberId: "member_123",
     });
     expect(createdCustomerMetadata).not.toHaveProperty("normalizedPhoneNumber");
     expect(createdCustomerMetadata).not.toHaveProperty("walletAddress");
+    expect(prisma.hostedMember.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          stripeCustomerId: "cus_123",
+          walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+        }),
+      }),
+    );
     expect(prisma.hostedMember.update).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -164,17 +195,42 @@ describe("createHostedBillingCheckout", () => {
         walletAddress: "0x00000000000000000000000000000000000000aa",
       }),
     );
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "0x00000000000000000000000000000000000000aa",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
 
     const prisma: any = {
       hostedBillingCheckout: {
         create: vi.fn().mockResolvedValue({}),
       },
       hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "member_123",
+          stripeCustomerId: "cus_existing_123",
+        }),
         update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
     };
 
     await createHostedBillingCheckout({
+      cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
@@ -209,22 +265,29 @@ describe("createHostedBillingCheckout", () => {
         walletAddress: "0x00000000000000000000000000000000000000aa",
       }),
     );
-    mocks.getOptionalHostedPrivyIdentityFromCookies.mockResolvedValue({
-      phone: {
-        number: "+15551234567",
-        verifiedAt: 1742990400,
-      },
-      userId: "did:privy:user_123",
-      wallet: {
-        address: "0x00000000000000000000000000000000000000bb",
-        chainType: "ethereum",
-        id: "wallet_456",
-        type: "wallet",
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "0x00000000000000000000000000000000000000bb",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_456",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
       },
     });
 
     await expect(
       createHostedBillingCheckout({
+        cookieStore: { get: vi.fn() },
         inviteCode: "invite-code",
         now: NOW,
         prisma: {
@@ -246,6 +309,43 @@ describe("createHostedBillingCheckout", () => {
       httpStatus: 409,
     });
     expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before any Stripe calls when the shared Privy session check fails", async () => {
+    mocks.requireHostedPrivyUserForSession.mockRejectedValue({
+      code: "PRIVY_SESSION_MISMATCH",
+      httpStatus: 403,
+      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+    });
+
+    await expect(
+      createHostedBillingCheckout({
+        cookieStore: { get: vi.fn() },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma: {
+          hostedBillingCheckout: {
+            create: vi.fn(),
+          },
+          hostedMember: {
+            findUnique: vi.fn(),
+            update: vi.fn(),
+            updateMany: vi.fn(),
+          },
+        } as any,
+        sessionRecord: {
+          member: {
+            id: "member_123",
+          },
+        } as any,
+      }),
+    ).rejects.toMatchObject({
+      code: "PRIVY_SESSION_MISMATCH",
+      httpStatus: 403,
+    });
+    expect(mocks.stripe.customers.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.customers.update).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 });

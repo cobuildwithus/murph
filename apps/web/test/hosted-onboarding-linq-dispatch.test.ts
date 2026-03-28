@@ -17,6 +17,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
 
   return {
     ...actual,
+    assertHostedLinqWebhookSignature: vi.fn(),
     sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
   };
 });
@@ -48,7 +49,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
   };
 });
 
-import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/service";
+import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 describe("handleHostedOnboardingLinqWebhook", () => {
   beforeEach(() => {

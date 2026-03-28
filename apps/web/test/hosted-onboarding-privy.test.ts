@@ -24,11 +24,11 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import {
-  getOptionalHostedPrivyIdentityFromCookies,
   hasHostedPrivyPhoneAuthConfig,
   readHostedPrivyIdentityTokenFromCookieStore,
   requireHostedPrivyIdentity,
   requireHostedPrivyIdentityFromCookies,
+  requireHostedPrivyUserForSession,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
 
@@ -150,41 +150,121 @@ describe("hosted Privy verification", () => {
     );
   });
 
-  it("requires the Privy identity cookie when reading hosted identity from cookies", async () => {
-    await expect(requireHostedPrivyIdentityFromCookies()).rejects.toMatchObject({
+  it("binds a verified Privy user to the current hosted session before exposing linked accounts", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_123",
+      linked_accounts: [
+        {
+          address: "user@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ],
+    });
+
+    await expect(
+      requireHostedPrivyUserForSession(
+        {
+          get: (name: string) => (name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+        },
+        {
+          member: {
+            privyUserId: "did:privy:user_123",
+          },
+        } as any,
+      ),
+    ).resolves.toEqual({
+      linkedAccounts: [
+        {
+          address: "user@example.com",
+          latest_verified_at: 1741194420,
+          type: "email",
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+        linked_accounts: [
+          {
+            address: "user@example.com",
+            latest_verified_at: 1741194420,
+            type: "email",
+          },
+        ],
+      },
+    });
+  });
+
+  it("requires the Privy identity cookie before binding a verified user to a hosted session", async () => {
+    await expect(
+      requireHostedPrivyUserForSession(
+        {
+          get: () => undefined,
+        },
+        {
+          member: {
+            privyUserId: "did:privy:user_123",
+          },
+        } as any,
+      ),
+    ).rejects.toMatchObject({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
       httpStatus: 401,
     });
     expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
   });
 
-  it("treats an invalid optional Privy cookie as absent", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "stale-cookie-token" } : undefined),
+  it("rejects hosted sessions whose verified Privy user id does not match the member binding", async () => {
+    mocks.verifyIdentityToken.mockResolvedValue({
+      id: "did:privy:user_other",
+      linked_accounts: [],
     });
-    mocks.verifyIdentityToken.mockRejectedValue(new Error("bad token"));
 
-    await expect(getOptionalHostedPrivyIdentityFromCookies()).resolves.toBeNull();
+    await expect(
+      requireHostedPrivyUserForSession(
+        {
+          get: (name: string) => (name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+        },
+        {
+          member: {
+            privyUserId: "did:privy:user_123",
+          },
+        } as any,
+      ),
+    ).rejects.toMatchObject({
+      code: "PRIVY_SESSION_MISMATCH",
+      httpStatus: 403,
+    });
   });
 
-  it("treats an optional Privy cookie without the required embedded wallet as absent", async () => {
-    mocks.cookies.mockResolvedValue({
-      get: vi.fn().mockImplementation((name: string) =>
-        name === "privy-id-token" ? { value: "cookie-token" } : undefined),
-    });
+  it("rejects hosted sessions that are missing a bound Privy user id", async () => {
     mocks.verifyIdentityToken.mockResolvedValue({
       id: "did:privy:user_123",
-      linked_accounts: [
-        {
-          latest_verified_at: 1741194420,
-          phoneNumber: "+1 415 555 2671",
-          type: "phone",
-        },
-      ],
+      linked_accounts: [],
     });
 
-    await expect(getOptionalHostedPrivyIdentityFromCookies()).resolves.toBeNull();
+    await expect(
+      requireHostedPrivyUserForSession(
+        {
+          get: (name: string) => (name === "privy-id-token" ? { value: "cookie-token" } : undefined),
+        },
+        {
+          member: {
+            privyUserId: null,
+          },
+        } as any,
+      ),
+    ).rejects.toMatchObject({
+      code: "PRIVY_SESSION_MISMATCH",
+      httpStatus: 403,
+    });
+  });
+
+  it("requires the Privy identity cookie when reading hosted identity from cookies", async () => {
+    await expect(requireHostedPrivyIdentityFromCookies()).rejects.toMatchObject({
+      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+      httpStatus: 401,
+    });
+    expect(mocks.verifyIdentityToken).not.toHaveBeenCalled();
   });
 
   it("requires the Privy verification key config for hosted verification", async () => {

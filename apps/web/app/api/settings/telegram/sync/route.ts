@@ -4,10 +4,7 @@ import { cookies } from "next/headers";
 import { getPrisma } from "@/src/lib/prisma";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
-import {
-  readHostedPrivyIdentityTokenFromCookieStore,
-  verifyHostedPrivyIdentityToken,
-} from "@/src/lib/hosted-onboarding/privy";
+import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
 import { extractHostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
@@ -25,26 +22,7 @@ export async function POST() {
       });
     }
 
-    const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
-
-    if (!identityToken) {
-      throw hostedOnboardingError({
-        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
-        message: "Refresh the page and relink Telegram before we sync it.",
-        httpStatus: 401,
-      });
-    }
-
-    const verifiedPrivyUser = await verifyHostedPrivyIdentityToken(identityToken);
-
-    if (verifiedPrivyUser.id !== hostedSession.member.privyUserId) {
-      throw hostedOnboardingError({
-        code: "PRIVY_SESSION_MISMATCH",
-        message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
-        httpStatus: 403,
-      });
-    }
-
+    const { verifiedPrivyUser } = await requireHostedPrivyUserForSession(cookieStore, hostedSession);
     const telegramAccount = extractHostedPrivyTelegramAccount(verifiedPrivyUser);
 
     if (!telegramAccount) {

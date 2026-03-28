@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
-import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/service";
+import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 export async function POST(request: Request) {
   try {

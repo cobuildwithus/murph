@@ -29,7 +29,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
   issueHostedInviteForPhone: mocks.issueHostedInviteForPhone,
 }));
 

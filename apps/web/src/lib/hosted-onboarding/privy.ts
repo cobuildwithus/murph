@@ -3,18 +3,22 @@ import { cookies } from "next/headers";
 
 import { hostedOnboardingError } from "./errors";
 import {
+  HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type HostedPrivyLinkedAccountContainer,
   type HostedPrivyPhoneAccount,
+  type PrivyLinkedAccountLike,
   type HostedPrivyWalletAccount,
+  resolveHostedPrivyLinkedAccounts,
   resolveHostedPrivyLinkedAccountState,
 } from "./privy-shared";
 import { getHostedOnboardingEnvironment } from "./runtime";
+import type { HostedSessionRecord } from "./session";
 
 interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
   id: string;
 }
 
-interface HostedPrivyCookieStore {
+export interface HostedPrivyCookieStore {
   get(name: string): { value?: string } | undefined;
 }
 
@@ -26,9 +30,14 @@ export interface HostedPrivyIdentity {
   wallet: HostedPrivyWalletAccount;
 }
 
+export interface HostedPrivySessionUser {
+  linkedAccounts: PrivyLinkedAccountLike[];
+  verifiedPrivyUser: HostedPrivyUser;
+}
+
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
   const user = await verifyHostedPrivyIdentityToken(identityToken);
-  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, "ethereum");
+  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
 
   if (!phone) {
     throw hostedOnboardingError({
@@ -68,23 +77,34 @@ export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPri
   return requireHostedPrivyIdentity(identityToken);
 }
 
-export async function getOptionalHostedPrivyIdentityFromCookies(): Promise<HostedPrivyIdentity | null> {
-  const cookieStore = await cookies();
+export async function requireHostedPrivyUserForSession(
+  cookieStore: HostedPrivyCookieStore,
+  hostedSession: HostedSessionRecord,
+): Promise<HostedPrivySessionUser> {
   const identityToken = readHostedPrivyIdentityTokenFromCookieStore(cookieStore);
 
   if (!identityToken) {
-    return null;
+    throw hostedOnboardingError({
+      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+      message: "Refresh the page and restore the matching Privy session before continuing.",
+      httpStatus: 401,
+    });
   }
 
-  try {
-    return await requireHostedPrivyIdentity(identityToken);
-  } catch (error) {
-    if (isOptionalHostedPrivyIdentityError(error)) {
-      return null;
-    }
+  const verifiedPrivyUser = await verifyHostedPrivyIdentityToken(identityToken);
 
-    throw error;
+  if (!hostedSession.member.privyUserId || verifiedPrivyUser.id !== hostedSession.member.privyUserId) {
+    throw hostedOnboardingError({
+      code: "PRIVY_SESSION_MISMATCH",
+      message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
+      httpStatus: 403,
+    });
   }
+
+  return {
+    linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
+    verifiedPrivyUser,
+  };
 }
 
 export async function verifyHostedPrivyIdentityToken(identityToken: string): Promise<HostedPrivyUser> {
@@ -159,17 +179,4 @@ function normalizeEnvValue(value: string | null | undefined): string | null {
   }
 
   return null;
-}
-
-function isOptionalHostedPrivyIdentityError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  const code = "code" in error ? error.code : null;
-  return (
-    code === "PRIVY_AUTH_FAILED" ||
-    code === "PRIVY_PHONE_REQUIRED" ||
-    code === "PRIVY_WALLET_REQUIRED"
-  );
 }

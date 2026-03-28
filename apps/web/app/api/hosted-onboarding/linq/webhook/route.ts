@@ -1,5 +1,5 @@
 import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
-import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/service";
+import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 export async function GET() {
   return jsonOk({
