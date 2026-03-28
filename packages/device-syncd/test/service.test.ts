@@ -197,7 +197,7 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   service.close();
 });
 
-test("device sync service durably suppresses WHOOP webhook replays without trace_id after the first job runs", async () => {
+test("device sync service durably suppresses WHOOP webhook replays without trace_id even when retry deliveries have a new signature timestamp", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-whoop-replay");
   const imports: unknown[] = [];
   const importer: DeviceSyncImporterPort = {
@@ -278,7 +278,9 @@ test("device sync service durably suppresses WHOOP webhook replays without trace
     }),
     "utf8",
   );
-  const headers = createWhoopWebhookHeaders("whoop-client-secret", rawBody, String(Date.now()));
+  const firstTimestamp = String(Date.now());
+  const retryTimestamp = String(Number(firstTimestamp) + 120_000);
+  const headers = createWhoopWebhookHeaders("whoop-client-secret", rawBody, firstTimestamp);
 
   const firstWebhook = await service.handleWebhook("whoop", headers, rawBody);
   assert.equal(firstWebhook.accepted, true);
@@ -289,7 +291,11 @@ test("device sync service durably suppresses WHOOP webhook replays without trace
   assert.equal(firstWebhookJob?.kind, "delete");
   assert.equal(imports.length, 2);
 
-  const duplicateWebhook = await service.handleWebhook("whoop", headers, rawBody);
+  const duplicateWebhook = await service.handleWebhook(
+    "whoop",
+    createWhoopWebhookHeaders("whoop-client-secret", rawBody, retryTimestamp),
+    rawBody,
+  );
   assert.equal(duplicateWebhook.accepted, true);
   assert.equal(duplicateWebhook.duplicate, true);
   assert.equal(duplicateWebhook.traceId, firstWebhook.traceId);
@@ -299,6 +305,88 @@ test("device sync service durably suppresses WHOOP webhook replays without trace
   assert.equal(imports.length, 2);
 
   service.close();
+});
+
+test("sqlite device-sync store clears lastSyncErrorAt when clearErrors removes the error fields", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-clear-errors");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-clear-errors",
+      displayName: "Demo",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+        refreshToken: "refresh-token",
+        refreshTokenEncrypted: "enc:refresh-token",
+      },
+      connectedAt: "2026-03-16T10:00:00.000Z",
+    });
+
+    store.markSyncFailed(
+      account.id,
+      "2026-03-16T10:05:00.000Z",
+      "SYNC_FAILED",
+      "Sync failed.",
+      "active",
+    );
+
+    const cleared = store.patchAccount(account.id, {
+      clearErrors: true,
+    });
+
+    assert.equal(cleared.lastErrorCode, null);
+    assert.equal(cleared.lastErrorMessage, null);
+    assert.equal(cleared.lastSyncErrorAt, null);
+  } finally {
+    store.close();
+  }
+});
+
+test("sqlite device-sync store disconnect clears mirrored tokens and stale errors", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-disconnect-clear");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+
+  try {
+    const account = store.upsertAccount({
+      provider: "demo",
+      externalAccountId: "demo-disconnect-clear",
+      displayName: "Demo",
+      scopes: ["offline"],
+      tokens: {
+        accessToken: "access-token",
+        accessTokenEncrypted: "enc:access-token",
+        refreshToken: "refresh-token",
+        refreshTokenEncrypted: "enc:refresh-token",
+      },
+      connectedAt: "2026-03-16T10:00:00.000Z",
+      nextReconcileAt: "2026-03-17T12:00:00.000Z",
+    });
+
+    store.markSyncFailed(
+      account.id,
+      "2026-03-16T10:05:00.000Z",
+      "SYNC_FAILED",
+      "Sync failed.",
+      "reauthorization_required",
+    );
+
+    const disconnected = store.disconnectAccount(account.id, "2026-03-16T10:10:00.000Z");
+
+    assert.equal(disconnected.status, "disconnected");
+    assert.equal(disconnected.accessTokenEncrypted, "");
+    assert.equal(disconnected.refreshTokenEncrypted, null);
+    assert.equal(disconnected.accessTokenExpiresAt, null);
+    assert.equal(disconnected.lastErrorCode, null);
+    assert.equal(disconnected.lastErrorMessage, null);
+    assert.equal(disconnected.lastSyncErrorAt, null);
+    assert.equal(disconnected.nextReconcileAt, null);
+  } finally {
+    store.close();
+  }
 });
 
 test("device sync service accepts configured external return origins and still rejects unknown origins", async () => {
@@ -631,8 +719,9 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   assert.ok(storedAccount);
   assert.equal(storedAccount.status, "disconnected");
   assert.equal(storedAccount.disconnectGeneration, (accountBeforeDisconnect?.disconnectGeneration ?? 0) + 1);
-  assert.equal(storedAccount.accessTokenEncrypted, accountBeforeDisconnect?.accessTokenEncrypted);
-  assert.equal(storedAccount.refreshTokenEncrypted, accountBeforeDisconnect?.refreshTokenEncrypted);
+  assert.equal(storedAccount.accessTokenEncrypted, "");
+  assert.equal(storedAccount.refreshTokenEncrypted, null);
+  assert.equal(storedAccount.accessTokenExpiresAt, null);
   assert.equal(storedAccount.lastSyncCompletedAt, null);
   assert.equal(service.summarize().jobsQueued, 0);
   assert.equal(service.summarize().jobsRunning, 0);
@@ -643,6 +732,139 @@ test("device sync service fences in-flight jobs after disconnect", async () => {
   assert.equal(jobs[0]?.last_error_code, "ACCOUNT_DISCONNECTED");
 
   service.close();
+});
+
+test("device sync service next wake tracks scheduled reconciles and queued jobs", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-next-wake");
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [createFakeProvider()],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "wake",
+  });
+
+  assert.equal(
+    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
+    "2026-03-17T12:00:00.000Z",
+  );
+
+  service.store.enqueueJob({
+    accountId: connected.account.id,
+    availableAt: "2026-03-17T11:00:00.000Z",
+    kind: "retry",
+    payload: {},
+    priority: 10,
+    provider: connected.account.provider,
+  });
+
+  assert.equal(
+    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
+    "2026-03-17T11:00:00.000Z",
+  );
+
+  service.store.enqueueJob({
+    accountId: connected.account.id,
+    availableAt: "2026-03-17T09:59:00.000Z",
+    kind: "due-now",
+    payload: {},
+    priority: 100,
+    provider: connected.account.provider,
+  });
+
+  assert.equal(
+    service.getNextWakeAt("2026-03-17T10:00:00.000Z"),
+    "2026-03-17T10:00:01.000Z",
+  );
+
+  service.close();
+});
+
+test("sqlite store hosted hydration replaces mirrored metadata and clears local tokens on disconnect", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-hosted-hydrate");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+  const seeded = store.upsertAccount({
+    connectedAt: "2026-03-20T10:00:00.000Z",
+    displayName: "Seeded Account",
+    externalAccountId: "demo-seeded",
+    metadata: {
+      stale: true,
+      retained: "old",
+    },
+    nextReconcileAt: "2026-03-28T00:00:00.000Z",
+    provider: "demo",
+    scopes: ["offline"],
+    status: "active",
+    tokens: {
+      accessToken: "seed-access",
+      accessTokenEncrypted: "enc:seed-access",
+      accessTokenExpiresAt: "2026-03-28T00:00:00.000Z",
+      refreshToken: "seed-refresh",
+      refreshTokenEncrypted: "enc:seed-refresh",
+    },
+  });
+  store.markSyncFailed(
+    seeded.id,
+    "2026-03-20T11:00:00.000Z",
+    "STALE",
+    "stale local error",
+    "reauthorization_required",
+  );
+
+  const hydrated = store.hydrateHostedAccount({
+    connectedAt: "2026-03-20T10:00:00.000Z",
+    displayName: "Hosted Account",
+    externalAccountId: "demo-seeded",
+    hostedObservedTokenVersion: null,
+    hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
+    lastSyncErrorAt: null,
+    lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
+    lastWebhookAt: "2026-03-27T07:50:00.000Z",
+    metadata: {
+      fresh: true,
+    },
+    nextReconcileAt: null,
+    provider: "demo",
+    scopes: ["heartrate"],
+    status: "disconnected",
+    updatedAt: "2026-03-27T08:00:00.000Z",
+  });
+
+  assert.ok(hydrated);
+  assert.equal(hydrated?.id, seeded.id);
+  assert.equal(hydrated?.status, "disconnected");
+  assert.equal(hydrated?.displayName, "Hosted Account");
+  assert.deepEqual(hydrated?.metadata, {
+    fresh: true,
+  });
+  assert.deepEqual(hydrated?.scopes, ["heartrate"]);
+  assert.equal(hydrated?.lastErrorCode, null);
+  assert.equal(hydrated?.lastErrorMessage, null);
+  assert.equal(hydrated?.lastWebhookAt, "2026-03-27T07:50:00.000Z");
+  assert.equal(hydrated?.lastSyncStartedAt, "2026-03-27T07:55:00.000Z");
+  assert.equal(hydrated?.lastSyncCompletedAt, "2026-03-27T08:00:00.000Z");
+  assert.equal(hydrated?.hostedObservedUpdatedAt, "2026-03-27T08:00:00.000Z");
+  assert.equal(hydrated?.hostedObservedTokenVersion, null);
+  assert.equal(hydrated?.updatedAt, "2026-03-27T08:00:00.000Z");
+  assert.equal(hydrated?.accessTokenEncrypted, "");
+  assert.equal(hydrated?.refreshTokenEncrypted, null);
+  assert.equal(hydrated?.accessTokenExpiresAt, null);
+
+  store.close();
 });
 
 test("sqlite store persists the webhook trace claim lifecycle", async () => {

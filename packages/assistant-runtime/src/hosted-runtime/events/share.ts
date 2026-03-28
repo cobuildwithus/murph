@@ -45,14 +45,35 @@ async function fetchHostedSharePayload(
     "commitTimeoutMs" | "webControlPlane"
   >,
 ): Promise<ReturnType<typeof parseHostedExecutionSharePackResponse>> {
-  if (!runtime.webControlPlane.shareBaseUrl || !runtime.webControlPlane.shareToken) {
+  if (!hasHostedSharePayloadAccess(runtime.webControlPlane)) {
     throw new Error("Hosted share payload fetch is not configured.");
   }
+  const baseUrl = runtime.webControlPlane.shareBaseUrl!;
+  const shareToken = runtime.webControlPlane.shareToken!;
 
   return await fetchHostedExecutionSharePack({
-    baseUrl: runtime.webControlPlane.shareBaseUrl,
+    baseUrl,
     share,
-    shareToken: runtime.webControlPlane.shareToken,
+    shareToken,
     timeoutMs: runtime.commitTimeoutMs,
   });
+}
+
+function hasHostedSharePayloadAccess(
+  webControlPlane: Pick<NormalizedHostedAssistantRuntimeConfig, "webControlPlane">["webControlPlane"],
+): boolean {
+  if (!webControlPlane.shareBaseUrl) {
+    return false;
+  }
+
+  return webControlPlane.shareToken !== null
+    || isHostedWorkerProxyBaseUrl(webControlPlane.shareBaseUrl, "share-pack.worker");
+}
+
+function isHostedWorkerProxyBaseUrl(baseUrl: string, hostname: string): boolean {
+  try {
+    return new URL(baseUrl).hostname === hostname;
+  } catch {
+    return false;
+  }
 }

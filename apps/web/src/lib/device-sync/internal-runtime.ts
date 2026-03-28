@@ -2,6 +2,16 @@ import type {
   DeviceSyncAccountStatus,
   PublicDeviceSyncAccount,
 } from "@murph/device-syncd";
+import {
+  type HostedExecutionDeviceSyncRuntimeApplyEntry as HostedDeviceSyncRuntimeApplyEntry,
+  type HostedExecutionDeviceSyncRuntimeApplyRequest as HostedDeviceSyncRuntimeApplyRequest,
+  type HostedExecutionDeviceSyncRuntimeApplyResponse as HostedDeviceSyncRuntimeApplyResponse,
+  type HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
+  type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
+  type HostedExecutionDeviceSyncRuntimeSnapshotRequest as HostedDeviceSyncRuntimeSnapshotRequest,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
+  type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
+} from "@murph/hosted-execution";
 
 import {
   hostedConnectionWithSecretArgs,
@@ -10,69 +20,6 @@ import {
   requireHostedConnectionBundleRecord,
 } from "./prisma-store";
 import { toIsoTimestamp, toJsonRecord } from "./shared";
-
-export interface HostedDeviceSyncRuntimeTokenBundle {
-  accessToken: string;
-  accessTokenExpiresAt: string | null;
-  keyVersion: string;
-  refreshToken: string | null;
-  tokenVersion: number;
-}
-
-export interface HostedDeviceSyncRuntimeConnectionSnapshot {
-  connection: PublicDeviceSyncAccount;
-  tokenBundle: HostedDeviceSyncRuntimeTokenBundle | null;
-}
-
-export interface HostedDeviceSyncRuntimeSnapshotRequest {
-  connectionId?: string | null;
-  provider?: string | null;
-  userId: string;
-}
-
-export interface HostedDeviceSyncRuntimeSnapshotResponse {
-  connections: HostedDeviceSyncRuntimeConnectionSnapshot[];
-  generatedAt: string;
-  userId: string;
-}
-
-export interface HostedDeviceSyncRuntimeConnectionUpdate {
-  accessTokenExpiresAt?: string | null;
-  clearError?: boolean;
-  connectionId: string;
-  displayName?: string | null;
-  lastErrorCode?: string | null;
-  lastErrorMessage?: string | null;
-  lastSyncCompletedAt?: string | null;
-  lastSyncErrorAt?: string | null;
-  lastSyncStartedAt?: string | null;
-  lastWebhookAt?: string | null;
-  metadata?: Record<string, unknown>;
-  nextReconcileAt?: string | null;
-  observedTokenVersion?: number | null;
-  scopes?: string[];
-  status?: DeviceSyncAccountStatus;
-  tokenBundle?: HostedDeviceSyncRuntimeTokenBundle | null;
-}
-
-export interface HostedDeviceSyncRuntimeApplyRequest {
-  occurredAt?: string | null;
-  updates: HostedDeviceSyncRuntimeConnectionUpdate[];
-  userId: string;
-}
-
-export interface HostedDeviceSyncRuntimeApplyEntry {
-  connection: PublicDeviceSyncAccount | null;
-  connectionId: string;
-  status: "missing" | "updated";
-  tokenUpdate: "applied" | "cleared" | "missing" | "skipped_version_mismatch" | "unchanged";
-}
-
-export interface HostedDeviceSyncRuntimeApplyResponse {
-  appliedAt: string;
-  updates: HostedDeviceSyncRuntimeApplyEntry[];
-  userId: string;
-}
 
 export async function buildHostedDeviceSyncRuntimeSnapshot(
   store: PrismaDeviceSyncControlPlaneStore,
@@ -90,7 +37,9 @@ export async function buildHostedDeviceSyncRuntimeSnapshot(
 
   return {
     connections: records.map((record) => ({
-      connection: mapHostedPublicAccountRecord(record),
+      connection: normalizeHostedDeviceSyncRuntimeConnection(
+        mapHostedPublicAccountRecord(record),
+      ),
       tokenBundle: record.secret
         ? (() => {
             const bundle = requireHostedConnectionBundleRecord(record, store.codec);
@@ -163,12 +112,26 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         }
 
         return {
-          connection: disconnected,
+          connection: normalizeHostedDeviceSyncRuntimeConnection(disconnected),
           connectionId: update.connectionId,
           status: "updated",
           tokenUpdate: existing.secret ? "cleared" : "missing",
         } satisfies HostedDeviceSyncRuntimeApplyEntry;
       }
+
+      const requestedAccessTokenExpiresAt = update.tokenBundle
+        ? update.tokenBundle.accessTokenExpiresAt
+        : Object.prototype.hasOwnProperty.call(update, "accessTokenExpiresAt")
+          ? update.accessTokenExpiresAt ?? null
+          : undefined;
+      const tokenMutationRequested = update.tokenBundle !== undefined || requestedAccessTokenExpiresAt !== undefined;
+      const tokenVersionMismatch = Boolean(
+        tokenMutationRequested
+        && existing.secret
+        && typeof update.observedTokenVersion === "number"
+        && update.observedTokenVersion > 0
+        && existing.secret.tokenVersion !== update.observedTokenVersion,
+      );
 
       const nextData: Record<string, unknown> = {
         ...(update.status ? { status: update.status } : {}),
@@ -181,10 +144,10 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         ...(Object.prototype.hasOwnProperty.call(update, "metadata")
           ? { metadataJson: toJsonRecord(update.metadata ?? {}) }
           : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "accessTokenExpiresAt")
+        ...(requestedAccessTokenExpiresAt !== undefined && !tokenVersionMismatch
           ? {
-              accessTokenExpiresAt: update.accessTokenExpiresAt
-                ? new Date(update.accessTokenExpiresAt)
+              accessTokenExpiresAt: requestedAccessTokenExpiresAt
+                ? new Date(requestedAccessTokenExpiresAt)
                 : null,
             }
           : {}),
@@ -223,6 +186,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
           : {}),
         ...(update.clearError
           ? {
+              lastSyncErrorAt: null,
               lastErrorCode: null,
               lastErrorMessage: null,
             }
@@ -247,12 +211,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         : "missing";
 
       if (update.tokenBundle) {
-        if (
-          existing.secret
-          && typeof update.observedTokenVersion === "number"
-          && update.observedTokenVersion > 0
-          && existing.secret.tokenVersion !== update.observedTokenVersion
-        ) {
+        if (tokenVersionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
         } else {
           const nextAccessTokenEncrypted = store.codec.encrypt(update.tokenBundle.accessToken);
@@ -262,7 +221,8 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
           const tokenChanged = !existing.secret
             || existing.secret.accessTokenEncrypted !== nextAccessTokenEncrypted
             || existing.secret.refreshTokenEncrypted !== nextRefreshTokenEncrypted
-            || updatedRecord.accessTokenExpiresAt?.toISOString() !== update.tokenBundle.accessTokenExpiresAt;
+            || normalizeNullableIsoTimestamp(updatedRecord.accessTokenExpiresAt)
+              !== normalizeNullableIsoTimestamp(requestedAccessTokenExpiresAt);
 
           if (!existing.secret) {
             await tx.deviceConnectionSecret.create({
@@ -312,7 +272,9 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       }
 
       return {
-        connection: mapHostedPublicAccountRecord(updatedRecord),
+        connection: normalizeHostedDeviceSyncRuntimeConnection(
+          mapHostedPublicAccountRecord(updatedRecord),
+        ),
         connectionId: update.connectionId,
         status: "updated",
         tokenUpdate,
@@ -331,6 +293,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
 
 export function parseHostedDeviceSyncRuntimeSnapshotRequest(
   value: Record<string, unknown>,
+  trustedUserId: string | null = null,
 ): HostedDeviceSyncRuntimeSnapshotRequest {
   return {
     ...(value.connectionId === undefined
@@ -339,12 +302,13 @@ export function parseHostedDeviceSyncRuntimeSnapshotRequest(
     ...(value.provider === undefined
       ? {}
       : { provider: readNullableString(value.provider, "provider") }),
-    userId: requireString(value.userId, "userId"),
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(value.userId, trustedUserId),
   };
 }
 
 export function parseHostedDeviceSyncRuntimeApplyRequest(
   value: Record<string, unknown>,
+  trustedUserId: string | null = null,
 ): HostedDeviceSyncRuntimeApplyRequest {
   return {
     ...(value.occurredAt === undefined
@@ -353,8 +317,23 @@ export function parseHostedDeviceSyncRuntimeApplyRequest(
     updates: requireArray(value.updates, "updates").map((entry, index) =>
       parseHostedDeviceSyncRuntimeConnectionUpdate(entry, index)
     ),
-    userId: requireString(value.userId, "userId"),
+    userId: resolveHostedDeviceSyncRuntimeRequestUserId(value.userId, trustedUserId),
   };
+}
+
+function resolveHostedDeviceSyncRuntimeRequestUserId(
+  value: unknown,
+  trustedUserId: string | null,
+): string {
+  if (typeof trustedUserId === "string" && trustedUserId.trim().length > 0) {
+    if (value !== undefined && value !== trustedUserId) {
+      throw new TypeError("userId must match the authenticated hosted execution user.");
+    }
+
+    return trustedUserId;
+  }
+
+  return requireString(value, "userId");
 }
 
 function parseHostedDeviceSyncRuntimeConnectionUpdate(
@@ -465,6 +444,25 @@ function parseDeviceSyncStatus(value: unknown, label: string): DeviceSyncAccount
   }
 
   throw new TypeError(`${label} must be an active, reauthorization_required, or disconnected status.`);
+}
+
+function normalizeNullableIsoTimestamp(
+  value: Date | string | null | undefined,
+): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function normalizeHostedDeviceSyncRuntimeConnection(
+  connection: PublicDeviceSyncAccount,
+): HostedDeviceSyncRuntimeConnectionSnapshot["connection"] {
+  return {
+    ...connection,
+    accessTokenExpiresAt: connection.accessTokenExpiresAt ?? null,
+  };
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {

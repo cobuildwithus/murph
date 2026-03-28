@@ -153,11 +153,7 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
   const vaultRoot = path.join(workspaceRoot, "vault");
 
   try {
-    mocks.createDeviceSyncRegistry.mockReturnValue({
-      list: vi.fn(() => [{}]),
-      register: vi.fn(),
-    });
-    mocks.createDeviceSyncService.mockReturnValue({
+    const deviceSyncService = {
       close: vi.fn(),
       drainWorker: vi.fn(async () => 4),
       getNextWakeAt: vi.fn(() => "2026-03-28T09:30:00.000Z"),
@@ -165,7 +161,12 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
       store: {
         getAccountByExternalAccount: vi.fn(() => null),
       },
+    };
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: vi.fn(() => [{}]),
+      register: vi.fn(),
     });
+    mocks.createDeviceSyncService.mockReturnValue(deviceSyncService);
     mocks.getAssistantCronStatus.mockResolvedValue({
       nextRunAt: "2026-03-28T10:00:00.000Z",
     });
@@ -198,6 +199,7 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
       nextWakeAt: "2026-03-28T09:30:00.000Z",
       parserProcessed: 0,
     });
+    assert.deepEqual(deviceSyncService.getNextWakeAt.mock.calls, [[]]);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
