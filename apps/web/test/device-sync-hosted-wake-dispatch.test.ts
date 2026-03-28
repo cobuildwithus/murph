@@ -32,6 +32,7 @@ vi.mock("@murph/device-syncd", () => ({
   createOuraWebhookSubscriptionClient: mocks.createOuraWebhookSubscriptionClient,
   deviceSyncError: vi.fn((input: { message: string }) => new Error(input.message)),
   isDeviceSyncError: vi.fn(() => false),
+  normalizeString: vi.fn((value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)),
   resolveOuraWebhookVerificationChallenge: vi.fn(() => null),
 }));
 
@@ -366,6 +367,20 @@ describe("dispatchHostedDeviceSyncWake", () => {
         userId: "user-123",
       }),
     );
+    expect(mocks.markConnectionDisconnected).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      errorCode: null,
+      errorMessage: null,
+      now: "2026-03-26T12:00:00.000Z",
+      tx: mocks.prismaTx,
+      userId: "user-123",
+    });
+    expect(mocks.markConnectionDisconnected.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.createSignal.mock.invocationCallOrder[0],
+    );
+    expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+    );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: expect.objectContaining({
@@ -486,6 +501,12 @@ describe("dispatchHostedDeviceSyncWake", () => {
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("123-45-6789");
     expect(JSON.stringify(signalInput?.payload ?? {})).not.toContain("job-secret-refresh-token");
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", mocks.prismaTx);
+    expect(mocks.createSignal.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0],
+    );
+    expect(mocks.enqueueHostedExecutionOutbox.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.completeWebhookTrace.mock.invocationCallOrder[0],
+    );
     expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
       expect.objectContaining({
         dispatch: {

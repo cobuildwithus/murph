@@ -8,6 +8,7 @@ import {
   type PublicDeviceSyncAccount,
 } from "@murph/device-syncd";
 import type {
+  HostedExecutionDispatchRequest,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncWakeEvent,
 } from "@murph/hosted-execution";
@@ -101,20 +102,19 @@ export async function disconnectHostedDeviceSyncConnection(input: {
       errorMessage: null,
       tx,
     });
-    const signal = await input.store.createSignal({
-      userId: input.userId,
-      connectionId: input.connectionId,
-      provider: disconnected.provider,
-      kind: "disconnected",
-      payload: hint,
-      createdAt: now,
-      tx,
-    });
-    await enqueueHostedExecutionOutbox({
+    await createHostedDeviceSyncSignalAndEnqueueWake({
       dispatch,
-      sourceId: String(signal.id),
-      sourceType: "device_sync_signal",
       tx,
+      createSignal: () =>
+        input.store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: disconnected.provider,
+          kind: "disconnected",
+          payload: hint,
+          createdAt: now,
+          tx,
+        }),
     });
     return disconnected;
   });
@@ -161,20 +161,19 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
     userId: ownerId,
   });
   await input.store.prisma.$transaction(async (tx) => {
-    const signal = await input.store.createSignal({
-      userId: ownerId,
-      connectionId: input.account.id,
-      provider: input.account.provider,
-      kind: "connected",
-      payload: hint,
-      createdAt: input.now,
-      tx,
-    });
-    await enqueueHostedExecutionOutbox({
+    await createHostedDeviceSyncSignalAndEnqueueWake({
       dispatch,
-      sourceId: String(signal.id),
-      sourceType: "device_sync_signal",
       tx,
+      createSignal: () =>
+        input.store.createSignal({
+          userId: ownerId,
+          connectionId: input.account.id,
+          provider: input.account.provider,
+          kind: "connected",
+          payload: hint,
+          createdAt: input.now,
+          tx,
+        }),
     });
   });
 }
@@ -218,20 +217,19 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     userId: ownerId,
   });
   await input.store.prisma.$transaction(async (tx) => {
-    const signal = await input.store.createSignal({
-      userId: ownerId,
-      connectionId: input.account.id,
-      provider: input.account.provider,
-      kind: "webhook_hint",
-      payload: toJsonRecord(hint),
-      createdAt: input.now,
-      tx,
-    });
-    await enqueueHostedExecutionOutbox({
+    await createHostedDeviceSyncSignalAndEnqueueWake({
       dispatch,
-      sourceId: String(signal.id),
-      sourceType: "device_sync_signal",
       tx,
+      createSignal: () =>
+        input.store.createSignal({
+          userId: ownerId,
+          connectionId: input.account.id,
+          provider: input.account.provider,
+          kind: "webhook_hint",
+          payload: toJsonRecord(hint),
+          createdAt: input.now,
+          tx,
+        }),
     });
     if (input.webhook.traceId) {
       await input.store.completeWebhookTrace(input.account.provider, input.webhook.traceId, tx);
@@ -256,27 +254,40 @@ export async function dispatchHostedDeviceSyncWake(input: {
   });
 
   await prisma.$transaction(async (tx) => {
-    const signal = await tx.deviceSyncSignal.create({
-      data: {
-        connectionId: input.connectionId,
-        createdAt: new Date(input.occurredAt),
-        kind: mapHostedDeviceSyncSignalKind(input.source),
-        payloadJson: hint,
-        provider: input.provider,
-        userId: input.userId,
-      },
-    });
-    await enqueueHostedExecutionOutbox({
+    await createHostedDeviceSyncSignalAndEnqueueWake({
       dispatch,
-      sourceId: String(signal.id),
-      sourceType: "device_sync_signal",
       tx,
+      createSignal: () =>
+        tx.deviceSyncSignal.create({
+          data: {
+            connectionId: input.connectionId,
+            createdAt: new Date(input.occurredAt),
+            kind: mapHostedDeviceSyncSignalKind(input.source),
+            payloadJson: hint,
+            provider: input.provider,
+            userId: input.userId,
+          },
+        }),
     });
   });
 
   return {
     dispatched: true,
   };
+}
+
+async function createHostedDeviceSyncSignalAndEnqueueWake(input: {
+  createSignal: () => Promise<{ id: number }>;
+  dispatch: HostedExecutionDispatchRequest;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const signal = await input.createSignal();
+  await enqueueHostedExecutionOutbox({
+    dispatch: input.dispatch,
+    sourceId: String(signal.id),
+    sourceType: "device_sync_signal",
+    tx: input.tx,
+  });
 }
 
 function buildHostedDeviceSyncSignalPayload(input: {
