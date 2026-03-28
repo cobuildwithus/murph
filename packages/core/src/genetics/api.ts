@@ -1,9 +1,15 @@
 import {
+  CONTRACT_SCHEMA_VERSION,
+  FRONTMATTER_DOC_TYPES,
+  extractHealthEntityRegistryLinks,
+  geneticsRegistryEntityDefinition,
+  type GeneticVariantFrontmatter,
   contractIdMaxLength,
   GENETIC_VARIANT_LIMITS,
   ID_PREFIXES,
 } from "@murph/contracts";
 
+import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
 
@@ -20,31 +26,64 @@ import {
 
 import type { FrontmatterObject } from "../types.ts";
 import type {
+  GeneticVariantEntity,
+  GeneticVariantLink,
+  GeneticVariantLinkType,
   GeneticVariantRecord,
   ReadGeneticVariantInput,
   UpsertGeneticVariantInput,
   UpsertGeneticVariantResult,
 } from "./types.ts";
 import {
-  GENETIC_VARIANT_DOC_TYPE,
-  GENETIC_VARIANT_SCHEMA_VERSION,
   VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES,
 } from "./types.ts";
 
-const GENETICS_DIRECTORY = "bank/genetics";
+const GENETICS_DIRECTORY = geneticsRegistryEntityDefinition.registry.directory;
 const GENETIC_TITLE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.title;
 const GENETIC_GENE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.gene;
 const GENETIC_INHERITANCE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.inheritance;
 const GENETIC_NOTE_MAX_LENGTH = GENETIC_VARIANT_LIMITS.note;
 const GENETIC_FAMILY_ID_MAX_LENGTH = contractIdMaxLength(ID_PREFIXES.family);
 
+function parseGeneticVariantFrontmatter(attributes: FrontmatterObject): GeneticVariantFrontmatter {
+  const schema = geneticsRegistryEntityDefinition.registry.frontmatterSchema;
+
+  if (!schema) {
+    throw new Error("Genetics registry definition is missing a frontmatter schema.");
+  }
+
+  const result = schema.safeParse(attributes);
+
+  if (!result.success) {
+    throw new VaultError("VAULT_INVALID_GENETIC_VARIANT", "Genetics registry document has an unexpected shape.");
+  }
+
+  return result.data as GeneticVariantFrontmatter;
+}
+
+function sortGeneticRecords(records: GeneticVariantRecord[]): void {
+  if (geneticsRegistryEntityDefinition.registry.sortBehavior !== "gene-title") {
+    throw new Error('Genetics registry definition must use "gene-title" sort behavior.');
+  }
+
+  records.sort(
+    (left, right) =>
+      left.gene.localeCompare(right.gene) ||
+      left.title.localeCompare(right.title) ||
+      left.variantId.localeCompare(right.variantId),
+  );
+}
+
 function buildBody(record: {
   gene: string;
   title: string;
+  links?: readonly GeneticVariantLink[];
   sourceFamilyMemberIds?: string[];
   note?: string;
 }): string {
+  const relations = canonicalizeGeneticRelations(record);
+
   return [
     `# ${record.title}`,
     "",
@@ -52,11 +91,81 @@ function buildBody(record: {
     "",
     "## Source Family Members",
     "",
-    bulletList(record.sourceFamilyMemberIds),
+    bulletList(relations.sourceFamilyMemberIds),
     "",
     maybeSection("Notes", record.note),
     "",
   ].join("\n");
+}
+
+function normalizeGeneticLinkType(value: string): GeneticVariantLinkType | null {
+  return value === "source_family_member" ? value : null;
+}
+
+function compareGeneticLinks(left: GeneticVariantLink, right: GeneticVariantLink): number {
+  return left.targetId.localeCompare(right.targetId);
+}
+
+function buildGeneticLinksFromFields(input: {
+  sourceFamilyMemberIds?: string[];
+}): GeneticVariantLink[] {
+  return (input.sourceFamilyMemberIds ?? []).map((targetId) => ({
+    type: "source_family_member",
+    targetId,
+  }) satisfies GeneticVariantLink);
+}
+
+function normalizeGeneticLinks(rawLinks: readonly GeneticVariantLink[]): GeneticVariantLink[] {
+  const sortedLinks = [...rawLinks].sort(compareGeneticLinks);
+  const links: GeneticVariantLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseGeneticLinks(attributes: FrontmatterObject): GeneticVariantLink[] {
+  return normalizeGeneticLinks(
+    extractHealthEntityRegistryLinks("genetics", attributes).flatMap((link) => {
+      const type = normalizeGeneticLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies GeneticVariantLink] : [];
+    }),
+  );
+}
+
+function geneticRelationsFromLinks(
+  links: readonly GeneticVariantLink[],
+): Pick<GeneticVariantEntity, "sourceFamilyMemberIds" | "links"> {
+  const sourceFamilyMemberIds = links.map((link) => link.targetId);
+
+  return {
+    sourceFamilyMemberIds: sourceFamilyMemberIds.length > 0 ? sourceFamilyMemberIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeGeneticRelations(input: {
+  links?: readonly GeneticVariantLink[];
+  sourceFamilyMemberIds?: string[];
+}): Pick<GeneticVariantEntity, "sourceFamilyMemberIds" | "links"> {
+  const links = normalizeGeneticLinks(
+    (input.links?.length ?? 0) > 0
+      ? [...(input.links ?? [])]
+      : buildGeneticLinksFromFields({
+          sourceFamilyMemberIds: input.sourceFamilyMemberIds,
+        }),
+  );
+
+  return geneticRelationsFromLinks(links);
 }
 
 function recordFromParts(
@@ -64,24 +173,19 @@ function recordFromParts(
   relativePath: string,
   markdown: string,
 ): GeneticVariantRecord {
+  const frontmatter = parseGeneticVariantFrontmatter(attributes);
+  const relations = canonicalizeGeneticRelations({
+    links: parseGeneticLinks(attributes),
+  });
+
   return {
-    schemaVersion: requireString(attributes.schemaVersion, "schemaVersion", 40) as typeof GENETIC_VARIANT_SCHEMA_VERSION,
-    docType: requireString(attributes.docType, "docType", 40) as typeof GENETIC_VARIANT_DOC_TYPE,
-    variantId: requireString(attributes.variantId, "variantId", 64),
-    slug: requireString(attributes.slug, "slug", 160),
-    title: requireString(attributes.title, "title", GENETIC_TITLE_MAX_LENGTH),
-    gene: requireString(attributes.gene, "gene", GENETIC_GENE_MAX_LENGTH),
-    zygosity: optionalEnum(attributes.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
-    significance: optionalEnum(attributes.significance, VARIANT_SIGNIFICANCES, "significance"),
-    inheritance: optionalString(attributes.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
-    sourceFamilyMemberIds: validateSortedStringList(
-      attributes.sourceFamilyMemberIds,
-      "sourceFamilyMemberIds",
-      "familyMemberId",
-      24,
-      GENETIC_FAMILY_ID_MAX_LENGTH,
-    ),
-    note: optionalString(attributes.note, "note", GENETIC_NOTE_MAX_LENGTH),
+    ...frontmatter,
+    zygosity: optionalEnum(frontmatter.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
+    significance: optionalEnum(frontmatter.significance, VARIANT_SIGNIFICANCES, "significance"),
+    inheritance: optionalString(frontmatter.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
+    sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
+    note: optionalString(frontmatter.note, "note", GENETIC_NOTE_MAX_LENGTH),
+    links: relations.links,
     relativePath,
     markdown,
   };
@@ -90,17 +194,10 @@ function recordFromParts(
 const geneticsRegistryApi = createMarkdownRegistryApi<GeneticVariantRecord>({
   directory: GENETICS_DIRECTORY,
   recordFromParts,
-  isExpectedRecord: (record) =>
-    record.docType === GENETIC_VARIANT_DOC_TYPE && record.schemaVersion === GENETIC_VARIANT_SCHEMA_VERSION,
+  isExpectedRecord: () => true,
   invalidCode: "VAULT_INVALID_GENETIC_VARIANT",
   invalidMessage: "Genetics registry document has an unexpected shape.",
-  sortRecords: (records) =>
-    records.sort(
-      (left, right) =>
-        left.gene.localeCompare(right.gene) ||
-        left.title.localeCompare(right.title) ||
-        left.variantId.localeCompare(right.variantId),
-    ),
+  sortRecords: sortGeneticRecords,
   getRecordId: (record) => record.variantId,
   conflictCode: "VAULT_GENETIC_VARIANT_CONFLICT",
   conflictMessage: "variantId and slug resolve to different variants.",
@@ -124,13 +221,16 @@ function buildAttributes(input: {
   zygosity?: string;
   significance?: string;
   inheritance?: string;
+  links?: readonly GeneticVariantLink[];
   sourceFamilyMemberIds?: string[];
   note?: string;
-}): FrontmatterObject {
+}): GeneticVariantFrontmatter {
+  const relations = canonicalizeGeneticRelations(input);
+
   return Object.fromEntries(
     Object.entries({
-      schemaVersion: GENETIC_VARIANT_SCHEMA_VERSION,
-      docType: GENETIC_VARIANT_DOC_TYPE,
+      schemaVersion: CONTRACT_SCHEMA_VERSION.geneticVariantFrontmatter,
+      docType: FRONTMATTER_DOC_TYPES.geneticVariant,
       variantId: input.variantId,
       slug: input.slug,
       title: input.title,
@@ -138,10 +238,10 @@ function buildAttributes(input: {
       zygosity: input.zygosity,
       significance: input.significance,
       inheritance: input.inheritance,
-      sourceFamilyMemberIds: input.sourceFamilyMemberIds,
+      sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
       note: input.note,
     }).filter(([, value]) => value !== undefined),
-  ) as FrontmatterObject;
+  ) as GeneticVariantFrontmatter;
 }
 
 export async function upsertGeneticVariant(
@@ -170,6 +270,9 @@ export async function upsertGeneticVariant(
           24,
           GENETIC_FAMILY_ID_MAX_LENGTH,
         );
+  const relations = canonicalizeGeneticRelations({
+    sourceFamilyMemberIds,
+  });
   const note =
     input.note === undefined
       ? existingRecord?.note
@@ -198,13 +301,15 @@ export async function upsertGeneticVariant(
           input.inheritance === undefined
             ? existingRecord?.inheritance
             : optionalString(input.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
-        sourceFamilyMemberIds,
+        sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
+        links: relations.links,
         note,
       }),
       body: buildBody({
         gene,
         title,
-        sourceFamilyMemberIds,
+        sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
+        links: relations.links,
         note,
       }),
     }),

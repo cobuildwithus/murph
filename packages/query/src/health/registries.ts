@@ -111,6 +111,18 @@ function compareRegistryRecords<TRecord extends RegistryMarkdownRecord>(
     return buildPriorityTitleComparator as (left: TRecord, right: TRecord) => number;
   }
 
+  if (sortBehavior === "title") {
+    return (left: TRecord, right: TRecord) => compareNullableStrings(left.title, right.title);
+  }
+
+  if (sortBehavior === "gene-title") {
+    return (left: TRecord, right: TRecord) =>
+      compareNullableStrings(
+        (left as TRecord & { gene?: string | null }).gene ?? null,
+        (right as TRecord & { gene?: string | null }).gene ?? null,
+      ) || compareNullableStrings(left.title, right.title);
+  }
+
   return undefined;
 }
 
@@ -456,8 +468,6 @@ export interface FamilyQueryRecord extends RegistryMarkdownRecord {
   conditions: string[];
   relatedVariantIds: string[];
   note: string | null;
-  lineage: string | null;
-  updatedAt: string | null;
 }
 
 export const familyRegistryDefinition: RegistryDefinition<FamilyQueryRecord> =
@@ -470,7 +480,6 @@ export interface GeneticsQueryRecord extends RegistryMarkdownRecord {
   inheritance: string | null;
   sourceFamilyMemberIds: string[];
   note: string | null;
-  updatedAt: string | null;
 }
 
 export const geneticsRegistryDefinition: RegistryDefinition<GeneticsQueryRecord> =
@@ -539,39 +548,12 @@ export function conditionRecordFromEntity(
   entity: CanonicalEntity,
 ): ConditionQueryRecord | null {
   const base = registryRecordBaseFromEntity(entity, "condition");
-  if (!base) {
-    return null;
-  }
-
-  return {
-    ...base,
-    clinicalStatus: firstString(base.attributes, ["clinicalStatus"]),
-    verificationStatus: firstString(base.attributes, ["verificationStatus"]),
-    assertedOn: firstString(base.attributes, ["assertedOn"]),
-    resolvedOn: firstString(base.attributes, ["resolvedOn"]),
-    severity: firstString(base.attributes, ["severity"]),
-    bodySites: readRegistryStrings(base.attributes, ["bodySites"]),
-    relatedGoalIds: readRegistryStrings(base.attributes, ["relatedGoalIds"]),
-    relatedProtocolIds: readRegistryStrings(base.attributes, ["relatedProtocolIds"]),
-    note: firstString(base.attributes, ["note"]),
-  };
+  return base ? transformRegistryRecord(base, conditionRegistryDefinition) : null;
 }
 
 export function allergyRecordFromEntity(entity: CanonicalEntity): AllergyQueryRecord | null {
   const base = registryRecordBaseFromEntity(entity, "allergy");
-  if (!base) {
-    return null;
-  }
-
-  return {
-    ...base,
-    substance: firstString(base.attributes, ["substance"]),
-    criticality: firstString(base.attributes, ["criticality"]),
-    reaction: firstString(base.attributes, ["reaction"]),
-    recordedOn: firstString(base.attributes, ["recordedOn", "assertedOn"]),
-    relatedConditionIds: readRegistryStrings(base.attributes, ["relatedConditionIds"]),
-    note: firstString(base.attributes, ["note"]),
-  };
+  return base ? transformRegistryRecord(base, allergyRegistryDefinition) : null;
 }
 
 export function protocolRecordFromEntity(entity: CanonicalEntity): ProtocolQueryRecord | null {
@@ -603,38 +585,12 @@ export function protocolRecordFromEntity(entity: CanonicalEntity): ProtocolQuery
 
 export function familyRecordFromEntity(entity: CanonicalEntity): FamilyQueryRecord | null {
   const base = registryRecordBaseFromEntity(entity, "family");
-  if (!base) {
-    return null;
-  }
-
-  return {
-    ...base,
-    relationship: firstString(base.attributes, ["relationship"]),
-    deceased: firstBoolean(base.attributes, ["deceased"]),
-    conditions: readRegistryStrings(base.attributes, ["conditions"]),
-    relatedVariantIds: readRegistryStrings(base.attributes, ["relatedVariantIds"]),
-    note: firstString(base.attributes, ["note"]),
-    lineage: firstString(base.attributes, ["lineage"]),
-    updatedAt: firstString(base.attributes, ["updatedAt"]),
-  };
+  return base ? transformRegistryRecord(base, familyRegistryDefinition) : null;
 }
 
 export function geneticsRecordFromEntity(
   entity: CanonicalEntity,
 ): GeneticsQueryRecord | null {
   const base = registryRecordBaseFromEntity(entity, "genetics");
-  if (!base) {
-    return null;
-  }
-
-  return {
-    ...base,
-    gene: firstString(base.attributes, ["gene"]),
-    zygosity: firstString(base.attributes, ["zygosity"]),
-    significance: firstString(base.attributes, ["significance"]),
-    inheritance: firstString(base.attributes, ["inheritance"]),
-    sourceFamilyMemberIds: readRegistryStrings(base.attributes, ["sourceFamilyMemberIds"]),
-    note: firstString(base.attributes, ["note"]),
-    updatedAt: firstString(base.attributes, ["updatedAt"]),
-  };
+  return base ? transformRegistryRecord(base, geneticsRegistryDefinition) : null;
 }

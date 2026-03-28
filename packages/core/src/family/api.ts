@@ -1,9 +1,15 @@
 import {
+  CONTRACT_SCHEMA_VERSION,
+  FRONTMATTER_DOC_TYPES,
+  extractHealthEntityRegistryLinks,
+  familyRegistryEntityDefinition,
+  type FamilyMemberFrontmatter,
   contractIdMaxLength,
   FAMILY_MEMBER_LIMITS,
   ID_PREFIXES,
 } from "@murph/contracts";
 
+import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";
 
@@ -20,27 +26,58 @@ import {
 
 import type { FrontmatterObject } from "../types.ts";
 import type {
+  FamilyMemberEntity,
+  FamilyMemberLink,
+  FamilyMemberLinkType,
   FamilyMemberRecord,
   ReadFamilyMemberInput,
   UpsertFamilyMemberInput,
   UpsertFamilyMemberResult,
 } from "./types.ts";
-import { FAMILY_MEMBER_DOC_TYPE, FAMILY_MEMBER_SCHEMA_VERSION } from "./types.ts";
 
-const FAMILY_DIRECTORY = "bank/family";
+const FAMILY_DIRECTORY = familyRegistryEntityDefinition.registry.directory;
 const FAMILY_TITLE_MAX_LENGTH = FAMILY_MEMBER_LIMITS.title;
 const FAMILY_RELATIONSHIP_MAX_LENGTH = FAMILY_MEMBER_LIMITS.relationship;
 const FAMILY_NOTE_MAX_LENGTH = FAMILY_MEMBER_LIMITS.note;
 const FAMILY_CONDITION_MAX_LENGTH = FAMILY_MEMBER_LIMITS.condition;
 const FAMILY_VARIANT_ID_MAX_LENGTH = contractIdMaxLength(ID_PREFIXES.variant);
 
+function parseFamilyMemberFrontmatter(attributes: FrontmatterObject): FamilyMemberFrontmatter {
+  const schema = familyRegistryEntityDefinition.registry.frontmatterSchema;
+
+  if (!schema) {
+    throw new Error("Family registry definition is missing a frontmatter schema.");
+  }
+
+  const result = schema.safeParse(attributes);
+
+  if (!result.success) {
+    throw new VaultError("VAULT_INVALID_FAMILY_MEMBER", "Family registry document has an unexpected shape.");
+  }
+
+  return result.data as FamilyMemberFrontmatter;
+}
+
+function sortFamilyRecords(records: FamilyMemberRecord[]): void {
+  if (familyRegistryEntityDefinition.registry.sortBehavior !== "title") {
+    throw new Error('Family registry definition must use "title" sort behavior.');
+  }
+
+  records.sort(
+    (left, right) => left.title.localeCompare(right.title) || left.familyMemberId.localeCompare(right.familyMemberId),
+  );
+}
+
 function buildBody(record: {
   title: string;
   relationship: string;
   conditions?: string[];
   note?: string;
+  links?: readonly FamilyMemberLink[];
   relatedVariantIds?: string[];
 }): string {
+  const relations = canonicalizeFamilyRelations(record);
+
   return [
     `# ${record.title}`,
     "",
@@ -52,11 +89,81 @@ function buildBody(record: {
     "",
     "## Related Variants",
     "",
-    bulletList(record.relatedVariantIds),
+    bulletList(relations.relatedVariantIds),
     "",
     maybeSection("Notes", record.note),
     "",
   ].join("\n");
+}
+
+function normalizeFamilyLinkType(value: string): FamilyMemberLinkType | null {
+  return value === "related_variant" ? value : null;
+}
+
+function compareFamilyLinks(left: FamilyMemberLink, right: FamilyMemberLink): number {
+  return left.targetId.localeCompare(right.targetId);
+}
+
+function buildFamilyLinksFromFields(input: {
+  relatedVariantIds?: string[];
+}): FamilyMemberLink[] {
+  return (input.relatedVariantIds ?? []).map((targetId) => ({
+    type: "related_variant",
+    targetId,
+  }) satisfies FamilyMemberLink);
+}
+
+function normalizeFamilyLinks(rawLinks: readonly FamilyMemberLink[]): FamilyMemberLink[] {
+  const sortedLinks = [...rawLinks].sort(compareFamilyLinks);
+  const links: FamilyMemberLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of sortedLinks) {
+    const dedupeKey = `${link.type}:${link.targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    links.push(link);
+  }
+
+  return links;
+}
+
+function parseFamilyLinks(attributes: FrontmatterObject): FamilyMemberLink[] {
+  return normalizeFamilyLinks(
+    extractHealthEntityRegistryLinks("family", attributes).flatMap((link) => {
+      const type = normalizeFamilyLinkType(link.type);
+      return type ? [{ type, targetId: link.targetId } satisfies FamilyMemberLink] : [];
+    }),
+  );
+}
+
+function familyRelationsFromLinks(
+  links: readonly FamilyMemberLink[],
+): Pick<FamilyMemberEntity, "relatedVariantIds" | "links"> {
+  const relatedVariantIds = links.map((link) => link.targetId);
+
+  return {
+    relatedVariantIds: relatedVariantIds.length > 0 ? relatedVariantIds : undefined,
+    links: [...links],
+  };
+}
+
+function canonicalizeFamilyRelations(input: {
+  links?: readonly FamilyMemberLink[];
+  relatedVariantIds?: string[];
+}): Pick<FamilyMemberEntity, "relatedVariantIds" | "links"> {
+  const links = normalizeFamilyLinks(
+    (input.links?.length ?? 0) > 0
+      ? [...(input.links ?? [])]
+      : buildFamilyLinksFromFields({
+          relatedVariantIds: input.relatedVariantIds,
+        }),
+  );
+
+  return familyRelationsFromLinks(links);
 }
 
 function recordFromParts(
@@ -64,29 +171,24 @@ function recordFromParts(
   relativePath: string,
   markdown: string,
 ): FamilyMemberRecord {
+  const frontmatter = parseFamilyMemberFrontmatter(attributes);
+  const relations = canonicalizeFamilyRelations({
+    links: parseFamilyLinks(attributes),
+  });
+
   return {
-    schemaVersion: requireString(attributes.schemaVersion, "schemaVersion", 40) as typeof FAMILY_MEMBER_SCHEMA_VERSION,
-    docType: requireString(attributes.docType, "docType", 40) as typeof FAMILY_MEMBER_DOC_TYPE,
-    familyMemberId: requireString(attributes.familyMemberId, "familyMemberId", 64),
-    slug: requireString(attributes.slug, "slug", 160),
-    title: requireString(attributes.title, "title", FAMILY_TITLE_MAX_LENGTH),
-    relationship: requireString(attributes.relationship, "relationship", FAMILY_RELATIONSHIP_MAX_LENGTH),
+    ...frontmatter,
     conditions: validateSortedStringList(
-      attributes.conditions,
+      frontmatter.conditions,
       "conditions",
       "condition",
       24,
       FAMILY_CONDITION_MAX_LENGTH,
     ),
-    deceased: optionalBoolean(attributes.deceased, "deceased"),
-    note: optionalString(attributes.note, "note", FAMILY_NOTE_MAX_LENGTH),
-    relatedVariantIds: validateSortedStringList(
-      attributes.relatedVariantIds,
-      "relatedVariantIds",
-      "variantId",
-      24,
-      FAMILY_VARIANT_ID_MAX_LENGTH,
-    ),
+    deceased: optionalBoolean(frontmatter.deceased, "deceased"),
+    note: optionalString(frontmatter.note, "note", FAMILY_NOTE_MAX_LENGTH),
+    relatedVariantIds: relations.relatedVariantIds,
+    links: relations.links,
     relativePath,
     markdown,
   };
@@ -95,14 +197,10 @@ function recordFromParts(
 const familyRegistryApi = createMarkdownRegistryApi<FamilyMemberRecord>({
   directory: FAMILY_DIRECTORY,
   recordFromParts,
-  isExpectedRecord: (record) =>
-    record.docType === FAMILY_MEMBER_DOC_TYPE && record.schemaVersion === FAMILY_MEMBER_SCHEMA_VERSION,
+  isExpectedRecord: () => true,
   invalidCode: "VAULT_INVALID_FAMILY_MEMBER",
   invalidMessage: "Family registry document has an unexpected shape.",
-  sortRecords: (records) =>
-    records.sort(
-      (left, right) => left.title.localeCompare(right.title) || left.familyMemberId.localeCompare(right.familyMemberId),
-    ),
+  sortRecords: sortFamilyRecords,
   getRecordId: (record) => record.familyMemberId,
   conflictCode: "VAULT_FAMILY_MEMBER_CONFLICT",
   conflictMessage: "familyMemberId and slug resolve to different family members.",
@@ -126,12 +224,15 @@ function buildAttributes(input: {
   conditions?: string[];
   deceased?: boolean;
   note?: string;
+  links?: readonly FamilyMemberLink[];
   relatedVariantIds?: string[];
-}): FrontmatterObject {
+}): FamilyMemberFrontmatter {
+  const relations = canonicalizeFamilyRelations(input);
+
   return Object.fromEntries(
     Object.entries({
-      schemaVersion: FAMILY_MEMBER_SCHEMA_VERSION,
-      docType: FAMILY_MEMBER_DOC_TYPE,
+      schemaVersion: CONTRACT_SCHEMA_VERSION.familyMemberFrontmatter,
+      docType: FRONTMATTER_DOC_TYPES.familyMember,
       familyMemberId: input.familyMemberId,
       slug: input.slug,
       title: input.title,
@@ -139,9 +240,9 @@ function buildAttributes(input: {
       conditions: input.conditions,
       deceased: input.deceased,
       note: input.note,
-      relatedVariantIds: input.relatedVariantIds,
+      relatedVariantIds: relations.relatedVariantIds,
     }).filter(([, value]) => value !== undefined),
-  ) as FrontmatterObject;
+  ) as FamilyMemberFrontmatter;
 }
 
 export async function upsertFamilyMember(
@@ -186,6 +287,9 @@ export async function upsertFamilyMember(
           24,
           FAMILY_VARIANT_ID_MAX_LENGTH,
         );
+  const relations = canonicalizeFamilyRelations({
+    relatedVariantIds,
+  });
   return familyRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
     existingRecord,
@@ -202,14 +306,16 @@ export async function upsertFamilyMember(
         deceased:
           input.deceased === undefined ? existingRecord?.deceased : optionalBoolean(input.deceased, "deceased"),
         note,
-        relatedVariantIds,
+        relatedVariantIds: relations.relatedVariantIds,
+        links: relations.links,
       }),
       body: buildBody({
         title,
         relationship,
         conditions,
         note,
-        relatedVariantIds,
+        relatedVariantIds: relations.relatedVariantIds,
+        links: relations.links,
       }),
     }),
   });

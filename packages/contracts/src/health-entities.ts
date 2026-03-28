@@ -1,8 +1,25 @@
 import type { ZodTypeAny } from "zod";
 
 import { ID_PREFIXES } from "./constants.ts";
-import { goalUpsertPatchPayloadSchema, goalUpsertPayloadSchema } from "./shares.ts";
-import { goalFrontmatterSchema } from "./zod.ts";
+import {
+  allergyUpsertPatchPayloadSchema,
+  allergyUpsertPayloadSchema,
+  conditionUpsertPatchPayloadSchema,
+  conditionUpsertPayloadSchema,
+  familyMemberUpsertPatchPayloadSchema,
+  familyMemberUpsertPayloadSchema,
+  geneticVariantUpsertPatchPayloadSchema,
+  geneticVariantUpsertPayloadSchema,
+  goalUpsertPatchPayloadSchema,
+  goalUpsertPayloadSchema,
+} from "./shares.ts";
+import {
+  allergyFrontmatterSchema,
+  conditionFrontmatterSchema,
+  familyMemberFrontmatterSchema,
+  geneticVariantFrontmatterSchema,
+  goalFrontmatterSchema,
+} from "./zod.ts";
 
 export type HealthEntityKind =
   | "assessment"
@@ -16,7 +33,7 @@ export type HealthEntityKind =
   | "family"
   | "genetics";
 
-export type HealthEntitySortBehavior = "priority-title" | "title";
+export type HealthEntitySortBehavior = "gene-title" | "priority-title" | "title";
 
 export type HealthEntityRegistryLinkCardinality = "one" | "many";
 
@@ -320,7 +337,7 @@ const checkedHealthEntityDefinitions = [
       },
     },
   }),
-  {
+  defineRegistryEntity({
     kind: "condition",
     listKinds: ["condition"],
     noun: "condition",
@@ -333,10 +350,43 @@ const checkedHealthEntityDefinitions = [
       assertedOn: "2026-03-12",
     },
     registry: {
+      frontmatterSchema: conditionFrontmatterSchema,
       directory: "bank/conditions",
-      idKeys: ["conditionId"],
+      idField: "conditionId",
+      patchPayloadSchema: conditionUpsertPatchPayloadSchema,
+      upsertPayloadSchema: conditionUpsertPayloadSchema,
+      relationKeys: [
+        {
+          type: "related_goal",
+          keys: ["relatedGoalIds"],
+          cardinality: "many",
+        },
+        {
+          type: "related_protocol",
+          keys: ["relatedProtocolIds"],
+          cardinality: "many",
+        },
+      ],
+      command: {
+        commandDescription: "Condition registry commands for the health extension surface.",
+        commandName: "condition",
+        listServiceMethod: "listConditions",
+        listStatusDescription: "Optional condition status to filter by.",
+        payloadFile: "condition.json",
+        runtimeListMethod: "listConditions",
+        runtimeMethod: "upsertCondition",
+        runtimeShowMethod: "showCondition",
+        scaffoldServiceMethod: "scaffoldCondition",
+        showId: {
+          description: "Condition id or slug to show.",
+          example: "<condition-id>",
+        },
+        showServiceMethod: "showCondition",
+        upsertServiceMethod: "upsertCondition",
+      },
       titleKeys: ["title"],
       statusKeys: ["clinicalStatus"],
+      sortBehavior: "title",
       transform({ attributes, helpers }) {
         return {
           clinicalStatus: helpers.firstString(attributes, ["clinicalStatus"]),
@@ -351,8 +401,8 @@ const checkedHealthEntityDefinitions = [
         };
       },
     },
-  },
-  {
+  }),
+  defineRegistryEntity({
     kind: "allergy",
     listKinds: ["allergy"],
     noun: "allergy",
@@ -364,10 +414,38 @@ const checkedHealthEntityDefinitions = [
       status: "active",
     },
     registry: {
+      frontmatterSchema: allergyFrontmatterSchema,
       directory: "bank/allergies",
-      idKeys: ["allergyId"],
+      idField: "allergyId",
+      patchPayloadSchema: allergyUpsertPatchPayloadSchema,
+      upsertPayloadSchema: allergyUpsertPayloadSchema,
+      relationKeys: [
+        {
+          type: "related_condition",
+          keys: ["relatedConditionIds"],
+          cardinality: "many",
+        },
+      ],
+      command: {
+        commandDescription: "Allergy registry commands for the health extension surface.",
+        commandName: "allergy",
+        listServiceMethod: "listAllergies",
+        listStatusDescription: "Optional allergy status to filter by.",
+        payloadFile: "allergy.json",
+        runtimeListMethod: "listAllergies",
+        runtimeMethod: "upsertAllergy",
+        runtimeShowMethod: "showAllergy",
+        scaffoldServiceMethod: "scaffoldAllergy",
+        showId: {
+          description: "Allergy id or slug to show.",
+          example: "<allergy-id>",
+        },
+        showServiceMethod: "showAllergy",
+        upsertServiceMethod: "upsertAllergy",
+      },
       titleKeys: ["title"],
       statusKeys: ["status"],
+      sortBehavior: "title",
       transform({ attributes, helpers }) {
         return {
           substance: helpers.firstString(attributes, ["substance"]),
@@ -379,7 +457,7 @@ const checkedHealthEntityDefinitions = [
         };
       },
     },
-  },
+  }),
   {
     kind: "protocol",
     listKinds: ["protocol"],
@@ -456,11 +534,11 @@ const checkedHealthEntityDefinitions = [
       ],
     },
   },
-  {
+  defineRegistryEntity({
     kind: "family",
     listKinds: ["family"],
-    noun: "family",
-    plural: "families",
+    noun: "family member",
+    plural: "family members",
     prefixes: [`${ID_PREFIXES.family}_`],
     scaffoldTemplate: {
       title: "Mother",
@@ -468,10 +546,37 @@ const checkedHealthEntityDefinitions = [
       conditions: ["hypertension"],
     },
     registry: {
+      frontmatterSchema: familyMemberFrontmatterSchema,
       directory: "bank/family",
-      idKeys: ["familyMemberId"],
+      idField: "familyMemberId",
+      patchPayloadSchema: familyMemberUpsertPatchPayloadSchema,
+      upsertPayloadSchema: familyMemberUpsertPayloadSchema,
+      relationKeys: [
+        {
+          type: "related_variant",
+          keys: ["relatedVariantIds"],
+          cardinality: "many",
+        },
+      ],
+      command: {
+        commandDescription: "Family registry commands for the health extension surface.",
+        commandName: "family",
+        listServiceMethod: "listFamilyMembers",
+        payloadFile: "family.json",
+        runtimeListMethod: "listFamilyMembers",
+        runtimeMethod: "upsertFamilyMember",
+        runtimeShowMethod: "showFamilyMember",
+        scaffoldServiceMethod: "scaffoldFamilyMember",
+        showId: {
+          description: "Family member id or slug to show.",
+          example: "<family-member-id>",
+        },
+        showServiceMethod: "showFamilyMember",
+        upsertServiceMethod: "upsertFamilyMember",
+      },
       titleKeys: ["title"],
       statusKeys: [],
+      sortBehavior: "title",
       transform({ attributes, helpers }) {
         return {
           relationship: helpers.firstString(attributes, ["relationship"]),
@@ -479,17 +584,15 @@ const checkedHealthEntityDefinitions = [
           conditions: helpers.firstStringArray(attributes, ["conditions"]),
           relatedVariantIds: helpers.firstStringArray(attributes, ["relatedVariantIds"]),
           note: helpers.firstString(attributes, ["note"]),
-          lineage: helpers.firstString(attributes, ["lineage"]),
-          updatedAt: helpers.firstString(attributes, ["updatedAt"]),
         };
       },
     },
-  },
-  {
+  }),
+  defineRegistryEntity({
     kind: "genetics",
     listKinds: ["genetics"],
-    noun: "genetics",
-    plural: "genetics",
+    noun: "genetic variant",
+    plural: "genetic variants",
     prefixes: [`${ID_PREFIXES.variant}_`],
     scaffoldTemplate: {
       title: "MTHFR C677T",
@@ -497,10 +600,38 @@ const checkedHealthEntityDefinitions = [
       significance: "risk_factor",
     },
     registry: {
+      frontmatterSchema: geneticVariantFrontmatterSchema,
       directory: "bank/genetics",
-      idKeys: ["variantId"],
+      idField: "variantId",
+      patchPayloadSchema: geneticVariantUpsertPatchPayloadSchema,
+      upsertPayloadSchema: geneticVariantUpsertPayloadSchema,
+      relationKeys: [
+        {
+          type: "source_family_member",
+          keys: ["sourceFamilyMemberIds"],
+          cardinality: "many",
+        },
+      ],
+      command: {
+        commandDescription: "Genetic variant commands for the health extension surface.",
+        commandName: "genetics",
+        listServiceMethod: "listGeneticVariants",
+        listStatusDescription: "Optional genetic-variant status to filter by.",
+        payloadFile: "genetics.json",
+        runtimeListMethod: "listGeneticVariants",
+        runtimeMethod: "upsertGeneticVariant",
+        runtimeShowMethod: "showGeneticVariant",
+        scaffoldServiceMethod: "scaffoldGeneticVariant",
+        showId: {
+          description: "Genetic variant id or slug to show.",
+          example: "<genetic-variant-id>",
+        },
+        showServiceMethod: "showGeneticVariant",
+        upsertServiceMethod: "upsertGeneticVariant",
+      },
       titleKeys: ["title"],
       statusKeys: ["significance"],
+      sortBehavior: "gene-title",
       transform({ attributes, helpers }) {
         return {
           gene: helpers.firstString(attributes, ["gene"]),
@@ -509,11 +640,10 @@ const checkedHealthEntityDefinitions = [
           inheritance: helpers.firstString(attributes, ["inheritance"]),
           sourceFamilyMemberIds: helpers.firstStringArray(attributes, ["sourceFamilyMemberIds"]),
           note: helpers.firstString(attributes, ["note"]),
-          updatedAt: helpers.firstString(attributes, ["updatedAt"]),
         };
       },
     },
-  },
+  }),
 ] as const satisfies readonly HealthEntityDefinition[];
 
 export const healthEntityDefinitions: readonly HealthEntityDefinition[] =
@@ -569,3 +699,7 @@ export function extractHealthEntityRegistryRelatedIds(
 }
 
 export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");
+export const conditionRegistryEntityDefinition = requireHealthEntityRegistryDefinition("condition");
+export const allergyRegistryEntityDefinition = requireHealthEntityRegistryDefinition("allergy");
+export const familyRegistryEntityDefinition = requireHealthEntityRegistryDefinition("family");
+export const geneticsRegistryEntityDefinition = requireHealthEntityRegistryDefinition("genetics");
