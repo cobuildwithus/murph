@@ -409,9 +409,16 @@ function createTelegramFileDownloader(input: {
   }
 
   const baseUrl = (input.fileBaseUrl ?? "https://api.telegram.org/file").replace(/\/$/u, "");
+  const allowLocalFileReads = isTrustedTelegramFileBaseUrl(baseUrl);
 
   return async (filePath, signal) => {
     if (looksLikeLocalBotApiFilePath(filePath)) {
+      if (!allowLocalFileReads) {
+        throw new Error(
+          "Telegram returned a local file path from an untrusted Bot API file base URL. Only loopback Local Bot API file endpoints may read local files directly.",
+        );
+      }
+
       const absolutePath = filePath.startsWith("file://")
         ? fileURLToPath(filePath)
         : filePath;
@@ -437,6 +444,23 @@ function looksLikeLocalBotApiFilePath(filePath: string): boolean {
     path.posix.isAbsolute(filePath) ||
     path.win32.isAbsolute(filePath)
   );
+}
+
+function isTrustedTelegramFileBaseUrl(fileBaseUrl: string): boolean {
+  try {
+    const url = new URL(fileBaseUrl);
+    const hostname = url.hostname.toLowerCase();
+
+    return (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return false;
+  }
 }
 
 function shouldRetryTelegramPollingError(error: unknown): boolean {
