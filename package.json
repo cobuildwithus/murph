@@ -8,7 +8,7 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "build": "pnpm --dir packages/hosted-execution build && pnpm --dir packages/runtime-state build && pnpm --dir packages/core build && pnpm --dir packages/importers build && pnpm --dir packages/device-syncd build && pnpm --dir packages/query build && pnpm --dir packages/inboxd build && pnpm --dir packages/parsers build && pnpm --dir packages/cli build && pnpm --dir packages/assistant-services build && pnpm --dir packages/assistant-runtime build",
+    "build": "pnpm --dir packages/hosted-execution build && pnpm --dir packages/runtime-state build && pnpm --dir packages/core build && pnpm --dir packages/importers build && pnpm --dir packages/device-syncd build && pnpm --dir packages/query build && pnpm --dir packages/inboxd build && pnpm --dir packages/parsers build && pnpm --dir packages/cli build && pnpm --dir packages/assistantd build && pnpm --dir packages/assistant-services build && pnpm --dir packages/assistant-runtime build",
     "clean": "rimraf packages/*/dist packages/*/.next packages/*/.test-dist packages/*/*.tsbuildinfo apps/*/.next apps/*/.next-smoke apps/*/*.tsbuildinfo && pnpm clean:source-sidecars",
     "clean:source-sidecars": "tsx scripts/prune-generated-source-sidecars.ts --quiet",
     "typecheck": "bash scripts/workspace-verify.sh typecheck",
@@ -36,6 +36,8 @@
     "review:gpt:delay": "bash scripts/review-gpt-delay.sh",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
     "chatgpt:thread:export": "node scripts/chatgpt-thread-export.mjs",
+    "chatgpt:thread:download": "node scripts/chatgpt-thread-download.mjs",
+    "chatgpt:thread:wake": "node scripts/chatgpt-thread-wake.mjs",
     "setup": "bash scripts/setup-host.sh",
     "onboard": "bash scripts/setup-host.sh",
     "chat": "pnpm exec tsx packages/cli/src/bin.ts assistant chat",

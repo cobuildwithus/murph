@@ -62,6 +62,10 @@ The repo now has two separate ChatGPT upload paths:
   waits locally, then reopens an existing ChatGPT thread through the same browser automation and saves the captured markdown response under `output-packages/review-gpt-delay/` without uploading a fresh ZIP by default
 - `pnpm chatgpt:thread:export --chat-url <url> --output <path>`
   reads an already-authenticated ChatGPT thread directly from the managed local Chrome session and saves the current thread text plus attachment/button labels as JSON, without posting a new prompt into the conversation
+- `pnpm chatgpt:thread:download --chat-url <url> --attachment-text <filename> --output-dir <dir>`
+  clicks a named attachment button inside an authenticated ChatGPT thread and waits for Chrome to finish downloading the file into the selected directory
+- `pnpm chatgpt:thread:wake --delay 70m --chat-url <url> [--session-id <uuid>]`
+  sleeps, exports the authenticated ChatGPT thread, downloads any `.patch` or `.diff` attachments it finds, and can then continue a non-interactive `codex exec resume` run against the selected session id
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 
