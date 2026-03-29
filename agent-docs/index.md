@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-03-29 (completion-workflow coverage audit was folded into the final review prompt, the central process docs were aligned, and the active-plan routing list was refreshed)
+Last verified: 2026-03-29 (hosted runner isolation docs covering scrubbed child env launch, stripped supervisor proxy vars, non-supervisor launch `HOME`, and abort-driven child reaping were aligned across architecture, runtime, verification, app-local docs, and plan-routing docs)
 
 ## Purpose
 
