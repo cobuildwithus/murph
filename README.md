@@ -57,15 +57,17 @@ VAULT=fixtures/demo-web-vault pnpm web:dev
 The repo now has two separate ChatGPT upload paths:
 
 - `pnpm review:gpt`
-  packages source/docs for code review using the existing audit ZIP flow, pruning untracked generated source sidecars first and then staging git-visible files while filtering local `.env` and build residue from the upload bundle
+  packages source/docs for code review using the existing audit ZIP flow, pruning untracked generated source sidecars first and then staging git-visible files while filtering local `.env` and build residue from the upload bundle. Use this path when you want to post a new prompt or update an existing ChatGPT thread.
 - `pnpm review:gpt:delay --delay 50m --chat-url <url>`
   waits locally, then reopens an existing ChatGPT thread through the same browser automation and saves the captured markdown response under `output-packages/review-gpt-delay/` without uploading a fresh ZIP by default
 - `pnpm chatgpt:thread:export --chat-url <url> --output <path>`
   reads an already-authenticated ChatGPT thread directly from the managed local Chrome session and saves the current thread text plus attachment/button labels as JSON, without posting a new prompt into the conversation
 - `pnpm chatgpt:thread:download --chat-url <url> --attachment-text <filename> --output-dir <dir>`
   clicks a named attachment button inside an authenticated ChatGPT thread and waits for Chrome to finish downloading the file into the selected directory
+- `pnpm chatgpt:thread:watch --delay 70m --chat-url <url> [--session-id <uuid>]`
+  watches an already-running ChatGPT thread, exports it after the delay, downloads any `.patch` or `.diff` attachments it finds, and can resume a non-interactive `codex exec resume` run against the selected session id. This is the no-post path for "just wait on that thread" requests.
 - `pnpm chatgpt:thread:wake --delay 70m --chat-url <url> [--session-id <uuid>]`
-  sleeps, exports the authenticated ChatGPT thread, downloads any `.patch` or `.diff` attachments it finds, and can then continue a non-interactive `codex exec resume` run against the selected session id
+  alias of `pnpm chatgpt:thread:watch` for the same export, download, and resume flow
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 
@@ -74,6 +76,8 @@ The repo now has two separate ChatGPT upload paths:
 `review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Murph precedence order: explicit `--vault`, then `VAULT`, then the saved default vault.
 
 `review:gpt:delay` defaults to skipping ZIP upload, auto-submitting, and waiting for the response, plus a generic "did the patch arrive yet?" prompt. You can override those flags and the prompt directly. The target chat still has to be accessible from the local logged-in browser profile that `cobuild-review-gpt` uses; it does not bypass ChatGPT auth on its own.
+
+If a thread is already running and expected to return a patch on its own, prefer `chatgpt:thread:watch` or `chatgpt:thread:wake` instead of `review:gpt`; those thread commands do not post another prompt into the conversation.
 
 The data bundle intentionally excludes `.runtime/**`, `.env*`, archive files, and `exports/packs/**` so machine-local runtime/auth material and already-derived export packs are not uploaded by default. Generated ZIPs are written under `output-packages/`.
 
