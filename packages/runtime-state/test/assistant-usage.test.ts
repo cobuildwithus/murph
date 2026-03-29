@@ -10,6 +10,7 @@ import {
   deletePendingAssistantUsageRecord,
   listPendingAssistantUsageRecords,
   parseAssistantUsageRecord,
+  resolveAssistantUsageCredentialSource,
   writePendingAssistantUsageRecord,
 } from "../src/index.ts";
 
@@ -92,7 +93,7 @@ test("assistant usage records round-trip through pending storage and sort by occ
   }
 });
 
-test("assistant usage parsing derives totalTokens from input and output tokens", () => {
+test("assistant usage parsing preserves a missing totalTokens value", () => {
   assert.deepEqual(
     parseAssistantUsageRecord({
       attemptCount: 1,
@@ -128,9 +129,36 @@ test("assistant usage parsing derives totalTokens from input and output tokens",
       schema: ASSISTANT_USAGE_SCHEMA,
       servedModel: null,
       sessionId: "asst_123",
-      totalTokens: 15,
+      totalTokens: null,
       turnId: "turn_123",
       usageId: "turn_123.attempt-1",
     },
+  );
+});
+
+test("assistant usage credential source resolves against the hosted user env snapshot", () => {
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "OPENAI_API_KEY",
+      provider: "openai-compatible",
+      userEnvKeys: ["OPENAI_API_KEY"],
+    }),
+    "member",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "OPENAI_API_KEY",
+      provider: "openai-compatible",
+      userEnvKeys: [],
+    }),
+    "platform",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
+      apiKeyEnv: null,
+      provider: "codex-cli",
+      userEnvKeys: ["VENICE_API_KEY"],
+    }),
+    "unknown",
   );
 });

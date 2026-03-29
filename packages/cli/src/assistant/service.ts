@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
+  resolveAssistantUsageCredentialSource,
   writePendingAssistantUsageRecord,
 } from '@murph/runtime-state'
 import {
@@ -1583,6 +1584,9 @@ async function persistPendingAssistantUsageEvent(input: {
 }): Promise<void> {
   const usage = input.providerResult.usage
   const hostedMemberId = normalizeNullableString(process.env.HOSTED_MEMBER_ID)
+  const apiKeyEnv = normalizeNullableString(
+    usage?.apiKeyEnv ?? input.providerResult.providerOptions.apiKeyEnv,
+  )
 
   if (!usage || !hostedMemberId) {
     return
@@ -1611,10 +1615,12 @@ async function persistPendingAssistantUsageEvent(input: {
       baseUrl: normalizeNullableString(
         usage.baseUrl ?? input.providerResult.providerOptions.baseUrl,
       ),
-      apiKeyEnv: normalizeNullableString(
-        usage.apiKeyEnv ?? input.providerResult.providerOptions.apiKeyEnv,
-      ),
-      credentialSource: null,
+      apiKeyEnv,
+      credentialSource: resolveAssistantUsageCredentialSource({
+        apiKeyEnv,
+        provider: input.providerResult.provider,
+        userEnvKeys: readHostedUserEnvKeysFromProcessEnv(process.env),
+      }),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       reasoningTokens: usage.reasoningTokens,
@@ -1627,6 +1633,21 @@ async function persistPendingAssistantUsageEvent(input: {
       rawUsageJson: usage.rawUsageJson,
     },
   })
+}
+
+function readHostedUserEnvKeysFromProcessEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): string[] {
+  const raw = normalizeNullableString(env.HOSTED_EXECUTION_USER_ENV_KEYS)
+
+  if (!raw) {
+    return []
+  }
+
+  return raw
+    .split(',')
+    .map((key) => normalizeNullableString(key))
+    .filter((key): key is string => key !== null)
 }
 
 async function persistAssistantTurnAndSession(input: {

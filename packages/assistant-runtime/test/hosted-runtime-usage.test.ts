@@ -314,4 +314,185 @@ describe("exportHostedPendingAssistantUsage", () => {
       }),
     ]);
   });
+
+  it("falls back to single-record retries when a batch request fails", async () => {
+    mocks.resolveHostedExecutionAiUsageClient.mockReturnValue({
+      recordUsage: mocks.recordUsage,
+    });
+    mocks.listPendingAssistantUsageRecords.mockResolvedValue([
+      {
+        apiKeyEnv: null,
+        attemptCount: 1,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: "platform",
+        inputTokens: 10,
+        memberId: "member_123",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        outputTokens: 5,
+        provider: "codex-cli",
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        providerSessionId: "sess_123",
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: "gpt-5.4",
+        routeId: "primary",
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.4",
+        sessionId: "asst_123",
+        totalTokens: 15,
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-1",
+      },
+      {
+        apiKeyEnv: null,
+        attemptCount: 2,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: "platform",
+        inputTokens: 20,
+        memberId: "member_123",
+        occurredAt: "2026-03-29T12:00:01.000Z",
+        outputTokens: 8,
+        provider: "codex-cli",
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        providerSessionId: "sess_124",
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: "gpt-5.4",
+        routeId: "primary",
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.4",
+        sessionId: "asst_123",
+        totalTokens: 28,
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-2",
+      },
+    ]);
+    mocks.recordUsage
+      .mockRejectedValueOnce(new Error("batch boom"))
+      .mockResolvedValueOnce({
+        recorded: 1,
+        usageIds: ["turn_123.attempt-1"],
+      })
+      .mockResolvedValueOnce({
+        recorded: 1,
+        usageIds: ["turn_123.attempt-2"],
+      });
+
+    const result = await exportHostedPendingAssistantUsage({
+      baseUrl: "https://join.example.test",
+      internalToken: "internal-token",
+      timeoutMs: 10_000,
+      userId: "member_123",
+      userEnvKeys: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(result).toEqual({
+      exported: 2,
+      failed: 0,
+      pending: 0,
+    });
+    expect(mocks.recordUsage).toHaveBeenCalledTimes(3);
+    expect(mocks.deletePendingAssistantUsageRecord).toHaveBeenCalledTimes(2);
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps export best-effort when an individual fallback retry fails", async () => {
+    mocks.resolveHostedExecutionAiUsageClient.mockReturnValue({
+      recordUsage: mocks.recordUsage,
+    });
+    mocks.listPendingAssistantUsageRecords.mockResolvedValue([
+      {
+        apiKeyEnv: null,
+        attemptCount: 1,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: "platform",
+        inputTokens: 10,
+        memberId: "member_123",
+        occurredAt: "2026-03-29T12:00:00.000Z",
+        outputTokens: 5,
+        provider: "codex-cli",
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        providerSessionId: "sess_123",
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: "gpt-5.4",
+        routeId: "primary",
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.4",
+        sessionId: "asst_123",
+        totalTokens: 15,
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-1",
+      },
+      {
+        apiKeyEnv: null,
+        attemptCount: 2,
+        baseUrl: null,
+        cacheWriteTokens: null,
+        cachedInputTokens: null,
+        credentialSource: "platform",
+        inputTokens: 20,
+        memberId: "member_123",
+        occurredAt: "2026-03-29T12:00:01.000Z",
+        outputTokens: 8,
+        provider: "codex-cli",
+        providerMetadataJson: null,
+        providerName: null,
+        providerRequestId: null,
+        providerSessionId: "sess_124",
+        rawUsageJson: null,
+        reasoningTokens: null,
+        requestedModel: "gpt-5.4",
+        routeId: "primary",
+        schema: "murph.assistant-usage.v1",
+        servedModel: "gpt-5.4",
+        sessionId: "asst_123",
+        totalTokens: 28,
+        turnId: "turn_123",
+        usageId: "turn_123.attempt-2",
+      },
+    ]);
+    mocks.recordUsage
+      .mockRejectedValueOnce(new Error("batch boom"))
+      .mockRejectedValueOnce(new Error("single boom"))
+      .mockResolvedValueOnce({
+        recorded: 1,
+        usageIds: ["turn_123.attempt-2"],
+      });
+
+    const result = await exportHostedPendingAssistantUsage({
+      baseUrl: "https://join.example.test",
+      internalToken: "internal-token",
+      timeoutMs: 10_000,
+      userId: "member_123",
+      userEnvKeys: [],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(result).toEqual({
+      exported: 1,
+      failed: 1,
+      pending: 1,
+    });
+    expect(mocks.recordUsage).toHaveBeenCalledTimes(3);
+    expect(mocks.deletePendingAssistantUsageRecord).toHaveBeenCalledTimes(1);
+    expect(mocks.deletePendingAssistantUsageRecord).toHaveBeenCalledWith({
+      usageId: "turn_123.attempt-2",
+      vault: "/tmp/vault",
+    });
+    expect(mocks.warn).toHaveBeenCalledTimes(2);
+  });
 });

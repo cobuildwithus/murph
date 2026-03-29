@@ -1,7 +1,8 @@
 import {
-  listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeFailed,
+  listHostedAiUsagePendingStripeMetering,
   markHostedAiUsageStripeMetered,
+  markHostedAiUsageStripeRetryableFailure,
   markHostedAiUsageStripeSkipped,
   type HostedAiUsageStripeCandidate,
 } from "./usage";
@@ -42,10 +43,10 @@ export async function drainHostedAiUsageStripeMetering(): Promise<HostedAiUsageS
   let failed = 0;
 
   for (const candidate of candidates) {
-    if (candidate.credentialSource === "member") {
+    if (candidate.credentialSource !== "platform") {
       await markHostedAiUsageStripeSkipped({
         id: candidate.id,
-        message: "Skipped Stripe AI metering because the run used a member-supplied API key.",
+        message: "Skipped Stripe AI metering because the run did not use platform credentials.",
       });
       skipped += 1;
       continue;
@@ -54,12 +55,10 @@ export async function drainHostedAiUsageStripeMetering(): Promise<HostedAiUsageS
     const stripeCustomerId = candidate.member.stripeCustomerId;
     const value = resolveHostedAiUsageStripeValue(candidate);
 
-    if (!stripeCustomerId || value === null) {
+    if (value === null) {
       await markHostedAiUsageStripeSkipped({
         id: candidate.id,
-        message: !stripeCustomerId
-          ? "Skipped Stripe AI metering because the member does not have a Stripe customer id yet."
-          : "Skipped Stripe AI metering because no total token count was available.",
+        message: "Skipped Stripe AI metering because no total token count was available.",
       });
       skipped += 1;
       continue;
@@ -69,6 +68,7 @@ export async function drainHostedAiUsageStripeMetering(): Promise<HostedAiUsageS
       await createHostedAiUsageStripeMeterEvent({
         eventName: environment.meterEventName,
         identifier: candidate.id,
+        occurredAt: candidate.occurredAt,
         stripeCustomerId,
         stripeSecretKey: environment.stripeSecretKey,
         value,
@@ -79,10 +79,19 @@ export async function drainHostedAiUsageStripeMetering(): Promise<HostedAiUsageS
       });
       metered += 1;
     } catch (error) {
-      await markHostedAiUsageStripeFailed({
-        id: candidate.id,
-        message: error instanceof Error ? error.message : String(error),
-      });
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (shouldRetryStripeMeterEvent(error)) {
+        await markHostedAiUsageStripeRetryableFailure({
+          id: candidate.id,
+          message,
+        });
+      } else {
+        await markHostedAiUsageStripeFailed({
+          id: candidate.id,
+          message,
+        });
+      }
       failed += 1;
     }
   }
@@ -112,6 +121,7 @@ export function readHostedAiUsageStripeMeterEnvironment(
 async function createHostedAiUsageStripeMeterEvent(input: {
   eventName: string;
   identifier: string;
+  occurredAt: Date;
   stripeCustomerId: string;
   stripeSecretKey: string;
   value: number;
@@ -121,6 +131,7 @@ async function createHostedAiUsageStripeMeterEvent(input: {
   body.set("identifier", input.identifier);
   body.set("payload[stripe_customer_id]", input.stripeCustomerId);
   body.set("payload[value]", String(input.value));
+  body.set("timestamp", String(Math.floor(input.occurredAt.getTime() / 1000)));
 
   const response = await fetch(STRIPE_METER_EVENTS_URL, {
     method: "POST",
@@ -134,8 +145,9 @@ async function createHostedAiUsageStripeMeterEvent(input: {
   const text = await response.text();
 
   if (!response.ok) {
-    throw new Error(
+    throw new StripeMeterEventError(
       `Stripe meter event ${input.identifier} failed with HTTP ${response.status}${formatStripeMeterErrorSuffix(text)}.`,
+      response.status,
     );
   }
 }
@@ -147,8 +159,7 @@ function resolveHostedAiUsageStripeValue(
     return candidate.totalTokens;
   }
 
-  const fallback = (candidate.inputTokens ?? 0) + (candidate.outputTokens ?? 0);
-  return fallback > 0 ? fallback : null;
+  return null;
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {
@@ -177,4 +188,19 @@ function readPositiveInteger(value: string | null, fallback: number, label: stri
 function formatStripeMeterErrorSuffix(text: string): string {
   const trimmed = text.trim();
   return trimmed.length > 0 ? `: ${trimmed.slice(0, 500)}` : "";
+}
+
+function shouldRetryStripeMeterEvent(error: unknown): boolean {
+  if (!(error instanceof StripeMeterEventError)) {
+    return true;
+  }
+
+  return error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
+class StripeMeterEventError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "StripeMeterEventError";
+  }
 }
