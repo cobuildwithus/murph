@@ -43,4 +43,4 @@ Implement the requested refactor sequence by first standardizing provider and re
 - `pnpm typecheck`
 - `pnpm test`
 - `pnpm test:coverage`
-- completion workflow audit passes: `simplify` -> `test-coverage-audit` -> `task-finish-review`
+- completion workflow audit passes: `simplify` -> `task-finish-review` (with coverage/proof-gap review folded into the final audit)
