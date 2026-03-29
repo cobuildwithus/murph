@@ -6,9 +6,11 @@ import {
   geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
   healthEntityDefinitions,
+  protocolRegistryEntityDefinition,
   type CommandCapability,
   type CommandCapabilityBundleId,
   type HealthEntityDefinition,
+  type HealthEntityDefinitionWithRegistry,
   type HealthEntityKind,
 } from "@murph/contracts";
 import { z } from "incur";
@@ -208,12 +210,9 @@ function buildStatusFilteredRegistryDescriptorExtension(
 }
 
 function buildSharedStatusFilteredRegistryDescriptorExtension(
-  definition:
-    | typeof goalRegistryEntityDefinition
-    | typeof conditionRegistryEntityDefinition
-    | typeof allergyRegistryEntityDefinition
-    | typeof familyRegistryEntityDefinition
-    | typeof geneticsRegistryEntityDefinition,
+  definition: HealthEntityDefinitionWithRegistry & {
+    kind: StatusFilteredRegistryDescriptorCommandName;
+  },
 ): HealthEntityDescriptorExtension {
   const command = definition.registry.command;
   const resultIdField = definition.registry.idField;
@@ -254,6 +253,17 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
         }
       : undefined,
   };
+}
+
+function narrowStatusFilteredRegistryDefinition<TKind extends StatusFilteredRegistryDescriptorCommandName>(
+  definition: HealthEntityDefinitionWithRegistry,
+  kind: TKind,
+): HealthEntityDefinitionWithRegistry & { kind: TKind } {
+  if (definition.kind !== kind) {
+    throw new Error(`Expected registry entity "${kind}" but received "${definition.kind}".`);
+  }
+
+  return definition as HealthEntityDefinitionWithRegistry & { kind: TKind };
 }
 
 const checkedHealthEntityDescriptorExtensions = {
@@ -337,29 +347,18 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showProfile",
     },
   },
-  goal: buildSharedStatusFilteredRegistryDescriptorExtension(goalRegistryEntityDefinition),
-  condition: buildSharedStatusFilteredRegistryDescriptorExtension(conditionRegistryEntityDefinition),
-  allergy: buildSharedStatusFilteredRegistryDescriptorExtension(allergyRegistryEntityDefinition),
-  protocol: buildStatusFilteredRegistryDescriptorExtension({
-    commandDescription: "Protocol registry commands for the health extension surface.",
-    commandName: "protocol",
-    listServiceMethod: "listProtocols",
-    listStatusDescription: "Optional protocol status to filter by.",
-    noun: "protocol",
-    payloadFile: "protocol.json",
-    pluralNoun: "protocols",
-    resultIdField: "protocolId",
-    runtimeListMethod: "listProtocols",
-    runtimeMethod: "upsertProtocolItem",
-    runtimeShowMethod: "showProtocol",
-    scaffoldServiceMethod: "scaffoldProtocol",
-    showId: {
-      description: "Protocol id or slug to show.",
-      example: "<protocol-id>",
-    },
-    showServiceMethod: "showProtocol",
-    upsertServiceMethod: "upsertProtocol",
-  }),
+  goal: buildSharedStatusFilteredRegistryDescriptorExtension(
+    narrowStatusFilteredRegistryDefinition(goalRegistryEntityDefinition, "goal"),
+  ),
+  condition: buildSharedStatusFilteredRegistryDescriptorExtension(
+    narrowStatusFilteredRegistryDefinition(conditionRegistryEntityDefinition, "condition"),
+  ),
+  allergy: buildSharedStatusFilteredRegistryDescriptorExtension(
+    narrowStatusFilteredRegistryDefinition(allergyRegistryEntityDefinition, "allergy"),
+  ),
+  protocol: buildSharedStatusFilteredRegistryDescriptorExtension(
+    narrowStatusFilteredRegistryDefinition(protocolRegistryEntityDefinition, "protocol"),
+  ),
   history: {
     command: {
       commandName: "history",
@@ -432,8 +431,12 @@ const checkedHealthEntityDescriptorExtensions = {
       showServiceMethod: "showBloodTest",
     },
   },
-  family: buildSharedStatusFilteredRegistryDescriptorExtension(familyRegistryEntityDefinition),
-  genetics: buildSharedStatusFilteredRegistryDescriptorExtension(geneticsRegistryEntityDefinition),
+  family: buildSharedStatusFilteredRegistryDescriptorExtension(
+    narrowStatusFilteredRegistryDefinition(familyRegistryEntityDefinition, "family"),
+  ),
+  genetics: buildSharedStatusFilteredRegistryDescriptorExtension(
+    narrowStatusFilteredRegistryDefinition(geneticsRegistryEntityDefinition, "genetics"),
+  ),
 } as const satisfies Record<HealthEntityKind, HealthEntityDescriptorExtension>;
 
 function requireScaffoldTemplate(definition: HealthEntityDefinition): JsonObject {
