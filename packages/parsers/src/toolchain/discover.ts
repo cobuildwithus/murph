@@ -35,34 +35,49 @@ export interface ParserDoctorReport {
   tools: Record<ParserToolName, ParserToolDiscovery>;
 }
 
+interface ParserToolchainContext {
+  config: ParserToolchainConfig | null;
+  configPath: string;
+}
+
 export async function discoverParserToolchain(input: {
   vaultRoot: string;
 }): Promise<ParserDoctorReport> {
-  const paths = getParserToolchainPaths(input.vaultRoot);
-  const loadedConfig = await readParserToolchainConfig(input.vaultRoot);
-  const config = loadedConfig?.config ?? null;
+  const context = await loadParserToolchainContext(input.vaultRoot);
 
+  return discoverParserToolchainFromContext({
+    config: context.config,
+    configPath: context.configPath,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function discoverParserToolchainFromContext(input: {
+  config: ParserToolchainConfig | null;
+  configPath: string;
+  vaultRoot: string;
+}): Promise<ParserDoctorReport> {
   return {
-    configPath: paths.configPath,
+    configPath: input.configPath,
     discoveredAt: new Date().toISOString(),
     tools: {
       ffmpeg: await discoverCommandTool({
-        config: config?.tools.ffmpeg,
+        config: input.config?.tools.ffmpeg,
         envValue: readConfiguredEnvValue(process.env, ["FFMPEG_COMMAND"]),
         fallbackCommands: ["ffmpeg"],
         availableReason: "ffmpeg CLI available.",
         missingReason: "ffmpeg CLI not found.",
       }),
       pdftotext: await discoverCommandTool({
-        config: config?.tools.pdftotext,
+        config: input.config?.tools.pdftotext,
         envValue: readConfiguredEnvValue(process.env, ["PDFTOTEXT_COMMAND"]),
         fallbackCommands: ["pdftotext"],
         availableReason: "pdftotext CLI available.",
         missingReason: "pdftotext CLI not found.",
       }),
-      whisper: await discoverWhisperTool(config, input.vaultRoot),
+      whisper: await discoverWhisperTool(input.config, input.vaultRoot),
       paddleocr: await discoverCommandTool({
-        config: config?.tools.paddleocr,
+        config: input.config?.tools.paddleocr,
         envValue: readConfiguredEnvValue(process.env, ["PADDLEOCR_COMMAND"]),
         fallbackCommands: ["paddleocr", "paddlex"],
         availableReason: "PaddleOCR CLI available.",
@@ -79,11 +94,14 @@ export async function createConfiguredParserRegistry(input: {
   registry: ParserRegistry;
   ffmpeg: FfmpegToolOptions | undefined;
 }> {
-  const loadedConfig = await readParserToolchainConfig(input.vaultRoot);
-  const config = loadedConfig?.config ?? null;
-  const doctor = await discoverParserToolchain(input);
+  const context = await loadParserToolchainContext(input.vaultRoot);
+  const doctor = await discoverParserToolchainFromContext({
+    config: context.config,
+    configPath: context.configPath,
+    vaultRoot: input.vaultRoot,
+  });
   const whisperModelResolution = resolveModelPath(
-    config?.tools.whisper?.modelPath,
+    context.config?.tools.whisper?.modelPath,
     readConfiguredEnvValue(process.env, ["WHISPER_MODEL_PATH"]),
   );
 
@@ -92,19 +110,37 @@ export async function createConfiguredParserRegistry(input: {
     registry: createParserRegistry([
       createTextFileProvider(),
       createWhisperCppProvider({
-        commandCandidates: toCommandCandidates(config?.tools.whisper?.command),
+        commandCandidates: toCommandCandidates(
+          context.config?.tools.whisper?.command,
+        ),
         modelPath: whisperModelResolution.modelPath
           ? resolveModelPathAbsolute(input.vaultRoot, whisperModelResolution)
           : undefined,
       }),
       createPdfToTextProvider({
-        commandCandidates: toCommandCandidates(config?.tools.pdftotext?.command),
+        commandCandidates: toCommandCandidates(
+          context.config?.tools.pdftotext?.command,
+        ),
       }),
       createPaddleOcrProvider({
-        commandCandidates: toCommandCandidates(config?.tools.paddleocr?.command),
+        commandCandidates: toCommandCandidates(
+          context.config?.tools.paddleocr?.command,
+        ),
       }),
     ]),
     ffmpeg: ffmpegOptionsFromDoctor(doctor),
+  };
+}
+
+async function loadParserToolchainContext(
+  vaultRoot: string,
+): Promise<ParserToolchainContext> {
+  const paths = getParserToolchainPaths(vaultRoot);
+  const loadedConfig = await readParserToolchainConfig(vaultRoot);
+
+  return {
+    config: loadedConfig?.config ?? null,
+    configPath: paths.configPath,
   };
 }
 

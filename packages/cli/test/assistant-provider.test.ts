@@ -439,6 +439,27 @@ test('executeAssistantProviderTurn keeps absent Codex runtime overrides undefine
   assert.equal(call?.oss, false)
 })
 
+test('executeAssistantProviderTurn keeps explicit Codex prompts untouched', async () => {
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [],
+    sessionId: 'thread-123',
+    stderr: '',
+    stdout: '',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    prompt: '  raw prompt  ',
+    systemPrompt: 'system prompt',
+    userPrompt: 'ignored user prompt',
+  })
+
+  const call = providerMocks.executeCodexPrompt.mock.calls[0]?.[0]
+  assert.equal(call?.prompt, 'raw prompt')
+})
+
 test('executeAssistantProviderTurn dispatches to the Codex adapter and preserves the provider session id', async () => {
   const onEvent = vi.fn()
   const abortController = new AbortController()
@@ -639,6 +660,43 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
       totalTokens: null,
     },
   })
+})
+
+test('executeAssistantProviderTurn keeps explicit OpenAI-compatible prompts as the final user message', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'gpt-oss:20b',
+    systemPrompt: 'system prompt',
+    prompt: '  raw prompt  ',
+    userPrompt: 'ignored user prompt',
+    conversationMessages: [
+      {
+        role: 'assistant',
+        content: 'older answer',
+      },
+    ],
+  })
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  assert.equal(generateCall?.system, 'system prompt')
+  assert.deepEqual(generateCall?.messages, [
+    {
+      role: 'assistant',
+      content: 'older answer',
+    },
+    {
+      role: 'user',
+      content: 'raw prompt',
+    },
+  ])
 })
 
 test('executeAssistantProviderTurn surfaces AI SDK usage for OpenAI-compatible providers', async () => {

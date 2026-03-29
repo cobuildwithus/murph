@@ -5,7 +5,10 @@ import type {
   AssistantSandbox,
 } from '../assistant-cli-contracts.js'
 import type { AssistantModelSpec } from '../model-harness.js'
-import { normalizeNullableString } from './shared.js'
+import {
+  normalizeNullableString,
+  readAssistantEnvString,
+} from './shared.js'
 
 export interface AssistantCodexProviderConfig {
   approvalPolicy: AssistantApprovalPolicy | null
@@ -280,10 +283,7 @@ export function resolveAssistantModelSpecFromProviderConfig(
   }
 
   const apiKeyEnv = normalizeNullableString(normalized.apiKeyEnv)
-  const apiKeyValue =
-    apiKeyEnv && typeof env[apiKeyEnv] === 'string' && env[apiKeyEnv].trim().length > 0
-      ? env[apiKeyEnv].trim()
-      : undefined
+  const apiKeyValue = readAssistantEnvString(env, apiKeyEnv) ?? undefined
 
   return {
     baseUrl,

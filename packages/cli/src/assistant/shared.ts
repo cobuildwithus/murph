@@ -16,6 +16,19 @@ export {
   normalizeNullableString,
 } from '../text/shared.js'
 
+export function readAssistantEnvString(
+  env: NodeJS.ProcessEnv | null | undefined,
+  key: string | null | undefined,
+): string | null {
+  const normalizedKey = normalizeNullableString(key)
+  if (!normalizedKey) {
+    return null
+  }
+
+  const value = env?.[normalizedKey]
+  return typeof value === 'string' ? normalizeNullableString(value) : null
+}
+
 export function normalizeRequiredText(value: string, fieldName: string): string {
   const normalized = normalizeNullableString(value)
   if (normalized) {

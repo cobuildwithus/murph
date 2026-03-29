@@ -164,25 +164,14 @@ export function findNextAssistantCronOccurrence(
   timeZone?: string,
 ): string | null {
   const parsed = parseAssistantCronExpression(expression)
-  const resolvedTimeZone = normalizeAssistantCronTimeZone(timeZone)
-  const candidate = new Date(after.getTime())
-  candidate.setUTCSeconds(0, 0)
-  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
 
-  for (let index = 0; index < MAX_CRON_LOOKAHEAD_MINUTES; index += 1) {
-    if (
-      matchesAssistantCronExpression(
-        parsed,
-        formatTimeZoneDateTimeParts(candidate, resolvedTimeZone),
-      )
-    ) {
-      return candidate.toISOString()
-    }
-
-    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
-  }
-
-  return null
+  return findNextAssistantTimeZoneOccurrence({
+    after,
+    timeZone,
+    matches(dateTime) {
+      return matchesAssistantCronExpression(parsed, dateTime)
+    },
+  })
 }
 
 export function validateAssistantCronExpression(expression: string): void {
@@ -383,14 +372,33 @@ function findNextAssistantDailyLocalOccurrence(
     )
   }
 
-  const resolvedTimeZone = normalizeAssistantCronTimeZone(timeZone)
-  const candidate = new Date(after.getTime())
+  return findNextAssistantTimeZoneOccurrence({
+    after,
+    timeZone,
+    matches(dateTime) {
+      return dateTime.hour === parsedTime.hour && dateTime.minute === parsedTime.minute
+    },
+  })
+}
+
+function findNextAssistantTimeZoneOccurrence(input: {
+  after: Date
+  matches: (dateTime: {
+    minute: number
+    hour: number
+    month: number
+    day: number
+    dayOfWeek: number
+  }) => boolean
+  timeZone?: string | null
+}): string | null {
+  const resolvedTimeZone = normalizeAssistantCronTimeZone(input.timeZone)
+  const candidate = new Date(input.after.getTime())
   candidate.setUTCSeconds(0, 0)
   candidate.setUTCMinutes(candidate.getUTCMinutes() + 1)
 
   for (let index = 0; index < MAX_CRON_LOOKAHEAD_MINUTES; index += 1) {
-    const parts = formatTimeZoneDateTimeParts(candidate, resolvedTimeZone)
-    if (parts.hour === parsedTime.hour && parts.minute === parsedTime.minute) {
+    if (input.matches(formatTimeZoneDateTimeParts(candidate, resolvedTimeZone))) {
       return candidate.toISOString()
     }
 
