@@ -21,7 +21,7 @@ export type {
   VaultRecord,
   VaultRecordType,
 } from "./model.ts";
-export type { CanonicalEntity, CanonicalEntityFamily } from "./canonical-entities.ts";
+export type { CanonicalEntity, CanonicalEntityFamily, CanonicalRecordClass } from "./canonical-entities.ts";
 export {
   describeLookupConstraint,
   ID_FAMILY_REGISTRY,

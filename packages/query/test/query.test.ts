@@ -15,6 +15,8 @@ import {
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
   buildExportPack,
+  describeLookupConstraint,
+  inferIdEntityKind,
   isQueryableLookupId,
   buildTimeline,
   getExperiment,
@@ -40,6 +42,7 @@ import {
   linkTargetIds,
   normalizeCanonicalLinks,
   projectProfileSnapshotEntity,
+  resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
 import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
@@ -114,6 +117,18 @@ test("id-family helpers no longer register the hard-cut legacy colon-prefixed fa
   assert.equal(isQueryableLookupId("experiment:focus"), false);
   assert.equal(isQueryableLookupId("sample:path:12"), false);
   assert.equal(isQueryableLookupId("aud_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("rcp_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("prov_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(isQueryableLookupId("wfmt_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+  assert.equal(inferIdEntityKind("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), "food");
+  assert.equal(inferIdEntityKind("rcp_01JNV40W8VFYQ2H7CMJY5A9R4K"), "recipe");
+  assert.equal(inferIdEntityKind("prov_01JNV40W8VFYQ2H7CMJY5A9R4K"), "provider");
+  assert.equal(
+    inferIdEntityKind("wfmt_01JNV40W8VFYQ2H7CMJY5A9R4K"),
+    "workout_format",
+  );
+  assert.equal(describeLookupConstraint("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), null);
 });
 
 test("normalizeCanonicalLinks drops blank targets and dedupes identical pairs", () => {
@@ -2249,6 +2264,7 @@ function createReadModelFromRecords(
       primaryLookupId: record.primaryLookupId,
       lookupIds: [...record.lookupIds],
       family: record.recordType,
+      recordClass: record.recordClass,
       kind: record.kind ?? record.recordType,
       status: record.status ?? null,
       occurredAt: record.occurredAt,
@@ -2281,6 +2297,10 @@ function createReadModelFromRecords(
     history: byFamily.history?.slice() ?? [],
     familyMembers: byFamily.family?.slice() ?? [],
     geneticVariants: byFamily.genetics?.slice() ?? [],
+    foods: byFamily.food?.slice() ?? [],
+    recipes: byFamily.recipe?.slice() ?? [],
+    providers: byFamily.provider?.slice() ?? [],
+    workoutFormats: byFamily.workout_format?.slice() ?? [],
     records: records.slice(),
   };
 }
@@ -2308,6 +2328,10 @@ function syncVaultDerivedFields(vault: Awaited<ReturnType<typeof readVault>>): v
   vault.history = next.history;
   vault.familyMembers = next.familyMembers;
   vault.geneticVariants = next.geneticVariants;
+  vault.foods = next.foods;
+  vault.recipes = next.recipes;
+  vault.providers = next.providers;
+  vault.workoutFormats = next.workoutFormats;
   vault.records = next.records;
 }
 
@@ -2331,6 +2355,10 @@ function collectVaultRecords(
     ...vault.history,
     ...vault.familyMembers,
     ...vault.geneticVariants,
+    ...vault.foods,
+    ...vault.recipes,
+    ...vault.providers,
+    ...vault.workoutFormats,
   ];
 }
 
@@ -2368,6 +2396,7 @@ function createSampleRecord(overrides: {
     primaryLookupId: overrides.id,
     lookupIds: [overrides.id],
     recordType: "sample",
+    recordClass: "sample",
     sourcePath: overrides.sourcePath,
     sourceFile: path.join("/tmp", overrides.id),
     occurredAt,
@@ -2415,6 +2444,8 @@ function createRecord(
     primaryLookupId,
     lookupIds,
     recordType: overrides.recordType,
+    recordClass:
+      overrides.recordClass ?? resolveCanonicalRecordClass(overrides.recordType),
     sourcePath: overrides.sourcePath,
     sourceFile: overrides.sourceFile ?? path.join("/tmp", overrides.id),
     occurredAt: overrides.occurredAt ?? null,

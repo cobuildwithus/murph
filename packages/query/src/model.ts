@@ -9,10 +9,12 @@ import {
   normalizeCanonicalDate,
   normalizeUniqueStringArray,
   relatedToLinks,
+  resolveCanonicalRecordClass,
   uniqueStrings,
   type CanonicalEntity,
   type CanonicalEntityLink,
   type CanonicalEntityFamily,
+  type CanonicalRecordClass,
 } from "./canonical-entities.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
@@ -30,6 +32,7 @@ export interface VaultRecord {
   primaryLookupId: string;
   lookupIds: string[];
   recordType: VaultRecordType;
+  recordClass: CanonicalRecordClass;
   sourcePath: string;
   sourceFile: string;
   occurredAt: string | null;
@@ -69,12 +72,17 @@ export interface VaultReadModel {
   history: VaultRecord[];
   familyMembers: VaultRecord[];
   geneticVariants: VaultRecord[];
+  foods: VaultRecord[];
+  recipes: VaultRecord[];
+  providers: VaultRecord[];
+  workoutFormats: VaultRecord[];
   records: VaultRecord[];
 }
 
 export interface EntityFilter {
   ids?: string[];
   families?: CanonicalEntityFamily[];
+  recordClasses?: CanonicalRecordClass[];
   kinds?: string[];
   statuses?: string[];
   streams?: string[];
@@ -89,6 +97,7 @@ export interface EntityFilter {
 export interface RecordFilter {
   ids?: string[];
   recordTypes?: VaultRecordType[];
+  recordClasses?: CanonicalRecordClass[];
   kinds?: string[];
   streams?: string[];
   experimentSlug?: string;
@@ -115,6 +124,7 @@ export interface JournalFilter {
 
 interface SharedListFilterInput {
   ids?: string[];
+  recordClasses?: CanonicalRecordClass[];
   kinds?: string[];
   streams?: string[];
   experimentSlug?: string;
@@ -132,6 +142,7 @@ interface PreparedTagAndTextFilter {
 
 interface PreparedRecordLikeFilter extends PreparedTagAndTextFilter {
   idSet: ReadonlySet<string> | null;
+  recordClassSet: ReadonlySet<CanonicalRecordClass> | null;
   kindSet: ReadonlySet<string> | null;
   streamSet: ReadonlySet<string> | null;
   experimentSlug?: string;
@@ -146,6 +157,7 @@ function relatedIdsToLinks(...groups: readonly unknown[]): CanonicalEntityLink[]
 
 interface RecordLikeFilterSource {
   lookupIds: readonly string[];
+  recordClass: CanonicalRecordClass;
   kind: string | null;
   stream: string | null;
   experimentSlug: string | null;
@@ -164,13 +176,17 @@ export const ALL_VAULT_RECORD_TYPES = [
   "event",
   "experiment",
   "family",
+  "food",
   "genetics",
   "goal",
   "history",
   "journal",
   "profile_snapshot",
   "protocol",
+  "provider",
+  "recipe",
   "sample",
+  "workout_format",
 ] as const satisfies readonly VaultRecordType[];
 
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
@@ -217,6 +233,10 @@ async function readVaultWithHealthMode(
   const history = recordsOfType(byFamily, "history");
   const familyMembers = recordsOfType(byFamily, "family");
   const geneticVariants = recordsOfType(byFamily, "genetics");
+  const foods = recordsOfType(byFamily, "food");
+  const recipes = recordsOfType(byFamily, "recipe");
+  const providers = recordsOfType(byFamily, "provider");
+  const workoutFormats = recordsOfType(byFamily, "workout_format");
 
   return {
     format: "murph.query.v1",
@@ -240,6 +260,10 @@ async function readVaultWithHealthMode(
     history,
     familyMembers,
     geneticVariants,
+    foods,
+    recipes,
+    providers,
+    workoutFormats,
     records,
   };
 }
@@ -442,6 +466,7 @@ async function readOptionalCoreEntity(
       primaryLookupId: id,
       lookupIds: uniqueStrings([id]),
       family: "core",
+      recordClass: resolveCanonicalRecordClass("core"),
       kind: "core_document",
       status: null,
       occurredAt: pickString(attributes, ["updatedAt"]),
@@ -505,6 +530,7 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         primaryLookupId: id,
         lookupIds: uniqueStrings([id, slug]),
         family: "experiment",
+        recordClass: resolveCanonicalRecordClass("experiment"),
         kind: "experiment",
         status: pickString(attributes, ["status"]),
         occurredAt: pickString(attributes, ["updatedAt"]) ?? startedOn,
@@ -559,6 +585,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
         primaryLookupId: id,
         lookupIds: uniqueStrings([id, date]),
         family: "journal",
+        recordClass: resolveCanonicalRecordClass("journal"),
         kind: "journal_day",
         status: pickString(attributes, ["status"]),
         occurredAt: pickString(attributes, ["updatedAt"]),
@@ -629,6 +656,7 @@ async function readJsonlRecordFamily(
           ...relatedIds,
         ]),
         family: recordType,
+        recordClass: resolveCanonicalRecordClass(recordType),
         kind,
         status: pickString(payload, ["status"]),
         occurredAt,
@@ -681,6 +709,7 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         primaryLookupId: rawRecordId,
         lookupIds: uniqueStrings([rawRecordId]),
         family: "sample",
+        recordClass: resolveCanonicalRecordClass("sample"),
         kind: "sample",
         status: pickString(payload, ["quality"]),
         occurredAt,
@@ -817,6 +846,7 @@ function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord 
     primaryLookupId: entity.primaryLookupId,
     lookupIds: entity.lookupIds,
     recordType: entity.family,
+    recordClass: entity.recordClass,
     sourcePath: entity.path,
     sourceFile: path.join(vaultRoot, ...entity.path.split("/")),
     occurredAt: entity.occurredAt,
@@ -958,6 +988,7 @@ function prepareRecordLikeFilter(
   return {
     ...prepareTagAndTextFilter(filters),
     idSet: toOptionalSet(filters.ids),
+    recordClassSet: toOptionalSet(filters.recordClasses),
     kindSet: toOptionalSet(filters.kinds),
     streamSet: toOptionalSet(filters.streams),
     experimentSlug: filters.experimentSlug,
@@ -973,6 +1004,10 @@ function matchesRecordLikeFilter(
   haystackValues: readonly unknown[],
 ): boolean {
   if (!matchesLookupIds(source.lookupIds, filter.idSet)) {
+    return false;
+  }
+
+  if (!matchesRequiredSet(source.recordClass, filter.recordClassSet)) {
     return false;
   }
 

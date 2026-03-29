@@ -777,6 +777,7 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
       strengthExercises: z.array(activityStrengthExerciseSchema).min(1).max(50).optional(),
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
+      templateText: boundedString(1, 4000).optional(),
     })
     .strict(),
   "@murph/contracts/frontmatter-workout-format.schema.json",

@@ -121,6 +121,7 @@ export interface AddWorkoutRecordInput {
   durationMinutes?: number
   activityType?: string
   distanceKm?: number
+  strengthExercises?: ActivityStrengthExercise[] | null
 }
 
 export interface ResolveWorkoutCaptureInput {
@@ -128,6 +129,7 @@ export interface ResolveWorkoutCaptureInput {
   durationMinutes?: number
   activityType?: string
   distanceKm?: number
+  strengthExercises?: ActivityStrengthExercise[] | null
 }
 
 export interface ResolvedWorkoutCapture {
@@ -150,7 +152,8 @@ export function resolveWorkoutCapture(
   const activity = resolveWorkoutActivityDescriptor(note, input.activityType)
   const durationMinutes = resolveDurationMinutes(note, input.durationMinutes)
   const distanceKm = resolveDistanceKm(note, input.distanceKm)
-  const strengthExercises = inferStrengthExercises(note, activity.activityType)
+  const strengthExercises =
+    input.strengthExercises ?? inferStrengthExercises(note, activity.activityType)
 
   return {
     note,

@@ -1,4 +1,7 @@
-import type { ActivityStrengthExercise } from "@murph/contracts";
+import {
+  deriveWorkoutFormatCompatibilityId,
+  type ActivityStrengthExercise,
+} from "@murph/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
@@ -133,6 +136,7 @@ function formatStrengthExerciseLine(exercise: ActivityStrengthExercise): string 
 function buildBody(record: WorkoutFormatRecord): string {
   const sections = [
     record.summary ? section("Summary", record.summary) : null,
+    record.templateText ? section("Saved workout text", record.templateText) : null,
     record.strengthExercises?.length
       ? listSection(
           "Strength Exercises",
@@ -168,20 +172,25 @@ function parseWorkoutFormatRecord(
     "Workout format registry document has an unexpected shape.",
   );
 
+  const slug = requireString(attributes.slug, "slug", 160);
+
   return stripUndefined({
     schemaVersion: WORKOUT_FORMAT_SCHEMA_VERSION,
     docType: WORKOUT_FORMAT_DOC_TYPE,
-    workoutFormatId: requireString(attributes.workoutFormatId, "workoutFormatId", 64),
-    slug: requireString(attributes.slug, "slug", 160),
+    slug,
+    workoutFormatId:
+      optionalString(attributes.workoutFormatId, "workoutFormatId", 64)
+      ?? deriveWorkoutFormatCompatibilityId(slug),
     title: requireString(attributes.title, "title", 160),
     status: normalizeWorkoutFormatStatus(attributes.status),
     summary: optionalString(attributes.summary, "summary", 4000),
-    activityType: normalizeWorkoutActivityType(attributes.activityType),
+    activityType: normalizeWorkoutActivityType(attributes.activityType ?? attributes.type),
     durationMinutes: optionalInteger(attributes.durationMinutes, "durationMinutes", 1, 24 * 60),
     distanceKm: optionalFiniteNumber(attributes.distanceKm, "distanceKm", 0, 1_000),
     strengthExercises: normalizeStrengthExercises(attributes.strengthExercises),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
+    templateText: optionalString(attributes.templateText ?? attributes.text, "templateText", 4000),
     relativePath,
     markdown,
   });
@@ -202,6 +211,7 @@ function buildAttributes(record: WorkoutFormatRecord): FrontmatterObject {
     strengthExercises: record.strengthExercises,
     tags: record.tags,
     note: record.note,
+    templateText: record.templateText,
   }) as unknown as FrontmatterObject;
 }
 
@@ -295,6 +305,11 @@ export async function upsertWorkoutFormat(
           ),
           note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
             optionalString(value, "note", 4000),
+          ),
+          templateText: resolveOptionalUpsertValue(
+            input.templateText,
+            existingRecord?.templateText,
+            (value) => optionalString(value, "templateText", 4000),
           ),
           relativePath: target.relativePath,
           markdown: existingRecord?.markdown ?? "",

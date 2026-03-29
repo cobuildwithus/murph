@@ -1,3 +1,4 @@
+export * from "./bank-entities.ts";
 export * from "./command-capabilities.ts";
 export * from "./constants.ts";
 export * from "./examples.ts";
@@ -14,6 +15,7 @@ export {
   parseFrontmatterDocument,
   parseFrontmatterScalar,
 } from "./frontmatter.ts";
+export { bankEntityDefinitionByKind } from "./bank-entities.ts";
 export {
   deriveProtocolGroupFromRelativePath,
   hasHealthEntityRegistry,
