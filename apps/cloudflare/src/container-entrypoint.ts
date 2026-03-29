@@ -116,7 +116,7 @@ function writeJsonResponse(
 function parseHostedExecutionRunnerJobRequest(payload: Uint8Array): HostedExecutionRunnerJobRequest {
   return requireJsonObject(
     JSON.parse(Buffer.from(payload).toString("utf8")),
-  ) as HostedExecutionRunnerJobRequest;
+  ) as unknown as HostedExecutionRunnerJobRequest;
 }
 
 function requireJsonObject(value: unknown): Record<string, unknown> {

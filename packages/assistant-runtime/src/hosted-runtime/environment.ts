@@ -23,14 +23,10 @@ import type {
 
 const hostedRuntimeModuleRequire = createRequire(import.meta.url);
 const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
-  "ALL_PROXY",
-  "HTTPS_PROXY",
-  "HTTP_PROXY",
   "LANG",
   "LC_ALL",
   "LC_CTYPE",
   "NODE_EXTRA_CA_CERTS",
-  "NO_PROXY",
   "PATH",
   "SSL_CERT_DIR",
   "SSL_CERT_FILE",
