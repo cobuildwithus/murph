@@ -27,7 +27,7 @@ export function createTestSqlStorage(): TestSqlStorageLike {
   return {
     exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: unknown[]): SqlCursorLike<T> {
       const trimmed = query.trim().toLowerCase();
-      if (trimmed.startsWith("select")) {
+      if (trimmed.startsWith("select") || trimmed.startsWith("pragma")) {
         const statement = database.prepare(query);
         const rows = statement.all(...bindings) as T[];
         return createCursor(rows, {
@@ -71,6 +71,8 @@ function initializeSchema(database: DatabaseSync): void {
       activated INTEGER NOT NULL DEFAULT 0,
       in_flight INTEGER NOT NULL DEFAULT 0,
       last_error TEXT,
+      last_error_at TEXT,
+      last_error_code TEXT,
       last_event_id TEXT,
       last_run_at TEXT,
       next_wake_at TEXT,
@@ -78,6 +80,8 @@ function initializeSchema(database: DatabaseSync): void {
       backpressured_event_ids_json TEXT NOT NULL DEFAULT '[]',
       agent_state_bundle_ref_json TEXT,
       vault_bundle_ref_json TEXT,
+      run_json TEXT,
+      timeline_json TEXT NOT NULL DEFAULT '[]',
       agent_state_bundle_version INTEGER NOT NULL DEFAULT 0,
       vault_bundle_version INTEGER NOT NULL DEFAULT 0
     );

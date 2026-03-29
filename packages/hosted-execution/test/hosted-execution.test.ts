@@ -24,6 +24,8 @@ import {
   createHostedExecutionServerSharePackClient,
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
+  buildHostedExecutionStructuredLogRecord,
+  deriveHostedExecutionErrorCode,
   HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
@@ -39,6 +41,7 @@ import {
   readHostedExecutionWorkerEnvironment,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
+  parseHostedExecutionUserStatus,
   resolveHostedDeviceSyncWakeContext,
   resolveHostedExecutionAiUsageClient,
   resolveHostedExecutionDeviceSyncRuntimeClient,
@@ -217,6 +220,132 @@ describe("@murph/hosted-execution", () => {
       retryDelayMs: 30_000,
       runnerControlToken: null,
       runnerTimeoutMs: 60_000,
+    });
+  });
+
+  it("parses hosted execution user status run traces when present", () => {
+    expect(parseHostedExecutionUserStatus({
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      inFlight: false,
+      lastError: null,
+      lastErrorAt: "2026-03-26T12:00:01.000Z",
+      lastErrorCode: "runner_http_error",
+      lastEventId: "evt_trace",
+      lastRunAt: "2026-03-26T12:00:00.000Z",
+      nextWakeAt: null,
+      pendingEventCount: 0,
+      poisonedEventIds: [],
+      retryingEventId: null,
+      run: {
+        attempt: 2,
+        eventId: "evt_trace",
+        phase: "retry.scheduled",
+        runId: "run_trace",
+        startedAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:01.000Z",
+      },
+      timeline: [
+        {
+          at: "2026-03-26T12:00:00.000Z",
+          attempt: 2,
+          component: "runner",
+          eventId: "evt_trace",
+          level: "info",
+          message: "Hosted dispatch claimed for execution.",
+          phase: "claimed",
+          runId: "run_trace",
+        },
+        {
+          at: "2026-03-26T12:00:01.000Z",
+          attempt: 2,
+          component: "runner",
+          errorCode: "runner_http_error",
+          eventId: "evt_trace",
+          level: "warn",
+          message: "Hosted dispatch scheduled a retry.",
+          phase: "retry.scheduled",
+          runId: "run_trace",
+        },
+      ],
+      userId: "user-123",
+    })).toMatchObject({
+      lastErrorAt: "2026-03-26T12:00:01.000Z",
+      lastErrorCode: "runner_http_error",
+      run: {
+        attempt: 2,
+        eventId: "evt_trace",
+        phase: "retry.scheduled",
+        runId: "run_trace",
+      },
+      timeline: [
+        {
+          phase: "claimed",
+          runId: "run_trace",
+        },
+        {
+          errorCode: "runner_http_error",
+          phase: "retry.scheduled",
+        },
+      ],
+      userId: "user-123",
+    });
+  });
+
+  it("derives stable hosted execution error codes and structured logs", () => {
+    const error = new Error("Hosted runner container returned HTTP 503.");
+
+    expect(deriveHostedExecutionErrorCode(error)).toBe("runner_http_error");
+    expect(buildHostedExecutionStructuredLogRecord({
+      component: "container",
+      dispatch: {
+        event: {
+          userId: "user-123",
+        },
+        eventId: "evt_trace",
+      },
+      error,
+      level: "warn",
+      message: "Hosted execution container failed.",
+      phase: "failed",
+      run: {
+        attempt: 3,
+        runId: "run_trace",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      time: "2026-03-26T12:00:01.000Z",
+    })).toEqual({
+      attempt: 3,
+      component: "container",
+      errorCode: "runner_http_error",
+      errorMessage: "Hosted runner container returned HTTP 503.",
+      errorName: "Error",
+      eventId: "evt_trace",
+      level: "warn",
+      message: "Hosted execution container failed.",
+      phase: "failed",
+      runId: "run_trace",
+      schema: "murph.hosted-execution.log.v1",
+      time: "2026-03-26T12:00:01.000Z",
+      userId: "user-123",
+    });
+  });
+
+  it("redacts obvious secret-bearing substrings from structured log error messages", () => {
+    const error = new Error(
+      "authorization: Bearer sk-live-secret apiKey=shh-token cookie=session123",
+    );
+
+    expect(buildHostedExecutionStructuredLogRecord({
+      component: "container",
+      error,
+      message: "Hosted execution container failed.",
+      phase: "failed",
+    })).toMatchObject({
+      errorCode: "runtime_error",
+      errorMessage: "authorization: <redacted> apiKey=<redacted> cookie=<redacted>",
     });
   });
 

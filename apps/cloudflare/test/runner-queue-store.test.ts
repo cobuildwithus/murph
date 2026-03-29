@@ -94,6 +94,53 @@ describe("RunnerQueueStore", () => {
     expect(meta.agent_state_bundle_ref_json).toBeNull();
     expect(meta.vault_bundle_ref_json).toBeNull();
   });
+
+
+  it("records a bounded run trace and derives stable error codes", async () => {
+    const state = createState();
+    const store = new RunnerQueueStore(state as never);
+    await store.bootstrapUser("member_123");
+
+    for (let index = 0; index < 26; index += 1) {
+      await store.recordRunPhase({
+        attempt: 2,
+        component: "runner",
+        eventId: "evt_trace",
+        message: `phase-${index}`,
+        phase: index === 25 ? "retry.scheduled" : "dispatch.running",
+        ...(index === 25 ? {
+          error: new Error("Hosted runner container returned HTTP 503."),
+          level: "warn" as const,
+        } : {}),
+        runId: "run_trace",
+        startedAt: "2026-03-29T10:00:00.000Z",
+      });
+    }
+
+    const record = await store.readState();
+    expect(record.lastEventId).toBe("evt_trace");
+    expect(record.lastErrorCode).toBe("runner_http_error");
+    expect(record.lastErrorAt).toEqual(expect.any(String));
+    expect(record.run).toMatchObject({
+      attempt: 2,
+      eventId: "evt_trace",
+      phase: "retry.scheduled",
+      runId: "run_trace",
+      startedAt: "2026-03-29T10:00:00.000Z",
+    });
+    expect(record.timeline).toHaveLength(24);
+    expect(record.timeline[0]).toMatchObject({
+      message: "phase-2",
+      phase: "dispatch.running",
+      runId: "run_trace",
+    });
+    expect(record.timeline.at(-1)).toMatchObject({
+      errorCode: "runner_http_error",
+      level: "warn",
+      message: "phase-25",
+      phase: "retry.scheduled",
+    });
+  });
 });
 
 function createState() {

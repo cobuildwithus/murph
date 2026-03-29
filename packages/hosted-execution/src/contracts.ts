@@ -1,4 +1,9 @@
 import type { SharePack } from "@murph/contracts";
+import type {
+  HostedExecutionRunContext,
+  HostedExecutionRunStatus,
+  HostedExecutionTimelineEntry,
+} from "./observability.ts";
 
 export const HOSTED_EXECUTION_SIGNATURE_HEADER = "x-hosted-execution-signature";
 export const HOSTED_EXECUTION_TIMESTAMP_HEADER = "x-hosted-execution-timestamp";
@@ -115,6 +120,7 @@ export interface HostedExecutionRunnerRequest {
     vault: string | null;
   };
   dispatch: HostedExecutionDispatchRequest;
+  run?: HostedExecutionRunContext | null;
 }
 
 export interface HostedExecutionRunnerResult {
@@ -144,12 +150,16 @@ export interface HostedExecutionUserStatus {
   };
   inFlight: boolean;
   lastError: string | null;
+  lastErrorAt?: string | null;
+  lastErrorCode?: string | null;
   lastEventId: string | null;
   lastRunAt: string | null;
   nextWakeAt: string | null;
   pendingEventCount: number;
   poisonedEventIds: string[];
+  run?: HostedExecutionRunStatus | null;
   retryingEventId: string | null;
+  timeline?: HostedExecutionTimelineEntry[];
   userId: string;
 }
 

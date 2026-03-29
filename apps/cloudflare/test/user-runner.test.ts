@@ -631,6 +631,18 @@ describe("HostedUserRunner", () => {
     expect(status.pendingEventCount).toBe(0);
     expect(status.poisonedEventIds).toEqual([]);
     expect(status.retryingEventId).toBeNull();
+    expect(status.run).toMatchObject({
+      attempt: 1,
+      eventId: "evt_123",
+      phase: "completed",
+    });
+    expect(status.timeline?.map((entry) => entry.phase)).toEqual([
+      "claimed",
+      "dispatch.running",
+      "commit.recorded",
+      "completed",
+    ]);
+    expect(new Set((status.timeline ?? []).map((entry) => entry.runId)).size).toBe(1);
     expect(storage.lastAlarm).not.toBeNull();
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
     await expect(createHostedExecutionJournalStore({
@@ -778,12 +790,22 @@ describe("HostedUserRunner", () => {
             vault: null | { hash: string; key: string; size: number; updatedAt: string };
           };
         };
+        run: {
+          attempt: number;
+          runId: string;
+          startedAt: string;
+        };
       };
     };
 
     expect(invokePayload.request.commit.bundleRefs).toEqual({
       agentState: null,
       vault: null,
+    });
+    expect(invokePayload.request.run).toMatchObject({
+      attempt: 1,
+      runId: expect.any(String),
+      startedAt: expect.any(String),
     });
   });
 
@@ -1279,8 +1301,18 @@ describe("HostedUserRunner", () => {
     });
 
     expect(first.lastError).toContain("HTTP 503");
+    expect(first.lastErrorCode).toBe("runner_http_error");
     expect(first.pendingEventCount).toBe(1);
     expect(first.retryingEventId).toBe("evt_retry_1");
+    expect(first.run).toMatchObject({
+      attempt: 1,
+      eventId: "evt_retry_1",
+      phase: "retry.scheduled",
+    });
+    expect(first.timeline?.at(-1)).toMatchObject({
+      errorCode: "runner_http_error",
+      phase: "retry.scheduled",
+    });
 
     vi.setSystemTime(new Date("2026-03-26T12:00:10.000Z"));
     await runner.alarm();
@@ -1293,6 +1325,12 @@ describe("HostedUserRunner", () => {
     expect(final.poisonedEventIds).toEqual(["evt_retry_1"]);
     expect(final.retryingEventId).toBeNull();
     expect(final.lastError).toContain("HTTP 503");
+    expect(final.lastErrorCode).toBe("runner_http_error");
+    expect(final.run).toMatchObject({
+      attempt: 3,
+      eventId: "evt_retry_1",
+      phase: "poisoned",
+    });
   });
 
   it("continues past a rescheduled head event and runs later due work in the same pass", async () => {
@@ -1852,6 +1890,12 @@ describe("HostedUserRunner", () => {
     expect(firstStatus.lastError).toBe(
       "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
     );
+    expect(firstStatus.lastErrorCode).toBe("configuration_error");
+    expect(firstStatus.run).toMatchObject({
+      attempt: 1,
+      eventId: "evt_missing_runner_token",
+      phase: "retry.scheduled",
+    });
     expect(countRunnerContainerCalls(storage.runnerContainerFetch, "/internal/invoke")).toBe(0);
 
     vi.setSystemTime(new Date("2026-03-26T12:00:11.000Z"));
@@ -1864,6 +1908,12 @@ describe("HostedUserRunner", () => {
     expect(retryStatus.lastError).toBe(
       "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN must be configured for native hosted execution.",
     );
+    expect(retryStatus.lastErrorCode).toBe("configuration_error");
+    expect(retryStatus.run).toMatchObject({
+      attempt: 2,
+      eventId: "evt_missing_runner_token",
+      phase: "retry.scheduled",
+    });
   });
 
   it("keeps replay suppression after a durable-object restart", async () => {
@@ -2342,9 +2392,30 @@ function seedRunnerQueueState(
     backpressuredEventIds?: string[];
     inFlight?: boolean;
     lastError?: string | null;
+    lastErrorAt?: string | null;
+    lastErrorCode?: string | null;
     lastEventId?: string | null;
     lastRunAt?: string | null;
     nextWakeAt?: string | null;
+    run?: {
+      attempt: number;
+      eventId: string;
+      phase: string;
+      runId: string;
+      startedAt: string;
+      updatedAt: string;
+    } | null;
+    timeline?: Array<{
+      at: string;
+      attempt: number;
+      component: string;
+      errorCode?: string | null;
+      eventId: string;
+      level: string;
+      message: string;
+      phase: string;
+      runId: string;
+    }>;
     pendingEvents?: Array<{
       attempts: number;
       availableAt: string;
@@ -2382,6 +2453,8 @@ function seedRunnerQueueState(
       activated,
       in_flight,
       last_error,
+      last_error_at,
+      last_error_code,
       last_event_id,
       last_run_at,
       next_wake_at,
@@ -2389,14 +2462,18 @@ function seedRunnerQueueState(
       backpressured_event_ids_json,
       agent_state_bundle_ref_json,
       vault_bundle_ref_json,
+      run_json,
+      timeline_json,
       agent_state_bundle_version,
       vault_bundle_version
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     1,
     input.userId,
     input.activated ? 1 : 0,
     input.inFlight ? 1 : 0,
     input.lastError ?? null,
+    input.lastErrorAt ?? null,
+    input.lastErrorCode ?? null,
     input.lastEventId ?? null,
     input.lastRunAt ?? null,
     input.nextWakeAt ?? null,
@@ -2404,6 +2481,8 @@ function seedRunnerQueueState(
     JSON.stringify(input.backpressuredEventIds ?? []),
     null,
     null,
+    input.run ? JSON.stringify(input.run) : null,
+    JSON.stringify(input.timeline ?? []),
     0,
     0,
   );
