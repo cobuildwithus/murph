@@ -29,7 +29,7 @@ import type {
   FamilyMemberEntity,
   FamilyMemberLink,
   FamilyMemberLinkType,
-  FamilyMemberRecord,
+  FamilyMemberStoredDocument,
   ReadFamilyMemberInput,
   UpsertFamilyMemberInput,
   UpsertFamilyMemberResult,
@@ -58,13 +58,15 @@ function parseFamilyMemberFrontmatter(attributes: FrontmatterObject): FamilyMemb
   return result.data as FamilyMemberFrontmatter;
 }
 
-function sortFamilyRecords(records: FamilyMemberRecord[]): void {
+function sortFamilyRecords(records: FamilyMemberStoredDocument[]): void {
   if (familyRegistryEntityDefinition.registry.sortBehavior !== "title") {
     throw new Error('Family registry definition must use "title" sort behavior.');
   }
 
   records.sort(
-    (left, right) => left.title.localeCompare(right.title) || left.familyMemberId.localeCompare(right.familyMemberId),
+    (left, right) =>
+      left.entity.title.localeCompare(right.entity.title) ||
+      left.entity.familyMemberId.localeCompare(right.entity.familyMemberId),
   );
 }
 
@@ -170,13 +172,13 @@ function recordFromParts(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
-): FamilyMemberRecord {
+): FamilyMemberStoredDocument {
   const frontmatter = parseFamilyMemberFrontmatter(attributes);
   const relations = canonicalizeFamilyRelations({
     links: parseFamilyLinks(attributes),
   });
 
-  return {
+  const entity = {
     ...frontmatter,
     conditions: validateSortedStringList(
       frontmatter.conditions,
@@ -189,19 +191,27 @@ function recordFromParts(
     note: optionalString(frontmatter.note, "note", FAMILY_NOTE_MAX_LENGTH),
     relatedVariantIds: relations.relatedVariantIds,
     links: relations.links,
-    relativePath,
-    markdown,
+  } satisfies FamilyMemberEntity;
+
+  return {
+    entity,
+    document: {
+      relativePath,
+      markdown,
+    },
   };
 }
 
-const familyRegistryApi = createMarkdownRegistryApi<FamilyMemberRecord>({
+const familyRegistryApi = createMarkdownRegistryApi<FamilyMemberStoredDocument>({
   directory: FAMILY_DIRECTORY,
   recordFromParts,
   isExpectedRecord: () => true,
   invalidCode: "VAULT_INVALID_FAMILY_MEMBER",
   invalidMessage: "Family registry document has an unexpected shape.",
   sortRecords: sortFamilyRecords,
-  getRecordId: (record) => record.familyMemberId,
+  getRecordId: (record) => record.entity.familyMemberId,
+  getRecordSlug: (record) => record.entity.slug,
+  getRecordRelativePath: (record) => record.document.relativePath,
   conflictCode: "VAULT_FAMILY_MEMBER_CONFLICT",
   conflictMessage: "familyMemberId and slug resolve to different family members.",
   readMissingCode: "VAULT_FAMILY_MEMBER_MISSING",
@@ -257,15 +267,16 @@ export async function upsertFamilyMember(
     recordId: normalizedFamilyMemberId,
     slug: selectorSlug,
   });
-  const title = requireString(input.title ?? existingRecord?.title, "title", FAMILY_TITLE_MAX_LENGTH);
+  const existingEntity = existingRecord?.entity;
+  const title = requireString(input.title ?? existingEntity?.title, "title", FAMILY_TITLE_MAX_LENGTH);
   const relationship = requireString(
-    input.relationship ?? existingRecord?.relationship,
+    input.relationship ?? existingEntity?.relationship,
     "relationship",
     FAMILY_RELATIONSHIP_MAX_LENGTH,
   );
   const conditions =
     input.conditions === undefined
-      ? existingRecord?.conditions
+      ? existingEntity?.conditions
       : validateSortedStringList(
           input.conditions,
           "conditions",
@@ -275,11 +286,11 @@ export async function upsertFamilyMember(
         );
   const note =
     input.note === undefined
-      ? existingRecord?.note
+      ? existingEntity?.note
       : optionalString(input.note, "note", FAMILY_NOTE_MAX_LENGTH);
   const relatedVariantIds =
     input.relatedVariantIds === undefined
-      ? existingRecord?.relatedVariantIds
+      ? existingEntity?.relatedVariantIds
       : validateSortedStringList(
           input.relatedVariantIds,
           "relatedVariantIds",
@@ -304,7 +315,7 @@ export async function upsertFamilyMember(
         relationship,
         conditions,
         deceased:
-          input.deceased === undefined ? existingRecord?.deceased : optionalBoolean(input.deceased, "deceased"),
+          input.deceased === undefined ? existingEntity?.deceased : optionalBoolean(input.deceased, "deceased"),
         note,
         relatedVariantIds: relations.relatedVariantIds,
         links: relations.links,
@@ -321,7 +332,7 @@ export async function upsertFamilyMember(
   });
 }
 
-export async function listFamilyMembers(vaultRoot: string): Promise<FamilyMemberRecord[]> {
+export async function listFamilyMembers(vaultRoot: string): Promise<FamilyMemberStoredDocument[]> {
   return familyRegistryApi.listRecords(vaultRoot);
 }
 
@@ -329,7 +340,7 @@ export async function readFamilyMember({
   vaultRoot,
   familyMemberId,
   slug,
-}: ReadFamilyMemberInput): Promise<FamilyMemberRecord> {
+}: ReadFamilyMemberInput): Promise<FamilyMemberStoredDocument> {
   const normalizedFamilyMemberId = normalizeId(familyMemberId, "familyMemberId", "fam");
   const normalizedSlug = slug ? normalizeSlug(slug, "slug") : undefined;
   return familyRegistryApi.readRecord({

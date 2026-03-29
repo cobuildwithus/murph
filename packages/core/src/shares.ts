@@ -16,7 +16,12 @@ import { protocolRecordToUpsertPayload, readProtocolItem, upsertProtocolItem } f
 import { readRecipe, recipeRecordToUpsertPayload, upsertRecipe } from "./bank/recipes.ts";
 
 import type { DateInput } from "./types.ts";
-import type { FoodRecord, ProtocolItemRecord, RecipeRecord } from "./bank/types.ts";
+import type {
+  FoodRecord,
+  ProtocolItemEntity,
+  ProtocolItemStoredDocument,
+  RecipeRecord,
+} from "./bank/types.ts";
 
 export interface ShareEntitySelector {
   id?: string;
@@ -46,7 +51,7 @@ export interface ImportSharePackIntoVaultInput {
 export interface ImportSharePackIntoVaultResult {
   pack: SharePack;
   foods: FoodRecord[];
-  protocols: ProtocolItemRecord[];
+  protocols: ProtocolItemEntity[];
   recipes: RecipeRecord[];
   meal: Awaited<ReturnType<typeof addMeal>> | null;
 }
@@ -60,8 +65,8 @@ export async function buildSharePackFromVault(
   const foodRefsById = new Map<string, string>();
   const recipeRefsById = new Map<string, string>();
 
-  const addProtocolRecord = (record: ProtocolItemRecord): string => {
-    const existing = protocolRefsById.get(record.protocolId);
+  const addProtocolRecord = (record: ProtocolItemStoredDocument): string => {
+    const existing = protocolRefsById.get(record.entity.protocolId);
 
     if (existing) {
       return existing;
@@ -70,8 +75,8 @@ export async function buildSharePackFromVault(
     const ref = buildProtocolRef(record);
     const payload = assertContract(
       protocolUpsertPayloadSchema,
-      protocolRecordToUpsertPayload(record),
-      `protocol payload ${record.protocolId}`,
+      protocolRecordToUpsertPayload(record.entity),
+      `protocol payload ${record.entity.protocolId}`,
     );
 
     entities.push({
@@ -79,7 +84,7 @@ export async function buildSharePackFromVault(
       ref,
       payload,
     });
-    protocolRefsById.set(record.protocolId, ref);
+    protocolRefsById.set(record.entity.protocolId, ref);
     return ref;
   };
 
@@ -216,7 +221,7 @@ export async function importSharePackIntoVault(
   const pack = assertContract(sharePackSchema, input.pack, "share pack");
   const protocolIdsByRef = new Map<string, string>();
   const foods: FoodRecord[] = [];
-  const protocols: ProtocolItemRecord[] = [];
+  const protocols: ProtocolItemEntity[] = [];
   const recipes: RecipeRecord[] = [];
 
   for (const entity of pack.entities) {
@@ -233,8 +238,8 @@ export async function importSharePackIntoVault(
       slug: buildImportedSlug(payload.slug ?? payload.title, protocolId),
     });
 
-    protocolIdsByRef.set(entity.ref, result.record.protocolId);
-    protocols.push(result.record);
+    protocolIdsByRef.set(entity.ref, result.record.entity.protocolId);
+    protocols.push(result.record.entity);
   }
 
   for (const entity of pack.entities) {
@@ -321,8 +326,8 @@ function buildRecipeRef(record: RecipeRecord): string {
   return `recipe:${sanitizeRefSegment(record.slug || record.recipeId)}`;
 }
 
-function buildProtocolRef(record: ProtocolItemRecord): string {
-  return `protocol:${sanitizeRefSegment(record.group)}:${sanitizeRefSegment(record.slug || record.protocolId)}`;
+function buildProtocolRef(record: ProtocolItemStoredDocument): string {
+  return `protocol:${sanitizeRefSegment(record.entity.group)}:${sanitizeRefSegment(record.entity.slug || record.entity.protocolId)}`;
 }
 
 function buildSharedMealNote(input: {

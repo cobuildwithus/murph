@@ -1,7 +1,8 @@
 import {
   createRegistryQueries,
   type RegistryListOptions,
-  type RegistryMarkdownRecord,
+  type RegistryQueryEntity,
+  type RegistryStoredDocument,
 } from "./registries.ts";
 import { firstObject, firstString, firstStringArray } from "./shared.ts";
 
@@ -9,7 +10,7 @@ interface FoodAutoLogDailyQueryRule {
   time: string;
 }
 
-export interface FoodQueryRecord extends RegistryMarkdownRecord {
+export interface FoodQueryEntity extends RegistryQueryEntity {
   summary: string | null;
   kind: string | null;
   brand: string | null;
@@ -24,6 +25,8 @@ export interface FoodQueryRecord extends RegistryMarkdownRecord {
   autoLogDaily: FoodAutoLogDailyQueryRule | null;
 }
 
+export type FoodQueryRecord = RegistryStoredDocument<FoodQueryEntity>;
+
 function readFoodAutoLogDailyRule(
   attributes: Record<string, unknown>,
 ): FoodAutoLogDailyQueryRule | null {
@@ -33,7 +36,7 @@ function readFoodAutoLogDailyRule(
   return time ? { time } : null;
 }
 
-const foodQueries = createRegistryQueries<FoodQueryRecord>({
+const foodQueries = createRegistryQueries<FoodQueryEntity>({
   directory: "bank/foods",
   idKeys: ["foodId"],
   titleKeys: ["title"],

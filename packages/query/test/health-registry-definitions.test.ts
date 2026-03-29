@@ -31,6 +31,7 @@ import {
   toRegistryRecord,
 } from "../src/health/registries.ts";
 import { projectRegistryEntity } from "../src/canonical-entities.ts";
+import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 
 test("query registry definitions inherit canonical registry metadata from shared health entity definitions", () => {
   const registryDefinitions = [
@@ -204,7 +205,7 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
 });
 
 test("protocol query projection round-trips shared protocol relation and ingredient metadata", () => {
-  const document = {
+  const document: MarkdownDocumentRecord = {
     relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
     markdown: "# Magnesium glycinate",
     body: "# Magnesium glycinate",
@@ -218,12 +219,17 @@ test("protocol query projection round-trips shared protocol relation and ingredi
       ingredients: [
         {
           compound: "Magnesium",
+          label: null,
           amount: 200,
           unit: "mg",
+          active: true,
+          note: null,
         },
         {
           compound: "Glycine",
           label: "Glycine buffer",
+          amount: null,
+          unit: null,
           active: false,
           note: "Paired to smooth GI tolerance.",
         },

@@ -473,27 +473,27 @@ test("health registry queries prefer canonical fields and stable title ordering"
     const genetics = await listGeneticVariants(vaultRoot);
 
     assert.deepEqual(
-      family.map((record) => record.id),
+      family.map((record) => record.entity.id),
       [
         "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
         "fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
       ],
     );
-    assert.equal(family[1]?.title, "Mother");
-    assert.equal(family[1]?.relationship, "mother");
-    assert.equal(family[1]?.note, null);
-    assert.deepEqual(family[0]?.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z400"]);
-    assert.deepEqual(family[1]?.relatedVariantIds, []);
+    assert.equal(family[1]?.entity.title, "Mother");
+    assert.equal(family[1]?.entity.relationship, "mother");
+    assert.equal(family[1]?.entity.note, null);
+    assert.deepEqual(family[0]?.entity.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z400"]);
+    assert.deepEqual(family[1]?.entity.relatedVariantIds, []);
 
     assert.deepEqual(
-      genetics.map((record) => record.id),
+      genetics.map((record) => record.entity.id),
       [
         "var_01JNW7YJ7MNE7M9Q2QWQK4Z400",
         "var_01JNW7YJ7MNE7M9Q2QWQK4Z401",
       ],
     );
-    assert.equal(genetics[0]?.title, "APOE e4 allele");
-    assert.deepEqual(genetics[1]?.sourceFamilyMemberIds, ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+    assert.equal(genetics[0]?.entity.title, "APOE e4 allele");
+    assert.deepEqual(genetics[1]?.entity.sourceFamilyMemberIds, ["fam_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 import type { FamilyMemberFrontmatter } from "@murph/contracts";
 
-import type { MarkdownRegistryDocumentEnvelope } from "../bank/types.ts";
+import type { StoredMarkdownRegistryEntity } from "../bank/types.ts";
 
 export type FamilyMemberLinkType = "related_variant";
 
@@ -13,7 +13,7 @@ export interface FamilyMemberEntity extends FamilyMemberFrontmatter {
   links: FamilyMemberLink[];
 }
 
-export type FamilyMemberRecord = FamilyMemberEntity & MarkdownRegistryDocumentEnvelope;
+export type FamilyMemberStoredDocument = StoredMarkdownRegistryEntity<FamilyMemberEntity>;
 
 export interface UpsertFamilyMemberInput {
   vaultRoot: string;
@@ -30,7 +30,7 @@ export interface UpsertFamilyMemberInput {
 export interface UpsertFamilyMemberResult {
   created: boolean;
   auditPath: string;
-  record: FamilyMemberRecord;
+  record: FamilyMemberStoredDocument;
 }
 
 export interface ReadFamilyMemberInput {

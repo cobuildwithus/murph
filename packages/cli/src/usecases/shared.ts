@@ -262,7 +262,15 @@ export function asListEnvelope<
 }
 
 export function recordPath(record: JsonObject) {
-  const relativePath = record.relativePath
+  const relativePath =
+    typeof record.relativePath === "string"
+      ? record.relativePath
+      : typeof record.document === "object" &&
+          record.document !== null &&
+          !Array.isArray(record.document) &&
+          typeof (record.document as JsonObject).relativePath === "string"
+        ? (record.document as JsonObject).relativePath
+        : undefined
   return typeof relativePath === "string" ? relativePath : undefined
 }
 
@@ -317,7 +325,6 @@ export function buildEntityLinks(record: {
     "relatedProtocolIds",
     "relatedExperimentIds",
     "sourceFamilyMemberIds",
-    "familyMemberIds",
     "relatedVariantIds",
   ] as const
   for (const key of arrayLinkKeys) {

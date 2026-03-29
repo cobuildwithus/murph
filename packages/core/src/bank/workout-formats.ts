@@ -221,6 +221,8 @@ const workoutFormatRegistryApi = createMarkdownRegistryApi<WorkoutFormatRecord>(
         || left.workoutFormatId.localeCompare(right.workoutFormatId),
     ),
   getRecordId: (record) => record.workoutFormatId,
+  getRecordSlug: (record) => record.slug,
+  getRecordRelativePath: (record) => record.relativePath,
   conflictCode: "VAULT_WORKOUT_FORMAT_CONFLICT",
   conflictMessage: "Workout format id and slug resolve to different records.",
   readMissingCode: "VAULT_WORKOUT_FORMAT_MISSING",

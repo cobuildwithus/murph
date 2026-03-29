@@ -16,7 +16,6 @@ import type {
 } from "./registries.ts";
 
 export interface SupplementQueryRecord extends ProtocolQueryRecord {
-  kind: string | null;
 }
 
 export interface SupplementListOptions extends RegistryListOptions {}
@@ -71,7 +70,7 @@ interface SupplementCompoundAggregationState {
 }
 
 function isSupplement(record: ProtocolQueryRecord | null): record is SupplementQueryRecord {
-  return record?.kind?.toLowerCase() === "supplement";
+  return record?.entity.kind?.toLowerCase() === "supplement";
 }
 
 function normalizeCompoundKey(value: string): string {
@@ -93,24 +92,24 @@ function compareSupplements(
   right: SupplementQueryRecord,
 ): number {
   return (
-    compareNullableStrings(left.title, right.title) ||
-    compareNullableStrings(left.brand, right.brand) ||
-    left.id.localeCompare(right.id)
+    compareNullableStrings(left.entity.title, right.entity.title) ||
+    compareNullableStrings(left.entity.brand, right.entity.brand) ||
+    left.entity.id.localeCompare(right.entity.id)
   );
 }
 
 function deriveLegacySupplementIngredients(
   record: SupplementQueryRecord,
 ): SupplementIngredientQueryRecord[] {
-  if (!record.substance) {
+  if (!record.entity.substance) {
     return [];
   }
 
   return [{
-    compound: record.substance,
-    label: record.substance,
-    amount: record.dose,
-    unit: record.unit,
+    compound: record.entity.substance,
+    label: record.entity.substance,
+    amount: record.entity.dose,
+    unit: record.entity.unit,
     active: true,
     note: null,
   }];
@@ -119,8 +118,8 @@ function deriveLegacySupplementIngredients(
 function activeSupplementIngredients(
   record: SupplementQueryRecord,
 ): SupplementIngredientQueryRecord[] {
-  const ingredients = record.ingredients.length > 0
-    ? record.ingredients
+  const ingredients = record.entity.ingredients.length > 0
+    ? record.entity.ingredients
     : deriveLegacySupplementIngredients(record);
 
   return ingredients.filter((ingredient) => ingredient.active !== false);
@@ -131,12 +130,12 @@ function buildCompoundSourceRecord(
   ingredient: SupplementIngredientQueryRecord,
 ): SupplementCompoundSourceRecord {
   return {
-    supplementId: record.id,
-    supplementSlug: record.slug,
-    supplementTitle: record.title,
-    brand: record.brand,
-    manufacturer: record.manufacturer,
-    status: record.status,
+    supplementId: record.entity.id,
+    supplementSlug: record.entity.slug,
+    supplementTitle: record.entity.title,
+    brand: record.entity.brand,
+    manufacturer: record.entity.manufacturer,
+    status: record.entity.status,
     label: ingredient.label,
     amount: ingredient.amount,
     unit: ingredient.unit,
@@ -190,7 +189,7 @@ function aggregateSupplementCompounds(
         totals: new Map(),
       };
 
-      existing.supplementIds.add(record.id);
+      existing.supplementIds.add(record.entity.id);
       existing.sources.push(buildCompoundSourceRecord(record, ingredient));
 
       const unitKey = ingredient.unit?.toLowerCase() ?? "";
@@ -293,7 +292,9 @@ export async function showSupplement(
     limit: undefined,
   });
 
-  return records.find((record) => matchesLookup(lookup, record.id, record.slug, record.title)) ?? null;
+  return records.find((record) =>
+    matchesLookup(lookup, record.entity.id, record.entity.slug, record.entity.title),
+  ) ?? null;
 }
 
 export async function listSupplementCompounds(

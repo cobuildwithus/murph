@@ -58,9 +58,9 @@ test("share packs export one food with attached supplement protocols and import 
     serving: "1 smoothie",
     ingredients: ["banana", "blueberries", "protein powder"],
     attachedProtocolIds: [
-      creatine.record.protocolId,
-      collagen.record.protocolId,
-      fiber.record.protocolId,
+      creatine.record.entity.protocolId,
+      collagen.record.entity.protocolId,
+      fiber.record.entity.protocolId,
     ],
     autoLogDaily: {
       time: "08:00",
@@ -97,6 +97,7 @@ test("share packs export one food with attached supplement protocols and import 
     pack,
   });
   assert.equal(imported.protocols.length, 3);
+  assert.ok(imported.protocols.every((record) => typeof record.protocolId === "string"));
   assert.equal(imported.foods.length, 1);
   assert.ok(imported.meal);
 
@@ -239,13 +240,13 @@ test("share packs reuse bank payload projections for protocol, recipe, and food 
     autoLogDaily: {
       time: "12:30",
     },
-    attachedProtocolIds: [protocol.record.protocolId],
+    attachedProtocolIds: [protocol.record.entity.protocolId],
   });
 
   const pack = await buildSharePackFromVault({
     vaultRoot,
     foods: [{ id: food.record.foodId }],
-    protocols: [{ id: protocol.record.protocolId }],
+    protocols: [{ id: protocol.record.entity.protocolId }],
     recipes: [{ id: recipe.record.recipeId }],
     includeAttachedProtocols: true,
   });
@@ -340,7 +341,7 @@ test("share pack imports create fresh destination records instead of overwriting
     kind: "smoothie",
     serving: "1 smoothie",
     ingredients: ["banana", "creatine"],
-    attachedProtocolIds: [sourceProtocol.record.protocolId],
+    attachedProtocolIds: [sourceProtocol.record.entity.protocolId],
   });
   const sourceRecipe = await upsertRecipe({
     vaultRoot: sourceVault,
@@ -353,7 +354,7 @@ test("share pack imports create fresh destination records instead of overwriting
   const pack = await buildSharePackFromVault({
     vaultRoot: sourceVault,
     foods: [{ id: sourceFood.record.foodId }],
-    protocols: [{ id: sourceProtocol.record.protocolId }],
+    protocols: [{ id: sourceProtocol.record.entity.protocolId }],
     recipes: [{ id: sourceRecipe.record.recipeId }],
   });
 
@@ -384,7 +385,7 @@ test("share pack imports create fresh destination records instead of overwriting
     pack,
   });
 
-  assert.notEqual(imported.protocols[0]?.protocolId, existingProtocol.record.protocolId);
+  assert.notEqual(imported.protocols[0]?.protocolId, existingProtocol.record.entity.protocolId);
   assert.notEqual(imported.foods[0]?.foodId, existingFood.record.foodId);
   assert.notEqual(imported.recipes[0]?.recipeId, existingRecipe.record.recipeId);
 

@@ -16,7 +16,6 @@ import {
   GOAL_STATUSES,
 } from "./types.ts";
 import {
-  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -43,7 +42,7 @@ import type {
   GoalEntity,
   GoalLink,
   GoalLinkType,
-  GoalRecord,
+  GoalStoredDocument,
   GoalWindow,
   ReadGoalInput,
   UpsertGoalInput,
@@ -206,7 +205,7 @@ function canonicalizeGoalRelations(input: {
   });
 }
 
-function buildBody(record: GoalRecord): string {
+function buildBody(record: GoalEntity): string {
   const relations = canonicalizeGoalRelations(record);
 
   return buildMarkdownBody(
@@ -237,7 +236,11 @@ function buildBody(record: GoalRecord): string {
   );
 }
 
-function parseGoalRecord(attributes: FrontmatterObject, relativePath: string, markdown: string): GoalRecord {
+function parseGoalStoredDocument(
+  attributes: FrontmatterObject,
+  relativePath: string,
+  markdown: string,
+): GoalStoredDocument {
   const parsed = parseGoalFrontmatter(attributes);
   requireMatchingDocType(
     parsed as unknown as FrontmatterObject,
@@ -253,7 +256,7 @@ function parseGoalRecord(attributes: FrontmatterObject, relativePath: string, ma
     parentGoalId: parsed.parentGoalId === null ? null : undefined,
   });
 
-  return stripUndefined({
+  const entity = stripUndefined({
     schemaVersion: GOAL_SCHEMA_VERSION,
     docType: GOAL_DOC_TYPE,
     goalId: requireString(parsed.goalId, "goalId", 64),
@@ -265,12 +268,18 @@ function parseGoalRecord(attributes: FrontmatterObject, relativePath: string, ma
     window: normalizeGoalWindow(parsed.window, "window"),
     ...relations,
     domains: normalizeDomainList(parsed.domains, "domains"),
-    relativePath,
-    markdown,
-  });
+  }) as GoalEntity;
+
+  return {
+    entity,
+    document: {
+      relativePath,
+      markdown,
+    },
+  };
 }
 
-function buildAttributes(record: GoalEntity | GoalRecord): FrontmatterObject {
+function buildAttributes(record: GoalEntity): FrontmatterObject {
   const relations = canonicalizeGoalRelations(record);
 
   return stripUndefined({
@@ -293,21 +302,24 @@ function buildAttributes(record: GoalEntity | GoalRecord): FrontmatterObject {
   }) as FrontmatterObject;
 }
 
-const goalRegistryApi = createMarkdownRegistryApi<GoalRecord>({
+const goalRegistryApi = createMarkdownRegistryApi<GoalStoredDocument>({
   directory: GOALS_DIRECTORY,
-  recordFromParts: parseGoalRecord,
-  isExpectedRecord: (record) => record.docType === GOAL_DOC_TYPE && record.schemaVersion === GOAL_SCHEMA_VERSION,
+  recordFromParts: parseGoalStoredDocument,
+  isExpectedRecord: (record) =>
+    record.entity.docType === GOAL_DOC_TYPE && record.entity.schemaVersion === GOAL_SCHEMA_VERSION,
   invalidCode: "VAULT_INVALID_GOAL",
   invalidMessage: "Goal registry document has an unexpected shape.",
   sortRecords: (records) =>
     records.sort(
       (left, right) =>
-        right.priority - left.priority ||
-        left.window.startAt.localeCompare(right.window.startAt) ||
-        left.title.localeCompare(right.title) ||
-        left.goalId.localeCompare(right.goalId),
+        right.entity.priority - left.entity.priority ||
+        left.entity.window.startAt.localeCompare(right.entity.window.startAt) ||
+        left.entity.title.localeCompare(right.entity.title) ||
+        left.entity.goalId.localeCompare(right.entity.goalId),
     ),
-  getRecordId: (record) => record.goalId,
+  getRecordId: (record) => record.entity.goalId,
+  getRecordSlug: (record) => record.entity.slug,
+  getRecordRelativePath: (record) => record.document.relativePath,
   conflictCode: "VAULT_GOAL_CONFLICT",
   conflictMessage: "Goal id and slug resolve to different records.",
   readMissingCode: "VAULT_GOAL_MISSING",
@@ -337,8 +349,9 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
     recordId: normalizedGoalId,
     slug: requestedSlug,
   });
-  const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const existingWindow = existingRecord?.window;
+  const existingEntity = existingRecord?.entity;
+  const title = requireString(input.title ?? existingEntity?.title, "title", 160);
+  const existingWindow = existingEntity?.window;
   return goalRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
     existingRecord,
@@ -348,68 +361,69 @@ export async function upsertGoal(input: UpsertGoalInput): Promise<UpsertGoalResu
     buildDocument: (target) => {
       const parentGoalId = resolveOptionalUpsertValue(
         input.parentGoalId,
-        existingRecord?.parentGoalId,
+        existingEntity?.parentGoalId,
         (value) => (value === null ? null : normalizeId(value, "parentGoalId", "goal")),
       );
       const relatedGoalIds = resolveOptionalUpsertValue(
         input.relatedGoalIds,
-        existingRecord?.relatedGoalIds,
+        existingEntity?.relatedGoalIds,
         (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
       );
       const relatedExperimentIds = resolveOptionalUpsertValue(
         input.relatedExperimentIds,
-        existingRecord?.relatedExperimentIds,
+        existingEntity?.relatedExperimentIds,
         (value) => normalizeRecordIdList(value, "relatedExperimentIds", "exp"),
       );
-      const attributes = buildAttributes(
-        ensureGoalLinks(
-          stripUndefined({
-            schemaVersion: GOAL_SCHEMA_VERSION,
-            docType: GOAL_DOC_TYPE,
-            goalId: target.recordId,
-            slug: target.slug,
-            title,
-            status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
-              optionalEnum(value, GOAL_STATUSES, "status") ?? "active",
-            ),
-            horizon: resolveRequiredUpsertValue(input.horizon, existingRecord?.horizon, "ongoing", (value) =>
-              optionalEnum(value, GOAL_HORIZONS, "horizon") ?? "ongoing",
-            ),
-            priority: resolveRequiredUpsertValue(input.priority, existingRecord?.priority, 5, normalizePriority),
-            window: normalizeGoalWindow(
-              {
-                startAt: input.window?.startAt ?? existingWindow?.startAt ?? new Date(),
-                targetAt:
-                  input.window?.targetAt === undefined ? existingWindow?.targetAt : input.window.targetAt,
-              },
-              "window",
-            ),
-            parentGoalId,
-            relatedGoalIds,
-            relatedExperimentIds,
-            domains: resolveOptionalUpsertValue(input.domains, existingRecord?.domains, (value) =>
-              normalizeDomainList(value, "domains"),
-            ),
-            links: [],
-          }) as GoalEntity,
-        ),
+      const entity = ensureGoalLinks(
+        stripUndefined({
+          schemaVersion: GOAL_SCHEMA_VERSION,
+          docType: GOAL_DOC_TYPE,
+          goalId: target.recordId,
+          slug: target.slug,
+          title,
+          status: resolveRequiredUpsertValue(input.status, existingEntity?.status, "active", (value) =>
+            optionalEnum(value, GOAL_STATUSES, "status") ?? "active",
+          ),
+          horizon: resolveRequiredUpsertValue(input.horizon, existingEntity?.horizon, "ongoing", (value) =>
+            optionalEnum(value, GOAL_HORIZONS, "horizon") ?? "ongoing",
+          ),
+          priority: resolveRequiredUpsertValue(input.priority, existingEntity?.priority, 5, normalizePriority),
+          window: normalizeGoalWindow(
+            {
+              startAt: input.window?.startAt ?? existingWindow?.startAt ?? new Date(),
+              targetAt:
+                input.window?.targetAt === undefined ? existingWindow?.targetAt : input.window.targetAt,
+            },
+            "window",
+          ),
+          parentGoalId,
+          relatedGoalIds,
+          relatedExperimentIds,
+          domains: resolveOptionalUpsertValue(input.domains, existingEntity?.domains, (value) =>
+            normalizeDomainList(value, "domains"),
+          ),
+          links: [],
+        }) as GoalEntity,
       );
+      const attributes = buildAttributes(entity);
 
-      return buildDocumentFromAttributes<FrontmatterObject, GoalRecord>({
+      return {
         attributes,
-        relativePath: target.relativePath,
-        markdown: existingRecord?.markdown,
-        buildBody,
-      });
+        body: buildBody(entity),
+      };
     },
   });
 }
 
-export async function listGoals(vaultRoot: string): Promise<GoalRecord[]> {
+export async function listGoals(vaultRoot: string): Promise<GoalStoredDocument[]> {
   return goalRegistryApi.listRecords(vaultRoot);
 }
 
-export async function readGoal({ vaultRoot, goalId, slug }: ReadGoalInput): Promise<GoalRecord> {
+export async function readGoal({
+  vaultRoot,
+  goalId,
+  slug,
+}: ReadGoalInput): Promise<GoalStoredDocument> {
   const normalizedGoalId = normalizeId(goalId, "goalId", "goal");
   const normalizedSlug = normalizeSelectorSlug(slug);
   return goalRegistryApi.readRecord({

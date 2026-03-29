@@ -873,9 +873,11 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     stoppedOn?: string
   }): Promise<{
     record: {
-      protocolId: string
-      stoppedOn?: string | null
-      status: string
+      entity: {
+        protocolId: string
+        stoppedOn?: string | null
+        status: string
+      }
     }
   }>
 }

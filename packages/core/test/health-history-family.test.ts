@@ -449,7 +449,7 @@ test("family members are stored as deterministic markdown registry entries", asy
   });
   const updated = await upsertFamilyMember({
     vaultRoot,
-    familyMemberId: created.record.familyMemberId,
+    familyMemberId: created.record.entity.familyMemberId,
     slug: "changed-slug-that-should-not-rename",
     note: "Updated summary.",
   });
@@ -457,24 +457,24 @@ test("family members are stored as deterministic markdown registry entries", asy
   const listed = await listFamilyMembers(vaultRoot);
   const read = await readFamilyMember({
     vaultRoot,
-    slug: created.record.slug,
+    slug: created.record.entity.slug,
   });
 
   assert.equal(created.created, true);
   assert.equal(updated.created, false);
-  assert.equal(updated.record.relativePath, created.record.relativePath);
-  assert.equal(updated.record.slug, created.record.slug);
+  assert.equal(updated.record.document.relativePath, created.record.document.relativePath);
+  assert.equal(updated.record.entity.slug, created.record.entity.slug);
   assert.equal(listed.length, 1);
-  assert.equal(read.familyMemberId, created.record.familyMemberId);
-  assert.match(read.markdown, /## Related Variants/);
-  assert.deepEqual(read.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
-  assert.deepEqual(read.links, [
+  assert.equal(read.entity.familyMemberId, created.record.entity.familyMemberId);
+  assert.match(read.document.markdown, /## Related Variants/);
+  assert.deepEqual(read.entity.relatedVariantIds, ["var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+  assert.deepEqual(read.entity.links, [
     {
       type: "related_variant",
       targetId: "var_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
     },
   ]);
-  assert.doesNotMatch(read.markdown, /updatedAt:/);
+  assert.doesNotMatch(read.document.markdown, /updatedAt:/);
 
   const auditRecords = await readJsonlRecords({
     vaultRoot,
@@ -517,8 +517,8 @@ test("family registry upserts reject conflicting family member ids and slugs", a
     () =>
       upsertFamilyMember({
         vaultRoot,
-        familyMemberId: first.record.familyMemberId,
-        slug: second.record.slug,
+        familyMemberId: first.record.entity.familyMemberId,
+        slug: second.record.entity.slug,
         note: "This should fail.",
       }),
     (error: unknown) =>
@@ -571,44 +571,44 @@ test("genetic variants are stored in markdown registries and can link to family 
     zygosity: "compound_heterozygous",
     significance: "risk_factor",
     inheritance: "maternal lineage",
-    sourceFamilyMemberIds: [familyMember.record.familyMemberId],
+    sourceFamilyMemberIds: [familyMember.record.entity.familyMemberId],
     note: "Family history and genotype raise late-life risk.",
   });
   const updated = await upsertGeneticVariant({
     vaultRoot,
-    variantId: created.record.variantId,
+    variantId: created.record.entity.variantId,
     slug: "changed-slug-that-should-not-rename",
     title: "APOE e4 allele updated",
     significance: "risk_factor",
     note: "Maintain aggressive cardiometabolic prevention.",
-    sourceFamilyMemberIds: [familyMember.record.familyMemberId],
+    sourceFamilyMemberIds: [familyMember.record.entity.familyMemberId],
   });
 
   const listed = await listGeneticVariants(vaultRoot);
   const read = await readGeneticVariant({
     vaultRoot,
-    variantId: created.record.variantId,
+    variantId: created.record.entity.variantId,
   });
 
   assert.equal(created.created, true);
   assert.equal(updated.created, false);
-  assert.equal(updated.record.slug, created.record.slug);
-  assert.equal(updated.record.relativePath, created.record.relativePath);
+  assert.equal(updated.record.entity.slug, created.record.entity.slug);
+  assert.equal(updated.record.document.relativePath, created.record.document.relativePath);
   assert.equal(listed.length, 1);
-  assert.equal(read.variantId, created.record.variantId);
-  assert.equal(read.gene, "APOE");
-  assert.equal(read.title, "APOE e4 allele updated");
-  assert.equal(read.zygosity, "compound_heterozygous");
-  assert.equal(read.inheritance, "maternal lineage");
-  assert.deepEqual(read.sourceFamilyMemberIds, [familyMember.record.familyMemberId]);
-  assert.deepEqual(read.links, [
+  assert.equal(read.entity.variantId, created.record.entity.variantId);
+  assert.equal(read.entity.gene, "APOE");
+  assert.equal(read.entity.title, "APOE e4 allele updated");
+  assert.equal(read.entity.zygosity, "compound_heterozygous");
+  assert.equal(read.entity.inheritance, "maternal lineage");
+  assert.deepEqual(read.entity.sourceFamilyMemberIds, [familyMember.record.entity.familyMemberId]);
+  assert.deepEqual(read.entity.links, [
     {
       type: "source_family_member",
-      targetId: familyMember.record.familyMemberId,
+      targetId: familyMember.record.entity.familyMemberId,
     },
   ]);
-  assert.match(read.markdown, /## Source Family Members/);
-  assert.doesNotMatch(read.markdown, /updatedAt:/);
+  assert.match(read.document.markdown, /## Source Family Members/);
+  assert.doesNotMatch(read.document.markdown, /updatedAt:/);
 
   const auditRecords = await readJsonlRecords({
     vaultRoot,
@@ -618,7 +618,7 @@ test("genetic variants are stored in markdown registries and can link to family 
   const geneticsAuditRecords = auditRecords.filter(
     (record) =>
       (record as { action?: string; targetIds?: string[] }).action === "genetics_upsert" &&
-      (record as { targetIds?: string[] }).targetIds?.includes(created.record.variantId),
+      (record as { targetIds?: string[] }).targetIds?.includes(created.record.entity.variantId),
   ) as Array<{
     changes?: Array<{ path?: string; op?: string }>;
   }>;
@@ -627,8 +627,8 @@ test("genetic variants are stored in markdown registries and can link to family 
   assert.deepEqual(
     geneticsAuditRecords.map((record) => record.changes?.[0]),
     [
-      { path: created.record.relativePath, op: "create" },
-      { path: created.record.relativePath, op: "update" },
+      { path: created.record.document.relativePath, op: "create" },
+      { path: created.record.document.relativePath, op: "update" },
     ],
   );
 
@@ -659,42 +659,42 @@ test("family and genetics updates clear normalized links without breaking patch 
     vaultRoot,
     gene: "APOE",
     title: "APOE e4 allele",
-    sourceFamilyMemberIds: [familyMember.record.familyMemberId],
+    sourceFamilyMemberIds: [familyMember.record.entity.familyMemberId],
   });
 
   const clearedFamilyMember = await upsertFamilyMember({
     vaultRoot,
-    familyMemberId: familyMember.record.familyMemberId,
+    familyMemberId: familyMember.record.entity.familyMemberId,
     relatedVariantIds: [],
   });
   const clearedVariant = await upsertGeneticVariant({
     vaultRoot,
-    variantId: variant.record.variantId,
+    variantId: variant.record.entity.variantId,
     sourceFamilyMemberIds: [],
     note: "Cleared source links without resupplying gene.",
   });
   const readFamilyRecord = await readFamilyMember({
     vaultRoot,
-    familyMemberId: familyMember.record.familyMemberId,
+    familyMemberId: familyMember.record.entity.familyMemberId,
   });
   const readVariantRecord = await readGeneticVariant({
     vaultRoot,
-    variantId: variant.record.variantId,
+    variantId: variant.record.entity.variantId,
   });
 
   assert.equal(clearedFamilyMember.created, false);
   assert.equal(clearedVariant.created, false);
-  assert.equal(readFamilyRecord.relationship, "mother");
-  assert.equal(readFamilyRecord.relatedVariantIds, undefined);
-  assert.deepEqual(readFamilyRecord.links, []);
-  assert.match(readFamilyRecord.markdown, /## Related Variants[\s\S]*- none/);
-  assert.doesNotMatch(readFamilyRecord.markdown, new RegExp(relatedVariantId));
-  assert.equal(readVariantRecord.gene, "APOE");
-  assert.equal(readVariantRecord.sourceFamilyMemberIds, undefined);
-  assert.deepEqual(readVariantRecord.links, []);
-  assert.equal(readVariantRecord.note, "Cleared source links without resupplying gene.");
-  assert.match(readVariantRecord.markdown, /## Source Family Members[\s\S]*- none/);
-  assert.doesNotMatch(readVariantRecord.markdown, new RegExp(familyMember.record.familyMemberId));
+  assert.equal(readFamilyRecord.entity.relationship, "mother");
+  assert.equal(readFamilyRecord.entity.relatedVariantIds, undefined);
+  assert.deepEqual(readFamilyRecord.entity.links, []);
+  assert.match(readFamilyRecord.document.markdown, /## Related Variants[\s\S]*- none/);
+  assert.doesNotMatch(readFamilyRecord.document.markdown, new RegExp(relatedVariantId));
+  assert.equal(readVariantRecord.entity.gene, "APOE");
+  assert.equal(readVariantRecord.entity.sourceFamilyMemberIds, undefined);
+  assert.deepEqual(readVariantRecord.entity.links, []);
+  assert.equal(readVariantRecord.entity.note, "Cleared source links without resupplying gene.");
+  assert.match(readVariantRecord.document.markdown, /## Source Family Members[\s\S]*- none/);
+  assert.doesNotMatch(readVariantRecord.document.markdown, new RegExp(familyMember.record.entity.familyMemberId));
 });
 
 test("genetic registry upserts reject conflicting variant ids and slugs", async () => {
@@ -716,8 +716,8 @@ test("genetic registry upserts reject conflicting variant ids and slugs", async 
     () =>
       upsertGeneticVariant({
         vaultRoot,
-        variantId: first.record.variantId,
-        slug: second.record.slug,
+        variantId: first.record.entity.variantId,
+        slug: second.record.entity.slug,
         gene: "APOE",
         note: "This should fail.",
       }),
@@ -814,8 +814,8 @@ test("family and genetics registry writes enforce the frozen contract length bou
     relationship: "R".repeat(120),
   });
 
-  assert.equal(familyAtLimit.record.title.length, 160);
-  assert.equal(familyAtLimit.record.relationship.length, 120);
+  assert.equal(familyAtLimit.record.entity.title.length, 160);
+  assert.equal(familyAtLimit.record.entity.relationship.length, 120);
 
   await assert.rejects(
     () =>
@@ -837,8 +837,8 @@ test("family and genetics registry writes enforce the frozen contract length bou
     title: "T".repeat(160),
   });
 
-  assert.equal(variantAtLimit.record.gene.length, 40);
-  assert.equal(variantAtLimit.record.title.length, 160);
+  assert.equal(variantAtLimit.record.entity.gene.length, 40);
+  assert.equal(variantAtLimit.record.entity.title.length, 160);
 
   await assert.rejects(
     () =>
@@ -877,12 +877,12 @@ test("family and genetics registry creation preserves caller-provided ids and ex
     title: "APOE e3 allele",
   });
 
-  assert.equal(familyMember.record.familyMemberId, familyMemberId);
-  assert.equal(familyMember.record.slug, "maternal-uncle");
-  assert.equal(familyMember.record.relativePath, "bank/family/maternal-uncle.md");
-  assert.equal(variant.record.variantId, variantId);
-  assert.equal(variant.record.slug, "apoe-e3");
-  assert.equal(variant.record.relativePath, "bank/genetics/apoe-e3.md");
+  assert.equal(familyMember.record.entity.familyMemberId, familyMemberId);
+  assert.equal(familyMember.record.entity.slug, "maternal-uncle");
+  assert.equal(familyMember.record.document.relativePath, "bank/family/maternal-uncle.md");
+  assert.equal(variant.record.entity.variantId, variantId);
+  assert.equal(variant.record.entity.slug, "apoe-e3");
+  assert.equal(variant.record.document.relativePath, "bank/genetics/apoe-e3.md");
 });
 
 test("family and genetics registry id-or-slug resolution preserves conflict and missing errors", async () => {
@@ -904,8 +904,8 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
     () =>
       upsertFamilyMember({
         vaultRoot,
-        familyMemberId: mother.record.familyMemberId,
-        slug: father.record.slug,
+        familyMemberId: mother.record.entity.familyMemberId,
+        slug: father.record.entity.slug,
         note: "Should fail because id and slug resolve to different records.",
       }),
     (error: unknown) =>
@@ -925,11 +925,11 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
 
   const readFamilyByConflictingSelectors = await readFamilyMember({
     vaultRoot,
-    familyMemberId: mother.record.familyMemberId,
-    slug: father.record.slug,
+    familyMemberId: mother.record.entity.familyMemberId,
+    slug: father.record.entity.slug,
   });
 
-  assert.equal(readFamilyByConflictingSelectors.familyMemberId, mother.record.familyMemberId);
+  assert.equal(readFamilyByConflictingSelectors.entity.familyMemberId, mother.record.entity.familyMemberId);
 
   const apoe = await upsertGeneticVariant({
     vaultRoot,
@@ -946,8 +946,8 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
     () =>
       upsertGeneticVariant({
         vaultRoot,
-        variantId: apoe.record.variantId,
-        slug: mthfr.record.slug,
+        variantId: apoe.record.entity.variantId,
+        slug: mthfr.record.entity.slug,
         gene: "APOE",
         title: "Conflicting selector",
       }),
@@ -968,11 +968,11 @@ test("family and genetics registry id-or-slug resolution preserves conflict and 
 
   const readVariantByConflictingSelectors = await readGeneticVariant({
     vaultRoot,
-    variantId: apoe.record.variantId,
-    slug: mthfr.record.slug,
+    variantId: apoe.record.entity.variantId,
+    slug: mthfr.record.entity.slug,
   });
 
-  assert.equal(readVariantByConflictingSelectors.variantId, apoe.record.variantId);
+  assert.equal(readVariantByConflictingSelectors.entity.variantId, apoe.record.entity.variantId);
 });
 
 test("family and genetics upserts require canonical title and familyMemberId fields", async () => {

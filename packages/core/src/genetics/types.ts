@@ -4,7 +4,7 @@ import {
   type GeneticVariantFrontmatter,
 } from "@murph/contracts";
 
-import type { MarkdownRegistryDocumentEnvelope } from "../bank/types.ts";
+import type { StoredMarkdownRegistryEntity } from "../bank/types.ts";
 
 export const VARIANT_ZYGOSITIES = CONTRACT_VARIANT_ZYGOSITIES;
 export const VARIANT_SIGNIFICANCES = CONTRACT_VARIANT_SIGNIFICANCES;
@@ -24,7 +24,7 @@ export interface GeneticVariantEntity extends GeneticVariantFrontmatter {
   links: GeneticVariantLink[];
 }
 
-export type GeneticVariantRecord = GeneticVariantEntity & MarkdownRegistryDocumentEnvelope;
+export type GeneticVariantStoredDocument = StoredMarkdownRegistryEntity<GeneticVariantEntity>;
 
 export interface UpsertGeneticVariantInput {
   vaultRoot: string;
@@ -42,7 +42,7 @@ export interface UpsertGeneticVariantInput {
 export interface UpsertGeneticVariantResult {
   created: boolean;
   auditPath: string;
-  record: GeneticVariantRecord;
+  record: GeneticVariantStoredDocument;
 }
 
 export interface ReadGeneticVariantInput {

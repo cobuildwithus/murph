@@ -152,14 +152,17 @@ test("explicit health services reuse shared protocol metadata and nested registr
 
     const upsertResult = await coreServices.upsertProtocol({
       input: payloadPath,
+      requestId: null,
       vault: vaultRoot,
     });
     const protocolResult = await queryServices.showProtocol({
       id: "prot_01JSHAREDMETADATA000000000001",
+      requestId: null,
       vault: vaultRoot,
     });
     const supplementResult = await queryServices.showSupplement({
       id: "prot_01JSHAREDMETADATA000000000001",
+      requestId: null,
       vault: vaultRoot,
     });
 
