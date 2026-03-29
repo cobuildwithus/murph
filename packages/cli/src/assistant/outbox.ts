@@ -1,3 +1,4 @@
+import { maybeDrainAssistantOutboxViaDaemon } from '../assistant-daemon-client.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
@@ -25,6 +26,7 @@ import {
   warnAssistantBestEffortFailure,
   writeJsonFileAtomic,
 } from './shared.js'
+import { assertAssistantOutboxIntentId } from './state-ids.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
@@ -567,6 +569,11 @@ export async function drainAssistantOutbox(input: {
   queued: number
   sent: number
 }> {
+  const remote = await maybeDrainAssistantOutboxViaDaemon(input)
+  if (remote) {
+    return remote
+  }
+
   maybeThrowInjectedAssistantFault({
     component: 'outbox',
     fault: 'outbox',
@@ -837,7 +844,7 @@ function resolveAssistantOutboxIntentPath(
   outboxDirectory: string,
   intentId: string,
 ): string {
-  return path.join(outboxDirectory, `${intentId}.json`)
+  return path.join(outboxDirectory, `${assertAssistantOutboxIntentId(intentId)}.json`)
 }
 
 function resolveAssistantOutboxQuarantineDirectory(

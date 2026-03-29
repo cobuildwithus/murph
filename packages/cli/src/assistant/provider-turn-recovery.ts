@@ -24,9 +24,9 @@ import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 import {
   isMissingFileError,
-  normalizeNullableString,
   writeJsonFileAtomic,
 } from './shared.js'
+import { assertAssistantSessionId } from './state-ids.js'
 
 const ASSISTANT_PROVIDER_ROUTE_RECOVERY_SCHEMA =
   'murph.assistant-provider-route-recovery.v1'
@@ -313,7 +313,7 @@ function resolveAssistantProviderRouteRecoveryPath(
 ): string {
   return path.join(
     paths.providerRouteRecoveryDirectory,
-    `${normalizeNullableString(sessionId) ?? 'unknown'}.json`,
+    `${assertAssistantSessionId(sessionId)}.json`,
   )
 }
 

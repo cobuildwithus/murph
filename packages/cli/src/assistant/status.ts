@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { maybeGetAssistantStatusViaDaemon } from '../assistant-daemon-client.js'
 import {
   assistantStatusResultSchema,
   type AssistantFailoverState,
@@ -36,7 +37,17 @@ export async function getAssistantStatus(
         vault: string
       },
 ): Promise<AssistantStatusResult> {
-  const vault = typeof input === 'string' ? input : input.vault
+  const normalizedInput = typeof input === 'string' ? { vault: input } : input
+  const remote = await maybeGetAssistantStatusViaDaemon({
+    limit: normalizedInput.limit,
+    sessionId: normalizedInput.sessionId ?? null,
+    vault: normalizedInput.vault,
+  })
+  if (remote) {
+    return remote
+  }
+
+  const vault = normalizedInput.vault
   const paths = resolveAssistantStatePaths(vault)
   const [
     automation,

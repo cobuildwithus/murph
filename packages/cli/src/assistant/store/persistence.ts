@@ -32,6 +32,7 @@ import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
 import { normalizeAssistantSessionSnapshot } from '../provider-state.js'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from '../runtime-events.js'
+import { assertAssistantSessionId } from '../state-ids.js'
 import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
@@ -194,14 +195,20 @@ export function resolveAssistantTranscriptPath(
   paths: AssistantStatePaths,
   sessionId: string,
 ): string {
-  return path.join(paths.transcriptsDirectory, `${sessionId}.jsonl`)
+  return path.join(
+    paths.transcriptsDirectory,
+    `${assertAssistantSessionId(sessionId)}.jsonl`,
+  )
 }
 
 export function resolveAssistantSessionPath(
   paths: AssistantStatePaths,
   sessionId: string,
 ): string {
-  return path.join(paths.sessionsDirectory, `${sessionId}.json`)
+  return path.join(
+    paths.sessionsDirectory,
+    `${assertAssistantSessionId(sessionId)}.json`,
+  )
 }
 
 export async function inspectAssistantSessionStorage(input: {

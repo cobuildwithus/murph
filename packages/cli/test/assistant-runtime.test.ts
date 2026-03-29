@@ -29,6 +29,12 @@ import {
 } from '../src/assistant/provider-turn-recovery.js'
 import * as assistantAutomationArtifacts from '../src/assistant/automation/artifacts.js'
 import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
+import {
+  assertAssistantOutboxIntentId,
+  assertAssistantSessionId,
+  assertAssistantTranscriptDistillationId,
+  assertAssistantTurnId,
+} from '../src/assistant/state-ids.js'
 import { buildAssistantTranscriptDistillationContinuityText } from '../src/assistant/transcript-distillation.js'
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -288,6 +294,63 @@ test('buildAssistantTranscriptDistillationContinuityText keeps distillations non
   assert.equal(continuity?.includes('operator-authored'), false)
   assert.equal(continuity?.includes('non-canonical'), true)
   assert.equal(continuity?.includes('vault evidence'), true)
+})
+
+test('assistant runtime opaque ids reject traversal-shaped values', () => {
+  assert.equal(assertAssistantSessionId('session_safe'), 'session_safe')
+  assert.equal(assertAssistantTurnId('turn_safe'), 'turn_safe')
+  assert.equal(assertAssistantOutboxIntentId('outbox_safe'), 'outbox_safe')
+  assert.equal(
+    assertAssistantTranscriptDistillationId('distill_safe'),
+    'distill_safe',
+  )
+
+  assert.throws(
+    () => assertAssistantSessionId('../escape'),
+    /opaque runtime ids/u,
+  )
+  assert.throws(
+    () => assertAssistantTurnId('turn/escape'),
+    /opaque runtime ids/u,
+  )
+  assert.throws(
+    () => assertAssistantOutboxIntentId(''),
+    /opaque runtime ids/u,
+  )
+})
+
+test('readLatestAssistantTranscriptDistillation quarantines malformed distillation files instead of silently accepting them', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-distillation-corrupt-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:distillation-corrupt',
+  })
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const distillationPath = path.join(
+    paths.distillationsDirectory,
+    `${resolved.session.sessionId}.jsonl`,
+  )
+
+  await writeFile(
+    distillationPath,
+    '{"schema":"murph.assistant-transcript-distillation.v1"}\n',
+    'utf8',
+  )
+
+  const distillation = await readLatestAssistantTranscriptDistillation(
+    vaultRoot,
+    resolved.session.sessionId,
+  )
+  assert.equal(distillation, null)
+
+  const quarantineEntries = await readdir(
+    path.join(paths.quarantineDirectory, 'transcript-distillation'),
+  )
+  assert.ok(quarantineEntries.some((entry) => entry.endsWith('.meta.json')))
 })
 
 test('sendAssistantMessage persists only assistant session metadata and reuses provider sessions via alias keys', async () => {

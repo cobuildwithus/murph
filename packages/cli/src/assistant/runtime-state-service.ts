@@ -60,49 +60,51 @@ import {
   upsertAssistantMemory,
 } from './memory.js'
 
+type AssistantStatusInput = Exclude<Parameters<typeof getAssistantStatus>[0], string>
 type OmitVault<T> = T extends { vault: string } ? Omit<T, 'vault'> : T
-type RecordAssistantDiagnosticEventInput = Parameters<
+type RecordAssistantDiagnosticEventInput = Omit<Parameters<
   typeof recordAssistantDiagnosticEvent
->[0]
-type CreateAssistantOutboxIntentInput = Parameters<
+>[0], 'vault'>
+type CreateAssistantOutboxIntentInput = Omit<Parameters<
   typeof createAssistantOutboxIntent
->[0]
-type DeliverAssistantOutboxMessageInput = Parameters<
+>[0], 'vault'>
+type DeliverAssistantOutboxMessageInput = Omit<Parameters<
   typeof deliverAssistantOutboxMessage
->[0]
-type CreateAssistantTurnReceiptInput = Parameters<
+>[0], 'vault'>
+type CreateAssistantTurnReceiptInput = Omit<Parameters<
   typeof createAssistantTurnReceipt
->[0]
-type AppendAssistantTurnReceiptEventInput = Parameters<
+>[0], 'vault'>
+type AppendAssistantTurnReceiptEventInput = Omit<Parameters<
   typeof appendAssistantTurnReceiptEvent
->[0]
-type UpdateAssistantTurnReceiptInput = Parameters<
+>[0], 'vault'>
+type UpdateAssistantTurnReceiptInput = Omit<Parameters<
   typeof updateAssistantTurnReceipt
->[0]
-type FinalizeAssistantTurnReceiptInput = Parameters<
+>[0], 'vault'>
+type FinalizeAssistantTurnReceiptInput = Omit<Parameters<
   typeof finalizeAssistantTurnReceipt
->[0]
+>[0], 'vault'>
+type AssistantMemoryGetInput = Omit<Parameters<typeof getAssistantMemory>[0], 'vault'>
+type AssistantMemoryPromptBlockInput = Omit<
+  Parameters<typeof loadAssistantMemoryPromptBlock>[0],
+  'vault'
+>
+type AssistantMemorySearchInput = Omit<Parameters<typeof searchAssistantMemory>[0], 'vault'>
+type AssistantMemoryUpsertInput = Omit<Parameters<typeof upsertAssistantMemory>[0], 'vault'>
 
 export interface AssistantRuntimeStateService {
   diagnostics: {
     readSnapshot: () => ReturnType<typeof readAssistantDiagnosticsSnapshot>
-    recordEvent: (
-      input: OmitVault<RecordAssistantDiagnosticEventInput>,
-    ) => ReturnType<typeof recordAssistantDiagnosticEvent>
+    recordEvent: (input: RecordAssistantDiagnosticEventInput) => ReturnType<typeof recordAssistantDiagnosticEvent>
   }
   memory: {
-    get: (...args: Parameters<typeof getAssistantMemory>) => ReturnType<typeof getAssistantMemory>
-    loadPromptBlock: (...args: Parameters<typeof loadAssistantMemoryPromptBlock>) => ReturnType<typeof loadAssistantMemoryPromptBlock>
-    search: (...args: Parameters<typeof searchAssistantMemory>) => ReturnType<typeof searchAssistantMemory>
-    upsert: (...args: Parameters<typeof upsertAssistantMemory>) => ReturnType<typeof upsertAssistantMemory>
+    get: (input: AssistantMemoryGetInput) => ReturnType<typeof getAssistantMemory>
+    loadPromptBlock: (input: AssistantMemoryPromptBlockInput) => ReturnType<typeof loadAssistantMemoryPromptBlock>
+    search: (input: AssistantMemorySearchInput) => ReturnType<typeof searchAssistantMemory>
+    upsert: (input: AssistantMemoryUpsertInput) => ReturnType<typeof upsertAssistantMemory>
   }
   outbox: {
-    createIntent: (
-      input: OmitVault<CreateAssistantOutboxIntentInput>,
-    ) => ReturnType<typeof createAssistantOutboxIntent>
-    deliverMessage: (
-      input: OmitVault<DeliverAssistantOutboxMessageInput>,
-    ) => Promise<DeliverAssistantOutboxMessageResult>
+    createIntent: (input: CreateAssistantOutboxIntentInput) => ReturnType<typeof createAssistantOutboxIntent>
+    deliverMessage: (input: DeliverAssistantOutboxMessageInput) => Promise<DeliverAssistantOutboxMessageResult>
     dispatchIntent: (input: {
       dependencies?: Parameters<typeof dispatchAssistantOutboxIntent>[0]['dependencies']
       dispatchHooks?: AssistantOutboxDispatchHooks
@@ -117,7 +119,7 @@ export interface AssistantRuntimeStateService {
   sessions: {
     get: (sessionId: string) => Promise<AssistantSession>
     list: () => Promise<AssistantSession[]>
-    resolve: (input: ResolveAssistantSessionInput) => Promise<ResolvedAssistantSession>
+    resolve: (input: Omit<ResolveAssistantSessionInput, 'vault'>) => Promise<ResolvedAssistantSession>
     restoreSnapshot: (input: {
       session: AssistantSession
       transcriptEntries?: readonly AssistantTranscriptEntryInput[] | null
@@ -131,7 +133,7 @@ export interface AssistantRuntimeStateService {
     put: (input: { docId: string; value: Record<string, unknown> }) => Promise<AssistantStateDocumentSnapshot>
   }
   status: {
-    get: (input?: Parameters<typeof getAssistantStatus>[0]) => Promise<AssistantStatusResult>
+    get: (input?: Omit<AssistantStatusInput, 'vault'>) => Promise<AssistantStatusResult>
     readSnapshot: () => ReturnType<typeof readAssistantStatusSnapshot>
     refreshSnapshot: () => ReturnType<typeof refreshAssistantStatusSnapshot>
   }
@@ -140,19 +142,11 @@ export interface AssistantRuntimeStateService {
     list: (sessionId: string) => Promise<AssistantTranscriptEntry[]>
   }
   turns: {
-    appendEvent: (
-      input: OmitVault<AppendAssistantTurnReceiptEventInput>,
-    ) => ReturnType<typeof appendAssistantTurnReceiptEvent>
-    createReceipt: (
-      input: OmitVault<CreateAssistantTurnReceiptInput>,
-    ) => ReturnType<typeof createAssistantTurnReceipt>
-    finalizeReceipt: (
-      input: OmitVault<FinalizeAssistantTurnReceiptInput>,
-    ) => ReturnType<typeof finalizeAssistantTurnReceipt>
+    appendEvent: (input: AppendAssistantTurnReceiptEventInput) => ReturnType<typeof appendAssistantTurnReceiptEvent>
+    createReceipt: (input: CreateAssistantTurnReceiptInput) => ReturnType<typeof createAssistantTurnReceipt>
+    finalizeReceipt: (input: FinalizeAssistantTurnReceiptInput) => ReturnType<typeof finalizeAssistantTurnReceipt>
     readReceipt: (turnId: string) => Promise<AssistantTurnReceipt | null>
-    updateReceipt: (
-      input: OmitVault<UpdateAssistantTurnReceiptInput>,
-    ) => ReturnType<typeof updateAssistantTurnReceipt>
+    updateReceipt: (input: UpdateAssistantTurnReceiptInput) => ReturnType<typeof updateAssistantTurnReceipt>
   }
   vault: string
 }
@@ -164,10 +158,10 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
       recordEvent: (input) => recordAssistantDiagnosticEvent({ ...input, vault }),
     },
     memory: {
-      get: (...args) => getAssistantMemory(...args),
-      loadPromptBlock: (...args) => loadAssistantMemoryPromptBlock(...args),
-      search: (...args) => searchAssistantMemory(...args),
-      upsert: (...args) => upsertAssistantMemory(...args),
+      get: (input) => getAssistantMemory({ ...input, vault }),
+      loadPromptBlock: (input) => loadAssistantMemoryPromptBlock({ ...input, vault }),
+      search: (input) => searchAssistantMemory({ ...input, vault }),
+      upsert: (input) => upsertAssistantMemory({ ...input, vault }),
     },
     outbox: {
       createIntent: (input) => createAssistantOutboxIntent({ ...input, vault }),
@@ -184,7 +178,11 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
     sessions: {
       get: (sessionId) => getAssistantSession(vault, sessionId),
       list: () => listAssistantSessions(vault),
-      resolve: (input) => resolveAssistantSession({ ...input, vault }),
+      resolve: (input) =>
+        resolveAssistantSession({
+          ...input,
+          vault,
+        }),
       restoreSnapshot: (input) =>
         restoreAssistantSessionSnapshot({
           ...input,
@@ -200,11 +198,10 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
     },
     status: {
       get: (input) =>
-        getAssistantStatus(
-          typeof input === 'string' || input === undefined
-            ? input ?? vault
-            : { ...input, vault },
-        ),
+        getAssistantStatus({
+          ...(input ?? {}),
+          vault,
+        }),
       readSnapshot: () => readAssistantStatusSnapshot(vault),
       refreshSnapshot: () => refreshAssistantStatusSnapshot(vault),
     },

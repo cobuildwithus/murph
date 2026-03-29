@@ -160,6 +160,7 @@ export const assistantStatusRunLockStateValues = [
 
 export const assistantQuarantineArtifactKindValues = [
   'session',
+  'transcript-distillation',
   'indexes',
   'automation',
   'status',
@@ -175,6 +176,7 @@ export const assistantQuarantineArtifactKindValues = [
 export const assistantRuntimeEventKindValues = [
   'session.upserted',
   'session.quarantined',
+  'transcript-distillation.quarantined',
   'indexes.rebuilt',
   'indexes.quarantined',
   'automation.recovered',

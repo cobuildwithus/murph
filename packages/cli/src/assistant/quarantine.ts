@@ -166,6 +166,8 @@ function mapAssistantQuarantineRuntimeEventKind(
   switch (artifactKind) {
     case 'session':
       return 'session.quarantined' as const
+    case 'transcript-distillation':
+      return 'transcript-distillation.quarantined' as const
     case 'indexes':
       return 'indexes.quarantined' as const
     case 'automation':

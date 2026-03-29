@@ -36,7 +36,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-test('assistantd http server enforces bearer auth and routes requests to the local assistant service', async () => {
+test('assistantd http server enforces bearer auth, validates requests, and routes calls to the local assistant service', async () => {
   const sendMessage = vi.fn(async (input: any) => ({
     vault: input.vault ?? '/tmp/vault',
     status: 'completed',
@@ -49,12 +49,97 @@ test('assistantd http server enforces bearer auth and routes requests to the loc
     deliveryError: null,
     blocked: null,
   }))
-  const getSession = vi.fn(async (sessionId: string) => ({
+  const getSession = vi.fn(async (input: { sessionId: string }) => ({
     ...TEST_SESSION,
-    sessionId,
+    sessionId: input.sessionId,
   }))
+  const getStatus = vi.fn(async () => ({
+    vault: '/tmp/vault',
+    stateRoot: '/tmp/assistant-state',
+    statusPath: '/tmp/assistant-state/status.json',
+    outboxRoot: '/tmp/assistant-state/outbox',
+    diagnosticsPath: '/tmp/assistant-state/diagnostics.snapshot.json',
+    failoverStatePath: '/tmp/assistant-state/failover.json',
+    turnsRoot: '/tmp/assistant-state/turns',
+    generatedAt: '2026-03-28T00:00:00.000Z',
+    runLock: {
+      state: 'unlocked',
+      pid: null,
+      startedAt: null,
+      mode: null,
+      command: null,
+      reason: null,
+    },
+    automation: {
+      inboxScanCursor: null,
+      autoReplyScanCursor: null,
+      autoReplyChannels: [],
+      preferredChannels: [],
+      autoReplyBacklogChannels: [],
+      autoReplyPrimed: false,
+      updatedAt: '2026-03-28T00:00:00.000Z',
+    },
+    outbox: {
+      total: 0,
+      pending: 0,
+      sending: 0,
+      retryable: 0,
+      sent: 0,
+      failed: 0,
+      abandoned: 0,
+      oldestPendingAt: null,
+      nextAttemptAt: null,
+    },
+    diagnostics: {
+      schema: 'murph.assistant-diagnostics.v1',
+      updatedAt: '2026-03-28T00:00:00.000Z',
+      lastEventAt: null,
+      lastErrorAt: null,
+      counters: {
+        turnsStarted: 0,
+        turnsCompleted: 0,
+        turnsDeferred: 0,
+        turnsFailed: 0,
+        providerAttempts: 0,
+        providerFailures: 0,
+        providerFailovers: 0,
+        deliveriesQueued: 0,
+        deliveriesSent: 0,
+        deliveriesFailed: 0,
+        deliveriesRetryable: 0,
+        outboxDrains: 0,
+        outboxRetries: 0,
+        automationScans: 0,
+      },
+      recentWarnings: [],
+    },
+    failover: {
+      schema: 'murph.assistant-failover-state.v1',
+      updatedAt: '2026-03-28T00:00:00.000Z',
+      routes: [],
+    },
+    quarantine: {
+      total: 0,
+      byKind: {},
+      recent: [],
+    },
+    runtimeBudget: {
+      schema: 'murph.assistant-runtime-budget.v1',
+      updatedAt: '2026-03-28T00:00:00.000Z',
+      caches: [],
+      maintenance: {
+        lastRunAt: null,
+        staleProviderRecoveryPruned: 0,
+        staleQuarantinePruned: 0,
+        staleLocksCleared: 0,
+        notes: [],
+      },
+    },
+    recentTurns: [],
+    warnings: [],
+  } as any))
   const service = {
-    drainOutbox: async () => ({ sent: 0, failed: 0, queued: 0 }),
+    drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getSession,
     health: async () => ({
       generatedAt: '2026-03-28T00:00:00.000Z',
@@ -62,26 +147,31 @@ test('assistantd http server enforces bearer auth and routes requests to the loc
       pid: 1234,
       vaultBound: true,
     }),
-    getStatus: async () => ({
-      vault: '/tmp/vault',
-      stateRoot: '/tmp/assistant-state',
-      runLock: { state: 'unlocked', holderPid: null, acquiredAt: null, staleAfter: null },
-      sessions: [],
-      activeSessionCount: 0,
-      outbox: { pending: 0, retryable: 0 },
-      diagnostics: { generatedAt: '2026-03-28T00:00:00.000Z', events: [], counters: { turnsAccepted: 0, turnsCompleted: 0, turnsFailed: 0, turnsDeferred: 0 } },
-      cron: { jobs: 0, due: 0, running: 0 },
-      automation: { pendingInboxDeliveries: 0, pendingAutoReplies: 0 },
-      generatedAt: '2026-03-28T00:00:00.000Z',
-    } as any),
+    getStatus,
     listSessions: async () => [TEST_SESSION as any],
     openConversation: async () => ({
       created: true,
-      paths: { assistantStateRoot: '/tmp/assistant-state' },
       session: TEST_SESSION as any,
     }),
-    processDueCron: async () => ({ runs: [] } as any),
-    runAutomationOnce: async () => ({ scannedInbox: 0, scannedAutoReply: 0, triggered: 0 } as any),
+    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    runAutomationOnce: async () => ({
+      vault: '/tmp/vault',
+      startedAt: '2026-03-28T00:00:00.000Z',
+      stoppedAt: '2026-03-28T00:00:00.000Z',
+      reason: 'completed',
+      daemonStarted: false,
+      scans: 1,
+      considered: 0,
+      routed: 0,
+      noAction: 0,
+      skipped: 0,
+      failed: 0,
+      replyConsidered: 0,
+      replied: 0,
+      replySkipped: 0,
+      replyFailed: 0,
+      lastError: null,
+    } as any),
     sendMessage,
     updateSessionOptions: async () => TEST_SESSION as any,
     vault: '/tmp/vault',
@@ -129,15 +219,53 @@ test('assistantd http server enforces bearer auth and routes requests to the loc
     assert.equal(messagePayload.response, 'daemon response')
     assert.equal(sendMessage.mock.calls[0]?.[0]?.prompt, 'hello over assistantd')
 
-    const session = await fetch(`${handle.address.baseUrl}/sessions/${encodeURIComponent('session_http_route')}`, {
-      headers: {
-        Authorization: 'Bearer secret-token',
+    const status = await fetch(
+      `${handle.address.baseUrl}/status?limit=7&sessionId=${encodeURIComponent(TEST_SESSION.sessionId)}&vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
       },
-    })
+    )
+    assert.equal(status.status, 200)
+    assert.equal(getStatus.mock.calls[0]?.[0]?.limit, 7)
+    assert.equal(getStatus.mock.calls[0]?.[0]?.sessionId, TEST_SESSION.sessionId)
+
+    const session = await fetch(
+      `${handle.address.baseUrl}/sessions/${encodeURIComponent('session_http_route')}?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
     assert.equal(session.status, 200)
     const sessionPayload = await session.json() as { sessionId: string }
     assert.equal(sessionPayload.sessionId, 'session_http_route')
-    assert.equal(getSession.mock.calls[0]?.[0], 'session_http_route')
+    assert.equal(getSession.mock.calls[0]?.[0]?.sessionId, 'session_http_route')
+
+    const invalidSession = await fetch(
+      `${handle.address.baseUrl}/sessions/${encodeURIComponent('../outside')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(invalidSession.status, 400)
+    assert.match(await invalidSession.text(), /session id/u)
+
+    const oversizedBody = await fetch(`${handle.address.baseUrl}/message`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt: 'x'.repeat(300_000),
+      }),
+    })
+    assert.equal(oversizedBody.status, 413)
   } finally {
     await handle.close()
   }
