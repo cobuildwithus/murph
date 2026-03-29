@@ -6,10 +6,12 @@ import {
   type AssistantTranscriptDistillation,
   type AssistantTranscriptEntry,
 } from '../assistant-cli-contracts.js'
+import { recordAssistantDiagnosticEvent } from './diagnostics.js'
+import { quarantineAssistantStateFile } from './quarantine.js'
+import { assertAssistantSessionId, assertAssistantTranscriptDistillationId } from './state-ids.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store.js'
 import {
-  isJsonSyntaxError,
   isMissingFileError,
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
@@ -67,7 +69,9 @@ export async function maybeRefreshAssistantTranscriptDistillation(input: {
 
   const record = assistantTranscriptDistillationSchema.parse({
     schema: 'murph.assistant-transcript-distillation.v1',
-    distillationId: `distill_${randomUUID().replace(/-/gu, '')}`,
+    distillationId: assertAssistantTranscriptDistillationId(
+      `distill_${randomUUID().replace(/-/gu, '')}`,
+    ),
     sessionId: input.sessionId,
     createdAt: new Date().toISOString(),
     conversationEntryCount: conversationEntries.length,
@@ -122,14 +126,33 @@ export async function listAssistantTranscriptDistillations(
     const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
       assistantTranscriptDistillationSchema.parse(value),
     )
+    if (parsed.malformedLineCount > 0) {
+      const error = new Error(
+        'Assistant transcript distillation contains malformed committed entries.',
+      )
+      await quarantineAssistantStateFile({
+        artifactKind: 'transcript-distillation',
+        error,
+        filePath: distillationPath,
+        paths,
+      })
+      await recordAssistantDiagnosticEvent({
+        vault,
+        component: 'assistant',
+        kind: 'transcript-distillation.quarantined',
+        level: 'warn',
+        message:
+          'Assistant transcript distillation was quarantined after malformed committed entries were detected.',
+        sessionId,
+        at: new Date().toISOString(),
+      }).catch(() => undefined)
+      return []
+    }
     return parsed.values.sort((left, right) =>
       left.createdAt.localeCompare(right.createdAt),
     )
   } catch (error) {
     if (isMissingFileError(error)) {
-      return []
-    }
-    if (isJsonSyntaxError(error)) {
       return []
     }
     throw error
@@ -168,7 +191,10 @@ export function resolveAssistantTranscriptDistillationPath(
   distillationsDirectory: string,
   sessionId: string,
 ): string {
-  return path.join(distillationsDirectory, `${sessionId}.jsonl`)
+  return path.join(
+    distillationsDirectory,
+    `${assertAssistantSessionId(sessionId)}.jsonl`,
+  )
 }
 
 function buildAssistantTranscriptDistillationSummaryLines(

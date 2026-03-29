@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import { afterEach, test, vi } from 'vitest'
 import {
   canUseAssistantDaemonForMessage,
+  maybeDrainAssistantOutboxViaDaemon,
+  maybeGetAssistantSessionViaDaemon,
+  maybeGetAssistantStatusViaDaemon,
+  maybeListAssistantSessionsViaDaemon,
   maybeOpenAssistantConversationViaDaemon,
+  maybeProcessDueAssistantCronViaDaemon,
   maybeSendAssistantMessageViaDaemon,
   maybeUpdateAssistantSessionOptionsViaDaemon,
   resolveAssistantDaemonClientConfig,
@@ -42,7 +47,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-test('resolveAssistantDaemonClientConfig trims the base URL and honors the disable flag', () => {
+test('resolveAssistantDaemonClientConfig trims loopback URLs, honors disable flags, and rejects remote hosts', () => {
   assert.deepEqual(
     resolveAssistantDaemonClientConfig({
       MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241/',
@@ -73,16 +78,13 @@ test('resolveAssistantDaemonClientConfig trims the base URL and honors the disab
       token: 'secret-token',
     },
   )
-})
-
-test('resolveAssistantDaemonClientConfig rejects non-loopback base URLs', () => {
   assert.throws(
     () =>
       resolveAssistantDaemonClientConfig({
         MURPH_ASSISTANTD_BASE_URL: 'http://example.com:50241/',
         MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
       }),
-    /loopback base URLs/u,
+    /loopback-only http:\/\//u,
   )
 })
 
@@ -117,13 +119,13 @@ test('canUseAssistantDaemonForMessage declines turns that rely on local progress
   )
 })
 
-test('assistant daemon client posts requests with a bearer token and parses assistant results', async () => {
+test('assistant daemon client routes serializable assistant operations through the loopback control plane', async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString()
+    const url = new URL(typeof input === 'string' ? input : input.toString())
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer secret-token')
 
-    if (url.endsWith('/message')) {
+    if (url.pathname === '/message') {
       assert.equal(init?.method, 'POST')
-      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer secret-token')
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
       assert.equal(body.prompt, 'hello from daemon')
       assert.equal('abortSignal' in body, false)
@@ -144,21 +146,152 @@ test('assistant daemon client posts requests with a bearer token and parses assi
       )
     }
 
-    if (url.endsWith('/open-conversation')) {
+    if (url.pathname === '/open-conversation') {
       return new Response(
         JSON.stringify({
           created: true,
-          paths: {
-            assistantStateRoot: '/tmp/assistant-state',
-          },
           session: TEST_SESSION,
         }),
         { status: 200 },
       )
     }
 
-    if (url.endsWith('/session-options')) {
+    if (url.pathname === '/session-options') {
       return new Response(JSON.stringify(TEST_SESSION), { status: 200 })
+    }
+
+    if (url.pathname === '/status') {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      assert.equal(url.searchParams.get('limit'), '7')
+      assert.equal(url.searchParams.get('sessionId'), TEST_SESSION.sessionId)
+      return new Response(
+        JSON.stringify({
+          vault: '/tmp/vault',
+          stateRoot: '/tmp/assistant-state',
+          statusPath: '/tmp/assistant-state/status.json',
+          outboxRoot: '/tmp/assistant-state/outbox',
+          diagnosticsPath: '/tmp/assistant-state/diagnostics.snapshot.json',
+          failoverStatePath: '/tmp/assistant-state/failover.json',
+          turnsRoot: '/tmp/assistant-state/turns',
+          generatedAt: '2026-03-28T00:00:00.000Z',
+          runLock: {
+            state: 'unlocked',
+            pid: null,
+            startedAt: null,
+            mode: null,
+            command: null,
+            reason: null,
+          },
+          automation: {
+            inboxScanCursor: null,
+            autoReplyScanCursor: null,
+            autoReplyChannels: [],
+            preferredChannels: [],
+            autoReplyBacklogChannels: [],
+            autoReplyPrimed: false,
+            updatedAt: '2026-03-28T00:00:00.000Z',
+          },
+          outbox: {
+            total: 0,
+            pending: 0,
+            sending: 0,
+            retryable: 0,
+            sent: 0,
+            failed: 0,
+            abandoned: 0,
+            oldestPendingAt: null,
+            nextAttemptAt: null,
+          },
+          diagnostics: {
+            schema: 'murph.assistant-diagnostics.v1',
+            updatedAt: '2026-03-28T00:00:00.000Z',
+            lastEventAt: null,
+            lastErrorAt: null,
+            counters: {
+              turnsStarted: 0,
+              turnsCompleted: 0,
+              turnsDeferred: 0,
+              turnsFailed: 0,
+              providerAttempts: 0,
+              providerFailures: 0,
+              providerFailovers: 0,
+              deliveriesQueued: 0,
+              deliveriesSent: 0,
+              deliveriesFailed: 0,
+              deliveriesRetryable: 0,
+              outboxDrains: 0,
+              outboxRetries: 0,
+              automationScans: 0,
+            },
+            recentWarnings: [],
+          },
+          failover: {
+            schema: 'murph.assistant-failover-state.v1',
+            updatedAt: '2026-03-28T00:00:00.000Z',
+            routes: [],
+          },
+          quarantine: {
+            total: 0,
+            byKind: {},
+            recent: [],
+          },
+          runtimeBudget: {
+            schema: 'murph.assistant-runtime-budget.v1',
+            updatedAt: '2026-03-28T00:00:00.000Z',
+            caches: [],
+            maintenance: {
+              lastRunAt: null,
+              staleProviderRecoveryPruned: 0,
+              staleQuarantinePruned: 0,
+              staleLocksCleared: 0,
+              notes: [],
+            },
+          },
+          recentTurns: [],
+          warnings: [],
+        }),
+        { status: 200 },
+      )
+    }
+
+    if (url.pathname === '/sessions') {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(JSON.stringify([TEST_SESSION]), { status: 200 })
+    }
+
+    if (url.pathname === `/sessions/${encodeURIComponent(TEST_SESSION.sessionId)}`) {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(JSON.stringify(TEST_SESSION), { status: 200 })
+    }
+
+    if (url.pathname === '/outbox/drain') {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      assert.equal(body.vault, '/tmp/vault')
+      assert.equal(body.limit, 2)
+      return new Response(
+        JSON.stringify({
+          attempted: 1,
+          failed: 0,
+          queued: 0,
+          sent: 1,
+        }),
+        { status: 200 },
+      )
+    }
+
+    if (url.pathname === '/cron/process-due') {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      assert.equal(body.vault, '/tmp/vault')
+      assert.equal(body.limit, 2)
+      assert.equal(body.deliveryDispatchMode, 'queue-only')
+      return new Response(
+        JSON.stringify({
+          failed: 0,
+          processed: 2,
+          succeeded: 2,
+        }),
+        { status: 200 },
+      )
     }
 
     throw new Error(`unexpected assistant daemon route: ${url}`)
@@ -188,9 +321,10 @@ test('assistant daemon client posts requests with a bearer token and parses assi
     },
     env,
   )
-  assert.ok(conversation)
   assert.equal(conversation?.created, true)
   assert.equal(conversation?.session.sessionId, TEST_SESSION.sessionId)
+  assert.equal(conversation?.session.providerSessionId, null)
+  assert.equal(conversation?.session.providerState, null)
 
   const updated = await maybeUpdateAssistantSessionOptionsViaDaemon(
     {
@@ -202,7 +336,92 @@ test('assistant daemon client posts requests with a bearer token and parses assi
     },
     env,
   )
-  assert.ok(updated)
   assert.equal(updated?.sessionId, TEST_SESSION.sessionId)
-  assert.equal(fetchMock.mock.calls.length, 3)
+
+  const status = await maybeGetAssistantStatusViaDaemon(
+    {
+      vault: '/tmp/vault',
+      limit: 7,
+      sessionId: TEST_SESSION.sessionId,
+    },
+    env,
+  )
+  assert.equal(status?.vault, '/tmp/vault')
+
+  const sessions = await maybeListAssistantSessionsViaDaemon(
+    {
+      vault: '/tmp/vault',
+    },
+    env,
+  )
+  assert.equal(sessions?.[0]?.sessionId, TEST_SESSION.sessionId)
+
+  const session = await maybeGetAssistantSessionViaDaemon(
+    {
+      vault: '/tmp/vault',
+      sessionId: TEST_SESSION.sessionId,
+    },
+    env,
+  )
+  assert.equal(session?.sessionId, TEST_SESSION.sessionId)
+
+  const drained = await maybeDrainAssistantOutboxViaDaemon(
+    {
+      vault: '/tmp/vault',
+      limit: 2,
+      now: new Date('2026-03-28T00:00:00.000Z'),
+    },
+    env,
+  )
+  assert.deepEqual(drained, {
+    attempted: 1,
+    failed: 0,
+    queued: 0,
+    sent: 1,
+  })
+
+  const cron = await maybeProcessDueAssistantCronViaDaemon(
+    {
+      vault: '/tmp/vault',
+      limit: 2,
+      deliveryDispatchMode: 'queue-only',
+    },
+    env,
+  )
+  assert.deepEqual(cron, {
+    failed: 0,
+    processed: 2,
+    succeeded: 2,
+  })
+
+  assert.equal(fetchMock.mock.calls.length, 8)
+})
+
+test('assistant daemon client refuses daemon routes that require local hooks or bespoke dependencies', async () => {
+  const env = {
+    MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241/',
+    MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+  }
+
+  assert.equal(
+    await maybeDrainAssistantOutboxViaDaemon(
+      {
+        vault: '/tmp/vault',
+        dependencies: {},
+      },
+      env,
+    ),
+    null,
+  )
+
+  assert.equal(
+    await maybeProcessDueAssistantCronViaDaemon(
+      {
+        vault: '/tmp/vault',
+        signal: new AbortController().signal,
+      },
+      env,
+    ),
+    null,
+  )
 })

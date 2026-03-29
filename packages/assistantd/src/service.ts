@@ -11,10 +11,11 @@ import {
   sendAssistantMessage,
   updateAssistantSessionOptions,
   type AssistantAskResult,
+  type AssistantCronProcessDueResult,
   type AssistantMessageInput,
+  type AssistantOutboxDispatchMode,
   type AssistantSession,
   type AssistantStatusResult,
-  type AssistantCronProcessDueResult,
   type RunAssistantAutomationInput,
 } from 'murph'
 
@@ -32,22 +33,42 @@ export interface AssistantLocalAutomationRunInput {
   vault?: string | null
 }
 
+export interface AssistantLocalOpenConversationResult {
+  created: boolean
+  session: AssistantSession
+}
+
 export interface AssistantLocalService {
-  drainOutbox(input?: { now?: string | null }): ReturnType<typeof drainAssistantOutbox>
-  getSession(sessionId: string): Promise<AssistantSession>
+  drainOutbox(input?: {
+    limit?: number
+    now?: string | null
+    vault?: string | null
+  }): ReturnType<typeof drainAssistantOutbox>
+  getSession(input: {
+    sessionId: string
+    vault?: string | null
+  }): Promise<AssistantSession>
   health(): Promise<{
     generatedAt: string
     ok: true
     pid: number
     vaultBound: true
   }>
-  getStatus(): Promise<AssistantStatusResult>
-  listSessions(): Promise<AssistantSession[]>
+  getStatus(input?: {
+    limit?: number
+    sessionId?: string | null
+    vault?: string | null
+  }): Promise<AssistantStatusResult>
+  listSessions(input?: {
+    vault?: string | null
+  }): Promise<AssistantSession[]>
   openConversation(
     input: Omit<Parameters<typeof openAssistantConversation>[0], 'vault'> & { vault?: string | null },
-  ): ReturnType<typeof openAssistantConversation>
+  ): Promise<AssistantLocalOpenConversationResult>
   processDueCron(input?: {
-    now?: string | null
+    deliveryDispatchMode?: AssistantOutboxDispatchMode
+    limit?: number
+    vault?: string | null
   }): Promise<AssistantCronProcessDueResult>
   runAutomationOnce(
     input?: AssistantLocalAutomationRunInput,
@@ -70,26 +91,53 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
   return {
     drainOutbox: async (input) =>
       drainAssistantOutbox({
+        limit:
+          typeof input?.limit === 'number' && Number.isFinite(input.limit)
+            ? Math.trunc(input.limit)
+            : undefined,
         now: input?.now ? new Date(input.now) : undefined,
-        vault: vaultRoot,
+        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
       }),
-    getSession: (sessionId) => getAssistantSession(vaultRoot, sessionId),
+    getSession: (input) =>
+      getAssistantSession(
+        resolveAssistantdRequestVault(input.vault, vaultRoot),
+        input.sessionId,
+      ),
     health: async () => ({
       generatedAt: new Date().toISOString(),
       ok: true,
       pid: process.pid,
       vaultBound: true,
     }),
-    getStatus: () => getAssistantStatus(vaultRoot),
-    listSessions: () => listAssistantSessions(vaultRoot),
-    openConversation: (input) =>
-      openAssistantConversation({
+    getStatus: (input) =>
+      getAssistantStatus({
+        limit:
+          typeof input?.limit === 'number' && Number.isFinite(input.limit)
+            ? Math.trunc(input.limit)
+            : undefined,
+        sessionId: input?.sessionId ?? null,
+        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+      }),
+    listSessions: (input) =>
+      listAssistantSessions(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+    openConversation: async (input) => {
+      const resolved = await openAssistantConversation({
         ...input,
         vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-      }),
+      })
+      return {
+        created: resolved.created,
+        session: resolved.session,
+      }
+    },
     processDueCron: (input) =>
       processDueAssistantCronJobs({
-        vault: vaultRoot,
+        deliveryDispatchMode: input?.deliveryDispatchMode,
+        limit:
+          typeof input?.limit === 'number' && Number.isFinite(input.limit)
+            ? Math.trunc(input.limit)
+            : undefined,
+        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
       }),
     runAutomationOnce: (input) =>
       runAssistantAutomation({

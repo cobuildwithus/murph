@@ -1,4 +1,5 @@
 import { resolveSystemTimeZone } from '@murph/contracts'
+import { maybeProcessDueAssistantCronViaDaemon } from '../assistant-daemon-client.js'
 import { loadVault } from '@murph/core'
 import {
   assistantCronJobSchema,
@@ -458,6 +459,11 @@ export async function runAssistantCronJobNow(
 export async function processDueAssistantCronJobs(
   input: ProcessDueAssistantCronJobsInput,
 ): Promise<AssistantCronProcessDueResult> {
+  const remote = await maybeProcessDueAssistantCronViaDaemon(input)
+  if (remote) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
 

@@ -11,7 +11,10 @@
   ],
   "references": [
     {
-      "path": "../cli/tsconfig.build.json"
+      "path": "../runtime-state"
+    },
+    {
+      "path": "../cli"
     }
   ],
   "exclude": [

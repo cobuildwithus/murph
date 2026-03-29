@@ -1,14 +1,18 @@
+import { isLoopbackHttpBaseUrl } from '@murph/runtime-state'
 import {
   assistantAskResultSchema,
   assistantSessionCompatSchema,
+  assistantStatusResultSchema,
   type AssistantAskResult,
   type AssistantSession,
+  type AssistantStatusResult,
 } from './assistant-cli-contracts.js'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './assistant/service-contracts.js'
-import type { ResolvedAssistantSession } from './assistant/store.js'
+import type { AssistantCronProcessDueResult } from './assistant/cron.js'
+import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
 import { normalizeNullableString } from './assistant/shared.js'
 
 const ASSISTANTD_BASE_URL_ENV_KEYS = [
@@ -21,12 +25,19 @@ const ASSISTANTD_CONTROL_TOKEN_ENV_KEYS = [
 ] as const
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
 
-export function resolveAssistantDaemonClientConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): {
+export interface AssistantDaemonClientConfig {
   baseUrl: string
   token: string
-} | null {
+}
+
+export interface AssistantDaemonOpenConversationResult {
+  created: boolean
+  session: AssistantSession
+}
+
+export function resolveAssistantDaemonClientConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): AssistantDaemonClientConfig | null {
   if (env[ASSISTANTD_DISABLE_CLIENT_ENV] === '1') {
     return null
   }
@@ -79,7 +90,7 @@ export async function maybeSendAssistantMessageViaDaemon(
 export async function maybeOpenAssistantConversationViaDaemon(
   input: AssistantSessionResolutionFields,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<ResolvedAssistantSession | null> {
+): Promise<AssistantDaemonOpenConversationResult | null> {
   if (!resolveAssistantDaemonClientConfig(env)) {
     return null
   }
@@ -89,14 +100,17 @@ export async function maybeOpenAssistantConversationViaDaemon(
     method: 'POST',
     body: input,
   })
-  return parseResolvedAssistantSessionPayload(payload)
+  return parseAssistantDaemonOpenConversationPayload(payload)
 }
 
-export async function maybeUpdateAssistantSessionOptionsViaDaemon(input: {
-  providerOptions: Partial<AssistantSession['providerOptions']>
-  sessionId: string
-  vault: string
-}, env: NodeJS.ProcessEnv = process.env): Promise<AssistantSession | null> {
+export async function maybeUpdateAssistantSessionOptionsViaDaemon(
+  input: {
+    providerOptions: Partial<AssistantSession['providerOptions']>
+    sessionId: string
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantSession | null> {
   if (!resolveAssistantDaemonClientConfig(env)) {
     return null
   }
@@ -107,6 +121,152 @@ export async function maybeUpdateAssistantSessionOptionsViaDaemon(input: {
     body: input,
   })
   return assistantSessionCompatSchema.parse(payload)
+}
+
+export async function maybeGetAssistantStatusViaDaemon(
+  input: {
+    limit?: number
+    sessionId?: string | null
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantStatusResult | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath('/status', {
+      limit:
+        typeof input.limit === 'number' && Number.isFinite(input.limit)
+          ? String(Math.trunc(input.limit))
+          : null,
+      sessionId: normalizeNullableString(input.sessionId),
+      vault: input.vault,
+    }),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return assistantStatusResultSchema.parse(payload)
+}
+
+export async function maybeListAssistantSessionsViaDaemon(
+  input: { vault: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantSession[] | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath('/sessions', {
+      vault: input.vault,
+    }),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return parseAssistantSessionListPayload(payload)
+}
+
+export async function maybeGetAssistantSessionViaDaemon(
+  input: {
+    sessionId: string
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantSession | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath(
+      `/sessions/${encodeURIComponent(input.sessionId)}`,
+      {
+        vault: input.vault,
+      },
+    ),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return assistantSessionCompatSchema.parse(payload)
+}
+
+export async function maybeDrainAssistantOutboxViaDaemon(
+  input: {
+    dependencies?: unknown
+    dispatchHooks?: unknown
+    limit?: number
+    now?: Date
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<
+  | {
+      attempted: number
+      failed: number
+      queued: number
+      sent: number
+    }
+  | null
+> {
+  if (input.dependencies !== undefined || input.dispatchHooks !== undefined) {
+    return null
+  }
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson('/outbox/drain', {
+    env,
+    method: 'POST',
+    body: {
+      limit:
+        typeof input.limit === 'number' && Number.isFinite(input.limit)
+          ? Math.trunc(input.limit)
+          : undefined,
+      now: input.now?.toISOString(),
+      vault: input.vault,
+    },
+  })
+  return parseAssistantOutboxDrainPayload(payload)
+}
+
+export async function maybeProcessDueAssistantCronViaDaemon(
+  input: {
+    deliveryDispatchMode?: AssistantOutboxDispatchMode
+    limit?: number
+    signal?: AbortSignal
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantCronProcessDueResult | null> {
+  if (input.signal !== undefined) {
+    return null
+  }
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson('/cron/process-due', {
+    env,
+    method: 'POST',
+    body: {
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      limit:
+        typeof input.limit === 'number' && Number.isFinite(input.limit)
+          ? Math.trunc(input.limit)
+          : undefined,
+      vault: input.vault,
+    },
+  })
+  return parseAssistantCronProcessDuePayload(payload)
 }
 
 async function assistantDaemonFetchJson(
@@ -122,12 +282,16 @@ async function assistantDaemonFetchJson(
     throw new Error('Assistant daemon client is not configured.')
   }
 
+  const headers = new Headers({
+    Authorization: `Bearer ${config.token}`,
+  })
+  if (input.body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+  }
+
   const response = await fetch(`${config.baseUrl}${routePath}`, {
     method: input.method,
-    headers: {
-      Authorization: `Bearer ${config.token}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: input.body === undefined ? undefined : JSON.stringify(input.body),
   })
 
@@ -164,7 +328,9 @@ function serializeAssistantMessageInput(
   return serializableInput
 }
 
-function parseResolvedAssistantSessionPayload(payload: unknown): ResolvedAssistantSession {
+function parseAssistantDaemonOpenConversationPayload(
+  payload: unknown,
+): AssistantDaemonOpenConversationResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Assistant daemon returned an invalid conversation payload.')
   }
@@ -173,15 +339,73 @@ function parseResolvedAssistantSessionPayload(payload: unknown): ResolvedAssista
   if (typeof record.created !== 'boolean') {
     throw new Error('Assistant daemon conversation payload was missing the created flag.')
   }
-  if (!record.paths || typeof record.paths !== 'object' || Array.isArray(record.paths)) {
-    throw new Error('Assistant daemon conversation payload was missing assistant state paths.')
-  }
 
   return {
     created: record.created,
-    paths: record.paths as ResolvedAssistantSession['paths'],
     session: assistantSessionCompatSchema.parse(record.session),
   }
+}
+
+function parseAssistantSessionListPayload(payload: unknown): AssistantSession[] {
+  if (!Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid session list payload.')
+  }
+  return payload.map((entry) => assistantSessionCompatSchema.parse(entry))
+}
+
+function parseAssistantOutboxDrainPayload(payload: unknown): {
+  attempted: number
+  failed: number
+  queued: number
+  sent: number
+} {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid outbox drain payload.')
+  }
+
+  const record = payload as Record<string, unknown>
+  return {
+    attempted: parseAssistantCountField(record.attempted, 'attempted'),
+    failed: parseAssistantCountField(record.failed, 'failed'),
+    queued: parseAssistantCountField(record.queued, 'queued'),
+    sent: parseAssistantCountField(record.sent, 'sent'),
+  }
+}
+
+function parseAssistantCronProcessDuePayload(
+  payload: unknown,
+): AssistantCronProcessDueResult {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid cron process payload.')
+  }
+
+  const record = payload as Record<string, unknown>
+  return {
+    failed: parseAssistantCountField(record.failed, 'failed'),
+    processed: parseAssistantCountField(record.processed, 'processed'),
+    succeeded: parseAssistantCountField(record.succeeded, 'succeeded'),
+  }
+}
+
+function parseAssistantCountField(value: unknown, field: string): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Assistant daemon payload field ${field} was invalid.`)
+  }
+  return value
+}
+
+function buildAssistantDaemonRoutePath(
+  routePath: string,
+  query: Record<string, string | null | undefined>,
+): string {
+  const searchParams = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined && value.length > 0) {
+      searchParams.set(key, value)
+    }
+  }
+  const search = searchParams.toString()
+  return search ? `${routePath}?${search}` : routePath
 }
 
 function firstAssistantDaemonEnvValue(
@@ -198,38 +422,16 @@ function firstAssistantDaemonEnvValue(
 }
 
 function normalizeAssistantDaemonBaseUrl(baseUrl: string): string {
-  let parsed: URL
+  const normalized = baseUrl.replace(/\/+$/u, '')
   try {
-    parsed = new URL(baseUrl)
+    if (!isLoopbackHttpBaseUrl(normalized)) {
+      throw new Error('Assistant daemon base URL must use loopback-only http:// addressing.')
+    }
   } catch (error) {
     throw new Error(
-      `Assistant daemon base URL must be a valid absolute URL: ${baseUrl}`,
+      `Assistant daemon base URL must be a valid loopback-only http:// URL: ${baseUrl}`,
       { cause: error },
     )
   }
-
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(
-      'Assistant daemon bearer tokens may only target loopback HTTP(S) base URLs.',
-    )
-  }
-
-  if (!isLoopbackAssistantDaemonHost(parsed.hostname)) {
-    throw new Error(
-      'Assistant daemon bearer tokens may only target loopback base URLs.',
-    )
-  }
-
-  return baseUrl.replace(/\/+$/u, '')
-}
-
-function isLoopbackAssistantDaemonHost(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/gu, '')
-  return (
-    normalized === 'localhost' ||
-    normalized === '127.0.0.1' ||
-    normalized === '::1' ||
-    normalized.startsWith('127.') ||
-    normalized.startsWith('::ffff:127.')
-  )
+  return normalized
 }

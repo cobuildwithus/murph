@@ -2,14 +2,16 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "paths": {},
     "rootDir": ".",
     "composite": false,
     "incremental": false
   },
   "references": [
     {
-      "path": "../cli/tsconfig.build.json"
+      "path": "../runtime-state"
+    },
+    {
+      "path": "../cli"
     }
   ],
   "include": [

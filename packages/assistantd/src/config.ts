@@ -1,3 +1,5 @@
+import { isLoopbackHostname } from '@murph/runtime-state'
+
 export interface AssistantdEnvironment {
   controlToken: string
   host: string
@@ -22,7 +24,9 @@ export function loadAssistantdEnvironment(
   }
 
   const host = normalizeNullableString(env.ASSISTANTD_HOST) ?? DEFAULT_ASSISTANTD_HOST
-  assertAssistantdLoopbackHost(host)
+  if (!isLoopbackHostname(host)) {
+    throw new Error('ASSISTANTD_HOST must be a loopback hostname or address.')
+  }
 
   return {
     controlToken,
@@ -30,20 +34,6 @@ export function loadAssistantdEnvironment(
     port: readAssistantdPort(env.ASSISTANTD_PORT),
     vaultRoot,
   }
-}
-
-function assertAssistantdLoopbackHost(host: string): void {
-  const normalized = host.trim().toLowerCase()
-  if (
-    normalized === 'localhost' ||
-    normalized === '127.0.0.1' ||
-    normalized === '::1' ||
-    normalized.startsWith('127.')
-  ) {
-    return
-  }
-
-  throw new Error('ASSISTANTD_HOST must be a loopback hostname or address.')
 }
 
 function normalizeNullableString(value: string | null | undefined): string | null {

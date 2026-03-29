@@ -69,9 +69,10 @@ export function resolveAssistantConversationPolicy(input: {
     message: input.message,
     session: input.session,
   })
-  const allowSensitiveHealthContext = shouldExposeSensitiveHealthContext(
-    input.session.binding,
-  )
+  const allowSensitiveHealthContext = shouldExposeSensitiveHealthContext({
+    audience,
+    binding: input.session.binding,
+  })
   const allowAutoReply = resolveAssistantConversationAutoReplyEligibility({
     audience,
     turnTrigger: input.message.turnTrigger ?? 'manual-ask',
@@ -172,18 +173,54 @@ export function resolveAssistantConversationAutoReplyEligibility(input: {
   return true
 }
 
-export function shouldExposeSensitiveHealthContext(binding: {
-  channel?: string | null
-  threadIsDirect?: boolean | null
+export function shouldExposeSensitiveHealthContext(input: {
+  audience: AssistantConversationAudience
+  binding: {
+    actorId?: string | null
+    channel?: string | null
+    delivery?: AssistantBindingDelivery | null
+    identityId?: string | null
+    threadId?: string | null
+    threadIsDirect?: boolean | null
+  }
 }): boolean {
-  const channel = normalizeNullableString(binding.channel)?.toLowerCase() ?? null
+  const channel = normalizeNullableString(input.binding.channel)?.toLowerCase() ?? null
   if (channel === null) {
     return true
   }
   if (channel === 'local' || channel === 'null') {
     return true
   }
-  return binding.threadIsDirect === true
+
+  const bindingIsPrivate = input.binding.threadIsDirect === true
+  if (!bindingIsPrivate) {
+    return false
+  }
+
+  if (input.audience.deliveryPolicy !== 'explicit-target-override') {
+    return true
+  }
+
+  const explicitTarget = normalizeNullableString(input.audience.explicitTarget)
+  const boundTarget = normalizeNullableString(input.binding.delivery?.target)
+  if (!explicitTarget || !boundTarget || explicitTarget !== boundTarget) {
+    return false
+  }
+
+  if (
+    normalizeNullableString(input.audience.channel) !==
+      normalizeNullableString(input.binding.channel) ||
+    normalizeNullableString(input.audience.identityId) !==
+      normalizeNullableString(input.binding.identityId) ||
+    normalizeNullableString(input.audience.actorId) !==
+      normalizeNullableString(input.binding.actorId) ||
+    normalizeNullableString(input.audience.threadId) !==
+      normalizeNullableString(input.binding.threadId)
+  ) {
+    return false
+  }
+
+  return input.audience.threadIsDirect === true
 }
 
 function resolveConversationScope(input: {

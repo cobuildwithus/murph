@@ -1,5 +1,9 @@
 import { readdir } from 'node:fs/promises'
 import {
+  maybeGetAssistantSessionViaDaemon,
+  maybeListAssistantSessionsViaDaemon,
+} from '../assistant-daemon-client.js'
+import {
   assistantAutomationStateSchema,
   assistantSessionSchema,
   assistantTranscriptEntrySchema,
@@ -177,6 +181,11 @@ export async function resolveAssistantSession(
 export async function listAssistantSessions(
   vault: string,
 ): Promise<AssistantSession[]> {
+  const remote = await maybeListAssistantSessionsViaDaemon({ vault })
+  if (remote) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
 
@@ -210,6 +219,14 @@ export async function getAssistantSession(
   vault: string,
   sessionId: string,
 ): Promise<AssistantSession> {
+  const remote = await maybeGetAssistantSessionViaDaemon({
+    sessionId,
+    vault,
+  })
+  if (remote) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
 

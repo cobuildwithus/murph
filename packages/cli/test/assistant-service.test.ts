@@ -54,6 +54,8 @@ import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
+import { resolveAssistantConversationPolicy } from '../src/assistant/conversation-policy.js'
+import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
 import {
   VAULT_ENV,
   saveAssistantOperatorDefaultsPatch,
@@ -1217,6 +1219,83 @@ test('sendAssistantMessage adds no-citations formatting guidance for outbound ch
     localChatCall?.systemPrompt ?? '',
     /mention relative file paths when practical/u,
   )
+})
+
+test('sanitizeAssistantOutboundReply strips local markdown links and vault source callouts for outbound channels', () => {
+  const sanitized = sanitizeAssistantOutboundReply(
+    [
+      '[Source: derived/summary.md] Here is the clean answer.',
+      '- From file:///tmp/private.md: The note is attached.',
+      'Read [the note](file:///tmp/private.md) and [journal entry](/tmp/vault/journal/today.md).',
+      'From a friend: keep this line intact.',
+    ].join('\n'),
+    'email',
+  )
+
+  assert.equal(
+    sanitized,
+    [
+      'Here is the clean answer.',
+      '- The note is attached.',
+      'Read the note and journal entry.',
+      'From a friend: keep this line intact.',
+    ].join('\n'),
+  )
+
+  assert.equal(
+    sanitizeAssistantOutboundReply('Read [the note](file:///tmp/private.md).', 'local'),
+    'Read [the note](file:///tmp/private.md).',
+  )
+})
+
+test('resolveAssistantConversationPolicy withholds sensitive health context when explicit delivery overrides the bound private audience', () => {
+  const privateBinding = {
+    conversationKey: 'email:private',
+    channel: 'email',
+    identityId: 'assistant@example.com',
+    actorId: 'person@example.com',
+    threadId: 'thread-123',
+    threadIsDirect: true,
+    delivery: {
+      channel: 'email',
+      target: 'person@example.com',
+      targetKind: 'email',
+    },
+  }
+
+  const matchingAudience = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: 'person@example.com',
+      maxSessionAgeMs: null,
+      sourceThreadId: 'thread-123',
+      threadId: 'thread-123',
+      threadIsDirect: true,
+      turnTrigger: 'manual-ask',
+    },
+    session: {
+      binding: privateBinding,
+    } as any,
+  })
+  assert.equal(matchingAudience.allowSensitiveHealthContext, true)
+
+  const redirectedAudience = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: 'other@example.com',
+      maxSessionAgeMs: null,
+      sourceThreadId: 'thread-123',
+      threadId: 'thread-123',
+      threadIsDirect: true,
+      turnTrigger: 'manual-ask',
+    },
+    session: {
+      binding: privateBinding,
+    } as any,
+  })
+  assert.equal(redirectedAudience.allowSensitiveHealthContext, false)
 })
 
 
