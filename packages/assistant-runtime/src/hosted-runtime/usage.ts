@@ -3,7 +3,10 @@ import {
   listPendingAssistantUsageRecords,
   resolveAssistantUsageCredentialSource,
 } from "@murph/runtime-state";
-import { resolveHostedExecutionAiUsageClient } from "@murph/hosted-execution";
+import {
+  resolveHostedExecutionAiUsageClient,
+  summarizeHostedExecutionError,
+} from "@murph/hosted-execution";
 
 export interface HostedPendingAssistantUsageExportResult {
   exported: number;
@@ -67,11 +70,11 @@ export async function exportHostedPendingAssistantUsage(input: {
       exported += result.exported;
       failed += result.failed;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = summarizeHostedExecutionError(error);
 
       if (batch.length === 1) {
         failed += 1;
-        console.warn(`Failed to export hosted AI usage batch of 1 records: ${message}`);
+        console.warn(`Failed to export hosted AI usage batch of 1 record: ${message}`);
         continue;
       }
 
@@ -92,7 +95,7 @@ export async function exportHostedPendingAssistantUsage(input: {
         } catch (singleError) {
           failed += 1;
           console.warn(
-            `Failed to export hosted AI usage retry for ${record.usageId}: ${singleError instanceof Error ? singleError.message : String(singleError)}`,
+            `Failed to export hosted AI usage retry for 1 record: ${summarizeHostedExecutionError(singleError)}`,
           );
         }
       }

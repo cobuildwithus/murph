@@ -26,6 +26,7 @@ import {
   createHostedExecutionSignatureHeaders,
   buildHostedExecutionStructuredLogRecord,
   deriveHostedExecutionErrorCode,
+  summarizeHostedExecutionError,
   HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
   HOSTED_EXECUTION_TIMESTAMP_HEADER,
@@ -329,24 +330,77 @@ describe("@murph/hosted-execution", () => {
       runId: "run_trace",
       schema: "murph.hosted-execution.log.v1",
       time: "2026-03-26T12:00:01.000Z",
-      userId: "user-123",
+      userId: null,
     });
   });
 
-  it("redacts obvious secret-bearing substrings from structured log error messages", () => {
+  it("redacts sensitive structured log fields and falls back to safe summaries", () => {
     const error = new Error(
-      "authorization: Bearer sk-live-secret apiKey=shh-token cookie=session123",
+      "Authorization: Bearer secret-token email ops@example.com OPENAI_API_KEY=sk-live-secret",
     );
+    error.name = "sk_live_secret_name";
 
+    expect(summarizeHostedExecutionError(error)).toBe("Hosted execution authorization failed.");
     expect(buildHostedExecutionStructuredLogRecord({
-      component: "container",
+      component: "worker",
+      dispatch: {
+        event: {
+          userId: "user-123",
+        },
+        eventId: "evt_secret",
+      },
       error,
-      message: "Hosted execution container failed.",
+      level: "error",
+      message: "Authorization: Bearer secret-token for ops@example.com",
       phase: "failed",
-    })).toMatchObject({
-      errorCode: "runtime_error",
-      errorMessage: "authorization: <redacted> apiKey=<redacted> cookie=<redacted>",
+      run: {
+        attempt: 1,
+        runId: "run_secret",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      },
+      time: "2026-03-26T12:00:01.000Z",
+    })).toEqual({
+      attempt: 1,
+      component: "worker",
+      errorCode: "authorization_error",
+      errorMessage: "Hosted execution authorization failed.",
+      eventId: "evt_secret",
+      level: "error",
+      message: "Authorization=Bearer [redacted] for [redacted-email]",
+      phase: "failed",
+      runId: "run_secret",
+      schema: "murph.hosted-execution.log.v1",
+      time: "2026-03-26T12:00:01.000Z",
+      userId: null,
     });
+  });
+
+  it("keeps runtime exception summaries generic unless the message matches request validation", () => {
+    const runtimeTypeError = new TypeError("missing hosted runtime config");
+    const invalidRequestError = new SyntaxError("Request body must be a JSON object.");
+
+    expect(deriveHostedExecutionErrorCode(runtimeTypeError)).toBe("type_error");
+    expect(summarizeHostedExecutionError(runtimeTypeError)).toBe("Hosted execution runtime failed.");
+    expect(deriveHostedExecutionErrorCode(invalidRequestError)).toBe("invalid_request");
+    expect(summarizeHostedExecutionError(invalidRequestError)).toBe(
+      "Hosted execution rejected an invalid request.",
+    );
+  });
+
+  it("collapses secret-bearing configuration errors to a generic safe summary", () => {
+    const error = new Error("Hosted API key sk-live-secret must be configured.");
+    error.name = "HostedExecutionConfigurationError";
+
+    expect(summarizeHostedExecutionError(error)).toBe("Hosted execution configuration is invalid.");
+    const record = buildHostedExecutionStructuredLogRecord({
+      component: "worker",
+      error,
+      message: "Hosted worker route failed.",
+      phase: "failed",
+    });
+    expect(record.errorCode).toBe("configuration_error");
+    expect(record.errorMessage).toBe("Hosted execution configuration is invalid.");
+    expect(JSON.stringify(record)).not.toContain("sk-live-secret");
   });
 
   it("sends the bound hosted execution user header when recording hosted AI usage", async () => {

@@ -1,8 +1,10 @@
 import {
   deriveHostedExecutionErrorCode,
+  normalizeHostedExecutionOperatorMessage,
   parseHostedExecutionDispatchRequest,
   parseHostedExecutionRunStatus,
   parseHostedExecutionTimelineEntries,
+  summarizeHostedExecutionError,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
@@ -241,11 +243,12 @@ export class RunnerQueueStore {
 
     const nextPending = this.readNextDuePendingDispatchSync(nowMs);
     if (!nextPending) {
-      meta.retrying_event_id = this.readRetryingEventIdSync();
-      this.writeMetaRowSync(meta);
+      const refreshedMeta = this.requireMetaRowSync();
+      refreshedMeta.retrying_event_id = this.readRetryingEventIdSync();
+      this.writeMetaRowSync(refreshedMeta);
       return {
         pendingDispatch: null,
-        record: this.readStateFromMetaSync(meta),
+        record: this.readStateFromMetaSync(refreshedMeta),
       };
     }
 
@@ -310,7 +313,7 @@ export class RunnerQueueStore {
   }
 
   async reschedulePendingFailure(input: {
-    errorMessage: string;
+    error: unknown;
     eventId: string;
     maxEventAttempts: number;
     retryDelayMs: number;
@@ -320,11 +323,12 @@ export class RunnerQueueStore {
     const pending = this.readPendingDispatchByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
-    const errorCode = deriveHostedExecutionErrorCode(input.errorMessage);
+    const errorCode = deriveHostedExecutionErrorCode(input.error);
+    const errorMessage = summarizeHostedExecutionError(input.error);
 
     if (!pending) {
       meta.in_flight = 0;
-      meta.last_error = input.errorMessage;
+      meta.last_error = errorMessage;
       meta.last_error_at = errorAt;
       meta.last_error_code = errorCode;
       meta.retrying_event_id = this.readRetryingEventIdSync();
@@ -337,7 +341,7 @@ export class RunnerQueueStore {
 
     const nextAttempts = pending.attempts + 1;
     meta.in_flight = 0;
-    meta.last_error = input.errorMessage;
+    meta.last_error = errorMessage;
     meta.last_error_at = errorAt;
     meta.last_error_code = errorCode;
     meta.last_event_id = input.eventId;
@@ -345,7 +349,7 @@ export class RunnerQueueStore {
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
       this.writeConsumedEventSync(input.eventId, nextConsumedEventExactExpiryIso());
-      this.writePoisonedEventSync(input.eventId, input.errorMessage, errorAt);
+      this.writePoisonedEventSync(input.eventId, errorMessage, errorAt);
       meta.retrying_event_id = this.readRetryingEventIdSync();
       this.writeMetaRowSync(meta);
       return {
@@ -361,7 +365,7 @@ export class RunnerQueueStore {
         WHERE event_id = ?`,
       nextAttempts,
       availableAt,
-      input.errorMessage,
+      errorMessage,
       input.eventId,
     );
     meta.retrying_event_id = input.eventId;
@@ -374,7 +378,7 @@ export class RunnerQueueStore {
   }
 
   async deferPendingConfigurationFailure(input: {
-    errorMessage: string;
+    error: unknown;
     eventId: string;
     retryDelayMs: number;
   }): Promise<RunnerStateRecord> {
@@ -383,11 +387,12 @@ export class RunnerQueueStore {
     const pending = this.readPendingDispatchByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
     const errorAt = new Date().toISOString();
+    const errorMessage = summarizeHostedExecutionError(input.error);
 
     meta.in_flight = 0;
-    meta.last_error = input.errorMessage;
+    meta.last_error = errorMessage;
     meta.last_error_at = errorAt;
-    meta.last_error_code = deriveHostedExecutionErrorCode(input.errorMessage);
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     meta.last_event_id = input.eventId;
 
     if (!pending) {
@@ -401,7 +406,7 @@ export class RunnerQueueStore {
         SET available_at = ?, last_error = ?
         WHERE event_id = ?`,
       new Date(Date.now() + input.retryDelayMs).toISOString(),
-      input.errorMessage,
+      errorMessage,
       input.eventId,
     );
     meta.retrying_event_id = input.eventId;
@@ -413,18 +418,19 @@ export class RunnerQueueStore {
   async rescheduleCommittedFinalizeRetry(input: {
     attempts: number;
     committed: HostedExecutionCommittedResult;
-    errorMessage: string;
+    error: unknown;
     retryDelayMs: number;
   }): Promise<RunnerStateRecord> {
     await this.bootstrapUserFromCommittedResult(input.committed);
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
+    const errorMessage = summarizeHostedExecutionError(input.error);
     assignBundleRefs(meta, input.committed.bundleRefs);
     meta.in_flight = 0;
-    meta.last_error = input.errorMessage;
+    meta.last_error = errorMessage;
     meta.last_error_at = new Date().toISOString();
-    meta.last_error_code = deriveHostedExecutionErrorCode(input.errorMessage);
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.error);
     meta.last_event_id = input.committed.eventId;
     meta.last_run_at = input.committed.committedAt;
     meta.retrying_event_id = input.committed.eventId;
@@ -436,7 +442,7 @@ export class RunnerQueueStore {
         WHERE event_id = ?`,
       input.attempts,
       new Date(Date.now() + input.retryDelayMs).toISOString(),
-      input.errorMessage,
+      errorMessage,
       input.committed.eventId,
     );
 
@@ -489,7 +495,7 @@ export class RunnerQueueStore {
           ...(errorCode ? { errorCode } : {}),
           eventId: input.eventId,
           level: input.level ?? (input.error === undefined ? "info" : "error"),
-          message: input.message,
+          message: normalizeHostedExecutionOperatorMessage(input.message),
           phase: input.phase,
           runId: input.runId,
         },
@@ -967,20 +973,20 @@ export class RunnerQueueStore {
   }
 
   private poisonMalformedPendingDispatchRowSync(row: PendingEventRow, error: unknown): void {
-    const message = formatMalformedPendingDispatchError(row.event_id, error);
+    const malformedError = classifyMalformedPendingDispatchError(error);
     const errorAt = new Date().toISOString();
     this.removePendingDispatchSync(row.event_id);
     this.writeConsumedEventSync(row.event_id, nextConsumedEventExactExpiryIso());
-    this.writePoisonedEventSync(row.event_id, message, errorAt);
+    this.writePoisonedEventSync(row.event_id, malformedError.message, errorAt);
 
     const meta = this.selectMetaRowSync();
     if (!meta) {
       return;
     }
 
-    meta.last_error = mergeRunnerLastError(meta.last_error, message);
+    meta.last_error = mergeRunnerLastError(meta.last_error, malformedError.message);
     meta.last_error_at = errorAt;
-    meta.last_error_code = deriveHostedExecutionErrorCode(message);
+    meta.last_error_code = malformedError.errorCode;
     meta.last_event_id = row.event_id;
     if (meta.retrying_event_id === row.event_id) {
       meta.retrying_event_id = null;
@@ -1234,10 +1240,31 @@ function sanitizeStoredRunTrace(meta: RunnerMetaRow): {
   };
 }
 
-function formatMalformedPendingDispatchError(eventId: string, error: unknown): string {
-  return `Hosted runner poisoned malformed pending dispatch ${eventId}: ${
-    error instanceof Error ? error.message : String(error)
-  }`;
+function classifyMalformedPendingDispatchError(error: unknown): {
+  errorCode: string;
+  message: string;
+} {
+  const errorCode = deriveHostedExecutionErrorCode(error);
+  if (isInvalidRequestFamilyErrorCode(errorCode)) {
+    return {
+      errorCode: "invalid_request",
+      message: "Hosted runner poisoned a malformed pending dispatch.",
+    };
+  }
+
+  return {
+    errorCode,
+    message: `Hosted runner poisoned a malformed pending dispatch. ${summarizeHostedExecutionError(error)}`,
+  };
+}
+
+function isInvalidRequestFamilyErrorCode(errorCode: string): boolean {
+  return errorCode === "invalid_request"
+    || errorCode === "range_error"
+    || errorCode === "reference_error"
+    || errorCode === "syntax_error"
+    || errorCode === "type_error"
+    || errorCode === "uri_error";
 }
 
 function mergeRunnerLastError(

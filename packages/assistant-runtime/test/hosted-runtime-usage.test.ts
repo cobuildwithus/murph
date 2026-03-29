@@ -145,7 +145,7 @@ describe("exportHostedPendingAssistantUsage", () => {
         usageId: "turn_123.attempt-1",
       },
     ]);
-    mocks.recordUsage.mockRejectedValue(new Error("boom"));
+    mocks.recordUsage.mockRejectedValue(new Error("Authorization: Bearer secret-token for ops@example.com OPENAI_API_KEY=sk-live-secret"));
 
     const result = await exportHostedPendingAssistantUsage({
       baseUrl: "https://join.example.test",
@@ -163,6 +163,9 @@ describe("exportHostedPendingAssistantUsage", () => {
     });
     expect(mocks.deletePendingAssistantUsageRecord).not.toHaveBeenCalled();
     expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      "Failed to export hosted AI usage batch of 1 record: Hosted execution authorization failed.",
+    );
   });
 
   it("exports pending usage in batches and deletes only acknowledged ids", async () => {
