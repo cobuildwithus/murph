@@ -105,11 +105,6 @@ export async function readAssistantSession(input: {
   treatCorruptedAsMissing?: boolean
 }): Promise<AssistantSession | null> {
   const sessionPath = resolveAssistantSessionPath(input.paths, input.sessionId)
-  const cached = assistantSessionCache.get(sessionPath)
-  if (cached !== undefined) {
-    return cached
-  }
-
   let raw: string
   try {
     raw = await readFile(sessionPath, 'utf8')
@@ -151,17 +146,20 @@ export async function writeAssistantSession(
   session: AssistantSession,
 ): Promise<void> {
   const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
-  const parsed = assistantSessionSchema.parse(normalizeAssistantSessionForWrite(session))
-  await writeJsonFileAtomic(sessionPath, parsed)
-  assistantSessionCache.set(sessionPath, parsed)
+  const normalized = normalizeAssistantSessionSnapshot(session)
+  const persisted = assistantSessionSchema.parse(
+    normalizeAssistantSessionForWrite(normalized),
+  )
+  await writeJsonFileAtomic(sessionPath, persisted)
+  assistantSessionCache.set(sessionPath, normalized)
   await appendAssistantRuntimeEventAtPaths(paths, {
-    at: parsed.updatedAt,
+    at: normalized.updatedAt,
     component: 'state',
-    entityId: parsed.sessionId,
+    entityId: normalized.sessionId,
     entityType: 'session',
     kind: 'session.upserted',
     level: 'info',
-    message: `Assistant session ${parsed.sessionId} was persisted.`,
+    message: `Assistant session ${normalized.sessionId} was persisted.`,
   }).catch(() => undefined)
 }
 
@@ -322,13 +320,15 @@ export async function persistResolvedSession(
     return session
   }
 
-  const updated = parseAssistantSessionRecord(
-    normalizeAssistantSessionForWrite({
-      ...session,
-      alias: input.alias ?? session.alias,
-      binding: nextBinding,
-      updatedAt: new Date().toISOString(),
-    }),
+  const updated = normalizeAssistantSessionSnapshot(
+    parseAssistantSessionRecord(
+      normalizeAssistantSessionForWrite({
+        ...session,
+        alias: input.alias ?? session.alias,
+        binding: nextBinding,
+        updatedAt: new Date().toISOString(),
+      }),
+    ),
   )
   await writeAssistantSession(paths, updated)
   await synchronizeAssistantIndexes(paths, updated, session)

@@ -323,6 +323,11 @@ export const assistantSessionSchema = z
 export function parseAssistantSessionRecord(value: unknown): AssistantSession {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const record = value as Record<string, unknown>
+    if ('codexPromptVersion' in record) {
+      throw new Error(
+        'Legacy top-level codexPromptVersion session records are no longer supported.',
+      )
+    }
     const schema = record.schema
     const hasProviderBinding = 'providerBinding' in record
 

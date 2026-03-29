@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
@@ -16,7 +15,6 @@ import {
   type AssistantProviderBinding,
   type AssistantProviderFailoverRoute,
   type AssistantProviderSessionOptions,
-  type AssistantSessionProviderState,
   type AssistantSandbox,
   type AssistantTurnTrigger,
 } from '../assistant-cli-contracts.js'
@@ -41,7 +39,6 @@ import {
   type AssistantOperatorDefaults,
 } from '../operator-config.js'
 import {
-  deliverAssistantOutboxMessage,
   type AssistantOutboxDispatchMode,
   normalizeAssistantDeliveryError,
 } from './outbox.js'
@@ -67,13 +64,37 @@ import {
   restoreAssistantSessionSnapshot,
   saveAssistantSession,
   type AssistantTranscriptEntryInput,
-  type ResolveAssistantSessionInput,
   type ResolvedAssistantSession,
 } from './store.js'
 import {
   createAssistantMemoryTurnContextEnv,
   loadAssistantMemoryPromptBlock,
 } from './memory.js'
+import {
+  resolveAssistantTurnSharedPlan as buildAssistantTurnSharedPlan,
+} from './turn-plan.js'
+import {
+  buildResolveAssistantSessionInput,
+  resolveAssistantSessionForMessage as resolveAssistantMessageSession,
+} from './session-resolution.js'
+import {
+  buildRecoveredAssistantProviderBindingSeed as buildRecoveredProviderBindingSeed,
+  hashAssistantProviderWorkingDirectory as hashProviderWorkingDirectory,
+  resolveAssistantProviderResumeKey as readAssistantProviderResumeKey,
+  resolveAssistantRouteResumeBinding as resolveAssistantResumeBinding,
+  shouldResumeAssistantProviderRecovery as shouldResumeProviderRecovery,
+} from './provider-binding.js'
+import {
+  deliverAssistantReply as dispatchAssistantReply,
+  finalizeAssistantTurnFromDeliveryOutcome as finalizeDeliveredAssistantTurn,
+} from './delivery-service.js'
+import {
+  persistAssistantTurnAndSession as finalizeAssistantTurnArtifacts,
+} from './turn-finalizer.js'
+import {
+  buildAssistantTranscriptDistillationContinuityText,
+  readLatestAssistantTranscriptDistillation,
+} from './transcript-distillation.js'
 import {
   type AssistantOnboardingSummary,
   updateAssistantOnboardingSummary,
@@ -99,16 +120,9 @@ import {
   recoverAssistantSessionAfterProviderFailure,
 } from './provider-turn-recovery.js'
 import {
-  normalizeAssistantProviderBinding,
   normalizeAssistantSessionSnapshot,
   readAssistantCodexPromptVersion,
   readAssistantProviderBinding,
-  readAssistantProviderResumeRouteId,
-  readAssistantProviderResumeWorkspaceKey,
-  readAssistantProviderSessionId,
-  writeAssistantCodexPromptVersion,
-  writeAssistantProviderStateResumeRouteId,
-  writeAssistantProviderStateResumeWorkspaceKey,
 } from './provider-state.js'
 import {
   executeWithCanonicalWriteGuard,
@@ -117,10 +131,16 @@ import {
 import { resolveAssistantProviderWorkingDirectory } from './provider-workspace.js'
 import { errorMessage, normalizeNullableString } from './shared.js'
 import { withAssistantTurnLock } from './turn-lock.js'
+import {
+  maybeOpenAssistantConversationViaDaemon,
+  maybeSendAssistantMessageViaDaemon,
+  maybeUpdateAssistantSessionOptionsViaDaemon,
+} from '../assistant-daemon-client.js'
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
 export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-27.2'
+export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 interface AssistantSessionResolutionFields {
   actorId?: string | null
@@ -285,35 +305,6 @@ type AssistantProviderTurnRecoveryOutcome =
       providerTurn: ExecutedAssistantProviderTurnResult
     }
 
-type AssistantDeliveryOutcome =
-  | {
-      kind: 'failed'
-      error: AssistantDeliveryError
-      intentId: string | null
-      session: AssistantSession
-    }
-  | {
-      kind: 'not-requested'
-      session: AssistantSession
-    }
-  | {
-      kind: 'queued'
-      error: AssistantDeliveryError | null
-      intentId: string
-      session: AssistantSession
-    }
-  | {
-      kind: 'sent'
-      delivery: NonNullable<AssistantAskResult['delivery']>
-      intentId: string | null
-      session: AssistantSession
-    }
-
-interface AssistantTurnDeliveryFinalizationPlan {
-  diagnostic: Parameters<typeof recordAssistantDiagnosticEvent>[0]
-  receipt: Parameters<typeof finalizeAssistantTurnReceipt>[0]
-}
-
 function clampVaultBoundAssistantSandbox(
   sandbox: AssistantSandbox | null | undefined,
 ): AssistantSandbox | null | undefined {
@@ -468,77 +459,14 @@ async function finalizeBlockedAssistantTurn(input: {
   return blockedResult
 }
 
-export function buildResolveAssistantSessionInput(
-  input: AssistantSessionResolutionFields,
-  defaults: AssistantOperatorDefaults | null,
-): ResolveAssistantSessionInput {
-  const inferredProvider = mergeAssistantProviderConfigs(defaults, input).provider
-  const providerDefaults = resolveAssistantProviderDefaults(defaults, inferredProvider)
-  const providerConfig = mergeAssistantProviderConfigsForProvider(
-    inferredProvider,
-    providerDefaults ? { provider: inferredProvider, ...providerDefaults } : null,
-    compactAssistantProviderConfigInput({
-      provider: inferredProvider,
-      ...input,
-    }),
-  )
-  const sessionId = input.conversation?.sessionId ?? input.sessionId
-  const alias = input.conversation?.alias ?? input.alias
-  const channel = input.conversation?.channel ?? input.channel
-  const identityId =
-    input.conversation?.identityId ??
-    input.identityId ??
-    defaults?.identityId ??
-    null
-  const participantId =
-    input.conversation?.participantId ??
-    input.actorId ??
-    input.participantId ??
-    null
-  const threadId =
-    input.conversation?.threadId ?? input.threadId ?? input.sourceThreadId ?? null
-  const directness =
-    typeof input.threadIsDirect === 'boolean'
-      ? input.threadIsDirect
-        ? 'direct'
-        : 'group'
-      : input.conversation?.directness ?? null
-
-  return {
-    vault: input.vault,
-    sessionId,
-    alias,
-    channel,
-    identityId,
-    actorId: participantId,
-    threadId,
-    threadIsDirect:
-      typeof input.threadIsDirect === 'boolean'
-        ? input.threadIsDirect
-        : directness === 'direct'
-          ? true
-          : directness === 'group'
-            ? false
-            : undefined,
-    provider: providerConfig.provider,
-    model: providerConfig.model,
-    sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox) ?? 'workspace-write',
-    approvalPolicy: providerConfig.approvalPolicy ?? 'on-request',
-    oss: providerConfig.oss ?? false,
-    profile: providerConfig.profile,
-    baseUrl: providerConfig.baseUrl,
-    apiKeyEnv: providerConfig.apiKeyEnv,
-    providerName: providerConfig.providerName,
-    headers:
-      providerConfig.provider === 'openai-compatible' ? providerConfig.headers : null,
-    reasoningEffort: providerConfig.reasoningEffort,
-    maxSessionAgeMs: input.maxSessionAgeMs ?? null,
-  }
-}
-
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,
 ) {
+  const remote = await maybeOpenAssistantConversationViaDaemon(input)
+  if (remote) {
+    return remote
+  }
+
   const defaults = await resolveAssistantOperatorDefaults()
   return resolveAssistantSession(buildResolveAssistantSessionInput(input, defaults))
 }
@@ -546,13 +474,22 @@ export async function openAssistantConversation(
 export async function sendAssistantMessage(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
+  const remote = await maybeSendAssistantMessageViaDaemon(input)
+  if (remote) {
+    return remote
+  }
+
   const defaults = await resolveAssistantOperatorDefaults()
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
-      const resolved = await resolveAssistantSessionForMessage(input, defaults)
-      const sharedPlan = await resolveAssistantTurnSharedPlan(input, resolved)
+      const resolved = await resolveAssistantMessageSession({
+        currentCodexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
+        defaults,
+        message: input,
+      })
+      const sharedPlan = await buildAssistantTurnSharedPlan(input, resolved)
       const routes = resolveAssistantTurnRoutes(input, defaults, resolved)
       const primaryRoute = routes[0] ?? null
       const receipt = await createAssistantTurnReceipt({
@@ -612,7 +549,8 @@ export async function sendAssistantMessage(
           turnId: userTurn.turnId,
           vault: input.vault,
         })
-        const session = await persistAssistantTurnAndSession({
+        const session = await finalizeAssistantTurnArtifacts({
+          currentCodexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
           input,
           plan: sharedPlan,
           providerResult,
@@ -620,14 +558,15 @@ export async function sendAssistantMessage(
           turnCreatedAt: userTurn.turnCreatedAt,
           turnId: userTurn.turnId,
         })
-        const deliveryOutcome = await deliverAssistantReply({
+        const deliveryOutcome = await dispatchAssistantReply({
           input,
           response: providerResult.response,
           session,
+          sharedPlan,
           turnId: userTurn.turnId,
         })
 
-        await finalizeAssistantTurnFromDeliveryOutcome({
+        await finalizeDeliveredAssistantTurn({
           outcome: deliveryOutcome,
           response: providerResult.response,
           turnId: userTurn.turnId,
@@ -734,6 +673,11 @@ export async function updateAssistantSessionOptions(input: {
   sessionId: string
   vault: string
 }): Promise<AssistantSession> {
+  const remote = await maybeUpdateAssistantSessionOptionsViaDaemon(input)
+  if (remote) {
+    return remote
+  }
+
   const session = await resolveAssistantSession({
     vault: input.vault,
     conversation: {
@@ -762,29 +706,6 @@ export async function updateAssistantSessionOptions(input: {
     }),
     updatedAt: new Date().toISOString(),
   })
-}
-
-async function resolveAssistantTurnSharedPlan(
-  input: AssistantMessageInput,
-  resolved: ResolvedAssistantSession,
-): Promise<AssistantTurnSharedPlan> {
-  const cliAccess = resolveAssistantCliAccessContext()
-  const requestedWorkingDirectory = input.workingDirectory ?? input.vault
-  return {
-    allowSensitiveHealthContext: shouldExposeSensitiveHealthContext(
-      resolved.session.binding,
-    ),
-    cliAccess,
-    onboardingSummary:
-      input.enableFirstTurnOnboarding === true
-        ? await updateAssistantOnboardingSummary({
-            prompt: input.prompt,
-            vault: input.vault,
-          })
-        : null,
-    persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
-    requestedWorkingDirectory,
-  }
 }
 
 function resolveAssistantTurnRoutes(
@@ -848,10 +769,10 @@ async function resolveAssistantRouteTurnPlan(input: {
     : input.sharedPlan.requestedWorkingDirectory
   const workingDirectoryKey =
     supportsDirectCliExecution
-      ? hashAssistantProviderWorkingDirectory(workingDirectory)
+      ? hashProviderWorkingDirectory(workingDirectory)
       : null
   const activeProviderBinding = readAssistantProviderBinding(input.session)
-  const recoveredProviderBinding = shouldResumeAssistantProviderRecovery(
+  const recoveredProviderBinding = shouldResumeProviderRecovery(
     input.input.turnTrigger ?? 'manual-ask',
   )
     ? readRecoveredAssistantProviderBindingForRoute({
@@ -861,7 +782,7 @@ async function resolveAssistantRouteTurnPlan(input: {
         session: input.session,
       })
     : null
-  const resumeProviderBinding = resolveAssistantRouteResumeBinding({
+  const resumeProviderBinding = resolveAssistantResumeBinding({
     provider: input.route.provider,
     recoveredBinding: recoveredProviderBinding,
     routeId: input.route.routeId,
@@ -876,7 +797,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const resumeProviderSessionId =
     shouldResetCodexProviderSession
       ? null
-      : resolveAssistantProviderResumeKey({
+      : readAssistantProviderResumeKey({
           binding: resumeProviderBinding,
           provider: input.route.provider,
         })
@@ -905,12 +826,23 @@ async function resolveAssistantRouteTurnPlan(input: {
         vault: input.input.vault,
       })
     : null
-  const continuityContext = shouldResetCodexProviderSession
-    ? await buildCodexPromptResetContinuityContext({
-        sessionId: input.session.sessionId,
-        vault: input.input.vault,
-      })
+  const transcriptDistillation = shouldInjectBootstrapContext
+    ? await readLatestAssistantTranscriptDistillation(
+        input.input.vault,
+        input.session.sessionId,
+      )
     : null
+  const continuityContext = [
+    buildAssistantTranscriptDistillationContinuityText(transcriptDistillation),
+    shouldResetCodexProviderSession
+      ? await buildCodexPromptResetContinuityContext({
+          sessionId: input.session.sessionId,
+          vault: input.input.vault,
+        })
+      : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join('\n\n') || null
   const stateMcpConfig = buildAssistantStateMcpConfig(
     workingDirectory,
   )
@@ -1466,7 +1398,8 @@ async function executeAssistantProviderAttempt(input: {
       error,
       provider: attemptPlan.route.provider,
       providerOptions: attemptPlan.route.providerOptions,
-      providerBinding: buildRecoveredAssistantProviderBindingSeed({
+      providerBinding: buildRecoveredProviderBindingSeed({
+        currentCodexPromptVersion: CURRENT_CODEX_PROMPT_VERSION,
         previousBinding,
         provider: attemptPlan.route.provider,
         providerOptions: attemptPlan.route.providerOptions,
@@ -1474,7 +1407,7 @@ async function executeAssistantProviderAttempt(input: {
       routeId: attemptPlan.route.routeId,
       session: attemptPlan.session,
       vault: executionPlan.input.vault,
-      workspaceKey: hashAssistantProviderWorkingDirectory(
+      workspaceKey: hashProviderWorkingDirectory(
         attemptPlan.routePlan.workingDirectory,
       ),
     })
@@ -1650,80 +1583,6 @@ function readHostedUserEnvKeysFromProcessEnv(
     .filter((key): key is string => key !== null)
 }
 
-async function persistAssistantTurnAndSession(input: {
-  input: AssistantMessageInput
-  plan: AssistantTurnSharedPlan
-  providerResult: ExecutedAssistantProviderTurnResult
-  session: AssistantSession
-  turnCreatedAt: string
-  turnId: string
-}): Promise<AssistantSession> {
-  if (!input.plan.persistUserPromptOnFailure) {
-    await appendAssistantTranscriptEntries(
-      input.input.vault,
-      input.session.sessionId,
-      [
-        {
-          kind: 'user',
-          text: input.input.prompt,
-          createdAt: input.turnCreatedAt,
-        },
-      ],
-    )
-    await appendAssistantTurnReceiptEvent({
-      vault: input.input.vault,
-      turnId: input.turnId,
-      kind: 'user.persisted',
-      detail: 'user prompt persisted after provider completion',
-      at: input.turnCreatedAt,
-    })
-  }
-
-  await appendAssistantTranscriptEntries(
-    input.input.vault,
-    input.session.sessionId,
-    [
-      {
-        kind: 'assistant',
-        text: input.providerResult.response,
-      },
-    ],
-  )
-
-  const updatedAt = new Date().toISOString()
-  const previousBinding = readAssistantProviderBinding(input.session)
-  const workspaceKey = hashAssistantProviderWorkingDirectory(
-    input.providerResult.workingDirectory,
-  )
-  let nextBinding = resolveNextAssistantProviderBinding({
-    provider: input.providerResult.provider,
-    providerSessionId: input.providerResult.providerSessionId,
-    previousBinding,
-    providerOptions: input.providerResult.providerOptions,
-    routeId: input.providerResult.route.routeId,
-    workspaceKey,
-    providerState: null,
-  })
-
-  if (input.providerResult.provider === 'codex-cli') {
-    nextBinding =
-      writeAssistantCodexPromptVersion(
-        nextBinding,
-        CURRENT_CODEX_PROMPT_VERSION,
-      ) ?? nextBinding
-  }
-
-  return saveAssistantSession(input.input.vault, {
-    ...input.session,
-    provider: input.providerResult.provider,
-    providerBinding: nextBinding,
-    providerOptions: input.providerResult.providerOptions,
-    updatedAt,
-    lastTurnAt: updatedAt,
-    turnCount: input.session.turnCount + 1,
-  })
-}
-
 async function persistFailedAssistantPromptAttempt(input: {
   plan: AssistantTurnSharedPlan
   prompt: string
@@ -1762,74 +1621,6 @@ async function persistFailedAssistantPromptAttempt(input: {
   )
 }
 
-async function deliverAssistantReply(input: {
-  input: AssistantMessageInput
-  response: string
-  session: AssistantSession
-  turnId: string
-}): Promise<AssistantDeliveryOutcome> {
-  if (!input.input.deliverResponse) {
-    return {
-      kind: 'not-requested',
-      session: input.session,
-    }
-  }
-
-  const outcome = await deliverAssistantOutboxMessage({
-    vault: input.input.vault,
-    turnId: input.turnId,
-    sessionId: input.session.sessionId,
-    message: sanitizeAssistantOutboundReply(
-      input.response,
-      input.session.binding.channel,
-    ),
-    channel: input.session.binding.channel,
-    identityId: input.session.binding.identityId,
-    actorId: input.session.binding.actorId,
-    threadId: input.session.binding.threadId,
-    threadIsDirect: input.session.binding.threadIsDirect,
-    bindingDelivery: input.session.binding.delivery,
-    explicitTarget: input.input.deliveryTarget ?? null,
-    replyToMessageId: input.input.deliveryReplyToMessageId ?? null,
-    dependencies: undefined,
-    dispatchMode: input.input.deliveryDispatchMode,
-  })
-  const session = outcome.session ?? input.session
-
-  switch (outcome.kind) {
-    case 'sent':
-      return {
-        kind: 'sent',
-        delivery: outcome.delivery!,
-        intentId: outcome.intent.intentId,
-        session,
-      }
-    case 'queued':
-      return {
-        kind: 'queued',
-        error: outcome.deliveryError,
-        intentId: outcome.intent.intentId,
-        session,
-      }
-    case 'failed':
-      return {
-        kind: 'failed',
-        error: outcome.deliveryError,
-        intentId: outcome.intent.intentId,
-        session,
-      }
-    default:
-      return {
-        kind: 'failed',
-        error: normalizeAssistantDeliveryError(
-          new Error('Assistant outbound delivery failed.'),
-        ),
-        intentId: 'unknown',
-        session,
-      }
-  }
-}
-
 function prioritizeAssistantFailoverRoutes(
   routes: readonly ResolvedAssistantFailoverRoute[],
   state: Awaited<ReturnType<typeof readAssistantFailoverState>>,
@@ -1846,141 +1637,6 @@ function prioritizeAssistantFailoverRoutes(
   }
 
   return ready.length > 0 ? [...ready, ...cooling] : [...routes]
-}
-
-async function finalizeAssistantTurnFromDeliveryOutcome(input: {
-  outcome: AssistantDeliveryOutcome
-  response: string
-  turnId: string
-  vault: string
-}): Promise<void> {
-  const completedAt = new Date().toISOString()
-  const plan = buildAssistantTurnDeliveryFinalizationPlan({
-    completedAt,
-    outcome: input.outcome,
-    response: input.response,
-    turnId: input.turnId,
-    vault: input.vault,
-  })
-  await finalizeAssistantTurnReceipt(plan.receipt)
-  await recordAssistantDiagnosticEvent(plan.diagnostic)
-}
-
-function buildAssistantTurnDeliveryFinalizationPlan(input: {
-  completedAt: string
-  outcome: AssistantDeliveryOutcome
-  response: string
-  turnId: string
-  vault: string
-}): AssistantTurnDeliveryFinalizationPlan {
-  switch (input.outcome.kind) {
-    case 'not-requested':
-      return {
-        receipt: {
-          vault: input.vault,
-          turnId: input.turnId,
-          status: 'completed',
-          deliveryDisposition: 'not-requested',
-          response: input.response,
-          completedAt: input.completedAt,
-        },
-        diagnostic: {
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.completed',
-          message: 'Assistant turn completed without outbound delivery.',
-          sessionId: input.outcome.session.sessionId,
-          turnId: input.turnId,
-          counterDeltas: {
-            turnsCompleted: 1,
-          },
-          at: input.completedAt,
-        },
-      }
-    case 'sent':
-      return {
-        receipt: {
-          vault: input.vault,
-          turnId: input.turnId,
-          status: 'completed',
-          deliveryDisposition: 'sent',
-          deliveryIntentId: input.outcome.intentId,
-          response: input.response,
-          completedAt: input.completedAt,
-        },
-        diagnostic: {
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.completed',
-          message: 'Assistant turn completed and delivered successfully.',
-          sessionId: input.outcome.session.sessionId,
-          turnId: input.turnId,
-          intentId: input.outcome.intentId,
-          counterDeltas: {
-            turnsCompleted: 1,
-          },
-          at: input.completedAt,
-        },
-      }
-    case 'queued':
-      return {
-        receipt: {
-          vault: input.vault,
-          turnId: input.turnId,
-          status: 'deferred',
-          deliveryDisposition: input.outcome.error ? 'retryable' : 'queued',
-          deliveryIntentId: input.outcome.intentId,
-          error: input.outcome.error,
-          response: input.response,
-          completedAt: input.completedAt,
-        },
-        diagnostic: {
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.deferred',
-          level: input.outcome.error ? 'warn' : 'info',
-          message:
-            input.outcome.error?.message ??
-            'Assistant turn deferred with a queued outbound delivery.',
-          code: input.outcome.error?.code ?? null,
-          sessionId: input.outcome.session.sessionId,
-          turnId: input.turnId,
-          intentId: input.outcome.intentId,
-          counterDeltas: {
-            turnsDeferred: 1,
-          },
-          at: input.completedAt,
-        },
-      }
-    case 'failed':
-      return {
-        receipt: {
-          vault: input.vault,
-          turnId: input.turnId,
-          status: 'failed',
-          deliveryDisposition: 'failed',
-          deliveryIntentId: input.outcome.intentId,
-          error: input.outcome.error,
-          response: input.response,
-          completedAt: input.completedAt,
-        },
-        diagnostic: {
-          vault: input.vault,
-          component: 'assistant',
-          kind: 'turn.failed',
-          level: 'error',
-          message: input.outcome.error.message,
-          code: input.outcome.error.code,
-          sessionId: input.outcome.session.sessionId,
-          turnId: input.turnId,
-          intentId: input.outcome.intentId,
-          counterDeltas: {
-            turnsFailed: 1,
-          },
-          at: input.completedAt,
-        },
-      }
-  }
 }
 
 async function runAssistantTurnBestEffort(
@@ -2163,331 +1819,6 @@ function isAssistantConversationTranscriptEntry(entry: {
   text: string
 } {
   return entry.kind === 'assistant' || entry.kind === 'user'
-}
-
-function hashAssistantProviderWorkingDirectory(
-  workingDirectory: string,
-): string {
-  return createHash('sha1')
-    .update(workingDirectory)
-    .digest('hex')
-    .slice(0, 16)
-}
-
-function resolveAssistantProviderResumeKey(input: {
-  binding: AssistantProviderBinding | null
-  provider: AssistantChatProvider
-}): string | null {
-  const traits = resolveAssistantProviderTraits(input.provider)
-  if (
-    traits.resumeKeyMode !== 'provider-session-id' ||
-    !input.binding ||
-    input.binding.provider !== input.provider
-  ) {
-    return null
-  }
-
-  return input.binding.providerSessionId
-}
-
-function shouldResumeAssistantProviderRecovery(
-  turnTrigger: AssistantTurnTrigger,
-): boolean {
-  return (
-    turnTrigger === 'manual-ask' || turnTrigger === 'manual-deliver'
-  )
-}
-
-function resolveAssistantRouteResumeBinding(input: {
-  provider: AssistantChatProvider
-  recoveredBinding: AssistantProviderBinding | null
-  routeId: string
-  sessionBinding: AssistantProviderBinding | null
-  workingDirectoryKey: string | null
-}): AssistantProviderBinding | null {
-  if (
-    doesAssistantResumeBindingMatchRoute({
-      binding: input.recoveredBinding,
-      provider: input.provider,
-      routeId: input.routeId,
-      workingDirectoryKey: input.workingDirectoryKey,
-    })
-  ) {
-    return input.recoveredBinding
-  }
-
-  if (
-    doesAssistantResumeBindingMatchRoute({
-      binding: input.sessionBinding,
-      provider: input.provider,
-      routeId: input.routeId,
-      workingDirectoryKey: input.workingDirectoryKey,
-    })
-  ) {
-    return input.sessionBinding
-  }
-
-  return null
-}
-
-function doesAssistantResumeBindingMatchRoute(input: {
-  binding: AssistantProviderBinding | null
-  provider: AssistantChatProvider
-  routeId: string
-  workingDirectoryKey: string | null
-}): boolean {
-  if (
-    input.binding?.provider !== input.provider ||
-    input.workingDirectoryKey === null
-  ) {
-    return false
-  }
-
-  const resumeRouteId = readAssistantProviderResumeRouteId({
-    providerBinding: input.binding,
-  })
-  const resumeWorkspaceKey = readAssistantProviderResumeWorkspaceKey({
-    providerBinding: input.binding,
-  })
-
-  return (
-    resumeRouteId === input.routeId &&
-    resumeWorkspaceKey === input.workingDirectoryKey
-  )
-}
-
-function resolveNextAssistantProviderBinding(input: {
-  previousBinding: AssistantProviderBinding | null
-  provider: AssistantChatProvider
-  providerOptions: AssistantProviderSessionOptions
-  providerSessionId: string | null
-  providerState: AssistantSessionProviderState | null
-  routeId: string | null
-  workspaceKey: string | null
-}): AssistantProviderBinding {
-  const previousBinding =
-    input.previousBinding?.provider === input.provider
-      ? input.previousBinding
-      : null
-  const traits = resolveAssistantProviderTraits(input.provider)
-  const nextProviderSessionId =
-    traits.resumeKeyMode === 'provider-session-id'
-      ? resolveNextAssistantProviderSessionId({
-          previousBinding,
-          providerSessionId: input.providerSessionId,
-          routeId: input.routeId,
-          workspaceKey: input.workspaceKey,
-        })
-      : null
-
-  return normalizeAssistantProviderBinding({
-    provider: input.provider,
-    providerOptions: input.providerOptions,
-    providerSessionId: nextProviderSessionId,
-    providerState: resolveNextAssistantProviderState({
-      previousBinding,
-      providerSessionId: nextProviderSessionId,
-      providerState: input.providerState ?? null,
-      routeId: input.routeId,
-      workspaceKey: input.workspaceKey,
-    }) as AssistantProviderBinding['providerState'],
-  }) as AssistantProviderBinding
-}
-
-function buildRecoveredAssistantProviderBindingSeed(input: {
-  previousBinding: AssistantProviderBinding | null
-  provider: AssistantChatProvider
-  providerOptions: AssistantProviderSessionOptions
-}): AssistantProviderBinding {
-  const previousBinding =
-    input.previousBinding?.provider === input.provider
-      ? input.previousBinding
-      : null
-
-  return normalizeAssistantProviderBinding({
-    provider: input.provider,
-    providerOptions: input.providerOptions,
-    providerSessionId: null,
-    providerState:
-      input.provider === 'codex-cli'
-        ? writeAssistantCodexPromptVersion(
-            normalizeAssistantProviderBinding({
-              provider: input.provider,
-              providerOptions: input.providerOptions,
-              providerSessionId: null,
-              providerState: previousBinding?.providerState ?? null,
-            }),
-            CURRENT_CODEX_PROMPT_VERSION,
-          )?.providerState ?? null
-        : previousBinding?.providerState ?? null,
-  }) as AssistantProviderBinding
-}
-
-function resolveNextAssistantProviderSessionId(input: {
-  previousBinding: AssistantProviderBinding | null
-  providerSessionId: string | null
-  routeId: string | null
-  workspaceKey: string | null
-}): string | null {
-  if (input.providerSessionId !== null) {
-    return input.providerSessionId
-  }
-
-  if (
-    input.previousBinding &&
-    readAssistantProviderResumeRouteId({
-      providerBinding: input.previousBinding,
-    }) === input.routeId &&
-    readAssistantProviderResumeWorkspaceKey({
-      providerBinding: input.previousBinding,
-    }) === input.workspaceKey
-  ) {
-    return readAssistantProviderSessionId({
-      providerBinding: input.previousBinding,
-    })
-  }
-
-  return null
-}
-
-function resolveNextAssistantProviderState(input: {
-  previousBinding: AssistantProviderBinding | null
-  providerSessionId: string | null
-  providerState: AssistantSessionProviderState | null
-  routeId: string | null
-  workspaceKey: string | null
-}): AssistantSessionProviderState | null {
-  if (input.providerSessionId === null) {
-    return null
-  }
-
-  const previousRouteId =
-    input.previousBinding
-      ? readAssistantProviderResumeRouteId({
-          providerBinding: input.previousBinding,
-        })
-      : null
-  const previousWorkspaceKey =
-    input.previousBinding
-      ? readAssistantProviderResumeWorkspaceKey({
-          providerBinding: input.previousBinding,
-        })
-      : null
-  const baseState =
-    input.providerState ??
-    (previousRouteId === input.routeId && previousWorkspaceKey === input.workspaceKey
-      ? input.previousBinding?.providerState ?? null
-      : null)
-
-  return writeAssistantProviderStateResumeWorkspaceKey(
-    writeAssistantProviderStateResumeRouteId(baseState, input.routeId),
-    input.workspaceKey,
-  )
-}
-
-async function resolveAssistantSessionForMessage(
-  input: AssistantMessageInput,
-  defaults: AssistantOperatorDefaults | null,
-) {
-  const sessionInput = buildResolveAssistantSessionInput(input, defaults)
-
-  try {
-    return await resolveAssistantSession(sessionInput)
-  } catch (error) {
-    const restored = await restoreMissingAssistantSessionSnapshot({
-      error,
-      input,
-      sessionInput,
-    })
-    if (!restored) {
-      throw error
-    }
-
-    return resolveAssistantSession({
-      ...sessionInput,
-      createIfMissing: false,
-    })
-  }
-}
-
-async function restoreMissingAssistantSessionSnapshot(input: {
-  error: unknown
-  input: AssistantMessageInput
-  sessionInput: ResolveAssistantSessionInput
-}): Promise<boolean> {
-  if (!isAssistantSessionNotFoundError(input.error)) {
-    return false
-  }
-
-  const requestedSessionId =
-    input.sessionInput.conversation?.sessionId ?? input.sessionInput.sessionId
-  const snapshot = input.input.sessionSnapshot
-  if (
-    typeof requestedSessionId !== 'string' ||
-    requestedSessionId.trim().length === 0 ||
-    !snapshot ||
-    snapshot.sessionId !== requestedSessionId
-  ) {
-    return false
-  }
-
-  const normalizedSnapshot = normalizeRestoredAssistantSessionSnapshot(snapshot)
-  const transcriptSnapshot = input.input.transcriptSnapshot ?? null
-  const transcriptExists = readAssistantSessionNotFoundTranscriptExists(input.error)
-
-  if (
-    resolveAssistantProviderTraits(normalizedSnapshot.provider).transcriptContextMode ===
-      'local-transcript' &&
-    transcriptExists !== true &&
-    transcriptSnapshot === null
-  ) {
-    throw new VaultCliError(
-      'ASSISTANT_SESSION_TRANSCRIPT_RESTORE_REQUIRED',
-      'Restoring this transcript-backed assistant session requires a local transcript snapshot. Resume from the original live chat or start a new session.',
-    )
-  }
-
-  // Live chat can recreate the missing local session file, and when the local
-  // transcript is also missing it can restore that snapshot before retrying.
-  await restoreAssistantSessionSnapshot({
-    vault: input.input.vault,
-    session: normalizedSnapshot,
-    transcriptEntries: transcriptExists === true ? null : transcriptSnapshot,
-  })
-  return true
-}
-
-function normalizeRestoredAssistantSessionSnapshot(
-  snapshot: AssistantSession,
-): AssistantSession {
-  const normalized = normalizeAssistantSessionSnapshot(snapshot)
-  const providerBinding = readAssistantProviderBinding(normalized)
-  if (providerBinding?.provider !== 'codex-cli') {
-    return normalized
-  }
-
-  return {
-    ...normalized,
-    providerBinding: writeAssistantCodexPromptVersion(
-      providerBinding,
-      readAssistantCodexPromptVersion(normalized) ?? CURRENT_CODEX_PROMPT_VERSION,
-    ),
-  }
-}
-
-function readAssistantSessionNotFoundTranscriptExists(error: unknown): boolean | null {
-  if (!error || typeof error !== 'object' || !('context' in error)) {
-    return null
-  }
-
-  const context = (error as { context?: unknown }).context
-  if (!context || typeof context !== 'object' || Array.isArray(context)) {
-    return null
-  }
-
-  return typeof (context as { transcriptExists?: unknown }).transcriptExists === 'boolean'
-    ? (context as { transcriptExists: boolean }).transcriptExists
-    : null
 }
 
 function buildAssistantSystemPrompt(input: {
@@ -2757,84 +2088,4 @@ function buildAssistantCronGuidanceText(
     'Do not claim you created, changed, or inspected a cron job in this session unless a real tool call happened.',
     'Cron schedules execute while `assistant run` is active for the vault.',
   ].join('\n\n')
-}
-
-function shouldExposeSensitiveHealthContext(binding: {
-  channel: string | null
-  threadIsDirect: boolean | null
-}): boolean {
-  if (binding.channel === null) {
-    return true
-  }
-
-  return binding.threadIsDirect === true
-}
-
-const ASSISTANT_LOCAL_MARKDOWN_LINK_PATTERN =
-  /\[([^\]\n]+)\]\(((?:\/|file:\/\/)[^)]+)\)/gu
-
-function sanitizeAssistantOutboundReply(
-  message: string,
-  channel: string | null,
-): string {
-  if (!isAssistantOutboundReplyChannel(channel)) {
-    return message
-  }
-
-  const withoutLocalMarkdownLinks = message.replace(
-    ASSISTANT_LOCAL_MARKDOWN_LINK_PATTERN,
-    '$1',
-  )
-  const normalizedLines = withoutLocalMarkdownLinks
-    .split('\n')
-    .map((line) => stripAssistantSourceCalloutPrefix(line))
-
-  return normalizedLines.join('\n').replace(/\n{3,}/gu, '\n\n').trim()
-}
-
-function stripAssistantSourceCalloutPrefix(line: string): string {
-  const match = /^(\s*(?:[-*]\s+)?)(?:In|From)\s+(.+?):\s+/u.exec(line)
-  if (!match) {
-    return line
-  }
-
-  const prefix = match[1] ?? ''
-  const referenceClause = match[2] ?? ''
-  if (!looksLikeAssistantSourceReferenceClause(referenceClause)) {
-    return line
-  }
-
-  return `${prefix}${line.slice(match[0].length)}`
-}
-
-function looksLikeAssistantSourceReferenceClause(value: string): boolean {
-  const parts = value
-    .split(/\s+(?:and|or)\s+|,\s*/u)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-
-  return parts.length > 0 && parts.every((part) => isAssistantSourceReference(part))
-}
-
-function isAssistantSourceReference(value: string): boolean {
-  const normalized = value.trim().replace(/^`|`$/gu, '')
-  if (normalized.length === 0) {
-    return false
-  }
-
-  if (normalized.startsWith('/') || normalized.startsWith('file://')) {
-    return true
-  }
-
-  if (
-    /^(?:journal|ledger|raw|derived|research|experiments|assistant-state)(?:\/|$)/u.test(
-      normalized,
-    )
-  ) {
-    return true
-  }
-
-  return /(?:^|\/)[A-Za-z0-9._-]+\.(?:md|jsonl|json|txt|csv|ya?ml)$/u.test(
-    normalized,
-  )
 }

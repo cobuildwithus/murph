@@ -47,6 +47,7 @@ readonly typecheck_package_dirs=(
   "packages/inboxd"
   "packages/parsers"
   "packages/cli"
+  "packages/assistantd"
   "packages/assistant-runtime"
   "packages/web"
   "apps/web"

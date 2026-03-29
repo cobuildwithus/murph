@@ -79,6 +79,12 @@
       "@murph/assistant-runtime/*": [
         "packages/assistant-runtime/src/*"
       ],
+      "@murph/assistantd": [
+        "packages/assistantd/src/index.ts"
+      ],
+      "@murph/assistantd/*": [
+        "packages/assistantd/src/*"
+      ],
       "murph": [
         "packages/cli/src/index.ts"
       ],

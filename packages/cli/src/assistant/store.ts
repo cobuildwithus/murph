@@ -164,12 +164,12 @@ export async function resolveAssistantSession(
       turnCount: 0,
     })
 
-    await saveAssistantSessionAtPaths(paths, session)
+    const savedSession = await saveAssistantSessionAtPaths(paths, session)
 
     return {
       created: true,
       paths,
-      session,
+      session: savedSession,
     }
   })
 }

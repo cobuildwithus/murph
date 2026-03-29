@@ -1,4 +1,35 @@
 export type {
+  AssistantConversationAudience,
+  AssistantConversationDeliveryPolicy,
+  AssistantConversationPolicy,
+  AssistantConversationResetPolicy,
+  AssistantConversationScopeStrategy,
+} from './assistant/conversation-policy.js'
+export {
+  resolveAssistantConversationAutoReplyEligibility,
+  resolveAssistantConversationAudience,
+  resolveAssistantConversationPolicy,
+  shouldExposeSensitiveHealthContext,
+} from './assistant/conversation-policy.js'
+export type {
+  AssistantRuntimeStateService,
+} from './assistant/runtime-state-service.js'
+export {
+  createAssistantRuntimeStateService,
+} from './assistant/runtime-state-service.js'
+export type {
+  AssistantTranscriptDistillation,
+} from './assistant-cli-contracts.js'
+export {
+  appendAssistantTranscriptDistillation,
+  buildAssistantTranscriptDistillationContinuityText,
+  listAssistantTranscriptDistillations,
+  maybeRefreshAssistantTranscriptDistillation,
+  readLatestAssistantTranscriptDistillation,
+  resolveAssistantTranscriptDistillationPath,
+} from './assistant/transcript-distillation.js'
+
+export type {
   AddAssistantCronJobInput,
   AssistantCronProcessDueResult,
   InstallAssistantCronPresetInput,
