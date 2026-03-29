@@ -85,11 +85,13 @@ export type {
 } from "./connectors/email/normalize-parsed.ts";
 export {
   parseRawEmailMessage,
+  readRawEmailHeaderValue,
   splitEmailAddressList,
 } from "./connectors/email/parsed.ts";
 export type {
   ParsedEmailAttachment,
   ParsedEmailMessage,
+  RawEmailHeaderValue,
 } from "./connectors/email/parsed.ts";
 export type {
   AgentmailAttachmentDownload,

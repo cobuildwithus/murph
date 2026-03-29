@@ -140,6 +140,91 @@ export function normalizeHostedEmailAddressList(
   return values;
 }
 
+export function resolveHostedEmailInboundSenderAddress(input: {
+  envelopeFrom?: string | null;
+  hasRepeatedHeaderFrom?: boolean;
+  headerFrom?: string | null;
+}): string | null {
+  if (input.hasRepeatedHeaderFrom) {
+    return null;
+  }
+
+  const headerSender = resolveHostedEmailHeaderSenderAddress(input.headerFrom);
+  const envelopeSender = normalizeHostedEmailAddress(input.envelopeFrom);
+  const hasHeaderSender = typeof input.headerFrom === "string" && input.headerFrom.trim().length > 0;
+
+  if (hasHeaderSender) {
+    if (!headerSender) {
+      return null;
+    }
+
+    if (envelopeSender && headerSender !== envelopeSender) {
+      return null;
+    }
+
+    return headerSender;
+  }
+
+  return envelopeSender;
+}
+
+export function resolveHostedEmailAuthorizedSenderAddresses(input: {
+  threadTarget?: HostedEmailThreadTarget | null;
+  verifiedEmailAddress?: string | null;
+}): string[] {
+  return normalizeHostedEmailAddressList([
+    input.verifiedEmailAddress,
+    ...(input.threadTarget?.to ?? []),
+    ...(input.threadTarget?.cc ?? []),
+  ]);
+}
+
+export function isHostedEmailInboundSenderAuthorized(input: {
+  envelopeFrom?: string | null;
+  hasRepeatedHeaderFrom?: boolean;
+  headerFrom?: string | null;
+  threadTarget?: HostedEmailThreadTarget | null;
+  verifiedEmailAddress?: string | null;
+}): boolean {
+  const sender = resolveHostedEmailInboundSenderAddress(input);
+
+  if (!sender) {
+    return false;
+  }
+
+  return resolveHostedEmailAuthorizedSenderAddresses(input).includes(sender);
+}
+
+function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const candidates = new Set<string>();
+  const angleMatches = [...value.matchAll(/<([^>]+)>/gu)];
+
+  for (const match of angleMatches) {
+    const normalized = normalizeHostedEmailAddress(match[1]);
+    if (normalized) {
+      candidates.add(normalized);
+    }
+  }
+
+  if (candidates.size === 0) {
+    const bareMatches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu) ?? [];
+    for (const match of bareMatches) {
+      const normalized = normalizeHostedEmailAddress(match);
+      if (normalized) {
+        candidates.add(normalized);
+      }
+    }
+  }
+
+  return candidates.size === 1
+    ? [...candidates][0] ?? null
+    : null;
+}
+
 export function normalizeHostedEmailMessageId(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
