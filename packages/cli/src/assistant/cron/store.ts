@@ -18,6 +18,10 @@ import {
   parseAssistantJsonLinesWithTailSalvage,
   writeJsonFileAtomic,
 } from '../shared.js'
+import {
+  assertAssistantCronJobId,
+  assertAssistantCronRunId,
+} from '../state-ids.js'
 
 const ASSISTANT_CRON_STORE_VERSION = 1
 
@@ -233,11 +237,11 @@ export function buildAssistantCronTarget(
 }
 
 export function createAssistantCronJobId(): string {
-  return `cron_${randomUUID().replace(/-/gu, '')}`
+  return assertAssistantCronJobId(`cron_${randomUUID().replace(/-/gu, '')}`)
 }
 
 export function createAssistantCronRunId(): string {
-  return `cronrun_${randomUUID().replace(/-/gu, '')}`
+  return assertAssistantCronRunId(`cronrun_${randomUUID().replace(/-/gu, '')}`)
 }
 
 export function normalizeRequiredAssistantCronText(
@@ -294,7 +298,10 @@ function resolveAssistantCronRunsPath(
   paths: AssistantStatePaths,
   jobId: string,
 ): string {
-  return path.join(paths.cronRunsDirectory, `${jobId}.jsonl`)
+  return path.join(
+    paths.cronRunsDirectory,
+    `${assertAssistantCronJobId(jobId)}.jsonl`,
+  )
 }
 
 function compareNullableIsoTimestamps(

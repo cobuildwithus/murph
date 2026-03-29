@@ -17,6 +17,14 @@ export function assertAssistantOutboxIntentId(
   return assertAssistantOpaqueId('outbox intent', value)
 }
 
+export function assertAssistantCronJobId(value: string | null | undefined): string {
+  return assertAssistantOpaqueId('cron job', value)
+}
+
+export function assertAssistantCronRunId(value: string | null | undefined): string {
+  return assertAssistantOpaqueId('cron run', value)
+}
+
 export function assertAssistantTranscriptDistillationId(
   value: string | null | undefined,
 ): string {

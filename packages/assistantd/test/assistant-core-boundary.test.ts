@@ -98,6 +98,15 @@ test('assistantd uses murph/assistant-core instead of the root murph export', as
   }
 })
 
+test('murph/assistant-core exports the assistant session id assertion used by assistantd', async () => {
+  const assistantCore = await import('murph/assistant-core')
+  assert.equal(typeof assistantCore.assertAssistantSessionId, 'function')
+  assert.equal(
+    assistantCore.assertAssistantSessionId('session_safe'),
+    'session_safe',
+  )
+})
+
 test('non-CLI workspace code avoids the root murph export', async () => {
   const repoRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
