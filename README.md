@@ -58,12 +58,18 @@ The repo now has two separate ChatGPT upload paths:
 
 - `pnpm review:gpt`
   packages source/docs for code review using the existing audit ZIP flow, pruning untracked generated source sidecars first and then staging git-visible files while filtering local `.env` and build residue from the upload bundle
+- `pnpm review:gpt:delay --delay 50m --chat-url <url>`
+  waits locally, then reopens an existing ChatGPT thread through the same browser automation and saves the captured markdown response under `output-packages/review-gpt-delay/` without uploading a fresh ZIP by default
+- `pnpm chatgpt:thread:export --chat-url <url> --output <path>`
+  reads an already-authenticated ChatGPT thread directly from the managed local Chrome session and saves the current thread text plus attachment/button labels as JSON, without posting a new prompt into the conversation
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
   packages the selected vault plus the matching `assistant-state` bucket and stages that ZIP in ChatGPT with no prompt text
 
 `review:gpt` also supports reusable audit presets. Current examples include `security`, `architecture`, `simplify`, `bad-code`, `legacy-removal`, `test-coverage-audit`, and `task-finish-review`.
 
 `review:gpt:data` defaults to `--send`; pass `--no-send` if you want draft-only staging. Vault resolution follows the normal Murph precedence order: explicit `--vault`, then `VAULT`, then the saved default vault.
+
+`review:gpt:delay` defaults to skipping ZIP upload, auto-submitting, and waiting for the response, plus a generic "did the patch arrive yet?" prompt. You can override those flags and the prompt directly. The target chat still has to be accessible from the local logged-in browser profile that `cobuild-review-gpt` uses; it does not bypass ChatGPT auth on its own.
 
 The data bundle intentionally excludes `.runtime/**`, `.env*`, archive files, and `exports/packs/**` so machine-local runtime/auth material and already-derived export packs are not uploaded by default. Generated ZIPs are written under `output-packages/`.
 
