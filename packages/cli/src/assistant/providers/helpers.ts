@@ -1,6 +1,12 @@
 import { getAssistantBindingContextLines } from '../bindings.js'
-import { normalizeNullableString } from '../shared.js'
-import type { AssistantProviderConfig } from '../provider-config.js'
+import {
+  normalizeNullableString,
+  readAssistantEnvString,
+} from '../shared.js'
+import {
+  normalizeAssistantHeaders,
+  type AssistantProviderConfig,
+} from '../provider-config.js'
 import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
@@ -10,19 +16,18 @@ export function buildOpenAICompatibleDiscoveryHeaders(input: {
   config: Extract<AssistantProviderConfig, { provider: 'openai-compatible' }>
   env?: NodeJS.ProcessEnv
 }): Record<string, string> {
-  const headers: Record<string, string> = {
-    Accept: 'application/json',
-    ...(input.config.headers ?? {}),
-  }
+  const headers =
+    normalizeAssistantHeaders({
+      Accept: 'application/json',
+      ...(input.config.headers ?? {}),
+    }) ?? {
+      Accept: 'application/json',
+    }
   const env = {
     ...process.env,
     ...(input.env ?? {}),
   }
-  const apiKeyEnv = normalizeNullableString(input.config.apiKeyEnv)
-  const apiKeyValue =
-    apiKeyEnv && typeof env[apiKeyEnv] === 'string' && env[apiKeyEnv].trim().length > 0
-      ? env[apiKeyEnv].trim()
-      : null
+  const apiKeyValue = readAssistantEnvString(env, input.config.apiKeyEnv)
 
   if (apiKeyValue && !('Authorization' in headers)) {
     headers.Authorization = `Bearer ${apiKeyValue}`
@@ -60,7 +65,7 @@ export function ensureTrailingSlash(baseUrl: string): string {
   return baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`
 }
 
-function normalizeConversationMessages(
+function sanitizeAssistantProviderConversationMessages(
   messages: AssistantProviderTurnExecutionInput['conversationMessages'],
 ): Array<{
   content: string
@@ -74,6 +79,49 @@ function normalizeConversationMessages(
     .filter((message) => message.content.length > 0)
 }
 
+function requireAssistantProviderUserPrompt(
+  input: AssistantProviderTurnExecutionInput,
+): string {
+  const userPrompt = normalizeNullableString(input.userPrompt)
+  if (userPrompt) {
+    return userPrompt
+  }
+
+  throw new Error(
+    'Assistant provider turns require either prompt or userPrompt.',
+  )
+}
+
+function resolveAssistantProviderContextSections(
+  input: AssistantProviderTurnExecutionInput,
+): string[] {
+  const contextLines =
+    input.sessionContext?.binding
+      ? getAssistantBindingContextLines(input.sessionContext.binding)
+      : []
+
+  return [
+    contextLines.length > 0
+      ? `Conversation context:\n${contextLines.join('\n')}`
+      : null,
+    normalizeNullableString(input.continuityContext),
+  ].filter((section): section is string => Boolean(section))
+}
+
+function resolveAssistantProviderComposedUserContent(
+  input: AssistantProviderTurnExecutionInput,
+  options: {
+    labelUserPrompt: boolean
+  },
+): string {
+  const userPrompt = requireAssistantProviderUserPrompt(input)
+  return [
+    ...resolveAssistantProviderContextSections(input),
+    options.labelUserPrompt ? `User message:\n${userPrompt}` : userPrompt,
+  ]
+    .join('\n\n')
+}
+
 export function resolveAssistantProviderPrompt(
   input: AssistantProviderTurnExecutionInput,
 ): string {
@@ -82,26 +130,13 @@ export function resolveAssistantProviderPrompt(
     return explicitPrompt
   }
 
-  const userPrompt = normalizeNullableString(input.userPrompt)
-  if (!userPrompt) {
-    throw new Error(
-      'Assistant provider turns require either prompt or userPrompt.',
-    )
-  }
-
   const systemPrompt = normalizeNullableString(input.systemPrompt)
-  const contextLines =
-    input.sessionContext?.binding
-      ? getAssistantBindingContextLines(input.sessionContext.binding)
-      : []
 
   return [
     systemPrompt,
-    contextLines.length > 0
-      ? `Conversation context:\n${contextLines.join('\n')}`
-      : null,
-    normalizeNullableString(input.continuityContext),
-    `User message:\n${userPrompt}`,
+    resolveAssistantProviderComposedUserContent(input, {
+      labelUserPrompt: true,
+    }),
   ]
     .filter((line): line is string => Boolean(line))
     .join('\n\n')
@@ -113,7 +148,9 @@ export function buildAssistantProviderMessages(
   content: string
   role: 'assistant' | 'user'
 }> {
-  const messages = normalizeConversationMessages(input.conversationMessages)
+  const messages = sanitizeAssistantProviderConversationMessages(
+    input.conversationMessages,
+  )
   const prompt = normalizeNullableString(input.prompt)
   if (prompt) {
     messages.push({
@@ -123,29 +160,11 @@ export function buildAssistantProviderMessages(
     return messages
   }
 
-  const userPrompt = normalizeNullableString(input.userPrompt)
-  if (!userPrompt) {
-    throw new Error(
-      'Assistant provider turns require either prompt or userPrompt.',
-    )
-  }
-
-  const sessionContextLines =
-    input.sessionContext?.binding
-      ? getAssistantBindingContextLines(input.sessionContext.binding)
-      : []
-  const continuityContext = normalizeNullableString(input.continuityContext)
-  const userParts = [
-    sessionContextLines.length > 0
-      ? `Conversation context:\n${sessionContextLines.join('\n')}`
-      : null,
-    continuityContext,
-    userPrompt,
-  ].filter((part): part is string => Boolean(part))
-
   messages.push({
     role: 'user',
-    content: userParts.join('\n\n'),
+    content: resolveAssistantProviderComposedUserContent(input, {
+      labelUserPrompt: false,
+    }),
   })
   return messages
 }
