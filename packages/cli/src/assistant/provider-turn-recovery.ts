@@ -6,10 +6,12 @@ import {
   assistantProviderRouteRecoverySchema,
   parseAssistantSessionRecord,
   type AssistantChatProvider,
-  type AssistantProviderRouteRecovery,
   type AssistantProviderBinding,
+  type AssistantProviderRouteRecovery,
   type AssistantSession,
 } from '../assistant-cli-contracts.js'
+import { quarantineAssistantStateFile } from './quarantine.js'
+import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import {
   normalizeAssistantProviderBinding,
   normalizeAssistantSessionSnapshot,
@@ -19,7 +21,7 @@ import {
 } from './provider-state.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
-import { resolveAssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 import {
   isMissingFileError,
   normalizeNullableString,
@@ -81,7 +83,7 @@ export async function recoverAssistantSessionAfterProviderFailure(input: {
       vault: input.vault,
     })
     return recoveredSession
-  } catch (error) {
+  } catch {
     return null
   }
 }
@@ -93,6 +95,7 @@ export async function readAssistantProviderRouteRecovery(
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   return readAssistantProviderRouteRecoveryAtPath(
+    paths,
     resolveAssistantProviderRouteRecoveryPath(paths, sessionId),
   )
 }
@@ -247,7 +250,7 @@ async function saveAssistantProviderRouteRecovery(input: {
     await mkdir(path.dirname(recoveryPath), {
       recursive: true,
     })
-    const existing = await readAssistantProviderRouteRecoveryAtPath(recoveryPath)
+    const existing = await readAssistantProviderRouteRecoveryAtPath(paths, recoveryPath)
     const routes = [
       ...(existing?.routes.filter((route) => route.routeId !== input.routeId) ?? []),
       assistantProviderRouteRecoveryEntrySchema.parse({
@@ -266,11 +269,24 @@ async function saveAssistantProviderRouteRecovery(input: {
       routes,
     })
     await writeJsonFileAtomic(recoveryPath, next)
-    return (await readAssistantProviderRouteRecoveryAtPath(recoveryPath)) ?? next
+    await appendAssistantRuntimeEventAtPaths(paths, {
+      at: input.at,
+      component: 'provider-recovery',
+      entityId: input.sessionId,
+      entityType: 'provider-route-recovery',
+      kind: 'provider-route-recovery.upserted',
+      level: 'info',
+      message: `Assistant provider route recovery was persisted for session ${input.sessionId}.`,
+      data: {
+        routeId: input.routeId,
+      },
+    }).catch(() => undefined)
+    return (await readAssistantProviderRouteRecoveryAtPath(paths, recoveryPath)) ?? next
   })
 }
 
 async function readAssistantProviderRouteRecoveryAtPath(
+  paths: AssistantStatePaths,
   filePath: string,
 ): Promise<AssistantProviderRouteRecovery | null> {
   try {
@@ -281,7 +297,13 @@ async function readAssistantProviderRouteRecoveryAtPath(
       return null
     }
 
-    throw error
+    await quarantineAssistantStateFile({
+      artifactKind: 'provider-route-recovery',
+      error,
+      filePath,
+      paths,
+    }).catch(() => undefined)
+    return null
   }
 }
 
@@ -290,8 +312,7 @@ function resolveAssistantProviderRouteRecoveryPath(
   sessionId: string,
 ): string {
   return path.join(
-    paths.assistantStateRoot,
-    'provider-route-recovery',
+    paths.providerRouteRecoveryDirectory,
     `${normalizeNullableString(sessionId) ?? 'unknown'}.json`,
   )
 }

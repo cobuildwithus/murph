@@ -28,3 +28,17 @@ export async function withAssistantRuntimeWriteLock<TResult>(
   const paths = resolveAssistantStatePaths(vault)
   return assistantRuntimeWriteLock.withWriteLock(paths, () => run(paths))
 }
+
+export async function inspectAssistantRuntimeWriteLock(
+  vault: string,
+) {
+  const paths = resolveAssistantStatePaths(vault)
+  return await assistantRuntimeWriteLock.inspectWriteLock(paths)
+}
+
+export async function clearAssistantRuntimeWriteLock(
+  vault: string,
+): Promise<void> {
+  const paths = resolveAssistantStatePaths(vault)
+  await assistantRuntimeWriteLock.clearWriteLock(paths)
+}

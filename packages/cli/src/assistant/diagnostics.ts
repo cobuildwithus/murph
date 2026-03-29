@@ -9,11 +9,12 @@ import {
   type AssistantDiagnosticsCounters,
   type AssistantDiagnosticsSnapshot,
 } from '../assistant-cli-contracts.js'
+import { quarantineAssistantStateFile } from './quarantine.js'
+import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { ensureAssistantState } from './store/persistence.js'
-import { resolveAssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
-  isJsonSyntaxError,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -46,24 +47,7 @@ export async function readAssistantDiagnosticsSnapshot(
 ): Promise<AssistantDiagnosticsSnapshot> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
-
-  try {
-    const raw = await readFile(paths.diagnosticSnapshotPath, 'utf8')
-    return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
-      throw error
-    }
-  }
-
-  return assistantDiagnosticsSnapshotSchema.parse({
-    schema: ASSISTANT_DIAGNOSTIC_SNAPSHOT_SCHEMA,
-    updatedAt: new Date(0).toISOString(),
-    lastEventAt: null,
-    lastErrorAt: null,
-    counters: createEmptyAssistantDiagnosticsCounters(),
-    recentWarnings: [],
-  })
+  return readAssistantDiagnosticsSnapshotAtPath(paths, paths.diagnosticSnapshotPath)
 }
 
 export async function saveAssistantDiagnosticsSnapshot(
@@ -111,7 +95,10 @@ export async function recordAssistantDiagnosticEvent(input: {
 
     await appendFile(paths.diagnosticEventsPath, `${JSON.stringify(event)}\n`, 'utf8')
 
-    const snapshot = await readAssistantDiagnosticsSnapshotAtPath(paths.diagnosticSnapshotPath)
+    const snapshot = await readAssistantDiagnosticsSnapshotAtPath(
+      paths,
+      paths.diagnosticSnapshotPath,
+    )
     const nextSnapshot = assistantDiagnosticsSnapshotSchema.parse({
       ...snapshot,
       updatedAt: at,
@@ -126,26 +113,57 @@ export async function recordAssistantDiagnosticEvent(input: {
       ]),
     })
     await writeJsonFileAtomic(paths.diagnosticSnapshotPath, nextSnapshot)
+    await appendAssistantRuntimeEventAtPaths(paths, {
+      at,
+      component: 'diagnostics',
+      entityId: input.turnId ?? input.sessionId ?? input.intentId ?? input.kind,
+      entityType: 'diagnostic-event',
+      kind: 'diagnostics.event.recorded',
+      level: event.level,
+      message: `${input.component}/${input.kind}: ${input.message}`,
+      data: input.data ?? undefined,
+    }).catch(() => undefined)
 
     return event
   })
 }
 
 async function readAssistantDiagnosticsSnapshotAtPath(
+  paths: AssistantStatePaths,
   snapshotPath: string,
 ): Promise<AssistantDiagnosticsSnapshot> {
   try {
     const raw = await readFile(snapshotPath, 'utf8')
     return assistantDiagnosticsSnapshotSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
-    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
-      throw error
+    if (!isMissingFileError(error)) {
+      await quarantineAssistantStateFile({
+        artifactKind: 'diagnostics-snapshot',
+        error,
+        filePath: snapshotPath,
+        paths,
+      }).catch(() => undefined)
+      const recovered = createAssistantDiagnosticsSnapshot(new Date().toISOString())
+      await writeJsonFileAtomic(snapshotPath, recovered)
+      await appendAssistantRuntimeEventAtPaths(paths, {
+        component: 'diagnostics',
+        entityId: 'assistant-diagnostics',
+        entityType: 'diagnostics-snapshot',
+        kind: 'diagnostics.snapshot.recovered',
+        level: 'warn',
+        message: 'Assistant diagnostics snapshot was rebuilt after quarantine.',
+      }).catch(() => undefined)
+      return recovered
     }
   }
 
+  return createAssistantDiagnosticsSnapshot(new Date(0).toISOString())
+}
+
+function createAssistantDiagnosticsSnapshot(updatedAt: string): AssistantDiagnosticsSnapshot {
   return assistantDiagnosticsSnapshotSchema.parse({
     schema: ASSISTANT_DIAGNOSTIC_SNAPSHOT_SCHEMA,
-    updatedAt: new Date(0).toISOString(),
+    updatedAt,
     lastEventAt: null,
     lastErrorAt: null,
     counters: createEmptyAssistantDiagnosticsCounters(),

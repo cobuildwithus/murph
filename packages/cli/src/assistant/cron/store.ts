@@ -10,10 +10,12 @@ import {
   type AssistantCronTarget,
 } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
-import type { AssistantStatePaths } from '../store.js'
+import { quarantineAssistantStateFile } from '../quarantine.js'
+import type { AssistantStatePaths } from '../store/paths.js'
 import {
   isMissingFileError,
   normalizeNullableString,
+  parseAssistantJsonLinesWithTailSalvage,
   writeJsonFileAtomic,
 } from '../shared.js'
 
@@ -64,13 +66,16 @@ export async function readAssistantCronStore(
     )
   } catch (error) {
     if (isMissingFileError(error)) {
-      return {
-        version: ASSISTANT_CRON_STORE_VERSION,
-        jobs: [],
-      }
+      return createEmptyAssistantCronStore()
     }
 
-    throw error
+    await quarantineAssistantStateFile({
+      artifactKind: 'cron-store',
+      error,
+      filePath: paths.cronJobsPath,
+      paths,
+    }).catch(() => undefined)
+    return createEmptyAssistantCronStore()
   }
 }
 
@@ -89,20 +94,35 @@ export async function readAssistantCronRuns(
 
   try {
     const raw = await readFile(runsPath, 'utf8')
-    return raw
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .map((line) =>
-        assistantCronRunRecordSchema.parse(JSON.parse(line) as unknown),
-      )
-      .sort((left, right) => right.startedAt.localeCompare(left.startedAt))
+    const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
+      assistantCronRunRecordSchema.parse(value),
+    )
+    if (parsed.malformedLineCount > 0) {
+      await quarantineAssistantStateFile({
+        artifactKind: 'cron-run',
+        error: new VaultCliError(
+          'ASSISTANT_CRON_RUN_CORRUPTED',
+          `Assistant cron run journal contains ${parsed.malformedLineCount} malformed committed line(s).`,
+        ),
+        filePath: runsPath,
+        paths,
+      }).catch(() => undefined)
+      return []
+    }
+
+    return parsed.values.sort((left, right) => right.startedAt.localeCompare(left.startedAt))
   } catch (error) {
     if (isMissingFileError(error)) {
       return []
     }
 
-    throw error
+    await quarantineAssistantStateFile({
+      artifactKind: 'cron-run',
+      error,
+      filePath: runsPath,
+      paths,
+    }).catch(() => undefined)
+    return []
   }
 }
 
@@ -233,6 +253,13 @@ export function normalizeRequiredAssistantCronText(
     'ASSISTANT_CRON_INVALID_INPUT',
     `${fieldName} must be a non-empty string.`,
   )
+}
+
+function createEmptyAssistantCronStore(): AssistantCronStore {
+  return {
+    version: ASSISTANT_CRON_STORE_VERSION,
+    jobs: [],
+  }
 }
 
 function normalizeAssistantCronStore(store: AssistantCronStore): AssistantCronStore {

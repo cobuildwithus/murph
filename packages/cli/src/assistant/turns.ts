@@ -10,6 +10,8 @@ import {
   type AssistantTurnTimelineEvent,
   type AssistantTurnTimelineEventKind,
 } from '../assistant-cli-contracts.js'
+import { quarantineAssistantStateFile } from './quarantine.js'
+import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { ensureAssistantState } from './store/persistence.js'
 import {
   resolveAssistantStatePaths,
@@ -17,7 +19,6 @@ import {
 } from './store/paths.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
-  isJsonSyntaxError,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -78,7 +79,10 @@ export async function readAssistantTurnReceipt(
 ): Promise<AssistantTurnReceipt | null> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
-  return readAssistantTurnReceiptAtPath(resolveAssistantTurnReceiptPath(paths, turnId))
+  return readAssistantTurnReceiptAtPath(
+    paths,
+    resolveAssistantTurnReceiptPath(paths, turnId),
+  )
 }
 
 export async function saveAssistantTurnReceipt(
@@ -88,7 +92,7 @@ export async function saveAssistantTurnReceipt(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
     const parsed = assistantTurnReceiptSchema.parse(receipt)
-    await writeJsonFileAtomic(resolveAssistantTurnReceiptPath(paths, parsed.turnId), parsed)
+    await writeAssistantTurnReceiptAtPath(paths, parsed)
     return parsed
   })
 }
@@ -104,7 +108,7 @@ export async function appendAssistantTurnReceiptEvent(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const receiptPath = resolveAssistantTurnReceiptPath(paths, input.turnId)
-    const existing = await readAssistantTurnReceiptAtPath(receiptPath)
+    const existing = await readAssistantTurnReceiptAtPath(paths, receiptPath)
     if (!existing) {
       return null
     }
@@ -123,7 +127,7 @@ export async function appendAssistantTurnReceiptEvent(input: {
         }),
       ],
     })
-    await writeJsonFileAtomic(receiptPath, updated)
+    await writeAssistantTurnReceiptAtPath(paths, updated)
     return updated
   })
 }
@@ -136,13 +140,13 @@ export async function updateAssistantTurnReceipt(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const receiptPath = resolveAssistantTurnReceiptPath(paths, input.turnId)
-    const existing = await readAssistantTurnReceiptAtPath(receiptPath)
+    const existing = await readAssistantTurnReceiptAtPath(paths, receiptPath)
     if (!existing) {
       return null
     }
 
     const updated = assistantTurnReceiptSchema.parse(input.mutate(existing))
-    await writeJsonFileAtomic(receiptPath, updated)
+    await writeAssistantTurnReceiptAtPath(paths, updated)
     return updated
   })
 }
@@ -171,7 +175,7 @@ export async function finalizeAssistantTurnReceipt(input: {
         ? input.error?.message ?? 'assistant turn failed'
         : input.status === 'blocked'
           ? input.error?.message ?? 'assistant turn blocked'
-        : null,
+          : null,
     metadata: {},
   })
 
@@ -217,6 +221,7 @@ export async function listRecentAssistantTurnReceipts(
     }
 
     const receipt = await readAssistantTurnReceiptAtPath(
+      paths,
       path.join(paths.turnsDirectory, entry.name),
     )
     if (receipt) {
@@ -237,6 +242,7 @@ export function resolveAssistantTurnReceiptPath(
 }
 
 async function readAssistantTurnReceiptAtPath(
+  paths: AssistantStatePaths,
   receiptPath: string,
 ): Promise<AssistantTurnReceipt | null> {
   try {
@@ -246,12 +252,37 @@ async function readAssistantTurnReceiptAtPath(
     if (isMissingFileError(error)) {
       return null
     }
-    if (isJsonSyntaxError(error)) {
-      return null
-    }
 
-    throw error
+    await quarantineAssistantStateFile({
+      artifactKind: 'turn-receipt',
+      error,
+      filePath: receiptPath,
+      paths,
+    }).catch(() => undefined)
+    return null
   }
+}
+
+async function writeAssistantTurnReceiptAtPath(
+  paths: AssistantStatePaths,
+  receipt: AssistantTurnReceipt,
+): Promise<void> {
+  const receiptPath = resolveAssistantTurnReceiptPath(paths, receipt.turnId)
+  await writeJsonFileAtomic(receiptPath, receipt)
+  await appendAssistantRuntimeEventAtPaths(paths, {
+    at: receipt.updatedAt,
+    component: 'turns',
+    entityId: receipt.turnId,
+    entityType: 'turn-receipt',
+    kind: 'turn.receipt.upserted',
+    level: receipt.status === 'failed' ? 'warn' : 'info',
+    message: `Assistant turn receipt ${receipt.turnId} was persisted with status ${receipt.status}.`,
+    data: {
+      deliveryDisposition: receipt.deliveryDisposition,
+      sessionId: receipt.sessionId,
+      status: receipt.status,
+    },
+  }).catch(() => undefined)
 }
 
 function normalizePreview(value: string | null | undefined, limit: number): string | null {
@@ -259,12 +290,13 @@ function normalizePreview(value: string | null | undefined, limit: number): stri
     return null
   }
 
-  const normalized = value.trim()
-  if (normalized.length === 0) {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
     return null
   }
+  if (trimmed.length <= limit) {
+    return trimmed
+  }
 
-  return normalized.length <= limit
-    ? normalized
-    : `${normalized.slice(0, Math.max(limit - 3, 0))}...`
+  return `${trimmed.slice(0, limit - 1).trimEnd()}…`
 }

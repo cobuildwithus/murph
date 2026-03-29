@@ -17,7 +17,6 @@ import {
   conversationRefFromLocator,
 } from './conversation-ref.js'
 import {
-  writeJsonFileAtomic,
   normalizeNullableString,
   resolveTimestamp,
 } from './shared.js'
@@ -31,6 +30,7 @@ import {
   readAssistantSession,
   readAssistantTranscriptEntries,
   readAutomationState,
+  writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
   writeAssistantSession,
@@ -191,7 +191,11 @@ export async function listAssistantSessions(
     }
 
     const sessionId = entry.name.replace(/\.json$/u, '')
-    const session = await readAssistantSession({ paths, sessionId })
+    const session = await readAssistantSession({
+      paths,
+      sessionId,
+      treatCorruptedAsMissing: true,
+    })
     if (session) {
       sessions.push(session)
     }
@@ -330,9 +334,7 @@ export async function saveAssistantAutomationState(
 ): Promise<AssistantAutomationState> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
-  const parsed = assistantAutomationStateSchema.parse(state)
-  await writeJsonFileAtomic(paths.automationPath, parsed)
-  return parsed
+  return writeAutomationState(paths, assistantAutomationStateSchema.parse(state))
 }
 
 async function saveAssistantSessionAtPaths(
