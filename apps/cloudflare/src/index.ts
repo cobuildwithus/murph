@@ -1,8 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
+export { ContainerProxy } from "@cloudflare/containers";
 
 import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  emitHostedExecutionStructuredLog,
   parseHostedExecutionDispatchRequest,
   readHostedEmailCapabilities,
   type HostedExecutionDispatchResult,
@@ -565,7 +567,13 @@ function unauthorized(): Response {
 }
 
 function mapWorkerRouteError(error: unknown): Response {
-  console.error("Hosted worker route failed.", error);
+  emitHostedExecutionStructuredLog({
+    component: "worker",
+    error,
+    level: "error",
+    message: "Hosted worker route failed.",
+    phase: "failed",
+  });
   const classified = classifyPublicRouteError(error);
 
   return json(

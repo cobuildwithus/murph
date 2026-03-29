@@ -1333,6 +1333,35 @@ describe("HostedUserRunner", () => {
     });
   });
 
+  it("redacts retryable runner failures before persisting hosted status", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(
+        new Error("Authorization: Bearer secret-token for ops@example.com OPENAI_API_KEY=sk-live-secret"),
+      ),
+    );
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+
+    const status = await runner.dispatch({
+      event: {
+        kind: "assistant.cron.tick" as const,
+        reason: "manual" as const,
+        userId: "member_123",
+      },
+      eventId: "evt_secret_failure",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    expect(status.lastError).toBe("Hosted execution authorization failed.");
+    expect(status.lastErrorCode).toBe("authorization_error");
+    expect(status.lastError).not.toContain("secret-token");
+    expect(status.lastError).not.toContain("ops@example.com");
+    expect(status.pendingEventCount).toBe(1);
+    expect(status.retryingEventId).toBe("evt_secret_failure");
+  });
+
   it("continues past a rescheduled head event and runs later due work in the same pass", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
@@ -1740,7 +1769,7 @@ describe("HostedUserRunner", () => {
 
     expect(first.pendingEventCount).toBe(1);
     expect(first.retryingEventId).toBe("evt_missing_commit");
-    expect(first.lastError).toContain("durable commit");
+    expect(first.lastError).toBe("Hosted execution failed before recording a durable commit.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await persistHostedExecutionCommit({
@@ -2344,7 +2373,30 @@ function createStorage() {
   const runnerContainerNamespace = {
     getByName() {
       return {
-        fetch: runnerContainerFetch,
+        async destroyInstance() {
+          await runnerContainerFetch(new Request("https://runner.internal/internal/destroy", {
+            headers: {
+              authorization: "Bearer runner-token",
+            },
+            method: "POST",
+          }));
+        },
+        async invoke(payload: Record<string, unknown>) {
+          const response = await runnerContainerFetch(new Request("https://runner.internal/internal/invoke", {
+            body: JSON.stringify(payload),
+            headers: {
+              authorization: "Bearer runner-token",
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }));
+
+          if (!response.ok) {
+            throw new Error(`Runner container returned HTTP ${response.status}.`);
+          }
+
+          return await response.json();
+        },
       };
     },
   };
