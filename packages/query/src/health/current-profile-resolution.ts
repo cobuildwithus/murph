@@ -1,6 +1,7 @@
 import {
   fallbackCurrentProfileEntity,
   normalizeCanonicalDate,
+  resolveCanonicalRecordClass,
   type CanonicalEntity,
 } from "../canonical-entities.ts";
 
@@ -174,6 +175,7 @@ export function fallbackCurrentProfileEntityFromSnapshotRecord(
     primaryLookupId: latestSnapshot.id,
     lookupIds: [latestSnapshot.id],
     family: "profile_snapshot",
+    recordClass: resolveCanonicalRecordClass("profile_snapshot"),
     kind: "profile_snapshot",
     status: latestSnapshot.status,
     occurredAt: latestSnapshot.recordedAt ?? latestSnapshot.capturedAt,

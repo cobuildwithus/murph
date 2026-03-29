@@ -89,6 +89,7 @@ export interface WorkoutFormatRecord {
   strengthExercises?: ActivityStrengthExercise[];
   tags?: string[];
   note?: string;
+  templateText?: string;
   relativePath: string;
   markdown: string;
 }
@@ -107,6 +108,7 @@ export interface UpsertWorkoutFormatInput {
   strengthExercises?: ActivityStrengthExercise[];
   tags?: string[];
   note?: string;
+  templateText?: string;
 }
 
 export interface UpsertWorkoutFormatResult {

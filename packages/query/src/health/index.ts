@@ -9,6 +9,9 @@ export { listGoals, readGoal, showGoal } from "./goals.ts";
 export { listConditions, readCondition, showCondition } from "./conditions.ts";
 export { listAllergies, readAllergy, showAllergy } from "./allergies.ts";
 export { listFoods, readFood, showFood } from "./foods.ts";
+export { listRecipes, readRecipe, showRecipe } from "./recipes.ts";
+export { listProviders, readProvider, showProvider } from "./providers.ts";
+export { listWorkoutFormats, readWorkoutFormat, showWorkoutFormat } from "./workout-formats.ts";
 export { listProtocols, readProtocol, showProtocol } from "./protocols.ts";
 export {
   listSupplementCompounds,
@@ -48,13 +51,21 @@ export type {
   AllergyQueryRecord,
   ConditionQueryRecord,
   FamilyQueryRecord,
+  FoodAutoLogDailyQueryRule,
+  FoodQueryEntity,
+  FoodQueryRecord,
   GeneticsQueryRecord,
   GoalQueryRecord,
+  ProviderQueryEntity,
+  ProviderQueryRecord,
+  RecipeQueryEntity,
+  RecipeQueryRecord,
   RegistryListOptions,
   ProtocolQueryRecord,
   SupplementIngredientQueryRecord,
+  WorkoutFormatQueryEntity,
+  WorkoutFormatQueryRecord,
 } from "./registries.ts";
-export type { FoodQueryRecord } from "./foods.ts";
 export type {
   BloodTestListOptions,
   BloodTestQueryRecord,

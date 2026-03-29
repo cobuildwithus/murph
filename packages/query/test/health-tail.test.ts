@@ -27,6 +27,7 @@ import {
 import {
   linkTargetIds,
   normalizeCanonicalLinks,
+  resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
 import { collectCanonicalEntities } from "../src/health/canonical-collector.ts";
 import { fallbackCurrentProfileEntityFromSnapshotRecord } from "../src/health/current-profile-resolution.ts";
@@ -500,6 +501,8 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
     primaryLookupId: overrides.primaryLookupId ?? overrides.displayId,
     lookupIds: overrides.lookupIds ?? [overrides.displayId],
     recordType: overrides.recordType,
+    recordClass:
+      overrides.recordClass ?? resolveCanonicalRecordClass(overrides.recordType),
     sourcePath: overrides.sourcePath ?? `${overrides.recordType}/${overrides.displayId}`,
     sourceFile: overrides.sourceFile ?? `${overrides.recordType}/${overrides.displayId}`,
     occurredAt: overrides.occurredAt ?? null,
@@ -530,6 +533,7 @@ function createManualVault(records: VaultRecord[]): VaultReadModel {
       primaryLookupId: record.primaryLookupId,
       lookupIds: record.lookupIds,
       family: record.recordType,
+      recordClass: record.recordClass,
       kind: record.kind ?? record.recordType,
       status: record.status ?? null,
       occurredAt: record.occurredAt,
@@ -569,6 +573,10 @@ function createManualVault(records: VaultRecord[]): VaultReadModel {
     history: byFamily.history ?? [],
     familyMembers: byFamily.family ?? [],
     geneticVariants: byFamily.genetics ?? [],
+    foods: byFamily.food ?? [],
+    recipes: byFamily.recipe ?? [],
+    providers: byFamily.provider ?? [],
+    workoutFormats: byFamily.workout_format ?? [],
     records,
   };
 }

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 
 import {
   allergyRegistryEntityDefinition,
+  bankEntityDefinitionByKind,
+  deriveWorkoutFormatCompatibilityId,
   conditionRegistryEntityDefinition,
+  extractBankEntityRegistryLinks,
+  extractBankEntityRegistryRelatedIds,
   extractHealthEntityRegistryLinks,
   extractHealthEntityRegistryRelatedIds,
   familyRegistryEntityDefinition,
@@ -20,15 +24,23 @@ import {
   conditionRecordFromEntity,
   conditionRegistryDefinition,
   familyRecordFromEntity,
-  goalRecordFromEntity,
   familyRegistryDefinition,
+  foodRecordFromEntity,
+  foodRegistryDefinition,
   geneticsRecordFromEntity,
   geneticsRegistryDefinition,
+  goalRecordFromEntity,
   goalRegistryDefinition,
   protocolRecordFromEntity,
   protocolRegistryDefinition,
+  providerRecordFromEntity,
+  providerRegistryDefinition,
+  recipeRecordFromEntity,
+  recipeRegistryDefinition,
   sortRegistryRecords,
   toRegistryRecord,
+  workoutFormatRecordFromEntity,
+  workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
 import { projectRegistryEntity } from "../src/canonical-entities.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
@@ -722,4 +734,193 @@ test("allergy query projection round-trips shared allergy relation metadata", ()
   assert.equal(roundTripped?.entity.recordedOn, "2026-03-02");
   assert.deepEqual(roundTripped?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
   assert.equal(roundTripped?.entity.note, "Carries an epinephrine auto-injector.");
+});
+
+
+test("bank registry definitions inherit canonical registry metadata from shared bank entity definitions", () => {
+  const registryDefinitions = [
+    ["food", foodRegistryDefinition],
+    ["recipe", recipeRegistryDefinition],
+    ["provider", providerRegistryDefinition],
+    ["workout_format", workoutFormatRegistryDefinition],
+  ] as const;
+
+  for (const [kind, registryDefinition] of registryDefinitions) {
+    const definition = bankEntityDefinitionByKind.get(kind);
+
+    assert.ok(definition, `missing bank entity definition for ${kind}`);
+    if (!definition) {
+      continue;
+    }
+
+    assert.equal(registryDefinition.directory, definition.registry.directory);
+    assert.deepEqual(registryDefinition.idKeys, definition.registry.idKeys);
+    assert.deepEqual(registryDefinition.titleKeys, definition.registry.titleKeys);
+    assert.deepEqual(registryDefinition.statusKeys, definition.registry.statusKeys);
+    assert.equal(typeof registryDefinition.transform, "function");
+  }
+});
+
+test("bank entity projections normalize food and workout format metadata through the shared seam", () => {
+  assert.deepEqual(
+    extractBankEntityRegistryLinks("food", {
+      relatedIds: ["misc_related_01"],
+      attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    }).map((link) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "related_to", targetId: "misc_related_01" },
+      { type: "related_protocol", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+    ],
+  );
+  assert.deepEqual(
+    extractBankEntityRegistryRelatedIds("food", {
+      relatedIds: ["misc_related_01"],
+      attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    }),
+    ["misc_related_01", "prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+  );
+
+  const foodRecord = toRegistryRecord(
+    {
+      relativePath: "bank/foods/overnight-oats.md",
+      markdown: "# Overnight oats",
+      body: "# Overnight oats",
+      attributes: {
+        foodId: "food_01JNY0B2W4VG5C2A0G9S8M7R6A",
+        slug: "overnight-oats",
+        title: "Overnight oats",
+        status: "active",
+        serving: "1 bowl",
+        tags: ["breakfast"],
+        autoLogDaily: {
+          time: "08:00",
+        },
+        relatedIds: ["misc_related_01"],
+        attachedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+      },
+    },
+    foodRegistryDefinition,
+  );
+
+  assert.ok(foodRecord);
+  assert.equal(foodRecord?.entity.serving, "1 bowl");
+  assert.deepEqual(foodRecord?.entity.tags, ["breakfast"]);
+  assert.deepEqual(foodRecord?.entity.autoLogDaily, { time: "08:00" });
+
+  const foodEntity = projectRegistryEntity("food", foodRecord!);
+  assert.equal(foodEntity.recordClass, "bank");
+  assert.deepEqual(foodEntity.relatedIds, [
+    "misc_related_01",
+    "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
+  ]);
+
+  const roundTrippedFood = foodRecordFromEntity(foodEntity);
+  assert.ok(roundTrippedFood);
+  assert.deepEqual(roundTrippedFood?.entity.autoLogDaily, { time: "08:00" });
+  assert.deepEqual(roundTrippedFood?.entity.attachedProtocolIds, [
+    "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
+  ]);
+
+  const workoutFormatRecord = toRegistryRecord(
+    {
+      relativePath: "bank/workout-formats/push-day-a.md",
+      markdown: "# Push Day A",
+      body: "# Push Day A",
+      attributes: {
+        slug: "push-day-a",
+        title: "Push Day A",
+        status: "active",
+        activityType: "strength-training",
+        durationMinutes: 45,
+        templateText: "45 min push day with incline bench.",
+        strengthExercises: [
+          {
+            exercise: "incline bench",
+            setCount: 4,
+            repsPerSet: 10,
+            load: 65,
+            loadUnit: "lb",
+          },
+        ],
+      },
+    },
+    workoutFormatRegistryDefinition,
+  );
+
+  assert.ok(workoutFormatRecord);
+  assert.equal(
+    workoutFormatRecord?.entity.id,
+    deriveWorkoutFormatCompatibilityId("push-day-a"),
+  );
+  assert.equal(workoutFormatRecord?.entity.activityType, "strength-training");
+  assert.equal(workoutFormatRecord?.entity.durationMinutes, 45);
+  assert.equal(workoutFormatRecord?.entity.templateText, "45 min push day with incline bench.");
+
+  const workoutFormatEntity = projectRegistryEntity("workout_format", workoutFormatRecord!);
+  assert.equal(workoutFormatEntity.recordClass, "bank");
+
+  const roundTrippedWorkoutFormat = workoutFormatRecordFromEntity(workoutFormatEntity);
+  assert.ok(roundTrippedWorkoutFormat);
+  assert.equal(
+    roundTrippedWorkoutFormat?.entity.id,
+    deriveWorkoutFormatCompatibilityId("push-day-a"),
+  );
+  assert.equal(roundTrippedWorkoutFormat?.entity.templateText, "45 min push day with incline bench.");
+});
+
+test("recipe and provider bank records round-trip through the shared registry seam", () => {
+  const recipeRecord = toRegistryRecord(
+    {
+      relativePath: "bank/recipes/salmon-rice-bowl.md",
+      markdown: "# Salmon rice bowl",
+      body: "# Salmon rice bowl",
+      attributes: {
+        recipeId: "recipe_01JNY0B2W4VG5C2A0G9S8M7R6B",
+        slug: "salmon-rice-bowl",
+        title: "Salmon rice bowl",
+        status: "saved",
+        servings: 2,
+        relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"],
+        relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+      },
+    },
+    recipeRegistryDefinition,
+  );
+  const providerRecord = toRegistryRecord(
+    {
+      relativePath: "bank/providers/primary-care.md",
+      markdown: "# Primary care physician",
+      body: "# Primary care physician",
+      attributes: {
+        providerId: "prov_01JNY0B2W4VG5C2A0G9S8M7R6C",
+        slug: "primary-care",
+        title: "Primary care physician",
+        status: "active",
+        specialty: "primary-care",
+        organization: "Neighborhood Clinic",
+      },
+    },
+    providerRegistryDefinition,
+  );
+
+  assert.ok(recipeRecord);
+  assert.ok(providerRecord);
+
+  const recipeEntity = projectRegistryEntity("recipe", recipeRecord!);
+  const providerEntity = projectRegistryEntity("provider", providerRecord!);
+
+  assert.equal(recipeEntity.recordClass, "bank");
+  assert.equal(providerEntity.recordClass, "bank");
+  assert.deepEqual(recipeEntity.relatedIds, [
+    "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q",
+    "cond_01JNY0B2W4VG5C2A0G9S8M7R6R",
+  ]);
+
+  const roundTrippedRecipe = recipeRecordFromEntity(recipeEntity);
+  const roundTrippedProvider = providerRecordFromEntity(providerEntity);
+
+  assert.ok(roundTrippedRecipe);
+  assert.ok(roundTrippedProvider);
+  assert.equal(roundTrippedRecipe?.entity.servings, 2);
+  assert.equal(roundTrippedProvider?.entity.organization, "Neighborhood Clinic");
 });

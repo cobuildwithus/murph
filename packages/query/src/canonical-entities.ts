@@ -1,8 +1,8 @@
 import {
-  extractHealthEntityRegistryLinks,
+  extractBankEntityRegistryLinks,
   extractIsoDatePrefix,
-  type HealthEntityKind,
-  type HealthEntityRegistryLink,
+  type BankEntityKind,
+  type BankEntityRegistryLink,
 } from "@murph/contracts";
 
 import {
@@ -16,6 +16,8 @@ import {
 import type { MarkdownDocumentRecord } from "./health/shared.ts";
 import type { RegistryMarkdownRecord } from "./health/registries.ts";
 
+export type CanonicalRecordClass = "bank" | "ledger" | "sample" | "snapshot";
+
 export type CanonicalEntityFamily =
   | "allergy"
   | "assessment"
@@ -26,19 +28,24 @@ export type CanonicalEntityFamily =
   | "event"
   | "experiment"
   | "family"
+  | "food"
   | "genetics"
   | "goal"
   | "history"
   | "journal"
   | "profile_snapshot"
   | "protocol"
-  | "sample";
+  | "provider"
+  | "recipe"
+  | "sample"
+  | "workout_format";
 
 export interface CanonicalEntity {
   entityId: string;
   primaryLookupId: string;
   lookupIds: string[];
   family: CanonicalEntityFamily;
+  recordClass: CanonicalRecordClass;
   kind: string;
   status: string | null;
   occurredAt: string | null;
@@ -78,6 +85,51 @@ export const HEALTH_HISTORY_KINDS = new Set([
   "adverse_effect",
   "exposure",
 ] as const);
+
+type RegistryEntityFamily = Extract<
+  CanonicalEntityFamily,
+  | "allergy"
+  | "condition"
+  | "family"
+  | "food"
+  | "genetics"
+  | "goal"
+  | "protocol"
+  | "provider"
+  | "recipe"
+  | "workout_format"
+>;
+
+export function resolveCanonicalRecordClass(
+  family: CanonicalEntityFamily,
+): CanonicalRecordClass {
+  switch (family) {
+    case "allergy":
+    case "condition":
+    case "experiment":
+    case "family":
+    case "food":
+    case "genetics":
+    case "goal":
+    case "protocol":
+    case "provider":
+    case "recipe":
+    case "workout_format":
+      return "bank";
+    case "sample":
+      return "sample";
+    case "assessment":
+    case "core":
+    case "current_profile":
+    case "profile_snapshot":
+      return "snapshot";
+    case "audit":
+    case "event":
+    case "history":
+    case "journal":
+      return "ledger";
+  }
+}
 
 const REGISTRY_LINK_TYPE_MAP = {
   parent_goal: "parent_of",
@@ -195,7 +247,7 @@ function buildScalarLinks(
 }
 
 function normalizeRegistryLinkType(
-  link: HealthEntityRegistryLink,
+  link: BankEntityRegistryLink,
 ): CanonicalEntityLinkType {
   return link.type in REGISTRY_LINK_TYPE_MAP
     ? REGISTRY_LINK_TYPE_MAP[
@@ -205,17 +257,14 @@ function normalizeRegistryLinkType(
 }
 
 function buildRegistryLinks(
-  family: Extract<
-    CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
-  >,
+  family: RegistryEntityFamily,
   attributes: Record<string, unknown>,
 ): CanonicalEntityLink[] {
   const protocolSelfId =
     family === "protocol" ? firstString(attributes, ["protocolId"]) : null;
 
   return normalizeCanonicalLinks(
-    extractHealthEntityRegistryLinks(family as HealthEntityKind, attributes)
+    extractBankEntityRegistryLinks(family as BankEntityKind, attributes)
       .filter((link) =>
         !(
           family === "protocol" &&
@@ -233,10 +282,7 @@ function buildRegistryLinks(
 }
 
 function registryCompatibilitySelfIds(
-  family: Extract<
-    CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
-  >,
+  family: RegistryEntityFamily,
   attributes: Record<string, unknown>,
 ): string[] {
   switch (family) {
@@ -300,6 +346,7 @@ export function projectAssessmentEntity(
     primaryLookupId: id,
     lookupIds: uniqueStrings([id, questionnaireSlug]),
     family: "assessment",
+    recordClass: resolveCanonicalRecordClass("assessment"),
     kind: "assessment",
     status: null,
     occurredAt: recordedAt ?? importedAt,
@@ -368,6 +415,7 @@ export function projectProfileSnapshotEntity(
     primaryLookupId: id,
     lookupIds: uniqueStrings([id]),
     family: "profile_snapshot",
+    recordClass: resolveCanonicalRecordClass("profile_snapshot"),
     kind: "profile_snapshot",
     status,
     occurredAt: recordedAt ?? capturedAt,
@@ -422,6 +470,7 @@ export function fallbackCurrentProfileEntity(
     primaryLookupId: "current",
     lookupIds: uniqueStrings(["current", latestSnapshot.entityId]),
     family: "current_profile",
+    recordClass: resolveCanonicalRecordClass("current_profile"),
     kind: "current_profile",
     status: null,
     occurredAt: latestSnapshot.occurredAt,
@@ -516,6 +565,7 @@ export function projectCurrentProfileEntity(
     primaryLookupId: "current",
     lookupIds: uniqueStrings(["current", snapshotId]),
     family: "current_profile",
+    recordClass: resolveCanonicalRecordClass("current_profile"),
     kind: "current_profile",
     status: null,
     occurredAt: updatedAt,
@@ -576,6 +626,7 @@ export function projectHistoryEntity(
     primaryLookupId: id,
     lookupIds: uniqueStrings([id]),
     family: "history",
+    recordClass: resolveCanonicalRecordClass("history"),
     kind,
     status,
     occurredAt,
@@ -594,10 +645,7 @@ export function projectHistoryEntity(
 }
 
 export function projectRegistryEntity(
-  family: Extract<
-    CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
-  >,
+  family: RegistryEntityFamily,
   record: RegistryMarkdownRecord,
 ): CanonicalEntity {
   const attributes = record.document.attributes;
@@ -620,6 +668,7 @@ export function projectRegistryEntity(
     primaryLookupId: record.entity.id,
     lookupIds: uniqueStrings([record.entity.id, record.entity.slug]),
     family,
+    recordClass: resolveCanonicalRecordClass(family),
     kind: firstString(attributes, ["docType", "kind"]) ?? family,
     status: record.entity.status,
     occurredAt,

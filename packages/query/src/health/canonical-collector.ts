@@ -32,19 +32,30 @@ import {
   allergyRegistryDefinition,
   conditionRegistryDefinition,
   familyRegistryDefinition,
+  foodRegistryDefinition,
   geneticsRegistryDefinition,
   goalRegistryDefinition,
   protocolRegistryDefinition,
+  providerRegistryDefinition,
+  recipeRegistryDefinition,
   toRegistryRecord,
+  workoutFormatRegistryDefinition,
   type RegistryMarkdownRecord,
 } from "./registries.ts";
-import {
-} from "./current-profile-resolution.ts";
 import type { MarkdownDocumentRecord } from "./shared.ts";
 
 type RegistryFamily = Extract<
   CanonicalEntityFamily,
-  "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
+  | "allergy"
+  | "condition"
+  | "family"
+  | "food"
+  | "genetics"
+  | "goal"
+  | "protocol"
+  | "provider"
+  | "recipe"
+  | "workout_format"
 >;
 
 type RegistryCollectionKey =
@@ -53,7 +64,11 @@ type RegistryCollectionKey =
   | "allergies"
   | "protocols"
   | "familyMembers"
-  | "geneticVariants";
+  | "geneticVariants"
+  | "foods"
+  | "recipes"
+  | "providers"
+  | "workoutFormats";
 
 interface RegistryCollectorConfig {
   key: RegistryCollectionKey;
@@ -69,6 +84,10 @@ interface RegistryCollections {
   protocols: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
+  foods: CanonicalEntity[];
+  recipes: CanonicalEntity[];
+  providers: CanonicalEntity[];
+  workoutFormats: CanonicalEntity[];
 }
 
 interface RegistryCollectionResult {
@@ -116,6 +135,10 @@ export interface CanonicalHealthEntityCollection {
   protocols: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
+  foods: CanonicalEntity[];
+  recipes: CanonicalEntity[];
+  providers: CanonicalEntity[];
+  workoutFormats: CanonicalEntity[];
   entities: CanonicalEntity[];
   failures: ParseFailure[];
   markdownByPath: ReadonlyMap<string, string>;
@@ -169,6 +192,30 @@ const REGISTRY_COLLECTORS = [
     "genetics",
     geneticsRegistryDefinition.directory,
     (document) => toRegistryRecord(document, geneticsRegistryDefinition),
+  ),
+  createRegistryCollectorConfig(
+    "foods",
+    "food",
+    foodRegistryDefinition.directory,
+    (document) => toRegistryRecord(document, foodRegistryDefinition),
+  ),
+  createRegistryCollectorConfig(
+    "recipes",
+    "recipe",
+    recipeRegistryDefinition.directory,
+    (document) => toRegistryRecord(document, recipeRegistryDefinition),
+  ),
+  createRegistryCollectorConfig(
+    "providers",
+    "provider",
+    providerRegistryDefinition.directory,
+    (document) => toRegistryRecord(document, providerRegistryDefinition),
+  ),
+  createRegistryCollectorConfig(
+    "workoutFormats",
+    "workout_format",
+    workoutFormatRegistryDefinition.directory,
+    (document) => toRegistryRecord(document, workoutFormatRegistryDefinition),
   ),
 ] as const satisfies readonly RegistryCollectorConfig[];
 
@@ -376,6 +423,10 @@ function buildCanonicalHealthCollection(input: {
   protocols: CanonicalEntity[];
   familyMembers: CanonicalEntity[];
   geneticVariants: CanonicalEntity[];
+  foods: CanonicalEntity[];
+  recipes: CanonicalEntity[];
+  providers: CanonicalEntity[];
+  workoutFormats: CanonicalEntity[];
   failures: ParseFailure[];
   markdownByPath: ReadonlyMap<string, string>;
 }): CanonicalHealthEntityCollection {
@@ -392,6 +443,10 @@ function buildCanonicalHealthCollection(input: {
       ...input.protocols,
       ...input.familyMembers,
       ...input.geneticVariants,
+      ...input.foods,
+      ...input.recipes,
+      ...input.providers,
+      ...input.workoutFormats,
     ].sort(compareCanonicalEntities),
   };
 }
@@ -404,6 +459,10 @@ function createEmptyRegistryCollections(): RegistryCollections {
     protocols: [],
     familyMembers: [],
     geneticVariants: [],
+    foods: [],
+    recipes: [],
+    providers: [],
+    workoutFormats: [],
   };
 }
 

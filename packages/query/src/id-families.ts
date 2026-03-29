@@ -61,9 +61,33 @@ export const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
     queryable: true,
   },
   {
+    family: "food",
+    entityKind: "food",
+    prefix: "food_",
+    queryable: true,
+  },
+  {
+    family: "recipe",
+    entityKind: "recipe",
+    prefix: "rcp_",
+    queryable: true,
+  },
+  {
+    family: "provider",
+    entityKind: "provider",
+    prefix: "prov_",
+    queryable: true,
+  },
+  {
     family: "sample",
     entityKind: "sample",
     prefix: "smp_",
+    queryable: true,
+  },
+  {
+    family: "workout_format",
+    entityKind: "workout_format",
+    prefix: "wfmt_",
     queryable: true,
   },
   {

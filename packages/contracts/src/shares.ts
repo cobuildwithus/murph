@@ -240,6 +240,7 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
       }).optional(),
       tags: uniqueArray(slugSchema, { uniqueItems: true }).optional(),
       note: boundedString(1, 4000).optional(),
+      templateText: boundedString(1, 4000).optional(),
     })
     .strict(),
   "@murph/contracts/workout-format-upsert-payload.schema.json",

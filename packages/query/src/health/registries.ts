@@ -1,8 +1,9 @@
 import {
-  requireHealthEntityRegistryDefinition,
-  type HealthEntityKind,
-  type HealthEntityRegistryProjectionHelpers,
-  type HealthEntitySortBehavior,
+  deriveWorkoutFormatCompatibilityId,
+  requireBankEntityRegistryDefinition,
+  type BankEntityKind,
+  type BankEntityRegistryProjectionHelpers,
+  type BankEntitySortBehavior,
 } from "@murph/contracts";
 import {
   applyLimit,
@@ -63,7 +64,16 @@ export interface RegistryListOptions {
 
 type ProjectedRegistryFamily = Extract<
   CanonicalEntityFamily,
-  "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
+  | "allergy"
+  | "condition"
+  | "family"
+  | "food"
+  | "genetics"
+  | "goal"
+  | "protocol"
+  | "provider"
+  | "recipe"
+  | "workout_format"
 >;
 
 interface RegistryDefinition<TEntity extends RegistryQueryEntity> {
@@ -79,7 +89,7 @@ interface RegistryDefinition<TEntity extends RegistryQueryEntity> {
   ): TEntity;
 }
 
-const registryProjectionHelpers: HealthEntityRegistryProjectionHelpers = {
+const registryProjectionHelpers: BankEntityRegistryProjectionHelpers = {
   firstBoolean,
   firstNumber,
   firstObject,
@@ -111,7 +121,7 @@ export function readPriority(
 }
 
 function compareRegistryRecords<TEntity extends RegistryQueryEntity>(
-  sortBehavior: HealthEntitySortBehavior | undefined,
+  sortBehavior: BankEntitySortBehavior | undefined,
 ): ((left: TEntity, right: TEntity) => number) | undefined {
   if (sortBehavior === "priority-title") {
     return buildPriorityTitleComparator as (left: TEntity, right: TEntity) => number;
@@ -133,10 +143,10 @@ function compareRegistryRecords<TEntity extends RegistryQueryEntity>(
   return undefined;
 }
 
-function createHealthEntityRegistryDefinition<TEntity extends RegistryQueryEntity>(
-  kind: HealthEntityKind,
+function createBankEntityRegistryDefinition<TEntity extends RegistryQueryEntity>(
+  kind: BankEntityKind,
 ): RegistryDefinition<TEntity> {
-  const definition = requireHealthEntityRegistryDefinition(kind);
+  const definition = requireBankEntityRegistryDefinition(kind);
   const { registry } = definition;
 
   return {
@@ -171,7 +181,12 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
   document: MarkdownDocumentRecord,
   definition: RegistryDefinition<TEntity>,
 ): RegistryStoredDocument<TEntity> | null {
-  const id = firstString(document.attributes, definition.idKeys);
+  const slug = firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath);
+  const id =
+    definition.directory === "bank/workout-formats"
+      ? firstString(document.attributes, ["workoutFormatId"])
+        ?? deriveWorkoutFormatCompatibilityId(slug)
+      : firstString(document.attributes, definition.idKeys);
   if (!id) {
     return null;
   }
@@ -179,7 +194,7 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
   const entity = transformRegistryEntity(
     {
       id,
-      slug: firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath),
+      slug,
       title: firstString(document.attributes, definition.titleKeys),
       status: firstString(document.attributes, definition.statusKeys),
     },
@@ -410,7 +425,7 @@ export interface GoalQueryEntity extends RegistryQueryEntity {
 export type GoalQueryRecord = RegistryStoredDocument<GoalQueryEntity>;
 
 export const goalRegistryDefinition: RegistryDefinition<GoalQueryEntity> =
-  createHealthEntityRegistryDefinition("goal");
+  createBankEntityRegistryDefinition("goal");
 
 export interface ConditionQueryEntity extends RegistryQueryEntity {
   clinicalStatus: string | null;
@@ -427,7 +442,7 @@ export interface ConditionQueryEntity extends RegistryQueryEntity {
 export type ConditionQueryRecord = RegistryStoredDocument<ConditionQueryEntity>;
 
 export const conditionRegistryDefinition: RegistryDefinition<ConditionQueryEntity> =
-  createHealthEntityRegistryDefinition("condition");
+  createBankEntityRegistryDefinition("condition");
 
 export interface AllergyQueryEntity extends RegistryQueryEntity {
   substance: string | null;
@@ -441,7 +456,7 @@ export interface AllergyQueryEntity extends RegistryQueryEntity {
 export type AllergyQueryRecord = RegistryStoredDocument<AllergyQueryEntity>;
 
 export const allergyRegistryDefinition: RegistryDefinition<AllergyQueryEntity> =
-  createHealthEntityRegistryDefinition("allergy");
+  createBankEntityRegistryDefinition("allergy");
 
 export interface SupplementIngredientQueryRecord {
   compound: string;
@@ -472,7 +487,7 @@ export interface ProtocolQueryEntity extends RegistryQueryEntity {
 export type ProtocolQueryRecord = RegistryStoredDocument<ProtocolQueryEntity>;
 
 export const protocolRegistryDefinition: RegistryDefinition<ProtocolQueryEntity> =
-  createHealthEntityRegistryDefinition("protocol");
+  createBankEntityRegistryDefinition("protocol");
 
 export interface FamilyQueryEntity extends RegistryQueryEntity {
   relationship: string | null;
@@ -485,7 +500,7 @@ export interface FamilyQueryEntity extends RegistryQueryEntity {
 export type FamilyQueryRecord = RegistryStoredDocument<FamilyQueryEntity>;
 
 export const familyRegistryDefinition: RegistryDefinition<FamilyQueryEntity> =
-  createHealthEntityRegistryDefinition("family");
+  createBankEntityRegistryDefinition("family");
 
 export interface GeneticsQueryEntity extends RegistryQueryEntity {
   gene: string | null;
@@ -499,7 +514,84 @@ export interface GeneticsQueryEntity extends RegistryQueryEntity {
 export type GeneticsQueryRecord = RegistryStoredDocument<GeneticsQueryEntity>;
 
 export const geneticsRegistryDefinition: RegistryDefinition<GeneticsQueryEntity> =
-  createHealthEntityRegistryDefinition("genetics");
+  createBankEntityRegistryDefinition("genetics");
+
+export interface FoodAutoLogDailyQueryRule {
+  time: string;
+}
+
+export interface FoodQueryEntity extends RegistryQueryEntity {
+  summary: string | null;
+  kind: string | null;
+  brand: string | null;
+  vendor: string | null;
+  location: string | null;
+  serving: string | null;
+  aliases: string[];
+  ingredients: string[];
+  tags: string[];
+  note: string | null;
+  attachedProtocolIds: string[];
+  autoLogDaily: FoodAutoLogDailyQueryRule | null;
+}
+
+export type FoodQueryRecord = RegistryStoredDocument<FoodQueryEntity>;
+
+export const foodRegistryDefinition: RegistryDefinition<FoodQueryEntity> =
+  createBankEntityRegistryDefinition("food");
+
+export interface RecipeQueryEntity extends RegistryQueryEntity {
+  summary: string | null;
+  cuisine: string | null;
+  dishType: string | null;
+  source: string | null;
+  servings: number | null;
+  prepTimeMinutes: number | null;
+  cookTimeMinutes: number | null;
+  totalTimeMinutes: number | null;
+  tags: string[];
+  ingredients: string[];
+  steps: string[];
+  relatedGoalIds: string[];
+  relatedConditionIds: string[];
+}
+
+export type RecipeQueryRecord = RegistryStoredDocument<RecipeQueryEntity>;
+
+export const recipeRegistryDefinition: RegistryDefinition<RecipeQueryEntity> =
+  createBankEntityRegistryDefinition("recipe");
+
+export interface ProviderQueryEntity extends RegistryQueryEntity {
+  specialty: string | null;
+  organization: string | null;
+  location: string | null;
+  website: string | null;
+  phone: string | null;
+  note: string | null;
+  aliases: string[];
+}
+
+export type ProviderQueryRecord = RegistryStoredDocument<ProviderQueryEntity>;
+
+export const providerRegistryDefinition: RegistryDefinition<ProviderQueryEntity> =
+  createBankEntityRegistryDefinition("provider");
+
+export interface WorkoutFormatQueryEntity extends RegistryQueryEntity {
+  summary: string | null;
+  activityType: string | null;
+  durationMinutes: number | null;
+  distanceKm: number | null;
+  strengthExercises: Record<string, unknown>[];
+  tags: string[];
+  note: string | null;
+  templateText: string | null;
+}
+
+export type WorkoutFormatQueryRecord =
+  RegistryStoredDocument<WorkoutFormatQueryEntity>;
+
+export const workoutFormatRegistryDefinition: RegistryDefinition<WorkoutFormatQueryEntity> =
+  createBankEntityRegistryDefinition("workout_format");
 
 export {
   type RegistryDefinition,
@@ -508,10 +600,7 @@ export {
 async function loadProjectedRegistryRecords<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
   definition: RegistryDefinition<TEntity>,
-  family: Extract<
-    CanonicalEntityFamily,
-    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
-  >,
+  family: ProjectedRegistryFamily,
   mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
 ): Promise<RegistryStoredDocument<TEntity>[]> {
   const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
@@ -609,4 +698,28 @@ export function geneticsRecordFromEntity(
   entity: CanonicalEntity,
 ): GeneticsQueryRecord | null {
   return projectRegistryRecordFromEntity(entity, "genetics", geneticsRegistryDefinition);
+}
+
+export function foodRecordFromEntity(entity: CanonicalEntity): FoodQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "food", foodRegistryDefinition);
+}
+
+export function recipeRecordFromEntity(entity: CanonicalEntity): RecipeQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "recipe", recipeRegistryDefinition);
+}
+
+export function providerRecordFromEntity(
+  entity: CanonicalEntity,
+): ProviderQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "provider", providerRegistryDefinition);
+}
+
+export function workoutFormatRecordFromEntity(
+  entity: CanonicalEntity,
+): WorkoutFormatQueryRecord | null {
+  return projectRegistryRecordFromEntity(
+    entity,
+    "workout_format",
+    workoutFormatRegistryDefinition,
+  );
 }

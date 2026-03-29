@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -423,6 +423,188 @@ test.sequential(
         ),
         true,
       )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'legacy workout format docs keep explicit bank frontmatter authoritative and compatibility ids stable',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await mkdir(path.join(vaultRoot, 'bank/workout-formats'), { recursive: true })
+      await writeFile(
+        path.join(vaultRoot, 'bank/workout-formats/garage-day.md'),
+        `---
+schemaVersion: murph.frontmatter.workout-format.v1
+docType: workout_format
+slug: garage-day
+title: Garage Day
+status: active
+activityType: strength-training
+durationMinutes: 40
+strengthExercises:
+  -
+    exercise: kettlebell swing
+    setCount: 5
+    repsPerSet: 15
+templateText: Garage day template.
+---
+# Garage Day
+`,
+        'utf8',
+      )
+
+      const firstShow = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        'garage-day',
+        '--vault',
+        vaultRoot,
+      ])
+      const secondShow = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        'garage-day',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(firstShow.ok, true)
+      assert.equal(secondShow.ok, true)
+      assert.equal(
+        requireData(firstShow).entity.data.workoutFormatId,
+        requireData(secondShow).entity.data.workoutFormatId,
+      )
+      assert.match(
+        String(requireData(firstShow).entity.data.workoutFormatId),
+        /^wfmt_[0-9A-HJKMNP-TV-Z]{26}$/u,
+      )
+      assert.deepEqual(requireData(firstShow).entity.data.strengthExercises, [
+        {
+          exercise: 'kettlebell swing',
+          setCount: 5,
+          repsPerSet: 15,
+        },
+      ])
+
+      const loggedWorkout = await runCli<WorkoutAddEnvelope>([
+        'workout',
+        'format',
+        'log',
+        'garage-day',
+        '--occurred-at',
+        '2026-03-12T17:30:00Z',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(loggedWorkout.ok, true)
+      assert.deepEqual(requireData(loggedWorkout).strengthExercises, [
+        {
+          exercise: 'kettlebell swing',
+          setCount: 5,
+          repsPerSet: 15,
+        },
+      ])
+
+      const upgradedFormat = await runCli<WorkoutFormatSaveEnvelope>([
+        'workout',
+        'format',
+        'save',
+        'Garage Day',
+        '40 min strength training. 5 sets of 15 kettlebell swings.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(upgradedFormat.ok, true)
+      assert.equal(requireData(upgradedFormat).created, false)
+
+      const upgradedShow = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        'garage-day',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(upgradedShow.ok, true)
+      assert.equal(
+        requireData(upgradedShow).entity.data.workoutFormatId,
+        requireData(firstShow).entity.data.workoutFormatId,
+      )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'workout format show tolerates first-class docs without templateText and log fails with a targeted error',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      await mkdir(path.join(vaultRoot, 'bank/workout-formats'), { recursive: true })
+      await writeFile(
+        path.join(vaultRoot, 'bank/workout-formats/no-template.md'),
+        `---
+schemaVersion: murph.frontmatter.workout-format.v1
+docType: workout_format
+workoutFormatId: wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1
+slug: no-template
+title: No Template
+status: active
+activityType: strength-training
+durationMinutes: 30
+---
+# No Template
+`,
+        'utf8',
+      )
+
+      const shown = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        'no-template',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, true)
+      assert.equal(requireData(shown).entity.title, 'No Template')
+      assert.equal(requireData(shown).entity.data.templateText, undefined)
+
+      const logged = await runCli([
+        'workout',
+        'format',
+        'log',
+        'no-template',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(logged.ok, false)
+      assert.equal(logged.error.code, 'contract_invalid')
+      assert.match(logged.error.message ?? '', /missing templateText/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
