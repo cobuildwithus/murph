@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { writeFile } from 'node:fs/promises'
-
-const DEFAULT_BROWSER_ENDPOINT = 'http://127.0.0.1:9222'
-const TARGET_READY_TIMEOUT_MS = 30_000
-const TARGET_READY_POLL_MS = 750
+import {
+  CdpClient,
+  DEFAULT_BROWSER_ENDPOINT,
+  ensureTarget,
+  waitForTargetContent,
+} from './chatgpt-managed-browser.mjs'
 
 function parseArgs(argv) {
   const args = {
@@ -53,128 +55,6 @@ function parseArgs(argv) {
   }
 
   return args
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-async function fetchJson(url) {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${url}`)
-  }
-  return response.json()
-}
-
-class CdpClient {
-  constructor(url) {
-    this.ws = new WebSocket(url)
-    this.nextId = 1
-    this.pending = new Map()
-    this.ready = new Promise((resolve, reject) => {
-      this.ws.addEventListener('open', resolve, { once: true })
-      this.ws.addEventListener('error', reject, { once: true })
-    })
-    this.ws.addEventListener('message', (event) => {
-      const message = JSON.parse(event.data)
-      if (!message.id || !this.pending.has(message.id)) {
-        return
-      }
-      const { resolve, reject } = this.pending.get(message.id)
-      this.pending.delete(message.id)
-      if (message.error) {
-        reject(new Error(JSON.stringify(message.error)))
-        return
-      }
-      resolve(message.result)
-    })
-  }
-
-  async send(method, params = {}) {
-    await this.ready
-    const id = this.nextId
-    this.nextId += 1
-    this.ws.send(JSON.stringify({ id, method, params }))
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject })
-    })
-  }
-
-  async evaluate(expression, options = {}) {
-    const result = await this.send('Runtime.evaluate', {
-      expression,
-      awaitPromise: options.awaitPromise ?? false,
-      returnByValue: true,
-    })
-    return result.result?.value
-  }
-
-  close() {
-    this.ws.close()
-  }
-}
-
-async function findMatchingTarget(browserEndpoint, chatUrl) {
-  const targets = await fetchJson(`${browserEndpoint}/json/list`)
-  const matches = targets.filter(
-    (target) => target.type === 'page' && target.url === chatUrl,
-  )
-  return matches.at(-1) ?? null
-}
-
-async function createTarget(browserEndpoint, chatUrl) {
-  const version = await fetchJson(`${browserEndpoint}/json/version`)
-  const browser = new CdpClient(version.webSocketDebuggerUrl)
-  try {
-    await browser.send('Target.createTarget', { url: chatUrl })
-  } finally {
-    browser.close()
-  }
-}
-
-async function ensureTarget(browserEndpoint, chatUrl) {
-  const existingTarget = await findMatchingTarget(browserEndpoint, chatUrl)
-  if (existingTarget) {
-    return existingTarget
-  }
-
-  await createTarget(browserEndpoint, chatUrl)
-  const startedAt = Date.now()
-  for (;;) {
-    const target = await findMatchingTarget(browserEndpoint, chatUrl)
-    if (target) {
-      return target
-    }
-    if (Date.now() - startedAt > TARGET_READY_TIMEOUT_MS) {
-      throw new Error(`Timed out waiting for a browser tab for ${chatUrl}`)
-    }
-    await sleep(TARGET_READY_POLL_MS)
-  }
-}
-
-async function waitForTargetContent(client, chatUrl) {
-  const startedAt = Date.now()
-  for (;;) {
-    const state = await client.evaluate(`(() => ({
-      href: location.href,
-      readyState: document.readyState,
-      title: document.title,
-      bodyLength: document.body?.innerText?.length ?? 0,
-    }))()`)
-    if (
-      state &&
-      state.href === chatUrl &&
-      state.readyState === 'complete' &&
-      state.bodyLength > 0
-    ) {
-      return state
-    }
-    if (Date.now() - startedAt > TARGET_READY_TIMEOUT_MS) {
-      throw new Error(`Timed out waiting for ChatGPT thread content for ${chatUrl}`)
-    }
-    await sleep(TARGET_READY_POLL_MS)
-  }
 }
 
 async function captureThread(client) {
