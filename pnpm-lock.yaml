@@ -12,14 +12,14 @@ importers:
         specifier: ^0.1.14
         version: 0.1.14
       '@cobuild/review-gpt':
-        specifier: ^0.5.1
-        version: 0.5.1(openapi-types@12.1.3)
+        specifier: ^0.5.2
+        version: 0.5.2(openapi-types@12.1.3)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
       '@vitest/coverage-v8':
         specifier: ^4.1.2
-        version: 4.1.2(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))
+        version: 4.1.2(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))
       rimraf:
         specifier: ^6.0.1
         version: 6.1.3
@@ -31,7 +31,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.2
-        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   apps/cloudflare:
     dependencies:
@@ -62,7 +62,7 @@ importers:
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.13.4
-        version: 0.13.4(@cloudflare/workers-types@4.20260317.1)(@vitest/runner@4.1.2)(@vitest/snapshot@4.1.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))
+        version: 0.13.4(@cloudflare/workers-types@4.20260317.1)(@vitest/runner@4.1.2)(@vitest/snapshot@4.1.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))
       '@cloudflare/workers-types':
         specifier: ^4.20260317.1
         version: 4.20260317.1
@@ -77,7 +77,7 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^4.1.2
-        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
       wrangler:
         specifier: ^4.68.0
         version: 4.77.0(@cloudflare/workers-types@4.20260317.1)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -186,6 +186,15 @@ importers:
         version: link:../runtime-state
 
   packages/assistant-services:
+    dependencies:
+      '@murph/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
+      murph:
+        specifier: workspace:*
+        version: link:../cli
+
+  packages/assistantd:
     dependencies:
       murph:
         specifier: workspace:*
@@ -517,8 +526,8 @@ packages:
     resolution: {integrity: sha512-/DKNFA3n1Y1pMKnbSiIctY57pZNdnVCNcB9ukKqAwQQRjt7sc9NoYuWBmb9H407Of9GvBNGg2BCMmQemKLtN6w==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.1':
-    resolution: {integrity: sha512-kgrRY4O3Z2RYrH3+6rxrj1rSZ1PjB6DmpKeqr/u6BL3mVj2dNOapZ05+WzZuof/v0dGdnBQCDf39/yqwSwLmIw==}
+  '@cobuild/review-gpt@0.5.2':
+    resolution: {integrity: sha512-LQ0bQYxLiGS5/8lMNycMtdBG46AW7HCMVN0iDZLymGqFnxvI3X/pqi24QC8nqYEn3xBuMDg/Lr+3RpVd5xPAmw==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -1267,8 +1276,11 @@ packages:
     resolution: {integrity: sha512-JEW4DEtBzfe8HvUYecLU9e6+XJnKDlUAIve8FvPzF3Kzs6Xo/KuZkZJsDH0wJXl/qEZbeeE7edxDNY3kMs39hQ==}
     engines: {node: '>= 18'}
 
-  '@napi-rs/wasm-runtime@1.1.1':
-    resolution: {integrity: sha512-p64ah1M1ld8xjWv3qbvFwHiFVWrq1yFvV4f7w+mzaqiR4IlSgkqhcRdHwsGgomwzBH51sRY4NEowLxnaBjcW/A==}
+  '@napi-rs/wasm-runtime@1.1.2':
+    resolution: {integrity: sha512-sNXv5oLJ7ob93xkZ1XnxisYhGYXfaG9f65/ZgYuAu3qt7b3NadcOEhLvx28hv31PgX8SZJRYrAIPQilQmFpLVw==}
+    peerDependencies:
+      '@emnapi/core': ^1.7.1
+      '@emnapi/runtime': ^1.7.1
 
   '@next/env@16.2.1':
     resolution: {integrity: sha512-n8P/HCkIWW+gVal2Z8XqXJ6aB3J0tuM29OcHpCsobWlChH/SITBs1DFBk/HajgrwDkqqBXPbuUuzgDvUekREPg==}
@@ -5633,6 +5645,11 @@ packages:
     peerDependencies:
       zod: ^3.25 || ^4
 
+  zod-to-json-schema@3.25.2:
+    resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
+    peerDependencies:
+      zod: ^3.25.28 || ^4
+
   zod@3.22.4:
     resolution: {integrity: sha512-iC+8Io04lddc+mVqQ9AZ7OQ2MrUKGN+oIQyq1vemgt46jwCwLfhq7/pwnBnNXXXZb8VTVLKwp9EDkx+ryxIWmg==}
 
@@ -5828,14 +5845,14 @@ snapshots:
     optionalDependencies:
       workerd: 1.20260317.1
 
-  '@cloudflare/vitest-pool-workers@0.13.4(@cloudflare/workers-types@4.20260317.1)(@vitest/runner@4.1.2)(@vitest/snapshot@4.1.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))':
+  '@cloudflare/vitest-pool-workers@0.13.4(@cloudflare/workers-types@4.20260317.1)(@vitest/runner@4.1.2)(@vitest/snapshot@4.1.2)(bufferutil@4.1.0)(utf-8-validate@6.0.6)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))':
     dependencies:
       '@vitest/runner': 4.1.2
       '@vitest/snapshot': 4.1.2
       cjs-module-lexer: 1.4.3
       esbuild: 0.27.3
       miniflare: 4.20260317.2(bufferutil@4.1.0)(utf-8-validate@6.0.6)
-      vitest: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+      vitest: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
       wrangler: 4.77.0(@cloudflare/workers-types@4.20260317.1)(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       zod: 3.25.76
     transitivePeerDependencies:
@@ -5862,7 +5879,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.14': {}
 
-  '@cobuild/review-gpt@0.5.1(openapi-types@12.1.3)':
+  '@cobuild/review-gpt@0.5.2(openapi-types@12.1.3)':
     dependencies:
       incur: 0.3.13(openapi-types@12.1.3)
     transitivePeerDependencies:
@@ -6603,7 +6620,7 @@ snapshots:
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
       zod: 4.3.6
-      zod-to-json-schema: 3.25.1(zod@4.3.6)
+      zod-to-json-schema: 3.25.2(zod@4.3.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -6614,7 +6631,7 @@ snapshots:
 
   '@msgpack/msgpack@3.1.2': {}
 
-  '@napi-rs/wasm-runtime@1.1.1':
+  '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
     dependencies:
       '@emnapi/core': 1.9.1
       '@emnapi/runtime': 1.9.1
@@ -7726,9 +7743,12 @@ snapshots:
   '@rolldown/binding-openharmony-arm64@1.0.0-rc.9':
     optional: true
 
-  '@rolldown/binding-wasm32-wasi@1.0.0-rc.9':
+  '@rolldown/binding-wasm32-wasi@1.0.0-rc.9(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
     dependencies:
-      '@napi-rs/wasm-runtime': 1.1.1
+      '@napi-rs/wasm-runtime': 1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
+    transitivePeerDependencies:
+      - '@emnapi/core'
+      - '@emnapi/runtime'
     optional: true
 
   '@rolldown/binding-win32-arm64-msvc@1.0.0-rc.9':
@@ -8454,7 +8474,7 @@ snapshots:
 
   '@vercel/oidc@3.1.0': {}
 
-  '@vitest/coverage-v8@4.1.2(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))':
+  '@vitest/coverage-v8@4.1.2(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)))':
     dependencies:
       '@bcoe/v8-coverage': 1.0.2
       '@vitest/utils': 4.1.2
@@ -8466,7 +8486,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.0.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+      vitest: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
   '@vitest/expect@4.1.2':
     dependencies:
@@ -8477,13 +8497,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.2(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))':
+  '@vitest/mocker@4.1.2(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))':
     dependencies:
       '@vitest/spy': 4.1.2
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
+      vite: 8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
 
   '@vitest/pretty-format@4.1.2':
     dependencies:
@@ -11617,7 +11637,7 @@ snapshots:
       glob: 13.0.6
       package-json-from-dist: 1.0.1
 
-  rolldown@1.0.0-rc.9:
+  rolldown@1.0.0-rc.9(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1):
     dependencies:
       '@oxc-project/types': 0.115.0
       '@rolldown/pluginutils': 1.0.0-rc.9
@@ -11634,9 +11654,12 @@ snapshots:
       '@rolldown/binding-linux-x64-gnu': 1.0.0-rc.9
       '@rolldown/binding-linux-x64-musl': 1.0.0-rc.9
       '@rolldown/binding-openharmony-arm64': 1.0.0-rc.9
-      '@rolldown/binding-wasm32-wasi': 1.0.0-rc.9
+      '@rolldown/binding-wasm32-wasi': 1.0.0-rc.9(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
       '@rolldown/binding-win32-arm64-msvc': 1.0.0-rc.9
       '@rolldown/binding-win32-x64-msvc': 1.0.0-rc.9
+    transitivePeerDependencies:
+      - '@emnapi/core'
+      - '@emnapi/runtime'
 
   router@2.2.0:
     dependencies:
@@ -12248,13 +12271,13 @@ snapshots:
       - utf-8-validate
       - zod
 
-  vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3):
+  vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3):
     dependencies:
       '@oxc-project/runtime': 0.115.0
       lightningcss: 1.32.0
       picomatch: 4.0.4
       postcss: 8.5.8
-      rolldown: 1.0.0-rc.9
+      rolldown: 1.0.0-rc.9(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)
       tinyglobby: 0.2.15
     optionalDependencies:
       '@types/node': 25.5.0
@@ -12263,11 +12286,14 @@ snapshots:
       jiti: 2.6.1
       tsx: 4.21.0
       yaml: 2.8.3
+    transitivePeerDependencies:
+      - '@emnapi/core'
+      - '@emnapi/runtime'
 
-  vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)):
+  vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@25.5.0)(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)):
     dependencies:
       '@vitest/expect': 4.1.2
-      '@vitest/mocker': 4.1.2(vite@8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+      '@vitest/mocker': 4.1.2(vite@8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
       '@vitest/pretty-format': 4.1.2
       '@vitest/runner': 4.1.2
       '@vitest/snapshot': 4.1.2
@@ -12284,7 +12310,7 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.1.0
-      vite: 8.0.0(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
+      vite: 8.0.0(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
@@ -12533,6 +12559,10 @@ snapshots:
       graphmatch: 1.1.1
 
   zod-to-json-schema@3.25.1(zod@4.3.6):
+    dependencies:
+      zod: 4.3.6
+
+  zod-to-json-schema@3.25.2(zod@4.3.6):
     dependencies:
       zod: 4.3.6
 
