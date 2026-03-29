@@ -1552,6 +1552,8 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
       providerOptions: resolved.session.providerOptions,
       providerState: {
         codexCli: null,
+        resumeRouteId: null,
+        resumeWorkspaceKey: null,
       },
     },
     updatedAt: '2026-03-26T00:00:00.000Z',
@@ -1615,6 +1617,7 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
       providerState: {
         codexCli: null,
         resumeRouteId: primaryRoute!.routeId,
+        resumeWorkspaceKey: null,
       },
     },
     updatedAt: '2026-03-26T00:00:00.000Z',

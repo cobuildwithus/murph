@@ -28,6 +28,8 @@ import {
   isAssistantProviderInterruptedError,
 } from '../src/assistant/provider-turn-recovery.js'
 import * as assistantAutomationArtifacts from '../src/assistant/automation/artifacts.js'
+import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
+import { buildAssistantTranscriptDistillationContinuityText } from '../src/assistant/transcript-distillation.js'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -69,6 +71,7 @@ vi.mock('../src/inbox-model-harness.js', () => ({
 
 import {
   readAssistantStatusSnapshot,
+  readLatestAssistantTranscriptDistillation,
   runAssistantAutomation,
   runAssistantChat,
   scanAssistantAutomationOnce,
@@ -184,6 +187,107 @@ beforeEach(() => {
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
+})
+
+
+
+test('sendAssistantMessage writes append-only transcript distillations once local history grows beyond the retained raw window', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-distillation-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockImplementation(async () => ({
+    provider: 'codex-cli',
+    providerSessionId: 'distill-thread-123',
+    response: 'acknowledged',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  }))
+
+  let latest = null as Awaited<ReturnType<typeof sendAssistantMessage>> | null
+  for (let index = 0; index < 9; index += 1) {
+    latest = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'imessage:distill',
+      channel: 'imessage',
+      identityId: 'assistant:primary',
+      participantId: 'contact:distill',
+      sourceThreadId: 'chat-distill',
+      provider: 'codex-cli',
+      prompt: `What changed on day ${index + 1}?`,
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+    })
+  }
+
+  assert.ok(latest)
+  const distillation = await readLatestAssistantTranscriptDistillation(
+    vaultRoot,
+    latest!.session.sessionId,
+  )
+  assert.ok(distillation)
+  assert.equal(distillation?.sessionId, latest!.session.sessionId)
+  assert.equal(distillation?.conversationEntryCount, 18)
+  assert.equal(distillation?.startEntryOffset, 0)
+  assert.equal(distillation?.endEntryOffset, 9)
+  assert.equal(distillation?.preservedRecentConversationCount, 8)
+  assert.ok((distillation?.summaryLines.length ?? 0) > 0)
+
+  const receipts = await listAssistantTurnReceipts(vaultRoot)
+  const latestReceipt = receipts[0]
+  assert.ok(latestReceipt)
+  assert.equal(
+    latestReceipt?.timeline.some((event) => event.kind === 'provider.context.refreshed'),
+    true,
+  )
+})
+
+test('sanitizeAssistantOutboundReply removes local source scaffolding for outbound channels', () => {
+  const sanitized = sanitizeAssistantOutboundReply(
+    [
+      'From vault/journal/2026-03-29.md: Sleep consistency looked better this week.',
+      'See [the note](/tmp/redacted/journal/2026-03-29.md) for context.',
+      '[Source: raw/inbox/imessage.json]',
+      'In research/weekly-summary.md: Keep the bedtime window narrow.',
+      '',
+      '',
+      'Done.',
+    ].join('\n'),
+    'imessage',
+  )
+
+  assert.equal(
+    sanitized,
+    [
+      'Sleep consistency looked better this week.',
+      'See the note for context.',
+      'Keep the bedtime window narrow.',
+      '',
+      'Done.',
+    ].join('\n'),
+  )
+})
+
+test('buildAssistantTranscriptDistillationContinuityText keeps distillations non-canonical', () => {
+  const continuity = buildAssistantTranscriptDistillationContinuityText({
+    schema: 'murph.assistant-transcript-distillation.v1',
+    distillationId: 'distill_test',
+    sessionId: 'session_test',
+    createdAt: '2026-03-29T00:00:00.000Z',
+    conversationEntryCount: 24,
+    startEntryOffset: 0,
+    endEntryOffset: 9,
+    preservedRecentConversationCount: 8,
+    preview: 'User asked about sleep.',
+    summaryLines: ['User asked: sleep timing Assistant replied: keep the routine steady'],
+  })
+
+  assert.ok(continuity)
+  assert.equal(continuity?.includes('operator-authored'), false)
+  assert.equal(continuity?.includes('non-canonical'), true)
+  assert.equal(continuity?.includes('vault evidence'), true)
 })
 
 test('sendAssistantMessage persists only assistant session metadata and reuses provider sessions via alias keys', async () => {

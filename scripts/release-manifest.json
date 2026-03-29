@@ -47,6 +47,10 @@
       "path": "packages/assistant-runtime"
     },
     {
+      "name": "@murph/assistantd",
+      "path": "packages/assistantd"
+    },
+    {
       "name": "@murph/assistant-services",
       "path": "packages/assistant-services"
     },
