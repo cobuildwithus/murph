@@ -1,6 +1,11 @@
 import { extractIsoDatePrefix } from "@murph/contracts";
 
-import { listRecords, type VaultReadModel, type VaultRecord } from "./model.ts";
+import {
+  listRecords,
+  recordRelationTargetIds,
+  type VaultReadModel,
+  type VaultRecord,
+} from "./model.ts";
 import {
   summarizeDailySamples,
   type DailySampleSummary,
@@ -270,7 +275,7 @@ export function buildTimeline(
 }
 
 function timelineRelatedIds(record: VaultRecord): string[] {
-  return record.relatedIds ?? record.lookupIds;
+  return recordRelationTargetIds(record);
 }
 
 function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {

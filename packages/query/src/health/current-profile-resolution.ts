@@ -189,10 +189,8 @@ export function fallbackCurrentProfileEntityFromSnapshotRecord(
       sourceEventIds: latestSnapshot.sourceEventIds,
     },
     frontmatter: null,
-    relatedIds: [
-      ...latestSnapshot.sourceAssessmentIds,
-      ...latestSnapshot.sourceEventIds,
-    ],
+    links: [],
+    relatedIds: [],
     stream: null,
     experimentSlug: null,
     tags: ["profile_snapshot", latestSnapshot.status],

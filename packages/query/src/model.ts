@@ -5,10 +5,13 @@ import path from "node:path";
 import {
   HEALTH_HISTORY_KINDS,
   compareCanonicalEntities,
+  linkTargetIds,
   normalizeCanonicalDate,
   normalizeUniqueStringArray,
+  relatedToLinks,
   uniqueStrings,
   type CanonicalEntity,
+  type CanonicalEntityLink,
   type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
@@ -40,6 +43,7 @@ export interface VaultRecord {
   data: QueryRecordData;
   body: string | null;
   frontmatter: QueryRecordData | null;
+  links: CanonicalEntityLink[];
   relatedIds?: string[];
 }
 
@@ -134,6 +138,10 @@ interface PreparedRecordLikeFilter extends PreparedTagAndTextFilter {
   date?: string;
   from?: string;
   to?: string;
+}
+
+function relatedIdsToLinks(...groups: readonly unknown[]): CanonicalEntityLink[] {
+  return relatedToLinks(groups.flatMap((group) => normalizeUniqueStringArray(group)));
 }
 
 interface RecordLikeFilterSource {
@@ -446,6 +454,7 @@ async function readOptionalCoreEntity(
         ...attributes,
       },
       frontmatter: attributes,
+      links: [],
       relatedIds: [],
       stream: null,
       experimentSlug: null,
@@ -489,6 +498,7 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
         pickString(attributes, ["title"]) ??
         extractMarkdownHeading(document.body) ??
         slug;
+      const links = relatedIdsToLinks(attributes.relatedIds, attributes.eventIds);
 
       return {
         entityId: id,
@@ -506,10 +516,8 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
           ...attributes,
         },
         frontmatter: attributes,
-        relatedIds: uniqueStrings([
-          ...normalizeUniqueStringArray(attributes.relatedIds),
-          ...normalizeUniqueStringArray(attributes.eventIds),
-        ]),
+        links,
+        relatedIds: linkTargetIds(links),
         stream: null,
         experimentSlug: slug,
         tags: normalizeTags(attributes.tags),
@@ -544,10 +552,7 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
         extractMarkdownHeading(document.body) ??
         date;
       const id = `journal:${date}`;
-      const relatedIds = uniqueStrings([
-        ...normalizeUniqueStringArray(attributes.relatedIds),
-        ...normalizeUniqueStringArray(attributes.eventIds),
-      ]);
+      const links = relatedIdsToLinks(attributes.relatedIds, attributes.eventIds);
 
       pages.push({
         entityId: id,
@@ -565,7 +570,8 @@ async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]
           ...attributes,
         },
         frontmatter: attributes,
-        relatedIds,
+        links,
+        relatedIds: linkTargetIds(links),
         stream: null,
         experimentSlug: pickString(attributes, ["experimentSlug"]),
         tags: normalizeTags(attributes.tags),
@@ -610,10 +616,8 @@ async function readJsonlRecordFamily(
         `${recordType} record at ${sourcePath}:${lineNumber}`,
       );
       const identity = deriveVaultRecordIdentity(recordType, payload, rawRecordId);
-      const relatedIds = uniqueStrings([
-        ...normalizeUniqueStringArray(payload.relatedIds),
-        ...normalizeUniqueStringArray(payload.eventIds),
-      ]);
+      const links = relatedIdsToLinks(payload.relatedIds, payload.eventIds);
+      const relatedIds = linkTargetIds(links);
 
       return {
         entityId: identity.displayId,
@@ -639,6 +643,7 @@ async function readJsonlRecordFamily(
           rawRecordId,
         }),
         frontmatter: null,
+        links,
         relatedIds,
         stream: null,
         experimentSlug: pickString(payload, ["experimentSlug"]),
@@ -669,6 +674,7 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         "stream",
         `sample record at ${sourcePath}:${lineNumber}`,
       );
+      const links = relatedIdsToLinks(payload.relatedIds);
 
       return {
         entityId: rawRecordId,
@@ -684,7 +690,8 @@ async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]>
         body: null,
         attributes: payload,
         frontmatter: null,
-        relatedIds: uniqueStrings(normalizeUniqueStringArray(payload.relatedIds)),
+        links,
+        relatedIds: linkTargetIds(links),
         stream,
         experimentSlug: pickString(payload, ["experimentSlug"]),
         tags: normalizeTags(payload.tags),
@@ -823,8 +830,19 @@ function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord 
     data: entity.attributes,
     body: entity.body,
     frontmatter: entity.frontmatter,
+    links: entity.links,
     relatedIds: entity.relatedIds,
   };
+}
+
+export function recordRelationTargetIds(
+  record: Pick<VaultRecord, "links" | "relatedIds" | "lookupIds">,
+): string[] {
+  return record.links.length > 0
+    ? linkTargetIds(record.links)
+    : record.relatedIds && record.relatedIds.length > 0
+      ? record.relatedIds
+      : record.lookupIds;
 }
 
 function groupRecordsByFamily(
