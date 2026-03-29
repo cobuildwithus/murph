@@ -21,18 +21,7 @@ interface RunnerContainerInvokePayload {
 }
 
 export class RunnerContainerTestDouble extends DurableObject {
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/internal/destroy") {
-      return new Response(null, { status: 204 });
-    }
-
-    if (url.pathname !== "/internal/invoke" || request.method !== "POST") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-
-    const payload = await request.json<RunnerContainerInvokePayload>();
+  async invoke(payload: RunnerContainerInvokePayload): Promise<HostedExecutionRunnerResult> {
     const runnerResult = buildRunnerResult(payload.request);
     const commitResponse = await handleRunnerOutboundRequest(
       new Request(
@@ -56,11 +45,13 @@ export class RunnerContainerTestDouble extends DurableObject {
     );
 
     if (!commitResponse.ok) {
-      return commitResponse;
+      throw new Error(`Runner commit failed with HTTP ${commitResponse.status}.`);
     }
 
-    return Response.json(runnerResult);
+    return runnerResult;
   }
+
+  async destroyInstance(): Promise<void> {}
 }
 
 function buildRunnerResult(

@@ -331,13 +331,11 @@ describe("RunnerContainer", () => {
   });
 
   it("posts the invoke envelope with the member routing key to the named runner container instance", async () => {
-    const fetch = vi.fn(async () => new Response(JSON.stringify(createRunnerResult()), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-      },
-      status: 200,
+    const invoke = vi.fn(async () => createRunnerResult());
+    const getByName = vi.fn(() => ({
+      async destroyInstance() {},
+      invoke,
     }));
-    const getByName = vi.fn(() => ({ fetch }));
 
     await invokeHostedExecutionContainerRunner({
       request: createRunnerRequest("evt_namespace"),
@@ -351,8 +349,7 @@ describe("RunnerContainer", () => {
     });
 
     expect(getByName).toHaveBeenCalledWith("member_123");
-    const request = fetch.mock.calls[0]?.[0] as Request;
-    const body = JSON.parse(await request.text()) as Record<string, unknown>;
+    const body = invoke.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body).toMatchObject({
       request: createRunnerRequest("evt_namespace"),
       runnerEnvironment: {
@@ -363,12 +360,83 @@ describe("RunnerContainer", () => {
     });
     expect(typeof body.internalWorkerProxyToken).toBe("string");
     expect((body.internalWorkerProxyToken as string).length).toBeGreaterThan(0);
-    expect(request.headers.get("authorization")).toBe("Bearer runner-token");
+  });
+
+  it("preserves extended runner request fields when the container is invoked over durable-object RPC", async () => {
+    const { container, containerFetch } = createContainerDouble();
+    const extendedRequest = {
+      ...createRunnerRequest("evt_extended"),
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+      },
+      resume: {
+        committedResult: {
+          result: {
+            summary: "already committed",
+          },
+          sideEffects: [],
+        },
+      },
+      run: {
+        attempt: 2,
+        eventId: "evt_extended",
+        phase: "retrying",
+        runId: "run_123",
+        startedAt: "2026-03-27T00:00:00.000Z",
+      },
+      userEnv: {
+        OPENAI_API_KEY: "sk-user",
+      },
+    };
+
+    await container.invoke({
+      internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+      request: extendedRequest,
+      runnerEnvironment: {},
+      timeoutMs: 30_000,
+      userId: "member_123",
+    });
+
+    expect(containerFetch).toHaveBeenCalledTimes(1);
+    const forwarded = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
+    expect(forwarded).toMatchObject({
+      commit: {
+        bundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+      },
+      resume: {
+        committedResult: {
+          result: {
+            summary: "already committed",
+          },
+          sideEffects: [],
+        },
+      },
+      run: {
+        attempt: 2,
+        eventId: "evt_extended",
+        phase: "retrying",
+        runId: "run_123",
+        startedAt: "2026-03-27T00:00:00.000Z",
+      },
+      userEnv: {
+        OPENAI_API_KEY: "sk-user",
+      },
+      internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+    });
   });
 
   it("fails before invoking the namespace when the runner control token is missing", async () => {
-    const fetch = vi.fn();
-    const getByName = vi.fn(() => ({ fetch }));
+    const invoke = vi.fn();
+    const getByName = vi.fn(() => ({
+      async destroyInstance() {},
+      invoke,
+    }));
 
     await expect(
       invokeHostedExecutionContainerRunner({
@@ -384,16 +452,19 @@ describe("RunnerContainer", () => {
     );
 
     expect(getByName).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("posts destroy without a request body and skips null namespaces", async () => {
-    const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+  it("destroys the named runner container instance and skips null namespaces", async () => {
+    const destroyInstance = vi.fn(async () => {});
 
     await destroyHostedExecutionContainer({
       runnerContainerNamespace: {
         getByName() {
-          return { fetch };
+          return {
+            destroyInstance,
+            invoke: vi.fn(async () => createRunnerResult()),
+          };
         },
       },
       runnerControlToken: "runner-token",
@@ -405,11 +476,7 @@ describe("RunnerContainer", () => {
       userId: "member_456",
     });
 
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const request = fetch.mock.calls[0]?.[0] as Request;
-    expect(request.method).toBe("POST");
-    expect(request.headers.get("authorization")).toBe("Bearer runner-token");
-    await expect(request.text()).resolves.toBe("");
+    expect(destroyInstance).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -16,8 +16,6 @@ const RUNNER_PING_ENDPOINT = "container/health";
 const RUNNER_EXECUTE_URL = "http://container/__internal/run";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_READY_TIMEOUT_MS = 20_000;
-const RUNNER_INVOKE_URL = "https://runner.internal/internal/invoke";
-const RUNNER_DESTROY_URL = "https://runner.internal/internal/destroy";
 const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
 const RUNNER_CONTROL_AUTH_SCHEME = "Bearer";
 
@@ -51,7 +49,10 @@ interface HostedExecutionContainerRunnerInput<TRequest extends HostedExecutionRu
 }
 
 export interface HostedExecutionContainerStubLike {
-  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  destroyInstance(): Promise<void>;
+  invoke<TRequest extends HostedExecutionRunnerRequest>(
+    input: HostedExecutionContainerInvokeRequest<TRequest>,
+  ): Promise<HostedExecutionRunnerResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -111,6 +112,18 @@ export class RunnerContainer extends Container {
     this.runnerControlToken = readOptionalString(env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
   }
 
+  async invoke<TRequest extends HostedExecutionRunnerRequest>(
+    payload: HostedExecutionContainerInvokeRequest<TRequest>,
+  ): Promise<HostedExecutionRunnerResult> {
+    return this.invokeHostedExecution(
+      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlToken),
+    );
+  }
+
+  async destroyInstance(): Promise<void> {
+    await this.destroyIfRunning();
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -128,7 +141,7 @@ export class RunnerContainer extends Container {
       }
 
       try {
-        return await this.handleInvokeRequest(await readJsonObject(request), this.runnerControlToken);
+        return await this.handleInvokeRequest(await readJsonObject(request));
       } catch (error) {
         if (error instanceof SyntaxError || error instanceof TypeError) {
           return json({ error: error.message }, 400);
@@ -158,21 +171,10 @@ export class RunnerContainer extends Container {
     return super.fetch(request);
   }
 
-  private async handleInvokeRequest(
-    payload: Record<string, unknown>,
-    runnerControlToken: string | null,
-  ): Promise<Response> {
-    const result = await this.invokeHostedExecution({
-      internalWorkerProxyToken: requireString(
-        payload.internalWorkerProxyToken,
-        "payload.internalWorkerProxyToken",
-      ),
-      request: parseHostedExecutionRunnerRequest(requireRecord(payload.request, "request")),
-      runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
-      runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
-      timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
-      userId: requireString(payload.userId, "payload.userId"),
-    });
+  private async handleInvokeRequest(payload: Record<string, unknown>): Promise<Response> {
+    const result = await this.invokeHostedExecution(
+      parseHostedExecutionContainerInvokeInput(payload, this.runnerControlToken),
+    );
 
     return json(result);
   }
@@ -287,31 +289,16 @@ export class RunnerContainer extends Container {
 export async function invokeHostedExecutionContainerRunner<
   TRequest extends HostedExecutionRunnerRequest,
 >(input: HostedExecutionContainerRunnerInput<TRequest>): Promise<HostedExecutionRunnerResult> {
-  const runnerControlToken = requireHostedExecutionRunnerControlToken(input.runnerControlToken);
+  requireHostedExecutionRunnerControlToken(input.runnerControlToken);
   const internalWorkerProxyToken = crypto.randomUUID();
 
-  const response = await input.runnerContainerNamespace.getByName(input.userId).fetch(
-    new Request(RUNNER_INVOKE_URL, {
-      body: JSON.stringify({
-        internalWorkerProxyToken,
-        request: input.request,
-        runnerEnvironment: input.runnerEnvironment,
-        timeoutMs: input.timeoutMs,
-        userId: input.userId,
-      } satisfies HostedExecutionContainerInvokeRequest<TRequest>),
-      headers: {
-        authorization: `${RUNNER_CONTROL_AUTH_SCHEME} ${runnerControlToken}`,
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    }),
-  );
-
-  if (!response.ok) {
-    throw new Error(`Hosted runner container returned HTTP ${response.status}.`);
-  }
-
-  return (await response.json()) as HostedExecutionRunnerResult;
+  return input.runnerContainerNamespace.getByName(input.userId).invoke({
+    internalWorkerProxyToken,
+    request: input.request,
+    runnerEnvironment: input.runnerEnvironment,
+    timeoutMs: input.timeoutMs,
+    userId: input.userId,
+  } satisfies HostedExecutionContainerInvokeRequest<TRequest>);
 }
 
 function createRunnerOutboundHandler() {
@@ -342,15 +329,7 @@ export async function destroyHostedExecutionContainer(input: {
   }
 
   try {
-    const runnerControlToken = requireHostedExecutionRunnerControlToken(input.runnerControlToken);
-    await input.runnerContainerNamespace.getByName(input.userId).fetch(
-      new Request(RUNNER_DESTROY_URL, {
-        headers: {
-          authorization: `${RUNNER_CONTROL_AUTH_SCHEME} ${runnerControlToken}`,
-        },
-        method: "POST",
-      }),
-    );
+    await input.runnerContainerNamespace.getByName(input.userId).destroyInstance();
   } catch {
     // best-effort cleanup only
   }
@@ -361,6 +340,39 @@ function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): stri
     ? source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER.trim()
     : "";
   return configured.length > 0 ? configured : DEFAULT_CONTAINER_SLEEP_AFTER;
+}
+
+function parseHostedExecutionContainerInvokeInput<
+  TRequest extends HostedExecutionRunnerRequest,
+>(
+  payload: {
+    internalWorkerProxyToken?: unknown;
+    request?: unknown;
+    runnerEnvironment?: unknown;
+    timeoutMs?: unknown;
+    userId?: unknown;
+  },
+  runnerControlToken: string | null,
+): HostedExecutionContainerInvokeInput<TRequest> {
+  return {
+    internalWorkerProxyToken: requireString(
+      payload.internalWorkerProxyToken,
+      "payload.internalWorkerProxyToken",
+    ),
+    request: parseHostedExecutionContainerRunnerRequest<TRequest>(payload.request),
+    runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
+    runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
+    timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
+    userId: requireString(payload.userId, "payload.userId"),
+  };
+}
+
+function parseHostedExecutionContainerRunnerRequest<
+  TRequest extends HostedExecutionRunnerRequest,
+>(value: unknown): TRequest {
+  const record = requireRecord(value, "request");
+  parseHostedExecutionRunnerRequest(record);
+  return record as TRequest;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

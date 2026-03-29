@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import { createHostedExecutionSignature } from "../src/auth.ts";
 import {
   createHostedVerifiedEmailUserEnv,
@@ -9,7 +10,7 @@ import {
 import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
-import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObject } from "../src/index.ts";
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
@@ -21,6 +22,10 @@ describe("cloudflare worker routes", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("re-exports ContainerProxy for container outbound routing", () => {
+    expect(ExportedContainerProxy).toBe(PackageContainerProxy);
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {
@@ -1683,7 +1688,30 @@ function createStorage() {
   const runnerContainerNamespace = {
     getByName() {
       return {
-        fetch: runnerContainerFetch,
+        async destroyInstance() {
+          await runnerContainerFetch(new Request("https://runner.internal/internal/destroy", {
+            headers: {
+              authorization: "Bearer runner-token",
+            },
+            method: "POST",
+          }));
+        },
+        async invoke(payload: Record<string, unknown>) {
+          const response = await runnerContainerFetch(new Request("https://runner.internal/internal/invoke", {
+            body: JSON.stringify(payload),
+            headers: {
+              authorization: "Bearer runner-token",
+              "content-type": "application/json; charset=utf-8",
+            },
+            method: "POST",
+          }));
+
+          if (!response.ok) {
+            throw new Error(`Runner container returned HTTP ${response.status}.`);
+          }
+
+          return await response.json();
+        },
       };
     },
   };
