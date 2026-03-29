@@ -219,6 +219,27 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(messagePayload.response, 'daemon response')
     assert.equal(sendMessage.mock.calls[0]?.[0]?.prompt, 'hello over assistantd')
 
+    const openConversation = await fetch(`${handle.address.baseUrl}/open-conversation`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt: 'start over assistantd',
+        vault: '/tmp/vault',
+      }),
+    })
+    assert.equal(openConversation.status, 200)
+    const openConversationPayload = await openConversation.json() as {
+      created: boolean
+      paths?: unknown
+      session: { sessionId: string }
+    }
+    assert.equal(openConversationPayload.created, true)
+    assert.equal(openConversationPayload.session.sessionId, TEST_SESSION.sessionId)
+    assert.equal('paths' in openConversationPayload, false)
+
     const status = await fetch(
       `${handle.address.baseUrl}/status?limit=7&sessionId=${encodeURIComponent(TEST_SESSION.sessionId)}&vault=${encodeURIComponent('/tmp/vault')}`,
       {

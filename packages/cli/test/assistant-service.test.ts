@@ -1227,6 +1227,9 @@ test('sanitizeAssistantOutboundReply strips local markdown links and vault sourc
       '[Source: derived/summary.md] Here is the clean answer.',
       '- From file:///tmp/private.md: The note is attached.',
       'Read [the note](file:///tmp/private.md) and [journal entry](/tmp/vault/journal/today.md).',
+      'Review [sleep note](derived/reports/sleep.md) before replying.',
+      'See vault/journal/2026-03-29.md for context.',
+      'Inline refs like `derived/reports/sleep.md` should not leak either.',
       'From a friend: keep this line intact.',
     ].join('\n'),
     'email',
@@ -1238,6 +1241,9 @@ test('sanitizeAssistantOutboundReply strips local markdown links and vault sourc
       'Here is the clean answer.',
       '- The note is attached.',
       'Read the note and journal entry.',
+      'Review sleep note before replying.',
+      'See that note for context.',
+      'Inline refs like that note should not leak either.',
       'From a friend: keep this line intact.',
     ].join('\n'),
   )
@@ -1245,6 +1251,21 @@ test('sanitizeAssistantOutboundReply strips local markdown links and vault sourc
   assert.equal(
     sanitizeAssistantOutboundReply('Read [the note](file:///tmp/private.md).', 'local'),
     'Read [the note](file:///tmp/private.md).',
+  )
+  assert.equal(
+    sanitizeAssistantOutboundReply('Use /help to continue.', 'email'),
+    'Use /help to continue.',
+  )
+  assert.equal(
+    sanitizeAssistantOutboundReply('See [docs](https://example.com/x/y.md) for details.', 'email'),
+    'See [docs](https://example.com/x/y.md) for details.',
+  )
+  assert.equal(
+    sanitizeAssistantOutboundReply(
+      'First line.\n  From a friend: keep this line intact.',
+      'email',
+    ),
+    'First line.\n  From a friend: keep this line intact.',
   )
 })
 
