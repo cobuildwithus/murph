@@ -1,6 +1,6 @@
 import { extractIsoDatePrefix } from "@murph/contracts";
 
-import type { VaultRecord, VaultRecordType } from "./model.ts";
+import { recordRelationTargetIds, type VaultRecord, type VaultRecordType } from "./model.ts";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;
@@ -120,7 +120,7 @@ function buildSearchDocument(
     record.primaryLookupId,
     ...(options.includeSourcePathTerms ? [record.sourcePath, record.sourceFile] : []),
     ...record.lookupIds,
-    ...(record.relatedIds ?? []),
+    ...recordRelationTargetIds(record),
     ...(options.includeStructuredPayload
       ? [
           safeJsonStringify(record.data),

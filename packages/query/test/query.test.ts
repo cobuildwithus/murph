@@ -36,7 +36,11 @@ import {
   summarizeOverviewExperiments,
   summarizeRecentOverviewJournals,
 } from "../src/index.ts";
-import { projectProfileSnapshotEntity } from "../src/canonical-entities.ts";
+import {
+  linkTargetIds,
+  normalizeCanonicalLinks,
+  projectProfileSnapshotEntity,
+} from "../src/canonical-entities.ts";
 import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
@@ -110,6 +114,29 @@ test("id-family helpers no longer register the hard-cut legacy colon-prefixed fa
   assert.equal(isQueryableLookupId("experiment:focus"), false);
   assert.equal(isQueryableLookupId("sample:path:12"), false);
   assert.equal(isQueryableLookupId("aud_01JNV40W8VFYQ2H7CMJY5A9R4K"), true);
+});
+
+test("normalizeCanonicalLinks drops blank targets and dedupes identical pairs", () => {
+  const blankFiltered = normalizeCanonicalLinks([
+    { type: "related_to", targetId: "" },
+    { type: "related_to", targetId: "   " },
+    { type: "related_to", targetId: "goal_01" },
+  ]);
+
+  assert.deepEqual(blankFiltered, [{ type: "related_to", targetId: "goal_01" }]);
+  assert.deepEqual(linkTargetIds(blankFiltered), ["goal_01"]);
+
+  const deduped = normalizeCanonicalLinks([
+    { type: "related_to", targetId: "goal_01" },
+    { type: "related_to", targetId: "goal_01" },
+    { type: "parent_of", targetId: "goal_01" },
+  ]);
+
+  assert.deepEqual(deduped, [
+    { type: "related_to", targetId: "goal_01" },
+    { type: "parent_of", targetId: "goal_01" },
+  ]);
+  assert.deepEqual(linkTargetIds(deduped), ["goal_01"]);
 });
 
 test(
@@ -2231,6 +2258,7 @@ function createReadModelFromRecords(
       body: record.body,
       attributes: record.data,
       frontmatter: record.frontmatter,
+      links: record.links,
       relatedIds: record.relatedIds ?? [],
       stream: record.stream,
       experimentSlug: record.experimentSlug,
@@ -2333,6 +2361,7 @@ function createSampleRecord(overrides: {
   data: Record<string, unknown>;
 }): Awaited<ReturnType<typeof readVault>>["samples"][number] {
   const occurredAt = overrides.occurredAt ?? "2026-03-10T00:00:00Z";
+  const links = normalizeCanonicalLinks([]);
 
   return {
     displayId: overrides.id,
@@ -2351,6 +2380,8 @@ function createSampleRecord(overrides: {
     data: overrides.data,
     body: null,
     frontmatter: null,
+    links,
+    relatedIds: linkTargetIds(links),
   };
 }
 
@@ -2372,6 +2403,12 @@ function createRecord(
     overrides.primaryLookupId ??
     lookupIds.find((lookupId) => lookupId !== displayId) ??
     displayId;
+  const links = normalizeCanonicalLinks(
+    (overrides.relatedIds ?? []).map((targetId) => ({
+      type: "related_to" as const,
+      targetId,
+    })),
+  );
 
   return {
     displayId,
@@ -2391,7 +2428,8 @@ function createRecord(
     data: overrides.data ?? {},
     body: overrides.body ?? null,
     frontmatter: overrides.frontmatter ?? null,
-    relatedIds: overrides.relatedIds,
+    links,
+    relatedIds: overrides.relatedIds ?? linkTargetIds(links),
   };
 }
 

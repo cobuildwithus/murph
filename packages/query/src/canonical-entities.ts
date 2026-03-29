@@ -1,6 +1,8 @@
 import {
-  extractHealthEntityRegistryRelatedIds,
+  extractHealthEntityRegistryLinks,
   extractIsoDatePrefix,
+  type HealthEntityKind,
+  type HealthEntityRegistryLink,
 } from "@murph/contracts";
 
 import {
@@ -46,10 +48,27 @@ export interface CanonicalEntity {
   body: string | null;
   attributes: Record<string, unknown>;
   frontmatter: Record<string, unknown> | null;
+  links: CanonicalEntityLink[];
   relatedIds: string[];
   stream: string | null;
   experimentSlug: string | null;
   tags: string[];
+}
+
+export type CanonicalEntityLinkType =
+  | "parent_of"
+  | "related_to"
+  | "supports_goal"
+  | "addresses_condition"
+  | "source_assessment"
+  | "source_event"
+  | "source_family_member"
+  | "top_goal"
+  | "snapshot_of";
+
+export interface CanonicalEntityLink {
+  type: CanonicalEntityLinkType;
+  targetId: string;
 }
 
 export const HEALTH_HISTORY_KINDS = new Set([
@@ -60,29 +79,15 @@ export const HEALTH_HISTORY_KINDS = new Set([
   "exposure",
 ] as const);
 
-const REGISTRY_RELATION_ARRAY_KEYS = [
-  "relatedIds",
-  "relatedGoalIds",
-  "relatedExperimentIds",
-  "relatedProtocolIds",
-  "sourceFamilyMemberIds",
-  "sourceAssessmentIds",
-  "sourceEventIds",
-  "topGoalIds",
-  "conditionIds",
-  "goalIds",
-  "protocolIds",
-] as const;
-
-const REGISTRY_RELATION_SCALAR_KEYS = [
-  "parentGoalId",
-  "snapshotId",
-  "conditionId",
-  "goalId",
-  "protocolId",
-  "sourceAssessmentId",
-  "sourceEventId",
-] as const;
+const REGISTRY_LINK_TYPE_MAP = {
+  parent_goal: "parent_of",
+  related_goal: "related_to",
+  related_experiment: "related_to",
+  related_protocol: "related_to",
+  related_condition: "related_to",
+  related_variant: "related_to",
+  source_family_member: "source_family_member",
+} as const satisfies Record<string, CanonicalEntityLinkType>;
 
 export function normalizeCanonicalDate(
   value: string | null | undefined,
@@ -114,8 +119,160 @@ export function normalizeUniqueStringArray(value: unknown): string[] {
   );
 }
 
+export function linkTargetIds(
+  links: readonly CanonicalEntityLink[],
+): string[] {
+  return uniqueStrings(links.map((link) => link.targetId));
+}
+
+export function normalizeCanonicalLinks(
+  links: readonly (CanonicalEntityLink | null | undefined)[],
+): CanonicalEntityLink[] {
+  const normalized: CanonicalEntityLink[] = [];
+  const seen = new Set<string>();
+
+  for (const link of links) {
+    if (!link) {
+      continue;
+    }
+
+    const targetId = link.targetId.trim();
+    if (!targetId) {
+      continue;
+    }
+
+    const dedupeKey = `${link.type}:${targetId}`;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+
+    seen.add(dedupeKey);
+    normalized.push({
+      type: link.type,
+      targetId,
+    });
+  }
+
+  return normalized;
+}
+
+export function relatedToLinks(
+  targetIds: readonly string[],
+): CanonicalEntityLink[] {
+  return normalizeCanonicalLinks(
+    targetIds.map((targetId) => ({
+      type: "related_to" as const,
+      targetId,
+    })),
+  );
+}
+
 function normalizeTags(value: unknown): string[] {
   return normalizeUniqueStringArray(value);
+}
+
+function buildArrayLinks(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+  type: CanonicalEntityLinkType,
+): CanonicalEntityLink[] {
+  return firstStringArray(source, keys).map((targetId) => ({
+    type,
+    targetId,
+  }));
+}
+
+function buildMergedArrayLinks(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+  type: CanonicalEntityLinkType,
+): CanonicalEntityLink[] {
+  return normalizeUniqueStringArray(
+    keys.flatMap((key) => (Array.isArray(source[key]) ? source[key] : [])),
+  ).map((targetId) => ({
+    type,
+    targetId,
+  }));
+}
+
+function buildScalarLinks(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+  type: CanonicalEntityLinkType,
+): CanonicalEntityLink[] {
+  const targetId = firstString(source, keys);
+  return targetId ? [{ type, targetId }] : [];
+}
+
+function normalizeRegistryLinkType(
+  link: HealthEntityRegistryLink,
+): CanonicalEntityLinkType {
+  return link.type in REGISTRY_LINK_TYPE_MAP
+    ? REGISTRY_LINK_TYPE_MAP[
+        link.type as keyof typeof REGISTRY_LINK_TYPE_MAP
+      ]
+    : "related_to";
+}
+
+function buildRegistryLinks(
+  family: Extract<
+    CanonicalEntityFamily,
+    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
+  >,
+  attributes: Record<string, unknown>,
+): CanonicalEntityLink[] {
+  const descriptorLinks = extractHealthEntityRegistryLinks(
+    family as HealthEntityKind,
+    attributes,
+  ).map((link) => ({
+    type: normalizeRegistryLinkType(link),
+    targetId: link.targetId,
+  }));
+
+  const supplementalLinks =
+    family === "protocol"
+      ? [
+          ...buildArrayLinks(attributes, ["relatedIds"], "related_to"),
+          ...buildMergedArrayLinks(
+            attributes,
+            ["goalIds", "relatedGoalIds"],
+            "supports_goal",
+          ),
+          ...buildScalarLinks(attributes, ["goalId"], "supports_goal"),
+          ...buildMergedArrayLinks(
+            attributes,
+            ["conditionIds", "relatedConditionIds"],
+            "addresses_condition",
+          ),
+          ...buildScalarLinks(attributes, ["conditionId"], "addresses_condition"),
+          ...buildMergedArrayLinks(
+            attributes,
+            ["protocolIds", "relatedProtocolIds"],
+            "related_to",
+          ),
+        ]
+      : buildArrayLinks(attributes, ["relatedIds"], "related_to");
+
+  return normalizeCanonicalLinks([...descriptorLinks, ...supplementalLinks]);
+}
+
+function registryCompatibilitySelfIds(
+  family: Extract<
+    CanonicalEntityFamily,
+    "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
+  >,
+  attributes: Record<string, unknown>,
+): string[] {
+  switch (family) {
+    case "goal":
+      return uniqueStrings([firstString(attributes, ["goalId"])]);
+    case "condition":
+      return uniqueStrings([firstString(attributes, ["conditionId"])]);
+    case "protocol":
+      return uniqueStrings([firstString(attributes, ["protocolId"])]);
+    default:
+      return [];
+  }
 }
 
 export function extractProfileTopGoalIds(profile: unknown): string[] {
@@ -155,6 +312,7 @@ export function projectAssessmentEntity(
   const recordedAt = firstString(source, ["recordedAt", "occurredAt", "importedAt"]);
   const importedAt = firstString(source, ["importedAt"]);
   const questionnaireSlug = firstString(source, ["questionnaireSlug"]);
+  const links = relatedToLinks(firstStringArray(source, ["relatedIds"]));
 
   return {
     entityId: id,
@@ -176,7 +334,8 @@ export function projectAssessmentEntity(
       responses: firstObject(source, ["responses", "response"]) ?? {},
     },
     frontmatter: null,
-    relatedIds: firstStringArray(source, ["relatedIds"]),
+    links,
+    relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
     tags: normalizeTags(source.tags),
@@ -212,6 +371,16 @@ export function projectProfileSnapshotEntity(
   const profile = firstObject(source, ["profile"]) ?? {};
   const summary = extractProfileSummary(profile);
   const status = firstString(source, ["status"]) ?? "accepted";
+  const links = normalizeCanonicalLinks([
+    ...resolvedAssessmentIds.map((targetId) => ({
+      type: "source_assessment" as const,
+      targetId,
+    })),
+    ...sourceEventIds.map((targetId) => ({
+      type: "source_event" as const,
+      targetId,
+    })),
+  ]);
 
   return {
     entityId: id,
@@ -239,7 +408,8 @@ export function projectProfileSnapshotEntity(
       summary,
     },
     frontmatter: null,
-    relatedIds: uniqueStrings([...resolvedAssessmentIds, ...sourceEventIds]),
+    links,
+    relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
     tags: uniqueStrings(["profile_snapshot", status, ...normalizeTags(source.tags)]),
@@ -259,6 +429,12 @@ export function fallbackCurrentProfileEntity(
   );
   const sourceEventIds = normalizeUniqueStringArray(latestSnapshot.attributes.sourceEventIds);
   const topGoalIds = extractProfileTopGoalIds(profile);
+  const links = buildCurrentProfileLinks({
+    snapshotId: latestSnapshot.entityId,
+    sourceAssessmentIds,
+    sourceEventIds,
+    topGoalIds,
+  });
 
   return {
     entityId: "current",
@@ -286,16 +462,40 @@ export function fallbackCurrentProfileEntity(
       sourceEventIds,
       topGoalIds,
     },
-    relatedIds: uniqueStrings([
-      latestSnapshot.entityId,
-      ...sourceAssessmentIds,
-      ...sourceEventIds,
-      ...topGoalIds,
-    ]),
+    links,
+    relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
     tags: ["current_profile"],
   };
+}
+
+function buildCurrentProfileLinks({
+  snapshotId,
+  sourceAssessmentIds,
+  sourceEventIds,
+  topGoalIds,
+}: {
+  snapshotId: string;
+  sourceAssessmentIds: readonly string[];
+  sourceEventIds: readonly string[];
+  topGoalIds: readonly string[];
+}): CanonicalEntityLink[] {
+  return normalizeCanonicalLinks([
+    { type: "snapshot_of", targetId: snapshotId },
+    ...sourceAssessmentIds.map((targetId) => ({
+      type: "source_assessment" as const,
+      targetId,
+    })),
+    ...sourceEventIds.map((targetId) => ({
+      type: "source_event" as const,
+      targetId,
+    })),
+    ...topGoalIds.map((targetId) => ({
+      type: "top_goal" as const,
+      targetId,
+    })),
+  ]);
 }
 
 export function projectCurrentProfileEntity(
@@ -314,6 +514,21 @@ export function projectCurrentProfileEntity(
   const sourceAssessmentIds = firstStringArray(attributes, ["sourceAssessmentIds"]);
   const sourceEventIds = firstStringArray(attributes, ["sourceEventIds"]);
   const topGoalIds = firstStringArray(attributes, ["topGoalIds"]);
+  const links = normalizeCanonicalLinks([
+    ...buildScalarLinks(attributes, ["snapshotId"], "snapshot_of"),
+    ...sourceAssessmentIds.map((targetId) => ({
+      type: "source_assessment" as const,
+      targetId,
+    })),
+    ...sourceEventIds.map((targetId) => ({
+      type: "source_event" as const,
+      targetId,
+    })),
+    ...topGoalIds.map((targetId) => ({
+      type: "top_goal" as const,
+      targetId,
+    })),
+  ]);
 
   return {
     entityId: "current",
@@ -336,12 +551,8 @@ export function projectCurrentProfileEntity(
       topGoalIds,
     },
     frontmatter: attributes,
-    relatedIds: uniqueStrings([
-      snapshotId,
-      ...sourceAssessmentIds,
-      ...sourceEventIds,
-      ...topGoalIds,
-    ]),
+    links,
+    relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
     tags: uniqueStrings(["current_profile", ...normalizeTags(attributes.tags)]),
@@ -372,7 +583,7 @@ export function projectHistoryEntity(
     return null;
   }
 
-  const relatedIds = firstStringArray(source, ["relatedIds"]);
+  const links = normalizeCanonicalLinks(buildArrayLinks(source, ["relatedIds"], "related_to"));
   const tags = firstStringArray(source, ["tags"]);
   const status =
     kind === "test"
@@ -393,7 +604,8 @@ export function projectHistoryEntity(
     body: firstString(source, ["note", "summary"]),
     attributes: source,
     frontmatter: null,
-    relatedIds,
+    links,
+    relatedIds: linkTargetIds(links),
     stream: null,
     experimentSlug: null,
     tags,
@@ -416,11 +628,10 @@ export function projectRegistryEntity(
       "assertedOn",
       "resolvedOn",
     ]) ?? null;
-  const sharedRegistryRelatedIds = extractHealthEntityRegistryRelatedIds(family, attributes);
+  const links = buildRegistryLinks(family, attributes);
   const relatedIds = uniqueStrings([
-    ...sharedRegistryRelatedIds,
-    ...REGISTRY_RELATION_ARRAY_KEYS.flatMap((key) => firstStringArray(attributes, [key])),
-    ...REGISTRY_RELATION_SCALAR_KEYS.map((key) => firstString(attributes, [key])),
+    ...linkTargetIds(links),
+    ...registryCompatibilitySelfIds(family, attributes),
   ]);
 
   return {
@@ -437,6 +648,7 @@ export function projectRegistryEntity(
     body: record.body,
     attributes,
     frontmatter: attributes,
+    links,
     relatedIds,
     stream: null,
     experimentSlug: firstString(attributes, ["experimentSlug"]),

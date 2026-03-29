@@ -84,6 +84,63 @@ test("protocol registry projection keeps the shared relative-path grouping rule"
   assert.equal(projected?.group, "supplements/sleep");
 });
 
+test("protocol query projection merges mixed relation alias arrays into normalized links", () => {
+  const protocolRecord = toRegistryRecord(
+    {
+      relativePath: "bank/protocols/recovery/cold-exposure.md",
+      markdown: "# Cold exposure",
+      body: "# Cold exposure",
+      attributes: {
+        protocolId: "prot_01",
+        title: "Cold exposure",
+        status: "active",
+        kind: "recovery",
+        goalIds: ["goal_primary_01", "goal_shared_01"],
+        relatedGoalIds: ["goal_secondary_01", "goal_shared_01"],
+        conditionIds: ["cond_primary_01", "cond_shared_01"],
+        relatedConditionIds: ["cond_secondary_01", "cond_shared_01"],
+        protocolIds: ["prot_related_01", "prot_shared_01"],
+        relatedProtocolIds: ["prot_related_02", "prot_shared_01"],
+        relatedIds: ["misc_related_01"],
+      },
+    },
+    protocolRegistryDefinition,
+  );
+
+  assert.ok(protocolRecord);
+
+  const entity = projectRegistryEntity("protocol", protocolRecord!);
+
+  assert.deepEqual(
+    entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "related_to", targetId: "misc_related_01" },
+      { type: "supports_goal", targetId: "goal_primary_01" },
+      { type: "supports_goal", targetId: "goal_shared_01" },
+      { type: "supports_goal", targetId: "goal_secondary_01" },
+      { type: "addresses_condition", targetId: "cond_primary_01" },
+      { type: "addresses_condition", targetId: "cond_shared_01" },
+      { type: "addresses_condition", targetId: "cond_secondary_01" },
+      { type: "related_to", targetId: "prot_related_01" },
+      { type: "related_to", targetId: "prot_shared_01" },
+      { type: "related_to", targetId: "prot_related_02" },
+    ],
+  );
+  assert.deepEqual(entity.relatedIds, [
+    "misc_related_01",
+    "goal_primary_01",
+    "goal_shared_01",
+    "goal_secondary_01",
+    "cond_primary_01",
+    "cond_shared_01",
+    "cond_secondary_01",
+    "prot_related_01",
+    "prot_shared_01",
+    "prot_related_02",
+    "prot_01",
+  ]);
+});
+
 test("goal shared registry definition owns payload, command, and relation metadata", () => {
   assert.equal(goalRegistryEntityDefinition.registry.idField, "goalId");
   assert.ok(goalRegistryEntityDefinition.registry.frontmatterSchema);
@@ -312,6 +369,14 @@ test("goal query projection round-trips shared Goal relation and window metadata
 
   const entity = projectRegistryEntity("goal", goalRecord!);
 
+  assert.deepEqual(
+    entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "parent_of", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6P" },
+      { type: "related_to", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6R" },
+      { type: "related_to", targetId: "exp_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+    ],
+  );
   assert.deepEqual(entity.relatedIds, [
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6P",
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
@@ -355,6 +420,10 @@ test("family and genetics query projections round-trip shared registry metadata 
 
   const familyEntity = projectRegistryEntity("family", familyRecord!);
 
+  assert.deepEqual(
+    familyEntity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [{ type: "related_to", targetId: "var_01JNY0B2W4VG5C2A0G9S8M7R6Q" }],
+  );
   assert.deepEqual(familyEntity.relatedIds, ["var_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
 
   const familyRoundTrip = familyRecordFromEntity(familyEntity);
@@ -388,6 +457,10 @@ test("family and genetics query projections round-trip shared registry metadata 
   const geneticsRoundTrip = geneticsRecordFromEntity(geneticsEntity);
 
   assert.ok(geneticsRoundTrip);
+  assert.deepEqual(
+    geneticsEntity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [{ type: "source_family_member", targetId: "fam_01JNY0B2W4VG5C2A0G9S8M7R6P" }],
+  );
   assert.deepEqual(geneticsEntity.relatedIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
   assert.equal("updatedAt" in (geneticsRoundTrip ?? {}), false);
   assert.deepEqual(geneticsRoundTrip?.sourceFamilyMemberIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
@@ -447,6 +520,13 @@ test("condition query projection round-trips shared condition relation metadata"
 
   const entity = projectRegistryEntity("condition", conditionRecord!);
 
+  assert.deepEqual(
+    entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "related_to", targetId: "goal_01JNY0B2W4VG5C2A0G9S8M7R6R" },
+      { type: "related_to", targetId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6S" },
+    ],
+  );
   assert.deepEqual(entity.relatedIds, [
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
     "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
@@ -492,6 +572,10 @@ test("allergy query projection round-trips shared allergy relation metadata", ()
 
   const entity = projectRegistryEntity("allergy", allergyRecord!);
 
+  assert.deepEqual(
+    entity.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [{ type: "related_to", targetId: "cond_01JNY0B2W4VG5C2A0G9S8M7R6T" }],
+  );
   assert.deepEqual(entity.relatedIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
 
   const roundTripped = allergyRecordFromEntity(entity);

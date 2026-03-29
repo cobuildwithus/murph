@@ -24,7 +24,12 @@ import {
   showSupplementCompound,
   showProfile,
 } from "../src/index.ts";
+import {
+  linkTargetIds,
+  normalizeCanonicalLinks,
+} from "../src/canonical-entities.ts";
 import { collectCanonicalEntities } from "../src/health/canonical-collector.ts";
+import { fallbackCurrentProfileEntityFromSnapshotRecord } from "../src/health/current-profile-resolution.ts";
 import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";
 import { listAssessments } from "../src/health/assessments.ts";
@@ -34,6 +39,7 @@ import {
   selectHistoryRecords,
   selectProfileSnapshotRecords,
 } from "../src/health/projections.ts";
+import { materializeSearchDocument } from "../src/search-shared.ts";
 import type { VaultReadModel, VaultRecord } from "../src/model.ts";
 
 async function writeVaultFile(
@@ -481,6 +487,12 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
   const hasStatus = Object.prototype.hasOwnProperty.call(overrides, "status");
   const hasStream = Object.prototype.hasOwnProperty.call(overrides, "stream");
   const hasExperimentSlug = Object.prototype.hasOwnProperty.call(overrides, "experimentSlug");
+  const links = normalizeCanonicalLinks(
+    (overrides.relatedIds ?? []).map((targetId) => ({
+      type: "related_to" as const,
+      targetId,
+    })),
+  );
 
   return {
     displayId: overrides.displayId,
@@ -500,7 +512,8 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
     data: overrides.data ?? {},
     body: overrides.body ?? null,
     frontmatter: overrides.frontmatter ?? null,
-    relatedIds: overrides.relatedIds,
+    links,
+    relatedIds: overrides.relatedIds ?? linkTargetIds(links),
   };
 }
 
@@ -525,6 +538,14 @@ function createManualVault(records: VaultRecord[]): VaultReadModel {
       body: record.body,
       attributes: record.data,
       frontmatter: record.frontmatter,
+      links:
+        record.links ??
+        normalizeCanonicalLinks(
+          (record.relatedIds ?? []).map((targetId) => ({
+            type: "related_to" as const,
+            targetId,
+          })),
+        ),
       relatedIds: record.relatedIds ?? [],
       stream: record.stream,
       experimentSlug: record.experimentSlug,
@@ -565,6 +586,23 @@ function groupRecordsByFamily(records: readonly VaultRecord[]) {
     {},
   );
 }
+
+test("manual record fixtures derive normalized links from compatibility relatedIds", () => {
+  const record = createRecord({
+    displayId: "goal_manual_01",
+    recordType: "goal",
+    relatedIds: ["cond_manual_01", "prot_manual_01"],
+  });
+
+  assert.deepEqual(
+    record.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "related_to", targetId: "cond_manual_01" },
+      { type: "related_to", targetId: "prot_manual_01" },
+    ],
+  );
+  assert.deepEqual(linkTargetIds(record.links), ["cond_manual_01", "prot_manual_01"]);
+});
 
 test("showProfile derives the current profile from the latest snapshot when the markdown page is stale", async () => {
   const vaultRoot = await createHealthVault();
@@ -1328,6 +1366,69 @@ test("buildTimeline applies health-specific fallbacks, related-id defaults, and 
       ["history_manual_01", "history", "2026-03-12T00:00:00Z", "history"],
     ],
   );
+});
+
+test("buildTimeline and search fall back to lookupIds when a record has no links or relatedIds", () => {
+  const assessmentRecord = createRecord({
+    displayId: "assessment_lookup_fallback_01",
+    recordType: "assessment",
+    occurredAt: "2026-03-13T08:00:00Z",
+    date: "2026-03-13",
+    lookupIds: ["asmt_alias_01", "asmt_01"],
+    kind: "assessment",
+    title: "Lookup fallback assessment",
+  });
+  const vault = createManualVault([assessmentRecord]);
+
+  const timeline = buildTimeline(vault, {
+    includeJournal: false,
+    includeEvents: false,
+    includeHistory: false,
+    includeProfileSnapshots: false,
+    includeDailySampleSummaries: false,
+    limit: 0,
+  });
+
+  assert.equal(timeline.length, 1);
+  assert.equal(timeline[0]?.id, "assessment_lookup_fallback_01");
+  assert.deepEqual(timeline[0]?.relatedIds, ["asmt_alias_01", "asmt_01"]);
+
+  const searchDocument = materializeSearchDocument(assessmentRecord);
+
+  assert.match(searchDocument.structuredText, /asmt_alias_01/u);
+  assert.match(searchDocument.structuredText, /asmt_01/u);
+});
+
+test("current-profile fallback derives normalized links from the latest snapshot", () => {
+  const entity = fallbackCurrentProfileEntityFromSnapshotRecord({
+    id: "psnap_x",
+    capturedAt: null,
+    recordedAt: "2026-03-12T14:00:00Z",
+    status: "active",
+    summary: "Snapshot summary",
+    sourceAssessmentIds: ["asmt_01"],
+    sourceEventIds: ["evt_01"],
+    profile: {
+      goals: {
+        topGoalIds: ["goal_01"],
+      },
+    },
+    relativePath: "ledger/profile-snapshots/2026/2026-03.jsonl",
+  });
+
+  assert.ok(entity);
+  assert.equal(entity?.entityId, "current");
+  assert.equal(entity?.attributes.snapshotId, "psnap_x");
+  assert.deepEqual(
+    entity?.links.map((link) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "snapshot_of", targetId: "psnap_x" },
+      { type: "source_assessment", targetId: "asmt_01" },
+      { type: "source_event", targetId: "evt_01" },
+      { type: "top_goal", targetId: "goal_01" },
+    ],
+  );
+  assert.deepEqual(entity?.relatedIds, ["psnap_x", "asmt_01", "evt_01", "goal_01"]);
 });
 
 test("buildExportPack preserves the five-file pack while embedding health context", async () => {
