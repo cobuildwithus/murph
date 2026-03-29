@@ -460,11 +460,6 @@ export class HostedUserRunner {
     };
   }): Promise<HostedExecutionCommittedResult> {
     const userId = await this.requireBoundUserId();
-    const existing = await this.commitRecovery.readCommittedDispatch(userId, input.eventId);
-    if (existing) {
-      return existing;
-    }
-
     return persistHostedExecutionCommit({
       bucket: this.bucket,
       currentBundleRefs: input.payload.currentBundleRefs,

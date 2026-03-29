@@ -16,6 +16,7 @@ describe("importHostedAiUsageRecords", () => {
 
     const result = await importHostedAiUsageRecords({
       prisma: prisma as never,
+      trustedUserId: "member_123",
       usage: [
         {
           apiKeyEnv: "OPENAI_API_KEY",
@@ -30,12 +31,18 @@ describe("importHostedAiUsageRecords", () => {
           outputTokens: 45,
           provider: "openai-compatible",
           providerMetadataJson: {
+            nested: {
+              ignored: undefined,
+            },
             provider: "example",
           },
           providerName: "example",
           providerRequestId: "req_123",
           providerSessionId: null,
           rawUsageJson: {
+            nested: {
+              ignored: undefined,
+            },
             totalTokens: 165,
           },
           reasoningTokens: 8,
@@ -62,16 +69,70 @@ describe("importHostedAiUsageRecords", () => {
         turnId: "turn_123",
         attemptCount: 1,
         provider: "openai-compatible",
+        providerMetadataJson: {
+          nested: {},
+          provider: "example",
+        },
+        rawUsageJson: {
+          nested: {},
+          totalTokens: 165,
+        },
         totalTokens: 165,
       }),
       update: {},
     });
   });
+
+  it("rejects usage rows whose memberId does not match the trusted hosted execution user", async () => {
+    const prisma = {
+      hostedAiUsage: {
+        upsert: vi.fn(async () => ({})),
+      },
+    };
+
+    await expect(
+      importHostedAiUsageRecords({
+        prisma: prisma as never,
+        trustedUserId: "member_123",
+        usage: [
+          {
+            attemptCount: 1,
+            memberId: "member_other",
+            occurredAt: "2026-03-29T12:00:00.000Z",
+            provider: "openai-compatible",
+            routeId: "primary",
+            schema: "murph.assistant-usage.v1",
+            sessionId: "asst_123",
+            totalTokens: 165,
+            turnId: "turn_123",
+            usageId: "turn_123.attempt-1",
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      "Hosted AI usage turn_123.attempt-1 memberId member_other does not match the authenticated hosted execution user member_123.",
+    );
+  });
 });
 
 describe("listHostedAiUsagePendingStripeMetering", () => {
   it("queries pending metering candidates in occurred order", async () => {
-    const findMany = vi.fn(async () => []);
+    const findMany = vi.fn(async () => [{
+      apiKeyEnv: null,
+      credentialSource: "platform",
+      id: "usage_123",
+      inputTokens: 10,
+      memberId: "member_123",
+      occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+      outputTokens: 5,
+      provider: "openai-compatible",
+      requestedModel: "gpt-5.4-mini",
+      stripeMeterStatus: "pending",
+      totalTokens: 15,
+      member: {
+        stripeCustomerId: "cus_123",
+      },
+    }]);
     const prisma = {
       hostedAiUsage: {
         findMany,
@@ -107,6 +168,7 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         id: true,
         inputTokens: true,
         memberId: true,
+        occurredAt: true,
         outputTokens: true,
         provider: true,
         requestedModel: true,
@@ -119,5 +181,26 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
         },
       },
     });
+    expect(
+      await listHostedAiUsagePendingStripeMetering({
+        limit: 16,
+        prisma: prisma as never,
+      }),
+    ).toEqual([{
+      apiKeyEnv: null,
+      credentialSource: "platform",
+      id: "usage_123",
+      inputTokens: 10,
+      memberId: "member_123",
+      occurredAt: new Date("2026-03-29T12:00:00.000Z"),
+      outputTokens: 5,
+      provider: "openai-compatible",
+      requestedModel: "gpt-5.4-mini",
+      stripeMeterStatus: "pending",
+      totalTokens: 15,
+      member: {
+        stripeCustomerId: "cus_123",
+      },
+    }]);
   });
 });
