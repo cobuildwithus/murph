@@ -86,6 +86,9 @@ const REGISTRY_LINK_TYPE_MAP = {
   related_protocol: "related_to",
   related_condition: "related_to",
   related_variant: "related_to",
+  related_to: "related_to",
+  supports_goal: "supports_goal",
+  addresses_condition: "addresses_condition",
   source_family_member: "source_family_member",
 } as const satisfies Record<string, CanonicalEntityLinkType>;
 
@@ -182,19 +185,6 @@ function buildArrayLinks(
   }));
 }
 
-function buildMergedArrayLinks(
-  source: Record<string, unknown>,
-  keys: readonly string[],
-  type: CanonicalEntityLinkType,
-): CanonicalEntityLink[] {
-  return normalizeUniqueStringArray(
-    keys.flatMap((key) => (Array.isArray(source[key]) ? source[key] : [])),
-  ).map((targetId) => ({
-    type,
-    targetId,
-  }));
-}
-
 function buildScalarLinks(
   source: Record<string, unknown>,
   keys: readonly string[],
@@ -221,39 +211,25 @@ function buildRegistryLinks(
   >,
   attributes: Record<string, unknown>,
 ): CanonicalEntityLink[] {
-  const descriptorLinks = extractHealthEntityRegistryLinks(
-    family as HealthEntityKind,
-    attributes,
-  ).map((link) => ({
-    type: normalizeRegistryLinkType(link),
-    targetId: link.targetId,
-  }));
+  const protocolSelfId =
+    family === "protocol" ? firstString(attributes, ["protocolId"]) : null;
 
-  const supplementalLinks =
-    family === "protocol"
-      ? [
-          ...buildArrayLinks(attributes, ["relatedIds"], "related_to"),
-          ...buildMergedArrayLinks(
-            attributes,
-            ["goalIds", "relatedGoalIds"],
-            "supports_goal",
-          ),
-          ...buildScalarLinks(attributes, ["goalId"], "supports_goal"),
-          ...buildMergedArrayLinks(
-            attributes,
-            ["conditionIds", "relatedConditionIds"],
-            "addresses_condition",
-          ),
-          ...buildScalarLinks(attributes, ["conditionId"], "addresses_condition"),
-          ...buildMergedArrayLinks(
-            attributes,
-            ["protocolIds", "relatedProtocolIds"],
-            "related_to",
-          ),
-        ]
-      : buildArrayLinks(attributes, ["relatedIds"], "related_to");
-
-  return normalizeCanonicalLinks([...descriptorLinks, ...supplementalLinks]);
+  return normalizeCanonicalLinks(
+    extractHealthEntityRegistryLinks(family as HealthEntityKind, attributes)
+      .filter((link) =>
+        !(
+          family === "protocol" &&
+          protocolSelfId &&
+          link.type === "related_protocol" &&
+          link.targetId === protocolSelfId &&
+          link.sourceKeys.length === 1 &&
+          link.sourceKeys[0] === "protocolId"
+        ))
+      .map((link) => ({
+        type: normalizeRegistryLinkType(link),
+        targetId: link.targetId,
+      })),
+  );
 }
 
 function registryCompatibilitySelfIds(
@@ -619,7 +595,7 @@ export function projectRegistryEntity(
   >,
   record: RegistryMarkdownRecord,
 ): CanonicalEntity {
-  const attributes = record.attributes;
+  const attributes = record.document.attributes;
   const occurredAt =
     firstString(attributes, [
       "updatedAt",
@@ -635,17 +611,17 @@ export function projectRegistryEntity(
   ]);
 
   return {
-    entityId: record.id,
-    primaryLookupId: record.id,
-    lookupIds: uniqueStrings([record.id, record.slug]),
+    entityId: record.entity.id,
+    primaryLookupId: record.entity.id,
+    lookupIds: uniqueStrings([record.entity.id, record.entity.slug]),
     family,
     kind: firstString(attributes, ["docType", "kind"]) ?? family,
-    status: record.status,
+    status: record.entity.status,
     occurredAt,
     date: firstString(attributes, ["dayKey"]) ?? normalizeCanonicalDate(occurredAt),
-    path: record.relativePath,
-    title: record.title,
-    body: record.body,
+    path: record.document.relativePath,
+    title: record.entity.title,
+    body: record.document.body,
     attributes,
     frontmatter: attributes,
     links,

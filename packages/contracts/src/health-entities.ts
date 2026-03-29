@@ -12,6 +12,7 @@ import {
   geneticVariantUpsertPayloadSchema,
   goalUpsertPatchPayloadSchema,
   goalUpsertPayloadSchema,
+  protocolUpsertPayloadSchema,
 } from "./shares.ts";
 import {
   allergyFrontmatterSchema,
@@ -19,6 +20,7 @@ import {
   familyMemberFrontmatterSchema,
   geneticVariantFrontmatterSchema,
   goalFrontmatterSchema,
+  protocolFrontmatterSchema,
 } from "./zod.ts";
 
 export type HealthEntityKind =
@@ -171,13 +173,33 @@ function readFirstRegistryStringArray(
   return [];
 }
 
+function readMergedRegistryStringArray(
+  source: Record<string, unknown>,
+  keys: readonly string[],
+): string[] {
+  return [
+    ...new Set(
+      keys.flatMap((key) => {
+        const value = source[key];
+        if (!Array.isArray(value)) {
+          return [];
+        }
+
+        return value
+          .map((entry) => normalizeRegistryString(entry))
+          .filter((entry): entry is string => Boolean(entry));
+      }),
+    ),
+  ];
+}
+
 function extractRegistryRelationTargets(
   source: Record<string, unknown>,
   relation: HealthEntityRegistryLinkMetadata,
 ): string[] {
   return relation.cardinality === "one"
     ? [readFirstRegistryString(source, relation.keys)].filter((entry): entry is string => Boolean(entry))
-    : readFirstRegistryStringArray(source, relation.keys);
+    : readMergedRegistryStringArray(source, relation.keys);
 }
 
 export function defineRegistryEntity(
@@ -206,9 +228,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+interface ProjectedSupplementIngredient {
+  compound: string;
+  label: string | null;
+  amount: number | null;
+  unit: string | null;
+  active: boolean;
+  note: string | null;
+}
+
 function projectSupplementIngredients(
   value: unknown,
-): Array<Record<string, unknown>> {
+): ProjectedSupplementIngredient[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -223,20 +254,22 @@ function projectSupplementIngredients(
       return [];
     }
 
-    return [
-      Object.fromEntries(
-        Object.entries({
-          compound,
-          label: typeof entry.label === "string" && entry.label.trim().length > 0 ? entry.label.trim() : undefined,
-          amount: typeof entry.amount === "number" && Number.isFinite(entry.amount) ? entry.amount : undefined,
-          unit: typeof entry.unit === "string" && entry.unit.trim().length > 0 ? entry.unit.trim() : undefined,
-          active: typeof entry.active === "boolean" ? entry.active : undefined,
-          note: typeof entry.note === "string" && entry.note.trim().length > 0 ? entry.note.trim() : undefined,
-        }).filter(([, entryValue]) => entryValue !== undefined),
-      ),
-    ];
+    return [{
+      compound,
+      label: typeof entry.label === "string" && entry.label.trim().length > 0 ? entry.label.trim() : null,
+      amount: typeof entry.amount === "number" && Number.isFinite(entry.amount) ? entry.amount : null,
+      unit: typeof entry.unit === "string" && entry.unit.trim().length > 0 ? entry.unit.trim() : null,
+      active: typeof entry.active === "boolean" ? entry.active : true,
+      note: typeof entry.note === "string" && entry.note.trim().length > 0 ? entry.note.trim() : null,
+    }];
   });
 }
+
+const RELATED_IDS_COMPATIBILITY_RELATION: HealthEntityRegistryLinkMetadata = {
+  type: "related_to",
+  keys: ["relatedIds"],
+  cardinality: "many",
+};
 
 const checkedHealthEntityDefinitions = [
   {
@@ -285,6 +318,7 @@ const checkedHealthEntityDefinitions = [
       patchPayloadSchema: goalUpsertPatchPayloadSchema,
       upsertPayloadSchema: goalUpsertPayloadSchema,
       relationKeys: [
+        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "parent_goal",
           keys: ["parentGoalId"],
@@ -356,6 +390,7 @@ const checkedHealthEntityDefinitions = [
       patchPayloadSchema: conditionUpsertPatchPayloadSchema,
       upsertPayloadSchema: conditionUpsertPayloadSchema,
       relationKeys: [
+        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_goal",
           keys: ["relatedGoalIds"],
@@ -420,6 +455,7 @@ const checkedHealthEntityDefinitions = [
       patchPayloadSchema: allergyUpsertPatchPayloadSchema,
       upsertPayloadSchema: allergyUpsertPayloadSchema,
       relationKeys: [
+        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_condition",
           keys: ["relatedConditionIds"],
@@ -458,7 +494,7 @@ const checkedHealthEntityDefinitions = [
       },
     },
   }),
-  {
+  defineRegistryEntity({
     kind: "protocol",
     listKinds: ["protocol"],
     noun: "protocol",
@@ -472,8 +508,60 @@ const checkedHealthEntityDefinitions = [
       group: "sleep",
     },
     registry: {
+      frontmatterSchema: protocolFrontmatterSchema,
       directory: "bank/protocols",
-      idKeys: ["protocolId"],
+      idField: "protocolId",
+      upsertPayloadSchema: protocolUpsertPayloadSchema,
+      relationKeys: [
+        RELATED_IDS_COMPATIBILITY_RELATION,
+        {
+          type: "supports_goal",
+          keys: ["goalIds", "relatedGoalIds"],
+          cardinality: "many",
+        },
+        {
+          type: "supports_goal",
+          keys: ["goalId"],
+          cardinality: "one",
+        },
+        {
+          type: "addresses_condition",
+          keys: ["conditionIds", "relatedConditionIds"],
+          cardinality: "many",
+        },
+        {
+          type: "addresses_condition",
+          keys: ["conditionId"],
+          cardinality: "one",
+        },
+        {
+          type: "related_protocol",
+          keys: ["protocolIds", "relatedProtocolIds"],
+          cardinality: "many",
+        },
+        {
+          type: "related_protocol",
+          keys: ["protocolId"],
+          cardinality: "one",
+        },
+      ],
+      command: {
+        commandDescription: "Protocol registry commands for the health extension surface.",
+        commandName: "protocol",
+        listServiceMethod: "listProtocols",
+        listStatusDescription: "Optional protocol status to filter by.",
+        payloadFile: "protocol.json",
+        runtimeListMethod: "listProtocols",
+        runtimeMethod: "upsertProtocolItem",
+        runtimeShowMethod: "showProtocol",
+        scaffoldServiceMethod: "scaffoldProtocol",
+        showId: {
+          description: "Protocol id or slug to show.",
+          example: "<protocol-id>",
+        },
+        showServiceMethod: "showProtocol",
+        upsertServiceMethod: "upsertProtocol",
+      },
       titleKeys: ["title"],
       statusKeys: ["status"],
       transform({ attributes, helpers, relativePath }) {
@@ -489,13 +577,15 @@ const checkedHealthEntityDefinitions = [
           manufacturer: helpers.firstString(attributes, ["manufacturer"]),
           servingSize: helpers.firstString(attributes, ["servingSize"]),
           ingredients: projectSupplementIngredients(attributes.ingredients),
-          relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
-          relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
-          group: deriveProtocolGroupFromRelativePath(relativePath),
+          relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds", "goalIds"]),
+          relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds", "conditionIds"]),
+          group:
+            helpers.firstString(attributes, ["group"]) ??
+            deriveProtocolGroupFromRelativePath(relativePath),
         };
       },
     },
-  },
+  }),
   {
     kind: "history",
     listKinds: ["encounter", "procedure", "test", "adverse_effect", "exposure"],
@@ -552,6 +642,7 @@ const checkedHealthEntityDefinitions = [
       patchPayloadSchema: familyMemberUpsertPatchPayloadSchema,
       upsertPayloadSchema: familyMemberUpsertPayloadSchema,
       relationKeys: [
+        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "related_variant",
           keys: ["relatedVariantIds"],
@@ -606,6 +697,7 @@ const checkedHealthEntityDefinitions = [
       patchPayloadSchema: geneticVariantUpsertPatchPayloadSchema,
       upsertPayloadSchema: geneticVariantUpsertPayloadSchema,
       relationKeys: [
+        RELATED_IDS_COMPATIBILITY_RELATION,
         {
           type: "source_family_member",
           keys: ["sourceFamilyMemberIds"],
@@ -701,5 +793,6 @@ export function extractHealthEntityRegistryRelatedIds(
 export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");
 export const conditionRegistryEntityDefinition = requireHealthEntityRegistryDefinition("condition");
 export const allergyRegistryEntityDefinition = requireHealthEntityRegistryDefinition("allergy");
+export const protocolRegistryEntityDefinition = requireHealthEntityRegistryDefinition("protocol");
 export const familyRegistryEntityDefinition = requireHealthEntityRegistryDefinition("family");
 export const geneticsRegistryEntityDefinition = requireHealthEntityRegistryDefinition("genetics");

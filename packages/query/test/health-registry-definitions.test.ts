@@ -10,6 +10,7 @@ import {
   goalRegistryEntityDefinition,
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
+  protocolRegistryEntityDefinition,
 } from "@murph/contracts";
 import { test } from "vitest";
 
@@ -24,6 +25,7 @@ import {
   geneticsRecordFromEntity,
   geneticsRegistryDefinition,
   goalRegistryDefinition,
+  protocolRecordFromEntity,
   protocolRegistryDefinition,
   sortRegistryRecords,
   toRegistryRecord,
@@ -81,7 +83,67 @@ test("protocol registry projection keeps the shared relative-path grouping rule"
     protocolRegistryDefinition,
   );
 
-  assert.equal(projected?.group, "supplements/sleep");
+  assert.equal(projected?.entity.group, "supplements/sleep");
+});
+
+test("protocol shared registry definition owns payload, command, and relation metadata", () => {
+  assert.equal(protocolRegistryEntityDefinition.registry.idField, "protocolId");
+  assert.ok(protocolRegistryEntityDefinition.registry.frontmatterSchema);
+  assert.ok(protocolRegistryEntityDefinition.registry.upsertPayloadSchema);
+  assert.equal(protocolRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertProtocolItem");
+  assert.equal(protocolRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showProtocol");
+
+  const parsedPayload = protocolRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
+    title: "Magnesium glycinate",
+  });
+
+  assert.equal(parsedPayload?.success, true);
+  if (parsedPayload?.success) {
+    const payload = parsedPayload.data as { kind: string; status: string };
+
+    assert.equal(payload.kind, "supplement");
+    assert.equal(payload.status, "active");
+  }
+
+  const links = extractHealthEntityRegistryLinks("protocol", {
+    relatedIds: ["goal_compat_01"],
+    goalId: "goal_scalar_01",
+    conditionIds: ["cond_array_01"],
+    protocolIds: ["prot_related_01"],
+    protocolId: "prot_self_01",
+  });
+
+  assert.deepEqual(
+    links.map((link: { type: string; targetId: string }) => ({ type: link.type, targetId: link.targetId })),
+    [
+      { type: "related_to", targetId: "goal_compat_01" },
+      { type: "supports_goal", targetId: "goal_scalar_01" },
+      { type: "addresses_condition", targetId: "cond_array_01" },
+      { type: "related_protocol", targetId: "prot_related_01" },
+      { type: "related_protocol", targetId: "prot_self_01" },
+    ],
+  );
+  assert.deepEqual(
+    extractHealthEntityRegistryRelatedIds("protocol", {
+      relatedIds: ["goal_compat_01"],
+      goalId: "goal_scalar_01",
+      conditionIds: ["cond_array_01"],
+      protocolIds: ["prot_related_01"],
+      protocolId: "prot_self_01",
+    }),
+    ["goal_compat_01", "goal_scalar_01", "cond_array_01", "prot_related_01", "prot_self_01"],
+  );
+});
+
+test("shared registry relation metadata preserves compatibility relatedIds links", () => {
+  for (const kind of ["goal", "condition", "allergy", "protocol", "family", "genetics"] as const) {
+    assert.deepEqual(
+      extractHealthEntityRegistryRelatedIds(kind, {
+        relatedIds: ["compat_related_01", "compat_related_01"],
+      }),
+      ["compat_related_01"],
+    );
+  }
 });
 
 test("protocol query projection merges mixed relation alias arrays into normalized links", () => {
@@ -139,6 +201,73 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
     "prot_related_02",
     "prot_01",
   ]);
+});
+
+test("protocol query projection round-trips shared protocol relation and ingredient metadata", () => {
+  const document = {
+    relativePath: "bank/protocols/supplements/sleep/magnesium-glycinate.md",
+    markdown: "# Magnesium glycinate",
+    body: "# Magnesium glycinate",
+    attributes: {
+      protocolId: "prot_01JNY0B2W4VG5C2A0G9S8M7R6P",
+      slug: "magnesium-glycinate",
+      title: "Magnesium glycinate",
+      kind: "supplement",
+      status: "active",
+      startedOn: "2026-03-12",
+      ingredients: [
+        {
+          compound: "Magnesium",
+          amount: 200,
+          unit: "mg",
+        },
+        {
+          compound: "Glycine",
+          label: "Glycine buffer",
+          active: false,
+          note: "Paired to smooth GI tolerance.",
+        },
+      ],
+      relatedIds: ["goal_compat_01"],
+      relatedGoalIds: ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"],
+      relatedConditionIds: ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"],
+      relatedProtocolIds: ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"],
+    },
+  };
+
+  const protocolRecord = toRegistryRecord(document, protocolRegistryDefinition);
+
+  assert.ok(protocolRecord);
+  assert.deepEqual(protocolRecord?.entity.ingredients, [
+    {
+      compound: "Magnesium",
+      label: null,
+      amount: 200,
+      unit: "mg",
+      active: true,
+      note: null,
+    },
+    {
+      compound: "Glycine",
+      label: "Glycine buffer",
+      amount: null,
+      unit: null,
+      active: false,
+      note: "Paired to smooth GI tolerance.",
+    },
+  ]);
+  assert.deepEqual(protocolRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
+  assert.deepEqual(protocolRecord?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.equal(protocolRecord?.entity.group, "supplements/sleep");
+
+  const entity = projectRegistryEntity("protocol", protocolRecord!);
+  const roundTripped = protocolRecordFromEntity(entity);
+
+  assert.ok(roundTripped);
+  assert.deepEqual(roundTripped?.entity.ingredients, protocolRecord?.entity.ingredients);
+  assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
+  assert.deepEqual(roundTripped?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.equal(roundTripped?.entity.group, "supplements/sleep");
 });
 
 test("goal shared registry definition owns payload, command, and relation metadata", () => {
@@ -360,12 +489,12 @@ test("goal query projection round-trips shared Goal relation and window metadata
   const goalRecord = toRegistryRecord(document, goalRegistryDefinition);
 
   assert.ok(goalRecord);
-  assert.equal(goalRecord?.windowStartAt, "2026-03-01");
-  assert.equal(goalRecord?.windowTargetAt, "2026-06-01");
-  assert.equal(goalRecord?.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
-  assert.deepEqual(goalRecord?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(goalRecord?.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
-  assert.deepEqual(goalRecord?.domains, ["sleep", "recovery"]);
+  assert.equal(goalRecord?.entity.windowStartAt, "2026-03-01");
+  assert.equal(goalRecord?.entity.windowTargetAt, "2026-06-01");
+  assert.equal(goalRecord?.entity.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
+  assert.deepEqual(goalRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(goalRecord?.entity.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(goalRecord?.entity.domains, ["sleep", "recovery"]);
 
   const entity = projectRegistryEntity("goal", goalRecord!);
 
@@ -387,12 +516,12 @@ test("goal query projection round-trips shared Goal relation and window metadata
   const roundTripped = goalRecordFromEntity(entity);
 
   assert.ok(roundTripped);
-  assert.equal(roundTripped?.windowStartAt, "2026-03-01");
-  assert.equal(roundTripped?.windowTargetAt, "2026-06-01");
-  assert.equal(roundTripped?.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
-  assert.deepEqual(roundTripped?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(roundTripped?.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
-  assert.deepEqual(roundTripped?.domains, ["sleep", "recovery"]);
+  assert.equal(roundTripped?.entity.windowStartAt, "2026-03-01");
+  assert.equal(roundTripped?.entity.windowTargetAt, "2026-06-01");
+  assert.equal(roundTripped?.entity.parentGoalId, "goal_01JNY0B2W4VG5C2A0G9S8M7R6P");
+  assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(roundTripped?.entity.relatedExperimentIds, ["exp_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.deepEqual(roundTripped?.entity.domains, ["sleep", "recovery"]);
 });
 
 test("family and genetics query projections round-trip shared registry metadata without leaking legacy aliases", () => {
@@ -430,7 +559,7 @@ test("family and genetics query projections round-trip shared registry metadata 
 
   assert.ok(familyRoundTrip);
   assert.equal("updatedAt" in (familyRoundTrip ?? {}), false);
-  assert.deepEqual(familyRoundTrip?.relatedVariantIds, ["var_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
+  assert.deepEqual(familyRoundTrip?.entity.relatedVariantIds, ["var_01JNY0B2W4VG5C2A0G9S8M7R6Q"]);
 
   const geneticsRecord = toRegistryRecord(
     {
@@ -463,7 +592,7 @@ test("family and genetics query projections round-trip shared registry metadata 
   );
   assert.deepEqual(geneticsEntity.relatedIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
   assert.equal("updatedAt" in (geneticsRoundTrip ?? {}), false);
-  assert.deepEqual(geneticsRoundTrip?.sourceFamilyMemberIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
+  assert.deepEqual(geneticsRoundTrip?.entity.sourceFamilyMemberIds, ["fam_01JNY0B2W4VG5C2A0G9S8M7R6P"]);
 
   const sortedGenetics = sortRegistryRecords(
     [
@@ -486,7 +615,7 @@ test("family and genetics query projections round-trip shared registry metadata 
     geneticsRegistryDefinition,
   );
 
-  assert.deepEqual(sortedGenetics.map((record) => record.gene), ["APOE", "MTHFR"]);
+  assert.deepEqual(sortedGenetics.map((record) => record.entity.gene), ["APOE", "MTHFR"]);
 });
 
 test("condition query projection round-trips shared condition relation metadata", () => {
@@ -512,11 +641,11 @@ test("condition query projection round-trips shared condition relation metadata"
   const conditionRecord = toRegistryRecord(document, conditionRegistryDefinition);
 
   assert.ok(conditionRecord);
-  assert.equal(conditionRecord?.clinicalStatus, "active");
-  assert.equal(conditionRecord?.verificationStatus, "confirmed");
-  assert.deepEqual(conditionRecord?.bodySites, ["head"]);
-  assert.deepEqual(conditionRecord?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(conditionRecord?.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.equal(conditionRecord?.entity.clinicalStatus, "active");
+  assert.equal(conditionRecord?.entity.verificationStatus, "confirmed");
+  assert.deepEqual(conditionRecord?.entity.bodySites, ["head"]);
+  assert.deepEqual(conditionRecord?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(conditionRecord?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
 
   const entity = projectRegistryEntity("condition", conditionRecord!);
 
@@ -536,12 +665,12 @@ test("condition query projection round-trips shared condition relation metadata"
   const roundTripped = conditionRecordFromEntity(entity);
 
   assert.ok(roundTripped);
-  assert.equal(roundTripped?.clinicalStatus, "active");
-  assert.equal(roundTripped?.verificationStatus, "confirmed");
-  assert.deepEqual(roundTripped?.bodySites, ["head"]);
-  assert.deepEqual(roundTripped?.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
-  assert.deepEqual(roundTripped?.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
-  assert.equal(roundTripped?.note, "Likely worsened by poor sleep.");
+  assert.equal(roundTripped?.entity.clinicalStatus, "active");
+  assert.equal(roundTripped?.entity.verificationStatus, "confirmed");
+  assert.deepEqual(roundTripped?.entity.bodySites, ["head"]);
+  assert.deepEqual(roundTripped?.entity.relatedGoalIds, ["goal_01JNY0B2W4VG5C2A0G9S8M7R6R"]);
+  assert.deepEqual(roundTripped?.entity.relatedProtocolIds, ["prot_01JNY0B2W4VG5C2A0G9S8M7R6S"]);
+  assert.equal(roundTripped?.entity.note, "Likely worsened by poor sleep.");
 });
 
 test("allergy query projection round-trips shared allergy relation metadata", () => {
@@ -566,9 +695,9 @@ test("allergy query projection round-trips shared allergy relation metadata", ()
   const allergyRecord = toRegistryRecord(document, allergyRegistryDefinition);
 
   assert.ok(allergyRecord);
-  assert.equal(allergyRecord?.substance, "Peanut");
-  assert.equal(allergyRecord?.criticality, "high");
-  assert.deepEqual(allergyRecord?.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
+  assert.equal(allergyRecord?.entity.substance, "Peanut");
+  assert.equal(allergyRecord?.entity.criticality, "high");
+  assert.deepEqual(allergyRecord?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
 
   const entity = projectRegistryEntity("allergy", allergyRecord!);
 
@@ -581,10 +710,10 @@ test("allergy query projection round-trips shared allergy relation metadata", ()
   const roundTripped = allergyRecordFromEntity(entity);
 
   assert.ok(roundTripped);
-  assert.equal(roundTripped?.substance, "Peanut");
-  assert.equal(roundTripped?.criticality, "high");
-  assert.equal(roundTripped?.reaction, "Hives");
-  assert.equal(roundTripped?.recordedOn, "2026-03-02");
-  assert.deepEqual(roundTripped?.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
-  assert.equal(roundTripped?.note, "Carries an epinephrine auto-injector.");
+  assert.equal(roundTripped?.entity.substance, "Peanut");
+  assert.equal(roundTripped?.entity.criticality, "high");
+  assert.equal(roundTripped?.entity.reaction, "Hives");
+  assert.equal(roundTripped?.entity.recordedOn, "2026-03-02");
+  assert.deepEqual(roundTripped?.entity.relatedConditionIds, ["cond_01JNY0B2W4VG5C2A0G9S8M7R6T"]);
+  assert.equal(roundTripped?.entity.note, "Carries an epinephrine auto-injector.");
 });

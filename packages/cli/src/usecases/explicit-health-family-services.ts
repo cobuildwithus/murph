@@ -5,7 +5,9 @@ import {
   geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
   healthEntityDefinitionByKind,
+  protocolRegistryEntityDefinition,
   safeParseContract,
+  type HealthEntityDefinitionWithRegistry,
 } from "@murph/contracts";
 import { VaultCliError } from "../vault-cli-errors.js";
 import type {
@@ -77,6 +79,15 @@ interface RegistryDocFamilyConfig<TIdField extends string> {
   ): Promise<JsonObject[]>;
 }
 
+const REGISTRY_DOC_ENTITY_ID_KEYS: Readonly<Record<RegistryDocFamilyKind, readonly string[]>> = {
+  goal: ["id", "goalId"],
+  condition: ["id", "conditionId"],
+  allergy: ["id", "allergyId"],
+  protocol: ["id", "protocolId"],
+  family: ["id", "familyMemberId"],
+  genetics: ["id", "variantId"],
+};
+
 const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "id",
   "kind",
@@ -139,176 +150,116 @@ function parseRegistryPayloadWithSharedSchema(
   return result.data as JsonObject;
 }
 
-const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] = [
-  (() => {
-    const command = goalRegistryEntityDefinition.registry.command;
-    const idField = goalRegistryEntityDefinition.registry.idField;
+function callRegistryRuntimeUpsert(
+  core: CoreRuntimeModule,
+  methodName: string,
+  input: { vaultRoot: string } & JsonObject,
+): Promise<{
+  record: JsonObject;
+  created?: boolean;
+}> {
+  const method = core[methodName as keyof CoreRuntimeModule];
 
-    if (!command || !idField) {
-      throw new Error('Registry entity "goal" is missing shared command metadata.');
-    }
+  if (typeof method !== "function") {
+    throw new Error(`Health core runtime method "${methodName}" is not available.`);
+  }
 
-    return {
-      idField: idField as "goalId",
-      kind: "goal",
-      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
-      notFoundLabel: goalRegistryEntityDefinition.noun,
-      parsePayload(payload) {
-        return parseRegistryPayloadWithSharedSchema("goal", payload);
-      },
-      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
-      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
-      upsert(core, input) {
-        return core.upsertGoal(input);
-      },
-      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
-      show(query, vaultRoot, lookup) {
-        return query.showGoal(vaultRoot, lookup);
-      },
-      list(query, vaultRoot, options) {
-        return query.listGoals(vaultRoot, options);
-      },
-    } satisfies RegistryDocFamilyConfig<"goalId">;
-  })(),
-  (() => {
-    const command = conditionRegistryEntityDefinition.registry.command;
-    const idField = conditionRegistryEntityDefinition.registry.idField;
+  return (method as (input: { vaultRoot: string } & JsonObject) => Promise<{
+    record: JsonObject;
+    created?: boolean;
+  }>)(input);
+}
 
-    if (!command || !idField) {
-      throw new Error('Registry entity "condition" is missing shared command metadata.');
-    }
+function callRegistryRuntimeShow(
+  query: QueryRuntimeModule,
+  methodName: string,
+  vaultRoot: string,
+  lookup: string,
+): Promise<JsonObject | null> {
+  const method = query[methodName as keyof QueryRuntimeModule];
 
-    return {
-      idField: idField as "conditionId",
-      kind: "condition",
-      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
-      notFoundLabel: conditionRegistryEntityDefinition.noun,
-      parsePayload(payload) {
-        return parseRegistryPayloadWithSharedSchema("condition", payload);
-      },
-      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
-      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
-      upsert(core, input) {
-        return core.upsertCondition(input);
-      },
-      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
-      show(query, vaultRoot, lookup) {
-        return query.showCondition(vaultRoot, lookup);
-      },
-      list(query, vaultRoot, options) {
-        return query.listConditions(vaultRoot, options);
-      },
-    } satisfies RegistryDocFamilyConfig<"conditionId">;
-  })(),
-  (() => {
-    const command = allergyRegistryEntityDefinition.registry.command;
-    const idField = allergyRegistryEntityDefinition.registry.idField;
+  if (typeof method !== "function") {
+    throw new Error(`Health query runtime method "${methodName}" is not available.`);
+  }
 
-    if (!command || !idField) {
-      throw new Error('Registry entity "allergy" is missing shared command metadata.');
-    }
+  return (method as (vaultRoot: string, lookup: string) => Promise<JsonObject | null>)(
+    vaultRoot,
+    lookup,
+  );
+}
 
-    return {
-      idField: idField as "allergyId",
-      kind: "allergy",
-      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
-      notFoundLabel: allergyRegistryEntityDefinition.noun,
-      parsePayload(payload) {
-        return parseRegistryPayloadWithSharedSchema("allergy", payload);
-      },
-      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
-      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
-      upsert(core, input) {
-        return core.upsertAllergy(input);
-      },
-      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
-      show(query, vaultRoot, lookup) {
-        return query.showAllergy(vaultRoot, lookup);
-      },
-      list(query, vaultRoot, options) {
-        return query.listAllergies(vaultRoot, options);
-      },
-    } satisfies RegistryDocFamilyConfig<"allergyId">;
-  })(),
-  {
-    idField: "protocolId",
-    kind: "protocol",
-    listServiceMethod: "listProtocols",
-    notFoundLabel: "protocol",
-    scaffoldServiceMethod: "scaffoldProtocol",
-    showServiceMethod: "showProtocol",
-    upsert(core, input) {
-      return core.upsertProtocolItem(input);
+function callRegistryRuntimeList(
+  query: QueryRuntimeModule,
+  methodName: string,
+  vaultRoot: string,
+  options: { limit?: number; status?: string },
+): Promise<JsonObject[]> {
+  const method = query[methodName as keyof QueryRuntimeModule];
+
+  if (typeof method !== "function") {
+    throw new Error(`Health query runtime method "${methodName}" is not available.`);
+  }
+
+  return (method as (
+    vaultRoot: string,
+    options: { limit?: number; status?: string },
+  ) => Promise<JsonObject[]>)(vaultRoot, options);
+}
+
+function buildSharedRegistryDocFamilyConfig(
+  definition: HealthEntityDefinitionWithRegistry & {
+    kind: RegistryDocFamilyKind;
+  },
+): RegistryDocFamilyConfig<string> {
+  const command = definition.registry.command;
+  const idField = definition.registry.idField;
+
+  if (!command || !idField) {
+    throw new Error(`Registry entity "${definition.kind}" is missing shared command metadata.`);
+  }
+
+  return {
+    idField,
+    kind: definition.kind,
+    listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
+    notFoundLabel: definition.noun,
+    parsePayload(payload) {
+      return parseRegistryPayloadWithSharedSchema(definition.kind, payload);
     },
-    upsertServiceMethod: "upsertProtocol",
+    scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
+    showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
+    upsert(core, input) {
+      return callRegistryRuntimeUpsert(core, command.runtimeMethod, input);
+    },
+    upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
     show(query, vaultRoot, lookup) {
-      return query.showProtocol(vaultRoot, lookup);
+      return callRegistryRuntimeShow(query, command.runtimeShowMethod, vaultRoot, lookup);
     },
     list(query, vaultRoot, options) {
-      return query.listProtocols(vaultRoot, options);
+      return callRegistryRuntimeList(query, command.runtimeListMethod, vaultRoot, options);
     },
-  },
-  (() => {
-    const command = familyRegistryEntityDefinition.registry.command;
-    const idField = familyRegistryEntityDefinition.registry.idField;
+  };
+}
 
-    if (!command || !idField) {
-      throw new Error('Registry entity "family" is missing shared command metadata.');
-    }
+function narrowRegistryDocFamilyDefinition<TKind extends RegistryDocFamilyKind>(
+  definition: HealthEntityDefinitionWithRegistry,
+  kind: TKind,
+): HealthEntityDefinitionWithRegistry & { kind: TKind } {
+  if (definition.kind !== kind) {
+    throw new Error(`Expected registry entity "${kind}" but received "${definition.kind}".`);
+  }
 
-    return {
-      idField: idField as "familyMemberId",
-      kind: "family",
-      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
-      notFoundLabel: familyRegistryEntityDefinition.noun,
-      parsePayload(payload) {
-        return parseRegistryPayloadWithSharedSchema("family", payload);
-      },
-      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
-      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
-      upsert(core, input) {
-        return core.upsertFamilyMember(input);
-      },
-      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
-      show(query, vaultRoot, lookup) {
-        return query.showFamilyMember(vaultRoot, lookup);
-      },
-      list(query, vaultRoot, options) {
-        return query.listFamilyMembers(vaultRoot, options);
-      },
-    } satisfies RegistryDocFamilyConfig<"familyMemberId">;
-  })(),
-  (() => {
-    const command = geneticsRegistryEntityDefinition.registry.command;
-    const idField = geneticsRegistryEntityDefinition.registry.idField;
+  return definition as HealthEntityDefinitionWithRegistry & { kind: TKind };
+}
 
-    if (!command || !idField) {
-      throw new Error('Registry entity "genetics" is missing shared command metadata.');
-    }
-
-    return {
-      idField: idField as "variantId",
-      kind: "genetics",
-      listServiceMethod: command.listServiceMethod as ExplicitHealthQueryServiceMethodName,
-      notFoundLabel: geneticsRegistryEntityDefinition.noun,
-      parsePayload(payload) {
-        return parseRegistryPayloadWithSharedSchema("genetics", payload);
-      },
-      scaffoldServiceMethod: command.scaffoldServiceMethod as ExplicitHealthCoreServiceMethodName,
-      showServiceMethod: command.showServiceMethod as ExplicitHealthQueryServiceMethodName,
-      upsert(core, input) {
-        return core.upsertGeneticVariant(input);
-      },
-      upsertServiceMethod: command.upsertServiceMethod as ExplicitHealthCoreServiceMethodName,
-      show(query, vaultRoot, lookup) {
-        return query.showGeneticVariant(vaultRoot, lookup);
-      },
-      list(query, vaultRoot, options) {
-        return query.listGeneticVariants(vaultRoot, options);
-      },
-    } satisfies RegistryDocFamilyConfig<"variantId">;
-  })(),
-] as const satisfies readonly RegistryDocFamilyConfig<string>[];
+const registryDocFamilyConfigs: readonly RegistryDocFamilyConfig<string>[] = [
+  narrowRegistryDocFamilyDefinition(goalRegistryEntityDefinition, "goal"),
+  narrowRegistryDocFamilyDefinition(conditionRegistryEntityDefinition, "condition"),
+  narrowRegistryDocFamilyDefinition(allergyRegistryEntityDefinition, "allergy"),
+  narrowRegistryDocFamilyDefinition(protocolRegistryEntityDefinition, "protocol"),
+  narrowRegistryDocFamilyDefinition(familyRegistryEntityDefinition, "family"),
+  narrowRegistryDocFamilyDefinition(geneticsRegistryEntityDefinition, "genetics"),
+].map((definition) => buildSharedRegistryDocFamilyConfig(definition));
 
 function firstNonEmptyString(
   record: JsonObject,
@@ -411,8 +362,10 @@ function buildHistoryUpsertResult(
 }
 
 function toRegistryDocEntityData(record: JsonObject) {
+  const dataSource = readRegistryRecordEntity(record);
+
   return Object.fromEntries(
-    Object.entries(record).filter(
+    Object.entries(dataSource).filter(
       ([key, value]) =>
         !REGISTRY_DOC_ENTITY_OMIT_KEYS.has(key) && value !== undefined,
     ),
@@ -424,21 +377,23 @@ function toRegistryDocReadEntity(
   record: JsonObject,
 ) {
   const data = toRegistryDocEntityData(record);
+  const entity = readRegistryRecordEntity(record);
+  const document = readRegistryRecordDocument(record);
 
   if (kind === "protocol") {
-    const protocolKind = firstNonEmptyString(record, ["kind"]);
+    const protocolKind = firstNonEmptyString(entity, ["kind"]);
     if (protocolKind) {
       data.kind = protocolKind;
     }
   }
 
   return {
-    id: firstNonEmptyString(record, ["id"]) ?? "",
+    id: firstNonEmptyString(entity, REGISTRY_DOC_ENTITY_ID_KEYS[kind]) ?? "",
     kind,
-    title: firstNonEmptyString(record, ["title", "summary", "name", "label"]),
+    title: firstNonEmptyString(entity, ["title", "summary", "name", "label"]),
     occurredAt: null,
-    path: firstNonEmptyString(record, ["relativePath", "path"]),
-    markdown: firstRawString(record, ["markdown", "body"]),
+    path: firstNonEmptyString(document, ["relativePath", "path"]),
+    markdown: firstRawString(document, ["markdown", "body"]),
     data,
     links: buildEntityLinks({
       data,
@@ -507,6 +462,18 @@ function toNestedHealthEntityData(record: JsonObject) {
   );
 }
 
+function readRegistryRecordEntity(record: JsonObject): JsonObject {
+  return typeof record.entity === "object" && record.entity !== null && !Array.isArray(record.entity)
+    ? (record.entity as JsonObject)
+    : record;
+}
+
+function readRegistryRecordDocument(record: JsonObject): JsonObject {
+  return typeof record.document === "object" && record.document !== null && !Array.isArray(record.document)
+    ? (record.document as JsonObject)
+    : record;
+}
+
 function toHistoryReadEntity(record: JsonObject) {
   const data = toNestedHealthEntityData(record);
 
@@ -564,7 +531,7 @@ function slugifyLookup(value: string): string {
 }
 
 function toSupplementEntityData(record: object) {
-  const rawRecord = record as Record<string, unknown>;
+  const rawRecord = readRegistryRecordEntity(record as JsonObject);
 
   return Object.fromEntries(
     Object.entries(rawRecord).filter(
@@ -575,7 +542,8 @@ function toSupplementEntityData(record: object) {
 }
 
 function toSupplementReadEntity(record: object) {
-  const rawRecord = record as JsonObject;
+  const rawRecord = readRegistryRecordEntity(record as JsonObject);
+  const rawDocument = readRegistryRecordDocument(record as JsonObject);
   const data = toSupplementEntityData(record);
   const id =
     firstRawString(rawRecord, ["id"]) ??
@@ -587,8 +555,8 @@ function toSupplementReadEntity(record: object) {
     kind: "supplement" as const,
     title: firstRawString(rawRecord, ["title"]),
     occurredAt: firstRawString(rawRecord, ["startedOn"]),
-    path: firstRawString(rawRecord, ["relativePath", "path"]),
-    markdown: firstRawString(rawRecord, ["markdown", "body"]),
+    path: firstRawString(rawDocument, ["relativePath", "path"]),
+    markdown: firstRawString(rawDocument, ["markdown", "body"]),
     data,
     links: buildEntityLinks({
       data,
@@ -624,37 +592,37 @@ async function renameSupplementRecord(
       group: "supplement",
     });
 
-    if (existing.kind !== "supplement") {
+    if (existing.entity.kind !== "supplement") {
       throw new VaultCliError("not_found", `No supplement found for "${input.lookup}".`);
     }
 
     const result = await core.upsertProtocolItem({
       vaultRoot: input.vault,
-      protocolId: existing.protocolId,
+      protocolId: existing.entity.protocolId,
       slug,
       allowSlugRename: true,
       title,
-      kind: existing.kind,
-      status: existing.status,
-      startedOn: existing.startedOn,
-      stoppedOn: existing.stoppedOn,
-      substance: existing.substance,
-      dose: existing.dose,
-      unit: existing.unit,
-      schedule: existing.schedule,
-      brand: existing.brand,
-      manufacturer: existing.manufacturer,
-      servingSize: existing.servingSize,
-      ingredients: existing.ingredients,
-      relatedGoalIds: existing.relatedGoalIds,
-      relatedConditionIds: existing.relatedConditionIds,
-      group: existing.group,
+      kind: existing.entity.kind,
+      status: existing.entity.status,
+      startedOn: existing.entity.startedOn,
+      stoppedOn: existing.entity.stoppedOn,
+      substance: existing.entity.substance,
+      dose: existing.entity.dose,
+      unit: existing.entity.unit,
+      schedule: existing.entity.schedule,
+      brand: existing.entity.brand,
+      manufacturer: existing.entity.manufacturer,
+      servingSize: existing.entity.servingSize,
+      ingredients: existing.entity.ingredients,
+      relatedGoalIds: existing.entity.relatedGoalIds,
+      relatedConditionIds: existing.entity.relatedConditionIds,
+      group: existing.entity.group,
     });
 
     return {
       vault: input.vault,
-      protocolId: String(result.record.protocolId),
-      lookupId: String(result.record.protocolId),
+      protocolId: String(result.record.entity.protocolId),
+      lookupId: String(result.record.entity.protocolId),
       path: recordPath(result.record),
       created: Boolean(result.created),
     };
@@ -698,7 +666,7 @@ function createRegistryDocCoreServices(
         ...parsedPayload,
         vaultRoot: input.vault,
       });
-      const identifier = String(result.record[config.idField] ?? "");
+      const identifier = String(readRegistryRecordEntity(result.record)[config.idField] ?? "");
 
       return {
         vault: input.vault,
@@ -827,8 +795,8 @@ export function createExplicitHealthCoreServices(
 
       return {
         vault: input.vault,
-        protocolId: String(result.record.protocolId),
-        lookupId: String(result.record.protocolId),
+        protocolId: String(result.record.entity.protocolId),
+        lookupId: String(result.record.entity.protocolId),
         path: recordPath(result.record),
         created: Boolean(result.created),
       };
@@ -852,10 +820,10 @@ export function createExplicitHealthCoreServices(
 
       return {
         vault: input.vault,
-        protocolId: String(result.record.protocolId),
-        lookupId: String(result.record.protocolId),
-        stoppedOn: result.record.stoppedOn ?? null,
-        status: String(result.record.status),
+        protocolId: String(result.record.entity.protocolId),
+        lookupId: String(result.record.entity.protocolId),
+        stoppedOn: result.record.entity.stoppedOn ?? null,
+        status: String(result.record.entity.status),
       };
     },
     async stopSupplement(input: StopProtocolInput) {
@@ -868,10 +836,10 @@ export function createExplicitHealthCoreServices(
 
       return {
         vault: input.vault,
-        protocolId: String(result.record.protocolId),
-        lookupId: String(result.record.protocolId),
-        stoppedOn: result.record.stoppedOn ?? null,
-        status: String(result.record.status),
+        protocolId: String(result.record.entity.protocolId),
+        lookupId: String(result.record.entity.protocolId),
+        stoppedOn: result.record.entity.stoppedOn ?? null,
+        status: String(result.record.entity.status),
       };
     },
   } as Pick<

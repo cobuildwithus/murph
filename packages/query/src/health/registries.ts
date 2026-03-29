@@ -1,5 +1,4 @@
 import {
-  deriveProtocolGroupFromRelativePath,
   requireHealthEntityRegistryDefinition,
   type HealthEntityKind,
   type HealthEntityRegistryProjectionHelpers,
@@ -7,7 +6,6 @@ import {
 } from "@murph/contracts";
 import {
   applyLimit,
-  asObject,
   compareNullableStrings,
   firstBoolean,
   firstNumber,
@@ -21,6 +19,7 @@ import {
 } from "./shared.ts";
 import {
   projectRegistryEntity,
+  type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "../canonical-entities.ts";
 import {
@@ -32,18 +31,29 @@ import type {
   FrontmatterObject,
   MarkdownDocumentRecord,
 } from "./shared.ts";
-import type { CanonicalEntity } from "../canonical-entities.ts";
 
-export interface RegistryMarkdownRecord {
-  id: string;
-  slug: string;
-  title: string | null;
-  status: string | null;
+export interface RegistryDocumentEnvelope {
   relativePath: string;
   markdown: string;
   body: string;
   attributes: FrontmatterObject;
 }
+
+export interface RegistryQueryEntity {
+  id: string;
+  slug: string;
+  title: string | null;
+  status: string | null;
+}
+
+export interface RegistryStoredDocument<
+  TEntity extends RegistryQueryEntity = RegistryQueryEntity,
+> {
+  entity: TEntity;
+  document: RegistryDocumentEnvelope;
+}
+
+export type RegistryMarkdownRecord = RegistryStoredDocument<RegistryQueryEntity>;
 
 export interface RegistryListOptions {
   status?: string | string[];
@@ -56,16 +66,17 @@ type ProjectedRegistryFamily = Extract<
   "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
 >;
 
-interface RegistryDefinition<TRecord extends RegistryMarkdownRecord> {
+interface RegistryDefinition<TEntity extends RegistryQueryEntity> {
   directory: string;
   idKeys: readonly string[];
   titleKeys: readonly string[];
   statusKeys: readonly string[];
-  compare?: (left: TRecord, right: TRecord) => number;
+  compare?: (left: TEntity, right: TEntity) => number;
   transform(
-    base: RegistryMarkdownRecord,
+    base: RegistryQueryEntity,
     attributes: FrontmatterObject,
-  ): TRecord;
+    relativePath: string,
+  ): TEntity;
 }
 
 const registryProjectionHelpers: HealthEntityRegistryProjectionHelpers = {
@@ -76,9 +87,11 @@ const registryProjectionHelpers: HealthEntityRegistryProjectionHelpers = {
   firstStringArray,
 };
 
-export function buildPriorityTitleComparator<TRecord extends RegistryMarkdownRecord & { priority: number | null }>(
-  left: TRecord,
-  right: TRecord,
+export function buildPriorityTitleComparator<
+  TEntity extends RegistryQueryEntity & { priority: number | null },
+>(
+  left: TEntity,
+  right: TEntity,
 ): number {
   const leftPriority = left.priority ?? Number.MAX_SAFE_INTEGER;
   const rightPriority = right.priority ?? Number.MAX_SAFE_INTEGER;
@@ -97,38 +110,32 @@ export function readPriority(
   return firstNumber(attributes, keys);
 }
 
-export function readRegistryStrings(
-  attributes: FrontmatterObject,
-  keys: readonly string[],
-): string[] {
-  return firstStringArray(attributes, keys);
-}
-
-function compareRegistryRecords<TRecord extends RegistryMarkdownRecord>(
+function compareRegistryRecords<TEntity extends RegistryQueryEntity>(
   sortBehavior: HealthEntitySortBehavior | undefined,
-): ((left: TRecord, right: TRecord) => number) | undefined {
+): ((left: TEntity, right: TEntity) => number) | undefined {
   if (sortBehavior === "priority-title") {
-    return buildPriorityTitleComparator as (left: TRecord, right: TRecord) => number;
+    return buildPriorityTitleComparator as (left: TEntity, right: TEntity) => number;
   }
 
   if (sortBehavior === "title") {
-    return (left: TRecord, right: TRecord) => compareNullableStrings(left.title, right.title);
+    return (left: TEntity, right: TEntity) =>
+      compareNullableStrings(left.title, right.title);
   }
 
   if (sortBehavior === "gene-title") {
-    return (left: TRecord, right: TRecord) =>
+    return (left: TEntity, right: TEntity) =>
       compareNullableStrings(
-        (left as TRecord & { gene?: string | null }).gene ?? null,
-        (right as TRecord & { gene?: string | null }).gene ?? null,
+        (left as TEntity & { gene?: string | null }).gene ?? null,
+        (right as TEntity & { gene?: string | null }).gene ?? null,
       ) || compareNullableStrings(left.title, right.title);
   }
 
   return undefined;
 }
 
-function createHealthEntityRegistryDefinition<TRecord extends RegistryMarkdownRecord>(
+function createHealthEntityRegistryDefinition<TEntity extends RegistryQueryEntity>(
   kind: HealthEntityKind,
-): RegistryDefinition<TRecord> {
+): RegistryDefinition<TEntity> {
   const definition = requireHealthEntityRegistryDefinition(kind);
   const { registry } = definition;
 
@@ -138,88 +145,106 @@ function createHealthEntityRegistryDefinition<TRecord extends RegistryMarkdownRe
     titleKeys: registry.titleKeys,
     statusKeys: registry.statusKeys,
     compare: compareRegistryRecords(registry.sortBehavior),
-    transform(base, attributes) {
+    transform(base, attributes, relativePath) {
       return {
         ...base,
         ...(registry.transform?.({
           attributes,
           helpers: registryProjectionHelpers,
-          relativePath: base.relativePath,
+          relativePath,
         }) ?? {}),
-      } as TRecord;
+      } as TEntity;
     },
   };
 }
 
-function transformRegistryRecord<TRecord extends RegistryMarkdownRecord>(
-  base: RegistryMarkdownRecord,
-  definition: RegistryDefinition<TRecord>,
-): TRecord {
-  return definition.transform(base, base.attributes);
+function transformRegistryEntity<TEntity extends RegistryQueryEntity>(
+  base: RegistryQueryEntity,
+  attributes: FrontmatterObject,
+  relativePath: string,
+  definition: RegistryDefinition<TEntity>,
+): TEntity {
+  return definition.transform(base, attributes, relativePath);
 }
 
-export function toRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
   document: MarkdownDocumentRecord,
-  definition: RegistryDefinition<TRecord>,
-): TRecord | null {
+  definition: RegistryDefinition<TEntity>,
+): RegistryStoredDocument<TEntity> | null {
   const id = firstString(document.attributes, definition.idKeys);
   if (!id) {
     return null;
   }
 
-  const base: RegistryMarkdownRecord = {
-    id,
-    slug: firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath),
-    title: firstString(document.attributes, definition.titleKeys),
-    status: firstString(document.attributes, definition.statusKeys),
-    relativePath: document.relativePath,
-    markdown: document.markdown,
-    body: document.body,
-    attributes: document.attributes,
-  };
+  const entity = transformRegistryEntity(
+    {
+      id,
+      slug: firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath),
+      title: firstString(document.attributes, definition.titleKeys),
+      status: firstString(document.attributes, definition.statusKeys),
+    },
+    document.attributes,
+    document.relativePath,
+    definition,
+  );
 
-  return transformRegistryRecord(base, definition);
+  return {
+    entity,
+    document: {
+      relativePath: document.relativePath,
+      markdown: document.markdown,
+      body: document.body,
+      attributes: document.attributes,
+    },
+  };
 }
 
-export function sortRegistryRecords<TRecord extends RegistryMarkdownRecord>(
-  records: TRecord[],
-  definition: RegistryDefinition<TRecord>,
-): TRecord[] {
+export function sortRegistryRecords<TEntity extends RegistryQueryEntity>(
+  records: RegistryStoredDocument<TEntity>[],
+  definition: RegistryDefinition<TEntity>,
+): RegistryStoredDocument<TEntity>[] {
   const compare =
     definition.compare ??
-    ((left: TRecord, right: TRecord) => compareNullableStrings(left.title, right.title));
+    ((left: TEntity, right: TEntity) =>
+      compareNullableStrings(left.title, right.title));
 
-  return records.sort(compare);
+  return records.sort((left, right) => compare(left.entity, right.entity));
 }
 
-function matchesRegistryOptions<TRecord extends RegistryMarkdownRecord>(
-  record: TRecord,
+function matchesRegistryOptions<TEntity extends RegistryQueryEntity>(
+  record: RegistryStoredDocument<TEntity>,
   options: RegistryListOptions,
 ): boolean {
   return (
-    matchesStatus(record.status, options.status) &&
+    matchesStatus(record.entity.status, options.status) &&
     matchesText(
-      [record.id, record.slug, record.title, record.body, record.attributes],
+      [
+        record.entity.id,
+        record.entity.slug,
+        record.entity.title,
+        record.document.body,
+        record.document.attributes,
+      ],
       options.text,
     )
   );
 }
 
-async function findRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+async function findRegistryRecord<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
-  predicate: (record: TRecord) => boolean,
-): Promise<TRecord | null> {
+  definition: RegistryDefinition<TEntity>,
+  predicate: (record: RegistryStoredDocument<TEntity>) => boolean,
+): Promise<RegistryStoredDocument<TEntity> | null> {
   const records = await loadRegistry(vaultRoot, definition);
   return records.find(predicate) ?? null;
 }
 
-async function loadRegistry<TRecord extends RegistryMarkdownRecord>(
+async function loadRegistry<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
-): Promise<TRecord[]> {
+  definition: RegistryDefinition<TEntity>,
+): Promise<RegistryStoredDocument<TEntity>[]> {
   const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
-  const records: TRecord[] = [];
+  const records: RegistryStoredDocument<TEntity>[] = [];
 
   for (const relativePath of relativePaths) {
     const document = await readMarkdownDocument(vaultRoot, relativePath);
@@ -232,43 +257,49 @@ async function loadRegistry<TRecord extends RegistryMarkdownRecord>(
   return sortRegistryRecords(records, definition);
 }
 
-export async function listRegistryRecords<TRecord extends RegistryMarkdownRecord>(
+export async function listRegistryRecords<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   options: RegistryListOptions = {},
-): Promise<TRecord[]> {
+): Promise<RegistryStoredDocument<TEntity>[]> {
   const records = await loadRegistry(vaultRoot, definition);
   const filtered = records.filter((record) => matchesRegistryOptions(record, options));
 
   return applyLimit(filtered, options.limit);
 }
 
-export async function readRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+export async function readRegistryRecord<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   recordId: string,
-): Promise<TRecord | null> {
-  return findRegistryRecord(vaultRoot, definition, (record) => record.id === recordId);
+): Promise<RegistryStoredDocument<TEntity> | null> {
+  return findRegistryRecord(vaultRoot, definition, (record) => record.entity.id === recordId);
 }
 
-export async function showRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+export async function showRegistryRecord<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   lookup: string,
-): Promise<TRecord | null> {
+): Promise<RegistryStoredDocument<TEntity> | null> {
   return findRegistryRecord(
     vaultRoot,
     definition,
-    (record) => matchesLookup(lookup, record.id, record.slug, record.title),
+    (record) =>
+      matchesLookup(
+        lookup,
+        record.entity.id,
+        record.entity.slug,
+        record.entity.title,
+      ),
   );
 }
 
-export function createRegistryQueries<TRecord extends RegistryMarkdownRecord>(
-  definition: RegistryDefinition<TRecord>,
+export function createRegistryQueries<TEntity extends RegistryQueryEntity>(
+  definition: RegistryDefinition<TEntity>,
 ): {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<TRecord[]>;
-  read(vaultRoot: string, recordId: string): Promise<TRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<TRecord | null>;
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<RegistryStoredDocument<TEntity>[]>;
+  read(vaultRoot: string, recordId: string): Promise<RegistryStoredDocument<TEntity> | null>;
+  show(vaultRoot: string, lookup: string): Promise<RegistryStoredDocument<TEntity> | null>;
 } {
   return {
     list(vaultRoot, options = {}) {
@@ -283,13 +314,13 @@ export function createRegistryQueries<TRecord extends RegistryMarkdownRecord>(
   };
 }
 
-export async function listProjectedRegistryRecords<TRecord extends RegistryMarkdownRecord>(
+export async function listProjectedRegistryRecords<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   family: ProjectedRegistryFamily,
-  mapEntity: (entity: CanonicalEntity) => TRecord | null,
+  mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
   options: RegistryListOptions = {},
-): Promise<TRecord[]> {
+): Promise<RegistryStoredDocument<TEntity>[]> {
   const records = await loadProjectedRegistryRecords(
     vaultRoot,
     definition,
@@ -301,29 +332,29 @@ export async function listProjectedRegistryRecords<TRecord extends RegistryMarkd
   return applyLimit(filtered, options.limit);
 }
 
-export async function readProjectedRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+export async function readProjectedRegistryRecord<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   family: ProjectedRegistryFamily,
-  mapEntity: (entity: CanonicalEntity) => TRecord | null,
+  mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
   recordId: string,
-): Promise<TRecord | null> {
+): Promise<RegistryStoredDocument<TEntity> | null> {
   const records = await loadProjectedRegistryRecords(
     vaultRoot,
     definition,
     family,
     mapEntity,
   );
-  return records.find((record) => record.id === recordId) ?? null;
+  return records.find((record) => record.entity.id === recordId) ?? null;
 }
 
-export async function showProjectedRegistryRecord<TRecord extends RegistryMarkdownRecord>(
+export async function showProjectedRegistryRecord<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   family: ProjectedRegistryFamily,
-  mapEntity: (entity: CanonicalEntity) => TRecord | null,
+  mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
   lookup: string,
-): Promise<TRecord | null> {
+): Promise<RegistryStoredDocument<TEntity> | null> {
   const records = await loadProjectedRegistryRecords(
     vaultRoot,
     definition,
@@ -331,17 +362,26 @@ export async function showProjectedRegistryRecord<TRecord extends RegistryMarkdo
     mapEntity,
   );
 
-  return records.find((record) => matchesLookup(lookup, record.id, record.slug, record.title)) ?? null;
+  return (
+    records.find((record) =>
+      matchesLookup(
+        lookup,
+        record.entity.id,
+        record.entity.slug,
+        record.entity.title,
+      ),
+    ) ?? null
+  );
 }
 
-export function createProjectedRegistryQueries<TRecord extends RegistryMarkdownRecord>(
-  definition: RegistryDefinition<TRecord>,
+export function createProjectedRegistryQueries<TEntity extends RegistryQueryEntity>(
+  definition: RegistryDefinition<TEntity>,
   family: ProjectedRegistryFamily,
-  mapEntity: (entity: CanonicalEntity) => TRecord | null,
+  mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
 ): {
-  list(vaultRoot: string, options?: RegistryListOptions): Promise<TRecord[]>;
-  read(vaultRoot: string, recordId: string): Promise<TRecord | null>;
-  show(vaultRoot: string, lookup: string): Promise<TRecord | null>;
+  list(vaultRoot: string, options?: RegistryListOptions): Promise<RegistryStoredDocument<TEntity>[]>;
+  read(vaultRoot: string, recordId: string): Promise<RegistryStoredDocument<TEntity> | null>;
+  show(vaultRoot: string, lookup: string): Promise<RegistryStoredDocument<TEntity> | null>;
 } {
   return {
     list(vaultRoot, options = {}) {
@@ -356,7 +396,7 @@ export function createProjectedRegistryQueries<TRecord extends RegistryMarkdownR
   };
 }
 
-export interface GoalQueryRecord extends RegistryMarkdownRecord {
+export interface GoalQueryEntity extends RegistryQueryEntity {
   horizon: string | null;
   priority: number | null;
   windowStartAt: string | null;
@@ -367,10 +407,12 @@ export interface GoalQueryRecord extends RegistryMarkdownRecord {
   domains: string[];
 }
 
-export const goalRegistryDefinition: RegistryDefinition<GoalQueryRecord> =
+export type GoalQueryRecord = RegistryStoredDocument<GoalQueryEntity>;
+
+export const goalRegistryDefinition: RegistryDefinition<GoalQueryEntity> =
   createHealthEntityRegistryDefinition("goal");
 
-export interface ConditionQueryRecord extends RegistryMarkdownRecord {
+export interface ConditionQueryEntity extends RegistryQueryEntity {
   clinicalStatus: string | null;
   verificationStatus: string | null;
   assertedOn: string | null;
@@ -382,10 +424,12 @@ export interface ConditionQueryRecord extends RegistryMarkdownRecord {
   note: string | null;
 }
 
-export const conditionRegistryDefinition: RegistryDefinition<ConditionQueryRecord> =
+export type ConditionQueryRecord = RegistryStoredDocument<ConditionQueryEntity>;
+
+export const conditionRegistryDefinition: RegistryDefinition<ConditionQueryEntity> =
   createHealthEntityRegistryDefinition("condition");
 
-export interface AllergyQueryRecord extends RegistryMarkdownRecord {
+export interface AllergyQueryEntity extends RegistryQueryEntity {
   substance: string | null;
   criticality: string | null;
   reaction: string | null;
@@ -394,7 +438,9 @@ export interface AllergyQueryRecord extends RegistryMarkdownRecord {
   note: string | null;
 }
 
-export const allergyRegistryDefinition: RegistryDefinition<AllergyQueryRecord> =
+export type AllergyQueryRecord = RegistryStoredDocument<AllergyQueryEntity>;
+
+export const allergyRegistryDefinition: RegistryDefinition<AllergyQueryEntity> =
   createHealthEntityRegistryDefinition("allergy");
 
 export interface SupplementIngredientQueryRecord {
@@ -406,43 +452,7 @@ export interface SupplementIngredientQueryRecord {
   note: string | null;
 }
 
-export function readSupplementIngredients(
-  attributes: FrontmatterObject,
-  keys: readonly string[] = ["ingredients"],
-): SupplementIngredientQueryRecord[] {
-  for (const key of keys) {
-    const value = attributes[key];
-
-    if (!Array.isArray(value)) {
-      continue;
-    }
-
-    return value.flatMap((entry) => {
-      const ingredient = asObject(entry);
-      if (!ingredient) {
-        return [];
-      }
-
-      const compound = firstString(ingredient, ["compound"]);
-      if (!compound) {
-        return [];
-      }
-
-      return [{
-        compound,
-        label: firstString(ingredient, ["label"]),
-        amount: firstNumber(ingredient, ["amount"]),
-        unit: firstString(ingredient, ["unit"]),
-        active: firstBoolean(ingredient, ["active"]) ?? true,
-        note: firstString(ingredient, ["note"]),
-      }];
-    });
-  }
-
-  return [];
-}
-
-export interface ProtocolQueryRecord extends RegistryMarkdownRecord {
+export interface ProtocolQueryEntity extends RegistryQueryEntity {
   kind: string | null;
   startedOn: string | null;
   stoppedOn: string | null;
@@ -459,10 +469,12 @@ export interface ProtocolQueryRecord extends RegistryMarkdownRecord {
   group: string | null;
 }
 
-export const protocolRegistryDefinition: RegistryDefinition<ProtocolQueryRecord> =
+export type ProtocolQueryRecord = RegistryStoredDocument<ProtocolQueryEntity>;
+
+export const protocolRegistryDefinition: RegistryDefinition<ProtocolQueryEntity> =
   createHealthEntityRegistryDefinition("protocol");
 
-export interface FamilyQueryRecord extends RegistryMarkdownRecord {
+export interface FamilyQueryEntity extends RegistryQueryEntity {
   relationship: string | null;
   deceased: boolean | null;
   conditions: string[];
@@ -470,10 +482,12 @@ export interface FamilyQueryRecord extends RegistryMarkdownRecord {
   note: string | null;
 }
 
-export const familyRegistryDefinition: RegistryDefinition<FamilyQueryRecord> =
+export type FamilyQueryRecord = RegistryStoredDocument<FamilyQueryEntity>;
+
+export const familyRegistryDefinition: RegistryDefinition<FamilyQueryEntity> =
   createHealthEntityRegistryDefinition("family");
 
-export interface GeneticsQueryRecord extends RegistryMarkdownRecord {
+export interface GeneticsQueryEntity extends RegistryQueryEntity {
   gene: string | null;
   zygosity: string | null;
   significance: string | null;
@@ -482,24 +496,26 @@ export interface GeneticsQueryRecord extends RegistryMarkdownRecord {
   note: string | null;
 }
 
-export const geneticsRegistryDefinition: RegistryDefinition<GeneticsQueryRecord> =
+export type GeneticsQueryRecord = RegistryStoredDocument<GeneticsQueryEntity>;
+
+export const geneticsRegistryDefinition: RegistryDefinition<GeneticsQueryEntity> =
   createHealthEntityRegistryDefinition("genetics");
 
 export {
   type RegistryDefinition,
 };
 
-async function loadProjectedRegistryRecords<TRecord extends RegistryMarkdownRecord>(
+async function loadProjectedRegistryRecords<TEntity extends RegistryQueryEntity>(
   vaultRoot: string,
-  definition: RegistryDefinition<TRecord>,
+  definition: RegistryDefinition<TEntity>,
   family: Extract<
     CanonicalEntityFamily,
     "allergy" | "condition" | "family" | "genetics" | "goal" | "protocol"
   >,
-  mapEntity: (entity: CanonicalEntity) => TRecord | null,
-): Promise<TRecord[]> {
+  mapEntity: (entity: CanonicalEntity) => RegistryStoredDocument<TEntity> | null,
+): Promise<RegistryStoredDocument<TEntity>[]> {
   const relativePaths = await walkRelativeFiles(vaultRoot, definition.directory, ".md");
-  const records: TRecord[] = [];
+  const records: RegistryStoredDocument<TEntity>[] = [];
 
   for (const relativePath of relativePaths) {
     const document = await readMarkdownDocument(vaultRoot, relativePath);
@@ -510,7 +526,10 @@ async function loadProjectedRegistryRecords<TRecord extends RegistryMarkdownReco
 
     const projected = mapEntity(projectRegistryEntity(family, record));
     if (projected) {
-      records.push(projected);
+      records.push({
+        entity: projected.entity,
+        document: record.document,
+      });
     }
   }
 
@@ -528,69 +547,66 @@ function registryRecordBaseFromEntity(
   const attributes = entity.attributes as FrontmatterObject;
 
   return {
-    id: entity.entityId,
-    slug: firstString(attributes, ["slug"]) ?? pathSlug(entity.path),
-    title: entity.title,
-    status: entity.status,
-    relativePath: entity.path,
-    markdown: entity.body ?? "",
-    body: entity.body ?? "",
-    attributes,
+    entity: {
+      id: entity.entityId,
+      slug: firstString(attributes, ["slug"]) ?? pathSlug(entity.path),
+      title: entity.title,
+      status: entity.status,
+    },
+    document: {
+      relativePath: entity.path,
+      markdown: entity.body ?? "",
+      body: entity.body ?? "",
+      attributes,
+    },
   };
 }
 
-export function goalRecordFromEntity(entity: CanonicalEntity): GoalQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "goal");
-  return base ? transformRegistryRecord(base, goalRegistryDefinition) : null;
-}
-
-export function conditionRecordFromEntity(
+function projectRegistryRecordFromEntity<TEntity extends RegistryQueryEntity>(
   entity: CanonicalEntity,
-): ConditionQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "condition");
-  return base ? transformRegistryRecord(base, conditionRegistryDefinition) : null;
-}
-
-export function allergyRecordFromEntity(entity: CanonicalEntity): AllergyQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "allergy");
-  return base ? transformRegistryRecord(base, allergyRegistryDefinition) : null;
-}
-
-export function protocolRecordFromEntity(entity: CanonicalEntity): ProtocolQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "protocol");
+  family: ProjectedRegistryFamily,
+  definition: RegistryDefinition<TEntity>,
+): RegistryStoredDocument<TEntity> | null {
+  const base = registryRecordBaseFromEntity(entity, family);
   if (!base) {
     return null;
   }
 
   return {
-    ...base,
-    kind: firstString(base.attributes, ["kind"]),
-    startedOn: firstString(base.attributes, ["startedOn"]),
-    stoppedOn: firstString(base.attributes, ["stoppedOn"]),
-    substance: firstString(base.attributes, ["substance"]),
-    dose: firstNumber(base.attributes, ["dose"]),
-    unit: firstString(base.attributes, ["unit"]),
-    schedule: firstString(base.attributes, ["schedule"]),
-    brand: firstString(base.attributes, ["brand"]),
-    manufacturer: firstString(base.attributes, ["manufacturer"]),
-    servingSize: firstString(base.attributes, ["servingSize"]),
-    ingredients: readSupplementIngredients(base.attributes),
-    relatedGoalIds: readRegistryStrings(base.attributes, ["relatedGoalIds"]),
-    relatedConditionIds: readRegistryStrings(base.attributes, ["relatedConditionIds"]),
-    group:
-      firstString(base.attributes, ["group"]) ??
-      deriveProtocolGroupFromRelativePath(base.relativePath),
+    entity: transformRegistryEntity(
+      base.entity,
+      base.document.attributes,
+      base.document.relativePath,
+      definition,
+    ),
+    document: base.document,
   };
 }
 
+export function goalRecordFromEntity(entity: CanonicalEntity): GoalQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "goal", goalRegistryDefinition);
+}
+
+export function conditionRecordFromEntity(
+  entity: CanonicalEntity,
+): ConditionQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "condition", conditionRegistryDefinition);
+}
+
+export function allergyRecordFromEntity(entity: CanonicalEntity): AllergyQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "allergy", allergyRegistryDefinition);
+}
+
+export function protocolRecordFromEntity(entity: CanonicalEntity): ProtocolQueryRecord | null {
+  return projectRegistryRecordFromEntity(entity, "protocol", protocolRegistryDefinition);
+}
+
 export function familyRecordFromEntity(entity: CanonicalEntity): FamilyQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "family");
-  return base ? transformRegistryRecord(base, familyRegistryDefinition) : null;
+  return projectRegistryRecordFromEntity(entity, "family", familyRegistryDefinition);
 }
 
 export function geneticsRecordFromEntity(
   entity: CanonicalEntity,
 ): GeneticsQueryRecord | null {
-  const base = registryRecordBaseFromEntity(entity, "genetics");
-  return base ? transformRegistryRecord(base, geneticsRegistryDefinition) : null;
+  return projectRegistryRecordFromEntity(entity, "genetics", geneticsRegistryDefinition);
 }
