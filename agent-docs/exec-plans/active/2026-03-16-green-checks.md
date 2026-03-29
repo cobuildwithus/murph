@@ -32,7 +32,7 @@ Updated: 2026-03-16
 - keep machine-readable CLI stdout intact while adjusting setup CTAs and redaction behavior
 - Product/process constraints:
 - keep the coordination ledger current while the lane is active
-- use the repository completion workflow, including simplify, coverage, and final review passes
+- use the repository completion workflow, including the simplify pass and the final review pass that also checks coverage/proof gaps
 - use `scripts/committer` for the final commit and avoid manual cleanup of unrelated diffs
 
 ## Risks and mitigations

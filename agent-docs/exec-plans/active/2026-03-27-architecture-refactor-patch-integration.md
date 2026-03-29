@@ -43,8 +43,7 @@ Integrate the supplied `murph-architecture-refactor-full.patch` on top of the cu
   - `pnpm test:coverage`
 - Required completion-workflow audit passes via spawned subagents:
   - `simplify`
-  - `test-coverage-audit`
-  - `task-finish-review`
+  - `task-finish-review` (including coverage/proof-gap review)
 
 ## Working Notes
 

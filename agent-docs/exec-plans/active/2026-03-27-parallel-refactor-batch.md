@@ -45,5 +45,4 @@ Main integrator lane:
   - `pnpm test:coverage`
 - Required completion audit passes via spawned subagents:
   - `simplify`
-  - `test-coverage-audit`
-  - `task-finish-review`
+  - `task-finish-review` (including coverage/proof-gap review)

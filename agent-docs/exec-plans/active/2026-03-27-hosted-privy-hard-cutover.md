@@ -31,4 +31,4 @@ Replace the first hosted onboarding slice's passkey-based auth with Privy phone 
 
 - Required repo commands: `pnpm typecheck`, `pnpm test`, `pnpm test:coverage`
 - Direct scenario proof: inspect the hosted web onboarding UI at desktop and mobile widths and record the result.
-- Required completion workflow audit passes: `simplify`, `test-coverage-audit`, `task-finish-review`
+- Required completion workflow audit passes: `simplify`, `task-finish-review` (the final review also checks coverage/proof gaps)

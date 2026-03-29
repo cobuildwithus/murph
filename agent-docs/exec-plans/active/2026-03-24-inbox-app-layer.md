@@ -39,4 +39,4 @@ Move inbox orchestration out of `packages/cli/src/inbox-services.ts` into a comm
 - `pnpm typecheck`
 - `pnpm test`
 - `pnpm test:coverage`
-- completion workflow audit passes: `simplify` -> `test-coverage-audit` -> `task-finish-review`
+- completion workflow audit passes: `simplify` -> `task-finish-review` (with coverage/proof-gap review folded into the final audit)

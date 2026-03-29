@@ -34,7 +34,7 @@ Merge the completed worker fixes for hosted device-sync and webhook hygiene into
 - `pnpm typecheck`
 - `pnpm test`
 - `pnpm test:coverage`
-- completion workflow passes: `simplify` -> `test-coverage-audit` -> `task-finish-review`
+- completion workflow passes: `simplify` -> `task-finish-review` (with coverage/proof-gap review folded into the final audit)
 
 ## Status
 
@@ -46,4 +46,4 @@ Completed in the current branch.
 - `pnpm typecheck` passed.
 - `pnpm test` passed.
 - `pnpm test:coverage` reached the final coverage gate, then failed on an unrelated pre-existing threshold miss in `packages/core/src/vault.ts` branch coverage (reported `77.04%` vs the global `80%` requirement). This merge did not touch `packages/core/src/vault.ts`.
-- Completion workflow review passes were run against the merged device-sync diff (`simplify` -> `test-coverage-audit` -> `task-finish-review`); no additional blocker was identified beyond the unrelated coverage threshold failure above.
+- Completion workflow review passes were run against the merged device-sync diff (`simplify` -> `task-finish-review`, with coverage/proof-gap review folded into the final audit); no additional blocker was identified beyond the unrelated coverage threshold failure above.

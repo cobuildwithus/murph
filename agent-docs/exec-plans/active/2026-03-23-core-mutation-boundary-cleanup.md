@@ -25,4 +25,4 @@ Make the stale experiment mutation split explicit by renaming divergent helper s
 - `pnpm typecheck`
 - `pnpm test:packages`
 - `pnpm test:smoke`
-- completion workflow audit passes: `simplify` -> `test-coverage-audit` -> `task-finish-review`
+- completion workflow audit passes: `simplify` -> `task-finish-review` (with coverage/proof-gap review folded into the final audit)

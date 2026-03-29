@@ -41,7 +41,7 @@
 3. Anchor inbox routing inputs to per-capture attachment subtrees and add regressions for cross-subtree vault reads.
 4. Harden inbox promotions with verified attachment path resolution plus always-recomputed SHA-256.
 5. Make local device-sync callback redirects use the same machine-readable-only contract as hosted code and align tests.
-6. Run focused package tests, then required repo checks, then mandatory simplify/coverage/final-review audit passes.
+6. Run focused package tests, then required repo checks, then the mandatory `simplify` audit plus the final review audit that also checks coverage/proof gaps.
 
 ## Verification
 

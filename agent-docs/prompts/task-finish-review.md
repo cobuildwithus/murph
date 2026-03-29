@@ -1,5 +1,5 @@
 ---
-description: Final completion audit for a dedicated spawned audit subagent
+description: Final completion audit, including coverage and proof review, for a dedicated spawned audit subagent
 action: thorough review
 ---
 
@@ -12,6 +12,11 @@ Runtime expectation:
 - Work methodically instead of rushing to a shallow answer.
 - Parent agent: allow the run to continue and do not cancel it early unless there is clear evidence the audit is stuck or off scope.
 
+Coverage/proof responsibility:
+- This final audit replaces any standalone `test-coverage-audit` pass.
+- Inspect modified production files and nearby tests to decide whether the change has direct proof at the highest stable behavior boundary available.
+- If meaningful proof is missing, recommend the smallest high-impact tests or direct scenario checks needed to close the gap.
+
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.
 - Honor any explicit exclusive/refactor notes from the ledger; otherwise work carefully on top of active rows without reverting adjacent edits.
@@ -22,10 +27,11 @@ Review for:
 - incorrect assumptions and invariant breaks
 - security and correctness risks
 - unexpected interface or state-transition changes
-- test gaps for newly introduced risk
+- coverage and test gaps for newly introduced risk or modified behavior
 - unnecessary complexity, speculative abstractions, or diff size that is disproportionate to the task
 - missed reuse or duplicated logic that likely came from incomplete codebase recall
 - verification gaps where passing checks still do not prove the changed behavior at a real boundary
+- proof gaps where verification stays inside helpers, mocks, or snapshots and never exercises the highest stable boundary available
 
 Output requirements:
 - Return findings ordered by severity (`high`, `medium`, `low`).

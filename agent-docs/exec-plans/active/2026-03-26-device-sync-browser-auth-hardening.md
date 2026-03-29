@@ -36,4 +36,4 @@ Replace the replayable hosted browser auth header tuple in `apps/web` with a sho
 - `pnpm typecheck`
 - `pnpm test`
 - `pnpm test:coverage`
-- completion workflow prompts: `simplify`, `test-coverage-audit`, `task-finish-review` (document clone limitations if any)
+- completion workflow prompts: `simplify`, `task-finish-review` (the final review also checks coverage/proof gaps; document clone limitations if any)

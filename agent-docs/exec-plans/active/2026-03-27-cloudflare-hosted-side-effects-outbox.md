@@ -31,4 +31,4 @@ Broaden the current hosted assistant-only post-commit outbox into a generic comm
 
 - Direct Cloudflare/runtime tests for committed side-effect collection, journal reconciliation, and committed-resume retries.
 - Required repo commands: `pnpm typecheck`, `pnpm test`, `pnpm test:coverage`
-- Required completion workflow audit passes: `simplify`, `test-coverage-audit`, `task-finish-review`
+- Required completion workflow audit passes: `simplify`, `task-finish-review` (the final review also checks coverage/proof gaps)
