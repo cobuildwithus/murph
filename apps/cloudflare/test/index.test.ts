@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionSignature } from "../src/auth.ts";
 import {
+  createHostedVerifiedEmailUserEnv,
   parseHostedEmailThreadTarget,
   type HostedExecutionDispatchRequest,
 } from "@murph/runtime-state";
+import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
 
@@ -866,6 +869,7 @@ describe("cloudflare worker routes", () => {
       env,
     );
     const { address } = await addressResponse.json() as { address: string };
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "alice@example.test");
     const raw = [
       'From: Alice Example <alice@example.test>',
       `To: ${address}`,
@@ -909,6 +913,130 @@ describe("cloudflare worker routes", () => {
     expect(readResponse.status).toBe(200);
     expect(readResponse.headers.get("content-type")).toBe("message/rfc822");
     await expect(readResponse.text()).resolves.toBe(raw);
+  });
+
+  it("rejects inbound hosted email on the stable alias when the sender does not match the verified email", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const addressResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const { address } = await addressResponse.json() as { address: string };
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "owner@example.test");
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "intruder@example.test",
+      raw: [
+        "From: intruder@example.test",
+        `To: ${address}`,
+        "Subject: Sneaky",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: address,
+    } as never, env as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
+  });
+
+  it("rejects inbound hosted email when the header sender and envelope sender disagree", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const addressResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const { address } = await addressResponse.json() as { address: string };
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "owner@example.test");
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "intruder@example.test",
+      raw: [
+        "From: Owner <owner@example.test>",
+        `To: ${address}`,
+        "Subject: Sneaky",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: address,
+    } as never, env as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
+  });
+
+  it("rejects inbound hosted email when the raw message contains duplicate From headers", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    const addressResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/email-address", {
+        headers: {
+          authorization: "Bearer control-token",
+        },
+        method: "GET",
+      }),
+      env,
+    );
+    const { address } = await addressResponse.json() as { address: string };
+    await seedHostedVerifiedEmailUserEnv(env, "member_123", "owner@example.test");
+    const setReject = vi.fn();
+
+    await worker.email?.({
+      from: "owner@example.test",
+      raw: [
+        "From: intruder@example.test",
+        "From: Owner <owner@example.test>",
+        `To: ${address}`,
+        "Subject: Sneaky",
+        "",
+        "hello",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: address,
+    } as never, env as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
   it("rejects inbound hosted email before route lookup when ingress is not configured", async () => {
@@ -1082,6 +1210,178 @@ describe("cloudflare worker routes", () => {
         userId: "member_123",
       }),
     }));
+  });
+
+  it("rejects hosted thread replies from senders outside the saved participant list", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({
+          result: {
+            queued: ["user@example.test"],
+          },
+          success: true,
+        }), { status: 200 })),
+    );
+
+    const sendResponse = await callRunnerOutbound(
+      new Request("http://email.worker/send", {
+        body: JSON.stringify({
+          identityId: "different@example.test",
+          message: "Hosted email hello.",
+          target: "user@example.test",
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    const sendPayload = await sendResponse.json() as {
+      ok: boolean;
+      target: string;
+    };
+    const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
+    const threadRouteKey = env.__bucketStore.keys().find((key) =>
+      key.startsWith("transient/hosted-email/threads/"),
+    );
+
+    if (!threadRouteKey || !threadTarget) {
+      throw new Error("Expected the hosted email thread route object to be written.");
+    }
+
+    await writeEncryptedR2Json({
+      bucket: env.BUNDLES,
+      cryptoKey: Buffer.alloc(32, 9),
+      key: threadRouteKey,
+      keyId: "v2",
+      value: {
+        identityId: "assistant@mail.example.test",
+        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
+        schema: "murph.hosted-email-thread-route.v1",
+        target: threadTarget,
+        updatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+
+    const setReject = vi.fn();
+    await worker.email?.({
+      from: "intruder@example.test",
+      raw: [
+        "From: intruder@example.test",
+        `To: ${threadTarget.replyAliasAddress}`,
+        "Subject: Re: Murph update",
+        "",
+        "Replying to the hosted alias.",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: threadTarget.replyAliasAddress ?? "",
+    } as never, env as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
+  });
+
+  it("rejects hosted thread replies with an ambiguous From header", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID: "v2",
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DEFAULT_SUBJECT: "Murph update",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({
+          result: {
+            queued: ["user@example.test"],
+          },
+          success: true,
+        }), { status: 200 })),
+    );
+
+    const sendResponse = await callRunnerOutbound(
+      new Request("http://email.worker/send", {
+        body: JSON.stringify({
+          identityId: "different@example.test",
+          message: "Hosted email hello.",
+          target: "user@example.test",
+          targetKind: "participant",
+        }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    const sendPayload = await sendResponse.json() as {
+      ok: boolean;
+      target: string;
+    };
+    const threadTarget = parseHostedEmailThreadTarget(sendPayload.target);
+    const threadRouteKey = env.__bucketStore.keys().find((key) =>
+      key.startsWith("transient/hosted-email/threads/"),
+    );
+
+    if (!threadRouteKey || !threadTarget) {
+      throw new Error("Expected the hosted email thread route object to be written.");
+    }
+
+    await writeEncryptedR2Json({
+      bucket: env.BUNDLES,
+      cryptoKey: Buffer.alloc(32, 9),
+      key: threadRouteKey,
+      keyId: "v2",
+      value: {
+        identityId: "assistant@mail.example.test",
+        replyKey: threadRouteKey.slice("transient/hosted-email/threads/".length, -".json".length),
+        schema: "murph.hosted-email-thread-route.v1",
+        target: threadTarget,
+        updatedAt: "2026-03-26T12:00:00.000Z",
+        userId: "member_123",
+      },
+    });
+
+    const setReject = vi.fn();
+    await worker.email?.({
+      from: "user@example.test",
+      raw: [
+        "From: User <user@example.test>, Intruder <intruder@example.test>",
+        `To: ${threadTarget.replyAliasAddress}`,
+        "Subject: Re: Murph update",
+        "",
+        "Replying to the hosted alias.",
+        "",
+      ].join("\r\n"),
+      setReject,
+      to: threadTarget.replyAliasAddress ?? "",
+    } as never, env as never);
+
+    expect(setReject).toHaveBeenCalledWith("Hosted email sender is not authorized for this route.");
+    expect(stub.dispatch).not.toHaveBeenCalled();
+    expect(env.__bucketStore.keys().filter((key) => key.includes("/messages/"))).toEqual([]);
   });
 
   it("returns method and auth errors on protected routes in the same order as before", async () => {
@@ -1292,6 +1592,31 @@ function callRunnerOutbound(
     userId,
     RUNNER_PROXY_TOKEN,
   );
+}
+
+async function seedHostedVerifiedEmailUserEnv(
+  env: ReturnType<typeof createWorkerEnv>,
+  userId: string,
+  emailAddress: string,
+): Promise<void> {
+  const payload = encodeHostedUserEnvPayload({
+    env: createHostedVerifiedEmailUserEnv({
+      address: emailAddress,
+    }),
+  });
+
+  if (!payload) {
+    throw new Error("Expected the hosted user env payload to be written.");
+  }
+
+  await createHostedUserEnvStore({
+    bucket: env.BUNDLES,
+    key:
+      typeof env.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY === "string"
+        ? Buffer.from(env.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY, "base64")
+        : Buffer.alloc(32, 9),
+    keyId: String(env.HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY_ID ?? "v1"),
+  }).writeUserEnv(userId, payload);
 }
 
 function createBucketStore(input: {

@@ -18,7 +18,7 @@ export async function executeHostedDispatchEvent(input: {
   internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "webControlPlane"
+    "commitTimeoutMs" | "userEnv" | "webControlPlane"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
   vaultRoot: string;
@@ -49,7 +49,7 @@ async function handleHostedDispatchEvent(input: {
   internalWorkerFetch?: typeof fetch;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "commitTimeoutMs" | "webControlPlane"
+    "commitTimeoutMs" | "userEnv" | "webControlPlane"
   >;
   vaultRoot: string;
 }): Promise<HostedDispatchEffect> {
@@ -80,6 +80,7 @@ async function handleHostedDispatchEvent(input: {
         input.emailBaseUrl,
         input.internalWorkerFetch,
         input.runtime.commitTimeoutMs,
+        input.runtime.userEnv,
       );
       return createNoopDispatchEffect();
     case "assistant.cron.tick":

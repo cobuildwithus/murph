@@ -6,6 +6,7 @@ import {
   createHostedExecutionServerDeviceSyncRuntimeClient,
   createHostedExecutionServerSharePackClient,
 } from "@murph/hosted-execution";
+import { serializeHostedEmailThreadTarget } from "@murph/runtime-state";
 import { syncHostedDeviceSyncControlPlaneState } from "../src/hosted-device-sync-runtime.ts";
 import { sendHostedEmailOverWorker } from "../src/hosted-email.ts";
 import { createHostedInternalWorkerFetch } from "../src/hosted-runtime/internal-http.ts";
@@ -333,6 +334,7 @@ test("hosted email message fetch applies the hosted timeout before failing on HT
         "/tmp/email-vault",
         {
           event: {
+            envelopeFrom: null,
             envelopeTo: "assistant@mail.example.test",
             identityId: "assistant@mail.example.test",
             kind: "email.message.received",
@@ -346,9 +348,235 @@ test("hosted email message fetch applies the hosted timeout before failing on HT
         "https://email.example.test",
         undefined,
         18_000,
+        {},
       ),
     /Hosted email message fetch failed/,
   );
 
   assert.equal(timeoutSpy.mock.calls[0]?.[0], 18_000);
+});
+
+test("hosted email message ingestion rejects a sender that does not match the verified hosted email", async () => {
+  global.fetch = vi.fn(async () =>
+    new Response([
+      "From: intruder@example.test",
+      "To: assistant@mail.example.test",
+      "Subject: Sneaky",
+      "",
+      "hello",
+      "",
+    ].join("\r\n"), {
+      status: 200,
+      headers: {
+        "content-type": "message/rfc822",
+      },
+    }));
+
+  await assert.rejects(
+    () =>
+      ingestHostedEmailMessage(
+        "/tmp/email-vault",
+        {
+          event: {
+            envelopeFrom: "intruder@example.test",
+            envelopeTo: "assistant@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_unauthorized",
+            threadTarget: null,
+            userId: "member_123",
+          },
+          eventId: "evt_email_unauthorized",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        "https://email.example.test",
+        undefined,
+        5_000,
+        {
+          HOSTED_USER_VERIFIED_EMAIL: "owner@example.test",
+        },
+      ),
+    /Hosted email sender is not authorized/u,
+  );
+});
+
+test("hosted email message ingestion rejects a mismatched header sender even when the header looks authorized", async () => {
+  global.fetch = vi.fn(async () =>
+    new Response([
+      "From: Owner <owner@example.test>",
+      "To: assistant@mail.example.test",
+      "Subject: Sneaky",
+      "",
+      "hello",
+      "",
+    ].join("\r\n"), {
+      status: 200,
+      headers: {
+        "content-type": "message/rfc822",
+      },
+    }));
+
+  await assert.rejects(
+    () =>
+      ingestHostedEmailMessage(
+        "/tmp/email-vault",
+        {
+          event: {
+            envelopeFrom: "intruder@example.test",
+            envelopeTo: "assistant@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_mismatch",
+            threadTarget: null,
+            userId: "member_123",
+          },
+          eventId: "evt_email_mismatch",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        "https://email.example.test",
+        undefined,
+        5_000,
+        {
+          HOSTED_USER_VERIFIED_EMAIL: "owner@example.test",
+        },
+      ),
+    /Hosted email sender is not authorized/u,
+  );
+});
+
+test("hosted email message ingestion rejects duplicate From headers", async () => {
+  global.fetch = vi.fn(async () =>
+    new Response([
+      "From: intruder@example.test",
+      "From: Owner <owner@example.test>",
+      "To: assistant@mail.example.test",
+      "Subject: Sneaky",
+      "",
+      "hello",
+      "",
+    ].join("\r\n"), {
+      status: 200,
+      headers: {
+        "content-type": "message/rfc822",
+      },
+    }));
+
+  await assert.rejects(
+    () =>
+      ingestHostedEmailMessage(
+        "/tmp/email-vault",
+        {
+          event: {
+            envelopeFrom: "owner@example.test",
+            envelopeTo: "assistant@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_duplicate_from",
+            threadTarget: null,
+            userId: "member_123",
+          },
+          eventId: "evt_email_duplicate_from",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        "https://email.example.test",
+        undefined,
+        5_000,
+        {
+          HOSTED_USER_VERIFIED_EMAIL: "owner@example.test",
+        },
+      ),
+    /Hosted email sender is not authorized/u,
+  );
+});
+
+test("hosted email message ingestion rejects thread replies from non-participants", async () => {
+  global.fetch = vi.fn(async () =>
+    new Response([
+      "From: intruder@example.test",
+      "To: assistant+t-thread@mail.example.test",
+      "Subject: Re: Murph update",
+      "",
+      "hello",
+      "",
+    ].join("\r\n"), {
+      status: 200,
+      headers: {
+        "content-type": "message/rfc822",
+      },
+    }));
+
+  await assert.rejects(
+    () =>
+      ingestHostedEmailMessage(
+        "/tmp/email-vault",
+        {
+          event: {
+            envelopeFrom: "intruder@example.test",
+            envelopeTo: "assistant+t-thread@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_thread_unauthorized",
+            threadTarget: serializeHostedEmailThreadTarget({
+              cc: ["friend@example.test"],
+              subject: "Murph update",
+              to: ["user@example.test"],
+            }),
+            userId: "member_123",
+          },
+          eventId: "evt_email_thread_unauthorized",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        "https://email.example.test",
+        undefined,
+        5_000,
+        {},
+      ),
+    /Hosted email sender is not authorized/u,
+  );
+});
+
+test("hosted email message ingestion rejects an ambiguous thread-reply From header", async () => {
+  global.fetch = vi.fn(async () =>
+    new Response([
+      "From: User <user@example.test>, Intruder <intruder@example.test>",
+      "To: assistant+t-thread@mail.example.test",
+      "Subject: Re: Murph update",
+      "",
+      "hello",
+      "",
+    ].join("\r\n"), {
+      status: 200,
+      headers: {
+        "content-type": "message/rfc822",
+      },
+    }));
+
+  await assert.rejects(
+    () =>
+      ingestHostedEmailMessage(
+        "/tmp/email-vault",
+        {
+          event: {
+            envelopeFrom: "user@example.test",
+            envelopeTo: "assistant+t-thread@mail.example.test",
+            identityId: "assistant@mail.example.test",
+            kind: "email.message.received",
+            rawMessageKey: "raw_thread_ambiguous",
+            threadTarget: serializeHostedEmailThreadTarget({
+              cc: ["friend@example.test"],
+              subject: "Murph update",
+              to: ["user@example.test"],
+            }),
+            userId: "member_123",
+          },
+          eventId: "evt_email_thread_ambiguous",
+          occurredAt: "2026-03-28T09:00:00.000Z",
+        },
+        "https://email.example.test",
+        undefined,
+        5_000,
+        {},
+      ),
+    /Hosted email sender is not authorized/u,
+  );
 });

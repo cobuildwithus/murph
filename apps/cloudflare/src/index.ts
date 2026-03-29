@@ -9,8 +9,10 @@ import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
+import { parseRawEmailMessage, readRawEmailHeaderValue } from "@murph/inboxd";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
+import { createHostedUserEnvStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommittedResult,
@@ -20,14 +22,23 @@ export { RunnerContainer } from "./runner-container.ts";
 import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import {
   createHostedEmailUserAddress,
+  type HostedEmailInboundRoute,
   readHostedEmailConfig,
   readHostedEmailMessageBytes,
   resolveHostedEmailInboundRoute,
   writeHostedEmailRawMessage,
   type HostedEmailWorkerRequest,
 } from "./hosted-email.ts";
-import { serializeHostedEmailThreadTarget } from "@murph/runtime-state";
-import { parseHostedUserEnvUpdate, type HostedUserEnvUpdate } from "./user-env.ts";
+import {
+  isHostedEmailInboundSenderAuthorized,
+  readHostedVerifiedEmailFromEnv,
+  serializeHostedEmailThreadTarget,
+} from "@murph/runtime-state";
+import {
+  decodeHostedUserEnvPayload,
+  parseHostedUserEnvUpdate,
+  type HostedUserEnvUpdate,
+} from "./user-env.ts";
 import {
   HostedUserRunner,
   type DurableObjectStateLike,
@@ -417,6 +428,21 @@ async function handleHostedEmailIngress(
   }
 
   const rawBytes = await readHostedEmailMessageBytes(message.raw);
+  const parsedMessage = parseRawEmailMessage(rawBytes);
+  const headerFrom = readRawEmailHeaderValue(rawBytes, "from");
+
+  if (!await authorizeHostedEmailIngress({
+    env,
+    environment,
+    envelopeFrom: message.from,
+    hasRepeatedHeaderFrom: headerFrom.repeated,
+    headerFrom: headerFrom.value ?? parsedMessage.from,
+    route,
+  })) {
+    message.setReject?.("Hosted email sender is not authorized for this route.");
+    return;
+  }
+
   const rawMessageKey = await writeHostedEmailRawMessage({
     bucket: env.BUNDLES,
     key: environment.bundleEncryptionKey,
@@ -442,6 +468,35 @@ async function handleHostedEmailIngress(
 function normalizeHostedEmailEnvelopeAddress(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized.toLowerCase() : null;
+}
+
+async function authorizeHostedEmailIngress(input: {
+  env: WorkerEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
+  envelopeFrom: string | null | undefined;
+  hasRepeatedHeaderFrom: boolean;
+  headerFrom: string | null | undefined;
+  route: HostedEmailInboundRoute;
+}): Promise<boolean> {
+  const userEnvPayload = await createHostedUserEnvStore({
+    bucket: input.env.BUNDLES,
+    key: input.environment.bundleEncryptionKey,
+    keyId: input.environment.bundleEncryptionKeyId,
+    keysById: input.environment.bundleEncryptionKeysById,
+  }).readUserEnv(input.route.userId);
+  const userEnv = decodeHostedUserEnvPayload(
+    userEnvPayload,
+    input.env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  const verifiedEmailAddress = readHostedVerifiedEmailFromEnv(userEnv)?.address ?? null;
+
+  return isHostedEmailInboundSenderAuthorized({
+    envelopeFrom: input.envelopeFrom,
+    hasRepeatedHeaderFrom: input.hasRepeatedHeaderFrom,
+    headerFrom: input.headerFrom,
+    threadTarget: input.route.target,
+    verifiedEmailAddress,
+  });
 }
 
 async function handleSignedDispatchRoute(context: WorkerRouteContext): Promise<Response> {

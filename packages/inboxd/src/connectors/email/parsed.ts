@@ -29,6 +29,11 @@ export interface ParsedEmailMessage {
   to: string[];
 }
 
+export interface RawEmailHeaderValue {
+  repeated: boolean;
+  value: string | null;
+}
+
 interface ParsedMimeEntity {
   bodyText: string;
   contentDisposition: string | null;
@@ -118,6 +123,25 @@ export function splitEmailAddressList(value: string | null | undefined): string[
     .filter((segment): segment is string => segment !== null);
 }
 
+export function readRawEmailHeaderValue(
+  input: Uint8Array | ArrayBuffer | string,
+  headerName: string,
+): RawEmailHeaderValue {
+  const rawBytes = toRawEmailBytes(input);
+  const rawText = utf8Decoder.decode(rawBytes);
+  const matchingValues = parseRawEmailHeaderEntries(readRawEmailHeaderBlock(rawText))
+    .filter((entry) => entry.name === headerName.trim().toLowerCase())
+    .map((entry) => entry.value);
+
+  return {
+    repeated: matchingValues.length > 1,
+    value:
+      matchingValues.length === 1
+        ? decodeHeaderWords(matchingValues[0] ?? null)
+        : null,
+  };
+}
+
 function parseMimeEntity(rawEntity: string): ParsedMimeEntity {
   const { bodyText, headers } = splitRawEmailEntity(rawEntity);
   const { params: contentDispositionParams, value: contentDisposition } = parseHeaderParams(
@@ -149,16 +173,15 @@ function splitRawEmailEntity(rawEntity: string): {
   headers: Record<string, string>;
 } {
   const headerMatch = /\r?\n\r?\n/u.exec(rawEntity);
+  const headerText = readRawEmailHeaderBlock(rawEntity);
   if (!headerMatch || headerMatch.index === undefined) {
     return {
       bodyText: "",
-      headers: parseRawEmailHeaders(rawEntity),
+      headers: parseRawEmailHeaders(headerText),
     };
   }
 
-  const separatorIndex = headerMatch.index;
-  const headerText = rawEntity.slice(0, separatorIndex);
-  const bodyText = rawEntity.slice(separatorIndex + headerMatch[0].length);
+  const bodyText = rawEntity.slice(headerMatch.index + headerMatch[0].length);
   return {
     bodyText,
     headers: parseRawEmailHeaders(headerText),
@@ -166,27 +189,58 @@ function splitRawEmailEntity(rawEntity: string): {
 }
 
 function parseRawEmailHeaders(headerText: string): Record<string, string> {
+  return Object.fromEntries(
+    parseRawEmailHeaderEntries(headerText).map((entry) => [entry.name, entry.value] as const),
+  );
+}
+
+function parseRawEmailHeaderEntries(headerText: string): Array<{ name: string; value: string }> {
   const lines = headerText.split(/\r?\n/u);
-  const headers: Record<string, string> = {};
+  const entries: Array<{ name: string; value: string }> = [];
   let currentName: string | null = null;
+  let currentValue = "";
 
   for (const line of lines) {
     if (/^[ \t]/u.test(line) && currentName) {
-      headers[currentName] = `${headers[currentName]} ${line.trim()}`.trim();
+      currentValue = `${currentValue} ${line.trim()}`.trim();
       continue;
+    }
+
+    if (currentName) {
+      entries.push({
+        name: currentName,
+        value: currentValue,
+      });
     }
 
     const separatorIndex = line.indexOf(":");
     if (separatorIndex <= 0) {
       currentName = null;
+      currentValue = "";
       continue;
     }
 
     currentName = line.slice(0, separatorIndex).trim().toLowerCase();
-    headers[currentName] = line.slice(separatorIndex + 1).trim();
+    currentValue = line.slice(separatorIndex + 1).trim();
   }
 
-  return headers;
+  if (currentName) {
+    entries.push({
+      name: currentName,
+      value: currentValue,
+    });
+  }
+
+  return entries;
+}
+
+function readRawEmailHeaderBlock(rawEntity: string): string {
+  const headerMatch = /\r?\n\r?\n/u.exec(rawEntity);
+  if (!headerMatch || headerMatch.index === undefined) {
+    return rawEntity;
+  }
+
+  return rawEntity.slice(0, headerMatch.index);
 }
 
 function splitMultipartBody(bodyText: string, boundary: string): string[] {

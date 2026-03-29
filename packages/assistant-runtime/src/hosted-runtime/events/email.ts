@@ -1,7 +1,13 @@
 import {
   normalizeParsedEmailMessage,
   parseRawEmailMessage,
+  readRawEmailHeaderValue,
 } from "@murph/inboxd";
+import {
+  isHostedEmailInboundSenderAuthorized,
+  parseHostedEmailThreadTarget,
+  readHostedVerifiedEmailFromEnv,
+} from "@murph/runtime-state";
 import {
   resolveHostedEmailSelfAddresses,
   type HostedExecutionDispatchRequest,
@@ -21,6 +27,7 @@ export async function ingestHostedEmailMessage(
   emailBaseUrl: string,
   fetchImpl: typeof fetch | undefined,
   timeoutMs: number | null,
+  runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<void> {
   const { bytes, response } = await fetchHostedBytesResponse({
     description: "Hosted email message fetch",
@@ -35,10 +42,26 @@ export async function ingestHostedEmailMessage(
     );
   }
 
+  const parsedMessage = parseRawEmailMessage(bytes);
+  const headerFrom = readRawEmailHeaderValue(bytes, "from");
+  const verifiedEmailAddress = readHostedVerifiedEmailFromEnv(runtimeEnv)?.address ?? null;
+
+  if (!isHostedEmailInboundSenderAuthorized({
+    envelopeFrom: dispatch.event.envelopeFrom,
+    hasRepeatedHeaderFrom: headerFrom.repeated,
+    headerFrom: headerFrom.value ?? parsedMessage.from,
+    threadTarget: parseHostedEmailThreadTarget(dispatch.event.threadTarget),
+    verifiedEmailAddress,
+  })) {
+    throw new Error(
+      `Hosted email sender is not authorized for ${dispatch.event.userId}/${dispatch.event.rawMessageKey}.`,
+    );
+  }
+
   const capture = await normalizeParsedEmailMessage({
     accountAddress: dispatch.event.identityId,
     accountId: dispatch.event.identityId,
-    message: parseRawEmailMessage(bytes),
+    message: parsedMessage,
     selfAddresses: resolveHostedEmailSelfAddresses({
       envelopeTo: dispatch.event.envelopeTo,
       senderIdentity: dispatch.event.identityId,
