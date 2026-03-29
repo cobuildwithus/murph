@@ -10,12 +10,11 @@ interface PackageJsonShape {
   types?: string
   files?: string[]
   bin?: Record<string, string>
-  exports?: {
-    '.': {
-      default?: string
-      types?: string
-    }
-  }
+  exports?: Record<string, {
+    default?: string
+    import?: string
+    types?: string
+  }>
   publishConfig?: {
     access?: string
   }
@@ -96,6 +95,14 @@ assert(
 assert(
   packageJson.exports?.['.']?.types === './dist/index.d.ts',
   'package.json exports must target dist/index.d.ts for types.',
+)
+assert(
+  packageJson.exports?.['./assistant-core']?.default === './dist/assistant-core.js',
+  'package.json must publish the assistant-core headless surface from dist/assistant-core.js.',
+)
+assert(
+  packageJson.exports?.['./assistant-core']?.types === './dist/assistant-core.d.ts',
+  'package.json must publish assistant-core types from dist/assistant-core.d.ts.',
 )
 assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===

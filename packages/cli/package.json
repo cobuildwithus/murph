@@ -23,6 +23,10 @@
       "types": "./dist/vault-cli-services.d.ts",
       "default": "./dist/vault-cli-services.js"
     },
+    "./assistant-core": {
+      "types": "./dist/assistant-core.d.ts",
+      "default": "./dist/assistant-core.js"
+    },
     "./assistant/automation": {
       "types": "./dist/assistant/automation.d.ts",
       "default": "./dist/assistant/automation.js"

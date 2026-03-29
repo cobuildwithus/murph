@@ -17,7 +17,7 @@ import {
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-} from 'murph'
+} from 'murph/assistant-core'
 
 export interface AssistantLocalAutomationRunInput {
   allowSelfAuthored?: boolean
