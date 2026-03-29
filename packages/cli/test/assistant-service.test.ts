@@ -1319,6 +1319,56 @@ test('resolveAssistantConversationPolicy withholds sensitive health context when
   assert.equal(redirectedAudience.allowSensitiveHealthContext, false)
 })
 
+test('resolveAssistantConversationPolicy uses the effective audience instead of the historical binding when deciding sensitive health context exposure', () => {
+  const historicallySharedBinding = {
+    conversationKey: 'email:shared',
+    channel: 'email',
+    identityId: 'assistant@example.com',
+    actorId: 'person@example.com',
+    threadId: 'thread-group',
+    threadIsDirect: false,
+    delivery: {
+      channel: 'email',
+      target: 'person@example.com',
+      targetKind: 'email',
+    },
+  }
+
+  const directOverrideAudience = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: 'person@example.com',
+      maxSessionAgeMs: null,
+      sourceThreadId: 'thread-private',
+      threadId: 'thread-private',
+      threadIsDirect: true,
+      turnTrigger: 'manual-ask',
+    },
+    session: {
+      binding: historicallySharedBinding,
+    } as any,
+  })
+  assert.equal(directOverrideAudience.allowSensitiveHealthContext, true)
+
+  const directOverrideToDifferentAudience = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: 'other@example.com',
+      maxSessionAgeMs: null,
+      sourceThreadId: 'thread-private',
+      threadId: 'thread-private',
+      threadIsDirect: true,
+      turnTrigger: 'manual-ask',
+    },
+    session: {
+      binding: historicallySharedBinding,
+    } as any,
+  })
+  assert.equal(directOverrideToDifferentAudience.allowSensitiveHealthContext, false)
+})
+
 
 test('sendAssistantMessage writes a system receipt for provider and delivery milestones', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-receipts-'))

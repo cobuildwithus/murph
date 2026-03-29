@@ -30,6 +30,8 @@ import {
 import * as assistantAutomationArtifacts from '../src/assistant/automation/artifacts.js'
 import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
 import {
+  assertAssistantCronJobId,
+  assertAssistantCronRunId,
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   assertAssistantTranscriptDistillationId,
@@ -300,6 +302,8 @@ test('assistant runtime opaque ids reject traversal-shaped values', () => {
   assert.equal(assertAssistantSessionId('session_safe'), 'session_safe')
   assert.equal(assertAssistantTurnId('turn_safe'), 'turn_safe')
   assert.equal(assertAssistantOutboxIntentId('outbox_safe'), 'outbox_safe')
+  assert.equal(assertAssistantCronJobId('cron_safe'), 'cron_safe')
+  assert.equal(assertAssistantCronRunId('cronrun_safe'), 'cronrun_safe')
   assert.equal(
     assertAssistantTranscriptDistillationId('distill_safe'),
     'distill_safe',
@@ -315,6 +319,14 @@ test('assistant runtime opaque ids reject traversal-shaped values', () => {
   )
   assert.throws(
     () => assertAssistantOutboxIntentId(''),
+    /opaque runtime ids/u,
+  )
+  assert.throws(
+    () => assertAssistantCronJobId('../cron-escape'),
+    /opaque runtime ids/u,
+  )
+  assert.throws(
+    () => assertAssistantCronRunId('cronrun/escape'),
     /opaque runtime ids/u,
   )
 })
