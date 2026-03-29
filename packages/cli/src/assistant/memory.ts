@@ -10,6 +10,7 @@ import {
   type AssistantMemoryWriteScope,
 } from '../assistant-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
+import { appendAssistantRuntimeEvent } from './runtime-events.js'
 import { redactAssistantDisplayPath } from './store.js'
 import {
   isMissingFileError,
@@ -259,6 +260,20 @@ export async function forgetAssistantMemory(
     return target
   })
 
+  await appendAssistantRuntimeEvent({
+    component: 'assistant.memory',
+    data: {
+      kind: removed.kind,
+      section: removed.section,
+      sourcePath: redactAssistantDisplayPath(removed.sourcePath),
+    },
+    entityId: removed.id,
+    entityType: 'assistant-memory',
+    kind: 'memory.removed',
+    message: `Removed assistant memory ${removed.id}.`,
+    vault: input.vault,
+  })
+
   return {
     removed,
   }
@@ -308,6 +323,21 @@ export async function upsertAssistantMemory(
       }
     },
   )
+
+  await appendAssistantRuntimeEvent({
+    component: 'assistant.memory',
+    data: {
+      dailyAdded,
+      longTermAdded,
+      memoryIds: memories.map((memory) => memory.id),
+      scope: normalized.scope,
+    },
+    entityId: memories.length === 1 ? memories[0]!.id : null,
+    entityType: 'assistant-memory',
+    kind: 'memory.upserted',
+    message: `Updated assistant memory (${longTermAdded} long-term, ${dailyAdded} daily).`,
+    vault: input.vault,
+  })
 
   return {
     dailyAdded,

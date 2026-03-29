@@ -17,23 +17,41 @@ import {
   type AssistantBindingPatch,
 } from '../bindings.js'
 import {
-  isJsonSyntaxError,
-  isMissingFileError,
+  createAssistantBoundedRuntimeCache,
+  ASSISTANT_AUTOMATION_STATE_CACHE,
+  ASSISTANT_INDEX_CACHE,
+  ASSISTANT_SESSION_CACHE,
+} from '../runtime-budget-policy.js'
+import {
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
-  readAssistantJsonFile,
   writeTextFileAtomic,
   writeJsonFileAtomic,
 } from '../shared.js'
 import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
 import { normalizeAssistantSessionSnapshot } from '../provider-state.js'
-import type {
-  AssistantStatePaths,
-} from './paths.js'
+import { quarantineAssistantStateFile } from '../quarantine.js'
+import { appendAssistantRuntimeEventAtPaths } from '../runtime-events.js'
+import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
 export const ASSISTANT_INDEX_STORE_VERSION = 2
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 2
+
+const assistantSessionCache = createAssistantBoundedRuntimeCache<string, AssistantSession | null>({
+  name: 'assistant.sessions',
+  ...ASSISTANT_SESSION_CACHE,
+})
+
+const assistantIndexStoreCache = createAssistantBoundedRuntimeCache<string, AssistantAliasStore>({
+  name: 'assistant.indexes',
+  ...ASSISTANT_INDEX_CACHE,
+})
+
+const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
+  name: 'assistant.automation-state',
+  ...ASSISTANT_AUTOMATION_STATE_CACHE,
+})
 
 export async function ensureAssistantState(
   paths: AssistantStatePaths,
@@ -48,10 +66,25 @@ export async function ensureAssistantState(
     mkdir(paths.outboxDirectory, {
       recursive: true,
     }),
+    mkdir(paths.outboxQuarantineDirectory, {
+      recursive: true,
+    }),
     mkdir(paths.turnsDirectory, {
       recursive: true,
     }),
     mkdir(paths.diagnosticsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.distillationsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.journalsDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.providerRouteRecoveryDirectory, {
+      recursive: true,
+    }),
+    mkdir(paths.quarantineDirectory, {
       recursive: true,
     }),
     mkdir(paths.stateDirectory, {
@@ -69,26 +102,47 @@ export async function ensureAssistantState(
 export async function readAssistantSession(input: {
   paths: AssistantStatePaths
   sessionId: string
+  treatCorruptedAsMissing?: boolean
 }): Promise<AssistantSession | null> {
   const sessionPath = resolveAssistantSessionPath(input.paths, input.sessionId)
+  const cached = assistantSessionCache.get(sessionPath)
+  if (cached !== undefined) {
+    return cached
+  }
 
+  let raw: string
   try {
-    return (
-      await readAssistantJsonFile({
-        filePath: sessionPath,
-        parse(value) {
-          return normalizeAssistantSessionSnapshot(parseAssistantSessionRecord(value))
-        },
-      })
-    ).value
+    raw = await readFile(sessionPath, 'utf8')
   } catch (error) {
     if (isMissingFileError(error)) {
-      return null
-    }
-    if (isJsonSyntaxError(error)) {
+      assistantSessionCache.set(sessionPath, null)
       return null
     }
     throw error
+  }
+
+  try {
+    const session = normalizeAssistantSessionSnapshot(
+      parseAssistantSessionRecord(JSON.parse(raw) as unknown),
+    )
+    assistantSessionCache.set(sessionPath, session)
+    return session
+  } catch (error) {
+    assistantSessionCache.delete(sessionPath)
+    await quarantineAssistantStateFile({
+      artifactKind: 'session',
+      error,
+      filePath: sessionPath,
+      paths: input.paths,
+    })
+    if (input.treatCorruptedAsMissing) {
+      return null
+    }
+    throw createAssistantSessionCorruptedError({
+      error,
+      sessionId: input.sessionId,
+      sessionPath,
+    })
   }
 }
 
@@ -97,10 +151,18 @@ export async function writeAssistantSession(
   session: AssistantSession,
 ): Promise<void> {
   const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
-  await writeJsonFileAtomic(
-    sessionPath,
-    assistantSessionSchema.parse(normalizeAssistantSessionForWrite(session)),
-  )
+  const parsed = assistantSessionSchema.parse(normalizeAssistantSessionForWrite(session))
+  await writeJsonFileAtomic(sessionPath, parsed)
+  assistantSessionCache.set(sessionPath, parsed)
+  await appendAssistantRuntimeEventAtPaths(paths, {
+    at: parsed.updatedAt,
+    component: 'state',
+    entityId: parsed.sessionId,
+    entityType: 'session',
+    kind: 'session.upserted',
+    level: 'info',
+    message: `Assistant session ${parsed.sessionId} was persisted.`,
+  }).catch(() => undefined)
 }
 
 export async function readAssistantTranscriptEntries(
@@ -254,8 +316,7 @@ export async function persistResolvedSession(
 ): Promise<AssistantSession> {
   const nextBinding = mergeAssistantBinding(session.binding, input.bindingPatch)
   const aliasChanged = input.alias !== null && input.alias !== session.alias
-  const bindingChanged =
-    JSON.stringify(nextBinding) !== JSON.stringify(session.binding)
+  const bindingChanged = !areAssistantBindingsEqual(nextBinding, session.binding)
 
   if (!aliasChanged && !bindingChanged) {
     return session
@@ -263,10 +324,10 @@ export async function persistResolvedSession(
 
   const updated = parseAssistantSessionRecord(
     normalizeAssistantSessionForWrite({
-    ...session,
-    alias: input.alias ?? session.alias,
-    binding: nextBinding,
-    updatedAt: new Date().toISOString(),
+      ...session,
+      alias: input.alias ?? session.alias,
+      binding: nextBinding,
+      updatedAt: new Date().toISOString(),
     }),
   )
   await writeAssistantSession(paths, updated)
@@ -345,27 +406,38 @@ export function isAssistantSessionExpired(
 export async function readAssistantIndexStore(
   paths: AssistantStatePaths,
 ): Promise<AssistantAliasStore> {
-  try {
-    return (
-      await readAssistantJsonFile({
-        filePath: paths.indexesPath,
-        parse(value) {
-          return assistantAliasStoreSchema.parse(value)
-        },
-      })
-    ).value
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      if (isJsonSyntaxError(error)) {
-        return rebuildAssistantIndexStore(paths)
-      }
-      throw error
-    }
+  const cached = assistantIndexStoreCache.get(paths.indexesPath)
+  if (cached !== undefined) {
+    return cached
   }
 
-  const initial = createInitialAssistantIndexStore()
-  await writeJsonFileAtomic(paths.indexesPath, initial)
-  return initial
+  let raw: string
+  try {
+    raw = await readFile(paths.indexesPath, 'utf8')
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+    const initial = createInitialAssistantIndexStore()
+    await writeJsonFileAtomic(paths.indexesPath, initial)
+    assistantIndexStoreCache.set(paths.indexesPath, initial)
+    return initial
+  }
+
+  try {
+    const parsed = assistantAliasStoreSchema.parse(JSON.parse(raw) as unknown)
+    assistantIndexStoreCache.set(paths.indexesPath, parsed)
+    return parsed
+  } catch (error) {
+    assistantIndexStoreCache.delete(paths.indexesPath)
+    await quarantineAssistantStateFile({
+      artifactKind: 'indexes',
+      error,
+      filePath: paths.indexesPath,
+      paths,
+    })
+    return await rebuildAssistantIndexStore(paths)
+  }
 }
 
 export async function synchronizeAssistantIndexes(
@@ -404,32 +476,65 @@ export async function synchronizeAssistantIndexes(
     conversationKeys,
   })
   await writeJsonFileAtomic(paths.indexesPath, updated)
+  assistantIndexStoreCache.set(paths.indexesPath, updated)
+}
+
+export async function writeAutomationState(
+  paths: AssistantStatePaths,
+  state: AssistantAutomationState,
+): Promise<AssistantAutomationState> {
+  const parsed = assistantAutomationStateSchema.parse(state)
+  await writeJsonFileAtomic(paths.automationPath, parsed)
+  assistantAutomationStateCache.set(paths.automationPath, parsed)
+  return parsed
 }
 
 export async function readAutomationState(
   paths: AssistantStatePaths,
 ): Promise<AssistantAutomationState> {
-  try {
-    return (
-      await readAssistantJsonFile({
-        filePath: paths.automationPath,
-        parse(value) {
-          return assistantAutomationStateSchema.parse(value)
-        },
-      })
-    ).value
-  } catch (error) {
-    if (!isMissingFileError(error)) {
-      if (isJsonSyntaxError(error)) {
-        return createInitialAutomationState()
-      }
-      throw error
-    }
+  const cached = assistantAutomationStateCache.get(paths.automationPath)
+  if (cached !== undefined) {
+    return cached
   }
 
-  const initial = createInitialAutomationState()
-  await writeJsonFileAtomic(paths.automationPath, initial)
-  return initial
+  let raw: string
+  try {
+    raw = await readFile(paths.automationPath, 'utf8')
+  } catch (error) {
+    if (!isMissingFileError(error)) {
+      throw error
+    }
+    const initial = createInitialAutomationState()
+    await writeJsonFileAtomic(paths.automationPath, initial)
+    assistantAutomationStateCache.set(paths.automationPath, initial)
+    return initial
+  }
+
+  try {
+    const parsed = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
+    assistantAutomationStateCache.set(paths.automationPath, parsed)
+    return parsed
+  } catch (error) {
+    assistantAutomationStateCache.delete(paths.automationPath)
+    await quarantineAssistantStateFile({
+      artifactKind: 'automation',
+      error,
+      filePath: paths.automationPath,
+      paths,
+    })
+    const initial = createInitialAutomationState()
+    await writeJsonFileAtomic(paths.automationPath, initial)
+    assistantAutomationStateCache.set(paths.automationPath, initial)
+    await appendAssistantRuntimeEventAtPaths(paths, {
+      component: 'automation',
+      entityId: 'automation',
+      entityType: 'automation-state',
+      kind: 'automation.recovered',
+      level: 'warn',
+      message: 'Assistant automation state was rebuilt after quarantine.',
+    }).catch(() => undefined)
+    return initial
+  }
 }
 
 function createInitialAssistantIndexStore(): AssistantAliasStore {
@@ -458,6 +563,7 @@ async function rebuildAssistantIndexStore(
       const session = await readAssistantSession({
         paths,
         sessionId: entry.name.replace(/\.json$/u, ''),
+        treatCorruptedAsMissing: true,
       })
       if (!session) {
         continue
@@ -469,15 +575,26 @@ async function rebuildAssistantIndexStore(
         conversationKeys[session.binding.conversationKey] = session.sessionId
       }
     } catch {
-      // Doctor will still flag the malformed session file; skip it while rebuilding indexes.
+      // Quarantine already happened in readAssistantSession; keep rebuild best-effort.
     }
   }
 
-  return assistantAliasStoreSchema.parse({
+  const rebuilt = assistantAliasStoreSchema.parse({
     version: ASSISTANT_INDEX_STORE_VERSION,
     aliases,
     conversationKeys,
   })
+  await writeJsonFileAtomic(paths.indexesPath, rebuilt)
+  assistantIndexStoreCache.set(paths.indexesPath, rebuilt)
+  await appendAssistantRuntimeEventAtPaths(paths, {
+    component: 'state',
+    entityId: 'indexes',
+    entityType: 'indexes',
+    kind: 'indexes.rebuilt',
+    level: 'warn',
+    message: 'Assistant session indexes were rebuilt from durable session files.',
+  }).catch(() => undefined)
+  return rebuilt
 }
 
 function createInitialAutomationState(): AssistantAutomationState {
@@ -491,4 +608,45 @@ function createInitialAutomationState(): AssistantAutomationState {
     autoReplyPrimed: true,
     updatedAt: new Date().toISOString(),
   })
+}
+
+function areAssistantBindingsEqual(
+  left: AssistantSession['binding'],
+  right: AssistantSession['binding'],
+): boolean {
+  return (
+    left.actorId === right.actorId &&
+    left.channel === right.channel &&
+    left.conversationKey === right.conversationKey &&
+    left.identityId === right.identityId &&
+    left.threadId === right.threadId &&
+    left.threadIsDirect === right.threadIsDirect &&
+    left.delivery?.kind === right.delivery?.kind &&
+    left.delivery?.target === right.delivery?.target
+  )
+}
+
+function createAssistantSessionCorruptedError(input: {
+  error: unknown
+  sessionId: string
+  sessionPath: string
+}): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_SESSION_CORRUPTED',
+    `Assistant session "${input.sessionId}" is corrupted and was quarantined. Repair or restore the session file before resuming it.`,
+    {
+      sessionId: input.sessionId,
+      sessionPath: input.sessionPath,
+      reason: input.error instanceof Error ? input.error.message : String(input.error),
+    },
+  )
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ENOENT',
+  )
 }

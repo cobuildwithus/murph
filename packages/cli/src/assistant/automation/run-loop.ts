@@ -14,6 +14,7 @@ import {
   drainAssistantOutbox,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
+import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import { refreshAssistantStatusSnapshot } from '../status.js'
 import {
   readAssistantAutomationState,
@@ -129,6 +130,14 @@ export async function runAssistantAutomation(
         counterDeltas: {
           automationScans: 1,
         },
+      })
+      await maybeRunAssistantRuntimeMaintenance({
+        vault: input.vault,
+      }).catch((error) => {
+        warnAssistantBestEffortFailure({
+          error,
+          operation: 'runtime maintenance',
+        })
       })
       if (input.drainOutbox ?? true) {
         await drainAssistantOutbox({

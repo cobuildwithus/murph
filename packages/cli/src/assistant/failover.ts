@@ -13,16 +13,17 @@ import {
   resolveAssistantProviderDefaults,
   type AssistantOperatorDefaults,
 } from '../operator-config.js'
+import { quarantineAssistantStateFile } from './quarantine.js'
+import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
-import { resolveAssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
 import { resolveAssistantProviderLabel } from './provider-registry.js'
 import {
-  isJsonSyntaxError,
   isMissingFileError,
   normalizeNullableString,
   writeJsonFileAtomic,
@@ -46,21 +47,7 @@ export async function readAssistantFailoverState(
 ): Promise<AssistantFailoverState> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
-
-  try {
-    const raw = await readFile(paths.failoverStatePath, 'utf8')
-    return assistantFailoverStateSchema.parse(JSON.parse(raw) as unknown)
-  } catch (error) {
-    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
-      throw error
-    }
-  }
-
-  return assistantFailoverStateSchema.parse({
-    schema: ASSISTANT_FAILOVER_STATE_SCHEMA,
-    updatedAt: new Date(0).toISOString(),
-    routes: [],
-  })
+  return readAssistantFailoverStateAtPath(paths, paths.failoverStatePath)
 }
 
 export async function saveAssistantFailoverState(
@@ -70,7 +57,7 @@ export async function saveAssistantFailoverState(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
     const parsed = assistantFailoverStateSchema.parse(state)
-    await writeJsonFileAtomic(paths.failoverStatePath, parsed)
+    await writeAssistantFailoverStateAtPath(paths, parsed)
     return parsed
   })
 }
@@ -143,7 +130,7 @@ export async function recordAssistantFailoverRouteSuccess(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const at = input.at ?? new Date().toISOString()
-    const state = await readAssistantFailoverStateAtPath(paths.failoverStatePath)
+    const state = await readAssistantFailoverStateAtPath(paths, paths.failoverStatePath)
     const routes = upsertAssistantProviderRouteState(
       state.routes,
       {
@@ -167,7 +154,7 @@ export async function recordAssistantFailoverRouteSuccess(input: {
       updatedAt: at,
       routes,
     })
-    await writeJsonFileAtomic(paths.failoverStatePath, nextState)
+    await writeAssistantFailoverStateAtPath(paths, nextState)
     return nextState
   })
 }
@@ -182,7 +169,7 @@ export async function recordAssistantFailoverRouteFailure(input: {
   return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
     const at = input.at ?? new Date().toISOString()
-    const state = await readAssistantFailoverStateAtPath(paths.failoverStatePath)
+    const state = await readAssistantFailoverStateAtPath(paths, paths.failoverStatePath)
     const explicitCooldownMs = normalizePositiveInt(input.cooldownMs)
     const derivedCooldownMs = resolveAssistantFailoverCooldownMs(input.error)
     const cooldownMs =
@@ -215,7 +202,7 @@ export async function recordAssistantFailoverRouteFailure(input: {
       updatedAt: at,
       routes,
     })
-    await writeJsonFileAtomic(paths.failoverStatePath, nextState)
+    await writeAssistantFailoverStateAtPath(paths, nextState)
     return nextState
   })
 }
@@ -304,6 +291,7 @@ function createResolvedAssistantFailoverRoute(input: {
 }
 
 async function readAssistantFailoverStateAtPath(
+  paths: AssistantStatePaths,
   failoverStatePath: string,
 ): Promise<AssistantFailoverState> {
   try {
@@ -311,10 +299,38 @@ async function readAssistantFailoverStateAtPath(
     return assistantFailoverStateSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
     if (!isMissingFileError(error)) {
-      throw error
+      await quarantineAssistantStateFile({
+        artifactKind: 'failover',
+        error,
+        filePath: failoverStatePath,
+        paths,
+      }).catch(() => undefined)
     }
   }
 
+  return createEmptyAssistantFailoverState()
+}
+
+async function writeAssistantFailoverStateAtPath(
+  paths: AssistantStatePaths,
+  state: AssistantFailoverState,
+): Promise<void> {
+  await writeJsonFileAtomic(paths.failoverStatePath, state)
+  await appendAssistantRuntimeEventAtPaths(paths, {
+    at: state.updatedAt,
+    component: 'failover',
+    entityId: 'assistant-failover',
+    entityType: 'failover-state',
+    kind: 'failover.state.upserted',
+    level: 'info',
+    message: `Assistant failover state was persisted with ${state.routes.length} route(s).`,
+    data: {
+      routeCount: state.routes.length,
+    },
+  }).catch(() => undefined)
+}
+
+function createEmptyAssistantFailoverState(): AssistantFailoverState {
   return assistantFailoverStateSchema.parse({
     schema: ASSISTANT_FAILOVER_STATE_SCHEMA,
     updatedAt: new Date(0).toISOString(),

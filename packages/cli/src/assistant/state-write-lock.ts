@@ -1,9 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import path from 'node:path'
+import { rm } from 'node:fs/promises'
 import {
   acquireDirectoryLock,
   buildProcessCommand,
   DirectoryLockHeldError,
+  inspectDirectoryLock,
   isProcessRunning,
 } from '@murph/runtime-state'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -124,9 +126,43 @@ export function createAssistantStateWriteLock<
     }
   }
 
+  async function inspectWriteLock(paths: TPaths) {
+    return await inspectDirectoryLock({
+      lockPath: path.join(paths.assistantStateRoot, options.lockDirectory),
+      metadataPath: path.join(paths.assistantStateRoot, options.lockMetadataPath),
+      parseMetadata(value) {
+        return isAssistantStateWriteLockMetadata(value) ? value : null
+      },
+      invalidMetadataReason: options.invalidMetadataReason,
+      inspectStale(metadata) {
+        return isProcessRunning(metadata.pid)
+          ? null
+          : `Process ${metadata.pid} is no longer running.`
+      },
+    })
+  }
+
+  async function clearWriteLock(paths: TPaths): Promise<void> {
+    await Promise.all([
+      rm(path.join(paths.assistantStateRoot, options.lockDirectory), {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 10,
+      }),
+      rm(path.join(paths.assistantStateRoot, options.lockMetadataPath), {
+        force: true,
+        maxRetries: 3,
+        retryDelay: 10,
+      }),
+    ])
+  }
+
   return {
     withWriteLock,
     acquireWriteLock,
+    inspectWriteLock,
+    clearWriteLock,
     isWriteLockMetadata: isAssistantStateWriteLockMetadata,
   }
 }

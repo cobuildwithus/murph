@@ -9,15 +9,20 @@ import { buildAssistantOutboxSummary } from './outbox.js'
 import { readAssistantDiagnosticsSnapshot } from './diagnostics.js'
 import { readAssistantFailoverState } from './failover.js'
 import { inspectAssistantAutomationRunLock } from './automation/runtime-lock.js'
+import { summarizeAssistantQuarantines, quarantineAssistantStateFile } from './quarantine.js'
+import { readAssistantRuntimeBudgetStatus } from './runtime-budgets.js'
+import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
-  readAssistantAutomationState,
+  ensureAssistantState,
+  readAutomationState,
+} from './store/persistence.js'
+import {
   redactAssistantDisplayPath,
   resolveAssistantStatePaths,
 } from './store.js'
 import { listRecentAssistantTurnReceipts } from './turns.js'
 import {
-  isJsonSyntaxError,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -33,19 +38,30 @@ export async function getAssistantStatus(
 ): Promise<AssistantStatusResult> {
   const vault = typeof input === 'string' ? input : input.vault
   const paths = resolveAssistantStatePaths(vault)
-  const [automation, runLock, outbox, diagnostics, failover, recentTurns] =
-    await Promise.all([
-      readAssistantAutomationState(vault),
-      inspectAssistantAutomationRunLock(paths),
-      buildAssistantOutboxSummary(vault),
-      readAssistantDiagnosticsSnapshot(vault),
-      readAssistantFailoverState(vault),
-      resolveRecentTurns(vault, typeof input === 'string' ? undefined : input),
-    ])
+  const [
+    automation,
+    runLock,
+    outbox,
+    diagnostics,
+    failover,
+    quarantine,
+    runtimeBudget,
+    recentTurns,
+  ] = await Promise.all([
+    readAutomationState(paths),
+    inspectAssistantAutomationRunLock(paths),
+    buildAssistantOutboxSummary(vault),
+    readAssistantDiagnosticsSnapshot(vault),
+    readAssistantFailoverState(vault),
+    summarizeAssistantQuarantines({ paths }),
+    readAssistantRuntimeBudgetStatus(vault),
+    resolveRecentTurns(vault, typeof input === 'string' ? undefined : input),
+  ])
   const warnings = buildAssistantStatusWarnings({
     diagnostics,
     failover,
     outbox,
+    quarantine,
     runLock,
   })
 
@@ -71,6 +87,8 @@ export async function getAssistantStatus(
     outbox,
     diagnostics,
     failover,
+    quarantine,
+    runtimeBudget,
     recentTurns,
     warnings,
   })
@@ -82,6 +100,19 @@ export async function refreshAssistantStatusSnapshot(
   const status = await getAssistantStatus(vault)
   await withAssistantRuntimeWriteLock(vault, async (paths) => {
     await writeJsonFileAtomic(paths.statusPath, status)
+    await appendAssistantRuntimeEventAtPaths(paths, {
+      at: status.generatedAt,
+      component: 'status',
+      entityId: 'assistant-status',
+      entityType: 'status-snapshot',
+      kind: 'status.snapshot.refreshed',
+      level: 'info',
+      message: 'Assistant status snapshot was refreshed.',
+      data: {
+        warningCount: status.warnings.length,
+        quarantineCount: status.quarantine.total,
+      },
+    }).catch(() => undefined)
   })
   return status
 }
@@ -90,14 +121,23 @@ export async function readAssistantStatusSnapshot(
   vault: string,
 ): Promise<AssistantStatusResult | null> {
   const paths = resolveAssistantStatePaths(vault)
+  await ensureAssistantState(paths)
+
   try {
     const raw = await readFile(paths.statusPath, 'utf8')
     return assistantStatusResultSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
-    if (isMissingFileError(error) || isJsonSyntaxError(error)) {
+    if (isMissingFileError(error)) {
       return null
     }
-    throw error
+
+    await quarantineAssistantStateFile({
+      artifactKind: 'status',
+      error,
+      filePath: paths.statusPath,
+      paths,
+    }).catch(() => undefined)
+    return null
   }
 }
 
@@ -105,6 +145,7 @@ function buildAssistantStatusWarnings(input: {
   diagnostics: AssistantStatusResult['diagnostics']
   failover: AssistantFailoverState
   outbox: AssistantStatusResult['outbox']
+  quarantine: AssistantStatusResult['quarantine']
   runLock: AssistantStatusResult['runLock']
 }): string[] {
   const warnings = [...input.diagnostics.recentWarnings]
@@ -117,6 +158,9 @@ function buildAssistantStatusWarnings(input: {
   }
   if (input.outbox.retryable > 0) {
     warnings.push(`${input.outbox.retryable} assistant outbox intent(s) are waiting for retry`)
+  }
+  if (input.quarantine.total > 0) {
+    warnings.push(`${input.quarantine.total} assistant runtime artifact(s) were quarantined for repair`)
   }
   const coolingDown = input.failover.routes.filter(
     (route) => route.cooldownUntil && Date.parse(route.cooldownUntil) > Date.now(),

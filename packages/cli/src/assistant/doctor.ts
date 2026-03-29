@@ -1,12 +1,14 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
-  assistantDiagnosticEventSchema,
   assistantAutomationStateSchema,
+  assistantDiagnosticEventSchema,
   assistantDiagnosticsSnapshotSchema,
   assistantDoctorResultSchema,
   assistantFailoverStateSchema,
   assistantOutboxIntentSchema,
+  assistantRuntimeBudgetSnapshotSchema,
+  assistantRuntimeEventSchema,
   assistantSessionSchema,
   assistantStatusResultSchema,
   assistantTranscriptEntrySchema,
@@ -17,6 +19,7 @@ import {
   type AssistantOutboxIntent,
   type AssistantTurnReceipt,
 } from '../assistant-cli-contracts.js'
+import { summarizeAssistantQuarantines } from './quarantine.js'
 import {
   isMissingFileError,
   parseAssistantJsonLinesWithTailSalvage,
@@ -28,18 +31,33 @@ const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 
 export async function runAssistantDoctor(vault: string): Promise<AssistantDoctorResult> {
   const paths = resolveAssistantStatePaths(vault)
-  const sessionScan = await scanSessionFiles(paths.sessionsDirectory)
-  const automationScan = await scanJsonFile(paths.automationPath, assistantAutomationStateSchema)
-  const transcriptScan = await scanTranscriptFiles(paths.transcriptsDirectory)
-  const receiptScan = await scanTurnReceiptFiles(paths.turnsDirectory)
-  const outboxScan = await scanOutboxFiles(paths.outboxDirectory)
-  const diagnosticEventScan = await scanDiagnosticEventLog(paths.diagnosticEventsPath)
-  const diagnosticsScan = await scanJsonFile(
-    paths.diagnosticSnapshotPath,
-    assistantDiagnosticsSnapshotSchema,
-  )
-  const failoverScan = await scanJsonFile(paths.failoverStatePath, assistantFailoverStateSchema)
-  const statusScan = await scanJsonFile(paths.statusPath, assistantStatusResultSchema)
+  const [
+    quarantine,
+    sessionScan,
+    automationScan,
+    transcriptScan,
+    receiptScan,
+    outboxScan,
+    diagnosticEventScan,
+    runtimeEventScan,
+    diagnosticsScan,
+    failoverScan,
+    statusScan,
+    runtimeBudgetScan,
+  ] = await Promise.all([
+    summarizeAssistantQuarantines({ paths }),
+    scanSessionFiles(paths.sessionsDirectory),
+    scanJsonFile(paths.automationPath, assistantAutomationStateSchema),
+    scanTranscriptFiles(paths.transcriptsDirectory),
+    scanTurnReceiptFiles(paths.turnsDirectory),
+    scanOutboxFiles(paths.outboxDirectory),
+    scanJsonLinesFile(paths.diagnosticEventsPath, assistantDiagnosticEventSchema),
+    scanJsonLinesFile(paths.runtimeEventsPath, assistantRuntimeEventSchema),
+    scanJsonFile(paths.diagnosticSnapshotPath, assistantDiagnosticsSnapshotSchema),
+    scanJsonFile(paths.failoverStatePath, assistantFailoverStateSchema),
+    scanJsonFile(paths.statusPath, assistantStatusResultSchema),
+    scanJsonFile(paths.resourceBudgetPath, assistantRuntimeBudgetSnapshotSchema),
+  ])
   const sessionIds = new Set(sessionScan.sessions.map((session) => session.sessionId))
   const outboxIntentIds = new Set(outboxScan.intents.map((intent) => intent.intentId))
 
@@ -95,18 +113,18 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
           ? `${transcriptScan.malformedLines} malformed transcript line(s) detected across ${transcriptScan.fileCount} transcript file(s).`
           : transcriptScan.salvagedTailLines > 0
             ? `${transcriptScan.salvagedTailLines} torn transcript tail line(s) were recovered during diagnostics.`
-          : transcriptOrphans.length > 0
-            ? `${transcriptOrphans.length} transcript file(s) do not have a matching session record.`
-            : `${transcriptScan.fileCount} transcript file(s) look healthy.`,
+            : transcriptOrphans.length > 0
+              ? `${transcriptOrphans.length} transcript file(s) do not have a matching session record.`
+              : `${transcriptScan.fileCount} transcript file(s) look healthy.`,
       name: 'transcript-files',
       status:
         transcriptScan.malformedLines > 0
           ? 'fail'
           : transcriptScan.salvagedTailLines > 0
             ? 'warn'
-          : transcriptOrphans.length > 0
-            ? 'warn'
-            : 'pass',
+            : transcriptOrphans.length > 0
+              ? 'warn'
+              : 'pass',
     }),
     createDoctorCheck({
       details: {
@@ -140,18 +158,18 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
           ? `${outboxScan.parseErrors} outbox intent file(s) could not be parsed.`
           : outboxScan.quarantinedFiles > 0
             ? `${outboxScan.quarantinedFiles} outbox intent file(s) were quarantined after parse failure.`
-          : outboxScan.staleOpenIntents.length > 0
-            ? `${outboxScan.staleOpenIntents.length} outbox intent(s) are still pending, retryable, or sending after ${Math.trunc(STALE_OUTBOX_INTENT_MS / 60000)} minutes.`
-            : `${outboxScan.intents.length} outbox intent(s) look healthy.`,
+            : outboxScan.staleOpenIntents.length > 0
+              ? `${outboxScan.staleOpenIntents.length} outbox intent(s) are still pending, retryable, or sending after ${Math.trunc(STALE_OUTBOX_INTENT_MS / 60000)} minutes.`
+              : `${outboxScan.intents.length} outbox intent(s) look healthy.`,
       name: 'outbox-intents',
       status:
         outboxScan.parseErrors > 0
           ? 'fail'
           : outboxScan.quarantinedFiles > 0
-            ? 'fail'
-          : outboxScan.staleOpenIntents.length > 0
             ? 'warn'
-            : 'pass',
+            : outboxScan.staleOpenIntents.length > 0
+              ? 'warn'
+              : 'pass',
     }),
     createDoctorCheck({
       details: {
@@ -173,6 +191,29 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
         diagnosticEventScan.malformedLines > 0
           ? 'fail'
           : diagnosticEventScan.salvagedTailLines > 0
+            ? 'warn'
+            : 'pass',
+    }),
+    createDoctorCheck({
+      details: {
+        malformedLines: runtimeEventScan.malformedLines,
+        present: runtimeEventScan.present,
+        salvagedTailLines: runtimeEventScan.salvagedTailLines,
+        totalEvents: runtimeEventScan.totalEvents,
+      },
+      message:
+        !runtimeEventScan.present
+          ? 'assistant runtime event journal has not been written yet.'
+          : runtimeEventScan.malformedLines > 0
+            ? `${runtimeEventScan.malformedLines} malformed runtime event line(s) detected.`
+            : runtimeEventScan.salvagedTailLines > 0
+              ? `${runtimeEventScan.salvagedTailLines} torn runtime event tail line(s) were recovered during diagnostics.`
+              : `${runtimeEventScan.totalEvents} assistant runtime event(s) parsed cleanly.`,
+      name: 'runtime-events',
+      status:
+        runtimeEventScan.malformedLines > 0
+          ? 'fail'
+          : runtimeEventScan.salvagedTailLines > 0
             ? 'warn'
             : 'pass',
     }),
@@ -229,6 +270,33 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
       name: 'status-snapshot',
       status: statusScan.parseError ? 'fail' : 'pass',
     }),
+    createDoctorCheck({
+      details: {
+        present: runtimeBudgetScan.present,
+        parseError: runtimeBudgetScan.parseError,
+      },
+      message:
+        !runtimeBudgetScan.present
+          ? 'assistant runtime budget snapshot has not been written yet.'
+          : runtimeBudgetScan.parseError
+            ? 'assistant runtime budget snapshot could not be parsed.'
+            : 'assistant runtime budget snapshot parsed cleanly.',
+      name: 'runtime-budget',
+      status: runtimeBudgetScan.parseError ? 'fail' : 'pass',
+    }),
+    createDoctorCheck({
+      details: {
+        byKind: quarantine.byKind,
+        recent: quarantine.recent.length,
+        total: quarantine.total,
+      },
+      message:
+        quarantine.total > 0
+          ? `${quarantine.total} assistant runtime artifact(s) are quarantined and should be reviewed.`
+          : 'No quarantined assistant runtime artifacts were found.',
+      name: 'quarantine-artifacts',
+      status: quarantine.total > 0 ? 'warn' : 'pass',
+    }),
   ]
 
   return assistantDoctorResultSchema.parse({
@@ -239,6 +307,7 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
     transcriptFileCount: transcriptScan.fileCount,
     receiptCount: receiptScan.fileCount,
     outboxIntentCount: outboxScan.intents.length,
+    quarantineCount: quarantine.total,
     checks,
   })
 }
@@ -353,7 +422,10 @@ async function scanTranscriptFiles(directory: string): Promise<{
   }
 }
 
-async function scanDiagnosticEventLog(filePath: string): Promise<{
+async function scanJsonLinesFile<T>(
+  filePath: string,
+  schema: { parse(input: unknown): T },
+): Promise<{
   malformedLines: number
   present: boolean
   salvagedTailLines: number
@@ -362,7 +434,7 @@ async function scanDiagnosticEventLog(filePath: string): Promise<{
   try {
     const raw = await readFile(filePath, 'utf8')
     const parsed = parseAssistantJsonLinesWithTailSalvage(raw, (value) =>
-      assistantDiagnosticEventSchema.parse(value),
+      schema.parse(value),
     )
     return {
       malformedLines: parsed.malformedLineCount,
@@ -428,7 +500,7 @@ async function scanOutboxFiles(directory: string): Promise<{
   const files = await readDirectoryFiles(directory)
   const quarantinedFiles = (
     await readDirectoryFiles(path.join(directory, '.quarantine'))
-  ).filter((file) => file.endsWith('.json')).length
+  ).filter((file) => file.endsWith('.meta.json')).length
   const intents: AssistantOutboxIntent[] = []
   let parseErrors = 0
 

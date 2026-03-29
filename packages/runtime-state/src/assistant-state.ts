@@ -14,13 +14,20 @@ export interface AssistantStatePaths {
   cronRunsDirectory: string;
   dailyMemoryDirectory: string;
   diagnosticsDirectory: string;
+  distillationsDirectory: string;
   diagnosticEventsPath: string;
   diagnosticSnapshotPath: string;
   failoverStatePath: string;
   indexesPath: string;
+  journalsDirectory: string;
   longTermMemoryPath: string;
   outboxDirectory: string;
+  outboxQuarantineDirectory: string;
+  providerRouteRecoveryDirectory: string;
+  quarantineDirectory: string;
   receiptsDirectory: string;
+  resourceBudgetPath: string;
+  runtimeEventsPath: string;
   sessionsDirectory: string;
   stateDirectory: string;
   statusPath: string;
@@ -37,6 +44,9 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   );
   const cronDirectory = path.join(rootPath, "cron");
   const diagnosticsDirectory = path.join(rootPath, "diagnostics");
+  const distillationsDirectory = path.join(rootPath, "distillations");
+  const journalsDirectory = path.join(rootPath, "journals");
+  const outboxDirectory = path.join(rootPath, "outbox");
   const receiptsDirectory = path.join(rootPath, "receipts");
   const usageDirectory = path.join(rootPath, "usage");
 
@@ -50,12 +60,19 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     dailyMemoryDirectory: path.join(rootPath, "memory"),
     diagnosticsDirectory,
     diagnosticEventsPath: path.join(diagnosticsDirectory, "events.jsonl"),
+    distillationsDirectory,
     diagnosticSnapshotPath: path.join(diagnosticsDirectory, "snapshot.json"),
     failoverStatePath: path.join(rootPath, "failover.json"),
     indexesPath: path.join(rootPath, "indexes.json"),
+    journalsDirectory,
     longTermMemoryPath: path.join(rootPath, "MEMORY.md"),
-    outboxDirectory: path.join(rootPath, "outbox"),
+    outboxDirectory,
+    outboxQuarantineDirectory: path.join(outboxDirectory, ".quarantine"),
+    providerRouteRecoveryDirectory: path.join(rootPath, "provider-route-recovery"),
+    quarantineDirectory: path.join(rootPath, "quarantine"),
     receiptsDirectory,
+    resourceBudgetPath: path.join(rootPath, "runtime-budgets.json"),
+    runtimeEventsPath: path.join(journalsDirectory, "runtime-events.jsonl"),
     sessionsDirectory: path.join(rootPath, "sessions"),
     stateDirectory: path.join(rootPath, "state"),
     statusPath: path.join(rootPath, "status.json"),

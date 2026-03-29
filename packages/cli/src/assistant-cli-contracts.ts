@@ -120,6 +120,7 @@ export const assistantTurnTimelineEventKindValues = [
   'provider.attempt.failed',
   'provider.failover.applied',
   'provider.cooldown.started',
+  'provider.context.refreshed',
   'delivery.queued',
   'delivery.attempt.started',
   'delivery.sent',
@@ -155,6 +156,47 @@ export const assistantStatusRunLockStateValues = [
   'unlocked',
   'active',
   'stale',
+] as const
+
+export const assistantQuarantineArtifactKindValues = [
+  'session',
+  'indexes',
+  'automation',
+  'status',
+  'diagnostics-snapshot',
+  'failover',
+  'turn-receipt',
+  'outbox-intent',
+  'provider-route-recovery',
+  'cron-store',
+  'cron-run',
+] as const
+
+export const assistantRuntimeEventKindValues = [
+  'session.upserted',
+  'session.quarantined',
+  'indexes.rebuilt',
+  'indexes.quarantined',
+  'automation.recovered',
+  'automation.quarantined',
+  'outbox.intent.upserted',
+  'outbox.intent.quarantined',
+  'turn.receipt.upserted',
+  'turn.receipt.quarantined',
+  'diagnostics.event.recorded',
+  'diagnostics.snapshot.recovered',
+  'diagnostics.snapshot.quarantined',
+  'failover.state.upserted',
+  'failover.state.quarantined',
+  'status.snapshot.refreshed',
+  'status.snapshot.quarantined',
+  'provider-route-recovery.upserted',
+  'provider-route-recovery.quarantined',
+  'cron.store.quarantined',
+  'cron.run.quarantined',
+  'memory.upserted',
+  'memory.removed',
+  'runtime.maintenance',
 ] as const
 
 export const assistantHeadersSchema = z.record(
@@ -315,6 +357,21 @@ export const assistantTranscriptEntrySchema = z.object({
   text: z.string(),
   createdAt: isoTimestampSchema,
 })
+
+export const assistantTranscriptDistillationSchema = z
+  .object({
+    schema: z.literal('murph.assistant-transcript-distillation.v1'),
+    distillationId: z.string().min(1),
+    sessionId: z.string().min(1),
+    createdAt: isoTimestampSchema,
+    conversationEntryCount: z.number().int().nonnegative(),
+    startEntryOffset: z.number().int().nonnegative(),
+    endEntryOffset: z.number().int().nonnegative(),
+    preservedRecentConversationCount: z.number().int().nonnegative(),
+    preview: z.string().nullable().default(null),
+    summaryLines: z.array(z.string().min(1)).min(1),
+  })
+  .strict()
 
 export const assistantChannelDeliverySchema = z.object({
   channel: z.string().min(1),
@@ -489,6 +546,74 @@ export const assistantDiagnosticsSnapshotSchema = z
   })
   .strict()
 
+export const assistantQuarantineEntrySchema = z
+  .object({
+    schema: z.literal('murph.assistant-quarantine-entry.v1'),
+    quarantineId: z.string().min(1),
+    artifactKind: z.enum(assistantQuarantineArtifactKindValues),
+    originalPath: pathSchema,
+    quarantinedPath: pathSchema,
+    metadataPath: pathSchema,
+    quarantinedAt: isoTimestampSchema,
+    errorCode: z.string().min(1).nullable(),
+    message: z.string().min(1),
+  })
+  .strict()
+
+export const assistantQuarantineSummarySchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    byKind: z.record(z.string(), z.number().int().nonnegative()),
+    recent: z.array(assistantQuarantineEntrySchema),
+  })
+  .strict()
+
+export const assistantRuntimeCacheBudgetSchema = z
+  .object({
+    name: z.string().min(1),
+    limit: z.number().int().positive(),
+    size: z.number().int().nonnegative(),
+    hits: z.number().int().nonnegative(),
+    misses: z.number().int().nonnegative(),
+    evictions: z.number().int().nonnegative(),
+    expired: z.number().int().nonnegative(),
+    ttlMs: z.number().int().positive(),
+  })
+  .strict()
+
+export const assistantRuntimeMaintenanceSnapshotSchema = z
+  .object({
+    lastRunAt: isoTimestampSchema.nullable(),
+    staleProviderRecoveryPruned: z.number().int().nonnegative(),
+    staleQuarantinePruned: z.number().int().nonnegative(),
+    staleLocksCleared: z.number().int().nonnegative(),
+    notes: z.array(z.string()),
+  })
+  .strict()
+
+export const assistantRuntimeBudgetSnapshotSchema = z
+  .object({
+    schema: z.literal('murph.assistant-runtime-budget.v1'),
+    updatedAt: isoTimestampSchema,
+    caches: z.array(assistantRuntimeCacheBudgetSchema),
+    maintenance: assistantRuntimeMaintenanceSnapshotSchema,
+  })
+  .strict()
+
+export const assistantRuntimeEventSchema = z
+  .object({
+    schema: z.literal('murph.assistant-runtime-event.v1'),
+    at: isoTimestampSchema,
+    level: z.enum(assistantDiagnosticLevelValues),
+    kind: z.enum(assistantRuntimeEventKindValues),
+    component: z.string().min(1),
+    entityId: z.string().min(1).nullable(),
+    entityType: z.string().min(1).nullable(),
+    message: z.string().min(1),
+    dataJson: z.string().nullable(),
+  })
+  .strict()
+
 export const assistantProviderRouteStateSchema = z
   .object({
     routeId: z.string().min(1),
@@ -565,6 +690,8 @@ export const assistantStatusResultSchema = z
     outbox: assistantStatusOutboxSummarySchema,
     diagnostics: assistantDiagnosticsSnapshotSchema,
     failover: assistantFailoverStateSchema,
+    quarantine: assistantQuarantineSummarySchema,
+    runtimeBudget: assistantRuntimeBudgetSnapshotSchema,
     recentTurns: z.array(assistantTurnReceiptSchema),
     warnings: z.array(z.string()),
   })
@@ -590,6 +717,7 @@ export const assistantDoctorResultSchema = z
     transcriptFileCount: z.number().int().nonnegative(),
     receiptCount: z.number().int().nonnegative(),
     outboxIntentCount: z.number().int().nonnegative(),
+    quarantineCount: z.number().int().nonnegative(),
     checks: z.array(assistantDoctorCheckSchema),
   })
   .strict()
@@ -1048,6 +1176,9 @@ export type AssistantProviderRouteRecoveryEntry = z.infer<
 export type AssistantTranscriptEntry = z.infer<
   typeof assistantTranscriptEntrySchema
 >
+export type AssistantTranscriptDistillation = z.infer<
+  typeof assistantTranscriptDistillationSchema
+>
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema
 >
@@ -1067,6 +1198,28 @@ export type AssistantTurnReceipt = z.infer<typeof assistantTurnReceiptSchema>
 export type AssistantOutboxIntent = z.infer<typeof assistantOutboxIntentSchema>
 export type AssistantDiagnosticEvent = z.infer<
   typeof assistantDiagnosticEventSchema
+>
+export type AssistantQuarantineArtifactKind =
+  (typeof assistantQuarantineArtifactKindValues)[number]
+export type AssistantQuarantineEntry = z.infer<
+  typeof assistantQuarantineEntrySchema
+>
+export type AssistantQuarantineSummary = z.infer<
+  typeof assistantQuarantineSummarySchema
+>
+export type AssistantRuntimeEventKind =
+  (typeof assistantRuntimeEventKindValues)[number]
+export type AssistantRuntimeEvent = z.infer<
+  typeof assistantRuntimeEventSchema
+>
+export type AssistantRuntimeCacheBudget = z.infer<
+  typeof assistantRuntimeCacheBudgetSchema
+>
+export type AssistantRuntimeMaintenanceSnapshot = z.infer<
+  typeof assistantRuntimeMaintenanceSnapshotSchema
+>
+export type AssistantRuntimeBudgetSnapshot = z.infer<
+  typeof assistantRuntimeBudgetSnapshotSchema
 >
 export type AssistantDiagnosticsCounters = z.infer<
   typeof assistantDiagnosticsCountersSchema
