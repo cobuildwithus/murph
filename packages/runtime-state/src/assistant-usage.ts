@@ -8,6 +8,18 @@ import {
 } from "./assistant-state.ts";
 
 export const ASSISTANT_USAGE_SCHEMA = "murph.assistant-usage.v1";
+const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set([
+  "ANTHROPIC_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "PERPLEXITY_API_KEY",
+  "TOGETHER_API_KEY",
+  "VENICE_API_KEY",
+  "XAI_API_KEY",
+]);
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 
@@ -122,12 +134,6 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
   const record = requireRecord(value, "assistant usage record");
   const inputTokens = normalizeOptionalInteger(record.inputTokens, "inputTokens");
   const outputTokens = normalizeOptionalInteger(record.outputTokens, "outputTokens");
-  const totalTokens =
-    normalizeOptionalInteger(record.totalTokens, "totalTokens")
-    ?? resolveFallbackTotalTokens({
-      inputTokens,
-      outputTokens,
-    });
 
   return {
     apiKeyEnv: normalizeOptionalString(record.apiKeyEnv, "apiKeyEnv"),
@@ -152,10 +158,30 @@ export function parseAssistantUsageRecord(value: unknown): AssistantUsageRecord 
     schema: normalizeUsageSchema(record.schema),
     servedModel: normalizeOptionalString(record.servedModel, "servedModel"),
     sessionId: normalizeRequiredString(record.sessionId, "sessionId"),
-    totalTokens,
+    totalTokens: normalizeOptionalInteger(record.totalTokens, "totalTokens"),
     turnId: normalizeRequiredString(record.turnId, "turnId"),
     usageId: normalizeRequiredString(record.usageId, "usageId"),
   };
+}
+
+export function resolveAssistantUsageCredentialSource(input: {
+  apiKeyEnv: string | null;
+  provider: string;
+  userEnvKeys: Iterable<string>;
+}): AssistantUsageCredentialSource {
+  const userEnvKeys = new Set(
+    [...input.userEnvKeys].map((key) => normalizeRequiredString(key, "userEnvKey")),
+  );
+
+  if (!input.apiKeyEnv) {
+    if (input.provider === "codex-cli" && hasHostedMemberAiCredential(userEnvKeys)) {
+      return "unknown";
+    }
+
+    return "platform";
+  }
+
+  return userEnvKeys.has(input.apiKeyEnv) ? "member" : "platform";
 }
 
 function resolveAssistantUsagePaths(
@@ -250,17 +276,6 @@ function normalizeOptionalInteger(value: unknown, label: string): number | null 
   return value;
 }
 
-function resolveFallbackTotalTokens(input: {
-  inputTokens: number | null;
-  outputTokens: number | null;
-}): number | null {
-  if (input.inputTokens === null && input.outputTokens === null) {
-    return null;
-  }
-
-  return (input.inputTokens ?? 0) + (input.outputTokens ?? 0);
-}
-
 function isMissingFileError(error: unknown): boolean {
   return Boolean(
     error
@@ -268,4 +283,8 @@ function isMissingFileError(error: unknown): boolean {
       && "code" in error
       && error.code === "ENOENT",
   );
+}
+
+function hasHostedMemberAiCredential(userEnvKeys: ReadonlySet<string>): boolean {
+  return [...userEnvKeys].some((key) => HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS.has(key));
 }

@@ -505,12 +505,7 @@ function extractOpenAICompatibleAssistantProviderUsage(input: {
       rawRecord?.model,
       providerMetadata?.model,
     ) ?? input.providerConfig.model,
-    totalTokens:
-      readAssistantProviderInteger(usageRecord, 'totalTokens', 'total_tokens')
-      ?? resolveAssistantProviderTotalTokens({
-        inputTokens,
-        outputTokens,
-      }),
+    totalTokens: readAssistantProviderInteger(usageRecord, 'totalTokens', 'total_tokens'),
   }
 }
 
@@ -570,12 +565,11 @@ function extractCodexAssistantProviderUsage(input: {
       completionRecord?.model_id,
       completionRecord?.modelId,
     ) ?? input.providerConfig.model,
-    totalTokens:
-      readAssistantProviderInteger(usageRecord ?? completionRecord, 'totalTokens', 'total_tokens')
-      ?? resolveAssistantProviderTotalTokens({
-        inputTokens,
-        outputTokens,
-      }),
+    totalTokens: readAssistantProviderInteger(
+      usageRecord ?? completionRecord,
+      'totalTokens',
+      'total_tokens',
+    ),
   }
 }
 
@@ -639,17 +633,6 @@ function readAssistantProviderInteger(
   }
 
   return null
-}
-
-function resolveAssistantProviderTotalTokens(input: {
-  inputTokens: number | null
-  outputTokens: number | null
-}): number | null {
-  if (input.inputTokens === null && input.outputTokens === null) {
-    return null
-  }
-
-  return (input.inputTokens ?? 0) + (input.outputTokens ?? 0)
 }
 
 function resolveAssistantProviderDefinition(

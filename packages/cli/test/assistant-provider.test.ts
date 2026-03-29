@@ -700,6 +700,42 @@ test('executeAssistantProviderTurn surfaces AI SDK usage for OpenAI-compatible p
   })
 })
 
+test('executeAssistantProviderTurn keeps totalTokens null when an OpenAI-compatible provider omits an explicit total', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+    totalUsage: {
+      inputTokens: 120,
+      outputTokens: 45,
+      reasoningTokens: 8,
+      cachedInputTokens: 12,
+      cacheWriteTokens: 3,
+    },
+    providerMetadata: {
+      provider: 'venice',
+    },
+    response: {
+      requestId: 'req_124',
+      model: 'venice/deepseek-r1-671b',
+    },
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'https://api.venice.ai/api/v1',
+    apiKeyEnv: 'VENICE_API_KEY',
+    providerName: 'venice',
+    model: 'deepseek-r1-671b',
+    userPrompt: 'hello',
+  })
+
+  assert.equal(result.usage?.inputTokens, 120)
+  assert.equal(result.usage?.outputTokens, 45)
+  assert.equal(result.usage?.totalTokens, null)
+})
+
 test('executeAssistantProviderTurn extracts best-effort Codex usage from the final completion event', async () => {
   providerMocks.executeCodexPrompt.mockResolvedValue({
     finalMessage: 'assistant reply',
@@ -758,6 +794,38 @@ test('executeAssistantProviderTurn extracts best-effort Codex usage from the fin
     servedModel: 'gpt-5.4',
     totalTokens: 308,
   })
+})
+
+test('executeAssistantProviderTurn keeps totalTokens null when Codex omits an explicit total', async () => {
+  providerMocks.executeCodexPrompt.mockResolvedValue({
+    finalMessage: 'assistant reply',
+    jsonEvents: [
+      { type: 'thread.started', thread_id: 'thread-123' },
+      {
+        type: 'turn.completed',
+        model: 'gpt-5.4',
+        usage: {
+          input_tokens: 210,
+          cached_input_tokens: 64,
+          output_tokens: 98,
+        },
+      },
+    ],
+    sessionId: 'thread-123',
+    stderr: '',
+    stdout: '',
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'codex-cli',
+    workingDirectory: '/tmp/vault',
+    model: 'gpt-5.4',
+    userPrompt: 'hello',
+  })
+
+  assert.equal(result.usage?.inputTokens, 210)
+  assert.equal(result.usage?.outputTokens, 98)
+  assert.equal(result.usage?.totalTokens, null)
 })
 
 test('executeAssistantProviderTurn infers the OpenAI-compatible provider when endpoint config is supplied without an explicit provider', async () => {

@@ -18,9 +18,10 @@ import {
 } from "./hosted-runtime/callbacks.ts";
 import { createHostedArtifactResolver } from "./hosted-runtime/artifacts.ts";
 import {
+  createHostedRuntimeChildLauncherDirectories,
+  createHostedRuntimeChildProcessEnv,
   normalizeHostedAssistantRuntimeConfig,
   resolveHostedRuntimeChildEntry,
-  resolveHostedRuntimeTsconfigPath,
   resolveHostedRuntimeTsxImportSpecifier,
   withHostedProcessEnvironment,
 } from "./hosted-runtime/environment.ts";
@@ -85,6 +86,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
       {
         envOverrides: runtimeEnv,
         hostedMemberId: input.request.dispatch.event.userId,
+        hostedUserEnvKeys: Object.keys(runtime.userEnv),
         operatorHomeRoot: restored.operatorHomeRoot,
         vaultRoot: restored.vaultRoot,
       },
@@ -150,6 +152,9 @@ export async function runHostedAssistantRuntimeJobInProcess(
 
 export async function runHostedAssistantRuntimeJobIsolated(
   input: HostedAssistantRuntimeJobInput,
+  options?: {
+    signal?: AbortSignal;
+  },
 ): Promise<HostedExecutionRunnerResult> {
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime);
   const childEntry = resolveHostedRuntimeChildEntry();
@@ -158,25 +163,36 @@ export async function runHostedAssistantRuntimeJobIsolated(
     ? ["--import", resolveHostedRuntimeTsxImportSpecifier(), childEntry]
     : [childEntry];
   const launcherRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-launch-"));
+  const abortSignal = options?.signal ?? null;
 
   try {
+    const launcherDirectories = await createHostedRuntimeChildLauncherDirectories(launcherRoot);
+
+    if (abortSignal?.aborted) {
+      throw createHostedRuntimeAbortError(abortSignal);
+    }
+
     return await new Promise<HostedExecutionRunnerResult>((resolve, reject) => {
       const child = spawn(process.execPath, childArgs, {
         cwd: launcherRoot,
-        env: {
-          ...process.env,
-          ...runtime.forwardedEnv,
-          ...(isTypeScriptChild
-            ? {
-                TSX_TSCONFIG_PATH: resolveHostedRuntimeTsconfigPath(),
-              }
-            : {}),
-        },
+        detached: process.platform !== "win32",
+        env: createHostedRuntimeChildProcessEnv({
+          forwardedEnv: runtime.forwardedEnv,
+          isTypeScriptChild,
+          launcherDirectories,
+        }),
         stdio: ["pipe", "pipe", "pipe"],
       });
       let stdout = "";
       let stderr = "";
       let settled = false;
+      const removeAbortListener = attachHostedRuntimeAbortHandler({
+        child,
+        onAbort: (error) => {
+          settleError(error);
+        },
+        signal: abortSignal,
+      });
 
       const settleError = (error: Error) => {
         if (settled) {
@@ -184,7 +200,18 @@ export async function runHostedAssistantRuntimeJobIsolated(
         }
 
         settled = true;
+        removeAbortListener();
         reject(error);
+      };
+
+      const settleResult = (result: HostedExecutionRunnerResult) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        removeAbortListener();
+        resolve(result);
       };
 
       child.stdout.setEncoding("utf8");
@@ -216,8 +243,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
             return;
           }
 
-          settled = true;
-          resolve(payload.result as HostedExecutionRunnerResult);
+          settleResult(payload.result as HostedExecutionRunnerResult);
         } catch (error) {
           settleError(
             new Error(
@@ -240,6 +266,63 @@ export async function runHostedAssistantRuntimeJobIsolated(
   } finally {
     await rm(launcherRoot, { force: true, recursive: true });
   }
+}
+
+function attachHostedRuntimeAbortHandler(input: {
+  child: ReturnType<typeof spawn>;
+  onAbort: (error: Error) => void;
+  signal: AbortSignal | null;
+}): () => void {
+  if (!input.signal) {
+    return () => {};
+  }
+
+  if (input.signal.aborted) {
+    terminateHostedRuntimeChildProcess(input.child);
+    queueMicrotask(() => {
+      input.onAbort(createHostedRuntimeAbortError(input.signal));
+    });
+    return () => {};
+  }
+
+  const handleAbort = () => {
+    terminateHostedRuntimeChildProcess(input.child);
+    input.onAbort(createHostedRuntimeAbortError(input.signal));
+  };
+
+  input.signal.addEventListener("abort", handleAbort, { once: true });
+  return () => {
+    input.signal?.removeEventListener("abort", handleAbort);
+  };
+}
+
+function terminateHostedRuntimeChildProcess(child: ReturnType<typeof spawn>): void {
+  const pid = typeof child.pid === "number" && child.pid > 0 ? child.pid : null;
+
+  if (pid !== null && process.platform !== "win32") {
+    try {
+      process.kill(-pid, "SIGKILL");
+      return;
+    } catch {
+      // Fall back to killing the child directly below.
+    }
+  }
+
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    // best-effort cleanup only
+  }
+}
+
+function createHostedRuntimeAbortError(signal: AbortSignal | null): Error {
+  const reason = signal?.reason;
+
+  if (reason instanceof Error) {
+    return reason;
+  }
+
+  return new Error("Hosted assistant runtime child was aborted.");
 }
 
 export function formatHostedRuntimeChildResult(

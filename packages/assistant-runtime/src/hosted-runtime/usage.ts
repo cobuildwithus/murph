@@ -58,45 +58,44 @@ export async function exportHostedPendingAssistantUsage(input: {
 
   for (const batch of chunkPendingUsageRecords(pendingRecords, HOSTED_USAGE_EXPORT_BATCH_LIMIT)) {
     try {
-      const response = await client.recordUsage(
-        batch.map((record): Record<string, unknown> =>
-          record.credentialSource === null
-            ? {
-                ...record,
-                credentialSource: resolveAssistantUsageCredentialSource({
-                  apiKeyEnv: record.apiKeyEnv,
-                  provider: record.provider,
-                  userEnvKeys: input.userEnvKeys ?? [],
-                }),
-              }
-            : {
-                ...record,
-              }
-        ),
-      );
-
-      const batchUsageIds = new Set(batch.map((record) => record.usageId));
-      const acknowledgedUsageIds = response.usageIds.filter((usageId) => batchUsageIds.has(usageId));
-
-      if (acknowledgedUsageIds.length !== batch.length) {
-        failed += batch.length - acknowledgedUsageIds.length;
-        console.warn(
-          `Hosted AI usage export acknowledged ${acknowledgedUsageIds.length} of ${batch.length} records; leaving the remainder pending.`,
-        );
-      }
-
-      for (const usageId of acknowledgedUsageIds) {
-        await deletePendingAssistantUsageRecord({
-          usageId,
-          vault: input.vaultRoot,
-        });
-      }
-      exported += acknowledgedUsageIds.length;
+      const result = await exportHostedUsageBatch({
+        batch,
+        client,
+        userEnvKeys: input.userEnvKeys ?? [],
+        vaultRoot: input.vaultRoot,
+      });
+      exported += result.exported;
+      failed += result.failed;
     } catch (error) {
-      failed += batch.length;
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (batch.length === 1) {
+        failed += 1;
+        console.warn(`Failed to export hosted AI usage batch of 1 records: ${message}`);
+        continue;
+      }
+
       console.warn(
-        `Failed to export hosted AI usage batch of ${batch.length} records: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to export hosted AI usage batch of ${batch.length} records; retrying each record individually: ${message}`,
       );
+
+      for (const record of batch) {
+        try {
+          const result = await exportHostedUsageBatch({
+            batch: [record],
+            client,
+            userEnvKeys: input.userEnvKeys ?? [],
+            vaultRoot: input.vaultRoot,
+          });
+          exported += result.exported;
+          failed += result.failed;
+        } catch (singleError) {
+          failed += 1;
+          console.warn(
+            `Failed to export hosted AI usage retry for ${record.usageId}: ${singleError instanceof Error ? singleError.message : String(singleError)}`,
+          );
+        }
+      }
     }
   }
 
@@ -115,4 +114,50 @@ function chunkPendingUsageRecords<T>(records: readonly T[], size: number): T[][]
   }
 
   return batches;
+}
+
+async function exportHostedUsageBatch(input: {
+  batch: readonly Awaited<ReturnType<typeof listPendingAssistantUsageRecords>>[number][];
+  client: NonNullable<ReturnType<typeof resolveHostedExecutionAiUsageClient>>;
+  userEnvKeys: readonly string[];
+  vaultRoot: string;
+}): Promise<{ exported: number; failed: number }> {
+  const response = await input.client.recordUsage(
+    input.batch.map((record): Record<string, unknown> =>
+      record.credentialSource === null
+        ? {
+            ...record,
+            credentialSource: resolveAssistantUsageCredentialSource({
+              apiKeyEnv: record.apiKeyEnv,
+              provider: record.provider,
+              userEnvKeys: input.userEnvKeys,
+            }),
+          }
+        : {
+            ...record,
+          }
+    ),
+  );
+
+  const batchUsageIds = new Set(input.batch.map((record) => record.usageId));
+  const acknowledgedUsageIds = response.usageIds.filter((usageId) => batchUsageIds.has(usageId));
+  const failed = input.batch.length - acknowledgedUsageIds.length;
+
+  if (failed > 0) {
+    console.warn(
+      `Hosted AI usage export acknowledged ${acknowledgedUsageIds.length} of ${input.batch.length} records; leaving the remainder pending.`,
+    );
+  }
+
+  for (const usageId of acknowledgedUsageIds) {
+    await deletePendingAssistantUsageRecord({
+      usageId,
+      vault: input.vaultRoot,
+    });
+  }
+
+  return {
+    exported: acknowledgedUsageIds.length,
+    failed,
+  };
 }
