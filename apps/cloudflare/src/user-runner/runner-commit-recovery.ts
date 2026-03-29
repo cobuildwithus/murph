@@ -59,7 +59,7 @@ export class RunnerCommitRecovery {
   ): Promise<RunnerStateRecord> {
     const committed = await this.readCommittedDispatch(userId, eventId);
     if (!committed) {
-      throw new Error(`Hosted runner returned before recording a durable commit for ${eventId}.`);
+      throw new Error("Hosted runner returned before recording a durable commit.");
     }
 
     return this.applyCommittedDispatch(userId, committed);
@@ -96,14 +96,13 @@ export class RunnerCommitRecovery {
   async rescheduleCommittedFinalizeRetry(input: {
     attempts: number;
     committed: HostedExecutionCommittedResult;
-    errorMessage: string;
+    error: unknown;
     retryDelayMs: number;
-    userId: string;
   }): Promise<RunnerStateRecord> {
     await this.queueStore.rescheduleCommittedFinalizeRetry({
       attempts: input.attempts,
       committed: input.committed,
-      errorMessage: input.errorMessage,
+      error: input.error,
       retryDelayMs: input.retryDelayMs,
     });
     return this.scheduler.syncNextWake(

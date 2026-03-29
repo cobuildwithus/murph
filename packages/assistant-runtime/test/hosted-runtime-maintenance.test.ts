@@ -263,6 +263,22 @@ test("non-device-sync maintenance continues when the hosted control-plane snapsh
     assert.equal(deviceSyncService.runSchedulerOnce.mock.calls.length, 1);
     assert.equal(deviceSyncService.drainWorker.mock.calls.length, 1);
     assert.equal(warnSpy.mock.calls.length, 1);
+    const payload = JSON.parse(String(warnSpy.mock.calls[0]?.[0])) as {
+      component: string;
+      errorCode: string;
+      errorMessage: string;
+      eventId: string;
+      level: string;
+      message: string;
+      userId: string | null;
+    };
+    assert.equal(payload.component, "runtime");
+    assert.equal(payload.errorCode, "runtime_error");
+    assert.equal(payload.errorMessage, "Hosted execution runtime failed.");
+    assert.equal(payload.eventId, "evt_email");
+    assert.equal(payload.level, "warn");
+    assert.equal(payload.message, "Hosted device-sync control-plane sync failed; continuing hosted job.");
+    assert.equal(payload.userId, null);
   } finally {
     warnSpy.mockRestore();
   }
@@ -322,6 +338,22 @@ test("non-device-sync maintenance continues when the hosted control-plane apply 
     assert.equal(mocks.syncHostedDeviceSyncControlPlaneState.mock.calls.length, 1);
     assert.equal(mocks.reconcileHostedDeviceSyncControlPlaneState.mock.calls.length, 1);
     assert.equal(warnSpy.mock.calls.length, 1);
+    const payload = JSON.parse(String(warnSpy.mock.calls[0]?.[0])) as {
+      component: string;
+      errorCode: string;
+      errorMessage: string;
+      eventId: string;
+      level: string;
+      message: string;
+      userId: string | null;
+    };
+    assert.equal(payload.component, "runtime");
+    assert.equal(payload.errorCode, "runtime_error");
+    assert.equal(payload.errorMessage, "Hosted execution runtime failed.");
+    assert.equal(payload.eventId, "evt_cron");
+    assert.equal(payload.level, "warn");
+    assert.equal(payload.message, "Hosted device-sync control-plane reconcile failed; continuing hosted job.");
+    assert.equal(payload.userId, null);
   } finally {
     warnSpy.mockRestore();
   }

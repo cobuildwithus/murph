@@ -367,7 +367,6 @@ export class HostedUserRunner {
         await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
         processedDispatch = true;
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
         const committed = await this.commitRecovery.readCommittedDispatch(
           record.userId,
           nextPending.dispatch.eventId,
@@ -387,9 +386,8 @@ export class HostedUserRunner {
           record = await this.commitRecovery.rescheduleCommittedFinalizeRetry({
             attempts: nextPending.attempts + 1,
             committed,
-            errorMessage,
+            error,
             retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
-            userId: record.userId,
           });
           record = await this.scheduler.syncNextWake();
           record = await this.advanceRunPhase({
@@ -405,7 +403,7 @@ export class HostedUserRunner {
 
         if (error instanceof HostedExecutionConfigurationError) {
           record = await this.queueStore.deferPendingConfigurationFailure({
-            errorMessage,
+            error,
             eventId: nextPending.dispatch.eventId,
             retryDelayMs: this.env.retryDelayMs,
           });
@@ -422,7 +420,7 @@ export class HostedUserRunner {
         }
 
         const failure = await this.queueStore.reschedulePendingFailure({
-          errorMessage,
+          error,
           eventId: nextPending.dispatch.eventId,
           maxEventAttempts: this.env.maxEventAttempts,
           retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),

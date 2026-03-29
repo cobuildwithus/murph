@@ -36,6 +36,7 @@ import type {
   HostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 import {
+  emitHostedExecutionStructuredLog,
   readHostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 
@@ -268,16 +269,14 @@ function reportHostedDeviceSyncControlPlaneFailure(
   dispatch: HostedExecutionDispatchRequest,
   error: unknown,
 ): void {
-  console.warn(
-    "[hosted-runtime] device-sync control-plane failure; continuing hosted job",
-    {
-      error: error instanceof Error ? error.message : String(error),
-      eventId: dispatch.eventId,
-      eventKind: dispatch.event.kind,
-      phase,
-      userId: dispatch.event.userId,
-    },
-  );
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch,
+    error,
+    level: "warn",
+    message: `Hosted device-sync control-plane ${phase} failed; continuing hosted job.`,
+    phase: "dispatch.running",
+  });
 }
 
 function createHostedDeviceSyncRuntime(input: {
