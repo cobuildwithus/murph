@@ -10,7 +10,7 @@ import {
   resolveHostedEmailInboundSenderAddress,
 } from "../src/index.ts";
 
-test("hosted email sender helpers prefer the parsed header sender and normalize trusted addresses", () => {
+test("hosted email sender helpers reject mismatched sender identities and normalize trusted addresses", () => {
   const threadTarget = createHostedEmailThreadTarget({
     cc: [" Friend@example.test "],
     to: ["Teammate@example.test"],
@@ -19,6 +19,13 @@ test("hosted email sender helpers prefer the parsed header sender and normalize 
   assert.equal(
     resolveHostedEmailInboundSenderAddress({
       envelopeFrom: "bounce@example.test",
+      headerFrom: " Owner@example.test ",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveHostedEmailInboundSenderAddress({
+      envelopeFrom: "owner@example.test",
       headerFrom: " Owner@example.test ",
     }),
     normalizeHostedEmailAddress("owner@example.test"),
