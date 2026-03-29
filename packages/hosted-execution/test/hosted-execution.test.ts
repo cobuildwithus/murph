@@ -40,8 +40,11 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
+  resolveHostedExecutionAiUsageClient,
+  resolveHostedExecutionDeviceSyncRuntimeClient,
   resolveHostedExecutionDispatchLifecycle,
   resolveHostedExecutionDispatchOutcomeState,
+  resolveHostedExecutionSharePackClient,
   verifyHostedExecutionSignature,
 } from "@murph/hosted-execution";
 
@@ -232,7 +235,7 @@ describe("@murph/hosted-execution", () => {
     const client = createHostedExecutionServerAiUsageClient({
       baseUrl: "https://join.example.test",
       boundUserId: "member_123",
-      internalToken: "internal-token",
+      internalToken: "  internal-token  ",
       timeoutMs: 10_000,
     });
 
@@ -257,6 +260,50 @@ describe("@murph/hosted-execution", () => {
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
     expect(requestHeaders).toBeInstanceOf(Headers);
     expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("resolves proxy device-sync clients from worker proxy urls without requiring server auth", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        connections: [],
+        generatedAt: "2026-03-29T10:00:00.000Z",
+        userId: "member_123",
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    global.fetch = fetchMock;
+    const client = resolveHostedExecutionDeviceSyncRuntimeClient({
+      baseUrl: "http://device-sync.worker",
+      boundUserId: "member_123",
+      timeoutMs: 10_000,
+    });
+
+    expect(client).not.toBeNull();
+    if (!client) {
+      throw new Error("Expected a device-sync runtime client.");
+    }
+
+    await expect(client.fetchSnapshot()).resolves.toEqual({
+      connections: [],
+      generatedAt: "2026-03-29T10:00:00.000Z",
+      userId: "member_123",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://device-sync.worker/api/internal/device-sync/runtime/snapshot",
+      expect.objectContaining({
+        headers: expect.any(Headers),
+        method: "POST",
+      }),
+    );
+    const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBeNull();
     expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
@@ -331,6 +378,23 @@ describe("@murph/hosted-execution", () => {
     expect(requestHeaders).toBeInstanceOf(Headers);
     expect((requestHeaders as Headers).get("authorization")).toBe("Bearer share-token");
     expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("keeps direct hosted web-control client resolution strict about authorization tokens", () => {
+    expect(
+      resolveHostedExecutionSharePackClient({
+        baseUrl: "https://share.example.test",
+        boundUserId: "member_123",
+      }),
+    ).toBeNull();
+
+    expect(() =>
+      resolveHostedExecutionAiUsageClient({
+        baseUrl: "https://join.example.test",
+        boundUserId: "member_123",
+        internalToken: "   ",
+      }),
+    ).toThrow(/authorization token must be configured/u);
   });
 
   it("exports the shared hosted callback hosts and default callback base urls", () => {
@@ -1154,7 +1218,7 @@ describe("@murph/hosted-execution", () => {
     );
     const client = createHostedExecutionControlClient({
       baseUrl: "https://worker.example.test/",
-      controlToken: "control-token",
+      controlToken: "  control-token  ",
       fetchImpl,
     });
 

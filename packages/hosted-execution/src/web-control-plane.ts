@@ -77,6 +77,16 @@ export interface HostedExecutionProxyAiUsageClient {
 export interface HostedExecutionServerAiUsageClient
   extends HostedExecutionProxyAiUsageClient {}
 
+interface HostedExecutionUserBoundRequesterResolutionInput {
+  authorizationToken?: string | null;
+  baseUrl: string | null | undefined;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  isProxyBaseUrl: (baseUrl: string) => boolean;
+  proxyHost: string;
+  timeoutMs?: number | null;
+}
+
 export function createHostedExecutionProxyDeviceSyncRuntimeClient(input: {
   baseUrl: string;
   boundUserId: string;
@@ -121,32 +131,21 @@ export function resolveHostedExecutionDeviceSyncRuntimeClient(input: {
   internalToken?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxyDeviceSyncRuntimeClient | HostedExecutionServerDeviceSyncRuntimeClient | null {
-  const { baseUrl } = input;
-
-  if (!baseUrl) {
-    return null;
-  }
-
-  if (isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl)) {
-    return createHostedExecutionProxyDeviceSyncRuntimeClient({
-      baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.timeoutMs,
-    });
-  }
-
-  if (!input.internalToken) {
-    return null;
-  }
-
-  return createHostedExecutionServerDeviceSyncRuntimeClient({
-    baseUrl,
+  const requester = resolveHostedExecutionUserBoundRequester({
+    authorizationToken: input.internalToken,
+    baseUrl: input.baseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    internalToken: input.internalToken,
+    isProxyBaseUrl: isHostedExecutionDeviceSyncProxyBaseUrl,
+    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.deviceSync,
     timeoutMs: input.timeoutMs,
   });
+
+  if (!requester) {
+    return null;
+  }
+
+  return buildHostedExecutionDeviceSyncRuntimeClient(requester, input.boundUserId);
 }
 
 export function createHostedExecutionProxySharePackClient(input: {
@@ -191,32 +190,21 @@ export function resolveHostedExecutionSharePackClient(input: {
   shareToken?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxySharePackClient | HostedExecutionServerSharePackClient | null {
-  const { baseUrl } = input;
-
-  if (!baseUrl) {
-    return null;
-  }
-
-  if (isHostedExecutionSharePackProxyBaseUrl(baseUrl)) {
-    return createHostedExecutionProxySharePackClient({
-      baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.timeoutMs,
-    });
-  }
-
-  if (!input.shareToken) {
-    return null;
-  }
-
-  return createHostedExecutionServerSharePackClient({
-    baseUrl,
+  const requester = resolveHostedExecutionUserBoundRequester({
+    authorizationToken: input.shareToken,
+    baseUrl: input.baseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    shareToken: input.shareToken,
+    isProxyBaseUrl: isHostedExecutionSharePackProxyBaseUrl,
+    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.sharePack,
     timeoutMs: input.timeoutMs,
   });
+
+  if (!requester) {
+    return null;
+  }
+
+  return buildHostedExecutionSharePackClient(requester);
 }
 
 export function createHostedExecutionProxyAiUsageClient(input: {
@@ -261,32 +249,21 @@ export function resolveHostedExecutionAiUsageClient(input: {
   internalToken?: string | null;
   timeoutMs?: number | null;
 }): HostedExecutionProxyAiUsageClient | HostedExecutionServerAiUsageClient | null {
-  const { baseUrl } = input;
-
-  if (!baseUrl) {
-    return null;
-  }
-
-  if (isHostedExecutionAiUsageProxyBaseUrl(baseUrl)) {
-    return createHostedExecutionProxyAiUsageClient({
-      baseUrl,
-      boundUserId: input.boundUserId,
-      fetchImpl: input.fetchImpl,
-      timeoutMs: input.timeoutMs,
-    });
-  }
-
-  if (!input.internalToken) {
-    return null;
-  }
-
-  return createHostedExecutionServerAiUsageClient({
-    baseUrl,
+  const requester = resolveHostedExecutionUserBoundRequester({
+    authorizationToken: input.internalToken,
+    baseUrl: input.baseUrl,
     boundUserId: input.boundUserId,
     fetchImpl: input.fetchImpl,
-    internalToken: input.internalToken,
+    isProxyBaseUrl: isHostedExecutionAiUsageProxyBaseUrl,
+    proxyHost: HOSTED_EXECUTION_PROXY_HOSTS.usage,
     timeoutMs: input.timeoutMs,
   });
+
+  if (!requester) {
+    return null;
+  }
+
+  return buildHostedExecutionAiUsageClient(requester);
 }
 
 export function isHostedExecutionDeviceSyncProxyBaseUrl(baseUrl: string): boolean {
@@ -395,6 +372,38 @@ function createHostedExecutionServerRequester(
   });
 }
 
+function resolveHostedExecutionUserBoundRequester(
+  input: HostedExecutionUserBoundRequesterResolutionInput,
+): HostedExecutionUserBoundWebControlPlaneRequester | null {
+  const { baseUrl } = input;
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  if (input.isProxyBaseUrl(baseUrl)) {
+    return createHostedExecutionProxyRequester({
+      baseUrl,
+      boundUserId: input.boundUserId,
+      fetchImpl: input.fetchImpl,
+      proxyHost: input.proxyHost,
+      timeoutMs: input.timeoutMs ?? null,
+    });
+  }
+
+  if (!input.authorizationToken) {
+    return null;
+  }
+
+  return createHostedExecutionServerRequester({
+    authorizationToken: input.authorizationToken,
+    baseUrl,
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    timeoutMs: input.timeoutMs ?? null,
+  });
+}
+
 function createHostedExecutionUserBoundRequester(input: {
   authorizationToken?: string | null;
   baseUrl: string;
@@ -419,7 +428,7 @@ function createHostedExecutionUserBoundRequester(input: {
         parse: request.parse,
         path: request.path,
         timeoutMs: input.timeoutMs,
-        token: input.authorizationToken ?? null,
+        authorizationToken: input.authorizationToken ?? null,
         url: input.baseUrl,
       });
     },
@@ -474,13 +483,22 @@ function requireHostedExecutionWorkerProxyBaseUrl(value: string, proxyHost: stri
 }
 
 function requireHostedExecutionAuthorizationToken(value: string): string {
-  const normalized = value.trim();
+  const normalized = normalizeHostedExecutionAuthorizationToken(value);
 
   if (!normalized) {
     throw new TypeError("Hosted web control-plane authorization token must be configured.");
   }
 
   return normalized;
+}
+
+function normalizeHostedExecutionAuthorizationToken(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
@@ -492,32 +510,21 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   parse: (value: unknown) => TResponse;
   path: string;
   timeoutMs: number | null;
-  token?: string | null;
+  authorizationToken?: string | null;
   url: string;
 }): Promise<TResponse> {
   const fetchImpl = input.fetchImpl ?? fetch;
-  const normalizedToken = typeof input.token === "string" && input.token.trim().length > 0
-    ? input.token.trim()
-    : null;
+  const body = input.body === undefined ? undefined : JSON.stringify(input.body);
+  const headers = buildHostedExecutionRequestHeaders({
+    authorizationToken: normalizeHostedExecutionAuthorizationToken(input.authorizationToken),
+    boundUserId: input.boundUserId,
+    withJsonContentType: body !== undefined,
+  });
   const response = await fetchImpl(
     new URL(input.path.replace(/^\/+/u, ""), `${requireHostedExecutionWebControlBaseUrl(input.url)}/`).toString(),
     {
-      ...(input.body
-        ? {
-            body: JSON.stringify(input.body),
-            headers: buildHostedExecutionRequestHeaders({
-              boundUserId: input.boundUserId,
-              token: normalizedToken,
-              withJsonContentType: true,
-            }),
-          }
-        : {
-            headers: buildHostedExecutionRequestHeaders({
-              boundUserId: input.boundUserId,
-              token: normalizedToken,
-              withJsonContentType: false,
-            }),
-          }),
+      ...(body === undefined ? {} : { body }),
+      headers,
       method: input.method,
       signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
     },
@@ -559,16 +566,16 @@ function formatHostedExecutionErrorSuffix(payload: unknown, text: string): strin
 }
 
 function buildHostedExecutionRequestHeaders(input: {
+  authorizationToken: string | null;
   boundUserId: string;
-  token: string | null;
   withJsonContentType: boolean;
 }): Headers {
   const headers = new Headers();
 
   headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
 
-  if (input.token) {
-    headers.set("authorization", `Bearer ${input.token}`);
+  if (input.authorizationToken) {
+    headers.set("authorization", `Bearer ${input.authorizationToken}`);
   }
 
   if (input.withJsonContentType) {

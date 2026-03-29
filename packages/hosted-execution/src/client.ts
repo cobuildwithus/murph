@@ -93,7 +93,13 @@ export function createHostedExecutionControlClient(
   const baseUrl = requireHostedExecutionBaseUrl(options.baseUrl);
   const controlToken = requireHostedExecutionControlToken(options.controlToken);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const authHeaders = withHostedExecutionControlToken(undefined, controlToken);
+  const authenticatedHeaders = withHostedExecutionControlToken(undefined, controlToken);
+  const authenticatedJsonHeaders = withHostedExecutionControlToken(
+    {
+      "content-type": "application/json; charset=utf-8",
+    },
+    controlToken,
+  );
 
   return {
     clearUserEnv(userId) {
@@ -104,7 +110,7 @@ export function createHostedExecutionControlClient(
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
-          headers: authHeaders,
+          headers: authenticatedHeaders,
           method: "DELETE",
         },
       });
@@ -117,7 +123,7 @@ export function createHostedExecutionControlClient(
         parse: parseHostedExecutionUserStatus,
         path: buildHostedExecutionUserStatusPath(userId),
         request: {
-          headers: authHeaders,
+          headers: authenticatedHeaders,
           method: "GET",
         },
       });
@@ -130,7 +136,7 @@ export function createHostedExecutionControlClient(
         parse: parseHostedExecutionUserEnvStatus,
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
-          headers: authHeaders,
+          headers: authenticatedHeaders,
           method: "GET",
         },
       });
@@ -144,12 +150,7 @@ export function createHostedExecutionControlClient(
         path: buildHostedExecutionUserRunPath(userId),
         request: {
           body: JSON.stringify({}),
-          headers: withHostedExecutionControlToken(
-            {
-              "content-type": "application/json; charset=utf-8",
-            },
-            controlToken,
-          ),
+          headers: authenticatedJsonHeaders,
           method: "POST",
         },
       });
@@ -165,12 +166,7 @@ export function createHostedExecutionControlClient(
         path: buildHostedExecutionUserEnvPath(userId),
         request: {
           body: JSON.stringify(requestPayload),
-          headers: withHostedExecutionControlToken(
-            {
-              "content-type": "application/json; charset=utf-8",
-            },
-            controlToken,
-          ),
+          headers: authenticatedJsonHeaders,
           method: "PUT",
         },
       });
@@ -189,13 +185,22 @@ function requireHostedExecutionBaseUrl(value: string): string {
 }
 
 function requireHostedExecutionControlToken(value: string): string {
-  const normalized = value.trim();
+  const normalized = normalizeHostedExecutionControlToken(value);
 
   if (!normalized) {
     throw new TypeError("Hosted execution controlToken must be configured.");
   }
 
   return normalized;
+}
+
+function normalizeHostedExecutionControlToken(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function resolveHostedExecutionTimeoutSignal(timeoutMs?: number): AbortSignal | undefined {
