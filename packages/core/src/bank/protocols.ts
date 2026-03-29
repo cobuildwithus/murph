@@ -43,7 +43,8 @@ import {
 import type { FrontmatterObject } from "../types.ts";
 import type {
   ReadProtocolItemInput,
-  ProtocolItemRecord,
+  ProtocolItemEntity,
+  ProtocolItemStoredDocument,
   SupplementIngredientRecord,
   StopProtocolItemInput,
   StopProtocolItemResult,
@@ -118,7 +119,7 @@ function formatIngredientLine(ingredient: SupplementIngredientRecord): string {
   return parts.join("; ");
 }
 
-function buildBody(record: ProtocolItemRecord): string {
+function buildBody(record: ProtocolItemEntity): string {
   const sections = [
     (record.brand || record.manufacturer || record.servingSize)
       ? section(
@@ -167,7 +168,7 @@ function parseProtocolItemRecord(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
-): ProtocolItemRecord {
+): ProtocolItemStoredDocument {
   requireMatchingDocType(
     attributes,
     PROTOCOL_SCHEMA_VERSION,
@@ -181,7 +182,7 @@ function parseProtocolItemRecord(
     throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol registry document is missing startedOn.");
   }
 
-  return stripUndefined({
+  const entity = stripUndefined({
     schemaVersion: PROTOCOL_SCHEMA_VERSION,
     docType: PROTOCOL_DOC_TYPE,
     protocolId: requireString(attributes.protocolId, "protocolId", 64),
@@ -202,13 +203,19 @@ function parseProtocolItemRecord(
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
     group: groupFromProtocolPath(relativePath, PROTOCOLS_DIRECTORY),
-    relativePath,
-    markdown,
-  });
+  }) as ProtocolItemEntity;
+
+  return {
+    entity,
+    document: {
+      relativePath,
+      markdown,
+    },
+  };
 }
 
 export function protocolRecordToUpsertPayload(
-  record: ProtocolItemRecord,
+  record: ProtocolItemEntity,
 ): Omit<ProtocolUpsertPayload, "protocolId"> {
   return stripUndefined({
     slug: record.slug,
@@ -240,7 +247,7 @@ export function protocolRecordToUpsertPayload(
   }) as Omit<ProtocolUpsertPayload, "protocolId">;
 }
 
-function buildAttributes(record: ProtocolItemRecord): FrontmatterObject {
+function buildAttributes(record: ProtocolItemEntity): FrontmatterObject {
   const { group: _group, ...payload } = protocolRecordToUpsertPayload(record);
 
   return stripUndefined({
@@ -251,7 +258,7 @@ function buildAttributes(record: ProtocolItemRecord): FrontmatterObject {
   }) as FrontmatterObject;
 }
 
-function validateProtocolTiming(record: ProtocolItemRecord): ProtocolItemRecord {
+function validateProtocolTiming(record: ProtocolItemEntity): ProtocolItemEntity {
   if (!record.startedOn) {
     throw new VaultError("VAULT_INVALID_INPUT", "startedOn is required.");
   }
@@ -271,35 +278,40 @@ function validateProtocolTiming(record: ProtocolItemRecord): ProtocolItemRecord 
   return record;
 }
 
-async function loadProtocolItems(vaultRoot: string): Promise<ProtocolItemRecord[]> {
+async function loadProtocolItems(vaultRoot: string): Promise<ProtocolItemStoredDocument[]> {
   const records = await loadMarkdownRegistryDocuments({
     vaultRoot,
     directory: PROTOCOLS_DIRECTORY,
     recordFromParts: parseProtocolItemRecord,
     isExpectedRecord: (record) =>
-      record.docType === PROTOCOL_DOC_TYPE && record.schemaVersion === PROTOCOL_SCHEMA_VERSION,
+      record.entity.docType === PROTOCOL_DOC_TYPE
+      && record.entity.schemaVersion === PROTOCOL_SCHEMA_VERSION,
     invalidCode: "VAULT_INVALID_PROTOCOL",
     invalidMessage: "Protocol registry document has an unexpected shape.",
   });
 
   records.sort(
     (left, right) =>
-      left.group.localeCompare(right.group) ||
-      left.title.localeCompare(right.title) ||
-      left.protocolId.localeCompare(right.protocolId),
+      left.entity.group.localeCompare(right.entity.group) ||
+      left.entity.title.localeCompare(right.entity.title) ||
+      left.entity.protocolId.localeCompare(right.entity.protocolId),
   );
   return records;
 }
 
 function selectProtocolRecord(
-  records: ProtocolItemRecord[],
+  records: ProtocolItemStoredDocument[],
   protocolId: string | undefined,
   slug: string | undefined,
   group: string | undefined,
-): ProtocolItemRecord | null {
-  const byId = protocolId ? records.find((record) => record.protocolId === protocolId) ?? null : null;
+): ProtocolItemStoredDocument | null {
+  const byId = protocolId
+    ? records.find((record) => record.entity.protocolId === protocolId) ?? null
+    : null;
   const slugMatches = slug
-    ? records.filter((record) => record.slug === slug && (!group || record.group === group))
+    ? records.filter(
+        (record) => record.entity.slug === slug && (!group || record.entity.group === group),
+      )
     : [];
   const bySlug = slugMatches.length > 0 ? slugMatches[0] ?? null : null;
 
@@ -307,20 +319,20 @@ function selectProtocolRecord(
     throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group or protocolId.");
   }
 
-  if (byId && bySlug && byId.protocolId !== bySlug.protocolId) {
+  if (byId && bySlug && byId.entity.protocolId !== bySlug.entity.protocolId) {
     throw new VaultError("VAULT_PROTOCOL_CONFLICT", "protocolId and slug resolve to different protocol records.");
   }
 
   return byId ?? bySlug;
 }
 
-async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<ProtocolItemRecord> {
+async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<ProtocolItemStoredDocument> {
   const normalizedProtocolId = normalizeId(input.protocolId, "protocolId", "prot");
   const normalizedSlug = normalizeSelectorSlug(input.slug);
   const normalizedGroup = input.group ? normalizeGroupPath(input.group, "protocol") : undefined;
   const records = await loadProtocolItems(input.vaultRoot);
   const match = records.find((record) => {
-    if (normalizedProtocolId && record.protocolId === normalizedProtocolId) {
+    if (normalizedProtocolId && record.entity.protocolId === normalizedProtocolId) {
       return true;
     }
 
@@ -328,11 +340,11 @@ async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<Prot
       return false;
     }
 
-    if (record.slug !== normalizedSlug) {
+    if (record.entity.slug !== normalizedSlug) {
       return false;
     }
 
-    return normalizedGroup ? record.group === normalizedGroup : true;
+    return normalizedGroup ? record.entity.group === normalizedGroup : true;
   });
 
   if (!match) {
@@ -340,7 +352,7 @@ async function resolveProtocolRecord(input: ReadProtocolItemInput): Promise<Prot
   }
 
   if (normalizedSlug && !normalizedGroup && !normalizedProtocolId) {
-    const collisions = records.filter((record) => record.slug === normalizedSlug);
+    const collisions = records.filter((record) => record.entity.slug === normalizedSlug);
     if (collisions.length > 1) {
       throw new VaultError("VAULT_PROTOCOL_CONFLICT", "slug resolves to multiple protocol records; include group.");
     }
@@ -359,11 +371,12 @@ export async function upsertProtocolItem(
   const requestedSlug = normalizeUpsertSelectorSlug(input.slug, input.title);
   const requestedGroup = input.group ? normalizeGroupPath(input.group, input.kind ?? "protocol") : undefined;
   const existingRecord = selectProtocolRecord(existingRecords, normalizedProtocolId, requestedSlug, requestedGroup);
-  const title = requireString(input.title ?? existingRecord?.title, "title", 160);
-  const kind = resolveRequiredUpsertValue(input.kind, existingRecord?.kind, "medication", (value) =>
+  const existingEntity = existingRecord?.entity;
+  const title = requireString(input.title ?? existingEntity?.title, "title", 160);
+  const kind = resolveRequiredUpsertValue(input.kind, existingEntity?.kind, "medication", (value) =>
     optionalEnum(value, PROTOCOL_KINDS, "kind") ?? "medication",
   );
-  const group = existingRecord?.group ?? requestedGroup ?? normalizeGroupPath(undefined, kind);
+  const group = existingEntity?.group ?? requestedGroup ?? normalizeGroupPath(undefined, kind);
   const target = resolveMarkdownRegistryUpsertTarget({
     existingRecord,
     recordId: normalizedProtocolId,
@@ -371,7 +384,9 @@ export async function upsertProtocolItem(
     defaultSlug: normalizeUpsertSelectorSlug(undefined, title) ?? "",
     allowSlugUpdate: input.allowSlugRename === true,
     directory: `${PROTOCOLS_DIRECTORY}/${group}`,
-    getRecordId: (record) => record.protocolId,
+    getRecordId: (record) => record.entity.protocolId,
+    getRecordSlug: (record) => record.entity.slug,
+    getRecordRelativePath: (record) => record.document.relativePath,
     createRecordId: () => generateRecordId("prot"),
   });
   const attributes = buildAttributes(
@@ -383,51 +398,50 @@ export async function upsertProtocolItem(
         slug: target.slug,
         title,
         kind,
-        status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
+        status: resolveRequiredUpsertValue(input.status, existingEntity?.status, "active", (value) =>
           optionalEnum(value, PROTOCOL_STATUSES, "status") ?? "active",
         ),
-        startedOn:
-          optionalDateOnly(input.startedOn ?? existingRecord?.startedOn ?? today, "startedOn") ?? "",
-        stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingRecord?.stoppedOn, (value) =>
+        startedOn: optionalDateOnly(input.startedOn ?? existingEntity?.startedOn ?? today, "startedOn") ?? "",
+        stoppedOn: resolveOptionalUpsertValue(input.stoppedOn, existingEntity?.stoppedOn, (value) =>
           optionalDateOnly(value, "stoppedOn"),
         ),
-        substance: resolveOptionalUpsertValue(input.substance, existingRecord?.substance, (value) =>
+        substance: resolveOptionalUpsertValue(input.substance, existingEntity?.substance, (value) =>
           optionalString(value, "substance", 160),
         ),
-        dose: resolveOptionalUpsertValue(input.dose, existingRecord?.dose, (value) =>
+        dose: resolveOptionalUpsertValue(input.dose, existingEntity?.dose, (value) =>
           optionalFiniteNumber(value, "dose", 0),
         ),
-        unit: resolveOptionalUpsertValue(input.unit, existingRecord?.unit, (value) =>
+        unit: resolveOptionalUpsertValue(input.unit, existingEntity?.unit, (value) =>
           optionalString(value, "unit", 40),
         ),
-        schedule: resolveOptionalUpsertValue(input.schedule, existingRecord?.schedule, (value) =>
+        schedule: resolveOptionalUpsertValue(input.schedule, existingEntity?.schedule, (value) =>
           optionalString(value, "schedule", 160),
         ),
-        brand: resolveOptionalUpsertValue(input.brand, existingRecord?.brand, (value) =>
+        brand: resolveOptionalUpsertValue(input.brand, existingEntity?.brand, (value) =>
           optionalString(value, "brand", 160),
         ),
         manufacturer: resolveOptionalUpsertValue(
           input.manufacturer,
-          existingRecord?.manufacturer,
+          existingEntity?.manufacturer,
           (value) => optionalString(value, "manufacturer", 160),
         ),
-        servingSize: resolveOptionalUpsertValue(input.servingSize, existingRecord?.servingSize, (value) =>
+        servingSize: resolveOptionalUpsertValue(input.servingSize, existingEntity?.servingSize, (value) =>
           optionalString(value, "servingSize", 160),
         ),
-        ingredients: resolveOptionalUpsertValue(input.ingredients, existingRecord?.ingredients, (value) =>
+        ingredients: resolveOptionalUpsertValue(input.ingredients, existingEntity?.ingredients, (value) =>
           normalizeSupplementIngredients(value),
         ),
         relatedGoalIds: resolveOptionalUpsertValue(
           input.relatedGoalIds,
-          existingRecord?.relatedGoalIds,
+          existingEntity?.relatedGoalIds,
           (value) => normalizeRecordIdList(value, "relatedGoalIds", "goal"),
         ),
         relatedConditionIds: resolveOptionalUpsertValue(
           input.relatedConditionIds,
-          existingRecord?.relatedConditionIds,
+          existingEntity?.relatedConditionIds,
           (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
         ),
-      }) as ProtocolItemRecord,
+      }) as ProtocolItemEntity,
     ),
   );
   const { auditPath, record } = await writeMarkdownRegistryRecord({
@@ -437,9 +451,7 @@ export async function upsertProtocolItem(
     body: buildBody({
       ...attributes,
       group,
-      relativePath: target.relativePath,
-      markdown: existingRecord?.markdown ?? "",
-    } as ProtocolItemRecord),
+    } as ProtocolItemEntity),
     recordFromParts: parseProtocolItemRecord,
     operationType: "protocol_upsert",
     summary: `Upsert protocol ${target.recordId}`,
@@ -458,11 +470,13 @@ export async function upsertProtocolItem(
   };
 }
 
-export async function listProtocolItems(vaultRoot: string): Promise<ProtocolItemRecord[]> {
+export async function listProtocolItems(vaultRoot: string): Promise<ProtocolItemStoredDocument[]> {
   return loadProtocolItems(vaultRoot);
 }
 
-export async function readProtocolItem(input: ReadProtocolItemInput): Promise<ProtocolItemRecord> {
+export async function readProtocolItem(
+  input: ReadProtocolItemInput,
+): Promise<ProtocolItemStoredDocument> {
   return resolveProtocolRecord(input);
 }
 
@@ -475,29 +489,29 @@ export async function stopProtocolItem(
     input.stoppedOn ?? toLocalDayKey(new Date(), vault.metadata.timezone ?? defaultTimeZone(), "stoppedOn"),
     "stoppedOn",
   ) ?? "";
-  const updatedRecord = validateProtocolTiming({
-    ...current,
+  const updatedEntity = validateProtocolTiming({
+    ...current.entity,
     status: "stopped",
     stoppedOn,
-  });
+  } satisfies ProtocolItemEntity);
   const { auditPath, record } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
     target: {
-      recordId: updatedRecord.protocolId,
-      slug: updatedRecord.slug,
-      relativePath: updatedRecord.relativePath,
+      recordId: updatedEntity.protocolId,
+      slug: updatedEntity.slug,
+      relativePath: current.document.relativePath,
       created: false,
     },
-    attributes: buildAttributes(updatedRecord),
-    body: buildBody(updatedRecord),
+    attributes: buildAttributes(updatedEntity),
+    body: buildBody(updatedEntity),
     recordFromParts: parseProtocolItemRecord,
     operationType: "protocol_stop",
-    summary: `Stop protocol ${updatedRecord.protocolId}`,
+    summary: `Stop protocol ${updatedEntity.protocolId}`,
     audit: {
       action: "protocol_stop",
       commandName: "core.stopProtocolItem",
-      summary: `Stopped protocol ${updatedRecord.protocolId}.`,
-      targetIds: [updatedRecord.protocolId],
+      summary: `Stopped protocol ${updatedEntity.protocolId}.`,
+      targetIds: [updatedEntity.protocolId],
     },
   });
 

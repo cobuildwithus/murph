@@ -1,5 +1,6 @@
 import {
   HEALTH_HISTORY_KINDS,
+  extractProfileSummary,
   projectAssessmentEntity,
   projectCurrentProfileEntity,
   projectHistoryEntity,
@@ -244,7 +245,9 @@ export function profileSnapshotRecordFromEntity(
     capturedAt: firstString(attributes, ["capturedAt", "recordedAt"]),
     recordedAt: firstString(attributes, ["recordedAt", "capturedAt"]),
     status: firstString(attributes, ["status"]) ?? "accepted",
-    summary: firstString(attributes, ["summary"]),
+    summary:
+      firstString(attributes, ["summary"]) ??
+      extractProfileSummary(firstObject(attributes, ["profile"])),
     source: firstString(attributes, ["source"]),
     sourceAssessmentIds: firstStringArray(attributes, ["sourceAssessmentIds"]),
     sourceEventIds: firstStringArray(attributes, ["sourceEventIds"]),

@@ -1212,7 +1212,7 @@ describe("runHostedExecutionJob", () => {
       vaultRoot: sourceVaultRoot,
       title: "Morning Smoothie",
       kind: "smoothie",
-      attachedProtocolIds: [creatine.record.protocolId],
+      attachedProtocolIds: [creatine.record.entity.protocolId],
       autoLogDaily: {
         time: "08:00",
       },
@@ -1334,7 +1334,7 @@ describe("runHostedExecutionJob", () => {
       vaultRoot: sourceVaultRoot,
       title: "Proxy Smoothie",
       kind: "smoothie",
-      attachedProtocolIds: [supplement.record.protocolId],
+      attachedProtocolIds: [supplement.record.entity.protocolId],
       autoLogDaily: {
         time: "08:00",
       },

@@ -79,27 +79,27 @@ kind: granola
     const shownByTitle = await showFood(vaultRoot, "Purely Elizabeth Granola");
 
     assert.equal(activeFoods.length, 1);
-    assert.equal(activeFoods[0]?.id, "food_01JNV422Y2M5ZBV64ZP4N1DRB1");
+    assert.equal(activeFoods[0]?.entity.id, "food_01JNV422Y2M5ZBV64ZP4N1DRB1");
     assert.equal(allFoods.length, 2);
-    assert.equal(allFoods[0]?.title, "Purely Elizabeth Granola");
-    assert.equal(allFoods[1]?.title, "Regular Acai Bowl");
-    assert.equal(readById?.vendor, "Neighborhood Acai Bar");
-    assert.deepEqual(readById?.aliases, ["regular acai bowl", "usual acai bowl"]);
-    assert.deepEqual(readById?.ingredients, [
+    assert.equal(allFoods[0]?.entity.title, "Purely Elizabeth Granola");
+    assert.equal(allFoods[1]?.entity.title, "Regular Acai Bowl");
+    assert.equal(readById?.entity.vendor, "Neighborhood Acai Bar");
+    assert.deepEqual(readById?.entity.aliases, ["regular acai bowl", "usual acai bowl"]);
+    assert.deepEqual(readById?.entity.ingredients, [
       "acai base",
       "banana",
       "strawberries",
       "granola",
       "almond butter",
     ]);
-    assert.deepEqual(readById?.autoLogDaily, {
+    assert.deepEqual(readById?.entity.autoLogDaily, {
       time: "08:00",
     });
-    assert.equal(shownBySlug?.slug, "regular-acai-bowl");
-    assert.deepEqual(shownBySlug?.autoLogDaily, {
+    assert.equal(shownBySlug?.entity.slug, "regular-acai-bowl");
+    assert.deepEqual(shownBySlug?.entity.autoLogDaily, {
       time: "08:00",
     });
-    assert.equal(shownByTitle?.id, "food_01JNV4R0R1DVH1YP8KQQD5GQ7X");
+    assert.equal(shownByTitle?.entity.id, "food_01JNV4R0R1DVH1YP8KQQD5GQ7X");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

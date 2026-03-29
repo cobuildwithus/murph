@@ -462,7 +462,7 @@ function projectRegistryDocumentEntity(
   }
 
   const entity = projectRegistryEntity(config.family, record);
-  markdownByPath.set(entity.path, record.markdown);
+  markdownByPath.set(entity.path, record.document.markdown);
   return entity;
 }
 

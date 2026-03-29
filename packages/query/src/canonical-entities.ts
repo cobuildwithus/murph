@@ -257,6 +257,11 @@ export function extractProfileTopGoalIds(profile: unknown): string[] {
     return [];
   }
 
+  const directTopGoalIds = firstStringArray(profileObject, ["topGoalIds"]);
+  if (directTopGoalIds.length > 0) {
+    return directTopGoalIds;
+  }
+
   const nestedGoals = firstObject(profileObject, ["goals"]);
   return nestedGoals ? firstStringArray(nestedGoals, ["topGoalIds"]) : [];
 }

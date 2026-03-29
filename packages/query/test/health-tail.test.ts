@@ -423,13 +423,14 @@ ingredients:
     const stoppedVitaminC = await showSupplementCompound(vaultRoot, "Vitamin C", {
       status: "stopped",
     });
-    const liposomal = supplements.find((record) => record.id === "prot_new") ?? null;
+    const liposomal = supplements.find((record) => record.entity.id === "prot_new") ?? null;
 
     assert.equal(supplements.length, 3);
-    assert.equal(liposomal?.brand, "LivOn Labs");
-    assert.equal(liposomal?.manufacturer, "LivOn Laboratories");
-    assert.equal(liposomal?.servingSize, "1 packet");
-    assert.deepEqual(liposomal?.ingredients, [
+    assert.equal((liposomal as { kind?: unknown } | null)?.kind, undefined);
+    assert.equal(liposomal?.entity.brand, "LivOn Labs");
+    assert.equal(liposomal?.entity.manufacturer, "LivOn Laboratories");
+    assert.equal(liposomal?.entity.servingSize, "1 packet");
+    assert.deepEqual(liposomal?.entity.ingredients, [
       {
         compound: "Vitamin C",
         label: "Ascorbic acid",

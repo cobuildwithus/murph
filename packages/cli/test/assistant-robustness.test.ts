@@ -265,6 +265,7 @@ test('drainAssistantOutbox reconciles a journaled delivery without re-sending it
           assert.equal(intent.intentId, result.deliveryIntentId)
           return {
             channel: 'telegram',
+            idempotencyKey: null,
             sentAt: new Date().toISOString(),
             target: 'chat-1',
             targetKind: 'thread',

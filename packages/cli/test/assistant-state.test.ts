@@ -120,6 +120,7 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(statePaths.stateDirectory, path.join(statePaths.assistantStateRoot, 'state'))
   assert.equal(statePaths.receiptsDirectory, path.join(statePaths.assistantStateRoot, 'receipts'))
   assert.equal(statePaths.outboxDirectory, path.join(statePaths.assistantStateRoot, 'outbox'))
+  assert.equal(statePaths.distillationsDirectory, path.join(statePaths.assistantStateRoot, 'distillations'))
 
   const first = await resolveAssistantSession({
     vault: vaultRoot,

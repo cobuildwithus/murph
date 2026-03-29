@@ -175,6 +175,8 @@ const foodRegistryApi = createMarkdownRegistryApi<FoodRecord>({
         left.foodId.localeCompare(right.foodId),
     ),
   getRecordId: (record) => record.foodId,
+  getRecordSlug: (record) => record.slug,
+  getRecordRelativePath: (record) => record.relativePath,
   conflictCode: "VAULT_FOOD_CONFLICT",
   conflictMessage: "Food id and slug resolve to different records.",
   readMissingCode: "VAULT_FOOD_MISSING",

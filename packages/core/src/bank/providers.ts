@@ -196,6 +196,8 @@ export async function upsertProvider(
     allowSlugUpdate: true,
     directory: VAULT_LAYOUT.providersDirectory,
     getRecordId: (record) => record.providerId,
+    getRecordSlug: (record) => record.slug,
+    getRecordRelativePath: (record) => record.relativePath,
     createRecordId: () => generateRecordId(ID_PREFIXES.provider),
   });
   const nextAttributes = validateProviderFrontmatter(
@@ -259,6 +261,7 @@ export async function readProvider({
     recordId: providerId,
     slug,
     getRecordId: (record) => record.providerId,
+    getRecordSlug: (record) => record.slug,
     readMissingCode: "PROVIDER_MISSING",
     readMissingMessage: "Provider was not found.",
   });

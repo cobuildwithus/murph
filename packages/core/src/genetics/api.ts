@@ -29,7 +29,7 @@ import type {
   GeneticVariantEntity,
   GeneticVariantLink,
   GeneticVariantLinkType,
-  GeneticVariantRecord,
+  GeneticVariantStoredDocument,
   ReadGeneticVariantInput,
   UpsertGeneticVariantInput,
   UpsertGeneticVariantResult,
@@ -62,16 +62,16 @@ function parseGeneticVariantFrontmatter(attributes: FrontmatterObject): GeneticV
   return result.data as GeneticVariantFrontmatter;
 }
 
-function sortGeneticRecords(records: GeneticVariantRecord[]): void {
+function sortGeneticRecords(records: GeneticVariantStoredDocument[]): void {
   if (geneticsRegistryEntityDefinition.registry.sortBehavior !== "gene-title") {
     throw new Error('Genetics registry definition must use "gene-title" sort behavior.');
   }
 
   records.sort(
     (left, right) =>
-      left.gene.localeCompare(right.gene) ||
-      left.title.localeCompare(right.title) ||
-      left.variantId.localeCompare(right.variantId),
+      left.entity.gene.localeCompare(right.entity.gene) ||
+      left.entity.title.localeCompare(right.entity.title) ||
+      left.entity.variantId.localeCompare(right.entity.variantId),
   );
 }
 
@@ -172,13 +172,13 @@ function recordFromParts(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
-): GeneticVariantRecord {
+): GeneticVariantStoredDocument {
   const frontmatter = parseGeneticVariantFrontmatter(attributes);
   const relations = canonicalizeGeneticRelations({
     links: parseGeneticLinks(attributes),
   });
 
-  return {
+  const entity = {
     ...frontmatter,
     zygosity: optionalEnum(frontmatter.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
     significance: optionalEnum(frontmatter.significance, VARIANT_SIGNIFICANCES, "significance"),
@@ -186,19 +186,27 @@ function recordFromParts(
     sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
     note: optionalString(frontmatter.note, "note", GENETIC_NOTE_MAX_LENGTH),
     links: relations.links,
-    relativePath,
-    markdown,
+  } satisfies GeneticVariantEntity;
+
+  return {
+    entity,
+    document: {
+      relativePath,
+      markdown,
+    },
   };
 }
 
-const geneticsRegistryApi = createMarkdownRegistryApi<GeneticVariantRecord>({
+const geneticsRegistryApi = createMarkdownRegistryApi<GeneticVariantStoredDocument>({
   directory: GENETICS_DIRECTORY,
   recordFromParts,
   isExpectedRecord: () => true,
   invalidCode: "VAULT_INVALID_GENETIC_VARIANT",
   invalidMessage: "Genetics registry document has an unexpected shape.",
   sortRecords: sortGeneticRecords,
-  getRecordId: (record) => record.variantId,
+  getRecordId: (record) => record.entity.variantId,
+  getRecordSlug: (record) => record.entity.slug,
+  getRecordRelativePath: (record) => record.document.relativePath,
   conflictCode: "VAULT_GENETIC_VARIANT_CONFLICT",
   conflictMessage: "variantId and slug resolve to different variants.",
   readMissingCode: "VAULT_GENETIC_VARIANT_MISSING",
@@ -258,11 +266,12 @@ export async function upsertGeneticVariant(
     recordId: normalizedVariantId,
     slug: selectorSlug,
   });
-  const title = requireString(input.title ?? existingRecord?.title, "title", GENETIC_TITLE_MAX_LENGTH);
-  const gene = requireString(input.gene ?? existingRecord?.gene, "gene", GENETIC_GENE_MAX_LENGTH);
+  const existingEntity = existingRecord?.entity;
+  const title = requireString(input.title ?? existingEntity?.title, "title", GENETIC_TITLE_MAX_LENGTH);
+  const gene = requireString(input.gene ?? existingEntity?.gene, "gene", GENETIC_GENE_MAX_LENGTH);
   const sourceFamilyMemberIds =
     input.sourceFamilyMemberIds === undefined
-      ? existingRecord?.sourceFamilyMemberIds
+      ? existingEntity?.sourceFamilyMemberIds
       : validateSortedStringList(
           input.sourceFamilyMemberIds,
           "sourceFamilyMemberIds",
@@ -275,7 +284,7 @@ export async function upsertGeneticVariant(
   });
   const note =
     input.note === undefined
-      ? existingRecord?.note
+      ? existingEntity?.note
       : optionalString(input.note, "note", GENETIC_NOTE_MAX_LENGTH);
   return geneticsRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
@@ -291,15 +300,15 @@ export async function upsertGeneticVariant(
         gene,
         zygosity:
           input.zygosity === undefined
-            ? existingRecord?.zygosity
+            ? existingEntity?.zygosity
             : optionalEnum(input.zygosity, VARIANT_ZYGOSITIES, "zygosity"),
         significance:
           input.significance === undefined
-            ? existingRecord?.significance
+            ? existingEntity?.significance
             : optionalEnum(input.significance, VARIANT_SIGNIFICANCES, "significance"),
         inheritance:
           input.inheritance === undefined
-            ? existingRecord?.inheritance
+            ? existingEntity?.inheritance
             : optionalString(input.inheritance, "inheritance", GENETIC_INHERITANCE_MAX_LENGTH),
         sourceFamilyMemberIds: relations.sourceFamilyMemberIds,
         links: relations.links,
@@ -316,7 +325,7 @@ export async function upsertGeneticVariant(
   });
 }
 
-export async function listGeneticVariants(vaultRoot: string): Promise<GeneticVariantRecord[]> {
+export async function listGeneticVariants(vaultRoot: string): Promise<GeneticVariantStoredDocument[]> {
   return geneticsRegistryApi.listRecords(vaultRoot);
 }
 
@@ -324,7 +333,7 @@ export async function readGeneticVariant({
   vaultRoot,
   variantId,
   slug,
-}: ReadGeneticVariantInput): Promise<GeneticVariantRecord> {
+}: ReadGeneticVariantInput): Promise<GeneticVariantStoredDocument> {
   const normalizedVariantId = normalizeId(variantId, "variantId", "var");
   const normalizedSlug = slug ? normalizeSlug(slug, "slug") : undefined;
   return geneticsRegistryApi.readRecord({

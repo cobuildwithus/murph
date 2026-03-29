@@ -1258,7 +1258,7 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
       vaultRoot,
       title: 'Morning Smoothie',
       kind: 'smoothie',
-      attachedProtocolIds: [creatine.record.protocolId],
+      attachedProtocolIds: [creatine.record.entity.protocolId],
     })
 
     const catalog = createDefaultAssistantToolCatalog(

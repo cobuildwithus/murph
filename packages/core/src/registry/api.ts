@@ -12,12 +12,7 @@ import type { FrontmatterObject } from "../types.ts";
 
 type MarkdownRegistryAuditAction = Parameters<typeof writeMarkdownRegistryRecord>[0]["audit"]["action"];
 
-interface RegistryApiRecord {
-  slug: string;
-  relativePath: string;
-}
-
-interface CreateMarkdownRegistryApiOptions<TRecord extends RegistryApiRecord> {
+interface CreateMarkdownRegistryApiOptions<TRecord> {
   directory: string;
   recordFromParts: (attributes: FrontmatterObject, relativePath: string, markdown: string) => TRecord;
   isExpectedRecord: (record: TRecord) => boolean;
@@ -25,6 +20,8 @@ interface CreateMarkdownRegistryApiOptions<TRecord extends RegistryApiRecord> {
   invalidMessage: string;
   sortRecords: (records: TRecord[]) => void;
   getRecordId: (record: TRecord) => string;
+  getRecordSlug: (record: TRecord) => string;
+  getRecordRelativePath: (record: TRecord) => string;
   conflictCode: string;
   conflictMessage: string;
   readMissingCode: string;
@@ -41,7 +38,7 @@ interface CreateMarkdownRegistryApiOptions<TRecord extends RegistryApiRecord> {
   };
 }
 
-interface UpsertMarkdownRegistryApiRecordInput<TRecord extends RegistryApiRecord> {
+interface UpsertMarkdownRegistryApiRecordInput<TRecord> {
   vaultRoot: string;
   existingRecord: TRecord | null;
   recordId?: string;
@@ -80,7 +77,7 @@ interface ResolveExistingMarkdownRegistryApiRecordInput {
  * resolution, frontmatter serialization, and audit-backed upserts consistent
  * across bank registries.
  */
-export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
+export function createMarkdownRegistryApi<TRecord>({
   directory,
   recordFromParts,
   isExpectedRecord,
@@ -88,6 +85,8 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
   invalidMessage,
   sortRecords,
   getRecordId,
+  getRecordSlug,
+  getRecordRelativePath,
   conflictCode,
   conflictMessage,
   readMissingCode,
@@ -123,6 +122,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       recordId,
       slug,
       getRecordId,
+      getRecordSlug,
       conflictCode,
       conflictMessage,
     });
@@ -157,6 +157,8 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       allowSlugUpdate,
       directory,
       getRecordId,
+      getRecordSlug,
+      getRecordRelativePath,
       createRecordId,
     });
     const { attributes, body } = buildDocument(target);
@@ -194,6 +196,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       recordId,
       slug,
       getRecordId,
+      getRecordSlug,
       readMissingCode,
       readMissingMessage,
     });
@@ -220,7 +223,7 @@ export function createMarkdownRegistryApi<TRecord extends RegistryApiRecord>({
       vaultRoot,
       operationType: deleteOperationType,
       summary: deleteSummary(getRecordId(record)),
-      relativePath: record.relativePath,
+      relativePath: getRecordRelativePath(record),
     });
 
     return {

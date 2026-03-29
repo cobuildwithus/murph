@@ -17,24 +17,17 @@ interface MarkdownRegistryLoadOptions<TRecord> {
   invalidMessage: string;
 }
 
-interface RegistryRecord {
-  slug: string;
-}
-
-interface ExistingMarkdownRegistryRecord extends RegistryRecord {
-  relativePath: string;
-}
-
-interface RegistrySelectionOptions<TRecord extends RegistryRecord> {
+interface RegistrySelectionOptions<TRecord> {
   records: readonly TRecord[];
   recordId?: string;
   slug?: string;
   getRecordId: (record: TRecord) => string;
+  getRecordSlug: (record: TRecord) => string;
   readMissingCode: string;
   readMissingMessage: string;
 }
 
-interface ExistingRegistrySelectionOptions<TRecord extends RegistryRecord>
+interface ExistingRegistrySelectionOptions<TRecord>
   extends Omit<RegistrySelectionOptions<TRecord>, "readMissingCode" | "readMissingMessage"> {
   conflictCode: string;
   conflictMessage: string;
@@ -66,7 +59,7 @@ interface DeleteMarkdownRegistryDocumentInput {
   relativePath: string;
 }
 
-interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord extends ExistingMarkdownRegistryRecord> {
+interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord> {
   existingRecord: TRecord | null;
   recordId?: string;
   requestedSlug?: string;
@@ -74,6 +67,8 @@ interface ResolveMarkdownRegistryUpsertTargetOptions<TRecord extends ExistingMar
   allowSlugUpdate?: boolean;
   directory: string;
   getRecordId: (record: TRecord) => string;
+  getRecordSlug: (record: TRecord) => string;
+  getRecordRelativePath: (record: TRecord) => string;
   createRecordId: () => string;
 }
 
@@ -122,11 +117,12 @@ export async function loadMarkdownRegistryDocuments<TRecord>({
   return records;
 }
 
-export function selectExistingRegistryRecord<TRecord extends RegistryRecord>({
+export function selectExistingRegistryRecord<TRecord>({
   records,
   recordId,
   slug,
   getRecordId,
+  getRecordSlug,
   conflictCode,
   conflictMessage,
 }: ExistingRegistrySelectionOptions<TRecord>): TRecord | null {
@@ -135,6 +131,7 @@ export function selectExistingRegistryRecord<TRecord extends RegistryRecord>({
     recordId,
     slug,
     getRecordId,
+    getRecordSlug,
     detectConflict: true,
   });
 
@@ -145,11 +142,12 @@ export function selectExistingRegistryRecord<TRecord extends RegistryRecord>({
   return selection.match;
 }
 
-export function readRegistryRecord<TRecord extends RegistryRecord>({
+export function readRegistryRecord<TRecord>({
   records,
   recordId,
   slug,
   getRecordId,
+  getRecordSlug,
   readMissingCode,
   readMissingMessage,
 }: RegistrySelectionOptions<TRecord>): TRecord {
@@ -158,6 +156,7 @@ export function readRegistryRecord<TRecord extends RegistryRecord>({
     recordId,
     slug,
     getRecordId,
+    getRecordSlug,
   }).match;
 
   if (!match) {
@@ -173,7 +172,7 @@ export function readRegistryRecord<TRecord extends RegistryRecord>({
  * Keeping rename and record-id ownership here prevents bank domains from
  * drifting on create-vs-update decisions or old-path cleanup.
  */
-export function resolveMarkdownRegistryUpsertTarget<TRecord extends ExistingMarkdownRegistryRecord>({
+export function resolveMarkdownRegistryUpsertTarget<TRecord>({
   existingRecord,
   recordId,
   requestedSlug,
@@ -181,19 +180,21 @@ export function resolveMarkdownRegistryUpsertTarget<TRecord extends ExistingMark
   allowSlugUpdate,
   directory,
   getRecordId,
+  getRecordSlug,
+  getRecordRelativePath,
   createRecordId,
 }: ResolveMarkdownRegistryUpsertTargetOptions<TRecord>): MarkdownRegistryUpsertTarget {
   const slug = allowSlugUpdate
-    ? requestedSlug ?? existingRecord?.slug ?? defaultSlug
-    : existingRecord?.slug ?? requestedSlug ?? defaultSlug;
+    ? requestedSlug ?? (existingRecord ? getRecordSlug(existingRecord) : undefined) ?? defaultSlug
+    : (existingRecord ? getRecordSlug(existingRecord) : undefined) ?? requestedSlug ?? defaultSlug;
   const relativePath = `${directory}/${slug}.md`;
   return {
     recordId: existingRecord ? getRecordId(existingRecord) : (recordId ?? createRecordId()),
     slug,
     relativePath,
     previousRelativePath:
-      allowSlugUpdate && existingRecord && existingRecord.relativePath !== relativePath
-        ? existingRecord.relativePath
+      allowSlugUpdate && existingRecord && getRecordRelativePath(existingRecord) !== relativePath
+        ? getRecordRelativePath(existingRecord)
         : undefined,
     created: !existingRecord,
   };

@@ -127,8 +127,13 @@ export interface ProfileSnapshotRuntimeResult {
   }
 }
 
+export interface StoredHealthRecordRuntime<TIdField extends string> extends JsonObject {
+  entity: JsonObject & Record<TIdField, string>
+  document: JsonObject
+}
+
 export interface HealthRecordRuntimeResult<TIdField extends string> {
-  record: JsonObject & Record<TIdField, string>
+  record: StoredHealthRecordRuntime<TIdField>
   created: boolean
 }
 
@@ -157,7 +162,7 @@ export interface HealthCoreRuntimeMethods {
   ): Promise<HealthRecordRuntimeResult<'protocolId'>>
   readProtocolItem(
     input: { vaultRoot: string } & JsonObject,
-  ): Promise<JsonObject & { protocolId: string }>
+  ): Promise<StoredHealthRecordRuntime<'protocolId'>>
   appendHistoryEvent(
     input: { vaultRoot: string } & JsonObject,
   ): Promise<HistoryEventRuntimeResult>

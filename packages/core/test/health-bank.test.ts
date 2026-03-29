@@ -96,15 +96,15 @@ test("goals support multiple active records and preserve relationships in markdo
     window: {
       startAt: "2026-03-05",
     },
-    parentGoalId: primary.record.goalId,
-    relatedGoalIds: [primary.record.goalId],
+    parentGoalId: primary.record.entity.goalId,
+    relatedGoalIds: [primary.record.entity.goalId],
     relatedExperimentIds: ["exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
   });
 
   const listed = await listGoals(vaultRoot);
   const updated = await upsertGoal({
     vaultRoot,
-    goalId: secondary.record.goalId,
+    goalId: secondary.record.entity.goalId,
   });
   const refreshedByTitle = await upsertGoal({
     vaultRoot,
@@ -112,7 +112,7 @@ test("goals support multiple active records and preserve relationships in markdo
   });
   const read = await readGoal({
     vaultRoot,
-    goalId: secondary.record.goalId,
+    goalId: secondary.record.entity.goalId,
   });
   const goalAuditRecords = await readJsonlRecords({
     vaultRoot,
@@ -128,30 +128,30 @@ test("goals support multiple active records and preserve relationships in markdo
   assert.equal(secondary.created, true);
   assert.equal(updated.created, false);
   assert.equal(refreshedByTitle.created, false);
-  assert.equal(refreshedByTitle.record.goalId, secondary.record.goalId);
+  assert.equal(refreshedByTitle.record.entity.goalId, secondary.record.entity.goalId);
   assert.equal(listed.length, 2);
-  assert.equal(read.title, secondary.record.title);
-  assert.equal(read.parentGoalId, primary.record.goalId);
-  assert.deepEqual(read.relatedGoalIds, [primary.record.goalId]);
-  assert.deepEqual(read.relatedExperimentIds, ["exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
-  assert.deepEqual(read.links, [
+  assert.equal(read.entity.title, secondary.record.entity.title);
+  assert.equal(read.entity.parentGoalId, primary.record.entity.goalId);
+  assert.deepEqual(read.entity.relatedGoalIds, [primary.record.entity.goalId]);
+  assert.deepEqual(read.entity.relatedExperimentIds, ["exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"]);
+  assert.deepEqual(read.entity.links, [
     {
       type: "parent_goal",
-      targetId: primary.record.goalId,
+      targetId: primary.record.entity.goalId,
     },
     {
       type: "related_goal",
-      targetId: primary.record.goalId,
+      targetId: primary.record.entity.goalId,
     },
     {
       type: "related_experiment",
       targetId: "exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
     },
   ]);
-  assert.equal(read.priority, 6);
-  assert.equal(read.window.startAt, "2026-03-05");
-  assert.deepEqual(primary.record.domains, ["metabolic-health", "sleep"]);
-  assert.match(read.markdown, /## Related Experiments/);
+  assert.equal(read.entity.priority, 6);
+  assert.equal(read.entity.window.startAt, "2026-03-05");
+  assert.deepEqual(primary.record.entity.domains, ["metabolic-health", "sleep"]);
+  assert.match(read.document.markdown, /## Related Experiments/);
   assert.deepEqual(selectAuditMetadata(goalAuditRecords, "goal_upsert"), [
     { action: "goal_upsert", commandName: "core.upsertGoal", op: "create" },
     { action: "goal_upsert", commandName: "core.upsertGoal", op: "create" },
@@ -186,34 +186,34 @@ test("goal updates can clear shared relation fields without leaving stale links 
     window: {
       startAt: "2026-03-03",
     },
-    parentGoalId: parent.record.goalId,
-    relatedGoalIds: [related.record.goalId],
+    parentGoalId: parent.record.entity.goalId,
+    relatedGoalIds: [related.record.entity.goalId],
     relatedExperimentIds: ["exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8"],
   });
 
   const cleared = await upsertGoal({
     vaultRoot,
-    goalId: goal.record.goalId,
+    goalId: goal.record.entity.goalId,
     parentGoalId: null,
     relatedGoalIds: [],
     relatedExperimentIds: [],
   });
   const read = await readGoal({
     vaultRoot,
-    goalId: goal.record.goalId,
+    goalId: goal.record.entity.goalId,
   });
 
   assert.equal(cleared.created, false);
-  assert.equal(read.parentGoalId, null);
-  assert.equal(read.relatedGoalIds, undefined);
-  assert.equal(read.relatedExperimentIds, undefined);
-  assert.deepEqual(read.links, []);
-  assert.match(read.markdown, /Parent goal: none/);
-  assert.match(read.markdown, /## Related Goals[\s\S]*- none/);
-  assert.match(read.markdown, /## Related Experiments[\s\S]*- none/);
-  assert.doesNotMatch(read.markdown, new RegExp(parent.record.goalId));
-  assert.doesNotMatch(read.markdown, new RegExp(related.record.goalId));
-  assert.doesNotMatch(read.markdown, /exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
+  assert.equal(read.entity.parentGoalId, null);
+  assert.equal(read.entity.relatedGoalIds, undefined);
+  assert.equal(read.entity.relatedExperimentIds, undefined);
+  assert.deepEqual(read.entity.links, []);
+  assert.match(read.document.markdown, /Parent goal: none/);
+  assert.match(read.document.markdown, /## Related Goals[\s\S]*- none/);
+  assert.match(read.document.markdown, /## Related Experiments[\s\S]*- none/);
+  assert.doesNotMatch(read.document.markdown, new RegExp(parent.record.entity.goalId));
+  assert.doesNotMatch(read.document.markdown, new RegExp(related.record.entity.goalId));
+  assert.doesNotMatch(read.document.markdown, /exp_01JNW7YJ7MNE7M9Q2QWQK4Z3F8/);
 });
 
 test("goal reads reject non-canonical frontmatter after the hard cut", async () => {
@@ -279,8 +279,8 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
     () =>
       upsertGoal({
         vaultRoot,
-        goalId: first.record.goalId,
-        slug: second.record.slug,
+        goalId: first.record.entity.goalId,
+        slug: second.record.entity.slug,
       }),
     (error: unknown) =>
       error instanceof VaultError &&
@@ -290,11 +290,11 @@ test("goal id-or-slug resolution preserves conflict, missing, and read-preferenc
 
   const readByConflictingSelectors = await readGoal({
     vaultRoot,
-    goalId: first.record.goalId,
-    slug: second.record.slug,
+    goalId: first.record.entity.goalId,
+    slug: second.record.entity.slug,
   });
 
-  assert.equal(readByConflictingSelectors.goalId, first.record.goalId);
+  assert.equal(readByConflictingSelectors.entity.goalId, first.record.entity.goalId);
 
   await assert.rejects(
     () =>
@@ -1087,8 +1087,8 @@ test("conditions and allergies are stored as deterministic markdown registry pag
     verificationStatus: "confirmed",
     assertedOn: "2024-05-01",
     bodySites: ["head"],
-    relatedGoalIds: [goal.record.goalId],
-    relatedProtocolIds: [protocol.record.protocolId],
+    relatedGoalIds: [goal.record.entity.goalId],
+    relatedProtocolIds: [protocol.record.entity.protocolId],
     note: "Likely worsened by sleep disruption.",
   });
   const allergy = await upsertAllergy({
@@ -1099,7 +1099,7 @@ test("conditions and allergies are stored as deterministic markdown registry pag
     criticality: "high",
     reaction: "rash",
     recordedOn: "2018-04-10",
-    relatedConditionIds: [condition.record.conditionId],
+    relatedConditionIds: [condition.record.entity.conditionId],
     note: "Avoid beta-lactam exposure until formally reviewed.",
   });
 
@@ -1107,19 +1107,19 @@ test("conditions and allergies are stored as deterministic markdown registry pag
   const allergies = await listAllergies(vaultRoot);
   const readConditionRecord = await readCondition({
     vaultRoot,
-    slug: condition.record.slug,
+    slug: condition.record.entity.slug,
   });
   const readAllergyRecord = await readAllergy({
     vaultRoot,
-    allergyId: allergy.record.allergyId,
+    allergyId: allergy.record.entity.allergyId,
   });
   const patchedCondition = await upsertCondition({
     vaultRoot,
-    conditionId: condition.record.conditionId,
+    conditionId: condition.record.entity.conditionId,
   });
   const patchedAllergy = await upsertAllergy({
     vaultRoot,
-    allergyId: allergy.record.allergyId,
+    allergyId: allergy.record.entity.allergyId,
   });
   const conditionAuditRecords = await readJsonlRecords({
     vaultRoot,
@@ -1132,49 +1132,49 @@ test("conditions and allergies are stored as deterministic markdown registry pag
 
   assert.equal(conditions.length, 1);
   assert.equal(allergies.length, 1);
-  assert.equal(patchedCondition.record.title, condition.record.title);
-  assert.equal(patchedAllergy.record.title, allergy.record.title);
-  assert.deepEqual(readConditionRecord.relatedGoalIds, [goal.record.goalId]);
-  assert.deepEqual(readConditionRecord.links, [
+  assert.equal(patchedCondition.record.entity.title, condition.record.entity.title);
+  assert.equal(patchedAllergy.record.entity.title, allergy.record.entity.title);
+  assert.deepEqual(readConditionRecord.entity.relatedGoalIds, [goal.record.entity.goalId]);
+  assert.deepEqual(readConditionRecord.entity.links, [
     {
       type: "related_goal",
-      targetId: goal.record.goalId,
+      targetId: goal.record.entity.goalId,
     },
     {
       type: "related_protocol",
-      targetId: protocol.record.protocolId,
+      targetId: protocol.record.entity.protocolId,
     },
   ]);
-  assert.deepEqual(readAllergyRecord.relatedConditionIds, [condition.record.conditionId]);
-  assert.deepEqual(readAllergyRecord.links, [
+  assert.deepEqual(readAllergyRecord.entity.relatedConditionIds, [condition.record.entity.conditionId]);
+  assert.deepEqual(readAllergyRecord.entity.links, [
     {
       type: "related_condition",
-      targetId: condition.record.conditionId,
+      targetId: condition.record.entity.conditionId,
     },
   ]);
-  assert.match(readConditionRecord.markdown, /## Related Protocols/);
-  assert.match(readAllergyRecord.markdown, /## Related Conditions/);
-  assert.deepEqual(patchedCondition.record.relatedGoalIds, [goal.record.goalId]);
-  assert.deepEqual(patchedCondition.record.relatedProtocolIds, [protocol.record.protocolId]);
-  assert.deepEqual(patchedCondition.record.links, [
+  assert.match(readConditionRecord.document.markdown, /## Related Protocols/);
+  assert.match(readAllergyRecord.document.markdown, /## Related Conditions/);
+  assert.deepEqual(patchedCondition.record.entity.relatedGoalIds, [goal.record.entity.goalId]);
+  assert.deepEqual(patchedCondition.record.entity.relatedProtocolIds, [protocol.record.entity.protocolId]);
+  assert.deepEqual(patchedCondition.record.entity.links, [
     {
       type: "related_goal",
-      targetId: goal.record.goalId,
+      targetId: goal.record.entity.goalId,
     },
     {
       type: "related_protocol",
-      targetId: protocol.record.protocolId,
+      targetId: protocol.record.entity.protocolId,
     },
   ]);
-  assert.equal(patchedCondition.record.note, "Likely worsened by sleep disruption.");
-  assert.deepEqual(patchedAllergy.record.relatedConditionIds, [condition.record.conditionId]);
-  assert.deepEqual(patchedAllergy.record.links, [
+  assert.equal(patchedCondition.record.entity.note, "Likely worsened by sleep disruption.");
+  assert.deepEqual(patchedAllergy.record.entity.relatedConditionIds, [condition.record.entity.conditionId]);
+  assert.deepEqual(patchedAllergy.record.entity.links, [
     {
       type: "related_condition",
-      targetId: condition.record.conditionId,
+      targetId: condition.record.entity.conditionId,
     },
   ]);
-  assert.equal(patchedAllergy.record.substance, "penicillin");
+  assert.equal(patchedAllergy.record.entity.substance, "penicillin");
   assert.equal(
     conditionAuditRecords.filter((record) => (record as { action?: string }).action === "condition_upsert").length,
     2,
@@ -1222,51 +1222,51 @@ test("condition and allergy updates clear normalized relations without leaving s
   const condition = await upsertCondition({
     vaultRoot,
     title: "Migraine",
-    relatedGoalIds: [goal.record.goalId],
-    relatedProtocolIds: [protocol.record.protocolId],
+    relatedGoalIds: [goal.record.entity.goalId],
+    relatedProtocolIds: [protocol.record.entity.protocolId],
     note: "Likely worsened by sleep disruption.",
   });
   const allergy = await upsertAllergy({
     vaultRoot,
     title: "Penicillin allergy",
     substance: "penicillin",
-    relatedConditionIds: [condition.record.conditionId],
+    relatedConditionIds: [condition.record.entity.conditionId],
     note: "Avoid beta-lactam exposure until formally reviewed.",
   });
 
   const clearedCondition = await upsertCondition({
     vaultRoot,
-    conditionId: condition.record.conditionId,
+    conditionId: condition.record.entity.conditionId,
     relatedGoalIds: [],
     relatedProtocolIds: [],
   });
   const clearedAllergy = await upsertAllergy({
     vaultRoot,
-    allergyId: allergy.record.allergyId,
+    allergyId: allergy.record.entity.allergyId,
     relatedConditionIds: [],
   });
   const readConditionRecord = await readCondition({
     vaultRoot,
-    conditionId: condition.record.conditionId,
+    conditionId: condition.record.entity.conditionId,
   });
   const readAllergyRecord = await readAllergy({
     vaultRoot,
-    allergyId: allergy.record.allergyId,
+    allergyId: allergy.record.entity.allergyId,
   });
 
   assert.equal(clearedCondition.created, false);
   assert.equal(clearedAllergy.created, false);
-  assert.equal(readConditionRecord.relatedGoalIds, undefined);
-  assert.equal(readConditionRecord.relatedProtocolIds, undefined);
-  assert.deepEqual(readConditionRecord.links, []);
-  assert.match(readConditionRecord.markdown, /## Related Goals[\s\S]*- none/);
-  assert.match(readConditionRecord.markdown, /## Related Protocols[\s\S]*- none/);
-  assert.doesNotMatch(readConditionRecord.markdown, new RegExp(goal.record.goalId));
-  assert.doesNotMatch(readConditionRecord.markdown, new RegExp(protocol.record.protocolId));
-  assert.equal(readAllergyRecord.relatedConditionIds, undefined);
-  assert.deepEqual(readAllergyRecord.links, []);
-  assert.match(readAllergyRecord.markdown, /## Related Conditions[\s\S]*- none/);
-  assert.doesNotMatch(readAllergyRecord.markdown, new RegExp(condition.record.conditionId));
+  assert.equal(readConditionRecord.entity.relatedGoalIds, undefined);
+  assert.equal(readConditionRecord.entity.relatedProtocolIds, undefined);
+  assert.deepEqual(readConditionRecord.entity.links, []);
+  assert.match(readConditionRecord.document.markdown, /## Related Goals[\s\S]*- none/);
+  assert.match(readConditionRecord.document.markdown, /## Related Protocols[\s\S]*- none/);
+  assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(goal.record.entity.goalId));
+  assert.doesNotMatch(readConditionRecord.document.markdown, new RegExp(protocol.record.entity.protocolId));
+  assert.equal(readAllergyRecord.entity.relatedConditionIds, undefined);
+  assert.deepEqual(readAllergyRecord.entity.links, []);
+  assert.match(readAllergyRecord.document.markdown, /## Related Conditions[\s\S]*- none/);
+  assert.doesNotMatch(readAllergyRecord.document.markdown, new RegExp(condition.record.entity.conditionId));
 });
 
 test("condition and allergy id-or-slug resolution preserves conflict, missing, and read-preference behavior", async () => {
@@ -1286,8 +1286,8 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
     () =>
       upsertCondition({
         vaultRoot,
-        conditionId: firstCondition.record.conditionId,
-        slug: secondCondition.record.slug,
+        conditionId: firstCondition.record.entity.conditionId,
+        slug: secondCondition.record.entity.slug,
       }),
     (error: unknown) =>
       error instanceof VaultError &&
@@ -1297,11 +1297,11 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
 
   const readConditionByConflictingSelectors = await readCondition({
     vaultRoot,
-    conditionId: firstCondition.record.conditionId,
-    slug: secondCondition.record.slug,
+    conditionId: firstCondition.record.entity.conditionId,
+    slug: secondCondition.record.entity.slug,
   });
 
-  assert.equal(readConditionByConflictingSelectors.conditionId, firstCondition.record.conditionId);
+  assert.equal(readConditionByConflictingSelectors.entity.conditionId, firstCondition.record.entity.conditionId);
 
   await assert.rejects(
     () =>
@@ -1330,8 +1330,8 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
     () =>
       upsertAllergy({
         vaultRoot,
-        allergyId: firstAllergy.record.allergyId,
-        slug: secondAllergy.record.slug,
+        allergyId: firstAllergy.record.entity.allergyId,
+        slug: secondAllergy.record.entity.slug,
       }),
     (error: unknown) =>
       error instanceof VaultError &&
@@ -1341,11 +1341,11 @@ test("condition and allergy id-or-slug resolution preserves conflict, missing, a
 
   const readAllergyByConflictingSelectors = await readAllergy({
     vaultRoot,
-    allergyId: firstAllergy.record.allergyId,
-    slug: secondAllergy.record.slug,
+    allergyId: firstAllergy.record.entity.allergyId,
+    slug: secondAllergy.record.entity.slug,
   });
 
-  assert.equal(readAllergyByConflictingSelectors.allergyId, firstAllergy.record.allergyId);
+  assert.equal(readAllergyByConflictingSelectors.entity.allergyId, firstAllergy.record.entity.allergyId);
 
   await assert.rejects(
     () =>
@@ -1475,27 +1475,27 @@ test("protocols support medication and supplement groups plus stop handling", as
   });
   const stopped = await stopProtocolItem({
     vaultRoot,
-    protocolId: medication.record.protocolId,
+    protocolId: medication.record.entity.protocolId,
     stoppedOn: "2026-03-20",
   });
 
   const listed = await listProtocolItems(vaultRoot);
   const readMedication = await readProtocolItem({
     vaultRoot,
-    protocolId: medication.record.protocolId,
+    protocolId: medication.record.entity.protocolId,
   });
   const readSupplement = await readProtocolItem({
     vaultRoot,
-    slug: supplement.record.slug,
+    slug: supplement.record.entity.slug,
     group: "supplement",
   });
   const protocolMarkdown = await fs.readFile(
-    path.join(vaultRoot, supplement.record.relativePath),
+    path.join(vaultRoot, supplement.record.document.relativePath),
     "utf8",
   );
   const patchedSupplement = await upsertProtocolItem({
     vaultRoot,
-    protocolId: supplement.record.protocolId,
+    protocolId: supplement.record.entity.protocolId,
   });
   const protocolAuditRecords = await readJsonlRecords({
     vaultRoot,
@@ -1512,13 +1512,13 @@ test("protocols support medication and supplement groups plus stop handling", as
   );
 
   assert.equal(listed.length, 2);
-  assert.equal(readMedication.group, "medication");
-  assert.equal(readSupplement.group, "supplement");
-  assert.equal(readSupplement.brand, "Nordic Naturals");
-  assert.equal(readSupplement.manufacturer, "Nordic Naturals");
-  assert.equal(readSupplement.servingSize, "2 softgels");
+  assert.equal(readMedication.entity.group, "medication");
+  assert.equal(readSupplement.entity.group, "supplement");
+  assert.equal(readSupplement.entity.brand, "Nordic Naturals");
+  assert.equal(readSupplement.entity.manufacturer, "Nordic Naturals");
+  assert.equal(readSupplement.entity.servingSize, "2 softgels");
   assert.deepEqual(
-    readSupplement.ingredients?.map((ingredient) => ({
+    readSupplement.entity.ingredients?.map((ingredient) => ({
       compound: ingredient.compound,
       label: ingredient.label,
       amount: ingredient.amount,
@@ -1539,21 +1539,21 @@ test("protocols support medication and supplement groups plus stop handling", as
       },
     ],
   );
-  assert.equal(stopped.record.status, "stopped");
-  assert.equal(stopped.record.stoppedOn, "2026-03-20");
-  assert.equal(patchedSupplement.record.title, supplement.record.title);
-  assert.equal(patchedSupplement.record.schedule, "with breakfast");
-  assert.equal(patchedSupplement.record.startedOn, "2026-02-15");
-  assert.equal(patchedSupplement.record.brand, "Nordic Naturals");
-  assert.equal(patchedSupplement.record.servingSize, "2 softgels");
-  assert.match(stopped.record.relativePath, /^bank\/protocols\/medication\//);
-  assert.match(readMedication.markdown, /Stopped on: 2026-03-20/);
-  assert.match(readSupplement.markdown, /## Product/);
-  assert.match(readSupplement.markdown, /Brand: Nordic Naturals/);
-  assert.match(readSupplement.markdown, /Serving size: 2 softgels/);
-  assert.match(readSupplement.markdown, /## Ingredients/);
-  assert.match(readSupplement.markdown, /EPA — 600 mg/);
-  assert.match(readSupplement.markdown, /DHA — 400 mg/);
+  assert.equal(stopped.record.entity.status, "stopped");
+  assert.equal(stopped.record.entity.stoppedOn, "2026-03-20");
+  assert.equal(patchedSupplement.record.entity.title, supplement.record.entity.title);
+  assert.equal(patchedSupplement.record.entity.schedule, "with breakfast");
+  assert.equal(patchedSupplement.record.entity.startedOn, "2026-02-15");
+  assert.equal(patchedSupplement.record.entity.brand, "Nordic Naturals");
+  assert.equal(patchedSupplement.record.entity.servingSize, "2 softgels");
+  assert.match(stopped.record.document.relativePath, /^bank\/protocols\/medication\//);
+  assert.match(readMedication.document.markdown, /Stopped on: 2026-03-20/);
+  assert.match(readSupplement.document.markdown, /## Product/);
+  assert.match(readSupplement.document.markdown, /Brand: Nordic Naturals/);
+  assert.match(readSupplement.document.markdown, /Serving size: 2 softgels/);
+  assert.match(readSupplement.document.markdown, /## Ingredients/);
+  assert.match(readSupplement.document.markdown, /EPA — 600 mg/);
+  assert.match(readSupplement.document.markdown, /DHA — 400 mg/);
   assert.doesNotMatch(protocolMarkdown, /^group:/mu);
   assert.deepEqual(selectAuditMetadata(protocolAuditRecords, "protocol_upsert"), [
     { action: "protocol_upsert", commandName: "core.upsertProtocolItem", op: "create" },
@@ -1591,12 +1591,12 @@ test("protocol reads with conflicting protocolId and slug currently return the f
 
   const readByConflictingSelectors = await readProtocolItem({
     vaultRoot,
-    protocolId: supplement.record.protocolId,
-    slug: medication.record.slug,
+    protocolId: supplement.record.entity.protocolId,
+    slug: medication.record.entity.slug,
   });
 
-  assert.equal(readByConflictingSelectors.protocolId, medication.record.protocolId);
-  assert.equal(readByConflictingSelectors.group, "medication");
+  assert.equal(readByConflictingSelectors.entity.protocolId, medication.record.entity.protocolId);
+  assert.equal(readByConflictingSelectors.entity.group, "medication");
 });
 
 test("protocol reads reject ambiguous slugs across groups unless group is supplied", async () => {
@@ -1640,8 +1640,8 @@ test("protocol reads reject ambiguous slugs across groups unless group is suppli
     group: "supplement",
   });
 
-  assert.equal(readSupplement.protocolId, supplement.record.protocolId);
-  assert.equal(readSupplement.group, "supplement");
+  assert.equal(readSupplement.entity.protocolId, supplement.record.entity.protocolId);
+  assert.equal(readSupplement.entity.group, "supplement");
 });
 
 test("protocol upserts reject ambiguous slugs across groups unless protocolId or group is supplied", async () => {

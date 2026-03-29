@@ -66,6 +66,11 @@ export interface MarkdownRegistryDocumentEnvelope {
   markdown: string;
 }
 
+export interface StoredMarkdownRegistryEntity<TEntity> {
+  entity: TEntity;
+  document: MarkdownRegistryDocumentEnvelope;
+}
+
 export interface FoodAutoLogDailyRule {
   time: string;
 }
@@ -292,7 +297,7 @@ export interface GoalEntity {
   links: GoalLink[];
 }
 
-export type GoalRecord = GoalEntity & MarkdownRegistryDocumentEnvelope;
+export type GoalStoredDocument = StoredMarkdownRegistryEntity<GoalEntity>;
 
 export interface UpsertGoalInput {
   vaultRoot: string;
@@ -315,7 +320,7 @@ export interface UpsertGoalInput {
 export interface UpsertGoalResult {
   created: boolean;
   auditPath: string;
-  record: GoalRecord;
+  record: GoalStoredDocument;
 }
 
 export interface ReadGoalInput {
@@ -349,7 +354,7 @@ export interface ConditionEntity {
   links: ConditionLink[];
 }
 
-export type ConditionRecord = ConditionEntity & MarkdownRegistryDocumentEnvelope;
+export type ConditionStoredDocument = StoredMarkdownRegistryEntity<ConditionEntity>;
 
 export interface UpsertConditionInput {
   vaultRoot: string;
@@ -370,7 +375,7 @@ export interface UpsertConditionInput {
 export interface UpsertConditionResult {
   created: boolean;
   auditPath: string;
-  record: ConditionRecord;
+  record: ConditionStoredDocument;
 }
 
 export interface ReadConditionInput {
@@ -402,7 +407,7 @@ export interface AllergyEntity {
   links: AllergyLink[];
 }
 
-export type AllergyRecord = AllergyEntity & MarkdownRegistryDocumentEnvelope;
+export type AllergyStoredDocument = StoredMarkdownRegistryEntity<AllergyEntity>;
 
 export interface UpsertAllergyInput {
   vaultRoot: string;
@@ -421,7 +426,7 @@ export interface UpsertAllergyInput {
 export interface UpsertAllergyResult {
   created: boolean;
   auditPath: string;
-  record: AllergyRecord;
+  record: AllergyStoredDocument;
 }
 
 export interface ReadAllergyInput {
@@ -430,7 +435,7 @@ export interface ReadAllergyInput {
   slug?: string;
 }
 
-export interface ProtocolItemRecord {
+export interface ProtocolItemEntity {
   schemaVersion: typeof PROTOCOL_SCHEMA_VERSION;
   docType: typeof PROTOCOL_DOC_TYPE;
   protocolId: string;
@@ -451,9 +456,9 @@ export interface ProtocolItemRecord {
   relatedGoalIds?: string[];
   relatedConditionIds?: string[];
   group: string;
-  relativePath: string;
-  markdown: string;
 }
+
+export type ProtocolItemStoredDocument = StoredMarkdownRegistryEntity<ProtocolItemEntity>;
 
 export interface UpsertProtocolItemInput {
   vaultRoot: string;
@@ -481,7 +486,7 @@ export interface UpsertProtocolItemInput {
 export interface UpsertProtocolItemResult {
   created: boolean;
   auditPath: string;
-  record: ProtocolItemRecord;
+  record: ProtocolItemStoredDocument;
 }
 
 export interface ReadProtocolItemInput {
@@ -501,5 +506,5 @@ export interface StopProtocolItemInput {
 
 export interface StopProtocolItemResult {
   auditPath: string;
-  record: ProtocolItemRecord;
+  record: ProtocolItemStoredDocument;
 }

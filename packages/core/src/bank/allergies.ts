@@ -16,7 +16,6 @@ import {
   ALLERGY_STATUSES,
 } from "./types.ts";
 import {
-  buildDocumentFromAttributes,
   buildMarkdownBody,
   detailList,
   listSection,
@@ -40,13 +39,13 @@ import type {
   AllergyEntity,
   AllergyLink,
   AllergyLinkType,
-  AllergyRecord,
+  AllergyStoredDocument,
   ReadAllergyInput,
   UpsertAllergyInput,
   UpsertAllergyResult,
 } from "./types.ts";
 
-function buildBody(record: AllergyRecord): string {
+function buildBody(record: AllergyEntity): string {
   const relations = canonicalizeAllergyRelations(record);
 
   return buildMarkdownBody(
@@ -157,7 +156,7 @@ function parseAllergyRecord(
   attributes: FrontmatterObject,
   relativePath: string,
   markdown: string,
-): AllergyRecord {
+): AllergyStoredDocument {
   const parsed = parseAllergyFrontmatter(attributes);
   requireMatchingDocType(
     parsed as unknown as FrontmatterObject,
@@ -170,7 +169,7 @@ function parseAllergyRecord(
     links: parseAllergyLinks(attributes),
   });
 
-  return stripUndefined({
+  const entity = stripUndefined({
     schemaVersion: ALLERGY_SCHEMA_VERSION,
     docType: ALLERGY_DOC_TYPE,
     allergyId: requireString(parsed.allergyId, "allergyId", 64),
@@ -184,12 +183,18 @@ function parseAllergyRecord(
     relatedConditionIds: relations.relatedConditionIds,
     note: optionalString(parsed.note, "note", 4000),
     links: relations.links,
-    relativePath,
-    markdown,
-  });
+  }) as AllergyEntity;
+
+  return {
+    entity,
+    document: {
+      relativePath,
+      markdown,
+    },
+  };
 }
 
-function buildAttributes(record: AllergyEntity | AllergyRecord): FrontmatterObject {
+function buildAttributes(record: AllergyEntity): FrontmatterObject {
   const relations = canonicalizeAllergyRelations(record);
 
   return stripUndefined({
@@ -208,18 +213,23 @@ function buildAttributes(record: AllergyEntity | AllergyRecord): FrontmatterObje
   }) as FrontmatterObject;
 }
 
-const allergyRegistryApi = createMarkdownRegistryApi<AllergyRecord>({
+const allergyRegistryApi = createMarkdownRegistryApi<AllergyStoredDocument>({
   directory: ALLERGIES_DIRECTORY,
   recordFromParts: parseAllergyRecord,
   isExpectedRecord: (record) =>
-    record.docType === ALLERGY_DOC_TYPE && record.schemaVersion === ALLERGY_SCHEMA_VERSION,
+    record.entity.docType === ALLERGY_DOC_TYPE &&
+    record.entity.schemaVersion === ALLERGY_SCHEMA_VERSION,
   invalidCode: "VAULT_INVALID_ALLERGY",
   invalidMessage: "Allergy registry document has an unexpected shape.",
   sortRecords: (records) =>
     records.sort(
-      (left, right) => left.title.localeCompare(right.title) || left.allergyId.localeCompare(right.allergyId),
+      (left, right) =>
+        left.entity.title.localeCompare(right.entity.title) ||
+        left.entity.allergyId.localeCompare(right.entity.allergyId),
     ),
-  getRecordId: (record) => record.allergyId,
+  getRecordId: (record) => record.entity.allergyId,
+  getRecordSlug: (record) => record.entity.slug,
+  getRecordRelativePath: (record) => record.document.relativePath,
   conflictCode: "VAULT_ALLERGY_CONFLICT",
   conflictMessage: "Allergy id and slug resolve to different records.",
   readMissingCode: "VAULT_ALLERGY_MISSING",
@@ -242,7 +252,8 @@ export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAl
     recordId: normalizedAllergyId,
     slug: requestedSlug,
   });
-  const title = requireString(input.title ?? existingRecord?.title, "title", 160);
+  const existingEntity = existingRecord?.entity;
+  const title = requireString(input.title ?? existingEntity?.title, "title", 160);
   return allergyRegistryApi.upsertRecord({
     vaultRoot: input.vaultRoot,
     existingRecord,
@@ -253,53 +264,54 @@ export async function upsertAllergy(input: UpsertAllergyInput): Promise<UpsertAl
       const relations = canonicalizeAllergyRelations({
         relatedConditionIds: resolveOptionalUpsertValue(
           input.relatedConditionIds,
-          existingRecord?.relatedConditionIds,
+          existingEntity?.relatedConditionIds,
           (value) => normalizeRecordIdList(value, "relatedConditionIds", "cond"),
         ),
       });
-      const attributes = buildAttributes(
-        stripUndefined({
-          schemaVersion: ALLERGY_SCHEMA_VERSION,
-          docType: ALLERGY_DOC_TYPE,
-          allergyId: target.recordId,
-          slug: target.slug,
-          title,
-          substance: requireString(input.substance ?? existingRecord?.substance, "substance", 160),
-          status: resolveRequiredUpsertValue(input.status, existingRecord?.status, "active", (value) =>
-            optionalEnum(value, ALLERGY_STATUSES, "status") ?? "active",
-          ),
-          criticality: resolveOptionalUpsertValue(input.criticality, existingRecord?.criticality, (value) =>
-            optionalEnum(value, ALLERGY_CRITICALITIES, "criticality"),
-          ),
-          reaction: resolveOptionalUpsertValue(input.reaction, existingRecord?.reaction, (value) =>
-            optionalString(value, "reaction", 160),
-          ),
-          recordedOn: resolveOptionalUpsertValue(input.recordedOn, existingRecord?.recordedOn, (value) =>
-            optionalDateOnly(value, "recordedOn"),
-          ),
-          relatedConditionIds: relations.relatedConditionIds,
-          note: resolveOptionalUpsertValue(input.note, existingRecord?.note, (value) =>
-            optionalString(value, "note", 4000),
-          ),
-          links: relations.links,
-        }) as AllergyEntity,
-      );
+      const entity = stripUndefined({
+        schemaVersion: ALLERGY_SCHEMA_VERSION,
+        docType: ALLERGY_DOC_TYPE,
+        allergyId: target.recordId,
+        slug: target.slug,
+        title,
+        substance: requireString(input.substance ?? existingEntity?.substance, "substance", 160),
+        status: resolveRequiredUpsertValue(input.status, existingEntity?.status, "active", (value) =>
+          optionalEnum(value, ALLERGY_STATUSES, "status") ?? "active",
+        ),
+        criticality: resolveOptionalUpsertValue(input.criticality, existingEntity?.criticality, (value) =>
+          optionalEnum(value, ALLERGY_CRITICALITIES, "criticality"),
+        ),
+        reaction: resolveOptionalUpsertValue(input.reaction, existingEntity?.reaction, (value) =>
+          optionalString(value, "reaction", 160),
+        ),
+        recordedOn: resolveOptionalUpsertValue(input.recordedOn, existingEntity?.recordedOn, (value) =>
+          optionalDateOnly(value, "recordedOn"),
+        ),
+        relatedConditionIds: relations.relatedConditionIds,
+        note: resolveOptionalUpsertValue(input.note, existingEntity?.note, (value) =>
+          optionalString(value, "note", 4000),
+        ),
+        links: relations.links,
+      }) as AllergyEntity;
+      const attributes = buildAttributes(entity);
 
-      return buildDocumentFromAttributes<FrontmatterObject, AllergyRecord>({
+      return {
         attributes,
-        relativePath: target.relativePath,
-        markdown: existingRecord?.markdown,
-        buildBody,
-      });
+        body: buildBody(entity),
+      };
     },
   });
 }
 
-export async function listAllergies(vaultRoot: string): Promise<AllergyRecord[]> {
+export async function listAllergies(vaultRoot: string): Promise<AllergyStoredDocument[]> {
   return allergyRegistryApi.listRecords(vaultRoot);
 }
 
-export async function readAllergy({ vaultRoot, allergyId, slug }: ReadAllergyInput): Promise<AllergyRecord> {
+export async function readAllergy({
+  vaultRoot,
+  allergyId,
+  slug,
+}: ReadAllergyInput): Promise<AllergyStoredDocument> {
   const normalizedAllergyId = normalizeId(allergyId, "allergyId", "alg");
   const normalizedSlug = normalizeSelectorSlug(slug);
   return allergyRegistryApi.readRecord({
