@@ -116,7 +116,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
     prompt: 'Reply to the capture.',
     response: 'Acknowledged.',
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: 'asst_session_1',
       provider: 'codex-cli',
       providerSessionId: null,
@@ -131,6 +131,7 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
         apiKeyEnv: undefined,
         providerName: undefined,
       },
+      providerBinding: null,
       alias: null,
       binding: {
         conversationKey: null,

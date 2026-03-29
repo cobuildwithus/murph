@@ -81,6 +81,7 @@ describe("hosted user env helpers", () => {
         env: {
           FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
           OPENAI_API_KEY: "sk-user",
+          VENICE_API_KEY: "venice-user",
           XAI_API_KEY: "xai-user",
         },
         mode: "replace",
@@ -88,6 +89,7 @@ describe("hosted user env helpers", () => {
     })).toEqual({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       OPENAI_API_KEY: "sk-user",
+      VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",
     });
 
@@ -174,17 +176,4 @@ describe("hosted user env helpers", () => {
     });
   });
 
-  it("still reads the legacy hosted user env schema", () => {
-    const payload = new TextEncoder().encode(JSON.stringify({
-      env: {
-        OPENAI_API_KEY: "sk-user",
-      },
-      schema: "healthybob.hosted-user-env.v1",
-      updatedAt: "2026-03-26T12:00:00.000Z",
-    }));
-
-    expect(decodeHostedUserEnvPayload(payload)).toEqual({
-      OPENAI_API_KEY: "sk-user",
-    });
-  });
 });

@@ -15,7 +15,6 @@ import {
 
 const WORKSPACE_ASSISTANT_ROOT = "assistant-state";
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";
-const LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT = "vault-runtime";
 const RAW_ARTIFACT_EXTERNALIZE_THRESHOLD_BYTES = 256 * 1024;
 
 export interface HostedWorkspaceArtifactPersistInput extends HostedBundleArtifactSnapshotInput {
@@ -134,7 +133,6 @@ export async function restoreHostedExecutionContext(input: {
     await restoreHostedBundleRoots({
       bytes: input.agentStateBundle,
       expectedKind: "agent-state",
-      ignoredRoots: [LEGACY_AGENT_STATE_VAULT_RUNTIME_ROOT],
       roots: {
         [WORKSPACE_ASSISTANT_ROOT]: assistantStateRoot,
         [WORKSPACE_OPERATOR_HOME_ROOT]: operatorHomeRoot,

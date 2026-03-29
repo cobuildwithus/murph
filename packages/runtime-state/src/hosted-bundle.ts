@@ -4,7 +4,6 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v2";
-export const HOSTED_BUNDLE_LEGACY_SCHEMA = "murph.hosted-bundle.v1";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
 
 export type HostedExecutionBundleKind = "vault" | "agent-state";
@@ -57,7 +56,7 @@ type HostedBundleArchiveFile = HostedBundleArchiveInlineFile | HostedBundleArchi
 interface HostedBundleArchive {
   files: HostedBundleArchiveFile[];
   kind: HostedExecutionBundleKind;
-  schema: typeof HOSTED_BUNDLE_SCHEMA | typeof HOSTED_BUNDLE_LEGACY_SCHEMA;
+  schema: typeof HOSTED_BUNDLE_SCHEMA;
 }
 
 export interface HostedBundleSnapshotRootInput {
@@ -377,7 +376,7 @@ function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundle
   };
 
   if (
-    (parsed.schema !== HOSTED_BUNDLE_SCHEMA && parsed.schema !== HOSTED_BUNDLE_LEGACY_SCHEMA)
+    parsed.schema !== HOSTED_BUNDLE_SCHEMA
     || !Array.isArray(parsed.files)
   ) {
     throw new Error("Hosted bundle archive is invalid.");

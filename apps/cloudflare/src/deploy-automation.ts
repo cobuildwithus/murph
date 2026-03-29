@@ -179,11 +179,9 @@ export function readHostedDeployAutomationEnvironment(
       "CF_RETRY_DELAY_MS",
     ),
     runnerCommitTimeoutMs: normalizePositiveIntegerString(
-      normalizeString(source.CF_RUNNER_COMMIT_TIMEOUT_MS)
-        ?? normalizeString(source.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS)
-        ?? "30000",
+      normalizeString(source.CF_RUNNER_COMMIT_TIMEOUT_MS) ?? "30000",
       "30000",
-      "CF_RUNNER_COMMIT_TIMEOUT_MS or HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS",
+      "CF_RUNNER_COMMIT_TIMEOUT_MS",
     ),
     runnerTimeoutMs: normalizePositiveIntegerString(
       source.CF_RUNNER_TIMEOUT_MS,

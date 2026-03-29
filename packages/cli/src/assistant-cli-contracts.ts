@@ -278,23 +278,6 @@ export const assistantSessionSchema = z
   })
   .strict()
 
-const assistantLegacySessionSchema = z
-  .object({
-    schema: z.literal('murph.assistant-session.v2'),
-    sessionId: z.string().min(1),
-    provider: z.enum(assistantChatProviderValues),
-    providerSessionId: z.string().min(1).nullable(),
-    providerState: assistantSessionProviderStateSchema.nullable().optional(),
-    providerOptions: assistantProviderSessionOptionsSchema,
-    alias: z.string().min(1).nullable(),
-    binding: assistantSessionBindingSchema,
-    createdAt: isoTimestampSchema,
-    updatedAt: isoTimestampSchema,
-    lastTurnAt: isoTimestampSchema.nullable(),
-    turnCount: z.number().int().nonnegative(),
-  })
-  .strict()
-
 export function parseAssistantSessionRecord(value: unknown): AssistantSession {
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
     const record = value as Record<string, unknown>
@@ -308,44 +291,7 @@ export function parseAssistantSessionRecord(value: unknown): AssistantSession {
       })
     }
   }
-
-  const legacy = assistantLegacySessionSchema.parse(value)
-  const providerBinding = shouldCreateAssistantLegacyProviderBinding(legacy)
-    ? assistantProviderBindingSchema.parse({
-        provider: legacy.provider,
-        providerSessionId: legacy.providerSessionId,
-        providerState: legacy.providerState ?? null,
-        providerOptions: legacy.providerOptions,
-      })
-    : null
-
-  return assistantSessionSchema.parse({
-    schema: 'murph.assistant-session.v3',
-    sessionId: legacy.sessionId,
-    provider: legacy.provider,
-    providerOptions: legacy.providerOptions,
-    providerBinding,
-    alias: legacy.alias,
-    binding: legacy.binding,
-    createdAt: legacy.createdAt,
-    updatedAt: legacy.updatedAt,
-    lastTurnAt: legacy.lastTurnAt,
-    turnCount: legacy.turnCount,
-  })
-}
-
-function shouldCreateAssistantLegacyProviderBinding(input: {
-  lastTurnAt: string | null
-  providerSessionId: string | null
-  providerState?: AssistantSessionProviderState | null
-  turnCount: number
-}): boolean {
-  return (
-    input.providerSessionId !== null ||
-    input.providerState !== null ||
-    input.lastTurnAt !== null ||
-    input.turnCount > 0
-  )
+  return assistantSessionSchema.parse(value)
 }
 
 export function normalizeAssistantSessionRecord(value: unknown): AssistantSession {
@@ -361,10 +307,7 @@ export const assistantSessionCompatSchema = z
   .unknown()
   .transform((value) => normalizeAssistantSessionRecord(value))
 
-const assistantSessionOutputSchema = z.union([
-  assistantSessionSchema,
-  assistantLegacySessionSchema,
-])
+const assistantSessionOutputSchema = assistantSessionSchema
 
 export const assistantTranscriptEntrySchema = z.object({
   schema: z.literal('murph.assistant-transcript-entry.v1'),
@@ -1091,7 +1034,7 @@ export type AssistantSession = Omit<
   AssistantSessionRecord,
   'providerBinding' | 'schema'
 > & {
-  schema: AssistantSessionRecord['schema'] | 'murph.assistant-session.v2'
+  schema: AssistantSessionRecord['schema']
   providerBinding?: AssistantProviderBinding | null
   providerSessionId?: string | null
   providerState?: AssistantSessionProviderState | null

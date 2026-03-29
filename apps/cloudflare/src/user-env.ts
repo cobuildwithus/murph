@@ -1,5 +1,4 @@
 export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
-const LEGACY_HOSTED_USER_ENV_SCHEMA = "healthybob.hosted-user-env.v1";
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -10,9 +9,11 @@ const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "MISTRAL_API_KEY",
   "OPENAI_API_KEY",
   "OPENROUTER_API_KEY",
+  "PERPLEXITY_API_KEY",
   "PADDLEOCR_COMMAND",
   "PDFTOTEXT_COMMAND",
   "TOGETHER_API_KEY",
+  "VENICE_API_KEY",
   "WHISPER_COMMAND",
   "WHISPER_MODEL_PATH",
   "XAI_API_KEY",
@@ -27,9 +28,11 @@ const DEFAULT_ALLOWED_USER_ENV_PREFIXES = [
   "MISTRAL_",
   "OPENAI_",
   "OPENROUTER_",
+  "PERPLEXITY_",
   "PADDLEOCR_",
   "PDFTOTEXT_",
   "TOGETHER_",
+  "VENICE_",
   "WHISPER_",
   "XAI_",
 ] as const;
@@ -208,7 +211,7 @@ function parseHostedUserEnvConfig(
   const parsed = JSON.parse(text) as Partial<HostedUserEnvConfig>;
 
   if (
-    (parsed.schema !== HOSTED_USER_ENV_SCHEMA && parsed.schema !== LEGACY_HOSTED_USER_ENV_SCHEMA)
+    parsed.schema !== HOSTED_USER_ENV_SCHEMA
     || !parsed.env
     || typeof parsed.env !== "object"
   ) {

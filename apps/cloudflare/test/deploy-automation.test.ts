@@ -176,29 +176,6 @@ describe("hosted deploy automation helpers", () => {
     });
   });
 
-  it("accepts the legacy runtime commit-timeout input when the deploy alias is unset", () => {
-    const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_WORKER_NAME: "hosted-worker",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
-    });
-
-    expect(environment.runnerCommitTimeoutMs).toBe("45000");
-  });
-
-  it("treats a blank CF runner commit-timeout as unset and falls back to the runtime input", () => {
-    const environment = readHostedDeployAutomationEnvironment({
-      CF_BUNDLES_BUCKET: "hosted-bundles",
-      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
-      CF_RUNNER_COMMIT_TIMEOUT_MS: "   ",
-      CF_WORKER_NAME: "hosted-worker",
-      HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
-    });
-
-    expect(environment.runnerCommitTimeoutMs).toBe("45000");
-  });
-
   it("does not accept legacy HB_CF deploy variable names", () => {
     expect(() =>
       readHostedDeployAutomationEnvironment({
