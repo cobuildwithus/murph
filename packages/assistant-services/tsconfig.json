@@ -11,9 +11,6 @@
   ],
   "references": [
     {
-      "path": "../runtime-state"
-    },
-    {
       "path": "../cli"
     }
   ],

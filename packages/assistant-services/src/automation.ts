@@ -1,10 +1,4 @@
-import {
-  runAssistantAutomation as runMurphAssistantAutomation,
+export {
+  runAssistantAutomation,
   type RunAssistantAutomationInput,
-} from "murph/assistant/automation";
-
-export type { RunAssistantAutomationInput };
-
-export async function runAssistantAutomation(input: RunAssistantAutomationInput) {
-  return await runMurphAssistantAutomation(input);
-}
+} from "murph/assistant-core";

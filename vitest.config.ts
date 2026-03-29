@@ -22,6 +22,7 @@ export default defineConfig({
       { find: "@murph/assistant-services/status", replacement: path.resolve("packages/assistant-services/src/status.ts") },
       { find: "@murph/assistant-services/store", replacement: path.resolve("packages/assistant-services/src/store.ts") },
       { find: "@murph/assistant-services/vault-services", replacement: path.resolve("packages/assistant-services/src/vault-services.ts") },
+      { find: /^murph\/assistant-core$/, replacement: path.resolve("packages/cli/src/assistant-core.ts") },
       { find: /^murph\/assistant\/store$/, replacement: path.resolve("packages/cli/src/assistant/store.ts") },
       { find: /^murph\/operator-config$/, replacement: path.resolve("packages/cli/src/operator-config.ts") },
       { find: /^murph$/, replacement: path.resolve("packages/cli/src/index.ts") },

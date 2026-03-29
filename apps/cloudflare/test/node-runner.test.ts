@@ -18,7 +18,7 @@ import {
   snapshotHostedExecutionContext,
   writePendingAssistantUsageRecord,
 } from "@murph/runtime-state";
-import { assistantOutboxIntentSchema } from "murph";
+import { assistantOutboxIntentSchema } from "murph/assistant-core";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),

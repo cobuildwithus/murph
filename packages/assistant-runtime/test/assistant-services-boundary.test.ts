@@ -19,32 +19,50 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from "murph/operator-config";
-import { assistantAutomationStateSchema } from "murph";
+import { assistantAutomationStateSchema } from "murph/assistant-core";
 import {
   readAssistantAutomationState as readCliAssistantAutomationState,
   saveAssistantAutomationState as saveCliAssistantAutomationState,
 } from "murph/assistant/store";
 
 test("assistant-services publishes the hosted boundary entrypoints needed by assistant-runtime", async () => {
-  const packageManifest = JSON.parse(
+  const assistantServicesManifest = JSON.parse(
     await readFile(
       new URL("../../assistant-services/package.json", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    dependencies?: Record<string, string>;
+    exports: Record<string, { default?: string; import?: string; types?: string }>;
+  };
+  const cliManifest = JSON.parse(
+    await readFile(
+      new URL("../../cli/package.json", import.meta.url),
       "utf8",
     ),
   ) as {
     exports: Record<string, { default?: string; import?: string; types?: string }>;
   };
 
-  assert.deepEqual(packageManifest.exports["."], {
+  assert.deepEqual(assistantServicesManifest.exports["."], {
     default: "./dist/index.js",
     import: "./dist/index.js",
     types: "./dist/index.d.ts",
   });
-  assert.deepEqual(packageManifest.exports["./operator-config"], {
+  assert.deepEqual(assistantServicesManifest.exports["./operator-config"], {
     default: "./dist/operator-config.js",
     import: "./dist/operator-config.js",
     types: "./dist/operator-config.d.ts",
   });
+  assert.deepEqual(cliManifest.exports["./assistant-core"], {
+    default: "./dist/assistant-core.js",
+    types: "./dist/assistant-core.d.ts",
+  });
+  assert.equal(
+    "@murph/runtime-state" in (assistantServicesManifest.dependencies ?? {}),
+    false,
+    "assistant-services should stay a compatibility boundary over murph/assistant-core instead of owning runtime-state writes.",
+  );
 });
 
 test("assistant-services operator-config writes targets back in a CLI-readable shape", async () => {

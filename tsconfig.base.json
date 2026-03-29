@@ -88,6 +88,9 @@
       "murph": [
         "packages/cli/src/index.ts"
       ],
+      "murph/assistant-core": [
+        "packages/cli/src/assistant-core.ts"
+      ],
       "murph/inbox-services": [
         "packages/cli/src/inbox-services.ts"
       ],

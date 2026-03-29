@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net'
 import { URL } from 'node:url'
 import { isLoopbackRemoteAddress } from '@murph/runtime-state'
-import { assertAssistantSessionId, isAssistantSessionNotFoundError } from 'murph'
+import { assertAssistantSessionId, isAssistantSessionNotFoundError } from 'murph/assistant-core'
 import type { AssistantLocalService } from './service.js'
 
 const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024
