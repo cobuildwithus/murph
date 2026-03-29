@@ -6,8 +6,6 @@ import type {
 import { HOSTED_EXECUTION_EVENT_KINDS } from "./contracts.ts";
 
 const HOSTED_EXECUTION_EVENT_KIND_SET = new Set<HostedExecutionEventKind>(HOSTED_EXECUTION_EVENT_KINDS);
-
-export const HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.ref.v1";
 const HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION = "murph.execution-outbox.v2";
 
 export interface HostedExecutionDispatchRef {
@@ -53,10 +51,7 @@ export function readHostedExecutionDispatchRef(
   const schemaVersion = readHostedExecutionText(payloadObject.schemaVersion);
   const storage = readHostedExecutionText(payloadObject.storage);
 
-  if (
-    schemaVersion !== HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION
-    && !(schemaVersion === HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION && storage === "reference")
-  ) {
+  if (schemaVersion !== HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION || storage !== "reference") {
     return null;
   }
 

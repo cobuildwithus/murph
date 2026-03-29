@@ -1,9 +1,8 @@
 import { decodeBase64, encodeBase64 } from "./base64.js";
 
 const HOSTED_CIPHER_SCHEMA = "murph.hosted-cipher.v1";
-const LEGACY_HOSTED_CIPHER_SCHEMA = "healthybob.hosted-cipher.v1";
 
-type HostedCipherSchema = typeof HOSTED_CIPHER_SCHEMA | typeof LEGACY_HOSTED_CIPHER_SCHEMA;
+type HostedCipherSchema = typeof HOSTED_CIPHER_SCHEMA;
 
 export interface HostedCipherEnvelope {
   algorithm: "AES-GCM";
@@ -192,7 +191,7 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 function isSupportedHostedCipherSchema(value: string): value is HostedCipherSchema {
-  return value === HOSTED_CIPHER_SCHEMA || value === LEGACY_HOSTED_CIPHER_SCHEMA;
+  return value === HOSTED_CIPHER_SCHEMA;
 }
 
 async function migrateEncryptedPayloadIfNeeded(input: {

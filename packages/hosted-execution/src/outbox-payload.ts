@@ -4,7 +4,6 @@ import {
 } from "./parsers.ts";
 import {
   buildHostedExecutionDispatchRef,
-  HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRef,
   type HostedExecutionDispatchRefFallback,
@@ -84,18 +83,7 @@ export function readHostedExecutionOutboxPayload(
 
     return null;
   }
-
-  const legacyDispatchRef = readHostedExecutionDispatchRef(payloadJson, fallback);
-
-  if (!legacyDispatchRef || schemaVersion !== HOSTED_EXECUTION_LEGACY_OUTBOX_PAYLOAD_SCHEMA_VERSION) {
-    return null;
-  }
-
-  return {
-    dispatchRef: legacyDispatchRef,
-    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
-    storage: "reference",
-  };
+  return null;
 }
 
 export function resolveHostedExecutionOutboxPayloadStorage(

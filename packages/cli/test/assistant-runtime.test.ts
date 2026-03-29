@@ -12,6 +12,7 @@ import {
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '../src/assistant-state.js'
+import { listPendingAssistantUsageRecords } from '@murph/runtime-state'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 import { listAssistantTurnReceipts } from '../src/assistant/receipts.js'
 import { readAssistantSession } from '../src/assistant/store/persistence.js'
@@ -317,6 +318,72 @@ test('sendAssistantMessage does not persist hosted usage records outside hosted 
   assert.deepEqual(usageEntries, [])
 })
 
+test('sendAssistantMessage freezes hosted usage credential ownership from the current user env snapshot', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const originalHostedMemberId = process.env.HOSTED_MEMBER_ID
+  const originalHostedUserEnvKeys = process.env.HOSTED_EXECUTION_USER_ENV_KEYS
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-usage-456',
+    response: 'usage reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: 12,
+      outputTokens: 7,
+      providerMetadataJson: null,
+      providerName: null,
+      providerRequestId: 'req_456',
+      rawUsageJson: {
+        inputTokens: 12,
+        outputTokens: 7,
+      },
+      reasoningTokens: null,
+      requestedModel: 'gpt-5',
+      servedModel: 'gpt-5',
+      totalTokens: null,
+    },
+  })
+
+  process.env.HOSTED_MEMBER_ID = 'member_123'
+  process.env.HOSTED_EXECUTION_USER_ENV_KEYS = 'VENICE_API_KEY'
+
+  try {
+    await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'imessage:bob',
+      channel: 'imessage',
+      identityId: 'assistant:primary',
+      participantId: 'contact:bob',
+      sourceThreadId: 'chat-123',
+      provider: 'codex-cli',
+      prompt: 'Count my tokens.',
+    })
+  } finally {
+    restoreEnvironmentVariable('HOSTED_MEMBER_ID', originalHostedMemberId)
+    restoreEnvironmentVariable('HOSTED_EXECUTION_USER_ENV_KEYS', originalHostedUserEnvKeys)
+  }
+
+  const usageEntries = await listPendingAssistantUsageRecords({
+    vault: vaultRoot,
+  })
+
+  assert.equal(usageEntries.length, 1)
+  assert.equal(usageEntries[0]?.credentialSource, 'unknown')
+  assert.equal(usageEntries[0]?.totalTokens, null)
+  assert.equal(usageEntries[0]?.usageId.endsWith('.attempt-1'), true)
+})
+
 test('sendAssistantMessage recovers provider sessions after user interruptions and preserves the interrupt marker', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-interrupt-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -389,7 +456,7 @@ test('sendAssistantMessage can optionally deliver the provider reply over the ma
     async (input: { message: string; sessionId: string }) => ({
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-123',
@@ -1518,7 +1585,7 @@ test('scanAssistantAutomationOnce preserves other enabled channels while drainin
     return {
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: threadId,
@@ -1791,7 +1858,7 @@ test('scanAssistantAutomationOnce keeps the reply cursor authoritative after bac
     return {
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: threadId,
@@ -2057,7 +2124,7 @@ test('scanAssistantAutomationOnce does not clear backlog when the first limited 
     return {
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: threadId,
@@ -2481,7 +2548,7 @@ test('scanAssistantAutomationOnce keeps the auto-reply cursor pinned on deferred
   runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
     message: 'unified reply',
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: 'session-unified',
       provider: 'codex-cli',
       providerSessionId: 'thread-unified',
@@ -2674,7 +2741,7 @@ test('scanAssistantAutoReplyOnce primes backlog cursors and replies to new inbou
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-auto',
@@ -3302,7 +3369,7 @@ test('scanAssistantAutoReplyOnce coalesces same-thread email backlog into one re
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-email-backlog',
@@ -3511,7 +3578,7 @@ test('scanAssistantAutoReplyOnce can use self-authored attachment prompts and su
     runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-self',
@@ -4090,7 +4157,7 @@ test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued fo
   runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValueOnce({
     message: 'recovered reply',
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: 'session-partial',
       provider: 'codex-cli',
       providerSessionId: 'thread-partial',
@@ -4180,7 +4247,7 @@ test('scanAssistantAutoReplyOnce does not resend after successful delivery when 
     async (input: { message: string; sessionId: string }) => ({
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-zero-artifact',
@@ -4393,7 +4460,7 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-telegram-scope',
@@ -4621,7 +4688,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-stall-1',
@@ -5188,7 +5255,7 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     .mockImplementationOnce(async (input: any) => ({
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-telegram-failure',
@@ -5412,7 +5479,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
     message: input.message,
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
       providerSessionId: 'thread-telegram-album',
@@ -5605,7 +5672,7 @@ test('runAssistantAutomation merges routing and reply into one inbox decision pa
     async (input: any) => ({
       message: input.message,
       session: {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-auto',
@@ -6045,7 +6112,7 @@ test('runAssistantChat delegates to the Ink UI implementation', async () => {
     stoppedAt: '2026-03-17T00:00:01.000Z',
     turns: 2,
     session: {
-      schema: 'murph.assistant-session.v2',
+      schema: 'murph.assistant-session.v3',
       sessionId: 'asst_123',
       provider: 'codex-cli',
       providerSessionId: 'thread-ink',
@@ -6111,7 +6178,7 @@ test('runAssistantChat surfaces Ink chat errors to the caller', async () => {
 
 test('assistant Ink resyncs the next turn selection after a failover-updated session', () => {
   const previousSession = {
-    schema: 'murph.assistant-session.v2',
+    schema: 'murph.assistant-session.v3',
     sessionId: 'asst_failover_prev',
     provider: 'codex-cli',
     providerSessionId: 'thread-primary',
@@ -6171,7 +6238,7 @@ test('assistant Ink resyncs the next turn selection after a failover-updated ses
 
 test('assistant Ink preserves explicit selections when unrelated same-provider session options change', () => {
   const previousSession = {
-    schema: 'murph.assistant-session.v2',
+    schema: 'murph.assistant-session.v3',
     sessionId: 'asst_same_provider_route_change',
     provider: 'openai-compatible',
     providerSessionId: null,
@@ -6469,7 +6536,7 @@ test('assistant Ink view-model preserves prior progress rows when later turns us
 
 test('assistant Ink view-model exposes codex-style footer metadata and busy copy', () => {
   const session = {
-    schema: 'murph.assistant-session.v2',
+    schema: 'murph.assistant-session.v3',
     sessionId: 'asst_demo',
     provider: 'codex-cli',
     providerSessionId: null,
@@ -6970,7 +7037,7 @@ test('assistant Ink blocked-turn feedback stays informational and status-only', 
 
 test('assistant Ink view-model falls back to default model labels when needed', () => {
   const ossSession = {
-    schema: 'murph.assistant-session.v2',
+    schema: 'murph.assistant-session.v3',
     sessionId: 'asst_demo',
     provider: 'codex-cli',
     providerSessionId: null,

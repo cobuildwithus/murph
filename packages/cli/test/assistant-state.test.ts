@@ -1118,7 +1118,7 @@ test('getAssistantSession explains vault-scoped session drift when only a transc
   )
 })
 
-test('getAssistantSession rejects non-canonical assistant state payloads with legacy excerpt fields', async () => {
+test('getAssistantSession rejects non-canonical assistant state payloads with excerpt fields', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-migrate-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -1134,7 +1134,7 @@ test('getAssistantSession rejects non-canonical assistant state payloads with le
     path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId,
         provider: 'codex-cli',
         providerSessionId: 'thread-legacy',
@@ -1175,7 +1175,7 @@ test('getAssistantSession rejects non-canonical assistant state payloads with le
   await assert.rejects(() => getAssistantSession(vaultRoot, sessionId))
 })
 
-test('getAssistantSession rejects legacy-normalized provider payloads instead of coercing them', async () => {
+test('getAssistantSession rejects invalid provider payloads instead of coercing them', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-state-provider-hard-cut-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -1191,7 +1191,7 @@ test('getAssistantSession rejects legacy-normalized provider payloads instead of
     path.join(statePaths.sessionsDirectory, `${sessionId}.json`),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId,
         provider: 'legacy-provider',
         providerSessionId: 'thread-legacy',
@@ -1236,7 +1236,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
     path.join(statePaths.sessionsDirectory, 'asst_existing.json'),
     `${JSON.stringify(
       {
-        schema: 'murph.assistant-session.v2',
+        schema: 'murph.assistant-session.v3',
         sessionId: 'asst_existing',
         provider: 'codex-cli',
         providerSessionId: null,
