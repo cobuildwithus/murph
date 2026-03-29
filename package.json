@@ -37,6 +37,7 @@
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
     "chatgpt:thread:export": "node scripts/chatgpt-thread-export.mjs",
     "chatgpt:thread:download": "node scripts/chatgpt-thread-download.mjs",
+    "chatgpt:thread:watch": "node scripts/chatgpt-thread-wake.mjs",
     "chatgpt:thread:wake": "node scripts/chatgpt-thread-wake.mjs",
     "setup": "bash scripts/setup-host.sh",
     "onboard": "bash scripts/setup-host.sh",
