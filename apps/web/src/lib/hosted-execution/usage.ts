@@ -4,6 +4,7 @@ import {
 } from "@prisma/client";
 import {
   parseAssistantUsageRecord,
+  type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
 } from "@murph/runtime-state";
 
@@ -18,17 +19,18 @@ type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 
 export interface HostedAiUsageStripeCandidate {
   apiKeyEnv: string | null;
-  credentialSource: string | null;
+  credentialSource: AssistantUsageCredentialSource | null;
   id: string;
   inputTokens: number | null;
   memberId: string;
+  occurredAt: Date;
   outputTokens: number | null;
   provider: string;
   requestedModel: string | null;
   stripeMeterStatus: string;
   totalTokens: number | null;
   member: {
-    stripeCustomerId: string | null;
+    stripeCustomerId: string;
   };
 }
 
@@ -38,7 +40,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
 } = {}): Promise<HostedAiUsageStripeCandidate[]> {
   const prisma = input.prisma ?? getPrisma();
 
-  return prisma.hostedAiUsage.findMany({
+  const records = await prisma.hostedAiUsage.findMany({
     where: {
       stripeMeterStatus: "pending",
       member: {
@@ -62,6 +64,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       id: true,
       inputTokens: true,
       memberId: true,
+      occurredAt: true,
       outputTokens: true,
       provider: true,
       requestedModel: true,
@@ -74,6 +77,17 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
       },
     },
   });
+
+  return records.flatMap((record) =>
+    record.member.stripeCustomerId
+      ? [{
+          ...record,
+          member: {
+            stripeCustomerId: record.member.stripeCustomerId,
+          },
+        }]
+      : [],
+  );
 }
 
 export async function markHostedAiUsageStripeMetered(input: {
@@ -110,7 +124,29 @@ export async function markHostedAiUsageStripeSkipped(input: {
     },
     data: {
       stripeMeterError: input.message,
+      stripeMeterIdentifier: null,
       stripeMeterStatus: "skipped",
+      stripeMeteredAt: null,
+    },
+  });
+}
+
+export async function markHostedAiUsageStripeRetryableFailure(input: {
+  id: string;
+  message: string;
+  prisma?: HostedAiUsageClient;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+
+  await prisma.hostedAiUsage.update({
+    where: {
+      id: input.id,
+    },
+    data: {
+      stripeMeterError: input.message,
+      stripeMeterIdentifier: null,
+      stripeMeterStatus: "pending",
+      stripeMeteredAt: null,
     },
   });
 }
@@ -128,13 +164,16 @@ export async function markHostedAiUsageStripeFailed(input: {
     },
     data: {
       stripeMeterError: input.message,
+      stripeMeterIdentifier: null,
       stripeMeterStatus: "failed",
+      stripeMeteredAt: null,
     },
   });
 }
 
 export async function importHostedAiUsageRecords(input: {
   prisma?: PrismaClient;
+  trustedUserId?: string | null;
   usage: readonly unknown[];
 }): Promise<ImportHostedAiUsageResult> {
   const prisma = input.prisma ?? getPrisma();
@@ -142,7 +181,7 @@ export async function importHostedAiUsageRecords(input: {
   const recordedIds: string[] = [];
 
   for (const record of records) {
-    const memberId = requireHostedAiUsageMemberId(record);
+    const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
 
     await prisma.hostedAiUsage.upsert({
       where: {
@@ -185,10 +224,19 @@ export async function importHostedAiUsageRecords(input: {
   };
 }
 
-function requireHostedAiUsageMemberId(record: AssistantUsageRecord): string {
+function requireHostedAiUsageMemberId(
+  record: AssistantUsageRecord,
+  trustedUserId: string | null,
+): string {
   if (!record.memberId) {
     throw new TypeError(
       `Hosted AI usage ${record.usageId} is missing memberId and cannot be imported into the hosted control plane.`,
+    );
+  }
+
+  if (trustedUserId && record.memberId !== trustedUserId) {
+    throw new TypeError(
+      `Hosted AI usage ${record.usageId} memberId ${record.memberId} does not match the authenticated hosted execution user ${trustedUserId}.`,
     );
   }
 
@@ -196,7 +244,21 @@ function requireHostedAiUsageMemberId(record: AssistantUsageRecord): string {
 }
 
 function toHostedAiUsageJson(value: unknown): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
-  return value === null || value === undefined
-    ? Prisma.JsonNull
-    : (value as Prisma.InputJsonValue);
+  if (value === null || value === undefined) {
+    return Prisma.JsonNull;
+  }
+
+  try {
+    const serialized = JSON.stringify(value);
+
+    if (serialized === undefined) {
+      return Prisma.JsonNull;
+    }
+
+    return JSON.parse(serialized) as Prisma.InputJsonValue;
+  } catch (error) {
+    throw new TypeError(
+      `Hosted AI usage JSON payload must be JSON-serializable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }

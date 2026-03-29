@@ -127,7 +127,8 @@ export async function completeHostedExecutionAfterCommit(input: {
     fetchImpl: input.internalWorkerFetch,
     internalToken: input.runtime.webControlPlane.internalToken,
     timeoutMs: input.runtime.commitTimeoutMs,
-    userEnv: input.runtime.userEnv,
+    userId: input.dispatch.event.userId,
+    userEnvKeys: Object.keys(input.runtime.userEnv),
     vaultRoot: input.restored.vaultRoot,
   });
   await reconcileHostedVerifiedEmailSelfTarget({

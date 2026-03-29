@@ -9,7 +9,11 @@ import {
   type HostedExecutionSideEffect,
 } from "@murph/assistant-runtime";
 
-import { createHostedBundleStore, type R2BucketLike } from "./bundle-store.js";
+import {
+  bundleObjectKey,
+  createHostedBundleStore,
+  type R2BucketLike,
+} from "./bundle-store.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 export interface HostedExecutionRunnerCommitRequest {
@@ -102,6 +106,7 @@ export async function persistHostedExecutionCommit(input: {
   }).readCommittedResult(input.userId, input.eventId);
 
   if (existing) {
+    assertEquivalentDuplicateCommit(existing, input);
     return existing;
   }
 
@@ -252,6 +257,92 @@ function normalizeHostedExecutionCommittedResult(
   };
 }
 
+function assertEquivalentDuplicateCommit(
+  existing: HostedExecutionCommittedResult,
+  input: {
+    currentBundleRefs: HostedExecutionRunnerCommitRequest["bundleRefs"];
+    eventId: string;
+    payload: HostedExecutionCommitPayload;
+    userId: string;
+  },
+): void {
+  if (existing.userId !== input.userId) {
+    throw new Error(
+      `Hosted execution commit ${input.eventId} was already persisted for user ${existing.userId}, not ${input.userId}.`,
+    );
+  }
+
+  if (!sameStructuredValue(existing.result, input.payload.result)) {
+    throw new Error(
+      `Hosted execution commit ${input.eventId} result does not match the existing durable commit.`,
+    );
+  }
+
+  const expectedSideEffects = parseHostedExecutionSideEffects(input.payload.sideEffects);
+  if (!sameStructuredValue(existing.sideEffects, expectedSideEffects)) {
+    throw new Error(
+      `Hosted execution commit ${input.eventId} side effects do not match the existing durable commit.`,
+    );
+  }
+
+  const expectedBundleRefs = {
+    agentState: resolveExpectedCommittedBundleRef(
+      "agent-state",
+      input.currentBundleRefs.agentState,
+      input.payload.bundles.agentState,
+    ),
+    vault: resolveExpectedCommittedBundleRef(
+      "vault",
+      input.currentBundleRefs.vault,
+      input.payload.bundles.vault,
+    ),
+  };
+
+  if (!sameHostedBundleRef(existing.bundleRefs.agentState, expectedBundleRefs.agentState)) {
+    throw new Error(
+      `Hosted execution commit ${input.eventId} agent-state bundle ref does not match the existing durable commit.`,
+    );
+  }
+
+  if (!sameHostedBundleRef(existing.bundleRefs.vault, expectedBundleRefs.vault)) {
+    throw new Error(
+      `Hosted execution commit ${input.eventId} vault bundle ref does not match the existing durable commit.`,
+    );
+  }
+}
+
+function resolveExpectedCommittedBundleRef(
+  kind: "agent-state" | "vault",
+  currentRef: HostedExecutionBundleRef | null,
+  value: string | null,
+): HostedExecutionBundleRef | null {
+  if (value === null) {
+    return null;
+  }
+
+  const plaintext = decodeHostedBundleBase64(value) ?? new Uint8Array();
+  const hash = sha256HostedBundleHex(plaintext);
+
+  if (
+    currentRef
+    && currentRef.hash === hash
+    && currentRef.size === plaintext.byteLength
+  ) {
+    return currentRef;
+  }
+
+  return {
+    hash,
+    key: bundleObjectKey(kind, hash),
+    size: plaintext.byteLength,
+    updatedAt: "",
+  };
+}
+
+function sameStructuredValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function sameHostedBundleRef(
   left: HostedExecutionBundleRef | null,
   right: HostedExecutionBundleRef | null,
@@ -268,6 +359,5 @@ function sameHostedBundleRef(
     left.hash === right.hash
     && left.key === right.key
     && left.size === right.size
-    && left.updatedAt === right.updatedAt
   );
 }
