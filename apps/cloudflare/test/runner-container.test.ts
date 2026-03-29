@@ -136,6 +136,36 @@ describe("RunnerContainer", () => {
     );
   });
 
+  it("forwards the hosted run context through the container invoke boundary", async () => {
+    const { containerFetch, container } = createContainerDouble();
+    const run = {
+      attempt: 3,
+      runId: "run_trace",
+      startedAt: "2026-03-27T00:00:00.000Z",
+    };
+
+    const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
+      body: JSON.stringify({
+        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+        request: createRunnerRequest("evt_with_run", { run }),
+        runnerEnvironment: {},
+        timeoutMs: 12_345,
+        userId: "member_123",
+      }),
+      headers: {
+        authorization: "Bearer runner-token",
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(200);
+    const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
+      run?: typeof run;
+    };
+    expect(forwardedBody.run).toEqual(run);
+  });
+
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
     const { container, startAndWaitForPorts } = createContainerDouble();
 
@@ -429,7 +459,16 @@ function createContainerDouble(input: {
   };
 }
 
-function createRunnerRequest(eventId = "evt_123") {
+function createRunnerRequest(
+  eventId = "evt_123",
+  input: {
+    run?: {
+      attempt: number;
+      runId: string;
+      startedAt: string;
+    };
+  } = {},
+) {
   return {
     bundles: {
       agentState: null,
@@ -444,6 +483,7 @@ function createRunnerRequest(eventId = "evt_123") {
       eventId,
       occurredAt: "2026-03-27T00:00:00.000Z",
     },
+    ...(input.run ? { run: input.run } : {}),
   };
 }
 

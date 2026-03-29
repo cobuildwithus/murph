@@ -166,6 +166,63 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it("passes the hosted run context through request parsing into the node runner", async () => {
+    const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockResolvedValue({
+      bundles: { agentState: null, vault: null },
+      result: { eventsHandled: 1, summary: "ok" },
+    });
+
+    try {
+      const server = await startHostedContainerEntrypoint({
+        controlToken: "runner-token",
+        port: 0,
+      });
+      servers.push(server);
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const run = {
+        attempt: 4,
+        runId: "run_trace",
+        startedAt: "2026-03-26T12:00:00.000Z",
+      };
+      const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
+        body: JSON.stringify({
+          bundles: { agentState: null, vault: null },
+          dispatch: {
+            event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
+            eventId: "evt_with_run",
+            occurredAt: "2026-03-26T12:00:00.000Z",
+          },
+          run,
+        }),
+        headers: {
+          authorization: "Bearer runner-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(spy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dispatch: expect.objectContaining({
+            eventId: "evt_with_run",
+          }),
+          run,
+        }),
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+        }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("allows concurrent hosted jobs inside one container process", async () => {
     const started: string[] = [];
     const finished: string[] = [];

@@ -1,7 +1,14 @@
 import {
+  deriveHostedExecutionErrorCode,
   parseHostedExecutionDispatchRequest,
+  parseHostedExecutionRunStatus,
+  parseHostedExecutionTimelineEntries,
   type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
+  type HostedExecutionRunLevel,
+  type HostedExecutionRunPhase,
+  type HostedExecutionRunStatus,
+  type HostedExecutionTimelineEntry,
 } from "@murph/hosted-execution";
 
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
@@ -10,6 +17,7 @@ import {
   MAX_BACKPRESSURED_EVENT_IDS,
   MAX_PENDING_EVENTS,
   MAX_POISONED_EVENT_IDS,
+  MAX_RUN_TIMELINE_ENTRIES,
   type DurableObjectSqlValue,
   type DurableObjectStateLike,
   type PendingDispatchRecord,
@@ -27,10 +35,14 @@ interface RunnerMetaRow {
   backpressured_event_ids_json: string;
   in_flight: number;
   last_error: string | null;
+  last_error_at: string | null;
+  last_error_code: string | null;
   last_event_id: string | null;
   last_run_at: string | null;
   next_wake_at: string | null;
   retrying_event_id: string | null;
+  run_json: string | null;
+  timeline_json: string;
   user_id: string;
   vault_bundle_ref_json: string | null;
   vault_bundle_version: number;
@@ -239,6 +251,8 @@ export class RunnerQueueStore {
 
     meta.in_flight = 1;
     meta.last_error = null;
+    meta.last_error_at = null;
+    meta.last_error_code = null;
     meta.retrying_event_id = nextPending.attempts > 0 ? nextPending.eventId : null;
     this.writeMetaRowSync(meta);
     return {
@@ -264,6 +278,8 @@ export class RunnerQueueStore {
     );
     meta.in_flight = 0;
     meta.last_error = null;
+    meta.last_error_at = null;
+    meta.last_error_code = null;
     meta.last_event_id = committed.eventId;
     meta.last_run_at = committed.committedAt;
     meta.retrying_event_id = null;
@@ -281,6 +297,8 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     assignBundleRefs(meta, committed.bundleRefs);
     meta.in_flight = 0;
+    meta.last_error_at = null;
+    meta.last_error_code = null;
     meta.last_event_id = committed.eventId;
     meta.last_run_at = committed.committedAt;
     meta.retrying_event_id = this.hasPendingDispatchSync(committed.eventId)
@@ -296,32 +314,44 @@ export class RunnerQueueStore {
     eventId: string;
     maxEventAttempts: number;
     retryDelayMs: number;
-  }): Promise<RunnerStateRecord> {
+  }): Promise<{ poisoned: boolean; record: RunnerStateRecord }> {
     this.pruneExpiredConsumedEventsSync();
 
     const pending = this.readPendingDispatchByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
+    const errorAt = new Date().toISOString();
+    const errorCode = deriveHostedExecutionErrorCode(input.errorMessage);
 
     if (!pending) {
       meta.in_flight = 0;
       meta.last_error = input.errorMessage;
+      meta.last_error_at = errorAt;
+      meta.last_error_code = errorCode;
       meta.retrying_event_id = this.readRetryingEventIdSync();
       this.writeMetaRowSync(meta);
-      return this.readStateFromMetaSync(meta);
+      return {
+        poisoned: false,
+        record: this.readStateFromMetaSync(meta),
+      };
     }
 
     const nextAttempts = pending.attempts + 1;
     meta.in_flight = 0;
     meta.last_error = input.errorMessage;
+    meta.last_error_at = errorAt;
+    meta.last_error_code = errorCode;
     meta.last_event_id = input.eventId;
 
     if (nextAttempts >= input.maxEventAttempts) {
       this.removePendingDispatchSync(input.eventId);
       this.writeConsumedEventSync(input.eventId, nextConsumedEventExactExpiryIso());
-      this.writePoisonedEventSync(input.eventId, input.errorMessage, new Date().toISOString());
+      this.writePoisonedEventSync(input.eventId, input.errorMessage, errorAt);
       meta.retrying_event_id = this.readRetryingEventIdSync();
       this.writeMetaRowSync(meta);
-      return this.readStateFromMetaSync(meta);
+      return {
+        poisoned: true,
+        record: this.readStateFromMetaSync(meta),
+      };
     }
 
     const availableAt = new Date(Date.now() + input.retryDelayMs).toISOString();
@@ -337,7 +367,10 @@ export class RunnerQueueStore {
     meta.retrying_event_id = input.eventId;
     this.writeMetaRowSync(meta);
 
-    return this.readStateFromMetaSync(meta);
+    return {
+      poisoned: false,
+      record: this.readStateFromMetaSync(meta),
+    };
   }
 
   async deferPendingConfigurationFailure(input: {
@@ -349,9 +382,12 @@ export class RunnerQueueStore {
 
     const pending = this.readPendingDispatchByEventIdSync(input.eventId);
     const meta = this.requireMetaRowSync();
+    const errorAt = new Date().toISOString();
 
     meta.in_flight = 0;
     meta.last_error = input.errorMessage;
+    meta.last_error_at = errorAt;
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.errorMessage);
     meta.last_event_id = input.eventId;
 
     if (!pending) {
@@ -387,6 +423,8 @@ export class RunnerQueueStore {
     assignBundleRefs(meta, input.committed.bundleRefs);
     meta.in_flight = 0;
     meta.last_error = input.errorMessage;
+    meta.last_error_at = new Date().toISOString();
+    meta.last_error_code = deriveHostedExecutionErrorCode(input.errorMessage);
     meta.last_event_id = input.committed.eventId;
     meta.last_run_at = input.committed.committedAt;
     meta.retrying_event_id = input.committed.eventId;
@@ -413,6 +451,64 @@ export class RunnerQueueStore {
     }
 
     return this.readStateSync();
+  }
+
+  async recordRunPhase(input: {
+    attempt: number;
+    clearError?: boolean;
+    component: string;
+    error?: unknown;
+    eventId: string;
+    level?: HostedExecutionRunLevel;
+    message: string;
+    phase: HostedExecutionRunPhase;
+    runId: string;
+    startedAt: string;
+  }): Promise<RunnerStateRecord> {
+    this.pruneExpiredConsumedEventsSync();
+
+    const meta = this.requireMetaRowSync();
+    const nowIso = new Date().toISOString();
+    const errorCode = input.error === undefined ? null : deriveHostedExecutionErrorCode(input.error);
+    meta.last_event_id = input.eventId;
+    meta.run_json = JSON.stringify({
+      attempt: input.attempt,
+      eventId: input.eventId,
+      phase: input.phase,
+      runId: input.runId,
+      startedAt: input.startedAt,
+      updatedAt: nowIso,
+    } satisfies HostedExecutionRunStatus);
+    meta.timeline_json = JSON.stringify(
+      appendBoundedTimelineEntry(
+        parseHostedExecutionTimelineEntriesJson(meta.timeline_json),
+        {
+          at: nowIso,
+          attempt: input.attempt,
+          component: input.component,
+          ...(errorCode ? { errorCode } : {}),
+          eventId: input.eventId,
+          level: input.level ?? (input.error === undefined ? "info" : "error"),
+          message: input.message,
+          phase: input.phase,
+          runId: input.runId,
+        },
+        MAX_RUN_TIMELINE_ENTRIES,
+      ),
+    );
+
+    if (input.clearError) {
+      meta.last_error_at = null;
+      meta.last_error_code = null;
+    }
+
+    if (errorCode) {
+      meta.last_error_at = nowIso;
+      meta.last_error_code = errorCode;
+    }
+
+    this.writeMetaRowSync(meta);
+    return this.readStateFromMetaSync(meta);
   }
 
   async readBundleState(): Promise<Pick<
@@ -502,6 +598,8 @@ export class RunnerQueueStore {
         activated INTEGER NOT NULL DEFAULT 0,
         in_flight INTEGER NOT NULL DEFAULT 0,
         last_error TEXT,
+        last_error_at TEXT,
+        last_error_code TEXT,
         last_event_id TEXT,
         last_run_at TEXT,
         next_wake_at TEXT,
@@ -509,10 +607,16 @@ export class RunnerQueueStore {
         backpressured_event_ids_json TEXT NOT NULL DEFAULT '[]',
         agent_state_bundle_ref_json TEXT,
         vault_bundle_ref_json TEXT,
+        run_json TEXT,
+        timeline_json TEXT NOT NULL DEFAULT '[]',
         agent_state_bundle_version INTEGER NOT NULL DEFAULT 0,
         vault_bundle_version INTEGER NOT NULL DEFAULT 0
       )
     `);
+    this.ensureMetaColumnSync("last_error_at", "TEXT");
+    this.ensureMetaColumnSync("last_error_code", "TEXT");
+    this.ensureMetaColumnSync("run_json", "TEXT");
+    this.ensureMetaColumnSync("timeline_json", "TEXT NOT NULL DEFAULT '[]'");
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS pending_events (
         event_id TEXT PRIMARY KEY,
@@ -570,11 +674,17 @@ export class RunnerQueueStore {
   ): RunnerStateRecord {
     const pendingDispatches = this.readPendingDispatchesSync();
     const bundleRefState = sanitizeStoredBundleRefs(meta);
+    const runTraceState = sanitizeStoredRunTrace(meta);
 
-    if (bundleRefState.changed) {
+    if (bundleRefState.changed || runTraceState.changed) {
       meta.agent_state_bundle_ref_json = stringifyHostedBundleRef(bundleRefState.agentState);
       meta.vault_bundle_ref_json = stringifyHostedBundleRef(bundleRefState.vault);
-      meta.last_error = mergeRunnerLastError(meta.last_error, bundleRefState.warning);
+      meta.run_json = stringifyRunStatus(runTraceState.run);
+      meta.timeline_json = JSON.stringify(runTraceState.timeline);
+      meta.last_error = mergeRunnerLastError(
+        mergeRunnerLastError(meta.last_error, bundleRefState.warning),
+        runTraceState.warning,
+      );
       this.writeMetaRowSync(meta);
     }
 
@@ -591,15 +701,29 @@ export class RunnerQueueStore {
       },
       inFlight: meta.in_flight === 1,
       lastError: meta.last_error,
+      lastErrorAt: meta.last_error_at,
+      lastErrorCode: meta.last_error_code,
       lastEventId: meta.last_event_id,
       lastRunAt: meta.last_run_at,
       nextPendingAvailableAt: nextPendingAvailableAtOverride ?? pendingDispatches[0]?.availableAt ?? null,
       nextWakeAt: meta.next_wake_at,
       pendingEventCount: pendingDispatches.length,
       poisonedEventIds: this.readPoisonedEventIdsSync(),
+      run: runTraceState.run,
       retryingEventId: meta.retrying_event_id,
+      timeline: runTraceState.timeline,
       userId: meta.user_id,
     };
+  }
+
+  private ensureMetaColumnSync(columnName: string, columnDefinition: string): void {
+    const hasColumn = this.sql.exec<{ name: DurableObjectSqlValue }>(
+      "PRAGMA table_info(runner_meta)",
+    ).toArray().some((row) => row.name === columnName);
+
+    if (!hasColumn) {
+      this.sql.exec(`ALTER TABLE runner_meta ADD COLUMN ${columnName} ${columnDefinition}`);
+    }
   }
 
   private requireMetaRowSync(): RunnerMetaRow {
@@ -639,6 +763,8 @@ export class RunnerQueueStore {
         activated,
         in_flight,
         last_error,
+        last_error_at,
+        last_error_code,
         last_event_id,
         last_run_at,
         next_wake_at,
@@ -646,6 +772,8 @@ export class RunnerQueueStore {
         backpressured_event_ids_json,
         agent_state_bundle_ref_json,
         vault_bundle_ref_json,
+        run_json,
+        timeline_json,
         agent_state_bundle_version,
         vault_bundle_version
       FROM runner_meta
@@ -667,6 +795,8 @@ export class RunnerQueueStore {
         activated,
         in_flight,
         last_error,
+        last_error_at,
+        last_error_code,
         last_event_id,
         last_run_at,
         next_wake_at,
@@ -674,14 +804,18 @@ export class RunnerQueueStore {
         backpressured_event_ids_json,
         agent_state_bundle_ref_json,
         vault_bundle_ref_json,
+        run_json,
+        timeline_json,
         agent_state_bundle_version,
         vault_bundle_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       1,
       meta.user_id,
       meta.activated,
       meta.in_flight,
       meta.last_error,
+      meta.last_error_at,
+      meta.last_error_code,
       meta.last_event_id,
       meta.last_run_at,
       meta.next_wake_at,
@@ -689,6 +823,8 @@ export class RunnerQueueStore {
       meta.backpressured_event_ids_json,
       meta.agent_state_bundle_ref_json,
       meta.vault_bundle_ref_json,
+      meta.run_json,
+      meta.timeline_json,
       meta.agent_state_bundle_version,
       meta.vault_bundle_version,
     );
@@ -832,9 +968,10 @@ export class RunnerQueueStore {
 
   private poisonMalformedPendingDispatchRowSync(row: PendingEventRow, error: unknown): void {
     const message = formatMalformedPendingDispatchError(row.event_id, error);
+    const errorAt = new Date().toISOString();
     this.removePendingDispatchSync(row.event_id);
     this.writeConsumedEventSync(row.event_id, nextConsumedEventExactExpiryIso());
-    this.writePoisonedEventSync(row.event_id, message, new Date().toISOString());
+    this.writePoisonedEventSync(row.event_id, message, errorAt);
 
     const meta = this.selectMetaRowSync();
     if (!meta) {
@@ -842,6 +979,8 @@ export class RunnerQueueStore {
     }
 
     meta.last_error = mergeRunnerLastError(meta.last_error, message);
+    meta.last_error_at = errorAt;
+    meta.last_error_code = deriveHostedExecutionErrorCode(message);
     meta.last_event_id = row.event_id;
     if (meta.retrying_event_id === row.event_id) {
       meta.retrying_event_id = null;
@@ -945,10 +1084,14 @@ function defaultMetaRow(userId: string): RunnerMetaRow {
     backpressured_event_ids_json: "[]",
     in_flight: 0,
     last_error: null,
+    last_error_at: null,
+    last_error_code: null,
     last_event_id: null,
     last_run_at: null,
     next_wake_at: null,
     retrying_event_id: null,
+    run_json: null,
+    timeline_json: "[]",
     user_id: userId,
     vault_bundle_ref_json: null,
     vault_bundle_version: 0,
@@ -987,6 +1130,38 @@ function parseStringArray(value: string): string[] {
   }
 }
 
+function appendBoundedTimelineEntry(
+  entries: readonly HostedExecutionTimelineEntry[],
+  entry: HostedExecutionTimelineEntry,
+  limit: number,
+): HostedExecutionTimelineEntry[] {
+  return [...entries, entry].slice(-limit);
+}
+
+function parseHostedExecutionRunStatusJson(value: string | null): HostedExecutionRunStatus | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return parseHostedExecutionRunStatus(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function parseHostedExecutionTimelineEntriesJson(value: string): HostedExecutionTimelineEntry[] {
+  try {
+    return parseHostedExecutionTimelineEntries(JSON.parse(value) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function stringifyRunStatus(value: HostedExecutionRunStatus | null): string | null {
+  return value ? JSON.stringify(value) : null;
+}
+
 function stringifyHostedBundleRef(value: HostedExecutionBundleRef | null): string | null {
   return value ? JSON.stringify(value) : null;
 }
@@ -1018,6 +1193,43 @@ function sanitizeStoredBundleRefs(meta: RunnerMetaRow): {
     vault,
     warning: clearedKinds.length > 0
       ? `Hosted runner cleared malformed bundle ref(s): ${clearedKinds.join(", ")}.`
+      : null,
+  };
+}
+
+function sanitizeStoredRunTrace(meta: RunnerMetaRow): {
+  changed: boolean;
+  run: HostedExecutionRunStatus | null;
+  timeline: HostedExecutionTimelineEntry[];
+  warning: string | null;
+} {
+  let changed = false;
+  const clearedKinds: string[] = [];
+
+  const run = parseHostedExecutionRunStatusJson(meta.run_json);
+  if (meta.run_json && !run) {
+    changed = true;
+    clearedKinds.push("run");
+  }
+
+  const timeline = parseHostedExecutionTimelineEntriesJson(meta.timeline_json);
+  if (meta.timeline_json && meta.timeline_json !== "[]" && timeline.length === 0) {
+    changed = true;
+    clearedKinds.push("timeline");
+  }
+
+  const boundedTimeline = timeline.slice(-MAX_RUN_TIMELINE_ENTRIES);
+  if (boundedTimeline.length !== timeline.length) {
+    changed = true;
+    clearedKinds.push("timeline-pruned");
+  }
+
+  return {
+    changed,
+    run,
+    timeline: boundedTimeline,
+    warning: clearedKinds.length > 0
+      ? `Hosted runner normalized run trace field(s): ${clearedKinds.join(", ")}.`
       : null,
   };
 }

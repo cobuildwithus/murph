@@ -1,7 +1,9 @@
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import {
+  emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
+  parseHostedExecutionRunnerRequest,
   type HostedExecutionRunnerRequest,
   type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
@@ -165,7 +167,7 @@ export class RunnerContainer extends Container {
         payload.internalWorkerProxyToken,
         "payload.internalWorkerProxyToken",
       ),
-      request: requireRecord(payload.request, "request") as unknown as HostedExecutionRunnerRequest,
+      request: parseHostedExecutionRunnerRequest(requireRecord(payload.request, "request")),
       runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
       runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
       timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
@@ -178,46 +180,73 @@ export class RunnerContainer extends Container {
   private async invokeHostedExecution<TRequest extends HostedExecutionRunnerRequest>(
     input: HostedExecutionContainerInvokeInput<TRequest>,
   ): Promise<HostedExecutionRunnerResult> {
-    const startTime = Date.now();
-    const readinessTimeoutMs = Math.min(input.timeoutMs, RUNNER_READY_TIMEOUT_MS);
-    await this.startAndWaitForPorts({
-      cancellationOptions: {
-        abort: AbortSignal.timeout(readinessTimeoutMs),
-        instanceGetTimeoutMS: readinessTimeoutMs,
-        portReadyTimeoutMS: readinessTimeoutMs,
-        waitInterval: RUNNER_WAIT_INTERVAL_MS,
-      },
-      ports: RUNNER_PORT,
-      startOptions: {
-        enableInternet: true,
-        envVars: {
-          ...input.runnerEnvironment,
-          HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
-          PORT: String(RUNNER_PORT),
-        },
-      },
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      dispatch: input.request.dispatch,
+      message: "Hosted execution container starting.",
+      phase: "container.starting",
+      run: input.request.run ?? null,
     });
-    await this.installOutboundHandlers(input.userId, input.internalWorkerProxyToken);
 
-    const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
-    const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
-      body: JSON.stringify({
-        ...input.request,
-        internalWorkerProxyToken: input.internalWorkerProxyToken,
-      }),
-      headers: {
-        authorization: `Bearer ${input.runnerControlToken}`,
-        "content-type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-      signal: AbortSignal.timeout(remainingTimeoutMs),
-    }, RUNNER_PORT);
+    try {
+      const startTime = Date.now();
+      const readinessTimeoutMs = Math.min(input.timeoutMs, RUNNER_READY_TIMEOUT_MS);
+      await this.startAndWaitForPorts({
+        cancellationOptions: {
+          abort: AbortSignal.timeout(readinessTimeoutMs),
+          instanceGetTimeoutMS: readinessTimeoutMs,
+          portReadyTimeoutMS: readinessTimeoutMs,
+          waitInterval: RUNNER_WAIT_INTERVAL_MS,
+        },
+        ports: RUNNER_PORT,
+        startOptions: {
+          enableInternet: true,
+          envVars: {
+            ...input.runnerEnvironment,
+            HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
+            PORT: String(RUNNER_PORT),
+          },
+        },
+      });
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        dispatch: input.request.dispatch,
+        message: "Hosted execution container is ready.",
+        phase: "container.ready",
+        run: input.request.run ?? null,
+      });
+      await this.installOutboundHandlers(input.userId, input.internalWorkerProxyToken);
 
-    if (!response.ok) {
-      throw new Error(`Hosted runner container returned HTTP ${response.status}.`);
+      const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
+      const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
+        body: JSON.stringify({
+          ...input.request,
+          internalWorkerProxyToken: input.internalWorkerProxyToken,
+        }),
+        headers: {
+          authorization: `Bearer ${input.runnerControlToken}`,
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(remainingTimeoutMs),
+      }, RUNNER_PORT);
+
+      if (!response.ok) {
+        throw new Error(`Hosted runner container returned HTTP ${response.status}.`);
+      }
+
+      return (await response.json()) as HostedExecutionRunnerResult;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        dispatch: input.request.dispatch,
+        error,
+        message: "Hosted execution container failed.",
+        phase: "failed",
+        run: input.request.run ?? null,
+      });
+      throw error;
     }
-
-    return (await response.json()) as HostedExecutionRunnerResult;
   }
 
   private async installOutboundHandlers(

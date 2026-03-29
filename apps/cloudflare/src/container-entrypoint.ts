@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { pathToFileURL } from "node:url";
 
+import {
+  emitHostedExecutionStructuredLog,
+  parseHostedExecutionRunnerRequest,
+} from "@murph/hosted-execution";
+
 import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
 
 export async function startHostedContainerEntrypoint(input: {
@@ -9,6 +14,7 @@ export async function startHostedContainerEntrypoint(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
+    let job: HostedExecutionRunnerJobRequest | null = null;
 
     try {
       if (request.method === "GET" && request.url === "/health") {
@@ -25,6 +31,12 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       if (!input.controlToken) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          level: "error",
+          message: "Hosted container entrypoint is missing its control token.",
+          phase: "failed",
+        });
         writeJsonResponse(response, 503, {
           error: "Hosted runner control token is not configured.",
         });
@@ -34,6 +46,12 @@ export async function startHostedContainerEntrypoint(input: {
       const authorization = request.headers.authorization ?? "";
 
       if (authorization !== `Bearer ${input.controlToken}`) {
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          level: "warn",
+          message: "Hosted container entrypoint rejected an unauthorized request.",
+          phase: "failed",
+        });
         writeJsonResponse(response, 401, {
           error: "Unauthorized",
         });
@@ -46,12 +64,16 @@ export async function startHostedContainerEntrypoint(input: {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
 
-      let job: HostedExecutionRunnerJobRequest;
-
       try {
         job = parseHostedExecutionRunnerJobRequest(Buffer.concat(chunks));
       } catch (error) {
-        console.warn("Hosted container entrypoint rejected the request body.", error);
+        emitHostedExecutionStructuredLog({
+          component: "container",
+          error,
+          level: "warn",
+          message: "Hosted container entrypoint rejected the request body.",
+          phase: "failed",
+        });
         const classified = classifyRequestDecodeError(error);
         writeJsonResponse(response, classified.statusCode, {
           error: classified.message,
@@ -75,7 +97,14 @@ export async function startHostedContainerEntrypoint(input: {
         return;
       }
 
-      console.error("Hosted container entrypoint failed.", error);
+      emitHostedExecutionStructuredLog({
+        component: "container",
+        dispatch: typeof job === "object" && job ? job.dispatch : null,
+        error,
+        message: "Hosted container entrypoint failed a runner job.",
+        phase: "failed",
+        run: typeof job === "object" && job ? job.run ?? null : null,
+      });
       writeJsonResponse(response, 500, {
         error: "Internal error.",
       });
@@ -114,9 +143,16 @@ function writeJsonResponse(
 }
 
 function parseHostedExecutionRunnerJobRequest(payload: Uint8Array): HostedExecutionRunnerJobRequest {
-  return requireJsonObject(
+  const record = requireJsonObject(
     JSON.parse(Buffer.from(payload).toString("utf8")),
-  ) as unknown as HostedExecutionRunnerJobRequest;
+  );
+  parseHostedExecutionRunnerRequest({
+    bundles: record.bundles,
+    dispatch: record.dispatch,
+    ...(record.run === undefined ? {} : { run: record.run }),
+  });
+
+  return record as unknown as HostedExecutionRunnerJobRequest;
 }
 
 function requireJsonObject(value: unknown): Record<string, unknown> {

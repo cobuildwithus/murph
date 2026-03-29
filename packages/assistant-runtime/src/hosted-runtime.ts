@@ -11,6 +11,9 @@ import {
 import type {
   HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
+import {
+  emitHostedExecutionStructuredLog,
+} from "@murph/hosted-execution";
 
 import {
   commitHostedExecutionResult,
@@ -58,6 +61,13 @@ const HOSTED_RUNTIME_CHILD_RESULT_PREFIX = "__HB_ASSISTANT_RUNTIME_RESULT__";
 export async function runHostedAssistantRuntimeJobInProcess(
   input: HostedAssistantRuntimeJobInput,
 ): Promise<HostedExecutionRunnerResult> {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    message: "Hosted runtime starting.",
+    phase: "runtime.starting",
+    run: input.request.run ?? null,
+  });
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime);
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-"));
 
@@ -132,19 +142,47 @@ export async function runHostedAssistantRuntimeJobInProcess(
             sideEffects: committedExecution.committedSideEffects,
             runtime,
           });
+          emitHostedExecutionStructuredLog({
+            component: "runtime",
+            dispatch: input.request.dispatch,
+            message: "Hosted runtime recorded a durable commit callback.",
+            phase: "commit.recorded",
+            run: input.request.run ?? null,
+          });
         }
 
-        return await completeHostedExecutionAfterCommit({
+        const finalResult = await completeHostedExecutionAfterCommit({
           commit: input.request.commit ?? null,
           dispatch: input.request.dispatch,
           internalWorkerFetch,
           materializedArtifactPaths,
+          run: input.request.run ?? null,
           runtime,
           restored,
           committedExecution,
         });
+
+        emitHostedExecutionStructuredLog({
+          component: "runtime",
+          dispatch: input.request.dispatch,
+          message: "Hosted runtime completed.",
+          phase: "completed",
+          run: input.request.run ?? null,
+        });
+
+        return finalResult;
       },
     );
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runtime",
+      dispatch: input.request.dispatch,
+      error,
+      message: "Hosted runtime failed.",
+      phase: "failed",
+      run: input.request.run ?? null,
+    });
+    throw error;
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

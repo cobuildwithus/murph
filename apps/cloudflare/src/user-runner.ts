@@ -2,10 +2,14 @@ import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
+  HostedExecutionRunLevel,
+  HostedExecutionRunContext,
+  HostedExecutionRunPhase,
   HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
 import {
+  emitHostedExecutionStructuredLog,
   resolveHostedExecutionDispatchOutcomeState,
 } from "@murph/hosted-execution";
 
@@ -37,6 +41,7 @@ import {
   computeRetryDelayMs,
   toUserStatus,
   type DurableObjectStateLike,
+  type PendingDispatchRecord,
   type RunnerStateRecord,
 } from "./user-runner/types.js";
 
@@ -129,17 +134,28 @@ export class HostedUserRunner {
         || isCommittedResultFresh(committed, COMMITTED_RESULT_FRESH_WINDOW_MS)
       ) {
         if (!isCommittedResultFinalized(committed)) {
+          const synced = await this.commitRecovery.syncCommittedBundlesWithoutConsuming(
+            input.event.userId,
+            committed,
+          );
+
           return toUserStatus(
-            await this.commitRecovery.syncCommittedBundlesWithoutConsuming(
-              input.event.userId,
-              committed,
-            ),
+            await this.advanceRunPhase({
+              clearError: true,
+              dispatch: input,
+              message: "Recovered a durable commit awaiting finalize.",
+              phase: "commit.recorded",
+              run: this.resolveRunContext(synced, {
+                eventId: input.eventId,
+                startedAt: committed.committedAt,
+              }),
+            }),
           );
         }
 
         return toUserStatus(
           presence.pending
-            ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed)
+            ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed, input)
             : await this.rememberCommittedEventAndCleanup(input.event.userId, input.eventId),
         );
       }
@@ -286,14 +302,33 @@ export class HostedUserRunner {
         return toUserStatus(processedDispatch ? record : await this.scheduler.syncNextWake());
       }
 
+      const run = this.createRunContext(record, nextPending);
+      record = await this.advanceRunPhase({
+        clearError: true,
+        dispatch: nextPending.dispatch,
+        message: "Hosted dispatch claimed for execution.",
+        phase: "claimed",
+        run,
+      });
+
       try {
         const committed = await this.commitRecovery.readCommittedDispatch(
           record.userId,
           nextPending.dispatch.eventId,
         );
+        record = await this.advanceRunPhase({
+          clearError: true,
+          dispatch: nextPending.dispatch,
+          message: committed && !isCommittedResultFinalized(committed)
+            ? "Resuming hosted dispatch from a durable commit."
+            : "Invoking hosted dispatch runtime.",
+          phase: "dispatch.running",
+          run,
+        });
         const runnerResult = await this.invokeRunner(
           record.userId,
           nextPending.dispatch,
+          run,
           committed && !isCommittedResultFinalized(committed)
             ? {
                 committedResult: {
@@ -307,6 +342,13 @@ export class HostedUserRunner {
           record.userId,
           nextPending.dispatch.eventId,
         );
+        record = await this.advanceRunPhase({
+          clearError: true,
+          dispatch: nextPending.dispatch,
+          message: "Hosted dispatch recorded a durable commit.",
+          phase: "commit.recorded",
+          run,
+        });
         record = await this.bundleSync.applyRunnerResultBundles(
           record.userId,
           record.bundleVersions,
@@ -315,6 +357,13 @@ export class HostedUserRunner {
         record = await this.scheduler.syncNextWake(
           runnerResult.result.nextWakeAt ?? null,
         );
+        record = await this.advanceRunPhase({
+          clearError: true,
+          dispatch: nextPending.dispatch,
+          message: "Hosted dispatch completed.",
+          phase: "completed",
+          run,
+        });
         await this.deleteCommittedDispatchBestEffort(record.userId, nextPending.dispatch.eventId);
         processedDispatch = true;
       } catch (error) {
@@ -326,7 +375,12 @@ export class HostedUserRunner {
 
         if (committed) {
           if (isCommittedResultFinalized(committed)) {
-            record = await this.applyCommittedDispatchAndCleanup(record.userId, committed);
+            record = await this.applyCommittedDispatchAndCleanup(
+              record.userId,
+              committed,
+              nextPending.dispatch,
+              run,
+            );
             continue;
           }
 
@@ -338,6 +392,14 @@ export class HostedUserRunner {
             userId: record.userId,
           });
           record = await this.scheduler.syncNextWake();
+          record = await this.advanceRunPhase({
+            dispatch: nextPending.dispatch,
+            error,
+            level: "warn",
+            message: "Hosted dispatch scheduled a finalize retry.",
+            phase: "retry.scheduled",
+            run,
+          });
           continue;
         }
 
@@ -348,16 +410,35 @@ export class HostedUserRunner {
             retryDelayMs: this.env.retryDelayMs,
           });
           record = await this.scheduler.syncNextWake();
+          record = await this.advanceRunPhase({
+            dispatch: nextPending.dispatch,
+            error,
+            level: "warn",
+            message: "Hosted dispatch delayed for configuration retry.",
+            phase: "retry.scheduled",
+            run,
+          });
           continue;
         }
 
-        record = await this.queueStore.reschedulePendingFailure({
+        const failure = await this.queueStore.reschedulePendingFailure({
           errorMessage,
           eventId: nextPending.dispatch.eventId,
           maxEventAttempts: this.env.maxEventAttempts,
           retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
         });
+        record = failure.record;
         record = await this.scheduler.syncNextWake();
+        record = await this.advanceRunPhase({
+          dispatch: nextPending.dispatch,
+          error,
+          level: failure.poisoned ? "error" : "warn",
+          message: failure.poisoned
+            ? "Hosted dispatch was poisoned after exhausting retries."
+            : "Hosted dispatch scheduled a retry.",
+          phase: failure.poisoned ? "poisoned" : "retry.scheduled",
+          run,
+        });
         continue;
       }
     }
@@ -366,6 +447,7 @@ export class HostedUserRunner {
   private async invokeRunner(
     userId: string,
     dispatch: HostedExecutionDispatchRequest,
+    run: HostedExecutionRunContext,
     resume: {
       committedResult: {
         result: HostedExecutionCommittedResult["result"];
@@ -382,6 +464,7 @@ export class HostedUserRunner {
       commit: {
         bundleRefs: typeof bundleState.bundleRefs;
       };
+      run: HostedExecutionRunContext;
       resume?: {
         committedResult: {
           result: HostedExecutionCommittedResult["result"];
@@ -395,6 +478,7 @@ export class HostedUserRunner {
         bundleRefs: bundleState.bundleRefs,
       },
       dispatch,
+      run,
       ...(resume ? { resume } : {}),
       userEnv: await this.bundleSync.readUserEnv(userId),
     };
@@ -418,7 +502,23 @@ export class HostedUserRunner {
     }
 
     if (recovered.committedEventId) {
+      const completedRecord = await this.advanceRunPhase({
+        clearError: true,
+        dispatch: {
+          event: {
+            userId: record.userId,
+          },
+          eventId: recovered.committedEventId,
+        },
+        message: "Recovered a finalized committed dispatch.",
+        phase: "completed",
+        run: this.resolveRunContext(recovered.record, {
+          eventId: recovered.committedEventId,
+          startedAt: recovered.record.lastRunAt ?? new Date().toISOString(),
+        }),
+      });
       await this.deleteCommittedDispatchBestEffort(record.userId, recovered.committedEventId);
+      return completedRecord;
     }
 
     return recovered.record;
@@ -427,9 +527,102 @@ export class HostedUserRunner {
   private async applyCommittedDispatchAndCleanup(
     userId: string,
     committed: HostedExecutionCommittedResult,
+    dispatch: Pick<HostedExecutionDispatchRequest, "eventId"> & {
+      event: {
+        userId: string;
+      };
+    },
+    run: HostedExecutionRunContext | null = null,
   ): Promise<RunnerStateRecord> {
-    const record = await this.commitRecovery.applyCommittedDispatch(userId, committed);
+    let record = await this.commitRecovery.applyCommittedDispatch(userId, committed);
+    record = await this.advanceRunPhase({
+      clearError: true,
+      dispatch,
+      message: "Hosted dispatch completed from a committed result.",
+      phase: "completed",
+      run: run ?? this.resolveRunContext(record, {
+        eventId: committed.eventId,
+        startedAt: committed.committedAt,
+      }),
+    });
     await this.deleteCommittedDispatchBestEffort(userId, committed.eventId);
+    return record;
+  }
+
+  private createRunContext(
+    record: RunnerStateRecord,
+    pending: PendingDispatchRecord,
+  ): HostedExecutionRunContext {
+    const priorAttempt = record.run?.eventId === pending.eventId
+      ? record.run.attempt
+      : 0;
+
+    return {
+      attempt: Math.max(pending.attempts + 1, priorAttempt + 1),
+      runId: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+    };
+  }
+
+  private resolveRunContext(
+    record: RunnerStateRecord,
+    input: {
+      attempt?: number;
+      eventId: string;
+      startedAt: string;
+    },
+  ): HostedExecutionRunContext {
+    if (record.run && record.run.eventId === input.eventId) {
+      return {
+        attempt: record.run.attempt,
+        runId: record.run.runId,
+        startedAt: record.run.startedAt,
+      };
+    }
+
+    return {
+      attempt: input.attempt ?? 1,
+      runId: crypto.randomUUID(),
+      startedAt: input.startedAt,
+    };
+  }
+
+  private async advanceRunPhase(input: {
+    clearError?: boolean;
+    dispatch: Pick<HostedExecutionDispatchRequest, "eventId"> & {
+      event: {
+        userId: string;
+      };
+    };
+    error?: unknown;
+    level?: HostedExecutionRunLevel;
+    message: string;
+    phase: HostedExecutionRunPhase;
+    run: HostedExecutionRunContext;
+  }): Promise<RunnerStateRecord> {
+    const record = await this.queueStore.recordRunPhase({
+      attempt: input.run.attempt,
+      clearError: input.clearError,
+      component: "runner",
+      error: input.error,
+      eventId: input.dispatch.eventId,
+      level: input.level,
+      message: input.message,
+      phase: input.phase,
+      runId: input.run.runId,
+      startedAt: input.run.startedAt,
+    });
+
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      dispatch: input.dispatch,
+      error: input.error,
+      level: input.level,
+      message: input.message,
+      phase: input.phase,
+      run: input.run,
+    });
+
     return record;
   }
 

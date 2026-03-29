@@ -2,6 +2,8 @@ import type {
   HostedExecutionBundleRef,
 } from "@murph/runtime-state";
 import type {
+  HostedExecutionRunStatus,
+  HostedExecutionTimelineEntry,
   HostedExecutionDispatchRequest,
   HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
@@ -64,13 +66,17 @@ export interface RunnerStateRecord {
   bundleVersions: RunnerBundleVersions;
   inFlight: boolean;
   lastError: string | null;
+  lastErrorAt: string | null;
+  lastErrorCode: string | null;
   lastEventId: string | null;
   lastRunAt: string | null;
   nextPendingAvailableAt: string | null;
   nextWakeAt: string | null;
   pendingEventCount: number;
   poisonedEventIds: string[];
+  run: HostedExecutionRunStatus | null;
   retryingEventId: string | null;
+  timeline: HostedExecutionTimelineEntry[];
   userId: string;
 }
 
@@ -79,6 +85,7 @@ export const CONSUMED_EVENT_EXACT_TTL_MS = 30 * 24 * 60 * 60_000;
 export const MAX_BACKPRESSURED_EVENT_IDS = 16;
 export const MAX_PENDING_EVENTS = 64;
 export const MAX_POISONED_EVENT_IDS = 16;
+export const MAX_RUN_TIMELINE_ENTRIES = 24;
 export const RETRY_MAX_DELAY_MS = 5 * 60_000;
 
 export function computeRetryDelayMs(baseDelayMs: number, attempts: number): number {
@@ -114,12 +121,24 @@ export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStat
     bundleRefs: record.bundleRefs,
     inFlight: record.inFlight,
     lastError: record.lastError,
+    ...(record.lastErrorAt ? {
+      lastErrorAt: record.lastErrorAt,
+    } : {}),
+    ...(record.lastErrorCode ? {
+      lastErrorCode: record.lastErrorCode,
+    } : {}),
     lastEventId: record.lastEventId,
     lastRunAt: record.lastRunAt,
     nextWakeAt: record.nextWakeAt,
     pendingEventCount: record.pendingEventCount,
     poisonedEventIds: record.poisonedEventIds,
+    ...(record.run ? {
+      run: record.run,
+    } : {}),
     retryingEventId: record.retryingEventId,
+    ...(record.timeline.length > 0 ? {
+      timeline: record.timeline,
+    } : {}),
     userId: record.userId,
   };
 }

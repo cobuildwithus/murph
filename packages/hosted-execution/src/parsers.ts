@@ -24,6 +24,15 @@ import type {
   HostedExecutionUserStatus,
   HostedExecutionVaultShareAcceptedEvent,
 } from "./contracts.ts";
+import type {
+  HostedExecutionRunContext,
+  HostedExecutionRunStatus,
+  HostedExecutionTimelineEntry,
+} from "./observability.ts";
+import {
+  isHostedExecutionRunLevel,
+  isHostedExecutionRunPhase,
+} from "./observability.ts";
 
 export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecutionDispatchRequest {
   const record = requireObject(value, "Hosted execution dispatch request");
@@ -51,6 +60,9 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
       ),
     },
     dispatch: parseHostedExecutionDispatchRequest(record.dispatch),
+    ...(record.run === undefined ? {} : {
+      run: record.run === null ? null : parseHostedExecutionRunContext(record.run),
+    }),
   };
 }
 
@@ -114,6 +126,15 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
     },
     inFlight: requireBoolean(record.inFlight, "Hosted execution user status inFlight"),
     lastError: readNullableString(record.lastError, "Hosted execution user status lastError"),
+    ...(record.lastErrorAt === undefined ? {} : {
+      lastErrorAt: readNullableString(record.lastErrorAt, "Hosted execution user status lastErrorAt"),
+    }),
+    ...(record.lastErrorCode === undefined ? {} : {
+      lastErrorCode: readNullableString(
+        record.lastErrorCode,
+        "Hosted execution user status lastErrorCode",
+      ),
+    }),
     lastEventId: readNullableString(record.lastEventId, "Hosted execution user status lastEventId"),
     lastRunAt: readNullableString(record.lastRunAt, "Hosted execution user status lastRunAt"),
     nextWakeAt: readNullableString(record.nextWakeAt, "Hosted execution user status nextWakeAt"),
@@ -129,8 +150,78 @@ export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionU
       record.retryingEventId,
       "Hosted execution user status retryingEventId",
     ),
+    ...(record.run === undefined ? {} : {
+      run: record.run === null ? null : parseHostedExecutionRunStatus(record.run),
+    }),
+    ...(record.timeline === undefined ? {} : {
+      timeline: parseHostedExecutionTimelineEntries(record.timeline),
+    }),
     userId: requireString(record.userId, "Hosted execution user status userId"),
   };
+}
+
+export function parseHostedExecutionRunContext(value: unknown): HostedExecutionRunContext {
+  const record = requireObject(value, "Hosted execution run context");
+
+  return {
+    attempt: requireNumber(record.attempt, "Hosted execution run context attempt"),
+    runId: requireString(record.runId, "Hosted execution run context runId"),
+    startedAt: requireString(record.startedAt, "Hosted execution run context startedAt"),
+  };
+}
+
+export function parseHostedExecutionRunStatus(value: unknown): HostedExecutionRunStatus {
+  const record = requireObject(value, "Hosted execution run status");
+  const phase = requireString(record.phase, "Hosted execution run status phase");
+
+  if (!isHostedExecutionRunPhase(phase)) {
+    throw new TypeError("Hosted execution run status phase is invalid.");
+  }
+
+  return {
+    attempt: requireNumber(record.attempt, "Hosted execution run status attempt"),
+    eventId: requireString(record.eventId, "Hosted execution run status eventId"),
+    phase,
+    runId: requireString(record.runId, "Hosted execution run status runId"),
+    startedAt: requireString(record.startedAt, "Hosted execution run status startedAt"),
+    updatedAt: requireString(record.updatedAt, "Hosted execution run status updatedAt"),
+  };
+}
+
+export function parseHostedExecutionTimelineEntries(value: unknown): HostedExecutionTimelineEntry[] {
+  return requireArray(value, "Hosted execution timeline entries").map((entry, index) => {
+    const record = requireObject(entry, `Hosted execution timeline entries[${index}]`);
+    const level = requireString(record.level, `Hosted execution timeline entries[${index}].level`);
+    const phase = requireString(record.phase, `Hosted execution timeline entries[${index}].phase`);
+
+    if (!isHostedExecutionRunLevel(level)) {
+      throw new TypeError(`Hosted execution timeline entries[${index}].level is invalid.`);
+    }
+
+    if (!isHostedExecutionRunPhase(phase)) {
+      throw new TypeError(`Hosted execution timeline entries[${index}].phase is invalid.`);
+    }
+
+    return {
+      at: requireString(record.at, `Hosted execution timeline entries[${index}].at`),
+      attempt: requireNumber(record.attempt, `Hosted execution timeline entries[${index}].attempt`),
+      component: requireString(
+        record.component,
+        `Hosted execution timeline entries[${index}].component`,
+      ),
+      ...(record.errorCode === undefined ? {} : {
+        errorCode: readNullableString(
+          record.errorCode,
+          `Hosted execution timeline entries[${index}].errorCode`,
+        ),
+      }),
+      eventId: requireString(record.eventId, `Hosted execution timeline entries[${index}].eventId`),
+      level,
+      message: requireString(record.message, `Hosted execution timeline entries[${index}].message`),
+      phase,
+      runId: requireString(record.runId, `Hosted execution timeline entries[${index}].runId`),
+    };
+  });
 }
 
 export function parseHostedExecutionUserEnvStatus(value: unknown): HostedExecutionUserEnvStatus {

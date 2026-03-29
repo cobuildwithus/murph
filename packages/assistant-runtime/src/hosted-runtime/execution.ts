@@ -7,7 +7,11 @@ import {
 } from "@murph/runtime-state";
 import type {
   HostedExecutionDispatchRequest,
+  HostedExecutionRunContext,
   HostedExecutionRunnerResult,
+} from "@murph/hosted-execution";
+import {
+  emitHostedExecutionStructuredLog,
 } from "@murph/hosted-execution";
 import {
   refreshAssistantStatusSnapshot,
@@ -41,10 +45,17 @@ export async function executeHostedDispatchForCommit(input: {
   restored: HostedRestoredExecutionContext;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
-    "artifactsBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "webControlPlane"
+    "artifactsBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "userEnv" | "webControlPlane"
   >;
   runtimeEnv: Readonly<Record<string, string>>;
 }): Promise<HostedCommittedExecutionState> {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.request.dispatch,
+    message: "Hosted runtime executing dispatch handlers.",
+    phase: "dispatch.running",
+    run: input.request.run ?? null,
+  });
   const dispatchMetrics = await executeHostedDispatchEvent({
     dispatch: input.request.dispatch,
     emailBaseUrl: input.runtime.emailBaseUrl,
@@ -105,6 +116,7 @@ export async function completeHostedExecutionAfterCommit(input: {
   dispatch: HostedExecutionDispatchRequest;
   internalWorkerFetch?: typeof fetch;
   materializedArtifactPaths?: ReadonlySet<string>;
+  run?: HostedExecutionRunContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "artifactsBaseUrl" | "commitBaseUrl" | "commitTimeoutMs" | "emailBaseUrl" | "sideEffectsBaseUrl" | "userEnv" | "webControlPlane"
@@ -112,6 +124,13 @@ export async function completeHostedExecutionAfterCommit(input: {
   restored: HostedRestoredExecutionContext;
   committedExecution: HostedCommittedExecutionState;
 }): Promise<HostedExecutionRunnerResult> {
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    message: "Hosted runtime draining committed side effects.",
+    phase: "side-effects.draining",
+    run: input.run ?? null,
+  });
   await drainHostedCommittedSideEffectsAfterCommit({
     commit: input.commit,
     commitTimeoutMs: input.runtime.commitTimeoutMs,
@@ -169,6 +188,14 @@ export async function completeHostedExecutionAfterCommit(input: {
     fetchImpl: input.internalWorkerFetch,
     finalResult,
     runtime: input.runtime,
+  });
+
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    dispatch: input.dispatch,
+    message: "Hosted runtime finalized the committed result.",
+    phase: "finalize.recorded",
+    run: input.run ?? null,
   });
 
   return finalResult;
