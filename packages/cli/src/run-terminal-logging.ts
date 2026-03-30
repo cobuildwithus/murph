@@ -263,7 +263,11 @@ function formatAssistantEventDetails(
   options: ForegroundTerminalLogOptions,
 ): string | null {
   const details = normalizeLabel(event.details)
+  const safeDetails = normalizeLabel(event.safeDetails)
   if (!details) {
+    if (event.type === 'capture.reply-failed') {
+      return safeDetails ?? fallbackAssistantReplyFailureDetails(event)
+    }
     return null
   }
 
@@ -285,6 +289,8 @@ function formatAssistantEventDetails(
       )
         ? 'waiting for provider reconnect'
         : null
+    case 'capture.reply-failed':
+      return safeDetails ?? fallbackAssistantReplyFailureDetails(event)
     default:
       return null
   }
@@ -389,6 +395,12 @@ function isSafeAssistantReplyStatusDetail(details: string): boolean {
     details.startsWith('assistant still running after ') ||
     details.startsWith('assistant provider stalled after ')
   )
+}
+
+function fallbackAssistantReplyFailureDetails(
+  event: Pick<AssistantRunEvent, 'errorCode'>,
+): string | null {
+  return event.errorCode ? `assistant reply failed (${event.errorCode})` : null
 }
 
 const SAFE_ASSISTANT_DETAILS = new Set([
