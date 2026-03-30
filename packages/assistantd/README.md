@@ -2,7 +2,7 @@
 
 Published local assistant runtime control plane for Murph.
 
-`assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status.
+`assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status through the explicit `murph/assistant-core` headless surface.
 
 Like `device-syncd`, the daemon binds the control plane to localhost by default and requires a bearer token for every control-plane request. It is meant to run one daemon per selected vault.
 
@@ -45,6 +45,12 @@ All routes are loopback control-plane routes and require `Authorization: Bearer 
 - `GET /status`
 - `GET /sessions`
 - `GET /sessions/:id`
+- `GET /outbox`
+- `GET /outbox/:intentId`
 - `POST /outbox/drain`
+- `GET /cron/status`
+- `GET /cron/jobs`
+- `GET /cron/jobs/:job`
+- `GET /cron/runs`
 - `POST /automation/run-once` (defaults to `once: true` and `startDaemon: false`)
 - `POST /cron/process-due`

@@ -18,7 +18,6 @@ export const cloudflareVitestAliases = [
   },
   ...createVitestWorkspaceRuntimeAliases(
     resolveWorkspaceSourceEntries(repoRoot, {
-      "@murph/assistant-services": "packages/assistant-services/src/index.ts",
       "@murph/assistant-runtime": "packages/assistant-runtime/src/index.ts",
       murph: "packages/cli/src/index.ts",
       "@murph/contracts": "packages/contracts/src/index.ts",

@@ -120,39 +120,6 @@
       ],
       "@murph/device-syncd/*": [
         "packages/device-syncd/src/*"
-      ],
-      "@murph/assistant-services": [
-        "packages/assistant-services/src/index.ts"
-      ],
-      "@murph/assistant-services/automation": [
-        "packages/assistant-services/src/automation.ts"
-      ],
-      "@murph/assistant-services/cron": [
-        "packages/assistant-services/src/cron.ts"
-      ],
-      "@murph/assistant-services/inbox-services": [
-        "packages/assistant-services/src/inbox-services.ts"
-      ],
-      "@murph/assistant-services/operator-config": [
-        "packages/assistant-services/src/operator-config.ts"
-      ],
-      "@murph/assistant-services/outbox": [
-        "packages/assistant-services/src/outbox.ts"
-      ],
-      "@murph/assistant-services/runtime": [
-        "packages/assistant-services/src/runtime.ts"
-      ],
-      "@murph/assistant-services/status": [
-        "packages/assistant-services/src/status.ts"
-      ],
-      "@murph/assistant-services/store": [
-        "packages/assistant-services/src/store.ts"
-      ],
-      "@murph/assistant-services/vault-services": [
-        "packages/assistant-services/src/vault-services.ts"
-      ],
-      "@murph/assistant-services/*": [
-        "packages/assistant-services/src/*"
       ]
     },
     "types": [

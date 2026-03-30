@@ -5,7 +5,7 @@ import { URL } from 'node:url'
 import {
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
-} from '@murph/assistant-services/runtime'
+} from 'murph/assistant-core'
 import { isLoopbackRemoteAddress } from '@murph/runtime-state'
 import type { AssistantLocalService } from './service.js'
 
@@ -599,7 +599,7 @@ function parseRequiredRouteSegment(
   prefix: string,
   context: string,
 ): string {
-  const encoded = pathname.replace(new RegExp(`^${prefix}`.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'), '')
+  const encoded = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : ''
   if (!encoded) {
     throw new AssistantHttpRequestError(`Assistant ${context} requires an identifier.`, 400)
   }

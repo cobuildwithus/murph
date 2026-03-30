@@ -12,14 +12,10 @@ import {
   createInboxParserService,
 } from "@murph/parsers";
 import {
+  createIntegratedInboxServices,
   getAssistantCronStatus,
-} from "@murph/assistant-services/cron";
-import {
-  createIntegratedInboxCliServices,
-} from "@murph/assistant-services/inbox-services";
-import {
   runAssistantAutomation,
-} from "@murph/assistant-services/automation";
+} from "murph/assistant-core";
 
 import type {
   HostedMaintenanceMetrics,
@@ -153,7 +149,7 @@ export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {
-  const inboxServices = createIntegratedInboxCliServices();
+  const inboxServices = createIntegratedInboxServices();
 
   try {
     await runAssistantAutomation({

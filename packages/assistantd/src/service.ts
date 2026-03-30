@@ -1,6 +1,6 @@
 import {
-  createIntegratedInboxCliServices,
-  createIntegratedVaultCliServices,
+  createIntegratedInboxServices,
+  createIntegratedVaultServices,
   drainAssistantOutbox,
   getAssistantCronJob,
   getAssistantCronStatus,
@@ -28,7 +28,7 @@ import {
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-} from '@murph/assistant-services/runtime'
+} from 'murph/assistant-core'
 
 export interface AssistantLocalAutomationRunInput {
   allowSelfAuthored?: boolean
@@ -121,8 +121,8 @@ export interface AssistantLocalService {
 }
 
 export function createAssistantLocalService(vaultRoot: string): AssistantLocalService {
-  const inboxServices = createIntegratedInboxCliServices()
-  const vaultServices = createIntegratedVaultCliServices()
+  const inboxServices = createIntegratedInboxServices()
+  const vaultServices = createIntegratedVaultServices()
 
   return {
     drainOutbox: async (input) =>

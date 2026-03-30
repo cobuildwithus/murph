@@ -1,11 +1,9 @@
 import {
   resolveAssistantSelfDeliveryTarget,
-  saveAssistantSelfDeliveryTarget,
-} from "@murph/assistant-services";
-import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "@murph/assistant-services";
+  saveAssistantSelfDeliveryTarget,
+} from "murph/assistant-core";
 import {
   readHostedVerifiedEmailFromEnv,
 } from "@murph/runtime-state";

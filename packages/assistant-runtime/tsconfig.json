@@ -12,7 +12,7 @@
   ],
   "references": [
     {
-      "path": "../assistant-services"
+      "path": "../cli"
     },
     {
       "path": "../hosted-execution"

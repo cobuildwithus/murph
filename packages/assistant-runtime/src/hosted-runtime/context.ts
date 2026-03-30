@@ -6,15 +6,11 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
 import {
-  createIntegratedInboxCliServices,
-} from "@murph/assistant-services/inbox-services";
-import {
-  createIntegratedVaultCliServices,
-} from "@murph/assistant-services/vault-services";
-import {
+  createIntegratedInboxServices,
+  createIntegratedVaultServices,
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "@murph/assistant-services/store";
+} from "murph/assistant-core";
 
 import type { HostedBootstrapResult } from "./models.ts";
 import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
@@ -39,7 +35,7 @@ export async function bootstrapHostedMemberContext(
   runtimeEnv: Readonly<Record<string, string>>,
 ): Promise<HostedBootstrapResult> {
   const requestId = dispatch.eventId;
-  const vaultServices = createIntegratedVaultCliServices();
+  const vaultServices = createIntegratedVaultServices();
   const vaultMetadataPath = path.join(vaultRoot, "vault.json");
   const vaultCreated = !existsSync(vaultMetadataPath);
 
@@ -131,7 +127,7 @@ export async function prepareHostedLocalRuntime(
   vaultRoot: string,
   requestId: string,
 ): Promise<void> {
-  const inboxServices = createIntegratedInboxCliServices();
+  const inboxServices = createIntegratedInboxServices();
   await inboxServices.init({
     rebuild: false,
     requestId,
