@@ -1085,8 +1085,8 @@ describe("runHostedExecutionJob", () => {
     });
     const sourceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-artifacts-missing-source-"));
     cleanupPaths.push(sourceRoot);
-    const attachmentPath = path.join(sourceRoot, "missing-photo.jpg");
-    await writeFile(attachmentPath, Buffer.from("image-bytes-placeholder\n", "utf8"));
+    const attachmentPath = path.join(sourceRoot, "missing-document.pdf");
+    await writeFile(attachmentPath, Buffer.from("%PDF-1.4\nmissing artifact\n", "utf8"));
 
     const runtime = await openInboxRuntime({
       vaultRoot: restoredActivation.vaultRoot,
@@ -1107,9 +1107,9 @@ describe("runHostedExecutionJob", () => {
         attachments: [
           {
             externalId: "att-404",
-            fileName: "missing-photo.jpg",
-            kind: "image",
-            mime: "image/jpeg",
+            fileName: "missing-document.pdf",
+            kind: "document",
+            mime: "application/pdf",
             originalPath: attachmentPath,
           },
         ],
@@ -1118,7 +1118,7 @@ describe("runHostedExecutionJob", () => {
         raw: {},
         receivedAt: "2026-03-28T12:00:05.000Z",
         source: "imessage",
-        text: "photo inbound",
+        text: "document inbound",
         thread: {
           id: "chat-404",
           isDirect: true,

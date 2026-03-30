@@ -119,6 +119,12 @@ async function runInProcessInboxCli<TData>(
 
 function createFakeImessageDriver(input: {
   photoPath: string
+  attachments?: Array<{
+    guid: string
+    fileName: string
+    path: string
+    mimeType: string
+  }>
   text?: string
 }) {
   return {
@@ -136,14 +142,15 @@ function createFakeImessageDriver(input: {
           handleId: 'friend',
           displayName: 'Friend',
           isFromMe: false,
-          attachments: [
-            {
-              guid: 'att-1',
-              fileName: 'meal-photo.jpg',
-              path: input.photoPath,
-              mimeType: 'image/jpeg',
-            },
-          ],
+          attachments:
+            input.attachments ?? [
+              {
+                guid: 'att-1',
+                fileName: 'meal-photo.jpg',
+                path: input.photoPath,
+                mimeType: 'image/jpeg',
+              },
+            ],
         },
       ]
     },
@@ -256,6 +263,7 @@ test.sequential(
   'inbox attachment commands expose stored metadata, parse status, and requeue support',
   async () => {
     const fixture = await makeVaultFixture('murph-inbox-attachments')
+    const pdfPath = path.join(fixture.vaultRoot, 'lab-result.pdf')
     const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
       getHomeDirectory: () => fixture.homeRoot,
@@ -264,10 +272,21 @@ test.sequential(
       loadInboxModule: loadBuiltInboxRuntime as never,
       loadParsersModule: async () => createFakeParsersModule() as never,
       loadImessageDriver: async () =>
-        createFakeImessageDriver({ photoPath: fixture.photoPath }),
+        createFakeImessageDriver({
+          photoPath: fixture.photoPath,
+          attachments: [
+            {
+              guid: 'att-1',
+              fileName: 'lab-result.pdf',
+              path: pdfPath,
+              mimeType: 'application/pdf',
+            },
+          ],
+        }),
     })
 
     try {
+      await writeFile(pdfPath, 'pdf', 'utf8')
       await initializeImessageSource({
         services,
         vaultRoot: fixture.vaultRoot,
