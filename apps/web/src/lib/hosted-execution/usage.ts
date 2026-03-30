@@ -82,7 +82,7 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
   });
 
   return records.flatMap((record) =>
-    record.member.stripeCustomerId && record.credentialSource
+    record.member.stripeCustomerId && isAssistantUsageCredentialSource(record.credentialSource)
       ? [{
           ...record,
           credentialSource: record.credentialSource,
@@ -92,6 +92,12 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
         }]
       : [],
   );
+}
+
+function isAssistantUsageCredentialSource(
+  value: string | null,
+): value is AssistantUsageCredentialSource {
+  return value === "member" || value === "platform" || value === "unknown";
 }
 
 export async function markHostedAiUsageStripeMetered(input: {
