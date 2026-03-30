@@ -94,6 +94,9 @@
       "murph/gateway-core": [
         "packages/cli/src/gateway-core.ts"
       ],
+      "murph/gateway-core-local": [
+        "packages/cli/src/gateway-core-local.ts"
+      ],
       "murph/inbox-services": [
         "packages/cli/src/inbox-services.ts"
       ],

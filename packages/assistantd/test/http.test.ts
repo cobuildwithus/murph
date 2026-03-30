@@ -115,6 +115,87 @@ const TEST_CRON_RUN = {
   error: null,
 } as const
 
+const TEST_GATEWAY_CONVERSATION = {
+  schema: 'murph.gateway-conversation.v1',
+  sessionKey: 'gwcs_http_test',
+  title: 'Lab thread',
+  lastMessagePreview: 'Please send the latest PDF.',
+  lastActivityAt: '2026-03-28T00:00:00.000Z',
+  messageCount: 2,
+  canSend: true,
+  route: {
+    channel: 'email',
+    identityId: 'murph@example.com',
+    participantId: 'contact:alex',
+    threadId: 'thread-labs',
+    directness: 'group',
+    reply: {
+      kind: 'thread',
+      target: 'thread-labs',
+    },
+  },
+} as const
+
+const TEST_GATEWAY_ATTACHMENT = {
+  schema: 'murph.gateway-attachment.v1',
+  attachmentId: 'gwca_http_test',
+  messageId: 'gwcm_http_test',
+  kind: 'document',
+  mime: 'application/pdf',
+  fileName: 'labs.pdf',
+  byteSize: 3,
+  parseState: 'pending',
+  extractedText: null,
+  transcriptText: null,
+} as const
+
+const TEST_GATEWAY_MESSAGE = {
+  schema: 'murph.gateway-message.v1',
+  messageId: TEST_GATEWAY_ATTACHMENT.messageId,
+  sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+  direction: 'inbound',
+  createdAt: '2026-03-28T00:00:00.000Z',
+  actorDisplayName: 'Alex',
+  text: 'Here is the latest lab PDF.',
+  attachments: [TEST_GATEWAY_ATTACHMENT],
+} as const
+
+function createGatewayServiceMock(
+  overrides: Partial<AssistantLocalService['gateway']> = {},
+): AssistantLocalService['gateway'] {
+  return {
+    fetchAttachments: async () => [TEST_GATEWAY_ATTACHMENT as any],
+    getConversation: async () => TEST_GATEWAY_CONVERSATION as any,
+    listConversations: async () => ({
+      conversations: [TEST_GATEWAY_CONVERSATION as any],
+      nextCursor: null,
+    }),
+    listOpenPermissions: async () => [],
+    pollEvents: async (input?: any) => ({
+      events: [],
+      nextCursor: input?.cursor ?? 0,
+      live: true,
+    }),
+    readMessages: async () => ({
+      messages: [TEST_GATEWAY_MESSAGE as any],
+      nextCursor: null,
+    }),
+    respondToPermission: async () => null,
+    sendMessage: async (input: any) => ({
+      sessionKey: input.sessionKey,
+      messageId: 'gwcm_sent_http_test',
+      queued: false,
+      delivery: null,
+    }),
+    waitForEvents: async (input?: any) => ({
+      events: [],
+      nextCursor: input?.cursor ?? 0,
+      live: true,
+    }),
+    ...overrides,
+  } as AssistantLocalService['gateway']
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -229,6 +310,22 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     recentTurns: [],
     warnings: [],
   } as any))
+  const listGatewayConversations = vi.fn(async () => ({
+    conversations: [TEST_GATEWAY_CONVERSATION as any],
+    nextCursor: null,
+  }))
+  const getGatewayConversation = vi.fn(async () => TEST_GATEWAY_CONVERSATION as any)
+  const readGatewayMessages = vi.fn(async () => ({
+    messages: [TEST_GATEWAY_MESSAGE as any],
+    nextCursor: null,
+  }))
+  const fetchGatewayAttachments = vi.fn(async () => [TEST_GATEWAY_ATTACHMENT as any])
+  const gateway = createGatewayServiceMock({
+    fetchAttachments: fetchGatewayAttachments,
+    getConversation: getGatewayConversation,
+    listConversations: listGatewayConversations,
+    readMessages: readGatewayMessages,
+  })
   const service = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getCronJob,
@@ -248,6 +345,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       vaultBound: true,
     }),
     getStatus,
+    gateway,
     listCronJobs: async () => [TEST_CRON_JOB as any],
     listCronRuns: async () => ({
       jobId: TEST_CRON_JOB.jobId,
@@ -395,6 +493,116 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     const outboxIntentPayload = await outboxIntent.json() as { intentId: string }
     assert.equal(outboxIntentPayload.intentId, 'outbox_http_route')
     assert.equal(getOutboxIntent.mock.calls[0]?.[0]?.intentId, 'outbox_http_route')
+
+    const gatewayList = await fetch(`${handle.address.baseUrl}/gateway/conversations/list`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        includeLastMessage: true,
+        limit: 5,
+        search: 'lab',
+      }),
+    })
+    assert.equal(gatewayList.status, 200)
+    const gatewayListPayload = await gatewayList.json() as {
+      conversations: Array<{ sessionKey: string }>
+    }
+    assert.equal(
+      gatewayListPayload.conversations[0]?.sessionKey,
+      TEST_GATEWAY_CONVERSATION.sessionKey,
+    )
+    assert.equal(listGatewayConversations.mock.calls[0]?.[0]?.limit, 5)
+    assert.equal(listGatewayConversations.mock.calls[0]?.[0]?.search, 'lab')
+
+    const gatewayConversation = await fetch(`${handle.address.baseUrl}/gateway/conversations/get`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+      }),
+    })
+    assert.equal(gatewayConversation.status, 200)
+    const gatewayConversationPayload = await gatewayConversation.json() as {
+      sessionKey: string
+    }
+    assert.equal(
+      gatewayConversationPayload.sessionKey,
+      TEST_GATEWAY_CONVERSATION.sessionKey,
+    )
+    assert.equal(
+      getGatewayConversation.mock.calls[0]?.[0]?.sessionKey,
+      TEST_GATEWAY_CONVERSATION.sessionKey,
+    )
+
+    const gatewayMessages = await fetch(`${handle.address.baseUrl}/gateway/messages/read`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        oldestFirst: true,
+        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+      }),
+    })
+    assert.equal(gatewayMessages.status, 200)
+    const gatewayMessagesPayload = await gatewayMessages.json() as {
+      messages: Array<{ messageId: string }>
+    }
+    assert.equal(
+      gatewayMessagesPayload.messages[0]?.messageId,
+      TEST_GATEWAY_MESSAGE.messageId,
+    )
+    assert.equal(readGatewayMessages.mock.calls[0]?.[0]?.oldestFirst, true)
+
+    const gatewayAttachments = await fetch(`${handle.address.baseUrl}/gateway/attachments/fetch`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        messageId: TEST_GATEWAY_MESSAGE.messageId,
+      }),
+    })
+    assert.equal(gatewayAttachments.status, 200)
+    const gatewayAttachmentsPayload = await gatewayAttachments.json() as Array<{
+      attachmentId: string
+    }>
+    assert.equal(
+      gatewayAttachmentsPayload[0]?.attachmentId,
+      TEST_GATEWAY_ATTACHMENT.attachmentId,
+    )
+    assert.equal(
+      fetchGatewayAttachments.mock.calls[0]?.[0]?.messageId,
+      TEST_GATEWAY_MESSAGE.messageId,
+    )
+
+    const mismatchedGatewayVault = await fetch(
+      `${handle.address.baseUrl}/gateway/conversations/list`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          vault: '/tmp/other-vault',
+        }),
+      },
+    )
+    assert.equal(mismatchedGatewayVault.status, 400)
+    assert.match(await mismatchedGatewayVault.text(), /bound to \/tmp\/vault/u)
 
     const cronStatus = await fetch(
       `${handle.address.baseUrl}/cron/status?vault=${encodeURIComponent('/tmp/vault')}`,
@@ -722,6 +930,7 @@ test('assistantd http server preserves typed assistant error codes for invalid i
       deliveryError: null,
       blocked: null,
     } as any),
+    gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION as any,
     vault: '/tmp/vault',
   } as AssistantLocalService
@@ -824,6 +1033,7 @@ test('assistantd http server does not reflect raw internal errors back to the cl
       deliveryError: null,
       blocked: null,
     }),
+    gateway: createGatewayServiceMock(),
     updateSessionOptions: async () => TEST_SESSION as any,
     vault: '/tmp/vault',
   } as AssistantLocalService

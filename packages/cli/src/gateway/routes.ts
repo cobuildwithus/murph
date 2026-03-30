@@ -1,5 +1,12 @@
-import type { AssistantSessionBinding } from '../assistant-cli-contracts.js'
-import { inferAssistantBindingDelivery } from '../assistant/channel-adapters.js'
+import type {
+  AssistantOutboxIntent,
+  AssistantSessionBinding,
+} from '../assistant-cli-contracts.js'
+import type { ConversationRef } from '../assistant/conversation-ref.js'
+import {
+  inferFallbackBindingDelivery,
+  inferThreadFirstBindingDelivery,
+} from '../assistant/channels/helpers.js'
 import { normalizeNullableString } from '../text/shared.js'
 import {
   gatewayConversationDirectnessValues,
@@ -70,6 +77,26 @@ export function gatewayConversationRouteFromBinding(
   })
 }
 
+export function gatewayConversationRouteFromOutboxIntent(
+  intent: Pick<
+    AssistantOutboxIntent,
+    'actorId' | 'bindingDelivery' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
+  >,
+): GatewayConversationRoute {
+  const conversation = gatewayConversationRefFromBinding({
+    actorId: intent.actorId,
+    channel: intent.channel,
+    identityId: intent.identityId,
+    threadId: intent.threadId,
+    threadIsDirect: intent.threadIsDirect,
+  })
+
+  return gatewayConversationRouteFromConversationRef(conversation, {
+    kind: intent.bindingDelivery?.kind ?? null,
+    target: intent.bindingDelivery?.target ?? null,
+  })
+}
+
 export function gatewayConversationRouteFromCapture(
   capture: GatewayInboundCaptureRouteInput,
 ): GatewayConversationRoute {
@@ -117,7 +144,7 @@ export function gatewayConversationRouteCanSend(
   route: GatewayConversationRoute | null | undefined,
 ): boolean {
   const normalized = normalizeGatewayConversationRoute(route)
-  const inferredDelivery = inferAssistantBindingDelivery({
+  const inferredDelivery = inferGatewayBindingDelivery({
     channel: normalized.channel,
     conversation: gatewayConversationRouteToConversationRef(normalized),
     deliveryKind: normalized.reply.kind,
@@ -137,6 +164,41 @@ export function gatewayConversationRouteCanSend(
   }
 
   return true
+}
+
+function inferGatewayBindingDelivery(input: {
+  channel?: string | null
+  conversation?: ConversationRef | null
+  deliveryKind?: 'participant' | 'thread' | null
+  deliveryTarget?: string | null
+}) {
+  switch (input.channel) {
+    case 'telegram':
+    case 'email':
+      return inferThreadFirstBindingDelivery(
+        {
+          conversation: input.conversation ?? {},
+          deliveryKind: input.deliveryKind ?? null,
+          deliveryTarget: input.deliveryTarget ?? null,
+        },
+        { includeParticipant: true },
+      )
+    case 'linq':
+      return inferThreadFirstBindingDelivery(
+        {
+          conversation: input.conversation ?? {},
+          deliveryKind: input.deliveryKind ?? null,
+          deliveryTarget: input.deliveryTarget ?? null,
+        },
+        { includeParticipant: false },
+      )
+    default:
+      return inferFallbackBindingDelivery({
+        conversation: input.conversation ?? {},
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+      })
+  }
 }
 
 function gatewayConversationRouteFromConversationRef(

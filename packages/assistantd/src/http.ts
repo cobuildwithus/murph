@@ -8,6 +8,16 @@ import {
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
 } from 'murph/assistant-core'
+import {
+  gatewayFetchAttachmentsInputSchema,
+  gatewayGetConversationInputSchema,
+  gatewayListConversationsInputSchema,
+  gatewayReadMessagesInputSchema,
+  type GatewayFetchAttachmentsInput,
+  type GatewayGetConversationInput,
+  type GatewayListConversationsInput,
+  type GatewayReadMessagesInput,
+} from 'murph/gateway-core'
 import { isLoopbackRemoteAddress } from '@murph/runtime-state'
 import type { AssistantLocalService } from './service.js'
 
@@ -53,6 +63,18 @@ type AssistantSessionListRequest = Parameters<AssistantLocalService['listSession
 type AssistantOutboxDrainRequest = Parameters<AssistantLocalService['drainOutbox']>[0]
 type AssistantAutomationRunRequest = Parameters<AssistantLocalService['runAutomationOnce']>[0]
 type AssistantCronProcessRequest = Parameters<AssistantLocalService['processDueCron']>[0]
+type AssistantGatewayListConversationsRequest = GatewayListConversationsInput & {
+  vault?: string | null
+}
+type AssistantGatewayGetConversationRequest = GatewayGetConversationInput & {
+  vault?: string | null
+}
+type AssistantGatewayReadMessagesRequest = GatewayReadMessagesInput & {
+  vault?: string | null
+}
+type AssistantGatewayFetchAttachmentsRequest = GatewayFetchAttachmentsInput & {
+  vault?: string | null
+}
 
 export async function startAssistantHttpServer(
   input: CreateAssistantHttpServerInput,
@@ -138,6 +160,34 @@ async function handleAssistantRequest(
     if (method === 'POST' && url.pathname === '/outbox/drain') {
       const body = parseAssistantOutboxDrainRequestBody(await readJsonBody(request))
       sendJson(response, 200, await input.service.drainOutbox(body))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/conversations/list') {
+      const body = parseGatewayListConversationsRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.listConversations(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/conversations/get') {
+      const body = parseGatewayGetConversationRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.getConversation(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/messages/read') {
+      const body = parseGatewayReadMessagesRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.readMessages(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/attachments/fetch') {
+      const body = parseGatewayFetchAttachmentsRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.fetchAttachments(gatewayInput))
       return
     }
     if (method === 'GET' && url.pathname === '/cron/status') {
@@ -236,6 +286,20 @@ function parseAssistantVaultQuery(url: URL): AssistantSessionListRequest {
   }
 }
 
+function assertAssistantBoundVault(
+  requestedVault: string | null | undefined,
+  configuredVault: string,
+): void {
+  if (!requestedVault || requestedVault === configuredVault) {
+    return
+  }
+
+  throw new AssistantHttpRequestError(
+    `assistantd is bound to ${configuredVault}, but the request targeted ${requestedVault}.`,
+    400,
+  )
+}
+
 function parseAssistantSessionRoute(url: URL): AssistantSessionLookupRequest {
   return {
     sessionId: parseRequiredOpaqueRouteSegment(
@@ -254,6 +318,98 @@ function parseAssistantOutboxDrainRequestBody(payload: unknown): AssistantOutbox
     limit: readOptionalIntegerField(record, 'limit', 'outbox/drain'),
     now: readOptionalNullableStringField(record, 'now', 'outbox/drain'),
     vault: readOptionalNullableStringField(record, 'vault', 'outbox/drain'),
+  }
+}
+
+function parseGatewayListConversationsRequestBody(
+  payload: unknown,
+): AssistantGatewayListConversationsRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/conversations/list')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayListConversationsInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/conversations/list'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway conversation-list request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayGetConversationRequestBody(
+  payload: unknown,
+): AssistantGatewayGetConversationRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/conversations/get')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayGetConversationInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/conversations/get'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway conversation-get request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayReadMessagesRequestBody(
+  payload: unknown,
+): AssistantGatewayReadMessagesRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/messages/read')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayReadMessagesInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/messages/read'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway message-read request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayFetchAttachmentsRequestBody(
+  payload: unknown,
+): AssistantGatewayFetchAttachmentsRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/attachments/fetch')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayFetchAttachmentsInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/attachments/fetch'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway attachment-fetch request was invalid.',
+      400,
+    )
   }
 }
 
