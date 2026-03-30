@@ -3,11 +3,18 @@ import { afterEach, test, vi } from 'vitest'
 import {
   canUseAssistantDaemonForMessage,
   maybeDrainAssistantOutboxViaDaemon,
+  maybeGetAssistantCronJobViaDaemon,
+  maybeGetAssistantCronStatusViaDaemon,
+  maybeGetAssistantOutboxIntentViaDaemon,
   maybeGetAssistantSessionViaDaemon,
   maybeGetAssistantStatusViaDaemon,
+  maybeListAssistantCronJobsViaDaemon,
+  maybeListAssistantCronRunsViaDaemon,
+  maybeListAssistantOutboxIntentsViaDaemon,
   maybeListAssistantSessionsViaDaemon,
   maybeOpenAssistantConversationViaDaemon,
   maybeProcessDueAssistantCronViaDaemon,
+  maybeRunAssistantAutomationViaDaemon,
   maybeSendAssistantMessageViaDaemon,
   maybeUpdateAssistantSessionOptionsViaDaemon,
   resolveAssistantDaemonClientConfig,
@@ -40,6 +47,89 @@ const TEST_SESSION = {
   updatedAt: '2026-03-28T00:00:00.000Z',
   lastTurnAt: null,
   turnCount: 0,
+} as const
+
+const TEST_OUTBOX_INTENT = {
+  schema: 'murph.assistant-outbox-intent.v1',
+  intentId: 'outbox_daemon_test',
+  sessionId: TEST_SESSION.sessionId,
+  turnId: 'turn_daemon_test',
+  createdAt: '2026-03-28T00:00:00.000Z',
+  updatedAt: '2026-03-28T00:00:00.000Z',
+  lastAttemptAt: null,
+  nextAttemptAt: '2026-03-28T00:00:00.000Z',
+  sentAt: null,
+  attemptCount: 0,
+  status: 'pending',
+  message: 'queued hello',
+  dedupeKey: 'dedupe-key',
+  targetFingerprint: 'target-fingerprint',
+  channel: 'telegram',
+  identityId: null,
+  actorId: 'chat-123',
+  threadId: 'chat-123',
+  threadIsDirect: true,
+  replyToMessageId: null,
+  bindingDelivery: {
+    kind: 'participant',
+    target: 'chat-123',
+  },
+  explicitTarget: null,
+  delivery: null,
+  deliveryConfirmationPending: false,
+  deliveryIdempotencyKey: null,
+  deliveryTransportIdempotent: false,
+  lastError: null,
+} as const
+
+const TEST_CRON_JOB = {
+  schema: 'murph.assistant-cron-job.v1',
+  jobId: 'cron_daemon_test',
+  name: 'daily-checkin',
+  enabled: true,
+  keepAfterRun: true,
+  prompt: 'Send a quick check-in.',
+  schedule: {
+    kind: 'every',
+    everyMs: 86_400_000,
+  },
+  target: {
+    sessionId: TEST_SESSION.sessionId,
+    alias: null,
+    channel: 'telegram',
+    identityId: null,
+    participantId: 'chat-123',
+    sourceThreadId: 'chat-123',
+    deliveryTarget: null,
+    deliverResponse: true,
+  },
+  stateDocId: null,
+  createdAt: '2026-03-28T00:00:00.000Z',
+  updatedAt: '2026-03-28T00:00:00.000Z',
+  state: {
+    nextRunAt: '2026-03-29T00:00:00.000Z',
+    lastRunAt: null,
+    lastSucceededAt: null,
+    lastFailedAt: null,
+    consecutiveFailures: 0,
+    lastError: null,
+    runningAt: null,
+    runningPid: null,
+  },
+} as const
+
+const TEST_CRON_RUN = {
+  schema: 'murph.assistant-cron-run.v1',
+  runId: 'cronrun_daemon_test',
+  jobId: TEST_CRON_JOB.jobId,
+  trigger: 'scheduled',
+  status: 'succeeded',
+  startedAt: '2026-03-28T00:00:00.000Z',
+  finishedAt: '2026-03-28T00:00:10.000Z',
+  sessionId: TEST_SESSION.sessionId,
+  response: 'done',
+  responseLength: 4,
+  error: null,
 } as const
 
 afterEach(() => {
@@ -279,6 +369,53 @@ test('assistant daemon client routes serializable assistant operations through t
       )
     }
 
+    if (url.pathname === '/outbox') {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(JSON.stringify([TEST_OUTBOX_INTENT]), { status: 200 })
+    }
+
+    if (url.pathname === `/outbox/${encodeURIComponent(TEST_OUTBOX_INTENT.intentId)}`) {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(JSON.stringify(TEST_OUTBOX_INTENT), { status: 200 })
+    }
+
+    if (url.pathname === '/cron/status') {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(
+        JSON.stringify({
+          totalJobs: 1,
+          enabledJobs: 1,
+          dueJobs: 0,
+          runningJobs: 0,
+          nextRunAt: TEST_CRON_JOB.state.nextRunAt,
+        }),
+        { status: 200 },
+      )
+    }
+
+    if (url.pathname === '/cron/jobs') {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(JSON.stringify([TEST_CRON_JOB]), { status: 200 })
+    }
+
+    if (url.pathname === `/cron/jobs/${encodeURIComponent(TEST_CRON_JOB.jobId)}`) {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(JSON.stringify(TEST_CRON_JOB), { status: 200 })
+    }
+
+    if (url.pathname === '/cron/runs') {
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      assert.equal(url.searchParams.get('job'), TEST_CRON_JOB.jobId)
+      assert.equal(url.searchParams.get('limit'), '3')
+      return new Response(
+        JSON.stringify({
+          jobId: TEST_CRON_JOB.jobId,
+          runs: [TEST_CRON_RUN],
+        }),
+        { status: 200 },
+      )
+    }
+
     if (url.pathname === '/cron/process-due') {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
       assert.equal(body.vault, '/tmp/vault')
@@ -289,6 +426,34 @@ test('assistant daemon client routes serializable assistant operations through t
           failed: 0,
           processed: 2,
           succeeded: 2,
+        }),
+        { status: 200 },
+      )
+    }
+
+    if (url.pathname === '/automation/run-once') {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      assert.equal(body.vault, '/tmp/vault')
+      assert.equal(body.once, true)
+      assert.equal(body.startDaemon, false)
+      return new Response(
+        JSON.stringify({
+          vault: '/tmp/vault',
+          startedAt: '2026-03-28T00:00:00.000Z',
+          stoppedAt: '2026-03-28T00:00:00.000Z',
+          reason: 'completed',
+          daemonStarted: false,
+          scans: 1,
+          considered: 0,
+          routed: 0,
+          noAction: 0,
+          skipped: 0,
+          failed: 0,
+          replyConsidered: 0,
+          replied: 0,
+          replySkipped: 0,
+          replyFailed: 0,
+          lastError: null,
         }),
         { status: 200 },
       )
@@ -365,6 +530,59 @@ test('assistant daemon client routes serializable assistant operations through t
   )
   assert.equal(session?.sessionId, TEST_SESSION.sessionId)
 
+  const intents = await maybeListAssistantOutboxIntentsViaDaemon(
+    {
+      vault: '/tmp/vault',
+    },
+    env,
+  )
+  assert.equal(intents?.[0]?.intentId, TEST_OUTBOX_INTENT.intentId)
+
+  const intent = await maybeGetAssistantOutboxIntentViaDaemon(
+    {
+      vault: '/tmp/vault',
+      intentId: TEST_OUTBOX_INTENT.intentId,
+    },
+    env,
+  )
+  assert.equal(intent?.intentId, TEST_OUTBOX_INTENT.intentId)
+
+  const cronStatus = await maybeGetAssistantCronStatusViaDaemon(
+    {
+      vault: '/tmp/vault',
+    },
+    env,
+  )
+  assert.equal(cronStatus?.totalJobs, 1)
+
+  const cronJobs = await maybeListAssistantCronJobsViaDaemon(
+    {
+      vault: '/tmp/vault',
+    },
+    env,
+  )
+  assert.equal(cronJobs?.[0]?.jobId, TEST_CRON_JOB.jobId)
+
+  const cronJob = await maybeGetAssistantCronJobViaDaemon(
+    {
+      vault: '/tmp/vault',
+      job: TEST_CRON_JOB.jobId,
+    },
+    env,
+  )
+  assert.equal(cronJob?.jobId, TEST_CRON_JOB.jobId)
+
+  const cronRuns = await maybeListAssistantCronRunsViaDaemon(
+    {
+      vault: '/tmp/vault',
+      job: TEST_CRON_JOB.jobId,
+      limit: 3,
+    },
+    env,
+  )
+  assert.equal(cronRuns?.jobId, TEST_CRON_JOB.jobId)
+  assert.equal(cronRuns?.runs[0]?.runId, TEST_CRON_RUN.runId)
+
   const drained = await maybeDrainAssistantOutboxViaDaemon(
     {
       vault: '/tmp/vault',
@@ -394,7 +612,17 @@ test('assistant daemon client routes serializable assistant operations through t
     succeeded: 2,
   })
 
-  assert.equal(fetchMock.mock.calls.length, 8)
+  const automation = await maybeRunAssistantAutomationViaDaemon(
+    {
+      vault: '/tmp/vault',
+      once: true,
+      startDaemon: false,
+    },
+    env,
+  )
+  assert.equal(automation?.scans, 1)
+
+  assert.equal(fetchMock.mock.calls.length, 15)
 })
 
 test('assistant daemon client refuses daemon routes that require local hooks or bespoke dependencies', async () => {

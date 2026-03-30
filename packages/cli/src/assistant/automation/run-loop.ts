@@ -5,8 +5,11 @@ import type {
   InboxCliServices,
   InboxRunEvent,
 } from '../../inbox-services.js'
+import { createIntegratedInboxCliServices } from '../../inbox-services.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
+import { createIntegratedVaultCliServices } from '../../vault-cli-services.js'
+import { maybeRunAssistantAutomationViaDaemon } from '../../assistant-daemon-client.js'
 import { processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
@@ -42,7 +45,7 @@ export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
-  inboxServices: InboxCliServices
+  inboxServices?: InboxCliServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
@@ -60,10 +63,39 @@ export interface RunAssistantAutomationInput {
 export async function runAssistantAutomation(
   input: RunAssistantAutomationInput,
 ) {
+  const canUseDaemonClient =
+    input.inboxServices === undefined &&
+    input.onEvent === undefined &&
+    input.onInboxEvent === undefined &&
+    input.signal === undefined &&
+    input.vaultServices === undefined
+  if (canUseDaemonClient) {
+    const remote = await maybeRunAssistantAutomationViaDaemon(
+      {
+        allowSelfAuthored: input.allowSelfAuthored,
+        deliveryDispatchMode: input.deliveryDispatchMode,
+        drainOutbox: input.drainOutbox,
+        maxPerScan: input.maxPerScan,
+        modelSpec: input.modelSpec,
+        once: input.once,
+        requestId: input.requestId ?? null,
+        scanIntervalMs: input.scanIntervalMs,
+        sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+        startDaemon: input.startDaemon,
+        vault: input.vault,
+      },
+    )
+    if (remote) {
+      return remote
+    }
+  }
+
   const startedAt = new Date().toISOString()
   const controller = new AbortController()
   const cleanup = bridgeAbortSignals(controller, input.signal)
   const paths = resolveAssistantStatePaths(input.vault)
+  const inboxServices = input.inboxServices ?? createIntegratedInboxCliServices()
+  const vaultServices = input.vaultServices ?? createIntegratedVaultCliServices()
   const aggregateRouting = createEmptyInboxScanResult()
   const aggregateReplies = createEmptyAutoReplyScanResult()
   let scans = 0
@@ -85,7 +117,7 @@ export async function runAssistantAutomation(
 
   let daemonPromise: Promise<unknown> | null = null
   if (daemonStarted) {
-    daemonPromise = input.inboxServices
+    daemonPromise = inboxServices
       .run(
         {
           vault: input.vault,
@@ -156,7 +188,7 @@ export async function runAssistantAutomation(
       const scanResult = await scanAssistantAutomationOnce({
         allowSelfAuthored: input.allowSelfAuthored ?? false,
         deliveryDispatchMode: input.deliveryDispatchMode,
-        inboxServices: input.inboxServices,
+        inboxServices,
         maxPerScan: input.maxPerScan,
         modelSpec: input.modelSpec,
         onEvent: input.onEvent,
@@ -165,7 +197,7 @@ export async function runAssistantAutomation(
         sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
         state,
         vault: input.vault,
-        vaultServices: input.vaultServices,
+        vaultServices,
         async onStateProgress(next) {
           state = await saveAssistantAutomationState(input.vault, {
             ...state,
