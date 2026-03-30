@@ -3737,6 +3737,7 @@ test.sequential('inbox setup and doctor expose additive parser toolchain status'
 
 test.sequential('inbox parse and requeue drive parser queue controls without real tool binaries', async () => {
   const fixture = await makeVaultFixture('murph-inbox-parser-queue')
+  const pdfPath = path.join(fixture.vaultRoot, 'parser-queue.pdf')
   const drainCalls: Array<{
     attachmentId?: string
     captureId?: string
@@ -3762,11 +3763,22 @@ test.sequential('inbox parse and requeue drive parser queue controls without rea
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: loadBuiltInboxRuntime,
     loadImessageDriver: async () =>
-      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-1',
+            fileName: 'parser-queue.pdf',
+            path: pdfPath,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
     loadParsersModule: async () => fakeParsers,
   })
 
   try {
+    await writeFile(pdfPath, 'pdf', 'utf8')
     await initializeImessageSource({
       services,
       vaultRoot: fixture.vaultRoot,
@@ -4140,16 +4152,28 @@ test.sequential('image attachments no longer advertise local parse-queue support
 
 test.sequential('inbox requeue can reset running attachment parse jobs', async () => {
   const fixture = await makeVaultFixture('murph-inbox-requeue-running')
+  const pdfPath = path.join(fixture.vaultRoot, 'requeue-running.pdf')
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
     getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: loadBuiltInboxRuntime,
     loadImessageDriver: async () =>
-      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-1',
+            fileName: 'requeue-running.pdf',
+            path: pdfPath,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
   })
 
   try {
+    await writeFile(pdfPath, 'pdf', 'utf8')
     await initializeImessageSource({
       services,
       vaultRoot: fixture.vaultRoot,
