@@ -1,7 +1,6 @@
-import { normalizeHostedExecutionBaseUrl } from "@murph/hosted-execution";
-
 import { decodeHostedEncryptionKey } from "../device-sync/crypto";
 import { normalizeNullableString, parseInteger } from "../device-sync/shared";
+import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { readLinqEnvironment } from "../linq/env";
 
 export interface HostedOnboardingEnvironment {
@@ -44,9 +43,7 @@ export function readHostedOnboardingEnvironment(
     throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY is required for hosted onboarding secrets.");
   }
 
-  const publicBaseUrl = normalizeBaseUrl(
-    readEnv(source, ["HOSTED_ONBOARDING_PUBLIC_BASE_URL", "NEXT_PUBLIC_SITE_URL"]),
-  );
+  const publicBaseUrl = readHostedPublicBaseUrl(source);
   const stripeBillingMode = readBillingMode(
     readEnv(source, ["HOSTED_ONBOARDING_STRIPE_BILLING_MODE"]),
   );
@@ -106,12 +103,6 @@ function readEnv(source: HostedOnboardingEnvSource, keys: readonly string[]): st
   }
 
   return null;
-}
-
-function normalizeBaseUrl(value: string | null): string | null {
-  return normalizeHostedExecutionBaseUrl(value, {
-    allowHttpLocalhost: true,
-  });
 }
 
 function normalizeRpcUrl(value: string | null): string | null {

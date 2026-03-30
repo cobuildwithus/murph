@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
 
+import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
+
 import "./globals.css";
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
@@ -46,7 +48,7 @@ export default function RootLayout(input: { children: React.ReactNode }) {
 }
 
 function resolveMetadataBase(): URL | null {
-  const value = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL ?? process.env.NEXT_PUBLIC_SITE_URL;
+  const value = resolveHostedPublicBaseUrl(process.env);
 
   if (!value) {
     return null;

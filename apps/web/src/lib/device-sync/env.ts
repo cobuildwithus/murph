@@ -9,6 +9,10 @@ import {
 
 import { decodeHostedEncryptionKey } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";
+import {
+  readHostedDeviceSyncPublicBaseUrl,
+  readHostedPublicOrigin,
+} from "../hosted-web/public-url";
 
 export interface HostedDeviceSyncEnvironment {
   allowedMutationOrigins: string[];
@@ -51,9 +55,6 @@ const DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS = [
 const DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS = [
   "DEVICE_SYNC_ENCRYPTION_KEY_VERSION",
 ] as const;
-const DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS = [
-  "DEVICE_SYNC_PUBLIC_BASE_URL",
-] as const;
 const DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS = [
   "DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER",
 ] as const;
@@ -70,19 +71,36 @@ const OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS = [
 export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = process.env): HostedDeviceSyncEnvironment {
   const encryptionKey = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_ENV_KEYS);
   const encryptionKeyVersion = readEnv(source, DEVICE_SYNC_ENCRYPTION_KEY_VERSION_ENV_KEYS) ?? "v1";
+  const hasExplicitAllowedMutationOrigins = hasExplicitEnv(
+    source,
+    DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS,
+  );
+  const hasExplicitAllowedReturnOrigins = hasExplicitEnv(
+    source,
+    DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS,
+  );
+  const allowedMutationOrigins = parseCommaSeparatedList(source.DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS);
+  const allowedReturnOrigins = parseCommaSeparatedList(source.DEVICE_SYNC_ALLOWED_RETURN_ORIGINS);
 
   if (!encryptionKey) {
     throw new TypeError("DEVICE_SYNC_ENCRYPTION_KEY is required for the hosted device-sync control plane.");
   }
 
+  const hostedPublicOrigin =
+    hasExplicitAllowedMutationOrigins && hasExplicitAllowedReturnOrigins
+      ? null
+      : readHostedPublicOrigin(source);
+
   return {
-    allowedMutationOrigins: parseCommaSeparatedList(readEnv(source, DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS_ENV_KEYS)),
-    allowedReturnOrigins: parseCommaSeparatedList(readEnv(source, DEVICE_SYNC_ALLOWED_RETURN_ORIGINS_ENV_KEYS)),
+    allowedMutationOrigins:
+      hasExplicitAllowedMutationOrigins ? allowedMutationOrigins : buildFallbackAllowedOrigins(hostedPublicOrigin),
+    allowedReturnOrigins:
+      hasExplicitAllowedReturnOrigins ? allowedReturnOrigins : buildFallbackAllowedOrigins(hostedPublicOrigin),
     encryptionKey: decodeHostedEncryptionKey(encryptionKey),
     encryptionKeyVersion,
     isProduction: (source.NODE_ENV ?? "development") === "production",
     ouraWebhookVerificationToken: readEnv(source, OURA_WEBHOOK_VERIFICATION_TOKEN_ENV_KEYS) ?? null,
-    publicBaseUrl: readEnv(source, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ?? null,
+    publicBaseUrl: readHostedDeviceSyncPublicBaseUrl(source),
     trustedUserAssertionHeader:
       normalizeHeaderName(readEnv(source, DEVICE_SYNC_TRUSTED_USER_ASSERTION_HEADER_ENV_KEYS)) ??
       "x-hosted-user-assertion",
@@ -98,6 +116,17 @@ export function readHostedDeviceSyncEnvironment(source: NodeJS.ProcessEnv = proc
       oura: readConfiguredOuraDeviceSyncProviderConfig(source),
     },
   };
+}
+
+function buildFallbackAllowedOrigins(origin: string | null): string[] {
+  return origin ? [origin] : [];
+}
+
+function hasExplicitEnv(
+  source: NodeJS.ProcessEnv,
+  keys: readonly string[],
+): boolean {
+  return keys.some((key) => Object.prototype.hasOwnProperty.call(source, key) && source[key] !== undefined);
 }
 
 function readEnv(

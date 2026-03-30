@@ -46,6 +46,15 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.telegramWebhookSecret).toBe("telegram-secret");
   });
 
+  it("falls back to the Vercel production domain for the public base URL", () => {
+    const environment = readHostedOnboardingEnvironment(createProcessEnv({
+      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
+    }));
+
+    expect(environment.publicBaseUrl).toBe("https://www.withmurph.ai");
+  });
+
   it("reads hosted RevNet config when the full subscription configuration is present", () => {
     const environment = readHostedOnboardingEnvironment(createProcessEnv({
       DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,

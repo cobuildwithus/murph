@@ -50,6 +50,11 @@ describe("hosted onboarding landing helpers", () => {
         createProcessEnv({ HOSTED_ONBOARDING_PUBLIC_BASE_URL: "not-a-url" }),
       ),
     ).toBeNull();
+    expect(
+      resolveHostedInstallScriptUrl(
+        createProcessEnv({ VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai" }),
+      ),
+    ).toBe("https://www.withmurph.ai/install.sh");
   });
 });
 

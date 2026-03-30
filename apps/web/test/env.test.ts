@@ -62,6 +62,46 @@ describe("readHostedDeviceSyncEnvironment", () => {
     expect(environment.providers.oura?.scopes).toContain("custom");
   });
 
+  it("falls back to the Vercel production domain for hosted defaults", () => {
+    const environment = readHostedDeviceSyncEnvironment({
+      NODE_ENV: "test",
+      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
+    });
+
+    expect(environment.publicBaseUrl).toBe("https://www.withmurph.ai/api/device-sync");
+    expect(environment.allowedMutationOrigins).toEqual(["https://www.withmurph.ai"]);
+    expect(environment.allowedReturnOrigins).toEqual(["https://www.withmurph.ai"]);
+  });
+
+  it("preserves explicit device-sync values when a lower-priority hosted public URL is invalid", () => {
+    const environment = readHostedDeviceSyncEnvironment({
+      NODE_ENV: "test",
+      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://api.withmurph.ai/device-sync",
+      DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS: "https://www.withmurph.ai",
+      DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "https://www.withmurph.ai",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "not-a-url",
+    });
+
+    expect(environment.publicBaseUrl).toBe("https://api.withmurph.ai/device-sync");
+    expect(environment.allowedMutationOrigins).toEqual(["https://www.withmurph.ai"]);
+    expect(environment.allowedReturnOrigins).toEqual(["https://www.withmurph.ai"]);
+  });
+
+  it("preserves explicit empty allowlists instead of activating the canonical fallback origin", () => {
+    const environment = readHostedDeviceSyncEnvironment({
+      NODE_ENV: "test",
+      DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+      DEVICE_SYNC_ALLOWED_MUTATION_ORIGINS: "",
+      DEVICE_SYNC_ALLOWED_RETURN_ORIGINS: "",
+      VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
+    });
+
+    expect(environment.allowedMutationOrigins).toEqual([]);
+    expect(environment.allowedReturnOrigins).toEqual([]);
+  });
+
   it("requires DEVICE_SYNC_ENCRYPTION_KEY", () => {
     expect(() =>
       readHostedDeviceSyncEnvironment({
