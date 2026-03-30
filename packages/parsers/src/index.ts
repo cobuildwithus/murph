@@ -50,8 +50,6 @@ export type { WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";
 export { createWhisperCppProvider } from "./adapters/whisper-cpp.js";
 export type { PdfToTextProviderOptions } from "./adapters/pdftotext.js";
 export { createPdfToTextProvider } from "./adapters/pdftotext.js";
-export type { PaddleOcrProviderOptions } from "./adapters/paddleocr.js";
-export { createPaddleOcrProvider } from "./adapters/paddleocr.js";
 export { createTextFileProvider } from "./adapters/text-file.js";
 export type { PublishedParserArtifacts } from "./publish/writer.js";
 export { writeParserArtifacts } from "./publish/writer.js";
@@ -75,7 +73,6 @@ export { runAttachmentParseJobOnce, runAttachmentParseWorker } from "./pipelines
 export type { CommandResult } from "./shared.js";
 export { runCommand } from "./shared.js";
 
-import { createPaddleOcrProvider } from "./adapters/paddleocr.js";
 import { createPdfToTextProvider, type PdfToTextProviderOptions } from "./adapters/pdftotext.js";
 import { createTextFileProvider } from "./adapters/text-file.js";
 import { createWhisperCppProvider, type WhisperCppProviderOptions } from "./adapters/whisper-cpp.js";
@@ -84,7 +81,6 @@ import { createParserRegistry } from "./registry/registry.js";
 export interface DefaultParserRegistryOptions {
   whisper?: WhisperCppProviderOptions;
   pdf?: PdfToTextProviderOptions;
-  paddle?: import("./adapters/paddleocr.js").PaddleOcrProviderOptions;
 }
 
 export function createDefaultParserRegistry(options: DefaultParserRegistryOptions = {}) {
@@ -92,6 +88,5 @@ export function createDefaultParserRegistry(options: DefaultParserRegistryOption
     createTextFileProvider(),
     createWhisperCppProvider(options.whisper),
     createPdfToTextProvider(options.pdf),
-    createPaddleOcrProvider(options.paddle),
   ]);
 }

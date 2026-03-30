@@ -722,12 +722,6 @@ function makeBootstrapResult(vault: string, options?: {
           reason: 'whisper.cpp CLI and model path configured.',
           source: 'config' as const,
         },
-        paddleocr: {
-          available: true,
-          command: '/usr/local/bin/paddlex',
-          reason: 'PaddleOCR CLI available.',
-          source: 'config' as const,
-        },
       },
     },
     doctor: {
@@ -759,12 +753,6 @@ function makeBootstrapResult(vault: string, options?: {
                 command: options.whisperCommand ?? options.parserToolchainPath,
                 modelPath: options.whisperModelPath ?? options.parserToolchainPath,
                 reason: 'whisper.cpp CLI and model path configured.',
-                source: 'config' as const,
-              },
-              paddleocr: {
-                available: true,
-                command: options.parserToolchainPath,
-                reason: 'PaddleOCR CLI available.',
                 source: 'config' as const,
               },
             },
@@ -806,7 +794,6 @@ function makeSetupResult(
     toolchainRoot: '~/.murph/toolchain',
     tools: {
       ffmpegCommand: '/usr/local/bin/ffmpeg',
-      paddleocrCommand: '/usr/local/bin/paddlex',
       pdftotextCommand: '/usr/local/bin/pdftotext',
       whisperCommand: '/usr/local/bin/whisper-cli',
       whisperModelPath: '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
@@ -1022,10 +1009,6 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
           step.id === 'homebrew' &&
           (step.status === 'planned' || step.status === 'reused'),
       ),
-      true,
-    )
-    assert.equal(
-      data.steps.some((step) => step.id === 'paddlex-ocr' && step.status === 'skipped'),
       true,
     )
     assert.equal(
@@ -1909,7 +1892,6 @@ test.sequential('setup service configures Telegram and enables assistant auto-re
   try {
     const result = await services.setupMacos({
       channels: ['telegram'],
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -2076,7 +2058,6 @@ test.sequential('setup service keeps Telegram configured but disables auto-reply
   try {
     const result = await services.setupMacos({
       channels: ['telegram'],
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -2181,13 +2162,11 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
     poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
-    'python@3.12': path.join(tempRoot, 'Cellar', 'python@3.12'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
   const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
   const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
   const murphShimPath = path.join(homeRoot, '.local', 'bin', 'murph')
   const vaultCliShimPath = path.join(homeRoot, '.local', 'bin', 'vault-cli')
@@ -2201,7 +2180,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   await writeExecutable(ffmpegCommand)
   await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
-  await writeExecutable(pythonCommand)
 
   const services = createSetupServices({
     arch: () => 'arm64',
@@ -2253,32 +2231,6 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
           exitCode: 0,
           stderr: '',
           stdout: `${formulaPrefixes[formula]}\n`,
-        }
-      }
-
-      if (file === pythonCommand && args[0] === '-m' && args[1] === 'venv') {
-        const venvRoot = args[2] ?? ''
-        await writeExecutable(path.join(venvRoot, 'bin', 'python'))
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: 'venv created\n',
-        }
-      }
-
-      if (
-        path.basename(file) === 'python' &&
-        args[0] === '-m' &&
-        args[1] === 'pip' &&
-        args[2] === 'install'
-      ) {
-        if (args.includes('paddlex[ocr]')) {
-          await writeExecutable(path.join(path.dirname(file), 'paddlex'))
-        }
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: 'pip ok\n',
         }
       }
 
@@ -2355,23 +2307,10 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
       result.tools.whisperModelPath,
       '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
-    assert.match(
-      String(bootstrapCalls[0]?.paddleocrCommand),
-      /paddlex-ocr\/bin\/paddlex$/u,
-    )
     assert.equal(result.toolchainRoot, '~/.murph/toolchain')
-    assert.equal(
-      result.tools.paddleocrCommand,
-      '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex',
-    )
     assert.equal(installedFormulas.has('ffmpeg'), true)
     assert.equal(installedFormulas.has('poppler'), true)
     assert.equal(installedFormulas.has('whisper-cpp'), true)
-    assert.equal(installedFormulas.has('python@3.12'), true)
-    assert.equal(
-      result.steps.some((step) => step.id === 'paddlex-ocr' && step.status === 'completed'),
-      true,
-    )
     assert.equal(
       result.steps.some((step) => step.id === 'cli-shims' && step.status === 'completed'),
       true,
@@ -2455,13 +2394,11 @@ test.sequential('setup preserves saved OpenAI-compatible headers when re-saving 
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
     poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
-    'python@3.12': path.join(tempRoot, 'Cellar', 'python@3.12'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
   const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
 
   await saveAssistantOperatorDefaultsPatch(
     {
@@ -2496,7 +2433,6 @@ test.sequential('setup preserves saved OpenAI-compatible headers when re-saving 
   await writeExecutable(ffmpegCommand)
   await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
-  await writeExecutable(pythonCommand)
   await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
   await writeFile(expectedWhisperModelPath, 'model', 'utf8')
 
@@ -2566,7 +2502,6 @@ test.sequential('setup preserves saved OpenAI-compatible headers when re-saving 
         account: null,
         detail: 'Use gpt-oss:20b through Ollama.',
       },
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -2606,13 +2541,11 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
     ffmpeg: path.join(tempRoot, 'Cellar', 'ffmpeg'),
     poppler: path.join(tempRoot, 'Cellar', 'poppler'),
     'whisper-cpp': path.join(tempRoot, 'Cellar', 'whisper-cpp'),
-    'python@3.12': path.join(tempRoot, 'Cellar', 'python@3.12'),
   }
   const brewCommand = path.join(homebrewBin, 'brew')
   const ffmpegCommand = path.join(formulaPrefixes.ffmpeg, 'bin', 'ffmpeg')
   const pdftotextCommand = path.join(formulaPrefixes.poppler, 'bin', 'pdftotext')
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
-  const pythonCommand = path.join(formulaPrefixes['python@3.12'], 'bin', 'python3.12')
 
   await saveAssistantOperatorDefaultsPatch(
     {
@@ -2644,7 +2577,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   await writeExecutable(ffmpegCommand)
   await writeExecutable(pdftotextCommand)
   await writeExecutable(whisperCommand)
-  await writeExecutable(pythonCommand)
   await mkdir(path.dirname(expectedWhisperModelPath), { recursive: true })
   await writeFile(expectedWhisperModelPath, 'model', 'utf8')
 
@@ -2714,7 +2646,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
         account: null,
         detail: 'Use Codex CLI with gpt-5.4.',
       },
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -2744,7 +2675,6 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
         account: null,
         detail: 'Use Codex CLI with gpt-5.4.',
       },
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -3200,7 +3130,6 @@ test.sequential('setup service reuses an existing vault and still bootstraps inb
   try {
     const result = await services.setupMacos({
       requestId: 'req-existing',
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -3249,7 +3178,6 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
     'whisper',
     'ggml-base.en.bin',
   )
-  const homePaddle = path.join(homeRoot, '.murph', 'toolchain', 'venvs', 'paddlex-ocr', 'bin', 'paddlex')
   const siblingPrefixPath = path.join(tempRoot, 'homebrew', 'bin', 'ffmpeg')
   const installedFormulas = new Set(['ffmpeg', 'poppler', 'whisper-cpp'])
   let bootstrapCalls = 0
@@ -3277,14 +3205,14 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
           doctorChecks: [
             {
               details: {
-                artifactPaths: [homeWhisperModel, homePaddle, siblingPrefixPath],
+                artifactPaths: [homeWhisperModel, siblingPrefixPath],
               },
               message: 'Configured parser assets were discovered.',
               name: 'parser-assets',
               status: 'pass',
             },
           ],
-          parserToolchainPath: homePaddle,
+          parserToolchainPath: homeWhisperCommand,
           whisperCommand: homeWhisperCommand,
           whisperModelPath: homeWhisperModel,
         })
@@ -3324,7 +3252,6 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
 
   try {
     const result = await services.setupMacos({
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -3348,15 +3275,10 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
       result.bootstrap?.doctor.parserToolchain?.tools.whisper.modelPath,
       '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
-    assert.equal(
-      result.bootstrap?.doctor.parserToolchain?.tools.paddleocr.command,
-      '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex',
-    )
     assert.deepEqual(
       result.bootstrap?.doctor.checks[0]?.details?.artifactPaths,
       [
         '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
-        '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex',
         siblingPrefixPath,
       ],
     )
@@ -3676,7 +3598,6 @@ test.sequential('setup service dry-run on Linux keeps cross-platform channels an
       vault: './vault',
       channels: ['imessage', 'email'],
       dryRun: true,
-      skipOcr: true,
     })
 
     assert.equal(result.platform, 'linux')
@@ -3689,81 +3610,6 @@ test.sequential('setup service dry-run on Linux keeps cross-platform channels an
     assert.ok(result.steps.some((step) => step.id === 'channel-imessage' && step.status === 'skipped'))
   } finally {
     await rm(homeRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('Linux dry-run still plans PaddleX OCR when PATH Python lacks venv support', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-python-dryrun-'))
-  const homeRoot = path.join(tempRoot, 'home')
-  const binRoot = path.join(tempRoot, 'bin')
-  const ffmpegCommand = path.join(binRoot, 'ffmpeg')
-  const pdftotextCommand = path.join(binRoot, 'pdftotext')
-  const whisperCommand = path.join(binRoot, 'whisper-cli')
-  const pythonCommand = path.join(binRoot, 'python3')
-  const runCalls: Array<{ file: string; args: string[] }> = []
-
-  await writeExecutable(ffmpegCommand)
-  await writeExecutable(pdftotextCommand)
-  await writeExecutable(whisperCommand)
-  await writeExecutable(pythonCommand)
-
-  const services = createSetupServices({
-    arch: () => 'x64',
-    env: () => ({ PATH: binRoot }),
-    getHomeDirectory: () => homeRoot,
-    log() {},
-    platform: () => 'linux',
-    runCommand: async ({ file, args }) => {
-      runCalls.push({ args, file })
-      if (file === pythonCommand && args[0] === '-m' && args[1] === 'venv' && args[2] === '--help') {
-        return {
-          exitCode: 1,
-          stderr: 'venv unavailable\n',
-          stdout: '',
-        }
-      }
-
-      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
-    },
-  })
-
-  try {
-    const result = await services.setupHost({
-      dryRun: true,
-      vault: './vault',
-      whisperModel: 'base.en',
-    })
-
-    assert.equal(result.platform, 'linux')
-    assert.equal(
-      result.steps.some(
-        (step) =>
-          step.id === 'python' &&
-          step.status === 'planned' &&
-          /Would reuse Python 3 with venv support/u.test(step.detail),
-      ),
-      true,
-    )
-    assert.equal(
-      result.steps.some(
-        (step) =>
-          step.id === 'paddlex-ocr' &&
-          step.status === 'planned' &&
-          /Would create .*paddlex-ocr.*install paddlepaddle plus paddlex\[ocr\]/u.test(
-            step.detail,
-          ),
-      ),
-      true,
-    )
-    assert.equal(result.tools.paddleocrCommand, null)
-    assert.deepEqual(runCalls, [
-      {
-        args: ['-m', 'venv', '--help'],
-        file: pythonCommand,
-      },
-    ])
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
   }
 })
 
@@ -3870,7 +3716,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
 
   try {
     const result = await services.setupHost({
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })
@@ -3902,7 +3747,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
       result.tools.whisperModelPath,
       '~/.murph/toolchain/models/whisper/ggml-base.en.bin',
     )
-    assert.equal(result.tools.paddleocrCommand, null)
     assert.equal(
       result.steps.some(
         (step) => step.id === 'ffmpeg' && step.status === 'completed',
@@ -3920,224 +3764,6 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
         (step) => step.id === 'whisper-cpp' && step.status === 'completed',
       ),
       true,
-    )
-    assert.equal(
-      result.steps.some(
-        (step) =>
-          step.id === 'paddlex-ocr' &&
-          step.status === 'skipped' &&
-          step.detail === 'Skipped PaddleX OCR because --skipOcr was set.',
-      ),
-      true,
-    )
-    assert.equal(result.notes.includes('OCR installation was skipped by request.'), true)
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
-  }
-})
-
-test.sequential('Linux setup provisions Python OCR tooling through the shared requirement spec', async () => {
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-linux-ocr-'))
-  const homeRoot = path.join(tempRoot, 'home')
-  const vaultRoot = path.join(tempRoot, 'vault')
-  const binRoot = path.join(tempRoot, 'bin')
-  const aptGetCommand = path.join(binRoot, 'apt-get')
-  const sudoCommand = path.join(binRoot, 'sudo')
-  const ffmpegCommand = path.join(binRoot, 'ffmpeg')
-  const pdftotextCommand = path.join(binRoot, 'pdftotext')
-  const whisperCommand = path.join(binRoot, 'whisper-cli')
-  const pythonCommand = path.join(binRoot, 'python3')
-  const expectedWhisperModelPath = path.join(
-    homeRoot,
-    '.murph',
-    'toolchain',
-    'models',
-    'whisper',
-    'ggml-base.en.bin',
-  )
-  const expectedPaddlexCommand = path.join(
-    homeRoot,
-    '.murph',
-    'toolchain',
-    'venvs',
-    'paddlex-ocr',
-    'bin',
-    'paddlex',
-  )
-  const cliBinPath = path.join(tempRoot, 'packages', 'cli', 'dist', 'bin.js')
-  const runCalls: Array<{ file: string; args: string[] }> = []
-  const bootstrapCalls: Array<Record<string, unknown>> = []
-
-  await writeExecutable(aptGetCommand)
-  await writeExecutable(sudoCommand)
-
-  const services = createSetupServices({
-    arch: () => 'x64',
-    downloadFile: async (_url, destinationPath) => {
-      await mkdir(path.dirname(destinationPath), { recursive: true })
-      await writeFile(destinationPath, 'model', 'utf8')
-    },
-    env: () => ({ PATH: binRoot, SHELL: '/bin/bash' }),
-    getHomeDirectory: () => homeRoot,
-    inboxServices: {
-      async bootstrap(input) {
-        bootstrapCalls.push(input as unknown as Record<string, unknown>)
-        return makeBootstrapResult(vaultRoot, {
-          parserToolchainPath: expectedPaddlexCommand,
-          whisperCommand,
-          whisperModelPath: expectedWhisperModelPath,
-        })
-      },
-    },
-    log() {},
-    platform: () => 'linux',
-    resolveCliBinPath: () => cliBinPath,
-    runCommand: async ({ file, args }) => {
-      runCalls.push({ args, file })
-      const baseName = path.basename(file)
-      const isSudoCommand = baseName === 'sudo'
-      const aptArgs =
-        isSudoCommand ? args.slice(2) : baseName === 'apt-get' ? args : null
-
-      if (aptArgs) {
-        if (isSudoCommand) {
-          assert.deepEqual(args.slice(0, 2), ['-n', aptGetCommand])
-        }
-
-        if (aptArgs[0] === 'update') {
-          return {
-            exitCode: 0,
-            stderr: '',
-            stdout: 'updated\n',
-          }
-        }
-
-        if (aptArgs[0] === 'install' && aptArgs[1] === '-y') {
-          for (const packageName of aptArgs.slice(2)) {
-            if (packageName === 'ffmpeg') {
-              await writeExecutable(ffmpegCommand)
-            } else if (packageName === 'poppler-utils') {
-              await writeExecutable(pdftotextCommand)
-            } else if (packageName === 'whisper-cpp') {
-              await writeExecutable(whisperCommand)
-            } else if (packageName === 'python3') {
-              await writeExecutable(pythonCommand)
-            } else if (packageName !== 'python3-venv') {
-              throw new Error(`Unexpected apt package: ${packageName}`)
-            }
-          }
-          return {
-            exitCode: 0,
-            stderr: '',
-            stdout: 'installed\n',
-          }
-        }
-
-        throw new Error(`Unexpected apt args: ${aptArgs.join(' ')}`)
-      }
-
-      if (file === pythonCommand && args[0] === '-m' && args[1] === 'venv' && args[2] === '--help') {
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: 'venv help\n',
-        }
-      }
-
-      if (file === pythonCommand && args[0] === '-m' && args[1] === 'venv') {
-        const venvRoot = args[2] ?? ''
-        await writeExecutable(path.join(venvRoot, 'bin', 'python'))
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: 'venv created\n',
-        }
-      }
-
-      if (
-        path.basename(file) === 'python' &&
-        args[0] === '-m' &&
-        args[1] === 'pip' &&
-        args[2] === 'install'
-      ) {
-        if (args.includes('paddlex[ocr]')) {
-          await writeExecutable(path.join(path.dirname(file), 'paddlex'))
-        }
-        return {
-          exitCode: 0,
-          stderr: '',
-          stdout: 'pip ok\n',
-        }
-      }
-
-      throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
-    },
-    vaultServices: {
-      core: {
-        async init(input: { vault: string }) {
-          return {
-            created: true,
-            directories: [],
-            files: [],
-            vault: input.vault,
-          }
-        },
-      },
-    } as any,
-  })
-
-  try {
-    const result = await services.setupHost({
-      vault: vaultRoot,
-      whisperModel: 'base.en',
-    })
-
-    const normalizedAptCalls = runCalls
-      .filter(({ file }) => {
-        const baseName = path.basename(file)
-        return baseName === 'sudo' || baseName === 'apt-get'
-      })
-      .map(({ args, file }) => ({
-        args: path.basename(file) === 'sudo' ? args.slice(2) : args,
-        file: path.basename(file) === 'sudo' ? aptGetCommand : file,
-      }))
-
-    assert.equal(result.platform, 'linux')
-    assert.deepEqual(
-      normalizedAptCalls.map(({ args }) => args.join(' ')),
-      [
-        'update',
-        'install -y ffmpeg',
-        'install -y poppler-utils',
-        'install -y whisper-cpp',
-        'install -y python3 python3-venv',
-      ],
-    )
-    assert.equal(bootstrapCalls.length, 1)
-    assert.equal(bootstrapCalls[0]?.ffmpegCommand, ffmpegCommand)
-    assert.equal(bootstrapCalls[0]?.pdftotextCommand, pdftotextCommand)
-    assert.equal(bootstrapCalls[0]?.whisperCommand, whisperCommand)
-    assert.equal(bootstrapCalls[0]?.whisperModelPath, expectedWhisperModelPath)
-    assert.equal(bootstrapCalls[0]?.paddleocrCommand, expectedPaddlexCommand)
-    assert.equal(result.tools.paddleocrCommand, '~/.murph/toolchain/venvs/paddlex-ocr/bin/paddlex')
-    assert.equal(
-      result.steps.some(
-        (step) =>
-          step.id === 'python' &&
-          step.status === 'completed' &&
-          step.detail === 'Installed Python 3 with venv support through apt-get for OCR tooling.',
-      ),
-      true,
-    )
-    assert.equal(
-      result.steps.some(
-        (step) => step.id === 'paddlex-ocr' && step.status === 'completed',
-      ),
-      true,
-    )
-    assert.equal(
-      result.notes.includes('OCR installation was skipped by request.'),
-      false,
     )
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -4309,7 +3935,6 @@ test.sequential('Linux setup preserves existing iMessage state while adding Tele
   try {
     const result = await services.setupHost({
       channels: ['telegram'],
-      skipOcr: true,
       vault: vaultRoot,
       whisperModel: 'base.en',
     })

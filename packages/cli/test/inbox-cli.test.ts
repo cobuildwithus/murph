@@ -515,12 +515,6 @@ function createFakeParsersRuntimeModule(input?: {
         reason: string
         source: 'config' | 'env' | 'system' | 'missing'
       }
-      paddleocr: {
-        available: boolean
-        command: string | null
-        reason: string
-        source: 'config' | 'env' | 'system' | 'missing'
-      }
     }
   >()
 
@@ -545,12 +539,6 @@ function createFakeParsersRuntimeModule(input?: {
           command: null,
           modelPath: null,
           reason: 'Whisper model path is not configured.',
-          source: 'missing' as const,
-        },
-        paddleocr: {
-          available: false,
-          command: null,
-          reason: 'PaddleOCR CLI not found.',
           source: 'missing' as const,
         },
       }
@@ -723,20 +711,9 @@ function createFakeParsersRuntimeModule(input?: {
             : {}),
           ...(inputPayload.tools?.whisper?.modelPath
             ? {
-                modelPath: inputPayload.tools.whisper.modelPath,
-              }
-            : {}),
-        },
-        paddleocr: {
-          ...current.paddleocr,
-          ...(inputPayload.tools?.paddleocr?.command
-            ? {
-                available: true,
-                command: inputPayload.tools.paddleocr.command,
-                reason: 'PaddleOCR CLI available.',
-                source: 'config' as const,
-              }
-            : {}),
+              modelPath: inputPayload.tools.whisper.modelPath,
+            }
+          : {}),
         },
       }
 
@@ -1260,10 +1237,6 @@ test.sequential(
                 command: string | null
                 modelPath: string | null
               }
-              paddleocr: {
-                available: boolean
-                command: string | null
-              }
             }
           }
           doctor: {
@@ -1283,8 +1256,6 @@ test.sequential(
           '/opt/whisper-cli',
           '--whisperModelPath',
           './models/ggml-base.en.bin',
-          '--paddleocrCommand',
-          'paddleocr',
         ], services),
       )
 
@@ -1303,8 +1274,6 @@ test.sequential(
         bootstrapResult.setup.tools.whisper.modelPath,
         './models/ggml-base.en.bin',
       )
-      assert.equal(bootstrapResult.setup.tools.paddleocr.available, true)
-      assert.equal(bootstrapResult.setup.tools.paddleocr.command, 'paddleocr')
       assert.equal(bootstrapResult.doctor.ok, true)
       assert.equal(
         bootstrapResult.doctor.checks.some(
@@ -1318,9 +1287,6 @@ test.sequential(
         whisper: {
           command: '/opt/whisper-cli',
           modelPath: './models/ggml-base.en.bin',
-        },
-        paddleocr: {
-          command: 'paddleocr',
         },
       })
     } finally {
@@ -3613,7 +3579,17 @@ test.sequential('backfill can opt into parser drains while remaining queue-first
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: loadBuiltInboxRuntime,
     loadImessageDriver: async () =>
-      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-1',
+            fileName: 'toast.pdf',
+            path: fixture.photoPath,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
     loadParsersModule: async () => fakeParsers,
   })
 
@@ -3718,7 +3694,6 @@ test.sequential('inbox setup and doctor expose additive parser toolchain status'
       requestId: null,
       whisperCommand: '/opt/whisper-cli',
       whisperModelPath: './models/ggml-base.en.bin',
-      paddleocrCommand: 'paddleocr',
     })
 
     assert.equal(setupResult.configPath, '.runtime/parsers/toolchain.json')
@@ -3869,6 +3844,7 @@ test.sequential('inbox parse and requeue drive parser queue controls without rea
 
 test.sequential('attachment-specific inbox services preserve lookup and parse-status response shapes', async () => {
   const fixture = await makeVaultFixture('murph-inbox-attachment-services')
+  const pdfPath = path.join(fixture.vaultRoot, 'toast.pdf')
   const drainCalls: Array<{
     attachmentId?: string
     captureId?: string
@@ -3896,11 +3872,22 @@ test.sequential('attachment-specific inbox services preserve lookup and parse-st
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: loadBuiltInboxRuntime,
     loadImessageDriver: async () =>
-      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+      createFakeImessageDriver({
+        photoPath: fixture.photoPath,
+        attachments: [
+          {
+            guid: 'att-1',
+            fileName: 'toast.pdf',
+            path: pdfPath,
+            mimeType: 'application/pdf',
+          },
+        ],
+      }),
     loadParsersModule: async () => fakeParsers,
   })
 
   try {
+    await writeFile(pdfPath, 'pdf', 'utf8')
     await initializeImessageSource({
       services,
       vaultRoot: fixture.vaultRoot,
@@ -4097,6 +4084,54 @@ test.sequential('attachment parse helpers reject non-parseable attachments with 
       }),
       'INBOX_ATTACHMENT_PARSE_UNSUPPORTED',
     )
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true })
+    await rm(fixture.homeRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('image attachments no longer advertise local parse-queue support', async () => {
+  const fixture = await makeVaultFixture('murph-inbox-image-parse-unsupported')
+  const services = createIntegratedInboxServices({
+    getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
+    loadCoreModule: loadBuiltCoreRuntime,
+    loadInboxModule: loadBuiltInboxRuntime,
+    loadImessageDriver: async () =>
+      createFakeImessageDriver({ photoPath: fixture.photoPath }),
+  })
+
+  try {
+    await initializeImessageSource({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    await services.backfill({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      sourceId: 'imessage:self',
+    })
+
+    const captureId = await captureSingleCaptureId({
+      services,
+      vaultRoot: fixture.vaultRoot,
+    })
+    const listed = await services.listAttachments({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      captureId,
+    })
+    const attachmentId = listed.attachments[0]?.attachmentId
+    assert.ok(attachmentId)
+
+    const status = await services.showAttachmentStatus({
+      vault: fixture.vaultRoot,
+      requestId: null,
+      attachmentId,
+    })
+    assert.equal(status.parseable, false)
+    assert.equal(status.currentState, null)
+    assert.deepEqual(status.jobs, [])
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
     await rm(fixture.homeRoot, { recursive: true, force: true })

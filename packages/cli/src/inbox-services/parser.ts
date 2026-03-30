@@ -114,7 +114,6 @@ export function toCliParserToolchain(
         ...toCliParserToolStatus(doctor.tools.whisper),
         modelPath: redactSensitivePath(doctor.tools.whisper.modelPath),
       },
-      paddleocr: toCliParserToolStatus(doctor.tools.paddleocr),
     },
   }
 }
@@ -126,7 +125,6 @@ export function toParserToolChecks(
     toParserToolCheck('ffmpeg', tools.ffmpeg),
     toParserToolCheck('pdftotext', tools.pdftotext),
     toParserToolCheck('whisper', tools.whisper),
-    toParserToolCheck('paddleocr', tools.paddleocr),
   ]
 }
 

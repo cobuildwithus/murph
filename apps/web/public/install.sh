@@ -138,7 +138,6 @@ Installer options:
 
 Murph setup flags are forwarded automatically, including:
   --vault <path>
-  --skipOcr
   --whisperModel <model>
   --assistantPreset <preset>
   --assistantModel <model>
@@ -156,7 +155,7 @@ Murph setup flags are forwarded automatically, including:
 Examples:
   curl -fsSL --proto '=https' --tlsv1.2 https://YOUR_DOMAIN/install.sh | bash
   curl -fsSL --proto '=https' --tlsv1.2 https://YOUR_DOMAIN/install.sh | bash -s -- --no-onboard --vault ./vault
-  curl -fsSL --proto '=https' --tlsv1.2 https://YOUR_DOMAIN/install.sh | bash -s -- --install-method git --git-dir ~/murph --vault ./vault --skipOcr
+  curl -fsSL --proto '=https' --tlsv1.2 https://YOUR_DOMAIN/install.sh | bash -s -- --install-method git --git-dir ~/murph --vault ./vault
   curl -fsSL --proto '=https' --tlsv1.2 https://YOUR_DOMAIN/install.sh | bash -s -- --version beta --vault ./vault
 
 Environment variables:
@@ -991,7 +990,7 @@ print_plan() {
     echo "Murph args:     ${rendered_args% }"
   fi
   echo
-  echo "Murph setup itself will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, optional PaddleX OCR on supported hosts, your vault bootstrap, and user-level murph/vault-cli shims."
+  echo "Murph setup itself will provision or reuse ffmpeg, poppler/pdftotext, whisper.cpp, a local Whisper model, your vault bootstrap, and user-level murph/vault-cli shims."
 }
 
 main() {

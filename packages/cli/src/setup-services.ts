@@ -62,7 +62,6 @@ import {
 } from './assistant/provider-config.js'
 import {
   buildBaseFormulaSpecs,
-  buildPythonFormulaSpec,
   createStep,
   DEFAULT_TOOLCHAIN_DIRECTORY,
   resolveWhisperModelPath,
@@ -73,12 +72,10 @@ import {
 import {
   ensureBrewFormula,
   ensureHomebrew,
-  ensurePaddleXOcr,
   ensureWhisperModel,
   resolveExecutablePath,
 } from './setup-services/toolchain.js'
 import { describeSelectedSetupWearables } from './setup-runtime-env.js'
-import { errorMessage } from './inbox-services/shared.js'
 
 interface SetupInput {
   vault: string
@@ -94,7 +91,6 @@ interface SetupInput {
   toolchainRoot?: string
   wearables?: readonly SetupWearable[] | null
   whisperModel?: WhisperModel
-  skipOcr?: boolean
 }
 
 interface SetupServicesDependencies {
@@ -129,7 +125,6 @@ interface SetupProvisioningInput {
   log: (message: string) => void
   notes: string[]
   runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
-  skipOcr?: boolean
   steps: SetupStepResult[]
   toolchainRoot: string
   whisperModel: WhisperModel
@@ -233,7 +228,6 @@ export function createSetupServices(
             log,
             notes,
             runCommand,
-            skipOcr: input.skipOcr,
             steps,
             toolchainRoot,
             whisperModel,
@@ -247,7 +241,6 @@ export function createSetupServices(
             log,
             notes,
             runCommand,
-            skipOcr: input.skipOcr,
             steps,
             toolchainRoot,
             whisperModel,
@@ -302,7 +295,6 @@ export function createSetupServices(
 
       bootstrap = await inboxServices.bootstrap({
         ffmpegCommand: tools.ffmpegCommand ?? undefined,
-        paddleocrCommand: tools.paddleocrCommand ?? undefined,
         pdftotextCommand: tools.pdftotextCommand ?? undefined,
         rebuild: input.rebuild,
         requestId,
@@ -418,7 +410,6 @@ export function createSetupServices(
         pdftotextCommand: redactNullableHomePath(tools.pdftotextCommand, homeDirectory),
         whisperCommand: redactNullableHomePath(tools.whisperCommand, homeDirectory),
         whisperModelPath: redactHomePath(tools.whisperModelPath, homeDirectory),
-        paddleocrCommand: redactNullableHomePath(tools.paddleocrCommand, homeDirectory),
       },
       vault: redactHomePath(vault, homeDirectory),
       whisperModel,
@@ -437,45 +428,6 @@ export function createSetupServices(
   return {
     setupHost,
     setupMacos,
-  }
-}
-
-function addSkippedOcrStep(input: {
-  detail: string
-  note: string
-  notes: string[]
-  steps: SetupStepResult[]
-}): void {
-  input.steps.push(
-    createStep({
-      detail: input.detail,
-      id: 'paddlex-ocr',
-      kind: 'install',
-      status: 'skipped',
-      title: 'PaddleX OCR',
-    }),
-  )
-  input.notes.push(input.note)
-}
-
-function addLinuxPaddleXOcrStep(input: {
-  detail: string
-  note?: string
-  notes?: string[]
-  status: 'reused' | 'skipped'
-  steps: SetupStepResult[]
-}): void {
-  input.steps.push(
-    createStep({
-      detail: input.detail,
-      id: 'paddlex-ocr',
-      kind: 'install',
-      status: input.status,
-      title: 'PaddleX OCR',
-    }),
-  )
-  if (input.note && input.notes) {
-    input.notes.push(input.note)
   }
 }
 
@@ -600,46 +552,6 @@ async function provisionMacosToolchain(
 
   const whisperModelPath = await ensureProvisionedWhisperModel(input)
 
-  let paddleocrCommand: string | null = null
-  if (input.skipOcr) {
-    addSkippedOcrStep({
-      detail: 'Skipped PaddleX OCR because --skipOcr was set.',
-      note: 'OCR installation was skipped by request.',
-      notes: input.notes,
-      steps: input.steps,
-    })
-  } else if (input.arch !== 'arm64') {
-    addSkippedOcrStep({
-      detail:
-        'Skipped PaddleX OCR because current macOS Paddle wheels only support Apple Silicon.',
-      note:
-        'OCR was skipped because PaddlePaddle does not currently publish macOS x86_64 support.',
-      notes: input.notes,
-      steps: input.steps,
-    })
-  } else {
-    const pythonResult = await ensureMacosToolRequirement({
-      brewState: state,
-      dryRun: input.dryRun,
-      requirement: buildPythonFormulaSpec(),
-      runCommand: input.runCommand,
-      steps: input.steps,
-    })
-    state = {
-      ...state,
-      env: pythonResult.env,
-    }
-    paddleocrCommand = await ensurePaddleXOcr({
-      dryRun: input.dryRun,
-      env: state.env,
-      fileExists: input.fileExists,
-      pythonCommand: pythonResult.command,
-      runCommand: input.runCommand,
-      steps: input.steps,
-      toolchainRoot: input.toolchainRoot,
-    })
-  }
-
   return {
     env: state.env,
     tools: {
@@ -647,7 +559,6 @@ async function provisionMacosToolchain(
       pdftotextCommand: formulaCommands.pdftotextCommand,
       whisperCommand: formulaCommands.whisperCommand,
       whisperModelPath,
-      paddleocrCommand,
     },
   }
 }
@@ -677,75 +588,6 @@ async function provisionLinuxToolchain(
 
   const whisperModelPath = await ensureProvisionedWhisperModel(input)
 
-  let paddleocrCommand: string | null = null
-  if (input.skipOcr) {
-    addSkippedOcrStep({
-      detail: 'Skipped PaddleX OCR because --skipOcr was set.',
-      note: 'OCR installation was skipped by request.',
-      notes: input.notes,
-      steps: input.steps,
-    })
-  } else if (input.arch !== 'x64') {
-    addSkippedOcrStep({
-      detail:
-        'Skipped PaddleX OCR because automatic Linux OCR setup currently targets x86_64 hosts.',
-      note:
-        'OCR was skipped because automatic Linux PaddleX setup currently targets x86_64 hosts.',
-      notes: input.notes,
-      steps: input.steps,
-    })
-  } else {
-    const existingPaddlex = await resolveExecutablePath(['paddlex'], input.env)
-    if (existingPaddlex) {
-      addLinuxPaddleXOcrStep({
-        detail: `Reusing PaddleX OCR from ${existingPaddlex}.`,
-        status: 'reused',
-        steps: input.steps,
-      })
-      paddleocrCommand = existingPaddlex
-    } else {
-      const python = await ensureLinuxPythonCommand({
-        apt,
-        dryRun: input.dryRun,
-        env: input.env,
-        notes: input.notes,
-        runCommand: input.runCommand,
-        steps: input.steps,
-      })
-      apt = python.apt
-      if (python.command) {
-        try {
-          paddleocrCommand = await ensurePaddleXOcr({
-            dryRun: input.dryRun,
-            env: input.env,
-            fileExists: input.fileExists,
-            pythonCommand: python.command,
-            runCommand: input.runCommand,
-            steps: input.steps,
-            toolchainRoot: input.toolchainRoot,
-          })
-        } catch (error) {
-          addLinuxPaddleXOcrStep({
-            detail:
-              'Skipped PaddleX OCR because the Python environment could not install paddlex[ocr] automatically on this host.',
-            status: 'skipped',
-            steps: input.steps,
-          })
-          input.notes.push(
-            `OCR was skipped because automatic Linux PaddleX setup failed: ${errorMessage(error)}.`,
-          )
-        }
-      } else if (!input.dryRun) {
-        addLinuxPaddleXOcrStep({
-          detail:
-            'Skipped PaddleX OCR because Python 3 with venv support could not be resolved on this host.',
-          status: 'skipped',
-          steps: input.steps,
-        })
-      }
-    }
-  }
-
   return {
     env: input.env,
     tools: {
@@ -753,7 +595,6 @@ async function provisionLinuxToolchain(
       pdftotextCommand: resolvedCommands.pdftotextCommand,
       whisperCommand: resolvedCommands.whisperCommand,
       whisperModelPath,
-      paddleocrCommand,
     },
   }
 }
@@ -891,43 +732,6 @@ async function ensureLinuxCommand(input: {
     apt: install.apt,
     command: null,
   }
-}
-
-async function ensureLinuxPythonCommand(input: {
-  apt: AptRunnerState
-  dryRun: boolean
-  env: NodeJS.ProcessEnv
-  notes: string[]
-  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
-  steps: SetupStepResult[]
-}): Promise<{
-  apt: AptRunnerState
-  command: string | null
-}> {
-  return ensureLinuxToolRequirement({
-    apt: input.apt,
-    dryRun: input.dryRun,
-    env: input.env,
-    notes: input.notes,
-    requirement: buildPythonFormulaSpec(),
-    runCommand: input.runCommand,
-    steps: input.steps,
-    validateResolvedCommand: async ({ command, env, runCommand }) =>
-      pythonSupportsVenv(command, env, runCommand),
-  })
-}
-
-async function pythonSupportsVenv(
-  pythonCommand: string,
-  env: NodeJS.ProcessEnv,
-  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>,
-): Promise<boolean> {
-  const result = await runCommand({
-    args: ['-m', 'venv', '--help'],
-    env,
-    file: pythonCommand,
-  })
-  return result.exitCode === 0
 }
 
 async function resolveAptRunner(env: NodeJS.ProcessEnv): Promise<AptRunnerState> {

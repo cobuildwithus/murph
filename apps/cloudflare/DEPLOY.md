@@ -102,7 +102,6 @@ Optional non-secret provider/toolchain variables to expose through the worker an
 - `WHISPER_MODEL_PATH`
 - `FFMPEG_COMMAND`
 - `PDFTOTEXT_COMMAND`
-- `PADDLEOCR_COMMAND`
 - `WHISPER_COMMAND`
 
 ### Required environment secrets

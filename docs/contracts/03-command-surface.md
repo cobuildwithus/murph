@@ -151,7 +151,7 @@ vault-cli supplement list --vault <path> [--status <status>] [--limit <n>] [--re
 vault-cli supplement stop <protocolId> --vault <path> [--stopped-on <date>] [--request-id <id>]
 vault-cli supplement compound list --vault <path> [--status <status>] [--limit <n>] [--request-id <id>]
 vault-cli supplement compound show <compound> --vault <path> [--status <status>] [--request-id <id>]
-vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--paddleocrCommand <command>] [--request-id <id>]
+vault-cli inbox bootstrap --vault <path> [--rebuild] [--strict] [--ffmpegCommand <command>] [--pdftotextCommand <command>] [--whisperCommand <command>] [--whisperModelPath <path>] [--request-id <id>]
 vault-cli inbox attachment list <captureId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment show <attachmentId> --vault <path> [--request-id <id>]
 vault-cli inbox attachment show-status <attachmentId> --vault <path> [--request-id <id>]

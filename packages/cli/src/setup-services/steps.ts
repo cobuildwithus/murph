@@ -8,8 +8,6 @@ import type {
 
 export const DEFAULT_TOOLCHAIN_DIRECTORY = path.join('.murph', 'toolchain')
 export const DEFAULT_USER_BIN_DIRECTORY = path.join('.local', 'bin')
-export const PADDLEX_VENV_NAME = 'paddlex-ocr'
-export const PADDLEX_REQUIREMENT = 'paddlex[ocr]'
 export const BREW_INSTALL_COMMAND =
   'NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
 
@@ -129,33 +127,6 @@ export function buildBaseFormulaSpecs(): ToolRequirementSpec[] {
       },
     },
   ]
-}
-
-export function buildPythonFormulaSpec(): Omit<ToolRequirementSpec, 'key'> {
-  return {
-    commandCandidates: ['python3.12', 'python3', 'python'],
-    id: 'python',
-    linux: {
-      completedDetail:
-        'Installed Python 3 with venv support through apt-get for OCR tooling.',
-      installPackages: ['python3', 'python3-venv'],
-      missingNoteDetail:
-        'OCR setup could not resolve Python 3 with venv support automatically. Install python3 and python3-venv manually or rerun setup with apt/sudo access.',
-      missingPlanDetail:
-        'Would reuse Python 3 with venv support from PATH when available, or install python3 plus python3-venv via apt-get for OCR tooling.',
-      missingStepDetail:
-        'Python 3 with venv support was not found on PATH and Murph could not install it automatically.',
-      reuseDetail: (command) => `Reusing Python 3 from ${command} for OCR tooling.`,
-      title: 'Python 3',
-    },
-    macos: {
-      formula: 'python@3.12',
-      installDetail: 'Installed Python 3.12 through Homebrew for OCR tooling.',
-      missingPlanDetail:
-        'Would install Python 3.12 through Homebrew for OCR tooling.',
-      title: 'Python 3.12',
-    },
-  }
 }
 
 export function createStep(input: {

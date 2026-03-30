@@ -16,7 +16,6 @@ import {
   createConfiguredParserRegistry,
   createInboxParserService,
   createParsedInboxPipeline,
-  createPaddleOcrProvider,
   createParserRegistry,
   createPdfToTextProvider,
   createTextFileProvider,
@@ -536,161 +535,6 @@ test("whisper.cpp provider rejects stdout-only logs when no transcript artifact 
       scratchDirectory: directory,
     }),
     /whisper\.cpp did not produce a transcript file/u,
-  );
-});
-
-test("PaddleOCR provider discovers explicit executables and harvests OCR artifacts", async () => {
-  const directory = await makeTempDirectory("murph-parser-paddleocr");
-  const executablePath = await writeExecutableFile(
-    directory,
-    "fake-paddleocr",
-    [
-      "#!/usr/bin/env node",
-      "const fs = require('node:fs');",
-      "const path = require('node:path');",
-      "const outputArg = process.argv.slice(2).find((arg) => arg.startsWith('--output='));",
-      "const outputDirectory = outputArg ? outputArg.slice('--output='.length) : process.cwd();",
-      "fs.mkdirSync(outputDirectory, { recursive: true });",
-      "fs.writeFileSync(path.join(outputDirectory, 'page1.md'), '# Receipt\\n\\nMilk\\n', 'utf8');",
-      "fs.writeFileSync(path.join(outputDirectory, 'page1.txt'), 'Milk\\nEggs\\n', 'utf8');",
-      "fs.writeFileSync(",
-      "  path.join(outputDirectory, 'page1.json'),",
-      "  JSON.stringify({ markdownText: '## Extra', rec_texts: ['Scanned', 'text'], tableRows: [['Item', 'Qty'], ['Milk', '1']] }),",
-      "  'utf8',",
-      ");",
-      "process.stdout.write('stdout ocr');",
-    ].join("\n"),
-  );
-  const inputPath = await writeExternalFile(directory, "receipt.png", "png-placeholder");
-  const provider = createPaddleOcrProvider({
-    commandCandidates: [executablePath],
-  });
-
-  assert.deepEqual(await provider.discover(), {
-    available: true,
-    reason: "PaddleOCR CLI available.",
-    executablePath,
-  });
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_image_support",
-        attachmentId: "att_image_support",
-        kind: "image",
-        fileName: "receipt.png",
-        mime: "image/png",
-        storedPath: "raw/inbox/example/receipt.png",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    true,
-  );
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_docx_support",
-        attachmentId: "att_docx_support",
-        kind: "document",
-        fileName: "statement.docx",
-        mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        storedPath: "raw/inbox/example/statement.docx",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    false,
-  );
-
-  const result = await provider.run({
-    intent: "attachment_text",
-    artifact: {
-      captureId: "cap_image_run",
-      attachmentId: "att_image_run",
-      kind: "image",
-      fileName: "receipt.png",
-      mime: "image/png",
-      storedPath: "raw/inbox/example/receipt.png",
-      absolutePath: inputPath,
-    },
-    inputPath,
-    scratchDirectory: directory,
-  });
-
-  assert.match(result.text, /Milk/u);
-  assert.match(result.text, /Scanned text/u);
-  assert.doesNotMatch(result.text, /stdout ocr/u);
-  assert.equal(result.tables?.length, 1);
-  assert.deepEqual(result.tables?.[0]?.rows, [
-    ["Item", "Qty"],
-    ["Milk", "1"],
-  ]);
-  assert.equal(result.metadata?.pageCount, 2);
-});
-
-test("PaddleOCR provider rejects stdout-only logs when no structured output files are written", async () => {
-  const directory = await makeTempDirectory("murph-parser-paddle-logs");
-  const imagePath = await writeExternalFile(directory, "scan.png", "image-placeholder");
-  const commandPath = await writeExecutableFile(
-    directory,
-    "fake-paddle.sh",
-    ['#!/usr/bin/env bash', 'echo "INFO: OCR complete"', "exit 0"].join("\n"),
-  );
-  const provider = createPaddleOcrProvider({
-    commandCandidates: [commandPath],
-  });
-
-  await assert.rejects(
-    provider.run({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_paddle_logs",
-        attachmentId: "att_paddle_logs",
-        kind: "image",
-        fileName: "scan.png",
-        mime: "image/png",
-        storedPath: "raw/inbox/example/scan.png",
-        absolutePath: imagePath,
-      },
-      inputPath: imagePath,
-      scratchDirectory: directory,
-    }),
-    /PaddleOCR did not produce extractable text/u,
-  );
-});
-
-test("PaddleOCR no longer claims PDF attachments", async () => {
-  const directory = await makeTempDirectory("murph-parser-paddle-mime-pdf");
-  const executablePath = await writeExecutableFile(
-    directory,
-    "fake-paddleocr-mime-pdf",
-    "#!/usr/bin/env node\nprocess.exit(0);\n",
-  );
-  const inputPath = await writeExternalFile(directory, "receipt.bin", "pdf-placeholder");
-  const provider = createPaddleOcrProvider({
-    commandCandidates: [executablePath],
-  });
-
-  assert.equal(
-    provider.supports({
-      intent: "attachment_text",
-      artifact: {
-        captureId: "cap_pdf_mime_support",
-        attachmentId: "att_pdf_mime_support",
-        kind: "document",
-        fileName: "receipt.bin",
-        mime: "application/pdf",
-        storedPath: "raw/inbox/example/receipt.bin",
-        absolutePath: inputPath,
-      },
-      inputPath,
-      scratchDirectory: directory,
-    }),
-    false,
   );
 });
 
@@ -1365,7 +1209,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
   const sourceRoot = await makeTempDirectory("murph-parser-worker-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "meal-photo.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "meal-photo.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -1383,10 +1227,10 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "meal-photo.png",
+        fileName: "meal-photo.pdf",
       },
     ],
     raw: {},
@@ -1407,7 +1251,7 @@ test("attachment parse worker consumes inbox jobs, writes derived artifacts, and
       };
     },
     supports(request) {
-      return (request.preparedKind ?? request.artifact.kind) === "image";
+      return (request.preparedKind ?? request.artifact.kind) === "document";
     },
     async run() {
       return {
@@ -1481,7 +1325,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
   const sourceRoot = await makeTempDirectory("murph-parser-worker-race-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "race.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "race.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -1499,10 +1343,10 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "race.png",
+        fileName: "race.pdf",
       },
     ],
     raw: {},
@@ -1528,7 +1372,7 @@ test("stale running parser attempts do not overwrite a requeued rerun", async ()
         };
       },
       supports(request) {
-        return (request.preparedKind ?? request.artifact.kind) === "image";
+        return (request.preparedKind ?? request.artifact.kind) === "document";
       },
       async run() {
         runCount += 1;
@@ -1671,7 +1515,7 @@ test("attachment parse worker marks jobs failed when no provider is available", 
   const sourceRoot = await makeTempDirectory("murph-parser-worker-fail-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "scan.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "scan.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -1689,10 +1533,10 @@ test("attachment parse worker marks jobs failed when no provider is available", 
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "scan.png",
+        fileName: "scan.pdf",
       },
     ],
     raw: {},
@@ -1726,8 +1570,8 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
   const sourceRoot = await makeTempDirectory("murph-parser-worker-scoped-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstPath = await writeExternalFile(sourceRoot, "first.png", "first-image");
-  const secondPath = await writeExternalFile(sourceRoot, "second.png", "second-image");
+  const firstPath = await writeExternalFile(sourceRoot, "first.pdf", "first-document");
+  const secondPath = await writeExternalFile(sourceRoot, "second.pdf", "second-document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -1744,10 +1588,10 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: firstPath,
-        fileName: "first.png",
+        fileName: "first.pdf",
       },
     ],
     raw: {},
@@ -1765,10 +1609,10 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: secondPath,
-        fileName: "second.png",
+        fileName: "second.pdf",
       },
     ],
     raw: {},
@@ -1788,7 +1632,7 @@ test("attachment parse worker can drain jobs scoped to a single capture", async 
         };
       },
       supports(request) {
-        return (request.preparedKind ?? request.artifact.kind) === "image";
+        return (request.preparedKind ?? request.artifact.kind) === "document";
       },
       async run() {
         return {
@@ -1822,7 +1666,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
   const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "auto-parse.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "auto-parse.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createParsedInboxPipeline({
     vaultRoot,
@@ -1841,7 +1685,7 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "image";
+          return (request.preparedKind ?? request.artifact.kind) === "document";
         },
         async run() {
           return {
@@ -1865,10 +1709,10 @@ test("parsed inbox pipeline auto-drains parser jobs for each processed capture",
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "auto-parse.png",
+        fileName: "auto-parse.pdf",
       },
     ],
     raw: {},
@@ -1894,7 +1738,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-startup-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "startup.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "startup.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -1911,10 +1755,10 @@ test("daemon with parsers drains pending jobs before connector watch work begins
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "startup.png",
+        fileName: "startup.pdf",
       },
     ],
     raw: {},
@@ -1964,7 +1808,7 @@ test("daemon with parsers drains pending jobs before connector watch work begins
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "image";
+          return (request.preparedKind ?? request.artifact.kind) === "document";
         },
         async run() {
           return {
@@ -1997,7 +1841,7 @@ test("daemon with parsers skips startup drain when the signal is already aborted
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-aborted-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "aborted.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "aborted.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2014,10 +1858,10 @@ test("daemon with parsers skips startup drain when the signal is already aborted
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "aborted.png",
+        fileName: "aborted.pdf",
       },
     ],
     raw: {},
@@ -2070,8 +1914,8 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
   const sourceRoot = await makeTempDirectory("murph-parsed-daemon-abort-mid-drain-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstPath = await writeExternalFile(sourceRoot, "first.png", "first-image");
-  const secondPath = await writeExternalFile(sourceRoot, "second.png", "second-image");
+  const firstPath = await writeExternalFile(sourceRoot, "first.pdf", "first-document");
+  const secondPath = await writeExternalFile(sourceRoot, "second.pdf", "second-document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2088,10 +1932,10 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: firstPath,
-        fileName: "first.png",
+        fileName: "first.pdf",
       },
     ],
     raw: {},
@@ -2109,10 +1953,10 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: secondPath,
-        fileName: "second.png",
+        fileName: "second.pdf",
       },
     ],
     raw: {},
@@ -2140,7 +1984,7 @@ test("daemon with parsers stops startup drain after abort between jobs", async (
           };
         },
         supports(request) {
-          return (request.preparedKind ?? request.artifact.kind) === "image";
+          return (request.preparedKind ?? request.artifact.kind) === "document";
         },
         async run() {
           parseCount += 1;
@@ -2296,7 +2140,7 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
   const sourceRoot = await makeTempDirectory("murph-parsed-pipeline-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "auto-fail.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "auto-fail.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createParsedInboxPipeline({
     vaultRoot,
@@ -2317,10 +2161,10 @@ test("parsed inbox pipeline stores captures even when auto-drain parsing fails",
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "auto-fail.png",
+        fileName: "auto-fail.pdf",
       },
     ],
     raw: {},
@@ -2354,7 +2198,7 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
   const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "unknown-image.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "unknown-document.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2372,10 +2216,10 @@ test("attachment parse worker marks jobs failed when no provider can handle the 
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "unknown-image.png",
+        fileName: "unknown-document.pdf",
       },
     ],
     raw: {},
@@ -2494,7 +2338,7 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
   const sourceRoot = await makeTempDirectory("murph-parser-rebuild-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "receipt.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "receipt.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2512,10 +2356,10 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "receipt.png",
+        fileName: "receipt.pdf",
       },
     ],
     raw: {},
@@ -2534,8 +2378,8 @@ test("successful parser results stay derived-only and rebuild re-enqueues work f
           reason: "available for rebuild test",
         };
       },
-      supports(request) {
-        return (request.preparedKind ?? request.artifact.kind) === "image";
+        supports(request) {
+          return (request.preparedKind ?? request.artifact.kind) === "document";
       },
       async run() {
         return {
@@ -2604,7 +2448,7 @@ test("attachment parse worker redacts local paths from stored failure messages",
   const sourceRoot = await makeTempDirectory("murph-parser-worker-failure-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "failure-image.png", "image-bytes-placeholder");
+  const imagePath = await writeExternalFile(sourceRoot, "failure-document.pdf", "document-placeholder");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -2622,10 +2466,10 @@ test("attachment parse worker redacts local paths from stored failure messages",
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: imagePath,
-        fileName: "failure-image.png",
+        fileName: "failure-document.pdf",
       },
     ],
     raw: {},
