@@ -69,9 +69,11 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "README.md" \
   "package.json" \
   "pnpm-workspace.yaml" \
+  "tsconfig.test-runtime.json" \
   "tsconfig.json" \
   "tsconfig.base.json" \
   "tsconfig.tools.json" \
+  "vitest.config.ts" \
   ".gitignore"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
   "config" \

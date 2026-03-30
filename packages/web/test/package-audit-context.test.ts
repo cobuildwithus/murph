@@ -95,6 +95,14 @@ test("audit packaging includes root deploy artifacts and config helpers while pr
       ),
       "expected audit bundle to include apps/cloudflare/wrangler.jsonc",
     );
+    assert.ok(
+      entries.includes("vitest.config.ts"),
+      "expected audit bundle to include the root vitest.config.ts",
+    );
+    assert.ok(
+      entries.includes("tsconfig.test-runtime.json"),
+      "expected audit bundle to include tsconfig.test-runtime.json",
+    );
     assert.equal(
       entries.some((entry) => /(^|\/)apps\/web\/\.next-dev\//u.test(entry)),
       false,
