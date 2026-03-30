@@ -67,6 +67,10 @@ const BLOOD_TEST_RESULT_COMPARATORS = ["<", "<=", ">", ">="] as const;
 const KNOWN_BLOOD_TEST_SPECIMEN_TYPES = new Set<string>(BLOOD_TEST_SPECIMEN_TYPES);
 
 type HistorySourceRecord = Record<string, unknown>;
+type StoredHistoryEventEntry = {
+  relativePath: string;
+  record: HistoryEventRecord;
+};
 
 type EncounterHistoryFields = Pick<
   EncounterHistoryEventRecord,
@@ -122,6 +126,9 @@ function normalizeBaseEvent(
     recordedAt,
     dayKey: toLocalDayKey(occurredAt, timeZone ?? defaultTimeZone(), "occurredAt"),
     timeZone,
+    lifecycle: {
+      revision: 1,
+    },
     source: optionalEnum(input.source ?? "manual", HEALTH_HISTORY_SOURCES, "source") ?? "manual",
     title: requireString(input.title, "title", 160),
     note: optionalString(input.note, "note", 4000),
@@ -484,6 +491,18 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     return null;
   }
 
+  const lifecycle = normalizeLifecycle(value.lifecycle);
+  if (
+    Object.prototype.hasOwnProperty.call(value, "lifecycle") &&
+    value.lifecycle !== undefined &&
+    lifecycle === undefined
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_HISTORY_EVENT",
+      "Stored health history event has an invalid lifecycle.",
+    );
+  }
+
   const baseRecord = {
     schemaVersion: requireString(value.schemaVersion, "schemaVersion", 40) as "murph.event.v1",
     id: requireString(value.id, "id", 64),
@@ -492,6 +511,7 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
     recordedAt: normalizeTimestamp(value.recordedAt as string, "recordedAt"),
     dayKey: requireString(value.dayKey, "dayKey", 10),
     timeZone: normalizeTimeZone(optionalString(value.timeZone, "timeZone", 64)),
+    lifecycle,
     source: optionalEnum(value.source, HEALTH_HISTORY_SOURCES, "source") ?? "manual",
     title: requireString(value.title, "title", 160),
     note: optionalString(value.note, "note", 4000),
@@ -513,6 +533,100 @@ function parseStoredHistoryEvent(value: unknown): HistoryEventRecord | null {
   }
 
   return result.data as HistoryEventRecord;
+}
+
+function normalizeLifecycle(
+  value: unknown,
+): HistoryEventRecord["lifecycle"] | undefined {
+  if (!isPlainRecord(value)) {
+    return undefined;
+  }
+
+  const revision = value.revision;
+  if (
+    typeof revision !== "number" ||
+    !Number.isInteger(revision) ||
+    revision < 1
+  ) {
+    return undefined;
+  }
+
+  const state = optionalString(value.state, "lifecycle.state", 32);
+  if (state && state !== "deleted") {
+    return undefined;
+  }
+
+  return stripUndefined({
+    revision,
+    state: state as "deleted" | undefined,
+  });
+}
+
+function historyEventRevision(record: Pick<HistoryEventRecord, "lifecycle">): number {
+  return record.lifecycle?.revision ?? 1;
+}
+
+function isDeletedHistoryEvent(record: Pick<HistoryEventRecord, "lifecycle">): boolean {
+  return record.lifecycle?.state === "deleted";
+}
+
+function compareStoredHistoryEntries(left: StoredHistoryEventEntry, right: StoredHistoryEventEntry): number {
+  const revisionComparison = historyEventRevision(left.record) - historyEventRevision(right.record);
+  if (revisionComparison !== 0) {
+    return revisionComparison;
+  }
+
+  const recordedAtComparison = left.record.recordedAt.localeCompare(right.record.recordedAt);
+  if (recordedAtComparison !== 0) {
+    return recordedAtComparison;
+  }
+
+  const occurredAtComparison = left.record.occurredAt.localeCompare(right.record.occurredAt);
+  if (occurredAtComparison !== 0) {
+    return occurredAtComparison;
+  }
+
+  return left.relativePath.localeCompare(right.relativePath);
+}
+
+function collapseStoredHistoryEntries(
+  entries: readonly StoredHistoryEventEntry[],
+): StoredHistoryEventEntry[] {
+  const latestById = new Map<string, StoredHistoryEventEntry>();
+
+  for (const entry of entries) {
+    const current = latestById.get(entry.record.id);
+    if (!current || compareStoredHistoryEntries(current, entry) < 0) {
+      latestById.set(entry.record.id, entry);
+    }
+  }
+
+  return [...latestById.values()].filter((entry) => !isDeletedHistoryEvent(entry.record));
+}
+
+async function loadStoredHistoryEntries(vaultRoot: string): Promise<StoredHistoryEventEntry[]> {
+  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const entries: StoredHistoryEventEntry[] = [];
+
+  for (const relativePath of shardPaths) {
+    const shardRecords = await readJsonlRecords({ vaultRoot, relativePath });
+
+    for (const shardRecord of shardRecords) {
+      const parsed = parseStoredHistoryEvent(shardRecord);
+      if (!parsed) {
+        continue;
+      }
+
+      entries.push({
+        relativePath,
+        record: parsed,
+      });
+    }
+  }
+
+  return entries;
 }
 
 function normalizeOrder(order: HistoryEventOrder | undefined): HistoryEventOrder {
@@ -634,40 +748,27 @@ export async function listHistoryEvents({
   const normalizedLimit = normalizeLimit(limit);
   const fromTimestamp = from ? normalizeTimestamp(from, "from") : null;
   const toTimestamp = to ? normalizeTimestamp(to, "to") : null;
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
-
   const records: HistoryEventRecord[] = [];
+  const latestEntries = collapseStoredHistoryEntries(await loadStoredHistoryEntries(vaultRoot));
 
-  for (const relativePath of shardPaths) {
-    const shardRecords = await readJsonlRecords({ vaultRoot, relativePath });
-
-    for (const shardRecord of shardRecords) {
-      const parsed = parseStoredHistoryEvent(shardRecord);
-
-      if (!parsed) {
-        continue;
-      }
-
-      if (kindFilter && !kindFilter.has(parsed.kind)) {
-        continue;
-      }
-
-      if (sourceFilter && parsed.source !== sourceFilter) {
-        continue;
-      }
-
-      if (fromTimestamp && parsed.occurredAt < fromTimestamp) {
-        continue;
-      }
-
-      if (toTimestamp && parsed.occurredAt > toTimestamp) {
-        continue;
-      }
-
-      records.push(parsed);
+  for (const { record } of latestEntries) {
+    if (kindFilter && !kindFilter.has(record.kind)) {
+      continue;
     }
+
+    if (sourceFilter && record.source !== sourceFilter) {
+      continue;
+    }
+
+    if (fromTimestamp && record.occurredAt < fromTimestamp) {
+      continue;
+    }
+
+    if (toTimestamp && record.occurredAt > toTimestamp) {
+      continue;
+    }
+
+    records.push(record);
   }
 
   records.sort((left, right) => compareIsoTimestamps(left, right, normalizedOrder));
@@ -685,29 +786,12 @@ export async function readHistoryEvent({
     throw new VaultError("VAULT_INVALID_INPUT", "eventId is required.");
   }
 
-  const shardPaths = await walkVaultFiles(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
-    extension: ".jsonl",
-  });
+  const latestEntry = collapseStoredHistoryEntries(await loadStoredHistoryEntries(vaultRoot)).find(
+    ({ record }) => record.id === normalizedEventId,
+  );
 
-  for (const relativePath of shardPaths) {
-    const shardRecords = await readJsonlRecords({ vaultRoot, relativePath });
-
-    for (const shardRecord of shardRecords) {
-      if (!isPlainRecord(shardRecord) || shardRecord.id !== normalizedEventId) {
-        continue;
-      }
-
-      const parsed = parseStoredHistoryEvent(shardRecord);
-
-      if (!parsed) {
-        throw new VaultError("VAULT_INVALID_HISTORY_EVENT", "Stored health history event is malformed.");
-      }
-
-      return {
-        relativePath,
-        record: parsed,
-      };
-    }
+  if (latestEntry) {
+    return latestEntry;
   }
 
   throw new VaultError("VAULT_HISTORY_EVENT_MISSING", "Health history event was not found.");

@@ -184,6 +184,7 @@ export async function applyStripeSubscriptionUpdated(
   if (previousEntitlement.accessAllowed && !nextEntitlement.accessAllowed) {
     await revokeHostedSessionsForMember({
       memberId: updatedMember.id,
+      now: dispatchContext.eventCreatedAt,
       prisma,
       reason: `billing_status:${updatedMember.billingStatus}`,
     });
@@ -708,6 +709,7 @@ async function suspendHostedMemberForBillingReversal(input: {
 
   await revokeHostedSessionsForMember({
     memberId: updatedMember.id,
+    now: input.dispatchContext.eventCreatedAt,
     prisma: input.prisma,
     reason: `billing_reversal:${input.reason}`,
   });

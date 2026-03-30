@@ -223,8 +223,8 @@ export function resolveReviewGptWorkspaceRoot(input: {
   vault: string
 }): string {
   const candidates = [
-    process.cwd(),
     input.vault,
+    process.cwd(),
     WORKSPACE_ROOT_CANDIDATE,
   ]
 

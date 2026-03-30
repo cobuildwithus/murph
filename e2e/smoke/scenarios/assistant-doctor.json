@@ -1,6 +1,6 @@
 {
   "id": "assistant-doctor",
-  "command": "vault-cli assistant doctor --vault <path> [--request-id <id>]",
+  "command": "vault-cli assistant doctor --vault <path> [--repair] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

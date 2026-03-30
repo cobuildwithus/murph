@@ -236,7 +236,6 @@ export function isParseableAttachment(
   return (
     attachment.kind === 'audio' ||
     attachment.kind === 'document' ||
-    attachment.kind === 'image' ||
     attachment.kind === 'video'
   )
 }

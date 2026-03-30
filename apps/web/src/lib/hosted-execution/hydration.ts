@@ -257,14 +257,17 @@ function validateHydratedHostedExecutionDispatch(
 export function isPermanentHostedExecutionHydrationError(
   error: unknown,
 ): error is HostedExecutionHydrationError {
+  const code =
+    error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+
   return Boolean(
     error &&
       typeof error === "object" &&
       "code" in error &&
       "permanent" in error &&
       "retryable" in error &&
-      typeof (error as { code?: unknown }).code === "string" &&
-      (error as { code?: string }).code.length > 0 &&
+      typeof code === "string" &&
+      code.length > 0 &&
       (error as { permanent?: unknown }).permanent === true &&
       (error as { retryable?: unknown }).retryable === false,
   );

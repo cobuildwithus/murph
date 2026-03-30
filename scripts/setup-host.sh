@@ -139,7 +139,6 @@ print_linux_install_plan() {
   printf '  - pnpm@%s via corepack\n' "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
-  printf '%s\n' '  - PaddleX OCR on Linux x86_64 unless you pass --skip-ocr'
   printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
   printf '%s\n' '  - iMessage stays macOS-only; Linux keeps the rest of Murph available for server or VM deployments'
 }

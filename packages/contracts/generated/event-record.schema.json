@@ -104,6 +104,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -245,6 +264,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -378,6 +416,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },
@@ -533,6 +590,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -666,6 +742,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -790,6 +885,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },
@@ -925,6 +1039,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },
@@ -1068,6 +1201,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -1205,6 +1357,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -1335,6 +1506,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },
@@ -1472,6 +1662,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },
@@ -1736,6 +1945,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -1951,6 +2179,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -2087,6 +2334,25 @@
           ],
           "additionalProperties": false
         },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
+          ],
+          "additionalProperties": false
+        },
         "timeZone": {
           "type": "string",
           "minLength": 3,
@@ -2218,6 +2484,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },
@@ -2360,6 +2645,25 @@
             "system",
             "resourceType",
             "resourceId"
+          ],
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "deleted"
+              ]
+            }
+          },
+          "required": [
+            "revision"
           ],
           "additionalProperties": false
         },

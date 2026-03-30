@@ -33,7 +33,9 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
       snapshotId: string
       currentProfilePath: string
       profile: {
-        topGoalIds: string[]
+        goals: {
+          topGoalIds: string[]
+        }
       }
     }>(
       ['profile', 'upsert', '--input', '-', '--vault', vaultRoot],
@@ -41,8 +43,9 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
         stdin: JSON.stringify({
           source: 'manual',
           profile: {
-            domains: ['sleep'],
-            topGoalIds: [goalId],
+            goals: {
+              topGoalIds: [goalId],
+            },
           },
         }),
       },
@@ -54,7 +57,7 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
       requireData(profileUpsert).currentProfilePath,
       'bank/profile/current.md',
     )
-    assert.deepEqual(requireData(profileUpsert).profile.topGoalIds, [goalId])
+    assert.deepEqual(requireData(profileUpsert).profile.goals.topGoalIds, [goalId])
 
     const profileShow = await runCli<{
       entity: {

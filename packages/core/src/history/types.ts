@@ -2,11 +2,15 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_SPECIMEN_TYPES,
+  EVENT_SOURCES,
+  HEALTH_HISTORY_EVENT_KINDS,
 } from "@murph/contracts";
 
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
+  EventSource,
+  HealthHistoryEventKind,
 } from "@murph/contracts";
 import type { DateInput } from "../types.ts";
 
@@ -15,28 +19,17 @@ export type {
   BloodTestResultRecord,
 } from "@murph/contracts";
 
-export const HEALTH_HISTORY_KINDS = [
-  "encounter",
-  "procedure",
-  "test",
-  "adverse_effect",
-  "exposure",
-] as const;
+export const HEALTH_HISTORY_KINDS = HEALTH_HISTORY_EVENT_KINDS;
 
-export const HEALTH_HISTORY_SOURCES = [
-  "manual",
-  "import",
-  "device",
-  "derived",
-] as const;
+export const HEALTH_HISTORY_SOURCES = EVENT_SOURCES;
 
 export const HISTORY_EVENT_ORDER = ["asc", "desc"] as const;
 export const PROCEDURE_STATUSES = ["planned", "completed", "cancelled"] as const;
 export const TEST_STATUSES = ["pending", "normal", "abnormal", "mixed", "unknown"] as const;
 export const ADVERSE_EFFECT_SEVERITIES = ["mild", "moderate", "severe"] as const;
 
-export type HistoryEventKind = (typeof HEALTH_HISTORY_KINDS)[number];
-export type HistoryEventSource = (typeof HEALTH_HISTORY_SOURCES)[number];
+export type HistoryEventKind = HealthHistoryEventKind;
+export type HistoryEventSource = EventSource;
 export type HistoryEventOrder = (typeof HISTORY_EVENT_ORDER)[number];
 export type ProcedureStatus = (typeof PROCEDURE_STATUSES)[number];
 export type TestResultStatus = (typeof TEST_STATUSES)[number];
@@ -53,6 +46,10 @@ export interface HistoryEventBase {
   recordedAt: string;
   dayKey: string;
   timeZone?: string;
+  lifecycle?: {
+    revision: number;
+    state?: "deleted";
+  };
   source: HistoryEventSource;
   title: string;
   note?: string;

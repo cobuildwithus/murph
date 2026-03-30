@@ -13,7 +13,7 @@ Updated: 2026-03-17
 - The built CLI shape exposes a setup-first `murph` alias, with `murph`, `murph --help`, and `murph setup ...` routing to the setup surface while other commands continue through the main operator surface.
 - `node packages/cli/dist/bin.js setup ...` works from a checked-out repo after build, so a shell wrapper can bootstrap the workspace and then delegate to the same installer logic.
 - The setup flow installs or reuses Homebrew-managed `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`, downloads a Whisper model, and configures the inbox parser toolchain through the existing bootstrap services.
-- Apple Silicon hosts can optionally install PaddleX OCR in a managed venv; unsupported macOS architectures skip OCR with a truthful note instead of failing the whole setup.
+- The setup flow stays limited to the active local parser stack (`ffmpeg`, `pdftotext`, `whisper-cpp`, and a Whisper model) without any separate OCR installer branch.
 - Focused tests cover dry-run/service orchestration, existing-vault reuse, shell-wrapper gating, and the bin/setup routing path.
 
 ## Scope
@@ -39,8 +39,8 @@ Updated: 2026-03-17
 
 1. Risk: Homebrew and Python provisioning are environment-sensitive on macOS.
    Mitigation: make each step idempotent, expose a dry-run mode, and return a detailed step log plus notes when a capability is skipped.
-2. Risk: OCR support on macOS differs by architecture.
-   Mitigation: default to truthful auto-detection, only attempt PaddleX OCR on Apple Silicon, and document the skip behavior.
+2. Risk: Setup docs can drift from the current parser stack as the host bootstrap flow evolves.
+   Mitigation: keep the plan and wrapper copy aligned with the active parser toolchain only, and remove stale references when support is hard-cut.
 3. Risk: The main CLI routing lanes are actively editing `vault-cli.ts`.
    Mitigation: keep this implementation in a separate setup entrypoint reached from `bin.ts` so the main command graph does not need to move.
 

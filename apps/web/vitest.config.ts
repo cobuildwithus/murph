@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { defineProject } from "vitest/config";
 
 import {
   createVitestWorkspaceRuntimeAliases,
@@ -11,7 +11,7 @@ import {
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
 
-export default defineConfig({
+export default defineProject({
   resolve: {
     alias: [
       {
@@ -22,7 +22,9 @@ export default defineConfig({
     ],
   },
   test: {
+    name: "hosted-web",
     environment: "node",
+    fileParallelism: false,
     include: ["apps/web/test/**/*.test.ts"],
   },
 });

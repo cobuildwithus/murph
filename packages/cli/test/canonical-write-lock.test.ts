@@ -410,6 +410,60 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
   });
 });
 
+test.sequential("editEventRecord strips stored lifecycle metadata before calling core upsert", async () => {
+  const capturedPayloads: Array<Record<string, unknown>> = [];
+  const eventRecord = {
+    recordType: "event",
+    primaryLookupId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    displayId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    kind: "note",
+    occurredAt: "2026-03-12T12:00:00.000Z",
+    date: "2026-03-12",
+    title: "Mock note",
+    data: {
+      id: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+      kind: "note",
+      occurredAt: "2026-03-12T12:00:00.000Z",
+      title: "Mock note",
+      note: "Existing note",
+      lifecycle: {
+        revision: 7,
+      },
+    },
+  };
+
+  await withCliUsecaseMocks({
+    coreRuntime: {
+      upsertEvent: async (input: { payload: Record<string, unknown> }) => {
+        capturedPayloads.push(input.payload);
+        return {
+          eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+          ledgerFile: "ledger/events/2026/2026-03.jsonl",
+          created: false,
+        };
+      },
+    },
+    queryRuntime: {
+      readVault: async () => ({}),
+      lookupRecordById: () => eventRecord,
+    },
+    run: async () => {
+      const { editEventRecord } = await import("../src/usecases/event-record-mutations.js");
+
+      await editEventRecord({
+        vault: "/tmp/mock-vault",
+        lookup: eventRecord.primaryLookupId,
+        entityLabel: "event",
+        set: ["title=Updated mock note"],
+      });
+    },
+  });
+
+  assert.equal(capturedPayloads.length, 1);
+  assert.equal(capturedPayloads[0]?.title, "Updated mock note");
+  assert.equal("lifecycle" in (capturedPayloads[0] ?? {}), false);
+});
+
 test.sequential("experiment and journal CLI usecases map renamed core error codes to CLI errors", async () => {
   const journalFailure = new VaultError("JOURNAL_DAY_MISSING", "Journal day is missing.");
   const timestampFailure = new VaultError("INVALID_TIMESTAMP", "Invalid timestamp.");

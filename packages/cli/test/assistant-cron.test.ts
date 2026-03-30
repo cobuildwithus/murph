@@ -10,9 +10,6 @@ import {
 } from '@murph/core'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
-// This file is intentionally excluded from the default root Vitest include list.
-// Keep must-run regression coverage in included CLI/runtime suites as well.
-
 const cronServiceMocks = vi.hoisted(() => ({
   sendAssistantMessage: vi.fn(),
 }))
@@ -25,6 +22,7 @@ vi.mock('../src/assistant/service.js', async () => {
   return {
     ...actual,
     sendAssistantMessage: cronServiceMocks.sendAssistantMessage,
+    sendAssistantMessageLocal: cronServiceMocks.sendAssistantMessage,
   }
 })
 
@@ -504,7 +502,7 @@ test('assistant cron quarantines legacy stored cron jobs that are missing persis
     )
     assert.equal(quarantineEntries.some((entry) => entry.endsWith('.meta.json')), true)
     assert.equal(
-      quarantineEntries.some((entry) => entry.includes('assistant-cron-jobs.json')),
+      quarantineEntries.some((entry) => entry.includes(path.basename(paths.cronJobsPath))),
       true,
     )
   } finally {

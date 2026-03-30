@@ -46,7 +46,7 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   const sourceRoot = await makeTempDirectory("murph-inbox-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const attachmentPath = await writeExternalFile(sourceRoot, "meal-photo.jpg", "photo");
+  const attachmentPath = await writeExternalFile(sourceRoot, "meal-notes.pdf", "document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
   assert.equal(runtime.databasePath, resolveRuntimePaths(vaultRoot).inboxDbPath);
@@ -71,10 +71,10 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
     attachments: [
       {
         externalId: "att-1",
-        kind: "image",
-        mime: "image/jpeg",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: attachmentPath,
-        fileName: "breakfast.jpg",
+        fileName: "breakfast.pdf",
       },
     ],
     raw: {
@@ -400,6 +400,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.captureId, capture.captureId);
   assert.match(hits[0]?.snippet ?? "", /Toast with avocado/);
+  assert.equal(runtime.listAttachmentParseJobs({ limit: 10 }).length, 0);
 
   const fallbackHits = runtime.searchCaptures({
     text: "   ",
@@ -418,6 +419,7 @@ test("runtime search indexes attachment metadata and can rebuild from envelope f
   assert.ok(rebuilt);
   assert.equal(rebuilt.text, "Toast with avocado");
   assert.equal(rebuilt.attachments[0]?.fileName, "toast-photo.jpg");
+  assert.equal(rebuiltRuntime.listAttachmentParseJobs({ limit: 10 }).length, 0);
   assert.equal(
     rebuilt.attachments[0]?.attachmentId,
     runtime.getCapture(capture.captureId)?.attachments[0]?.attachmentId,
@@ -432,7 +434,7 @@ test("completed attachment parse jobs refresh capture search text and attachment
   const sourceRoot = await makeTempDirectory("murph-inbox-parse-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "lab-result.png", "image");
+  const documentPath = await writeExternalFile(sourceRoot, "lab-result.pdf", "document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -449,10 +451,10 @@ test("completed attachment parse jobs refresh capture search text and attachment
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
-        originalPath: imagePath,
-        fileName: "lab-result.png",
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: documentPath,
+        fileName: "lab-result.pdf",
       },
     ],
     raw: {},
@@ -464,7 +466,7 @@ test("completed attachment parse jobs refresh capture search text and attachment
   runtime.completeAttachmentParseJob({
     jobId: pendingJob.jobId,
     attempt: pendingJob.attempts,
-    providerId: "fake-image-parser",
+    providerId: "fake-document-parser",
     resultPath: "derived/inbox/manifest.json",
     extractedText: "Glucose 88 mg/dL",
   });
@@ -472,7 +474,7 @@ test("completed attachment parse jobs refresh capture search text and attachment
   const refreshed = runtime.getCapture(capture.captureId);
   assert.ok(refreshed);
   assert.equal(refreshed.attachments[0]?.parseState, "succeeded");
-  assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-image-parser");
+  assert.equal(refreshed.attachments[0]?.parserProviderId, "fake-document-parser");
   assert.equal(refreshed.attachments[0]?.derivedPath, "derived/inbox/manifest.json");
   assert.equal(refreshed.attachments[0]?.extractedText, "Glucose 88 mg/dL");
 
@@ -492,8 +494,8 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const firstPath = await writeExternalFile(sourceRoot, "first.png", "image-one");
-  const secondPath = await writeExternalFile(sourceRoot, "second.png", "image-two");
+  const firstPath = await writeExternalFile(sourceRoot, "first.pdf", "document-one");
+  const secondPath = await writeExternalFile(sourceRoot, "second.pdf", "document-two");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -510,10 +512,10 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: firstPath,
-        fileName: "first.png",
+        fileName: "first.pdf",
       },
     ],
     raw: {},
@@ -531,10 +533,10 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: secondPath,
-        fileName: "second.png",
+        fileName: "second.pdf",
       },
     ],
     raw: {},
@@ -554,14 +556,14 @@ test("attachment parse job filters and requeue reset runtime-only parser state",
   runtime.completeAttachmentParseJob({
     jobId: firstJob.jobId,
     attempt: firstJob.attempts,
-    providerId: "fake-image-parser",
+    providerId: "fake-document-parser",
     resultPath: "derived/inbox/first.json",
     extractedText: "Glucose 88 mg/dL",
   });
   runtime.completeAttachmentParseJob({
     jobId: secondJob.jobId,
     attempt: secondJob.attempts,
-    providerId: "fake-image-parser",
+    providerId: "fake-document-parser",
     resultPath: "derived/inbox/second.json",
     extractedText: "Unrelated text",
   });
@@ -619,7 +621,7 @@ test("requeue can reset running attachment parse jobs back to pending", async ()
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-running-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "running.png", "image");
+  const documentPath = await writeExternalFile(sourceRoot, "running.pdf", "document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -636,10 +638,10 @@ test("requeue can reset running attachment parse jobs back to pending", async ()
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
-        originalPath: imagePath,
-        fileName: "running.png",
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: documentPath,
+        fileName: "running.pdf",
       },
     ],
     raw: {},
@@ -680,7 +682,7 @@ test("requeue invalidates stale running claims before finalization", async () =>
   const sourceRoot = await makeTempDirectory("murph-inbox-requeue-stale-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const imagePath = await writeExternalFile(sourceRoot, "stale.png", "image");
+  const documentPath = await writeExternalFile(sourceRoot, "stale.pdf", "document");
   const runtime = await openInboxRuntime({ vaultRoot });
   const pipeline = await createInboxPipeline({ vaultRoot, runtime });
 
@@ -697,10 +699,10 @@ test("requeue invalidates stale running claims before finalization", async () =>
     text: null,
     attachments: [
       {
-        kind: "image",
-        mime: "image/png",
-        originalPath: imagePath,
-        fileName: "stale.png",
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: documentPath,
+        fileName: "stale.pdf",
       },
     ],
     raw: {},

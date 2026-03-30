@@ -185,7 +185,9 @@ priority: 1
       source: "assessment_projection",
       sourceAssessmentIds: ["asmt_web_01"],
       profile: {
-        topGoalIds: ["goal_sleep_01"],
+        goals: {
+          topGoalIds: ["goal_sleep_01"],
+        },
         sleep: {
           averageHours: 7.2,
         },
