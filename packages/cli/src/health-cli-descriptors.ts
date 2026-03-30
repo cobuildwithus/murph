@@ -31,6 +31,7 @@ import {
   pathSchema,
   showResultSchema,
 } from "./vault-cli-contracts.js";
+import { getHealthRegistryCommandMetadata } from "./health-registry-command-metadata.js";
 
 export type { JsonObject } from "./health-cli-method-types.js";
 
@@ -214,12 +215,12 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
     kind: StatusFilteredRegistryDescriptorCommandName;
   },
 ): HealthEntityDescriptorExtension {
-  const command = definition.registry.command;
+  const command = getHealthRegistryCommandMetadata(definition.kind);
   const resultIdField = definition.registry.idField;
   const supportsStatusFilter = definition.registry.statusKeys.length > 0;
 
-  if (!command || !resultIdField) {
-    throw new Error(`Registry entity "${definition.kind}" is missing shared command metadata.`);
+  if (!resultIdField) {
+    throw new Error(`Registry entity "${definition.kind}" is missing a canonical id field.`);
   }
 
   const extension = buildStatusFilteredRegistryDescriptorExtension({

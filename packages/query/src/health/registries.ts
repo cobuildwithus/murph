@@ -18,6 +18,10 @@ import {
   pathSlug,
 } from "./shared.ts";
 import {
+  getHealthRegistryQueryMetadata,
+  type HealthRegistryProjectionKind,
+} from "./health-registry-query-metadata.ts";
+import {
   projectRegistryEntity,
   type CanonicalEntity,
   type CanonicalEntityFamily,
@@ -84,6 +88,21 @@ const registryProjectionHelpers: BankEntityRegistryProjectionHelpers = {
   firstStringArray,
 };
 
+const PROJECTED_HEALTH_REGISTRY_KINDS = new Set<HealthRegistryProjectionKind>([
+  "goal",
+  "condition",
+  "allergy",
+  "protocol",
+  "family",
+  "genetics",
+]);
+
+function isProjectedHealthRegistryKind(
+  kind: BankEntityKind,
+): kind is HealthRegistryProjectionKind {
+  return PROJECTED_HEALTH_REGISTRY_KINDS.has(kind as HealthRegistryProjectionKind);
+}
+
 export function buildPriorityTitleComparator<
   TEntity extends RegistryQueryEntity & { priority: number | null },
 >(
@@ -135,17 +154,20 @@ function createBankEntityRegistryDefinition<TEntity extends RegistryQueryEntity>
 ): RegistryDefinition<TEntity> {
   const definition = requireBankEntityRegistryDefinition(kind);
   const { registry } = definition;
+  const projection = isProjectedHealthRegistryKind(kind)
+    ? getHealthRegistryQueryMetadata(kind)
+    : registry;
 
   return {
     directory: registry.directory,
     idKeys: registry.idKeys,
     titleKeys: registry.titleKeys,
     statusKeys: registry.statusKeys,
-    compare: compareRegistryRecords(registry.sortBehavior),
+    compare: compareRegistryRecords(projection.sortBehavior),
     transform(base, attributes, relativePath) {
       return {
         ...base,
-        ...(registry.transform?.({
+        ...(projection.transform?.({
           attributes,
           helpers: registryProjectionHelpers,
           relativePath,

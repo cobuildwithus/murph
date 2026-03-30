@@ -31,7 +31,7 @@ import {
 } from "../src/canonical-entities.ts";
 import { collectCanonicalEntities } from "../src/health/canonical-collector.ts";
 import { fallbackCurrentProfileEntityFromSnapshotRecord } from "../src/health/current-profile-resolution.ts";
-import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
+import { ALL_VAULT_RECORD_TYPES, createVaultReadModel } from "../src/model.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";
 import { listAssessments } from "../src/health/assessments.ts";
 import {
@@ -522,78 +522,11 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
 }
 
 function createManualVault(records: VaultRecord[]): VaultReadModel {
-  const byFamily = groupRecordsByFamily(records);
-
-  return {
-    format: "murph.query.v1",
+  return createVaultReadModel({
     vaultRoot: "manual-vault",
     metadata: null,
-    entities: records.map((record) => ({
-      entityId: record.displayId,
-      primaryLookupId: record.primaryLookupId,
-      lookupIds: record.lookupIds,
-      family: record.recordType,
-      recordClass: record.recordClass,
-      kind: record.kind ?? record.recordType,
-      status: record.status ?? null,
-      occurredAt: record.occurredAt,
-      date: record.date,
-      path: record.sourcePath,
-      title: record.title,
-      body: record.body,
-      attributes: record.data,
-      frontmatter: record.frontmatter,
-      links:
-        record.links ??
-        normalizeCanonicalLinks(
-          (record.relatedIds ?? []).map((targetId) => ({
-            type: "related_to" as const,
-            targetId,
-          })),
-        ),
-      relatedIds: record.relatedIds ?? [],
-      stream: record.stream,
-      experimentSlug: record.experimentSlug,
-      tags: record.tags,
-    })),
-    byFamily,
-    coreDocument: byFamily.core?.[0] ?? null,
-    experiments: byFamily.experiment ?? [],
-    journalEntries: byFamily.journal ?? [],
-    events: byFamily.event ?? [],
-    samples: byFamily.sample ?? [],
-    audits: byFamily.audit ?? [],
-    assessments: byFamily.assessment ?? [],
-    profileSnapshots: byFamily.profile_snapshot ?? [],
-    currentProfile: byFamily.current_profile?.[0] ?? null,
-    goals: byFamily.goal ?? [],
-    conditions: byFamily.condition ?? [],
-    allergies: byFamily.allergy ?? [],
-    protocols: byFamily.protocol ?? [],
-    history: byFamily.history ?? [],
-    familyMembers: byFamily.family ?? [],
-    geneticVariants: byFamily.genetics ?? [],
-    foods: byFamily.food ?? [],
-    recipes: byFamily.recipe ?? [],
-    providers: byFamily.provider ?? [],
-    workoutFormats: byFamily.workout_format ?? [],
     records,
-  };
-}
-
-function groupRecordsByFamily(records: readonly VaultRecord[]) {
-  return records.reduce<Partial<Record<VaultRecord["recordType"], VaultRecord[]>>>(
-    (byFamily, record) => {
-      const familyRecords = byFamily[record.recordType];
-      if (familyRecords) {
-        familyRecords.push(record);
-      } else {
-        byFamily[record.recordType] = [record];
-      }
-      return byFamily;
-    },
-    {},
-  );
+  });
 }
 
 test("manual record fixtures derive normalized links from compatibility relatedIds", () => {

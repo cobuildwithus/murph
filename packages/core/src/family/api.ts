@@ -59,10 +59,6 @@ function parseFamilyMemberFrontmatter(attributes: FrontmatterObject): FamilyMemb
 }
 
 function sortFamilyRecords(records: FamilyMemberStoredDocument[]): void {
-  if (familyRegistryEntityDefinition.registry.sortBehavior !== "title") {
-    throw new Error('Family registry definition must use "title" sort behavior.');
-  }
-
   records.sort(
     (left, right) =>
       left.entity.title.localeCompare(right.entity.title) ||

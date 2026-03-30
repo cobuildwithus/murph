@@ -63,10 +63,6 @@ function parseGeneticVariantFrontmatter(attributes: FrontmatterObject): GeneticV
 }
 
 function sortGeneticRecords(records: GeneticVariantStoredDocument[]): void {
-  if (geneticsRegistryEntityDefinition.registry.sortBehavior !== "gene-title") {
-    throw new Error('Genetics registry definition must use "gene-title" sort behavior.');
-  }
-
   records.sort(
     (left, right) =>
       left.entity.gene.localeCompare(right.entity.gene) ||

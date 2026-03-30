@@ -2,24 +2,24 @@ import type { ZodTypeAny } from "zod";
 
 import { ID_PREFIXES } from "./constants.ts";
 import {
-  deriveProtocolGroupFromRelativePath,
   extractHealthEntityRegistryLinks,
   requireHealthEntityRegistryDefinition,
   type HealthEntityKind,
-  type HealthEntityRegistryCommandMetadata,
   type HealthEntityRegistryLink,
   type HealthEntityRegistryLinkCardinality,
   type HealthEntityRegistryLinkMetadata,
   type HealthEntityRegistryMetadata,
-  type HealthEntityRegistryProjectionContext,
-  type HealthEntityRegistryProjectionHelpers,
-  type HealthEntitySortBehavior,
 } from "./health-entities.ts";
 import {
   foodUpsertPayloadSchema,
   recipeUpsertPayloadSchema,
   workoutFormatUpsertPayloadSchema,
 } from "./shares.ts";
+import {
+  extractRegistryRelationTargets,
+  isPlainObject,
+  projectSupplementIngredients,
+} from "./registry-helpers.ts";
 import {
   foodFrontmatterSchema,
   providerFrontmatterSchema,
@@ -39,14 +39,47 @@ export type BankEntityKind =
   | "recipe"
   | "workout_format";
 
-export type BankEntitySortBehavior = HealthEntitySortBehavior;
+export type BankEntitySortBehavior = "gene-title" | "priority-title" | "title";
 export type BankEntityRegistryLink = HealthEntityRegistryLink;
 export type BankEntityRegistryLinkCardinality = HealthEntityRegistryLinkCardinality;
 export type BankEntityRegistryLinkMetadata = HealthEntityRegistryLinkMetadata;
-export type BankEntityRegistryProjectionHelpers = HealthEntityRegistryProjectionHelpers;
-export type BankEntityRegistryProjectionContext = HealthEntityRegistryProjectionContext;
-export type BankEntityRegistryMetadata = HealthEntityRegistryMetadata;
-export type BankEntityRegistryCommandMetadata = HealthEntityRegistryCommandMetadata;
+
+export interface BankEntityRegistryProjectionHelpers {
+  firstBoolean(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): boolean | null;
+  firstNumber(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): number | null;
+  firstObject(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): Record<string, unknown> | null;
+  firstString(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): string | null;
+  firstStringArray(
+    source: Record<string, unknown>,
+    keys: readonly string[],
+  ): string[];
+}
+
+export interface BankEntityRegistryProjectionContext {
+  attributes: Record<string, unknown>;
+  helpers: BankEntityRegistryProjectionHelpers;
+  relativePath: string;
+}
+
+export interface BankEntityRegistryMetadata extends HealthEntityRegistryMetadata {
+  sortBehavior?: BankEntitySortBehavior;
+  transform?(
+    context: BankEntityRegistryProjectionContext,
+  ): Record<string, unknown>;
+}
+
 export type BankEntityDefinitionWithRegistry = BankEntityDefinition;
 
 export interface BankEntityDefinition {
@@ -94,113 +127,6 @@ function defineBankRegistryEntity(
       slugKeys: input.registry.slugKeys ?? ["slug"],
     },
   };
-}
-
-function normalizeRegistryString(value: unknown): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readFirstRegistryString(
-  source: Record<string, unknown>,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = normalizeRegistryString(source[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function readMergedRegistryStringArray(
-  source: Record<string, unknown>,
-  keys: readonly string[],
-): string[] {
-  return [
-    ...new Set(
-      keys.flatMap((key) => {
-        const value = source[key];
-        if (!Array.isArray(value)) {
-          return [];
-        }
-
-        return value
-          .map((entry) => normalizeRegistryString(entry))
-          .filter((entry): entry is string => Boolean(entry));
-      }),
-    ),
-  ];
-}
-
-function extractRegistryRelationTargets(
-  source: Record<string, unknown>,
-  relation: BankEntityRegistryLinkMetadata,
-): string[] {
-  return relation.cardinality === "one"
-    ? [readFirstRegistryString(source, relation.keys)].filter(
-        (entry): entry is string => Boolean(entry),
-      )
-    : readMergedRegistryStringArray(source, relation.keys);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-interface ProjectedSupplementIngredient {
-  compound: string;
-  label: string | null;
-  amount: number | null;
-  unit: string | null;
-  active: boolean;
-  note: string | null;
-}
-
-function projectSupplementIngredients(
-  value: unknown,
-): ProjectedSupplementIngredient[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((entry) => {
-    if (!isPlainObject(entry)) {
-      return [];
-    }
-
-    const compound = typeof entry.compound === "string" ? entry.compound.trim() : "";
-    if (!compound) {
-      return [];
-    }
-
-    return [{
-      compound,
-      label:
-        typeof entry.label === "string" && entry.label.trim().length > 0
-          ? entry.label.trim()
-          : null,
-      amount:
-        typeof entry.amount === "number" && Number.isFinite(entry.amount)
-          ? entry.amount
-          : null,
-      unit:
-        typeof entry.unit === "string" && entry.unit.trim().length > 0
-          ? entry.unit.trim()
-          : null,
-      active: typeof entry.active === "boolean" ? entry.active : true,
-      note:
-        typeof entry.note === "string" && entry.note.trim().length > 0
-          ? entry.note.trim()
-          : null,
-    }];
-  });
 }
 
 function projectWorkoutStrengthExercises(
@@ -463,7 +389,3 @@ export const foodBankEntityDefinition = requireBankEntityRegistryDefinition("foo
 export const recipeBankEntityDefinition = requireBankEntityRegistryDefinition("recipe");
 export const providerBankEntityDefinition = requireBankEntityRegistryDefinition("provider");
 export const workoutFormatBankEntityDefinition = requireBankEntityRegistryDefinition("workout_format");
-
-export {
-  deriveProtocolGroupFromRelativePath,
-};
