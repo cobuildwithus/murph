@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net'
 import { URL } from 'node:url'
 import {
+  assertAssistantCronJobId,
+  assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
 } from 'murph/assistant-core'
@@ -244,20 +246,13 @@ function parseAssistantVaultQuery(url: URL): AssistantSessionListRequest {
 }
 
 function parseAssistantSessionRoute(url: URL): AssistantSessionLookupRequest {
-  const encodedSessionId = url.pathname.replace(/^\/sessions\//u, '')
-  if (!encodedSessionId) {
-    throw new AssistantHttpRequestError('Assistant session routes require a session id.', 400)
-  }
-
-  let sessionId: string
-  try {
-    sessionId = decodeURIComponent(encodedSessionId)
-  } catch {
-    throw new AssistantHttpRequestError('Assistant session route contained an invalid encoding.', 400)
-  }
-
   return {
-    sessionId: parseAssistantSessionIdField(sessionId, 'session route'),
+    sessionId: parseRequiredOpaqueRouteSegment(
+      url.pathname,
+      '/sessions/',
+      'session route',
+      parseAssistantSessionIdField,
+    ),
     vault: readOptionalNullableQuery(url, 'vault'),
   }
 }
@@ -276,7 +271,12 @@ function parseAssistantOutboxRoute(url: URL): {
   vault?: string | null
 } {
   return {
-    intentId: parseRequiredRouteSegment(url.pathname, '/outbox/', 'outbox route'),
+    intentId: parseRequiredOpaqueRouteSegment(
+      url.pathname,
+      '/outbox/',
+      'outbox route',
+      parseAssistantOutboxIntentIdField,
+    ),
     vault: readOptionalNullableQuery(url, 'vault'),
   }
 }
@@ -328,7 +328,12 @@ function parseAssistantCronJobRoute(url: URL): {
   vault?: string | null
 } {
   return {
-    job: parseRequiredRouteSegment(url.pathname, '/cron/jobs/', 'cron job route'),
+    job: parseRequiredOpaqueRouteSegment(
+      url.pathname,
+      '/cron/jobs/',
+      'cron job route',
+      parseAssistantCronJobIdField,
+    ),
     vault: readOptionalNullableQuery(url, 'vault'),
   }
 }
@@ -344,7 +349,7 @@ function parseAssistantCronRunsQuery(url: URL): {
   }
 
   return {
-    job,
+    job: parseAssistantCronJobIdField(job, 'cron runs query'),
     limit: readOptionalIntegerQuery(url, 'limit'),
     vault: readOptionalNullableQuery(url, 'vault'),
   }
@@ -592,6 +597,51 @@ function parseAssistantSessionIdField(value: unknown, context: string): string {
       400,
     )
   }
+}
+
+function parseAssistantOutboxIntentIdField(value: unknown, context: string): string {
+  if (typeof value !== 'string') {
+    throw new AssistantHttpRequestError(
+      `Assistant ${context} outbox intent id must be a string.`,
+      400,
+    )
+  }
+
+  try {
+    return assertAssistantOutboxIntentId(value)
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error ? error.message : 'Assistant outbox intent id was invalid.',
+      400,
+    )
+  }
+}
+
+function parseAssistantCronJobIdField(value: unknown, context: string): string {
+  if (typeof value !== 'string') {
+    throw new AssistantHttpRequestError(
+      `Assistant ${context} cron job id must be a string.`,
+      400,
+    )
+  }
+
+  try {
+    return assertAssistantCronJobId(value)
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error ? error.message : 'Assistant cron job id was invalid.',
+      400,
+    )
+  }
+}
+
+function parseRequiredOpaqueRouteSegment(
+  pathname: string,
+  prefix: string,
+  context: string,
+  parseValue: (value: unknown, context: string) => string,
+): string {
+  return parseValue(parseRequiredRouteSegment(pathname, prefix, context), context)
 }
 
 function parseRequiredRouteSegment(

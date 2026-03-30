@@ -1,11 +1,8 @@
+const IPV4_MAPPED_PREFIX = '::ffff:'
+
 export function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase().replace(/^\[(.*)\]$/u, '$1')
-  return (
-    normalized === 'localhost' ||
-    normalized === '::1' ||
-    normalized === '127.0.0.1' ||
-    normalized.startsWith('127.')
-  )
+  const normalized = normalizeLoopbackValue(hostname)
+  return normalized === 'localhost' || normalized === '::1' || isLoopbackIpv4Literal(normalized)
 }
 
 export function isLoopbackHttpBaseUrl(baseUrl: string): boolean {
@@ -20,10 +17,31 @@ export function isLoopbackRemoteAddress(
     return false
   }
 
-  const normalized = value.trim().toLowerCase()
+  const normalized = normalizeLoopbackValue(value)
+  if (normalized === '::1' || isLoopbackIpv4Literal(normalized)) {
+    return true
+  }
+  if (normalized.startsWith(IPV4_MAPPED_PREFIX)) {
+    return isLoopbackIpv4Literal(normalized.slice(IPV4_MAPPED_PREFIX.length))
+  }
+  return false
+}
+
+function normalizeLoopbackValue(value: string): string {
+  return value.trim().toLowerCase().replace(/^\[(.*)\]$/u, '$1')
+}
+
+function isLoopbackIpv4Literal(value: string): boolean {
+  const octets = value.split('.')
+  if (octets.length !== 4) {
+    return false
+  }
+
+  const parsedOctets = octets.map((octet) =>
+    /^\d{1,3}$/u.test(octet) ? Number(octet) : Number.NaN,
+  )
   return (
-    normalized === '::1' ||
-    normalized.startsWith('127.') ||
-    normalized.startsWith('::ffff:127.')
+    parsedOctets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) &&
+    parsedOctets[0] === 127
   )
 }

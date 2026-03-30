@@ -265,6 +265,19 @@ test.sequential(
         error instanceof Error &&
         /loopback base URLs/u.test(error.message),
     )
+
+    await assert.rejects(
+      () =>
+        ensureManagedDeviceSyncControlPlane({
+          env: {
+            DEVICE_SYNC_BASE_URL: 'http://127.example.com:9911',
+            DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          },
+        }),
+      (error) =>
+        error instanceof Error &&
+        /loopback base URLs/u.test(error.message),
+    )
   },
 )
 

@@ -8,6 +8,7 @@ import {
   resolveDeviceSyncBaseUrl,
   resolveDeviceSyncControlToken,
 } from "../src/device-sync.ts";
+import { isLoopbackRemoteAddress } from "../src/loopback-control-plane.ts";
 import { encodeCrockford, encodeRandomCrockford, generateUlid } from "../src/ulid.ts";
 
 function deterministicRandomBytes(length: number): Uint8Array {
@@ -51,6 +52,7 @@ test("assertLocalDeviceSyncControlPlaneBaseUrl allows loopback control-plane tar
   assert.equal(isLoopbackDeviceSyncBaseUrl("http://127.0.0.1:8788"), true);
   assert.equal(isLoopbackDeviceSyncBaseUrl("http://localhost:8788"), true);
   assert.equal(isLoopbackDeviceSyncBaseUrl("http://[::1]:8788"), true);
+  assert.equal(isLoopbackDeviceSyncBaseUrl("http://127.example.com:8788"), false);
 
   assert.doesNotThrow(() =>
     assertLocalDeviceSyncControlPlaneBaseUrl({
@@ -58,6 +60,23 @@ test("assertLocalDeviceSyncControlPlaneBaseUrl allows loopback control-plane tar
       controlToken: "control-token",
     }),
   );
+
+  assert.throws(
+    () =>
+      assertLocalDeviceSyncControlPlaneBaseUrl({
+        baseUrl: "http://127.example.com:8788",
+        controlToken: "control-token",
+      }),
+    (error) => isDeviceSyncLocalControlPlaneError(error),
+  );
+});
+
+test("loopback remote-address checks accept only literal loopback addresses", () => {
+  assert.equal(isLoopbackRemoteAddress("127.0.0.1"), true);
+  assert.equal(isLoopbackRemoteAddress("::1"), true);
+  assert.equal(isLoopbackRemoteAddress("::ffff:127.0.0.1"), true);
+  assert.equal(isLoopbackRemoteAddress("127.example.com"), false);
+  assert.equal(isLoopbackRemoteAddress("::ffff:127.example.com"), false);
 });
 
 test("resolveDeviceSyncControlToken reads the unprefixed control token", () => {

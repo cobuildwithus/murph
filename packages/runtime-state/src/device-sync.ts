@@ -1,3 +1,5 @@
+import { isLoopbackHostname } from './loopback-control-plane.ts';
+
 export const DEVICE_SYNC_BASE_URL_ENV = "DEVICE_SYNC_BASE_URL";
 export const DEVICE_SYNC_BASE_URL_ENV_KEYS = [
   DEVICE_SYNC_BASE_URL_ENV,
@@ -237,17 +239,6 @@ function readEnvValue(
 
   return null;
 }
-
-function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase().replace(/^\[(.*)\]$/u, "$1");
-  return (
-    normalized === "localhost" ||
-    normalized === "::1" ||
-    normalized === "127.0.0.1" ||
-    normalized.startsWith("127.")
-  );
-}
-
 export function withControlPlaneAuth(
   headers: HeadersInit | undefined,
   controlToken: string | null,

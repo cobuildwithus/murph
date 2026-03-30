@@ -69,6 +69,8 @@ export {
 } from './assistant/outbox.js'
 
 export {
+  assertAssistantCronJobId,
+  assertAssistantOutboxIntentId,
   assertAssistantSessionId,
 } from './assistant/state-ids.js'
 

@@ -209,6 +209,38 @@ export async function listRecentAssistantTurnReceipts(
   vault: string,
   limit = 10,
 ): Promise<AssistantTurnReceipt[]> {
+  return await listRecentAssistantTurnReceiptsInternal(vault, {
+    limit,
+  })
+}
+
+export async function listRecentAssistantTurnReceiptsForSession(
+  vault: string,
+  sessionId: string,
+  limit = 10,
+): Promise<AssistantTurnReceipt[]> {
+  return await listRecentAssistantTurnReceiptsInternal(vault, {
+    limit,
+    sessionId,
+  })
+}
+
+async function listRecentAssistantTurnReceiptsInternal(
+  vault: string,
+  input: {
+    limit: number
+    sessionId?: string | null
+  },
+): Promise<AssistantTurnReceipt[]> {
+  const normalizedLimit =
+    typeof input.limit === 'number' && Number.isFinite(input.limit)
+      ? Math.max(0, Math.trunc(input.limit))
+      : 0
+  if (normalizedLimit === 0) {
+    return []
+  }
+
+  const sessionFilter = input.sessionId?.trim() || null
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   const entries = await readdir(paths.turnsDirectory, {
@@ -225,14 +257,35 @@ export async function listRecentAssistantTurnReceipts(
       paths,
       path.join(paths.turnsDirectory, entry.name),
     )
-    if (receipt) {
-      receipts.push(receipt)
+    if (!receipt || (sessionFilter && receipt.sessionId !== sessionFilter)) {
+      continue
     }
+
+    insertRecentAssistantTurnReceipt(receipts, receipt, normalizedLimit)
   }
 
   return receipts
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-    .slice(0, Math.max(0, limit))
+}
+
+function insertRecentAssistantTurnReceipt(
+  receipts: AssistantTurnReceipt[],
+  receipt: AssistantTurnReceipt,
+  limit: number,
+): void {
+  const insertAt = receipts.findIndex(
+    (existing) => receipt.updatedAt.localeCompare(existing.updatedAt) > 0,
+  )
+  if (insertAt === -1) {
+    if (receipts.length < limit) {
+      receipts.push(receipt)
+    }
+    return
+  }
+
+  receipts.splice(insertAt, 0, receipt)
+  if (receipts.length > limit) {
+    receipts.pop()
+  }
 }
 
 export function resolveAssistantTurnReceiptPath(
