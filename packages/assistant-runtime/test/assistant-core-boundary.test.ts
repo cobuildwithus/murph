@@ -41,6 +41,10 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
     exports: Record<string, { default?: string; types?: string }>;
   };
   const sourceFiles = await listFilesRecursive(new URL("../src/", import.meta.url));
+  const cloudflareNodeRunnerSource = await readFile(
+    new URL("../../../apps/cloudflare/test/node-runner.test.ts", import.meta.url),
+    "utf8",
+  );
   let sawAssistantCoreImport = false;
 
   assert.equal(runtimeManifest.dependencies?.murph, "workspace:*");
@@ -50,6 +54,8 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
     default: "./dist/assistant-core.js",
     types: "./dist/assistant-core.d.ts",
   });
+  assert.match(cloudflareNodeRunnerSource, /from ["']murph\/assistant-core["']/u);
+  assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph["']/u);
 
   for (const fileUrl of sourceFiles) {
     const source = await readFile(fileUrl, "utf8");

@@ -193,6 +193,12 @@ export async function listAssistantSessions(
     return remote
   }
 
+  return listAssistantSessionsLocal(vault)
+}
+
+export async function listAssistantSessionsLocal(
+  vault: string,
+): Promise<AssistantSession[]> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
 
@@ -234,6 +240,13 @@ export async function getAssistantSession(
     return remote
   }
 
+  return getAssistantSessionLocal(vault, sessionId)
+}
+
+export async function getAssistantSessionLocal(
+  vault: string,
+  sessionId: string,
+): Promise<AssistantSession> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
 

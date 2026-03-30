@@ -463,6 +463,19 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     const automationPayload = await automation.json() as { scans: number }
     assert.equal(automationPayload.scans, 1)
 
+    const invalidAutomationDispatchMode = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        deliveryDispatchMode: 'later',
+      }),
+    })
+    assert.equal(invalidAutomationDispatchMode.status, 400)
+    assert.match(await invalidAutomationDispatchMode.text(), /deliveryDispatchMode/u)
+
     const invalidSession = await fetch(
       `${handle.address.baseUrl}/sessions/${encodeURIComponent('../outside')}`,
       {
@@ -559,6 +572,92 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       }),
     })
     assert.equal(oversizedBody.status, 413)
+  } finally {
+    await handle.close()
+  }
+})
+
+test('assistantd http server does not reflect raw internal errors back to the client', async () => {
+  const service = {
+    drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+    getSession: async () => TEST_SESSION as any,
+    health: async () => ({
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      ok: true,
+      pid: 1234,
+      vaultBound: true,
+    }),
+    getStatus: async () => {
+      throw new Error('database credentials leaked')
+    },
+    listSessions: async () => [],
+    listCronJobs: async () => [],
+    listCronRuns: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      runs: [],
+    }),
+    listOutbox: async () => [],
+    getOutboxIntent: async () => null,
+    getCronJob: async () => TEST_CRON_JOB as any,
+    getCronStatus: async () => ({
+      totalJobs: 0,
+      enabledJobs: 0,
+      dueJobs: 0,
+      runningJobs: 0,
+      nextRunAt: null,
+    }),
+    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
+    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    runAutomationOnce: async () => ({
+      vault: '/tmp/vault',
+      startedAt: '2026-03-28T00:00:00.000Z',
+      stoppedAt: '2026-03-28T00:00:00.000Z',
+      reason: 'completed',
+      daemonStarted: false,
+      scans: 0,
+      considered: 0,
+      routed: 0,
+      noAction: 0,
+      skipped: 0,
+      failed: 0,
+      replyConsidered: 0,
+      replied: 0,
+      replySkipped: 0,
+      replyFailed: 0,
+      lastError: null,
+    } as any),
+    sendMessage: async () => ({
+      vault: '/tmp/vault',
+      status: 'completed',
+      prompt: 'hello',
+      response: 'daemon response',
+      session: TEST_SESSION,
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryIntentId: null,
+      deliveryError: null,
+      blocked: null,
+    }),
+    updateSessionOptions: async () => TEST_SESSION as any,
+    vault: '/tmp/vault',
+  } as AssistantLocalService
+
+  const handle = await startAssistantHttpServer({
+    controlToken: 'secret-token',
+    host: '127.0.0.1',
+    port: 0,
+    service,
+  })
+
+  try {
+    const response = await fetch(`${handle.address.baseUrl}/status`, {
+      headers: {
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(response.status, 500)
+    const payload = await response.json() as { error: string }
+    assert.equal(payload.error, 'Assistant daemon request failed.')
   } finally {
     await handle.close()
   }
