@@ -403,7 +403,6 @@ That setup entrypoint is intentionally separate from the main `vault-cli` manife
 - on macOS, install or reuse Homebrew; on Linux, reuse system tools from PATH when available and otherwise attempt apt-based installs for the parser stack
 - install or reuse `ffmpeg`, `poppler`/`pdftotext`, and `whisper-cpp`
 - download a local whisper.cpp model into `~/.murph/toolchain/models/whisper/`
-- install PaddleX OCR into `~/.murph/toolchain/venvs/paddlex-ocr` on Apple Silicon, and attempt the same Linux OCR setup on x86_64 unless you pass `--skipOcr`
 - initialize the target vault and run the existing inbox bootstrap flow so `.runtime/inboxd` and `.runtime/parsers/toolchain.json` are ready immediately
 - open an interactive onboarding wizard that steps through assistant defaults, message channels, optional wearable connect targets, and a final review with compact inline summaries instead of one long text wall
 - offer Codex CLI, Codex OSS/local-model, OpenAI-compatible endpoint, or skip-for-now assistant presets during that wizard, with provider-specific follow-up prompts such as model ids, base URLs, and API-key environment variable names
@@ -420,7 +419,6 @@ Common options:
 - `--vault <path>` defaults to `./vault`
 - `--whisperModel <tiny|tiny.en|base|base.en|small|small.en|medium|medium.en|large-v3-turbo>` picks the downloaded whisper.cpp model
 - `--dry-run` shows the plan without mutating the machine or vault
-- `--skipOcr` disables the PaddleX OCR step even on Apple Silicon
 
 The existing operator/data-plane surface remains under `vault-cli`. Published installs are expected to use the unscoped `murph` package plus the internal scoped runtime packages released from the same git tag, but the supported checkout bootstrap path today is still the repo-local wrapper below.
 
@@ -557,7 +555,9 @@ Run the root verification commands:
 
 ```bash
 pnpm typecheck
-pnpm test
+pnpm test:packages      # fast package-only Vitest lane
+pnpm test:apps          # web/cloudflare typecheck + smoke/build verification
+pnpm test               # package lane + app verification + fixture smoke
 pnpm test:coverage
 ```
 

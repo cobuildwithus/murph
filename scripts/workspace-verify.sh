@@ -54,8 +54,19 @@ readonly typecheck_package_dirs=(
   "apps/cloudflare"
 )
 
+readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-50%}"
+
 readonly cli_verify_test_files=(
   "packages/cli/test/runtime.test.ts"
+  "packages/cli/test/cli-expansion-document-meal.test.ts"
+  "packages/cli/test/cli-expansion-experiment-journal-vault.test.ts"
+  "packages/cli/test/cli-expansion-experiment-journal-vault-phase2.test.ts"
+  "packages/cli/test/cli-expansion-inbox-attachments.test.ts"
+  "packages/cli/test/cli-expansion-intervention.test.ts"
+  "packages/cli/test/cli-expansion-provider-event-samples.test.ts"
+  "packages/cli/test/cli-expansion-samples-audit.test.ts"
+  "packages/cli/test/cli-expansion-workout.test.ts"
+  "packages/cli/test/device-cli.test.ts"
   "packages/cli/test/device-daemon.test.ts"
   "packages/cli/test/health-tail.test.ts"
   "packages/cli/test/canonical-write-source-audit.test.ts"
@@ -69,7 +80,6 @@ readonly cli_verify_test_files=(
   "packages/cli/test/inbox-model-harness.test.ts"
   "packages/cli/test/inbox-model-route.test.ts"
   "packages/cli/test/search-runtime.test.ts"
-  "packages/cli/test/cli-expansion-workout.test.ts"
   "packages/cli/test/setup-cli.test.ts"
   "packages/cli/test/release-script-coverage-audit.test.ts"
   "packages/cli/test/release-workflow-guards.test.ts"
@@ -136,16 +146,21 @@ run_package_command_with_retry() {
 run_test_packages_common() {
   pnpm no-js
   pnpm --dir "packages/contracts" test
-  run_repo_build_with_retry
-  tsx "packages/cli/scripts/verify-package-shape.ts"
-  pnpm --dir "packages/web" test
-  pnpm --dir "apps/web" test
+}
+
+run_test_apps() {
+  pnpm --dir "packages/web" verify
+  pnpm --dir "apps/web" verify
   pnpm --dir "apps/cloudflare" verify
 }
 
-refresh_repo_vitest_runtime_artifacts() {
+prepare_repo_vitest_runtime_artifacts() {
   run_repo_build_with_retry
-  tsx "packages/cli/scripts/verify-package-shape.ts"
+  pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
+}
+
+run_repo_vitest() {
+  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" --maxWorkers "$repo_vitest_max_workers" "$@"
 }
 
 run_typecheck() {
@@ -162,42 +177,35 @@ run_test() {
   bash "scripts/check-agent-docs-drift.sh"
   run_workspace_boundary_check
   run_test_packages
-  tsx "e2e/smoke/verify-fixtures.ts"
+  run_test_apps
+  pnpm exec tsx "e2e/smoke/verify-fixtures.ts"
 }
 
 run_test_packages() {
   run_test_packages_common
-  refresh_repo_vitest_runtime_artifacts
-  vitest run --no-coverage --maxWorkers 1
+  prepare_repo_vitest_runtime_artifacts
+  run_repo_vitest --no-coverage
 }
 
 run_test_packages_coverage() {
-  pnpm no-js
   rimraf "coverage"
-  pnpm --dir "packages/contracts" test
-  run_repo_build_with_retry
-  tsx "packages/cli/scripts/verify-package-shape.ts"
-  pnpm --dir "packages/web" test
-  pnpm --dir "apps/web" test
-  pnpm --dir "apps/cloudflare" verify
-  refresh_repo_vitest_runtime_artifacts
-  vitest run --coverage --maxWorkers 1
+  run_test_packages_common
+  prepare_repo_vitest_runtime_artifacts
+  run_repo_vitest --coverage
 }
 
 run_test_coverage() {
   bash "scripts/doc-gardening.sh" --fail-on-issues
   run_test_packages_coverage
-  tsx "e2e/smoke/verify-fixtures.ts" --coverage
+  run_test_apps
+  pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage
 }
 
 run_verify_cli() {
-  pnpm --dir "packages/contracts" build
-  pnpm --dir "packages/device-syncd" build
-  pnpm --dir "packages/inboxd" build
   pnpm --dir "packages/cli" typecheck
   run_repo_build_with_retry
-  tsx "packages/cli/scripts/verify-package-shape.ts"
-  vitest run "${cli_verify_test_files[@]}" --no-coverage --maxWorkers 1
+  pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
+  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run "${cli_verify_test_files[@]}" --no-coverage --maxWorkers 1
 }
 
 main() {
@@ -216,6 +224,9 @@ main() {
     "test:packages")
       run_test_packages
       ;;
+    "test:apps")
+      run_test_apps
+      ;;
     "test:packages:coverage")
       run_test_packages_coverage
       ;;
@@ -226,7 +237,7 @@ main() {
       run_verify_cli
       ;;
     *)
-      echo "Usage: bash scripts/workspace-verify.sh {typecheck|typecheck:packages|test|test:packages|test:packages:coverage|test:coverage|verify:cli}" >&2
+      echo "Usage: bash scripts/workspace-verify.sh {typecheck|typecheck:packages|test|test:packages|test:apps|test:packages:coverage|test:coverage|verify:cli}" >&2
       exit 1
       ;;
   esac
