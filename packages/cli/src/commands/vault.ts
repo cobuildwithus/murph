@@ -12,7 +12,7 @@ import {
   vaultInitResultSchema,
   vaultValidateResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 
 const unknownRecordSchema = z.record(z.string(), z.unknown())
 
@@ -82,7 +82,7 @@ const vaultRepairResultSchema = z.object({
   auditPath: pathSchema.nullable(),
 })
 
-export function registerVaultCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerVaultCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
     'init',
     {

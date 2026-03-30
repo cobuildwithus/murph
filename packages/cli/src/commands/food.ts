@@ -8,7 +8,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import { dailyFoodTimeSchema } from '../usecases/food-autolog.js'
 import {
   deleteFoodRecord,
@@ -62,7 +62,7 @@ const foodListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
-function createFoodRenameCommandConfig(services: VaultCliServices) {
+function createFoodRenameCommandConfig(services: VaultServices) {
   return {
     args: z.object({
       lookup: z.string().min(1).describe('Food id or slug to rename.'),
@@ -98,7 +98,7 @@ function createFoodRenameCommandConfig(services: VaultCliServices) {
   }
 }
 
-function createFoodScheduleCommandConfig(services: VaultCliServices) {
+function createFoodScheduleCommandConfig(services: VaultServices) {
   return {
     args: z.object({
       title: z.string().min(1).max(160).describe('Remembered food title.'),
@@ -142,7 +142,7 @@ function createFoodScheduleCommandConfig(services: VaultCliServices) {
   }
 }
 
-export function registerFoodCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerFoodCommands(cli: Cli.Cli, services: VaultServices) {
   const food = createRegistryDocEntityGroup({
     commandName: 'food',
     description: 'Food registry commands for bank/foods Markdown records.',

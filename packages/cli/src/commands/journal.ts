@@ -10,7 +10,7 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 
 export const journalMutationResultSchema = z.object({
@@ -44,7 +44,7 @@ const journalReferenceOptionsSchema = withBaseOptions({
     .describe('Optional sample streams to mutate. Repeat --stream for multiple values.'),
 })
 
-export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliServices) {
+export function registerJournalCommands(cli: Cli.Cli, _services: VaultServices) {
   const journal = Cli.create('journal', {
     description: 'Journal document commands routed through the core write API.',
   })
@@ -167,7 +167,7 @@ export function registerJournalCommands(cli: Cli.Cli, _services: VaultCliService
 }
 
 async function mutateJournalReferences(
-  services: VaultCliServices,
+  services: VaultServices,
   input: {
     operation: 'link' | 'unlink'
     vault: string

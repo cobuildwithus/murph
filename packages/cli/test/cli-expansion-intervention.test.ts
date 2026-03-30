@@ -6,7 +6,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerInterventionCommands } from '../src/commands/intervention.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
+import { createIntegratedVaultServices } from '../src/vault-services.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 interface SchemaEnvelope {
@@ -59,7 +59,7 @@ function createSliceCli() {
     description: 'intervention slice test cli',
     version: '0.0.0-test',
   })
-  const services = createIntegratedVaultCliServices()
+  const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
   registerInterventionCommands(cli, services)

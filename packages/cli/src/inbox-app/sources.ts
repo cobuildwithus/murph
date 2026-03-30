@@ -2,7 +2,7 @@ import type { InboxConnectorConfig } from '../inbox-cli-contracts.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
   InboxAppEnvironment,
-  InboxCliServices,
+  InboxServices,
 } from './types.js'
 import { describeLinqConnectorEndpoint } from './linq-endpoint.js'
 import {
@@ -70,7 +70,7 @@ function assertImessageSupportedOnHost(
 export function createInboxSourceOps(
   env: InboxAppEnvironment,
 ): Pick<
-  InboxCliServices,
+  InboxServices,
   'sourceAdd' | 'sourceList' | 'sourceRemove' | 'sourceSetEnabled'
 > {
   return {

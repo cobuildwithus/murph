@@ -7,8 +7,8 @@ import {
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
 } from './health-cli-descriptors.js'
-import type { InboxCliServices } from './inbox-services.js'
-import type { VaultCliServices } from './vault-cli-services.js'
+import type { InboxServices } from './inbox-services.js'
+import type { VaultServices } from './vault-services.js'
 import { registerAssistantCommands } from './commands/assistant.js'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerDeviceCommands } from './commands/device.js'
@@ -39,12 +39,12 @@ import { registerSupplementCommands } from './commands/supplement.js'
 import { registerVaultCommands } from './commands/vault.js'
 import { registerWorkoutCommands } from './commands/workout.js'
 
-type VaultServiceGroupName = Extract<keyof VaultCliServices, string>
-type InboxServiceMethodName = Extract<keyof InboxCliServices, string>
+type VaultServiceGroupName = Extract<keyof VaultServices, string>
+type InboxServiceMethodName = Extract<keyof InboxServices, string>
 type CommandExample = Readonly<Record<string, unknown>>
 type DirectVaultServiceBindings = {
   [TGroupName in VaultServiceGroupName]?: ReadonlyArray<
-    Extract<keyof VaultCliServices[TGroupName], string>
+    Extract<keyof VaultServices[TGroupName], string>
   >
 }
 
@@ -62,8 +62,8 @@ interface BaseVaultCliCommandDescriptor {
   leafCommands?: readonly VaultCliLeafCommandDescriptor[]
   register(input: {
     cli: Cli.Cli
-    services: VaultCliServices
-    inboxServices: InboxCliServices
+    services: VaultServices
+    inboxServices: InboxServices
   }): void
 }
 
@@ -85,7 +85,7 @@ export interface CollectedVaultCliDirectServiceBindings {
   inbox: readonly InboxServiceMethodName[]
   vault: {
     [TGroupName in VaultServiceGroupName]: ReadonlyArray<
-      Extract<keyof VaultCliServices[TGroupName], string>
+      Extract<keyof VaultServices[TGroupName], string>
     >
   }
 }
@@ -839,8 +839,8 @@ assertValidVaultCliCommandManifest(vaultCliCommandDescriptors)
 
 export function registerVaultCliCommandDescriptors(input: {
   cli: Cli.Cli
-  services: VaultCliServices
-  inboxServices: InboxCliServices
+  services: VaultServices
+  inboxServices: InboxServices
 }) {
   for (const descriptor of vaultCliCommandDescriptors) {
     descriptor.register(input)
@@ -892,15 +892,15 @@ export function collectVaultCliDirectServiceBindings(): CollectedVaultCliDirectS
   return {
     inbox: orderedUniqueStrings(inboxBindings),
     vault: {
-      core: vaultBindings.core as Array<Extract<keyof VaultCliServices['core'], string>>,
+      core: vaultBindings.core as Array<Extract<keyof VaultServices['core'], string>>,
       importers:
         vaultBindings.importers as Array<
-          Extract<keyof VaultCliServices['importers'], string>
+          Extract<keyof VaultServices['importers'], string>
         >,
-      query: vaultBindings.query as Array<Extract<keyof VaultCliServices['query'], string>>,
+      query: vaultBindings.query as Array<Extract<keyof VaultServices['query'], string>>,
       devices:
         vaultBindings.devices as Array<
-          Extract<keyof VaultCliServices['devices'], string>
+          Extract<keyof VaultServices['devices'], string>
         >,
     },
   }

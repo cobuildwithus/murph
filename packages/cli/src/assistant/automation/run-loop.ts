@@ -2,13 +2,13 @@ import {
   assistantRunResultSchema,
 } from '../../assistant-cli-contracts.js'
 import type {
-  InboxCliServices,
+  InboxServices,
   InboxRunEvent,
 } from '../../inbox-services.js'
-import { createIntegratedInboxCliServices } from '../../inbox-services.js'
+import { createIntegratedInboxServices } from '../../inbox-services.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
-import type { VaultCliServices } from '../../vault-cli-services.js'
-import { createIntegratedVaultCliServices } from '../../vault-cli-services.js'
+import type { VaultServices } from '../../vault-services.js'
+import { createIntegratedVaultServices } from '../../vault-services.js'
 import { maybeRunAssistantAutomationViaDaemon } from '../../assistant-daemon-client.js'
 import { processDueAssistantCronJobsLocal as processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
@@ -45,7 +45,7 @@ export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
-  inboxServices?: InboxCliServices
+  inboxServices?: InboxServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
@@ -57,7 +57,7 @@ export interface RunAssistantAutomationInput {
   startDaemon?: boolean
   sessionMaxAgeMs?: number | null
   vault: string
-  vaultServices?: VaultCliServices
+  vaultServices?: VaultServices
 }
 
 export async function runAssistantAutomation(
@@ -94,8 +94,8 @@ export async function runAssistantAutomation(
   const controller = new AbortController()
   const cleanup = bridgeAbortSignals(controller, input.signal)
   const paths = resolveAssistantStatePaths(input.vault)
-  const inboxServices = input.inboxServices ?? createIntegratedInboxCliServices()
-  const vaultServices = input.vaultServices ?? createIntegratedVaultCliServices()
+  const inboxServices = input.inboxServices ?? createIntegratedInboxServices()
+  const vaultServices = input.vaultServices ?? createIntegratedVaultServices()
   const aggregateRouting = createEmptyInboxScanResult()
   const aggregateReplies = createEmptyAutoReplyScanResult()
   let scans = 0

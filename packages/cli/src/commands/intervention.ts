@@ -4,7 +4,7 @@ import {
   interventionAddResultSchema,
   isoTimestampSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   addInterventionRecord,
   deleteInterventionRecord,
@@ -25,7 +25,7 @@ const interventionLookupSchema = z
 
 export function registerInterventionCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  _services: VaultServices,
 ) {
   const intervention = Cli.create('intervention', {
     description:

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { test } from "vitest";
 
 import { openSqliteRuntimeDatabase } from "@murph/runtime-state";
-import { createIntegratedInboxCliServices } from "../src/inbox-services.js";
+import { createIntegratedInboxServices } from "../src/inbox-services.js";
 
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;
 const builtInboxRuntimeUrl = new URL("../../inboxd/dist/index.js", import.meta.url).href;
@@ -57,7 +57,7 @@ function createFakeImessageDriver(input: {
 }
 
 async function initializeImessageSource(input: {
-  services: ReturnType<typeof createIntegratedInboxCliServices>;
+  services: ReturnType<typeof createIntegratedInboxServices>;
   vaultRoot: string;
 }) {
   await input.services.init({
@@ -75,7 +75,7 @@ async function initializeImessageSource(input: {
 }
 
 async function captureSingleCaptureId(input: {
-  services: ReturnType<typeof createIntegratedInboxCliServices>;
+  services: ReturnType<typeof createIntegratedInboxServices>;
   vaultRoot: string;
 }) {
   const listed = await input.services.list({
@@ -173,7 +173,7 @@ test.sequential(
         ];
       },
     };
-    const services = createIntegratedInboxCliServices({
+    const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
       getHomeDirectory: () => homeRoot,
       getPlatform: () => "darwin",

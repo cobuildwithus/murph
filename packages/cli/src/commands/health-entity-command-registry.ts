@@ -14,7 +14,7 @@ import {
   type HealthCommandDescriptorEntry,
 } from "../health-cli-descriptors.js";
 import { pathSchema } from "../vault-cli-contracts.js";
-import type { VaultCliServices } from "../vault-cli-services.js";
+import type { VaultServices } from "../vault-services.js";
 
 function requireHealthCommandDescriptor(commandName: string): HealthCommandDescriptorEntry {
   const descriptor = healthEntityDescriptorByCommandName.get(commandName);
@@ -64,7 +64,7 @@ export function createHealthUpsertResultSchema(
 }
 
 function bindCrudServices(
-  services: VaultCliServices,
+  services: VaultServices,
   descriptor: HealthCommandDescriptorEntry,
 ) {
   return bindHealthCrudServices(services, {
@@ -76,7 +76,7 @@ function bindCrudServices(
 }
 
 function createHealthEntityCrudConfig(
-  services: VaultCliServices,
+  services: VaultServices,
   descriptor: HealthCommandDescriptorEntry,
 ) {
   return {
@@ -110,14 +110,14 @@ function createHealthEntityCrudConfig(
 
 export function registerHealthEntityCrudGroup(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
   commandName: string,
 ) {
   cli.command(createHealthEntityCrudGroup(services, commandName));
 }
 
 export function createHealthEntityCrudGroup(
-  services: VaultCliServices,
+  services: VaultServices,
   commandName: string,
 ) {
   const descriptor = requireHealthCommandDescriptor(commandName);

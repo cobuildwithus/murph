@@ -10,7 +10,7 @@ import {
   suggestedCommandsCta,
 } from "./health-command-factory.js"
 import { localDateSchema, pathSchema } from "../vault-cli-contracts.js"
-import type { VaultCliServices } from "../vault-cli-services.js"
+import type { VaultServices } from "../vault-services.js"
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const supplementSlugSchema = z
@@ -93,7 +93,7 @@ const compoundListResultSchema = z.object({
 
 export function registerSupplementCommands(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
 ) {
   const supplement = createRegistryDocEntityGroup({
     commandName: 'supplement',

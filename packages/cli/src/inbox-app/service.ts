@@ -6,13 +6,13 @@ import { createInboxRuntimeOps } from './runtime.js'
 import { createInboxSourceOps } from './sources.js'
 
 import type {
-  InboxCliServices,
+  InboxServices,
   InboxServicesDependencies,
 } from './types.js'
 
-export function createIntegratedInboxCliServices(
+export function createIntegratedInboxServices(
   dependencies: InboxServicesDependencies = {},
-): InboxCliServices {
+): InboxServices {
   const env = createInboxAppEnvironment(dependencies)
 
   return {
@@ -23,3 +23,5 @@ export function createIntegratedInboxCliServices(
     ...createInboxPromotionOps(env),
   }
 }
+
+export const createIntegratedInboxCliServices = createIntegratedInboxServices

@@ -13,8 +13,8 @@ import {
   type AssistantToolCatalog,
   defineAssistantTool,
 } from './model-harness.js'
-import type { InboxCliServices } from './inbox-services.js'
-import type { VaultCliServices } from './vault-cli-services.js'
+import type { InboxServices } from './inbox-services.js'
+import type { VaultServices } from './vault-services.js'
 
 const localDateSchema = z
   .string()
@@ -37,10 +37,10 @@ const shareEntitySelectorSchema = z
 
 interface AssistantToolContext {
   captureId?: string
-  inboxServices?: InboxCliServices
+  inboxServices?: InboxServices
   requestId?: string | null
   vault: string
-  vaultServices?: VaultCliServices
+  vaultServices?: VaultServices
 }
 
 export interface AssistantToolCatalogOptions {
@@ -193,7 +193,7 @@ function createVaultQueryToolDefinitions(
             vault: input.vault,
             requestId: input.requestId ?? null,
             ...filters,
-          } as Parameters<VaultCliServices['query']['list']>[0],
+          } as Parameters<VaultServices['query']['list']>[0],
         ),
     }),
     defineAssistantTool({

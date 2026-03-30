@@ -1,12 +1,19 @@
-export type { CommandContext } from "./usecases/types.js"
+/**
+ * Legacy CLI-shaped vault service exports kept for compatibility.
+ * New code should import from ./vault-services.js.
+ */
+export type { CommandContext } from "./vault-services.js"
 export type {
   CoreWriteServices,
   DeviceSyncServices,
   ImporterServices,
   QueryServices,
-  VaultCliServices,
-} from "./usecases/types.js"
+  VaultServices,
+} from "./vault-services.js"
+export type { VaultCliServices } from "./usecases/types.js"
 export {
-  createIntegratedVaultCliServices,
-  createUnwiredVaultCliServices,
-} from "./usecases/integrated-services.js"
+  createIntegratedVaultServices,
+  createIntegratedVaultServices as createIntegratedVaultCliServices,
+  createUnwiredVaultServices,
+  createUnwiredVaultServices as createUnwiredVaultCliServices,
+} from "./vault-services.js"

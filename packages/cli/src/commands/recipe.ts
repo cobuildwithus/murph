@@ -6,7 +6,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   deleteRecipeRecord,
   editRecipeRecord,
@@ -44,7 +44,7 @@ const recipeListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
-export function registerRecipeCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerRecipeCommands(cli: Cli.Cli, services: VaultServices) {
   registerRegistryDocEntityGroup(cli, {
     commandName: 'recipe',
     description: 'Recipe registry commands for bank/recipes Markdown records.',

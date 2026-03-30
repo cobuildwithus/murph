@@ -4,7 +4,7 @@ import {
 } from '../linq-runtime.js'
 import type {
   InboxAppEnvironment,
-  InboxCliServices,
+  InboxServices,
   InboxRunEvent,
   ParserRuntimeDrainResult,
   PollConnector,
@@ -200,7 +200,7 @@ async function waitForDaemonStop(
 export function createInboxRuntimeOps(
   env: InboxAppEnvironment,
 ): Pick<
-  InboxCliServices,
+  InboxServices,
   'parse' | 'requeue' | 'backfill' | 'run' | 'status' | 'stop'
 > {
   return {

@@ -16,7 +16,7 @@ import {
   type AssistantModelSpec,
 } from './model-harness.js'
 import type { InboxShowResult } from './inbox-cli-contracts.js'
-import type { InboxCliServices } from './inbox-services.js'
+import type { InboxServices } from './inbox-services.js'
 import {
   assistantExecutionPlanSchema,
   inboxModelAttachmentBundleSchema,
@@ -34,7 +34,7 @@ import {
   type RoutingImageEligibility,
 } from './inbox-routing-vision.js'
 import { errorMessage, normalizeNullableString } from './text/shared.js'
-import type { VaultCliServices } from './vault-cli-services.js'
+import type { VaultServices } from './vault-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_MAX_FRAGMENT_CHARS = 6000
@@ -74,11 +74,11 @@ interface PreparedInboxPlacementInput {
 }
 
 export interface BuildInboxModelBundleInput {
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   requestId?: string | null
   captureId: string
   vault: string
-  vaultServices?: VaultCliServices
+  vaultServices?: VaultServices
 }
 
 export interface RouteInboxCaptureWithModelInput

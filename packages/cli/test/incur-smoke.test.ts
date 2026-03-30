@@ -10,8 +10,8 @@ import {
   collectVaultCliDirectServiceBindings,
   vaultCliCommandDescriptors,
 } from '../src/vault-cli-command-manifest.js'
-import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
-import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import { createIntegratedInboxServices } from '../src/inbox-services.js'
+import { createUnwiredVaultServices } from '../src/vault-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
 import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 
@@ -62,8 +62,8 @@ test('root help lists the simple health CRUD command groups', async () => {
 
 test('descriptor manifest stays aligned with the live root command topology', async () => {
   const cli = createVaultCli(
-    createUnwiredVaultCliServices(),
-    createIntegratedInboxCliServices(),
+    createUnwiredVaultServices(),
+    createIntegratedInboxServices(),
   )
   const registeredCommands = Cli.toCommands.get(cli)
 
@@ -76,8 +76,8 @@ test('descriptor manifest stays aligned with the live root command topology', as
 
 test('descriptor direct service bindings resolve against the declared service surfaces', () => {
   const descriptorBindings = collectVaultCliDirectServiceBindings()
-  const vaultServices = createUnwiredVaultCliServices()
-  const inboxServices = createIntegratedInboxCliServices()
+  const vaultServices = createUnwiredVaultServices()
+  const inboxServices = createIntegratedInboxServices()
 
   for (const descriptor of vaultCliCommandDescriptors) {
     if (descriptor.bindingMode !== 'direct') {
@@ -441,13 +441,11 @@ test('assistant session list schema emits the normalized session output shape', 
 
   const sessions = schema.output.properties.sessions as {
     items?: {
-      anyOf?: Array<{
-        properties?: Record<string, unknown>
-        required?: string[]
-      }>
+      properties?: Record<string, unknown>
+      required?: string[]
     }
   }
-  const sessionVariant = sessions.items?.anyOf?.[0]
+  const sessionVariant = sessions.items
 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), true)
@@ -475,12 +473,10 @@ test('assistant session show schema emits the normalized session output shape', 
   assert.deepEqual(schema.output.required, ['vault', 'stateRoot', 'session'])
 
   const session = schema.output.properties.session as {
-    anyOf?: Array<{
-      properties?: Record<string, unknown>
-      required?: string[]
-    }>
+    properties?: Record<string, unknown>
+    required?: string[]
   }
-  const sessionVariant = session.anyOf?.[0]
+  const sessionVariant = session
 
   assert.notEqual(sessionVariant, undefined)
   assert.equal('providerSessionId' in (sessionVariant?.properties ?? {}), true)

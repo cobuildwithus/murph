@@ -1,6 +1,6 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
 import type { InboxShowResult } from '../../inbox-cli-contracts.js'
-import type { InboxCliServices } from '../../inbox-services.js'
+import type { InboxServices } from '../../inbox-services.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import { conversationRefFromCapture } from '../conversation-ref.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
@@ -129,7 +129,7 @@ export async function scanAssistantAutoReplyOnce(input: {
   backlogChannels?: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   maxPerScan?: number
   onEvent?: (event: AssistantRunEvent) => void
   onStateProgress?: (
@@ -323,7 +323,7 @@ export async function processAssistantAutoReplyGroup(input: {
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
@@ -347,7 +347,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
@@ -689,7 +689,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   allowSelfAuthored: boolean
   enabledChannels: readonly string[]
   group: AssistantAutoReplyGroupContext
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   requestId: string | null
   vault: string
 }): Promise<AssistantAutoReplyDecision> {
@@ -782,7 +782,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
 async function loadAssistantAutoReplyCaptures(input: {
   group: AssistantAutoReplyGroupContext
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   requestId: string | null
   vault: string
 }): Promise<AssistantAutoReplyPromptCapture[]> {

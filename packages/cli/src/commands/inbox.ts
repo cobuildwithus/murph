@@ -40,13 +40,13 @@ import {
   materializeInboxModelBundle,
   routeInboxCaptureWithModel,
 } from '../inbox-model-harness.js'
-import type { InboxCliServices } from '../inbox-services.js'
+import type { InboxServices } from '../inbox-services.js'
 import {
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 
 const inboxInitOptionFields = {
   rebuild: z
@@ -85,8 +85,8 @@ const inboxSetupOptionFields = {
 
 export function registerInboxCommands(
   cli: Cli.Cli,
-  services: InboxCliServices,
-  vaultServices?: VaultCliServices,
+  services: InboxServices,
+  vaultServices?: VaultServices,
 ) {
   const inbox = Cli.create('inbox', {
     description:

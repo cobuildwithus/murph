@@ -96,7 +96,7 @@ import {
   requestIdFromOptions,
   withBaseOptions,
 } from '../command-helpers.js'
-import type { InboxCliServices } from '../inbox-services.js'
+import type { InboxServices } from '../inbox-services.js'
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
@@ -116,7 +116,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '../vault-cli-errors.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import { requestIdSchema } from '../vault-cli-contracts.js'
 
 const assistantSessionOptionFields = {
@@ -734,8 +734,8 @@ const assistantRunOptionsSchema = withBaseOptions({
 })
 
 function createAssistantRunCommandDefinition(
-  inboxServices: InboxCliServices,
-  vaultServices?: VaultCliServices,
+  inboxServices: InboxServices,
+  vaultServices?: VaultServices,
   input?: {
     description?: string
     hint?: string
@@ -831,8 +831,8 @@ function createAssistantRunCommandDefinition(
 
 export function registerAssistantCommands(
   cli: Cli.Cli,
-  inboxServices: InboxCliServices,
-  vaultServices?: VaultCliServices,
+  inboxServices: InboxServices,
+  vaultServices?: VaultServices,
 ) {
   const assistant = Cli.create('assistant', {
     description:

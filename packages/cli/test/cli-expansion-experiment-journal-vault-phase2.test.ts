@@ -8,7 +8,7 @@ import { registerExperimentCommands } from '../src/commands/experiment.js'
 import { registerJournalCommands } from '../src/commands/journal.js'
 import { registerReadCommands } from '../src/commands/read.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
+import { createIntegratedVaultServices } from '../src/vault-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -17,7 +17,7 @@ function createSliceCli() {
     description: 'experiment/journal/vault phase2 slice test cli',
     version: '0.0.0-test',
   })
-  const services = createIntegratedVaultCliServices()
+  const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
   registerExperimentCommands(cli, services)

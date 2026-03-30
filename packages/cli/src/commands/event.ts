@@ -11,7 +11,7 @@ import {
   editEventRecord,
 } from '../usecases/event-record-mutations.js'
 import { showEventRecord } from '../usecases/provider-event.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   eventScaffoldKindSchema,
 } from './event-command-helpers.js'
@@ -55,7 +55,7 @@ const eventListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 })
 
-export function registerEventCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
   registerLedgerEventEntityGroup(cli, {
     commandName: 'event',
     description: 'Generic canonical event commands for event kinds without specialized nouns.',

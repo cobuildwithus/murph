@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import { openSqliteRuntimeDatabase } from '@murph/runtime-state'
-import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { createIntegratedInboxServices } from '../src/inbox-services.js'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import { createUnwiredVaultServices } from '../src/vault-services.js'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href
@@ -101,9 +101,9 @@ async function loadBuiltInboxRuntime() {
 
 async function runInProcessInboxCli<TData>(
   args: string[],
-  inboxServices: ReturnType<typeof createIntegratedInboxCliServices>,
+  inboxServices: ReturnType<typeof createIntegratedInboxServices>,
 ): Promise<CliEnvelope<TData>> {
-  const cli = createVaultCli(createUnwiredVaultCliServices(), inboxServices)
+  const cli = createVaultCli(createUnwiredVaultServices(), inboxServices)
   const output: string[] = []
 
   await cli.serve([...args, '--verbose', '--format', 'json'], {
@@ -216,7 +216,7 @@ function createFakeParsersModule() {
 }
 
 async function initializeImessageSource(input: {
-  services: ReturnType<typeof createIntegratedInboxCliServices>
+  services: ReturnType<typeof createIntegratedInboxServices>
   vaultRoot: string
 }) {
   await input.services.init({
@@ -234,7 +234,7 @@ async function initializeImessageSource(input: {
 }
 
 async function captureSingleCapture(input: {
-  services: ReturnType<typeof createIntegratedInboxCliServices>
+  services: ReturnType<typeof createIntegratedInboxServices>
   vaultRoot: string
 }) {
   const listed = await input.services.list({
@@ -256,7 +256,7 @@ test.sequential(
   'inbox attachment commands expose stored metadata, parse status, and requeue support',
   async () => {
     const fixture = await makeVaultFixture('murph-inbox-attachments')
-    const services = createIntegratedInboxCliServices({
+    const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
       getHomeDirectory: () => fixture.homeRoot,
       getPlatform: () => 'darwin',
@@ -440,7 +440,7 @@ test.sequential(
   'inbox journal and experiment-note promotions are idempotent',
   async () => {
     const fixture = await makeVaultFixture('murph-inbox-journal-promotion')
-    const services = createIntegratedInboxCliServices({
+    const services = createIntegratedInboxServices({
       enableJournalPromotion: true,
       getHomeDirectory: () => fixture.homeRoot,
       getPlatform: () => 'darwin',

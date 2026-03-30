@@ -6,16 +6,24 @@ const cli: Cli.Cli = createVaultCli()
 export default cli
 export { createVaultCli, CLI_DESCRIPTION } from './vault-cli.js'
 export {
-  createIntegratedInboxCliServices,
+  createIntegratedInboxServices,
+  createIntegratedInboxServices as createIntegratedInboxCliServices,
   type InboxCliServices,
+  type InboxServices,
 } from './inbox-services.js'
+export {
+  createIntegratedVaultServices,
+  createUnwiredVaultServices,
+  type CommandContext,
+  type CoreWriteServices,
+  type DeviceSyncServices,
+  type ImporterServices,
+  type QueryServices,
+  type VaultServices,
+} from './vault-services.js'
 export {
   createIntegratedVaultCliServices,
   createUnwiredVaultCliServices,
-  type CommandContext,
-  type CoreWriteServices,
-  type ImporterServices,
-  type QueryServices,
   type VaultCliServices,
 } from './vault-cli-services.js'
 export * from './vault-cli-contracts.js'

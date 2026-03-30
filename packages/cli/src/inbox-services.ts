@@ -1,4 +1,11 @@
-export { createIntegratedInboxCliServices } from './inbox-app/service.js'
+/**
+ * Neutral inbox service surface. The old createIntegratedInboxCliServices name stays
+ * as a compatibility alias while new code should prefer createIntegratedInboxServices.
+ */
+export {
+  createIntegratedInboxServices,
+  createIntegratedInboxServices as createIntegratedInboxCliServices,
+} from './inbox-app/service.js'
 
 export type {
   CanonicalAttachmentPromotionResult,
@@ -11,6 +18,7 @@ export type {
   EmailDriver,
   ImessageDriver,
   InboxCliServices,
+  InboxServices,
   InboxParserServiceRuntime,
   InboxPaths,
   InboxPipeline,

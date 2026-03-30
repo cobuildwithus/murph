@@ -2,7 +2,7 @@ import { VaultCliError } from '../vault-cli-errors.js'
 import { toVaultCliError } from '../usecases/vault-usecase-helpers.js'
 import type {
   InboxAppEnvironment,
-  InboxCliServices,
+  InboxServices,
 } from './types.js'
 import {
   documentCanonicalPromotionSpec,
@@ -35,7 +35,7 @@ function unsupportedPromotion(target: 'journal' | 'experiment-note'): VaultCliEr
 export function createInboxPromotionOps(
   env: InboxAppEnvironment,
 ): Pick<
-  InboxCliServices,
+  InboxServices,
   'promoteMeal' | 'promoteDocument' | 'promoteJournal' | 'promoteExperimentNote'
 > {
   return {

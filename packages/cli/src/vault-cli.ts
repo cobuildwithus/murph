@@ -1,12 +1,12 @@
 import { createRequire } from 'node:module'
 import { Cli } from 'incur'
 import {
-  createIntegratedVaultCliServices,
-  type VaultCliServices,
-} from './vault-cli-services.js'
+  createIntegratedVaultServices,
+  type VaultServices,
+} from './vault-services.js'
 import {
-  createIntegratedInboxCliServices,
-  type InboxCliServices,
+  createIntegratedInboxServices,
+  type InboxServices,
 } from './inbox-services.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
@@ -23,8 +23,8 @@ const CLI_SYNC_SUGGESTIONS = [
 ]
 
 export function createVaultCli(
-  services: VaultCliServices = createIntegratedVaultCliServices(),
-  inboxServices: InboxCliServices = createIntegratedInboxCliServices(),
+  services: VaultServices = createIntegratedVaultServices(),
+  inboxServices: InboxServices = createIntegratedInboxServices(),
 ): Cli.Cli {
   const cli = Cli.create('vault-cli', {
     description: CLI_DESCRIPTION,

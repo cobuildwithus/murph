@@ -6,7 +6,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   deleteDocumentRecord,
   documentLookupSchema,
@@ -23,7 +23,7 @@ const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
 export function registerDocumentCommands(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
 ) {
   registerArtifactBackedEntityGroup(cli, {
     commandName: 'document',

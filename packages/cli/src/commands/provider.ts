@@ -4,7 +4,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   deleteProviderRecord,
   editProviderRecord,
@@ -44,7 +44,7 @@ const providerListResultSchema = z.object({
 
 export function registerProviderCommands(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
 ) {
   registerRegistryDocEntityGroup(cli, {
     commandName: 'provider',
