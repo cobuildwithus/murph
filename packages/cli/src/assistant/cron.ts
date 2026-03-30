@@ -51,7 +51,7 @@ import {
   type AssistantCronTargetInput,
   writeAssistantCronStore,
 } from './cron/store.ts'
-import { sendAssistantMessage } from './service.ts'
+import { sendAssistantMessageLocal } from './service.ts'
 import { getAssistantChannelAdapter } from './channel-adapters.ts'
 import { resolveAssistantBindingDelivery } from './bindings.ts'
 import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.ts'
@@ -494,6 +494,12 @@ export async function processDueAssistantCronJobs(
     return remote
   }
 
+  return processDueAssistantCronJobsLocal(input)
+}
+
+export async function processDueAssistantCronJobsLocal(
+  input: ProcessDueAssistantCronJobsInput,
+): Promise<AssistantCronProcessDueResult> {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
 
@@ -662,7 +668,7 @@ async function executeClaimedAssistantCronJob(input: {
         foodId: input.job.foodAutoLog.foodId,
       })
     } else {
-      const result = await sendAssistantMessage({
+      const result = await sendAssistantMessageLocal({
         vault: input.vault,
         prompt: buildAssistantCronExecutionPrompt(input.job),
         sessionId: input.job.target.sessionId ?? undefined,

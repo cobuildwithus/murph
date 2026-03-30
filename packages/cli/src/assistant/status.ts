@@ -50,6 +50,19 @@ export async function getAssistantStatus(
     return remote
   }
 
+  return getAssistantStatusLocal(input)
+}
+
+export async function getAssistantStatusLocal(
+  input:
+    | string
+    | {
+        limit?: number
+        sessionId?: string | null
+        vault: string
+      },
+): Promise<AssistantStatusResult> {
+  const normalizedInput = typeof input === 'string' ? { vault: input } : input
   const vault = normalizedInput.vault
   const paths = resolveAssistantStatePaths(vault)
   const [
@@ -110,7 +123,7 @@ export async function getAssistantStatus(
 export async function refreshAssistantStatusSnapshot(
   vault: string,
 ): Promise<AssistantStatusResult> {
-  const status = await getAssistantStatus(vault)
+  const status = await getAssistantStatusLocal(vault)
   await withAssistantRuntimeWriteLock(vault, async (paths) => {
     await writeJsonFileAtomic(paths.statusPath, status)
     await appendAssistantRuntimeEventAtPaths(paths, {
@@ -128,6 +141,12 @@ export async function refreshAssistantStatusSnapshot(
     }).catch(() => undefined)
   })
   return status
+}
+
+export async function refreshAssistantStatusSnapshotLocal(
+  vault: string,
+): Promise<AssistantStatusResult> {
+  return refreshAssistantStatusSnapshot(vault)
 }
 
 export async function readAssistantStatusSnapshot(

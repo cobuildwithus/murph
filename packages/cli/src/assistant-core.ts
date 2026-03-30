@@ -3,7 +3,8 @@
  *
  * This subpath intentionally excludes CLI command routing, Ink/UI entrypoints, and other
  * operator-shell-only helpers so hosted runtimes and daemons can depend on one explicit
- * application boundary.
+ * application boundary. The exported assistant/session/status helpers execute locally and do
+ * not consult assistantd environment fallbacks.
  */
 
 export {
@@ -53,14 +54,14 @@ export {
   getAssistantCronStatus,
   listAssistantCronJobs,
   listAssistantCronRuns,
-  processDueAssistantCronJobs,
+  processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
   type AssistantCronStatusSnapshot,
   type AssistantCronProcessDueResult,
 } from './assistant/cron.js'
 
 export {
   dispatchAssistantOutboxIntent,
-  drainAssistantOutbox,
+  drainAssistantOutboxLocal as drainAssistantOutbox,
   listAssistantOutboxIntents,
   readAssistantOutboxIntent,
   shouldDispatchAssistantOutboxIntent,
@@ -75,22 +76,23 @@ export {
 } from './assistant/state-ids.js'
 
 export {
-  getAssistantSession,
+  getAssistantSessionLocal as getAssistantSession,
   isAssistantSessionNotFoundError,
-  listAssistantSessions,
+  listAssistantSessionsLocal as listAssistantSessions,
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from './assistant/store.js'
 
 export {
-  getAssistantStatus,
+  getAssistantStatusLocal as getAssistantStatus,
+  readAssistantStatusSnapshot,
   refreshAssistantStatusSnapshot,
 } from './assistant/status.js'
 
 export {
-  openAssistantConversation,
-  sendAssistantMessage,
-  updateAssistantSessionOptions,
+  openAssistantConversationLocal as openAssistantConversation,
+  sendAssistantMessageLocal as sendAssistantMessage,
+  updateAssistantSessionOptionsLocal as updateAssistantSessionOptions,
   type AssistantMessageInput,
 } from './assistant/service.js'
 

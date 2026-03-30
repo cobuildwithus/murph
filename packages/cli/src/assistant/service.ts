@@ -54,7 +54,7 @@ import {
   type ResolvedAssistantFailoverRoute,
 } from './failover.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
-import { refreshAssistantStatusSnapshot } from './status.js'
+import { refreshAssistantStatusSnapshotLocal } from './status.js'
 import {
   appendAssistantTranscriptEntries,
   isAssistantSessionNotFoundError,
@@ -468,6 +468,12 @@ export async function openAssistantConversation(
     return remote
   }
 
+  return openAssistantConversationLocal(input)
+}
+
+export async function openAssistantConversationLocal(
+  input: AssistantSessionResolutionFields,
+) {
   const defaults = await resolveAssistantOperatorDefaults()
   return resolveAssistantSession(buildResolveAssistantSessionInput(input, defaults))
 }
@@ -480,6 +486,12 @@ export async function sendAssistantMessage(
     return remote
   }
 
+  return sendAssistantMessageLocal(input)
+}
+
+export async function sendAssistantMessageLocal(
+  input: AssistantMessageInput,
+): Promise<AssistantAskResult> {
   const defaults = await resolveAssistantOperatorDefaults()
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
@@ -662,7 +674,7 @@ export async function sendAssistantMessage(
         throw error
       } finally {
         await runAssistantTurnBestEffort(() =>
-          refreshAssistantStatusSnapshot(input.vault),
+          refreshAssistantStatusSnapshotLocal(input.vault),
         )
       }
     },
@@ -679,6 +691,14 @@ export async function updateAssistantSessionOptions(input: {
     return remote
   }
 
+  return updateAssistantSessionOptionsLocal(input)
+}
+
+export async function updateAssistantSessionOptionsLocal(input: {
+  providerOptions: Partial<AssistantSession['providerOptions']>
+  sessionId: string
+  vault: string
+}): Promise<AssistantSession> {
   const session = await resolveAssistantSession({
     vault: input.vault,
     conversation: {

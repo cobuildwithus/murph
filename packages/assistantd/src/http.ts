@@ -178,7 +178,12 @@ async function handleAssistantRequest(
             ? 404
             : 500
     sendJson(response, statusCode, {
-      error: error instanceof Error ? error.message : 'Assistant daemon request failed.',
+      error:
+        statusCode >= 500
+          ? 'Assistant daemon request failed.'
+          : error instanceof Error
+            ? error.message
+            : 'Assistant daemon request failed.',
     })
   }
 }
@@ -292,9 +297,27 @@ function parseAssistantAutomationRunRequestBody(payload: unknown): AssistantAuto
   assertOptionalFiniteNumberField(record, 'maxPerScan', 'automation/run-once')
   assertOptionalFiniteNumberField(record, 'scanIntervalMs', 'automation/run-once')
   assertOptionalFiniteNumberField(record, 'sessionMaxAgeMs', 'automation/run-once')
-  assertOptionalNullableStringField(record, 'deliveryDispatchMode', 'automation/run-once')
+  const deliveryDispatchMode = readOptionalNullableStringField(
+    record,
+    'deliveryDispatchMode',
+    'automation/run-once',
+  )
+  if (
+    deliveryDispatchMode !== null &&
+    deliveryDispatchMode !== undefined &&
+    deliveryDispatchMode !== 'immediate' &&
+    deliveryDispatchMode !== 'queue-only'
+  ) {
+    throw new AssistantHttpRequestError(
+      'Assistant automation run requests must use a valid deliveryDispatchMode.',
+      400,
+    )
+  }
   assertOptionalObjectField(record, 'modelSpec', 'automation/run-once')
-  return record as AssistantAutomationRunRequest
+  return {
+    ...record,
+    deliveryDispatchMode: deliveryDispatchMode ?? undefined,
+  } as AssistantAutomationRunRequest
 }
 
 function parseAssistantCronProcessRequestBody(payload: unknown): AssistantCronProcessRequest {

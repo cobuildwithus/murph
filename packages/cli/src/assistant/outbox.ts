@@ -593,6 +593,21 @@ export async function drainAssistantOutbox(input: {
     return remote
   }
 
+  return drainAssistantOutboxLocal(input)
+}
+
+export async function drainAssistantOutboxLocal(input: {
+  dependencies?: AssistantChannelDependencies
+  dispatchHooks?: AssistantOutboxDispatchHooks
+  limit?: number
+  now?: Date
+  vault: string
+}): Promise<{
+  attempted: number
+  failed: number
+  queued: number
+  sent: number
+}> {
   maybeThrowInjectedAssistantFault({
     component: 'outbox',
     fault: 'outbox',

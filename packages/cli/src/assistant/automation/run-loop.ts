@@ -10,11 +10,11 @@ import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultCliServices } from '../../vault-cli-services.js'
 import { createIntegratedVaultCliServices } from '../../vault-cli-services.js'
 import { maybeRunAssistantAutomationViaDaemon } from '../../assistant-daemon-client.js'
-import { processDueAssistantCronJobs } from '../cron.js'
+import { processDueAssistantCronJobsLocal as processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
 import {
-  drainAssistantOutbox,
+  drainAssistantOutboxLocal as drainAssistantOutbox,
   type AssistantOutboxDispatchMode,
 } from '../outbox.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
