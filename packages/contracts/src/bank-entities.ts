@@ -73,8 +73,6 @@ const RELATED_IDS_COMPATIBILITY_RELATION: BankEntityRegistryLinkMetadata = {
   cardinality: "many",
 };
 
-const CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
 const HEALTH_BANK_ENTITY_KINDS = [
   "goal",
   "condition",
@@ -105,28 +103,6 @@ function normalizeRegistryString(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
-}
-
-function encodeBase32(bytes: Uint8Array, length: number): string {
-  let output = "";
-  let buffer = 0;
-  let bits = 0;
-
-  for (const byte of bytes) {
-    buffer = (buffer << 8) | byte;
-    bits += 8;
-
-    while (bits >= 5 && output.length < length) {
-      bits -= 5;
-      output += CROCKFORD_BASE32_ALPHABET[(buffer >> bits) & 31];
-    }
-  }
-
-  if (bits > 0 && output.length < length) {
-    output += CROCKFORD_BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
-  }
-
-  return output.padEnd(length, "0").slice(0, length);
 }
 
 function readFirstRegistryString(
@@ -403,7 +379,6 @@ const checkedBankEntityDefinitions = [
       frontmatterSchema: workoutFormatFrontmatterSchema as ZodTypeAny,
       directory: "bank/workout-formats",
       idField: "workoutFormatId",
-      idKeys: ["workoutFormatId", "slug"],
       upsertPayloadSchema: workoutFormatUpsertPayloadSchema as ZodTypeAny,
       titleKeys: ["title"],
       statusKeys: ["status"],
@@ -411,13 +386,13 @@ const checkedBankEntityDefinitions = [
       transform({ attributes, helpers }) {
         return {
           summary: helpers.firstString(attributes, ["summary"]),
-          activityType: helpers.firstString(attributes, ["activityType", "type"]),
+          activityType: helpers.firstString(attributes, ["activityType"]),
           durationMinutes: helpers.firstNumber(attributes, ["durationMinutes"]),
           distanceKm: helpers.firstNumber(attributes, ["distanceKm"]),
           strengthExercises: projectWorkoutStrengthExercises(attributes.strengthExercises),
           tags: helpers.firstStringArray(attributes, ["tags"]),
           note: helpers.firstString(attributes, ["note"]),
-          templateText: helpers.firstString(attributes, ["templateText", "text"]),
+          templateText: helpers.firstString(attributes, ["templateText"]),
         };
       },
     },
@@ -476,13 +451,6 @@ export function extractBankEntityRegistryRelatedIds(
       extractBankEntityRegistryLinks(kind, attributes).map((link) => link.targetId),
     ),
   ];
-}
-
-export function deriveWorkoutFormatCompatibilityId(slug: string): string {
-  return `${ID_PREFIXES.workoutFormat}_${encodeBase32(
-    new TextEncoder().encode(`legacy-workout-format:${slug.trim().toLowerCase()}`),
-    26,
-  )}`;
 }
 
 export const goalBankEntityDefinition = requireBankEntityRegistryDefinition("goal");

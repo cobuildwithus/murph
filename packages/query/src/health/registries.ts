@@ -1,5 +1,4 @@
 import {
-  deriveWorkoutFormatCompatibilityId,
   requireBankEntityRegistryDefinition,
   type BankEntityKind,
   type BankEntityRegistryProjectionHelpers,
@@ -182,11 +181,7 @@ export function toRegistryRecord<TEntity extends RegistryQueryEntity>(
   definition: RegistryDefinition<TEntity>,
 ): RegistryStoredDocument<TEntity> | null {
   const slug = firstString(document.attributes, ["slug"]) ?? pathSlug(document.relativePath);
-  const id =
-    definition.directory === "bank/workout-formats"
-      ? firstString(document.attributes, ["workoutFormatId"])
-        ?? deriveWorkoutFormatCompatibilityId(slug)
-      : firstString(document.attributes, definition.idKeys);
+  const id = firstString(document.attributes, definition.idKeys);
   if (!id) {
     return null;
   }

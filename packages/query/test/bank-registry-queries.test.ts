@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "vitest";
-import { deriveWorkoutFormatCompatibilityId } from "@murph/contracts";
 
 import {
   listProviders,
@@ -67,14 +66,31 @@ organization: Neighborhood Clinic
       `---
 schemaVersion: murph.frontmatter.workout-format.v1
 docType: workout_format
+workoutFormatId: wfmt_01JNV4R0R1DVH1YP8KQQD5GQ7Y
 slug: garage-day
 title: Garage Day
 status: active
-type: strength-training
+activityType: strength-training
 durationMinutes: 40
-text: Garage day template.
+templateText: Garage day template.
 ---
 # Garage Day
+`,
+    );
+    await writeVaultFile(
+      vaultRoot,
+      "bank/workout-formats/legacy-gym-day.md",
+      `---
+schemaVersion: murph.frontmatter.workout-format.v1
+docType: workout_format
+slug: legacy-gym-day
+title: Legacy Gym Day
+status: active
+type: strength-training
+durationMinutes: 35
+text: Legacy gym day template.
+---
+# Legacy Gym Day
 `,
     );
 
@@ -87,8 +103,7 @@ text: Garage day template.
     const workoutFormats = await listWorkoutFormats(vaultRoot, {
       status: "active",
     });
-    const workoutFormatCompatibilityId =
-      deriveWorkoutFormatCompatibilityId("garage-day");
+    const workoutFormatId = "wfmt_01JNV4R0R1DVH1YP8KQQD5GQ7Y";
 
     assert.equal(recipes.length, 1);
     assert.equal(recipes[0]?.entity.id, "rcp_01JNV422Y2M5ZBV64ZP4N1DRB1");
@@ -113,15 +128,16 @@ text: Garage day template.
     );
 
     assert.equal(workoutFormats.length, 1);
-    assert.equal(workoutFormats[0]?.entity.id, workoutFormatCompatibilityId);
+    assert.equal(workoutFormats[0]?.entity.id, workoutFormatId);
     assert.equal(
-      (await readWorkoutFormat(vaultRoot, workoutFormatCompatibilityId))?.entity.slug,
+      (await readWorkoutFormat(vaultRoot, workoutFormatId))?.entity.slug,
       "garage-day",
     );
     assert.equal(
       (await showWorkoutFormat(vaultRoot, "garage-day"))?.entity.id,
-      workoutFormatCompatibilityId,
+      workoutFormatId,
     );
+    assert.equal(await showWorkoutFormat(vaultRoot, "legacy-gym-day"), null);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

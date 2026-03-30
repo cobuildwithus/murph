@@ -1,6 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises'
 import {
-  deriveWorkoutFormatCompatibilityId,
   type ActivityStrengthExercise,
   ID_PREFIXES,
 } from '@murph/contracts'
@@ -39,11 +38,11 @@ interface WorkoutFormatRecord {
   title: string
   slug: string
   status: string
-  text: string | null
+  templateText?: string
   activityType: string
-  durationMinutes: number
-  distanceKm: number | null
-  strengthExercises: ActivityStrengthExercise[] | null
+  durationMinutes?: number
+  distanceKm?: number
+  strengthExercises?: ActivityStrengthExercise[]
   relativePath: string
   markdown: string
 }
@@ -105,11 +104,11 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
     title,
     slug,
     status: existingRecord?.status ?? 'active',
-    text: capture.note,
+    templateText: capture.note,
     activityType: capture.activityType,
     durationMinutes: capture.durationMinutes,
-    distanceKm: capture.distanceKm,
-    strengthExercises: capture.strengthExercises,
+    distanceKm: capture.distanceKm ?? undefined,
+    strengthExercises: capture.strengthExercises ?? undefined,
     relativePath,
     markdown: existingMarkdown ?? '',
   })
@@ -188,8 +187,8 @@ export async function logWorkoutFormat(input: LogWorkoutFormatInput) {
     distanceKm:
       typeof input.distanceKm === 'number'
         ? input.distanceKm
-        : record.distanceKm ?? undefined,
-    strengthExercises: record.strengthExercises,
+        : record.distanceKm,
+    strengthExercises: record.strengthExercises ?? null,
     occurredAt: input.occurredAt,
     source: input.source,
   })
@@ -216,7 +215,15 @@ async function loadWorkoutFormats(vault: string): Promise<WorkoutFormatRecord[]>
       const relativePath = `${WORKOUT_FORMATS_DIRECTORY}/${entry.name}`
       const resolvedFile = await resolveVaultPathOnDisk(vault, relativePath)
       const markdown = await readFile(resolvedFile.absolutePath, 'utf8')
-      records.push(parseWorkoutFormatRecord(markdown, relativePath))
+      try {
+        records.push(parseWorkoutFormatRecord(markdown, relativePath))
+      } catch (error) {
+        if (isLegacyWorkoutFormatCompatibilityError(error)) {
+          continue
+        }
+
+        throw error
+      }
     }
   } catch (error) {
     if (isMissingPathError(error)) {
@@ -239,11 +246,16 @@ async function resolveWorkoutFormat(vault: string, lookup: string) {
     throw new VaultCliError('contract_invalid', 'Workout format name is required.')
   }
 
-  const records = await loadWorkoutFormats(vault)
   const directSlug = slugifyWorkoutFormatName(normalizedLookup)
-  const slugMatch =
-    records.find((record) => record.slug === normalizedLookup) ??
-    records.find((record) => record.slug === directSlug)
+  if (directSlug) {
+    const directRecord = await readWorkoutFormatBySlug(vault, directSlug)
+    if (directRecord) {
+      return directRecord
+    }
+  }
+
+  const records = await loadWorkoutFormats(vault)
+  const slugMatch = records.find((record) => record.slug === normalizedLookup)
   if (slugMatch) {
     return slugMatch
   }
@@ -266,6 +278,21 @@ async function resolveWorkoutFormat(vault: string, lookup: string) {
     'not_found',
     `Workout format "${normalizedLookup}" was not found.`,
   )
+}
+
+async function readWorkoutFormatBySlug(
+  vault: string,
+  slug: string,
+): Promise<WorkoutFormatRecord | null> {
+  const relativePath = formatWorkoutFormatPath(slug)
+  const resolvedFile = await resolveVaultPathOnDisk(vault, relativePath)
+  const markdown = await readOptionalUtf8File(resolvedFile.absolutePath)
+
+  if (!markdown) {
+    return null
+  }
+
+  return parseWorkoutFormatRecord(markdown, relativePath)
 }
 
 function parseWorkoutFormatRecord(
@@ -293,10 +320,17 @@ function parseWorkoutFormatRecord(
 
   const title = requireWorkoutFormatString(attributes.title, 'title', relativePath)
   const slug = requireWorkoutFormatString(attributes.slug, 'slug', relativePath)
-  const text = optionalWorkoutFormatString(attributes.templateText ?? attributes.text)
-  const activityType =
-    optionalWorkoutFormatString(attributes.activityType) ??
-    optionalWorkoutFormatString(attributes.type)
+  const workoutFormatId = requireWorkoutFormatString(
+    attributes.workoutFormatId,
+    'workoutFormatId',
+    relativePath,
+  )
+  const templateText = optionalWorkoutFormatString(attributes.templateText)
+  const activityType = requireWorkoutFormatString(
+    attributes.activityType,
+    'activityType',
+    relativePath,
+  )
   const durationMinutes = optionalWorkoutFormatPositiveInteger(
     attributes.durationMinutes,
     'durationMinutes',
@@ -311,43 +345,17 @@ function parseWorkoutFormatRecord(
     attributes.strengthExercises,
     relativePath,
   )
-  const needsCompatibilityDefaults =
-    activityType === null ||
-    durationMinutes === null ||
-    (distanceKm === null && strengthExercises === null)
-  const capture = needsCompatibilityDefaults
-    ? text
-      ? validateWorkoutFormatDefaults({
-          text,
-          durationMinutes: durationMinutes ?? undefined,
-          activityType: activityType ?? undefined,
-          distanceKm: distanceKm ?? undefined,
-          relativePath,
-        })
-      : null
-    : null
-  const resolvedActivityType = activityType ?? capture?.activityType
-  const resolvedDurationMinutes = durationMinutes ?? capture?.durationMinutes
-
-  if (!resolvedActivityType || resolvedDurationMinutes === undefined) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Workout format document "${relativePath}" is invalid.`,
-    )
-  }
 
   return {
-    workoutFormatId:
-      optionalWorkoutFormatString(attributes.workoutFormatId) ??
-      deriveWorkoutFormatCompatibilityId(slug),
+    workoutFormatId,
     title,
     slug,
     status: optionalWorkoutFormatString(attributes.status) ?? 'active',
-    text,
-    activityType: resolvedActivityType,
-    durationMinutes: resolvedDurationMinutes,
-    distanceKm: distanceKm ?? capture?.distanceKm ?? null,
-    strengthExercises: strengthExercises ?? capture?.strengthExercises ?? null,
+    templateText,
+    activityType,
+    durationMinutes,
+    distanceKm,
+    strengthExercises,
     relativePath,
     markdown,
   }
@@ -360,9 +368,11 @@ function stringifyWorkoutFormatRecord(record: WorkoutFormatRecord) {
     '',
     `- Status: ${record.status}`,
     `- Activity type: ${record.activityType}`,
-    `- Default duration: ${record.durationMinutes} min`,
+    `- Default duration: ${record.durationMinutes ?? 'none'}${
+      record.durationMinutes === undefined ? '' : ' min'
+    }`,
     `- Default distance: ${record.distanceKm ?? 'none'}${
-      record.distanceKm === null ? '' : ' km'
+      record.distanceKm === undefined ? '' : ' km'
     }`,
     '',
     ...(record.strengthExercises?.length
@@ -391,8 +401,8 @@ function stringifyWorkoutFormatRecord(record: WorkoutFormatRecord) {
       status: record.status,
       activityType: record.activityType,
       durationMinutes: record.durationMinutes,
-      distanceKm: record.distanceKm ?? undefined,
-      strengthExercises: record.strengthExercises ?? undefined,
+      distanceKm: record.distanceKm,
+      strengthExercises: record.strengthExercises,
       templateText: text,
     }) as WorkoutFormatFrontmatter,
     body,
@@ -415,13 +425,13 @@ function toWorkoutFormatEntity(
     data: compactObject({
       workoutFormatId: record.workoutFormatId,
       slug: record.slug,
-      text: record.text ?? undefined,
-      templateText: record.text ?? undefined,
+      text: record.templateText,
+      templateText: record.templateText,
       type: record.activityType,
       activityType: record.activityType,
       durationMinutes: record.durationMinutes,
-      distanceKm: record.distanceKm ?? undefined,
-      strengthExercises: record.strengthExercises ?? undefined,
+      distanceKm: record.distanceKm,
+      strengthExercises: record.strengthExercises,
       status: record.status,
     }),
     links: [],
@@ -434,7 +444,6 @@ function validateWorkoutFormatDefaults(
     durationMinutes?: number
     activityType?: string
     distanceKm?: number
-    relativePath?: string
   },
 ): ResolvedWorkoutCapture {
   try {
@@ -449,18 +458,13 @@ function validateWorkoutFormatDefaults(
       throw error
     }
 
-    const prefix =
-      typeof input.relativePath === 'string' && input.relativePath.length > 0
-        ? `Workout format document "${input.relativePath}" is invalid: `
-        : 'Workout format defaults are invalid: '
-
-    throw new VaultCliError(error.code, `${prefix}${error.message}`)
+    throw new VaultCliError(error.code, `Workout format defaults are invalid: ${error.message}`)
   }
 }
 
 function requireWorkoutFormatTemplateText(record: WorkoutFormatRecord) {
-  if (record.text) {
-    return record.text
+  if (record.templateText) {
+    return record.templateText
   }
 
   throw new VaultCliError(
@@ -486,7 +490,7 @@ function requireWorkoutFormatString(
 }
 
 function optionalWorkoutFormatString(value: unknown) {
-  return typeof value === 'string' ? normalizeOptionalText(value) : null
+  return typeof value === 'string' ? normalizeOptionalText(value) ?? undefined : undefined
 }
 
 function optionalWorkoutFormatPositiveInteger(
@@ -495,7 +499,7 @@ function optionalWorkoutFormatPositiveInteger(
   relativePath: string,
 ) {
   if (value === undefined || value === null) {
-    return null
+    return undefined
   }
 
   if (!Number.isInteger(value) || Number(value) <= 0) {
@@ -514,7 +518,7 @@ function optionalWorkoutFormatPositiveNumber(
   relativePath: string,
 ) {
   if (value === undefined || value === null) {
-    return null
+    return undefined
   }
 
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -532,7 +536,7 @@ function optionalWorkoutFormatStrengthExercises(
   relativePath: string,
 ) {
   if (value === undefined || value === null) {
-    return null
+    return undefined
   }
 
   if (!Array.isArray(value)) {
@@ -569,24 +573,24 @@ function optionalWorkoutFormatStrengthExercises(
       entry.load,
       `strengthExercises[${index}].load`,
       relativePath,
-    ) : null
+    ) : undefined
     const loadUnit =
       'loadUnit' in entry && typeof entry.loadUnit === 'string' && LOAD_UNITS.has(entry.loadUnit)
         ? entry.loadUnit
-        : null
+        : undefined
     const loadDescription =
       'loadDescription' in entry
         ? optionalWorkoutFormatString(entry.loadDescription)
-        : null
+        : undefined
 
-    if (setCount === null || repsPerSet === null) {
+    if (setCount === undefined || repsPerSet === undefined) {
       throw new VaultCliError(
         'contract_invalid',
         `Workout format document "${relativePath}" has invalid strengthExercises[${index}].`,
       )
     }
 
-    if ((load === null) !== (loadUnit === null)) {
+    if ((load === undefined) !== (loadUnit === undefined)) {
       throw new VaultCliError(
         'contract_invalid',
         `Workout format document "${relativePath}" has invalid strengthExercises[${index}].`,
@@ -597,13 +601,13 @@ function optionalWorkoutFormatStrengthExercises(
       exercise,
       setCount,
       repsPerSet,
-      load: load ?? undefined,
-      loadUnit: loadUnit ?? undefined,
-      loadDescription: loadDescription ?? undefined,
+      load,
+      loadUnit,
+      loadDescription,
     }) as ActivityStrengthExercise
   })
 
-  return exercises.length > 0 ? exercises : null
+  return exercises.length > 0 ? exercises : undefined
 }
 
 function formatStrengthExerciseLine(exercise: ActivityStrengthExercise) {
@@ -661,5 +665,13 @@ function isMissingPathError(error: unknown) {
       typeof error === 'object' &&
       'code' in error &&
       error.code === 'ENOENT',
+  )
+}
+
+function isLegacyWorkoutFormatCompatibilityError(error: unknown) {
+  return (
+    error instanceof VaultCliError &&
+    error.code === 'contract_invalid' &&
+    /missing (workoutFormatId|activityType)/u.test(error.message)
   )
 }

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   allergyRegistryEntityDefinition,
   bankEntityDefinitionByKind,
-  deriveWorkoutFormatCompatibilityId,
   conditionRegistryEntityDefinition,
   extractBankEntityRegistryLinks,
   extractBankEntityRegistryRelatedIds,
@@ -827,6 +826,7 @@ test("bank entity projections normalize food and workout format metadata through
       markdown: "# Push Day A",
       body: "# Push Day A",
       attributes: {
+        workoutFormatId: "wfmt_01JNY0B2W4VG5C2A0G9S8M7R6D",
         slug: "push-day-a",
         title: "Push Day A",
         status: "active",
@@ -850,7 +850,7 @@ test("bank entity projections normalize food and workout format metadata through
   assert.ok(workoutFormatRecord);
   assert.equal(
     workoutFormatRecord?.entity.id,
-    deriveWorkoutFormatCompatibilityId("push-day-a"),
+    "wfmt_01JNY0B2W4VG5C2A0G9S8M7R6D",
   );
   assert.equal(workoutFormatRecord?.entity.activityType, "strength-training");
   assert.equal(workoutFormatRecord?.entity.durationMinutes, 45);
@@ -863,7 +863,7 @@ test("bank entity projections normalize food and workout format metadata through
   assert.ok(roundTrippedWorkoutFormat);
   assert.equal(
     roundTrippedWorkoutFormat?.entity.id,
-    deriveWorkoutFormatCompatibilityId("push-day-a"),
+    "wfmt_01JNY0B2W4VG5C2A0G9S8M7R6D",
   );
   assert.equal(roundTrippedWorkoutFormat?.entity.templateText, "45 min push day with incline bench.");
 });
