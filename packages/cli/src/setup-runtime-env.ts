@@ -20,7 +20,7 @@ const OURA_CLIENT_SECRET_KEYS = ['OURA_CLIENT_SECRET'] as const
 const OURA_CLIENT_KEY_GROUPS = [OURA_CLIENT_ID_KEYS, OURA_CLIENT_SECRET_KEYS] as const
 
 export const SETUP_RUNTIME_ENV_NOTICE =
-  'Murph uses the current process environment for this run, including shell exports and any CLI-loaded .env.local/.env values. Prompts here are current-run only and do not write env files.'
+  'Murph can use keys from your current shell for this setup run. Anything you enter here is only used for this run and is not written to a file.'
 
 export interface SetupWizardRuntimeStatus {
   badge: string
@@ -32,6 +32,7 @@ export interface SetupWizardRuntimeStatus {
 export interface SetupRuntimeEnvResolver {
   getCurrentEnv(): NodeJS.ProcessEnv
   promptForMissing(input: {
+    assistantApiKeyEnv?: string | null
     channels: readonly SetupChannel[]
     env: NodeJS.ProcessEnv
     wearables: readonly SetupWearable[]
@@ -51,13 +52,13 @@ export function createSetupRuntimeEnvResolver(): SetupRuntimeEnvResolver {
 
       process.stderr.write(`\n${SETUP_RUNTIME_ENV_NOTICE}\n`)
       process.stderr.write(
-        'Enter any missing values for this onboarding run only. Leave a prompt blank to skip it for now.\n\n',
+        'Enter any missing keys for this setup run. Leave a prompt blank to skip it for now.\n\n',
       )
 
       const overrides: NodeJS.ProcessEnv = {}
       for (const key of missingKeys) {
         const value = await promptForRuntimeEnvValue(
-          `Enter ${key} for this run only (leave blank to skip): `,
+          `Enter ${key} for this setup run (leave blank to skip): `,
         )
         if (value) {
           overrides[key] = value
@@ -166,7 +167,7 @@ export function describeSetupChannelStatus(
             ready: true,
           }
         : {
-            badge: 'needs env',
+            badge: 'needs keys',
             detail:
               'Add LINQ_API_TOKEN and LINQ_WEBHOOK_SECRET to the current environment to enable the Linq channel.',
             missingEnv,
@@ -263,6 +264,7 @@ export function describeSelectedSetupWearables(input: {
 }
 
 function collectSetupPromptKeys(input: {
+  assistantApiKeyEnv?: string | null
   channels: readonly SetupChannel[]
   env: NodeJS.ProcessEnv
   wearables: readonly SetupWearable[]
@@ -288,6 +290,14 @@ function collectSetupPromptKeys(input: {
     }
   }
 
+  const assistantApiKeyEnv = normalizeEnvValue(input.assistantApiKeyEnv)
+  if (assistantApiKeyEnv && normalizeEnvValue(input.env[assistantApiKeyEnv]) === null) {
+    if (!seen.has(assistantApiKeyEnv)) {
+      seen.add(assistantApiKeyEnv)
+      keys.push(assistantApiKeyEnv)
+    }
+  }
+
   return keys
 }
 
@@ -302,7 +312,7 @@ function hasAnyEnv(env: NodeJS.ProcessEnv, keys: readonly string[]): boolean {
   return keys.some((key) => normalizeEnvValue(env[key]) !== null)
 }
 
-function normalizeEnvValue(value: string | undefined): string | null {
+function normalizeEnvValue(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
 }

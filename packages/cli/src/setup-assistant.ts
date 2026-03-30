@@ -155,7 +155,7 @@ export function createSetupAssistantResolver(
             oss: null,
             account: null,
             detail:
-              'Skipped saving assistant defaults during setup. Murph will keep any existing assistant config unchanged.',
+              'Skipped assistant setup. Murph will keep your current assistant settings as they are.',
           }
           break
 
@@ -168,7 +168,7 @@ export function createSetupAssistantResolver(
             input,
             output,
             prompt:
-              'Default assistant model for Codex CLI',
+              'Default model to use with Codex',
           })
 
           resolvedAssistant = {
@@ -211,7 +211,7 @@ export function createSetupAssistantResolver(
             input,
             output,
             prompt:
-              'Default local model for Codex OSS',
+              'Default local model to use with Codex',
           })
 
           resolvedAssistant = {
@@ -263,7 +263,7 @@ export function createSetupAssistantResolver(
             input,
             output,
             prompt:
-              'OpenAI-compatible base URL',
+              'Model endpoint URL',
           })
 
           const apiKeyEnv = await resolveOptionalPromptedValue({
@@ -275,7 +275,7 @@ export function createSetupAssistantResolver(
             input,
             output,
             prompt:
-              'API key environment variable (leave blank for local/no auth)',
+              'API key env var name (leave blank if this endpoint does not need one)',
           })
           const providerName =
             normalizeNullableString(
@@ -374,7 +374,7 @@ async function resolveOpenAICompatibleModel(input: {
   }
 
   if (discoveredModels.length > 0) {
-    input.output.write('\nDiscovered OpenAI-compatible models:\n')
+    input.output.write('\nAvailable models:\n')
     for (const [index, model] of discoveredModels.entries()) {
       input.output.write(`  ${index + 1}. ${model}\n`)
     }
@@ -384,7 +384,7 @@ async function resolveOpenAICompatibleModel(input: {
       defaultValue: '1',
       input: input.input,
       output: input.output,
-      prompt: 'Choose a model number or type a model id',
+      prompt: 'Pick a model number or type a model id',
     })
 
     if (choice) {
@@ -405,7 +405,7 @@ async function resolveOpenAICompatibleModel(input: {
     allowPrompt: true,
     input: input.input,
     output: input.output,
-    prompt: 'Default model for the OpenAI-compatible endpoint',
+    prompt: 'Default model to use',
   })
 }
 
@@ -503,10 +503,10 @@ function buildOpenAICompatibleAssistantDetail(input: {
   model: string
 }): string {
   if (input.apiKeyEnv) {
-    return `Use ${input.model} through the OpenAI-compatible endpoint at ${input.baseUrl} with credentials sourced from ${input.apiKeyEnv}.`
+    return `Use ${input.model} from ${input.baseUrl}. Murph will read the key from ${input.apiKeyEnv}.`
   }
 
-  return `Use ${input.model} through the OpenAI-compatible endpoint at ${input.baseUrl}.`
+  return `Use ${input.model} from ${input.baseUrl}.`
 }
 
 function buildCodexAssistantDetail(input: {
@@ -514,8 +514,8 @@ function buildCodexAssistantDetail(input: {
   oss: boolean
 }): string {
   return input.oss
-    ? `Use Codex CLI in OSS mode with ${input.model}.`
-    : `Use Codex CLI with ${input.model}.`
+    ? `Use Codex with the local model ${input.model}.`
+    : `Use Codex with ${input.model}.`
 }
 
 function appendDetectedAssistantAccountDetail(

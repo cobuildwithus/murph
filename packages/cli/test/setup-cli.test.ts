@@ -54,6 +54,8 @@ import {
   createSetupWizardCompletionController,
   describeSetupWizardPublicUrlStrategyChoice,
   getDefaultSetupWizardScheduledUpdates,
+  inferSetupWizardAssistantProvider,
+  resolveSetupWizardAssistantSelection,
   type SetupWizardResult,
 } from '../src/setup-wizard.js'
 import {
@@ -248,7 +250,7 @@ test('public URL review recommends hosted apps/web for wearable ingress when no 
 
   assert.equal(review.enabled, true)
   assert.equal(review.recommendedStrategy, 'hosted')
-  assert.match(review.summary, /hosted `apps\/web`/u)
+  assert.match(review.summary, /Hosted `apps\/web`/u)
   assert.deepEqual(
     review.targets.map((target) => target.url),
     [
@@ -279,7 +281,7 @@ test('public URL review recommends tunnel mode for Linq-only ingress and keeps t
   assert.deepEqual(review.targets, [
     {
       detail:
-        'Point Linq here through a tunnel. Hosted `apps/web` does not replace this inbox webhook path yet.',
+        'Point your tunnel here. Hosted `apps/web` does not replace this Linq webhook yet.',
       label: 'Linq webhook',
       url: 'http://127.0.0.1:8789/linq-webhook',
     },
@@ -289,7 +291,7 @@ test('public URL review recommends tunnel mode for Linq-only ingress and keeps t
       review,
       strategy: 'tunnel',
     }),
-    /does not provide a hosted Linq ingress yet/u,
+    /does not have a hosted Linq webhook yet/u,
   )
 })
 
@@ -1582,6 +1584,308 @@ test('interactive onboarding prompts for missing channel and wearable credential
       process.env.OURA_CLIENT_SECRET = previousEnv.OURA_CLIENT_SECRET
     }
   }
+})
+
+test('interactive onboarding carries assistant API key defaults from the wizard into runtime prompts and assistant setup', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-api-key-'))
+  const promptedInputs: Array<{
+    assistantApiKeyEnv: string | null | undefined
+    channels: string[]
+    env: NodeJS.ProcessEnv
+    wearables: string[]
+  }> = []
+  const assistantCalls: Array<{
+    options: {
+      assistantApiKeyEnv: string | null | undefined
+      assistantBaseUrl: string | null | undefined
+      assistantProviderName: string | null | undefined
+    }
+    preset: string
+  }> = []
+  const previousEnv = {
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  }
+  delete process.env.OPENAI_API_KEY
+
+  const cli = createSetupCli({
+    assistantSetup: {
+      async resolve(input: any) {
+        assistantCalls.push({
+          options: {
+            assistantApiKeyEnv: input.options.assistantApiKeyEnv,
+            assistantBaseUrl: input.options.assistantBaseUrl,
+            assistantProviderName: input.options.assistantProviderName,
+          },
+          preset: input.preset,
+        })
+
+        return {
+          account: null,
+          apiKeyEnv: input.options.assistantApiKeyEnv ?? null,
+          approvalPolicy: null,
+          baseUrl: input.options.assistantBaseUrl ?? null,
+          codexCommand: null,
+          detail: 'configured',
+          enabled: true,
+          model: 'gpt-5.4',
+          oss: false,
+          preset: input.preset,
+          profile: null,
+          provider: 'openai-compatible',
+          providerName: input.options.assistantProviderName ?? null,
+          reasoningEffort: null,
+          sandbox: null,
+        }
+      },
+    },
+    commandName: 'murph',
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {}
+      },
+      async promptForMissing(input) {
+        promptedInputs.push({
+          assistantApiKeyEnv: input.assistantApiKeyEnv,
+          channels: [...input.channels],
+          env: { ...input.env },
+          wearables: [...input.wearables],
+        })
+        return {
+          OPENAI_API_KEY: 'sk-openai-key',
+        }
+      },
+    },
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+    services: {
+      async setupMacos(input: any) {
+        return makeSetupResult(input.vault, {
+          assistant: input.assistant,
+        })
+      },
+    } as ReturnType<typeof createSetupServices>,
+    wizard: {
+      async run() {
+        return {
+          assistantApiKeyEnv: 'OPENAI_API_KEY',
+          assistantBaseUrl: 'https://api.openai.com/v1',
+          assistantPreset: 'openai-compatible',
+          assistantProviderName: 'OpenAI',
+          channels: [],
+          scheduledUpdates: [],
+          wearables: [],
+        }
+      },
+    },
+  })
+
+  try {
+    await cli.serve(['onboard', '--vault', vaultRoot, '--format', 'toon', '--verbose'], {
+      env: process.env,
+      exit: () => {},
+      stdout() {},
+    })
+
+    assert.deepEqual(promptedInputs, [
+      {
+        assistantApiKeyEnv: 'OPENAI_API_KEY',
+        channels: [],
+        env: {},
+        wearables: [],
+      },
+    ])
+    assert.deepEqual(assistantCalls, [
+      {
+        options: {
+          assistantApiKeyEnv: 'OPENAI_API_KEY',
+          assistantBaseUrl: 'https://api.openai.com/v1',
+          assistantProviderName: 'OpenAI',
+        },
+        preset: 'openai-compatible',
+      },
+    ])
+    assert.equal(process.env.OPENAI_API_KEY, 'sk-openai-key')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+
+    if (previousEnv.OPENAI_API_KEY === undefined) {
+      delete process.env.OPENAI_API_KEY
+    } else {
+      process.env.OPENAI_API_KEY = previousEnv.OPENAI_API_KEY
+    }
+  }
+})
+
+test('interactive onboarding clears stale assistant endpoint defaults when the wizard switches back to Codex sign-in', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-assistant-clear-'))
+  const promptedInputs: Array<{
+    assistantApiKeyEnv: string | null | undefined
+    channels: string[]
+    env: NodeJS.ProcessEnv
+    wearables: string[]
+  }> = []
+  const assistantCalls: Array<{
+    options: {
+      assistantApiKeyEnv: string | null | undefined
+      assistantBaseUrl: string | null | undefined
+      assistantProviderName: string | null | undefined
+    }
+    preset: string
+  }> = []
+
+  const cli = createSetupCli({
+    assistantSetup: {
+      async resolve(input: any) {
+        assistantCalls.push({
+          options: {
+            assistantApiKeyEnv: input.options.assistantApiKeyEnv,
+            assistantBaseUrl: input.options.assistantBaseUrl,
+            assistantProviderName: input.options.assistantProviderName,
+          },
+          preset: input.preset,
+        })
+
+        return {
+          account: null,
+          apiKeyEnv: null,
+          approvalPolicy: null,
+          baseUrl: null,
+          codexCommand: null,
+          detail: 'configured',
+          enabled: true,
+          model: 'gpt-5.4',
+          oss: false,
+          preset: input.preset,
+          profile: null,
+          provider: 'codex-cli',
+          providerName: null,
+          reasoningEffort: null,
+          sandbox: null,
+        }
+      },
+    },
+    commandName: 'murph',
+    runtimeEnv: {
+      getCurrentEnv() {
+        return {}
+      },
+      async promptForMissing(input) {
+        promptedInputs.push({
+          assistantApiKeyEnv: input.assistantApiKeyEnv,
+          channels: [...input.channels],
+          env: { ...input.env },
+          wearables: [...input.wearables],
+        })
+        return {}
+      },
+    },
+    terminal: {
+      stdinIsTTY: true,
+      stderrIsTTY: true,
+    },
+    services: {
+      async setupMacos(input: any) {
+        return makeSetupResult(input.vault, {
+          assistant: input.assistant,
+        })
+      },
+    } as ReturnType<typeof createSetupServices>,
+    wizard: {
+      async run() {
+        return {
+          assistantApiKeyEnv: null,
+          assistantBaseUrl: null,
+          assistantPreset: 'codex-cli',
+          assistantProviderName: null,
+          channels: [],
+          scheduledUpdates: [],
+          wearables: [],
+        }
+      },
+    },
+  })
+
+  try {
+    await cli.serve(
+      [
+        'onboard',
+        '--vault',
+        vaultRoot,
+        '--format',
+        'toon',
+        '--verbose',
+        '--assistantBaseUrl',
+        'https://api.openai.com/v1',
+        '--assistantApiKeyEnv',
+        'OPENAI_API_KEY',
+        '--assistantProviderName',
+        'OpenAI',
+      ],
+      {
+        env: process.env,
+        exit: () => {},
+        stdout() {},
+      },
+    )
+
+    assert.deepEqual(promptedInputs, [
+      {
+        assistantApiKeyEnv: null,
+        channels: [],
+        env: {},
+        wearables: [],
+      },
+    ])
+    assert.deepEqual(assistantCalls, [
+      {
+        options: {
+          assistantApiKeyEnv: null,
+          assistantBaseUrl: null,
+          assistantProviderName: null,
+        },
+        preset: 'codex-cli',
+      },
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('wizard keeps a custom compatible endpoint even when it reuses OPENAI_API_KEY', () => {
+  assert.equal(
+    inferSetupWizardAssistantProvider({
+      apiKeyEnv: 'OPENAI_API_KEY',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      preset: 'openai-compatible',
+      providerName: null,
+    }),
+    'compatible',
+  )
+})
+
+test('wizard preserves existing compatible endpoint metadata when that method stays selected', () => {
+  assert.deepEqual(
+    resolveSetupWizardAssistantSelection({
+      initialApiKeyEnv: 'OPENROUTER_API_KEY',
+      initialBaseUrl: 'https://openrouter.ai/api/v1',
+      initialProvider: 'compatible',
+      initialProviderName: 'OpenRouter',
+      method: 'compatible-endpoint',
+      provider: 'compatible',
+    }),
+    {
+      apiKeyEnv: 'OPENROUTER_API_KEY',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
+      methodLabel: 'Compatible endpoint',
+      preset: 'openai-compatible',
+      providerLabel: 'Local or compatible endpoint',
+      providerName: 'OpenRouter',
+      summary: 'Local or compatible endpoint · Compatible endpoint',
+    },
+  )
 })
 
 test('setup wearable helpers split ready and pending selections', () => {
