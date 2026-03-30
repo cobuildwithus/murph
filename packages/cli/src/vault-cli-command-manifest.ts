@@ -378,7 +378,7 @@ export const vaultCliCommandDescriptors = [
       },
       {
         path: ['workout', 'format', 'show'],
-        description: 'Show one saved workout format by name or slug.',
+        description: 'Show one saved workout format by name, slug, or id.',
       },
       {
         path: ['workout', 'format', 'list'],

@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import {
   listWriteOperationMetadataPaths,
+  parseFrontmatterDocument,
   readStoredWriteOperation,
 } from '@murph/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
@@ -249,13 +250,32 @@ test.sequential(
       assert.equal(showFormat.ok, true)
       assert.equal(requireData(showFormat).entity.kind, 'workout_format')
       assert.equal(requireData(showFormat).entity.title, 'Push Day A')
+      assert.match(requireData(showFormat).entity.id, /^wfmt_/u)
       assert.equal(
         requireData(showFormat).entity.path,
         'bank/workout-formats/push-day-a.md',
       )
       assert.equal(
+        requireData(showFormat).entity.data.workoutFormatId,
+        requireData(showFormat).entity.id,
+      )
+      assert.equal(
         requireData(showFormat).entity.data.text,
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
+      )
+
+      const showFormatById = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        requireData(showFormat).entity.id,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(showFormatById.ok, true)
+      assert.equal(
+        requireData(showFormatById).entity.id,
+        requireData(showFormat).entity.id,
       )
 
       const listFormats = await runCli<WorkoutFormatListEnvelope>([
@@ -268,6 +288,7 @@ test.sequential(
       assert.equal(listFormats.ok, true)
       assert.equal(requireData(listFormats).count, 1)
       assert.equal(requireData(listFormats).items[0]?.kind, 'workout_format')
+      assert.equal(requireData(listFormats).items[0]?.id, requireData(showFormat).entity.id)
       assert.equal(requireData(listFormats).items[0]?.title, 'Push Day A')
       assert.equal(requireData(listFormats).items[0]?.markdown, null)
 
@@ -316,6 +337,88 @@ test.sequential(
         requireData(showLoggedWorkout).entity.data.note,
         '20 min strength training. 4 sets of 20 pushups. 4 sets of 12 incline bench with a 45 lb bar plus 10 lb plates on both sides.',
       )
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'workout format save preserves first-class metadata and canonical workout-format ids',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
+
+    try {
+      const initResult = await runCli<{ created: boolean }>([
+        'init',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(initResult.ok, true)
+      assert.equal(requireData(initResult).created, true)
+
+      const workoutFormatId = 'wfmt_01JNV422Y2M5ZBV64ZP4N1DRB1'
+      await mkdir(path.join(vaultRoot, 'bank/workout-formats'), { recursive: true })
+      await writeFile(
+        path.join(vaultRoot, 'bank/workout-formats/garage-day.md'),
+        `---
+schemaVersion: murph.frontmatter.workout-format.v1
+docType: workout_format
+workoutFormatId: ${workoutFormatId}
+slug: garage-day
+title: Garage Day
+status: active
+summary: Default garage session.
+activityType: strength-training
+durationMinutes: 40
+tags:
+  - garage
+  - strength
+note: Keep one kettlebell near the rack.
+templateText: Garage day template.
+---
+# Garage Day
+`,
+        'utf8',
+      )
+
+      const saved = await runCli<WorkoutFormatSaveEnvelope>([
+        'workout',
+        'format',
+        'save',
+        'Garage Day',
+        '40 min strength training. 5 sets of 15 kettlebell swings.',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(saved.ok, true)
+      assert.equal(requireData(saved).created, false)
+
+      const shown = await runCli<ShowEnvelope>([
+        'workout',
+        'format',
+        'show',
+        workoutFormatId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(shown.ok, true)
+      assert.equal(requireData(shown).entity.id, workoutFormatId)
+      assert.equal(requireData(shown).entity.data.summary, 'Default garage session.')
+      assert.deepEqual(requireData(shown).entity.data.tags, ['garage', 'strength'])
+      assert.equal(
+        requireData(shown).entity.data.note,
+        'Keep one kettlebell near the rack.',
+      )
+
+      const savedMarkdown = await readFile(
+        path.join(vaultRoot, 'bank/workout-formats/garage-day.md'),
+        'utf8',
+      )
+      const parsed = parseFrontmatterDocument(savedMarkdown)
+      assert.equal(parsed.attributes.summary, 'Default garage session.')
+      assert.deepEqual(parsed.attributes.tags, ['garage', 'strength'])
+      assert.equal(parsed.attributes.note, 'Keep one kettlebell near the rack.')
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

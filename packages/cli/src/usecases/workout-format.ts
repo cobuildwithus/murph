@@ -8,6 +8,9 @@ import {
   parseFrontmatterDocument,
   resolveVaultPathOnDisk,
   stringifyFrontmatterDocument,
+  WORKOUT_FORMAT_DOC_TYPE,
+  WORKOUT_FORMAT_SCHEMA_VERSION,
+  WORKOUT_FORMATS_DIRECTORY,
 } from '@murph/core'
 import { generateUlid } from '@murph/runtime-state'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -23,11 +26,8 @@ import {
   normalizeOptionalText,
 } from './vault-usecase-helpers.js'
 
-const WORKOUT_FORMATS_DIRECTORY = 'bank/workout-formats'
-const WORKOUT_FORMAT_SCHEMA_VERSION = 'murph.frontmatter.workout-format.v1'
-const WORKOUT_FORMAT_DOC_TYPE = 'workout_format'
-const WORKOUT_FORMAT_ID_PREFIX = 'workout-format:'
 const LOAD_UNITS = new Set(['lb', 'kg'])
+const WORKOUT_FORMAT_RECORD_ID_PATTERN = new RegExp(`^${ID_PREFIXES.workoutFormat}_[0-9A-Za-z]+$`, 'u')
 
 type WorkoutFormatFrontmatter = NonNullable<
   Parameters<typeof stringifyFrontmatterDocument>[0]
@@ -38,11 +38,14 @@ interface WorkoutFormatRecord {
   title: string
   slug: string
   status: string
+  summary?: string
   templateText?: string
   activityType: string
   durationMinutes?: number
   distanceKm?: number
   strengthExercises?: ActivityStrengthExercise[]
+  tags?: string[]
+  note?: string
   relativePath: string
   markdown: string
 }
@@ -104,11 +107,14 @@ export async function saveWorkoutFormat(input: SaveWorkoutFormatInput) {
     title,
     slug,
     status: existingRecord?.status ?? 'active',
+    summary: existingRecord?.summary,
     templateText: capture.note,
     activityType: capture.activityType,
     durationMinutes: capture.durationMinutes,
     distanceKm: capture.distanceKm ?? undefined,
     strengthExercises: capture.strengthExercises ?? undefined,
+    tags: existingRecord?.tags,
+    note: existingRecord?.note,
     relativePath,
     markdown: existingMarkdown ?? '',
   })
@@ -246,6 +252,15 @@ async function resolveWorkoutFormat(vault: string, lookup: string) {
     throw new VaultCliError('contract_invalid', 'Workout format name is required.')
   }
 
+  const records = await loadWorkoutFormats(vault)
+
+  if (isWorkoutFormatId(normalizedLookup)) {
+    const idMatch = records.find((record) => record.workoutFormatId === normalizedLookup)
+    if (idMatch) {
+      return idMatch
+    }
+  }
+
   const directSlug = slugifyWorkoutFormatName(normalizedLookup)
   if (directSlug) {
     const directRecord = await readWorkoutFormatBySlug(vault, directSlug)
@@ -254,8 +269,11 @@ async function resolveWorkoutFormat(vault: string, lookup: string) {
     }
   }
 
-  const records = await loadWorkoutFormats(vault)
-  const slugMatch = records.find((record) => record.slug === normalizedLookup)
+  const slugMatch = records.find(
+    (record) =>
+      record.slug === normalizedLookup ||
+      (directSlug !== '' && record.slug === directSlug),
+  )
   if (slugMatch) {
     return slugMatch
   }
@@ -351,11 +369,14 @@ function parseWorkoutFormatRecord(
     title,
     slug,
     status: optionalWorkoutFormatString(attributes.status) ?? 'active',
+    summary: optionalWorkoutFormatString(attributes.summary),
     templateText,
     activityType,
     durationMinutes,
     distanceKm,
     strengthExercises,
+    tags: optionalWorkoutFormatTags(attributes.tags, relativePath),
+    note: optionalWorkoutFormatString(attributes.note),
     relativePath,
     markdown,
   }
@@ -375,6 +396,7 @@ function stringifyWorkoutFormatRecord(record: WorkoutFormatRecord) {
       record.distanceKm === undefined ? '' : ' km'
     }`,
     '',
+    ...(record.summary ? ['## Summary', '', record.summary, ''] : []),
     ...(record.strengthExercises?.length
       ? [
           '## Strength Exercises',
@@ -389,6 +411,10 @@ function stringifyWorkoutFormatRecord(record: WorkoutFormatRecord) {
     '',
     text,
     '',
+    ...(record.tags?.length
+      ? ['## Tags', '', ...record.tags.map((tag) => `- ${tag}`), '']
+      : []),
+    ...(record.note ? ['## Notes', '', record.note, ''] : []),
   ].join('\n')
 
   return stringifyFrontmatterDocument({
@@ -399,10 +425,13 @@ function stringifyWorkoutFormatRecord(record: WorkoutFormatRecord) {
       slug: record.slug,
       title: record.title,
       status: record.status,
+      summary: record.summary,
       activityType: record.activityType,
       durationMinutes: record.durationMinutes,
       distanceKm: record.distanceKm,
       strengthExercises: record.strengthExercises,
+      tags: record.tags,
+      note: record.note,
       templateText: text,
     }) as WorkoutFormatFrontmatter,
     body,
@@ -416,7 +445,7 @@ function toWorkoutFormatEntity(
   },
 ) {
   return {
-    id: `${WORKOUT_FORMAT_ID_PREFIX}${record.slug}`,
+    id: record.workoutFormatId,
     kind: 'workout_format',
     title: record.title,
     occurredAt: null,
@@ -425,6 +454,7 @@ function toWorkoutFormatEntity(
     data: compactObject({
       workoutFormatId: record.workoutFormatId,
       slug: record.slug,
+      summary: record.summary,
       text: record.templateText,
       templateText: record.templateText,
       type: record.activityType,
@@ -432,6 +462,8 @@ function toWorkoutFormatEntity(
       durationMinutes: record.durationMinutes,
       distanceKm: record.distanceKm,
       strengthExercises: record.strengthExercises,
+      tags: record.tags,
+      note: record.note,
       status: record.status,
     }),
     links: [],
@@ -491,6 +523,43 @@ function requireWorkoutFormatString(
 
 function optionalWorkoutFormatString(value: unknown) {
   return typeof value === 'string' ? normalizeOptionalText(value) ?? undefined : undefined
+}
+
+function optionalWorkoutFormatTags(
+  value: unknown,
+  relativePath: string,
+) {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  if (!Array.isArray(value)) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Workout format document "${relativePath}" has invalid tags.`,
+    )
+  }
+
+  const tags = [...new Set(value.map((entry) => {
+    if (typeof entry !== 'string') {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Workout format document "${relativePath}" has invalid tags.`,
+      )
+    }
+
+    const normalized = normalizeOptionalText(entry)
+    if (!normalized) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Workout format document "${relativePath}" has invalid tags.`,
+      )
+    }
+
+    return normalized
+  }))]
+
+  return tags.length > 0 ? tags : undefined
 }
 
 function optionalWorkoutFormatPositiveInteger(
@@ -641,6 +710,10 @@ function slugifyWorkoutFormatName(value: string) {
 
 function formatWorkoutFormatPath(slug: string) {
   return `${WORKOUT_FORMATS_DIRECTORY}/${slug}.md`
+}
+
+function isWorkoutFormatId(value: string) {
+  return WORKOUT_FORMAT_RECORD_ID_PATTERN.test(value)
 }
 
 function createWorkoutFormatId() {
