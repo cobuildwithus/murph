@@ -301,7 +301,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 function normalizeAssistantSessionForWrite(
   session: AssistantSession,
 ): AssistantSession {
-  const normalized = normalizeAssistantSessionSnapshot({
+  return normalizeAssistantSessionSnapshot({
     ...session,
     providerOptions: serializeAssistantProviderSessionOptions({
       provider: session.provider,
@@ -317,13 +317,6 @@ function normalizeAssistantSessionForWrite(
         }
       : null,
   })
-
-  const {
-    providerSessionId: _providerSessionId,
-    providerState: _providerState,
-    ...persisted
-  } = normalized
-  return persisted
 }
 
 export async function persistResolvedSession(

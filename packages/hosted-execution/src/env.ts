@@ -83,7 +83,7 @@ export function readHostedExecutionWebControlPlaneEnvironment(
     internalToken: normalizeHostedExecutionString(source.HOSTED_EXECUTION_INTERNAL_TOKEN),
     schedulerToken: normalizeHostedExecutionString(source.CRON_SECRET),
     shareBaseUrl: normalizeHostedExecutionBaseUrl(
-      source.HOSTED_SHARE_BASE_URL ?? source.HOSTED_SHARE_API_BASE_URL,
+      source.HOSTED_SHARE_API_BASE_URL,
       options,
     ) ?? sharedBaseUrl,
     shareToken: normalizeHostedExecutionString(source.HOSTED_SHARE_INTERNAL_TOKEN),

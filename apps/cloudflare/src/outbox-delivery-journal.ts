@@ -40,10 +40,17 @@ export function createHostedExecutionSideEffectJournalStore(input: {
 }): HostedExecutionSideEffectJournalStore {
   return {
     async read(query) {
-      const byEffect = await readRecordAtKey(input, effectRecordKey(query.userId, query.effectId));
+      const aliasedRecordKey = await readAliasRecordKeyAtKey(
+        input,
+        effectRecordKey(query.userId, query.effectId),
+      );
 
-      if (byEffect) {
-        return byEffect;
+      if (aliasedRecordKey) {
+        const byEffectAlias = await readRecordAtKey(input, aliasedRecordKey);
+
+        if (byEffectAlias) {
+          return byEffectAlias;
+        }
       }
 
       return readRecordAtKey(
@@ -60,12 +67,7 @@ export function createHostedExecutionSideEffectJournalStore(input: {
         record.fingerprint,
       );
       const effectKey = effectRecordKey(writeInput.userId, record.effectId);
-      const existing = await this.read({
-        effectId: record.effectId,
-        fingerprint: record.fingerprint,
-        kind: record.kind,
-        userId: writeInput.userId,
-      });
+      const existing = await readRecordAtKey(input, canonicalKey);
       const durableRecord = existing ?? record;
 
       await writeRecordAtKey(input, canonicalKey, durableRecord);
@@ -83,7 +85,6 @@ async function readRecordAtKey(
     keysById?: Readonly<Record<string, Uint8Array>>;
   },
   key: string,
-  seenKeys = new Set<string>(),
 ): Promise<HostedExecutionSideEffectRecord | null> {
   const value = await readEncryptedR2Json({
     bucket: input.bucket,
@@ -99,15 +100,31 @@ async function readRecordAtKey(
   if (!value) {
     return null;
   }
-  if (isHostedExecutionSideEffectAlias(value)) {
-    if (seenKeys.has(value.recordKey)) {
-      return null;
-    }
-    seenKeys.add(value.recordKey);
-    return readRecordAtKey(input, value.recordKey, seenKeys);
-  }
 
   return parseHostedExecutionSideEffectRecord(value);
+}
+
+async function readAliasRecordKeyAtKey(
+  input: {
+    bucket: EncryptedR2BucketLike;
+    key: Uint8Array;
+    keyId: string;
+    keysById?: Readonly<Record<string, Uint8Array>>;
+  },
+  key: string,
+): Promise<string | null> {
+  const value = await readEncryptedR2Json({
+    bucket: input.bucket,
+    cryptoKey: input.key,
+    cryptoKeysById: input.keysById,
+    expectedKeyId: input.keyId,
+    key,
+    parse(value) {
+      return value;
+    },
+  });
+
+  return isHostedExecutionSideEffectAlias(value) ? value.recordKey : null;
 }
 
 async function writeRecordAtKey(

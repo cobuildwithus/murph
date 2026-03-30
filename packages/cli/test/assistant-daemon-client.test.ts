@@ -540,8 +540,8 @@ test('assistant daemon client routes serializable assistant operations through t
   )
   assert.equal(conversation?.created, true)
   assert.equal(conversation?.session.sessionId, TEST_SESSION.sessionId)
-  assert.equal(conversation?.session.providerSessionId, null)
-  assert.equal(conversation?.session.providerState, null)
+  assert.equal(conversation?.session.providerBinding?.providerSessionId ?? null, null)
+  assert.equal(conversation?.session.providerBinding?.providerState ?? null, null)
 
   const updated = await maybeUpdateAssistantSessionOptionsViaDaemon(
     {

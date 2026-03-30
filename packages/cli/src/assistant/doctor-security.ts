@@ -452,7 +452,7 @@ function mergeAssistantProviderRouteRecoverySecretsForRepair(input: {
 function normalizeAssistantSessionForRepair(
   session: AssistantSession,
 ): AssistantSession {
-  const normalized = normalizeAssistantSessionSnapshot({
+  return normalizeAssistantSessionSnapshot({
     ...session,
     providerOptions: serializeAssistantProviderSessionOptions({
       provider: session.provider,
@@ -468,13 +468,6 @@ function normalizeAssistantSessionForRepair(
         }
       : null,
   })
-
-  const {
-    providerSessionId: _providerSessionId,
-    providerState: _providerState,
-    ...persisted
-  } = normalized
-  return persisted
 }
 
 function resolveAssistantProviderRouteRecoveryPath(

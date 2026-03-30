@@ -66,30 +66,11 @@ export class PrismaLinqControlPlaneStore {
       ],
     });
 
-    return collapsePreferredBindings(records).map(mapHostedLinqBindingRecord);
+    return records.map(mapHostedLinqBindingRecord);
   }
 
   async getBindingByRecipientPhone(recipientPhone: string): Promise<HostedLinqBindingRecord | null> {
-    const records = await this.findBindingsByCanonicalRecipientPhone(recipientPhone);
-
-    if (records.length === 0) {
-      return null;
-    }
-
-    const uniqueUserIds = new Set(records.map((record) => record.userId));
-    if (uniqueUserIds.size > 1) {
-      throw hostedLinqError({
-        code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
-        message: `Linq recipient phone ${recipientPhone} is paired to multiple hosted users.`,
-        httpStatus: 409,
-        details: {
-          recipientPhone,
-        },
-      });
-    }
-
-    const record = choosePreferredBindingRecord(records);
-
+    const record = await this.findBindingByRecipientPhone(recipientPhone);
     return record ? mapHostedLinqBindingRecord(record) : null;
   }
 
@@ -99,23 +80,20 @@ export class PrismaLinqControlPlaneStore {
     label?: string | null;
   }): Promise<HostedLinqBindingRecord> {
     const recipientPhone = normalizeCanonicalRecipientPhone(input.recipientPhone);
-    const existingRecords = await this.findBindingsByCanonicalRecipientPhone(recipientPhone);
-    const existingByOtherUser = existingRecords.find((record) => record.userId !== input.userId);
-
-    if (existingByOtherUser) {
-      throw hostedLinqError({
-        code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
-        message: `Linq recipient phone ${recipientPhone} is already paired to a different hosted user.`,
-        httpStatus: 409,
-        details: {
-          recipientPhone,
-        },
-      });
-    }
-
-    const existing = choosePreferredBindingRecord(existingRecords);
+    const existing = await this.findBindingByRecipientPhone(recipientPhone);
 
     if (existing) {
+      if (existing.userId !== input.userId) {
+        throw hostedLinqError({
+          code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
+          message: `Linq recipient phone ${recipientPhone} is already paired to a different hosted user.`,
+          httpStatus: 409,
+          details: {
+            recipientPhone,
+          },
+        });
+      }
+
       const updated = await this.prisma.linqRecipientBinding.update({
         where: {
           id: existing.id,
@@ -142,19 +120,32 @@ export class PrismaLinqControlPlaneStore {
       return mapHostedLinqBindingRecord(created);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        const conflicted = await this.findBindingsByCanonicalRecipientPhone(recipientPhone);
-        const conflictedByOtherUser = conflicted.find((record) => record.userId !== input.userId);
+        const conflicted = await this.findBindingByRecipientPhone(recipientPhone);
 
-        if (conflictedByOtherUser) {
-          throw hostedLinqError({
-            code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
-            message: `Linq recipient phone ${recipientPhone} is already paired to a different hosted user.`,
-            httpStatus: 409,
-            details: {
+        if (conflicted) {
+          if (conflicted.userId !== input.userId) {
+            throw hostedLinqError({
+              code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
+              message: `Linq recipient phone ${recipientPhone} is already paired to a different hosted user.`,
+              httpStatus: 409,
+              details: {
+                recipientPhone,
+              },
+              cause: error,
+            });
+          }
+
+          const updated = await this.prisma.linqRecipientBinding.update({
+            where: {
+              id: conflicted.id,
+            },
+            data: {
+              label: input.label ?? null,
               recipientPhone,
             },
-            cause: error,
           });
+
+          return mapHostedLinqBindingRecord(updated);
         }
       }
 
@@ -234,48 +225,12 @@ export class PrismaLinqControlPlaneStore {
     return records.map(mapHostedLinqWebhookEventRecord);
   }
 
-  private async findBindingsByCanonicalRecipientPhone(recipientPhone: string): Promise<LinqBindingPrismaRecord[]> {
-    const canonicalRecipientPhone = normalizeCanonicalRecipientPhone(recipientPhone);
-    const exactCandidateRecords = await this.prisma.linqRecipientBinding.findMany({
+  private async findBindingByRecipientPhone(recipientPhone: string): Promise<LinqBindingPrismaRecord | null> {
+    return this.prisma.linqRecipientBinding.findUnique({
       where: {
-        recipientPhone: {
-          in: buildRecipientPhoneLookupCandidates(canonicalRecipientPhone),
-        },
+        recipientPhone: normalizeCanonicalRecipientPhone(recipientPhone),
       },
-      orderBy: [
-        {
-          createdAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
     });
-
-    const matchingExactCandidates = exactCandidateRecords.filter(
-      (record) => normalizeStoredRecipientPhone(record.recipientPhone) === canonicalRecipientPhone,
-    );
-    if (matchingExactCandidates.length > 0) {
-      return matchingExactCandidates;
-    }
-
-    // Compatibility fallback for older rows that may have been stored with punctuation or
-    // spacing differences before canonicalization was enforced. Keep this scoped to the
-    // cold-miss path so normal webhook routing and browser upserts stay off the full scan.
-    const fallbackRecords = await this.prisma.linqRecipientBinding.findMany({
-      orderBy: [
-        {
-          createdAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
-    });
-
-    return fallbackRecords.filter(
-      (record) => normalizeStoredRecipientPhone(record.recipientPhone) === canonicalRecipientPhone,
-    );
   }
 }
 
@@ -335,32 +290,4 @@ function normalizeCanonicalRecipientPhone(recipientPhone: string): string {
 
 function normalizeStoredRecipientPhone(recipientPhone: string | null | undefined): string | null {
   return normalizePhoneNumber(recipientPhone ?? null);
-}
-
-function buildRecipientPhoneLookupCandidates(canonicalRecipientPhone: string): string[] {
-  return Array.from(
-    new Set([
-      canonicalRecipientPhone,
-      canonicalRecipientPhone.startsWith("+") ? canonicalRecipientPhone.slice(1) : canonicalRecipientPhone,
-    ]),
-  );
-}
-
-function choosePreferredBindingRecord(records: LinqBindingPrismaRecord[]): LinqBindingPrismaRecord | null {
-  return records.find((record) => normalizeStoredRecipientPhone(record.recipientPhone) === record.recipientPhone) ?? records[0] ?? null;
-}
-
-function collapsePreferredBindings(records: LinqBindingPrismaRecord[]): LinqBindingPrismaRecord[] {
-  const groups = new Map<string, LinqBindingPrismaRecord[]>();
-
-  for (const record of records) {
-    const canonicalPhone = normalizeStoredRecipientPhone(record.recipientPhone) ?? `raw:${record.id}`;
-    const existing = groups.get(canonicalPhone) ?? [];
-    existing.push(record);
-    groups.set(canonicalPhone, existing);
-  }
-
-  return Array.from(groups.values())
-    .map((group) => choosePreferredBindingRecord(group))
-    .filter((record): record is LinqBindingPrismaRecord => record !== null);
 }

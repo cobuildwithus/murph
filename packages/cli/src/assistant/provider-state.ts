@@ -225,18 +225,15 @@ export function normalizeAssistantSessionProviderState(
 export function normalizeAssistantSessionSnapshot(
   session: AssistantSession,
 ): AssistantSession {
-  const legacyProviderSessionId =
-    normalizeNullableString(session.providerSessionId) ?? null
-  const legacyProviderState = normalizeAssistantSessionProviderState(
-    session.providerState,
-  )
-  // An explicit `providerBinding: null` means "clear any provider resume state";
-  // only fall back to legacy compatibility fields when the binding key is absent.
-  const hasExplicitProviderBinding = Object.prototype.hasOwnProperty.call(
-    session,
-    'providerBinding',
-  )
-  const explicitProviderBinding =
+  const {
+    providerSessionId: _legacyProviderSessionId,
+    providerState: _legacyProviderState,
+    ...persisted
+  } = session as AssistantSession & {
+    providerSessionId?: unknown
+    providerState?: unknown
+  }
+  const providerBinding = normalizeAssistantProviderBinding(
     session.providerBinding
       ? {
           ...session.providerBinding,
@@ -246,25 +243,12 @@ export function normalizeAssistantSessionSnapshot(
             session.providerBinding.providerState,
           ),
         }
-      : null
-  const providerBinding = normalizeAssistantProviderBinding(
-    hasExplicitProviderBinding
-      ? explicitProviderBinding
-      : legacyProviderSessionId !== null || legacyProviderState !== null
-        ? {
-            provider: session.provider,
-            providerOptions: session.providerOptions,
-            providerSessionId: legacyProviderSessionId,
-            providerState: legacyProviderState,
-          }
-        : null,
+      : null,
   )
 
   return {
-    ...session,
+    ...persisted,
     schema: 'murph.assistant-session.v3',
     providerBinding,
-    providerSessionId: providerBinding?.providerSessionId ?? null,
-    providerState: providerBinding?.providerState ?? null,
   }
 }

@@ -346,8 +346,6 @@ export const assistantSessionSchema = z
     provider: z.enum(assistantChatProviderValues),
     providerOptions: assistantProviderSessionOptionsSchema,
     providerBinding: assistantProviderBindingSchema.nullable().default(null),
-    providerSessionId: z.string().min(1).nullable().optional(),
-    providerState: assistantSessionProviderStateSchema.nullable().optional(),
     alias: z.string().min(1).nullable(),
     binding: assistantSessionBindingSchema,
     createdAt: isoTimestampSchema,
@@ -379,12 +377,7 @@ export function parseAssistantSessionRecord(value: unknown): AssistantSession {
 }
 
 export function normalizeAssistantSessionRecord(value: unknown): AssistantSession {
-  const session = parseAssistantSessionRecord(value)
-  return {
-    ...session,
-    providerSessionId: session.providerBinding?.providerSessionId ?? null,
-    providerState: session.providerBinding?.providerState ?? null,
-  }
+  return parseAssistantSessionRecord(value)
 }
 
 export const assistantSessionCompatSchema = z
