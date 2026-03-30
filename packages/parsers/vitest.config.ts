@@ -1,12 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { defineProject } from "vitest/config";
 
 import {
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
-} from "../../config/workspace-source-resolution";
+} from "../../config/workspace-source-resolution.js";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
@@ -14,17 +14,19 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murph/core": "../core/src/index.ts",
   "@murph/inboxd": "../inboxd/src/index.ts",
   "@murph/parsers": "./src/index.ts",
+  "@murph/runtime-state": "../runtime-state/src/index.ts",
 } as const;
 
-export default defineConfig({
+export default defineProject({
   resolve: {
     alias: createVitestWorkspaceRuntimeAliases(
       resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
     ),
   },
   test: {
+    name: "parsers",
     environment: "node",
     fileParallelism: false,
-    include: ["packages/parsers/test/**/*.test.ts"],
+    include: ["test/**/*.test.ts"],
   },
 });

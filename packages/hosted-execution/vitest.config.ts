@@ -11,9 +11,7 @@ import {
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murph/contracts": "../contracts/src/index.ts",
-  "@murph/core": "../core/src/index.ts",
-  "@murph/inboxd": "./src/index.ts",
-  "@murph/runtime-state": "../runtime-state/src/index.ts",
+  "@murph/hosted-execution": "./src/index.ts",
 } as const;
 
 export default defineProject({
@@ -23,7 +21,7 @@ export default defineProject({
     ),
   },
   test: {
-    name: "inboxd",
+    name: "hosted-execution",
     environment: "node",
     fileParallelism: false,
     include: ["test/**/*.test.ts"],
