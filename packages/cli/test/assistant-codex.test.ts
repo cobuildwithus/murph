@@ -80,7 +80,7 @@ test('buildCodexArgs includes sandbox and approval flags for fresh exec sessions
     'o3',
     '--config',
     'model_reasoning_effort="xhigh"',
-    'Summarize the vault.',
+    '-',
   ])
 })
 
@@ -115,13 +115,15 @@ test('buildCodexArgs keeps approval as a root flag and omits sandbox when resumi
     'o3',
     '--config',
     'model_reasoning_effort="high"',
-    'What changed?',
+    '-',
   ])
 })
 
 test('executeCodexPrompt returns parsed events, discovered session id, and file-backed final output', async () => {
+  let stdinPayload = ''
   installSpawnMock(async (child, args) => {
     const outputFile = readOutputFilePath(args)
+    stdinPayload = readPromptPayload(child)
 
     child.stdout.emit(
       'data',
@@ -147,6 +149,7 @@ test('executeCodexPrompt returns parsed events, discovered session id, and file-
   assert.equal(result.jsonEvents.length, 2)
   assert.match(result.stdout, /plain stdout line/u)
   assert.equal(result.stderr, 'stderr line')
+  assert.equal(stdinPayload, 'Summarize the vault.')
 })
 
 test('executeCodexPrompt falls back to non-JSON stdout when the last-message file is missing', async () => {
@@ -645,6 +648,7 @@ function installSpawnMock(
 
 function createMockChildProcess(): MockChildProcess {
   const child = new EventEmitter() as MockChildProcess
+  child.stdin = createMockStdin()
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
   child.kill = vi.fn((signal?: NodeJS.Signals) => {
@@ -656,6 +660,17 @@ function createMockChildProcess(): MockChildProcess {
   return child
 }
 
+function createMockStdin(): MockWritable {
+  const stdin = new EventEmitter() as MockWritable
+  stdin.end = vi.fn((chunk?: string | Buffer) => {
+    if (chunk !== undefined) {
+      stdin.writes.push(String(chunk))
+    }
+  })
+  stdin.writes = []
+  return stdin
+}
+
 function readOutputFilePath(args: string[]): string {
   const outputFlagIndex = args.indexOf('--output-last-message')
   assert.notEqual(outputFlagIndex, -1)
@@ -664,10 +679,20 @@ function readOutputFilePath(args: string[]): string {
   return outputFile
 }
 
+function readPromptPayload(child: MockChildProcess): string {
+  return child.stdin.writes.join('')
+}
+
 interface MockChildProcess extends EventEmitter {
   kill: any
+  stdin: MockWritable
   stderr: EventEmitter
   stdout: EventEmitter
+}
+
+interface MockWritable extends EventEmitter {
+  end: any
+  writes: string[]
 }
 
 

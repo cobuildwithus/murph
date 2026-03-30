@@ -140,7 +140,7 @@ export async function executeCodexPrompt(
       const child = spawn(codexCommand, args, {
         cwd: workingDirectory,
         env: sanitizeChildProcessEnv(input.env),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       })
 
       let settled = false
@@ -220,6 +220,11 @@ export async function executeCodexPrompt(
           }
         })
       })
+
+      child.stdin.on('error', (error) => {
+        rejectOnce(error)
+      })
+      child.stdin.end(input.prompt)
 
       child.on('close', (code, signal) => {
         if (stderrBuffer.trim().length > 0) {
@@ -380,7 +385,7 @@ export function buildCodexArgs(
     )
   }
 
-  args.push(input.prompt)
+  args.push('-')
 
   return [...rootArgs, ...args]
 }

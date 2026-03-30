@@ -28,6 +28,9 @@ import {
   isAssistantProviderInterruptedError,
 } from '../src/assistant/provider-turn-recovery.js'
 import * as assistantAutomationArtifacts from '../src/assistant/automation/artifacts.js'
+import {
+  buildAssistantAutoReplyPrompt,
+} from '../src/assistant/automation/prompt-builder.js'
 import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
 import {
   assertAssistantCronJobId,
@@ -4182,6 +4185,122 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
     ),
     true,
   )
+})
+
+test('buildAssistantAutoReplyPrompt omits oversized parsed attachment bodies but keeps attachment handles', () => {
+  const largeExtractedText =
+    `timestamp,spo2,hr\n2026-03-28T23:32:08Z,98,55\n${'filler,'.repeat(400)}\nTAIL_MARKER_SHOULD_NOT_APPEAR`
+
+  const prompt = buildAssistantAutoReplyPrompt([
+    {
+      capture: {
+        captureId: 'cap-o2',
+        source: 'telegram',
+        accountId: 'acct',
+        externalId: 'ext-o2',
+        threadId: 'thread-o2',
+        threadTitle: 'O2 Ring',
+        threadIsDirect: true,
+        actorId: 'user',
+        actorName: 'User',
+        actorIsSelf: false,
+        occurredAt: '2026-03-30T10:05:31.625Z',
+        receivedAt: null,
+        text: 'Log this finger oxygen reader plz',
+        attachmentCount: 1,
+        envelopePath: 'raw/inbox/captures/cap-o2/envelope.json',
+        eventId: 'evt-o2',
+        createdAt: '2026-03-30T10:05:31.625Z',
+        promotions: [],
+        attachments: [
+          {
+            attachmentId: 'att-o2',
+            ordinal: 1,
+            externalId: 'ext-att-o2',
+            kind: 'document',
+            mime: 'text/csv',
+            originalPath: 'imports/o2.csv',
+            storedPath: 'raw/inbox/captures/cap-o2/attachments/1/o2.csv',
+            fileName: 'o2.csv',
+            byteSize: 1027628,
+            sha256: 'abc123',
+            extractedText: largeExtractedText,
+            transcriptText: null,
+            derivedPath: 'derived/inbox/cap-o2/attachment-1/manifest.json',
+            parserProviderId: 'parser',
+            parseState: 'succeeded',
+          },
+        ],
+      },
+      telegramMetadata: null,
+    },
+  ])
+
+  assert.deepEqual(prompt.kind, 'ready')
+  assert.match(prompt.prompt, /Attachment context:/u)
+  assert.match(prompt.prompt, /attachmentId: att-o2/u)
+  assert.match(
+    prompt.prompt,
+    /storedPath: raw\/inbox\/captures\/cap-o2\/attachments\/1\/o2\.csv/u,
+  )
+  assert.match(
+    prompt.prompt,
+    /derivedPath: derived\/inbox\/cap-o2\/attachment-1\/manifest\.json/u,
+  )
+  assert.match(prompt.prompt, /Extracted text excerpt:\ntimestamp,spo2,hr/u)
+  assert.match(prompt.prompt, /Large parsed attachment content omitted from prompt/u)
+  assert.doesNotMatch(prompt.prompt, /TAIL_MARKER_SHOULD_NOT_APPEAR/u)
+})
+
+test('buildAssistantAutoReplyPrompt still inlines small parsed attachment text', () => {
+  const prompt = buildAssistantAutoReplyPrompt([
+    {
+      capture: {
+        captureId: 'cap-note',
+        source: 'telegram',
+        accountId: 'acct',
+        externalId: 'ext-note',
+        threadId: 'thread-note',
+        threadTitle: 'Voice Note',
+        threadIsDirect: true,
+        actorId: 'user',
+        actorName: 'User',
+        actorIsSelf: false,
+        occurredAt: '2026-03-30T11:00:00.000Z',
+        receivedAt: null,
+        text: 'Remember eggs and yogurt.',
+        attachmentCount: 1,
+        envelopePath: 'raw/inbox/captures/cap-note/envelope.json',
+        eventId: 'evt-note',
+        createdAt: '2026-03-30T11:00:00.000Z',
+        promotions: [],
+        attachments: [
+          {
+            attachmentId: 'att-note',
+            ordinal: 1,
+            externalId: 'ext-att-note',
+            kind: 'audio',
+            mime: 'audio/m4a',
+            originalPath: 'imports/note.m4a',
+            storedPath: 'raw/inbox/captures/cap-note/attachments/1/note.m4a',
+            fileName: 'note.m4a',
+            byteSize: 4096,
+            sha256: 'def456',
+            extractedText: null,
+            transcriptText: 'eggs, yogurt, and blueberries',
+            derivedPath: null,
+            parserProviderId: 'parser',
+            parseState: 'succeeded',
+          },
+        ],
+      },
+      telegramMetadata: null,
+    },
+  ])
+
+  assert.deepEqual(prompt.kind, 'ready')
+  assert.match(prompt.prompt, /Transcript:\neggs, yogurt, and blueberries/u)
+  assert.doesNotMatch(prompt.prompt, /Large parsed attachment content omitted from prompt/u)
 })
 
 test('scanAssistantAutoReplyOnce keeps grouped partial reply artifacts queued for retry instead of advancing past the thread', async () => {
