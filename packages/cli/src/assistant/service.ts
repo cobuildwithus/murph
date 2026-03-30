@@ -124,6 +124,7 @@ import {
   readAssistantCodexPromptVersion,
   readAssistantProviderBinding,
 } from './provider-state.js'
+import { redactAssistantSessionForDisplay } from './redaction.js'
 import {
   executeWithCanonicalWriteGuard,
   isAssistantCanonicalWriteBlockedError,
@@ -314,7 +315,7 @@ function clampVaultBoundAssistantSandbox(
 function serializeAssistantSessionForResult(
   session: AssistantSession,
 ): AssistantSession {
-  return normalizeAssistantSessionSnapshot(session)
+  return redactAssistantSessionForDisplay(normalizeAssistantSessionSnapshot(session))
 }
 
 function normalizeAssistantAskResultForReturn<T extends AssistantAskResult>(

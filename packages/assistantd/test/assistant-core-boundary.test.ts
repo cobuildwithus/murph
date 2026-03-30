@@ -42,7 +42,7 @@ function extractModuleSpecifiers(source: string): string[] {
   return specifiers
 }
 
-test('assistant-services stays a compatibility shim over murph/assistant-core', async () => {
+test('assistant-services stays a compatibility shim over published murph assistant entrypoints', async () => {
   const assistantServicesRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '../../assistant-services/src',
@@ -57,8 +57,8 @@ test('assistant-services stays a compatibility shim over murph/assistant-core', 
     const source = await readFile(filePath, 'utf8')
     assert.match(
       source,
-      /from\s+["']murph\/assistant-core["']/u,
-      `${path.relative(assistantServicesRoot, filePath)} should import from murph/assistant-core.`,
+      /from\s+["']murph\/assistant(?:-core|\/store)["']/u,
+      `${path.relative(assistantServicesRoot, filePath)} should import from an explicit murph assistant entrypoint.`,
     )
     assert.doesNotMatch(
       source,
@@ -73,7 +73,7 @@ test('assistant-services stays a compatibility shim over murph/assistant-core', 
   }
 })
 
-test('assistantd uses murph/assistant-core instead of the root murph export', async () => {
+test('assistantd uses @murph/assistant-services entrypoints instead of importing murph directly', async () => {
   const assistantdRoot = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     '../src',
@@ -87,22 +87,22 @@ test('assistantd uses murph/assistant-core instead of the root murph export', as
     const source = await readFile(filePath, 'utf8')
     assert.match(
       source,
-      /from\s+["']murph\/assistant-core["']/u,
-      `${path.basename(filePath)} should import from murph/assistant-core.`,
+      /from\s+["']@murph\/assistant-services(?:\/runtime)?["']/u,
+      `${path.basename(filePath)} should import from an explicit @murph/assistant-services entrypoint.`,
     )
     assert.doesNotMatch(
       source,
-      /from\s+["']murph["']/u,
-      `${path.basename(filePath)} should not reach through the root murph export.`,
+      /from\s+["']murph(?:\/assistant-core)?["']/u,
+      `${path.basename(filePath)} should not import from murph directly.`,
     )
   }
 })
 
-test('murph/assistant-core exports the assistant session id assertion used by assistantd', async () => {
-  const assistantCore = await import('murph/assistant-core')
-  assert.equal(typeof assistantCore.assertAssistantSessionId, 'function')
+test('@murph/assistant-services/runtime exports the assistant session id assertion used by assistantd', async () => {
+  const assistantRuntime = await import('@murph/assistant-services/runtime')
+  assert.equal(typeof assistantRuntime.assertAssistantSessionId, 'function')
   assert.equal(
-    assistantCore.assertAssistantSessionId('session_safe'),
+    assistantRuntime.assertAssistantSessionId('session_safe'),
     'session_safe',
   )
 })

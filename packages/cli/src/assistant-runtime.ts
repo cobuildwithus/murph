@@ -2,8 +2,6 @@ export type {
   AssistantConversationAudience,
   AssistantConversationDeliveryPolicy,
   AssistantConversationPolicy,
-  AssistantConversationResetPolicy,
-  AssistantConversationScopeStrategy,
 } from './assistant/conversation-policy.js'
 export {
   resolveAssistantConversationAutoReplyEligibility,

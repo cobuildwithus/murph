@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": false,
     "rootDir": "src",
     "outDir": "dist",

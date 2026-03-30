@@ -4,6 +4,7 @@ import {
   pathSchema,
   timeZoneSchema,
 } from './vault-cli-contracts.js'
+import { isValidAssistantOpaqueId } from './assistant/state-ids.js'
 
 export const assistantSandboxValues = [
   'read-only',
@@ -169,6 +170,7 @@ export const assistantQuarantineArtifactKindValues = [
   'turn-receipt',
   'outbox-intent',
   'provider-route-recovery',
+  'runtime-budget',
   'cron-store',
   'cron-run',
 ] as const
@@ -194,6 +196,8 @@ export const assistantRuntimeEventKindValues = [
   'status.snapshot.quarantined',
   'provider-route-recovery.upserted',
   'provider-route-recovery.quarantined',
+  'runtime-budget.recovered',
+  'runtime-budget.quarantined',
   'cron.store.quarantined',
   'cron.run.quarantined',
   'memory.upserted',
@@ -219,6 +223,11 @@ export const assistantSessionProviderStateSchema = z
     resumeWorkspaceKey: z.string().min(1).nullable().default(null),
   })
   .strict()
+
+export const assistantSessionIdSchema = z.string().refine(
+  (value) => isValidAssistantOpaqueId(value),
+  'Assistant session ids must be opaque runtime ids without path separators or traversal segments.',
+)
 
 export const assistantProviderSessionOptionsSchema = z.object({
   model: z.string().min(1).nullable(),
@@ -247,9 +256,35 @@ export const assistantProviderRouteRecoveryEntrySchema = z
 export const assistantProviderRouteRecoverySchema = z
   .object({
     schema: z.literal('murph.assistant-provider-route-recovery.v1'),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     updatedAt: isoTimestampSchema,
     routes: z.array(assistantProviderRouteRecoveryEntrySchema),
+  })
+  .strict()
+
+export const assistantSessionSecretsSchema = z
+  .object({
+    schema: z.literal('murph.assistant-session-secrets.v1'),
+    sessionId: z.string().min(1),
+    updatedAt: isoTimestampSchema,
+    providerHeaders: assistantHeadersSchema.nullable().default(null),
+    providerBindingHeaders: assistantHeadersSchema.nullable().default(null),
+  })
+  .strict()
+
+export const assistantProviderRouteRecoverySecretsRouteSchema = z
+  .object({
+    routeId: z.string().min(1),
+    providerHeaders: assistantHeadersSchema.nullable().default(null),
+  })
+  .strict()
+
+export const assistantProviderRouteRecoverySecretsSchema = z
+  .object({
+    schema: z.literal('murph.assistant-provider-route-recovery-secrets.v1'),
+    sessionId: z.string().min(1),
+    updatedAt: isoTimestampSchema,
+    routes: z.array(assistantProviderRouteRecoverySecretsRouteSchema),
   })
   .strict()
 
@@ -275,8 +310,8 @@ export const assistantProviderFailoverRouteSchema = z
 export const assistantAliasStoreSchema = z
   .object({
     version: z.literal(2),
-    aliases: z.record(z.string(), z.string().min(1)),
-    conversationKeys: z.record(z.string(), z.string().min(1)),
+    aliases: z.record(z.string(), assistantSessionIdSchema),
+    conversationKeys: z.record(z.string(), assistantSessionIdSchema),
   })
   .strict()
 
@@ -307,7 +342,7 @@ export const assistantProviderBindingSchema = z
 export const assistantSessionSchema = z
   .object({
     schema: z.literal('murph.assistant-session.v3'),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     provider: z.enum(assistantChatProviderValues),
     providerOptions: assistantProviderSessionOptionsSchema,
     providerBinding: assistantProviderBindingSchema.nullable().default(null),
@@ -369,7 +404,7 @@ export const assistantTranscriptDistillationSchema = z
   .object({
     schema: z.literal('murph.assistant-transcript-distillation.v1'),
     distillationId: z.string().min(1),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     createdAt: isoTimestampSchema,
     conversationEntryCount: z.number().int().nonnegative(),
     startEntryOffset: z.number().int().nonnegative(),
@@ -449,7 +484,7 @@ export const assistantTurnReceiptSchema = z
   .object({
     schema: z.literal('murph.assistant-turn-receipt.v1'),
     turnId: z.string().min(1),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     provider: z.enum(assistantChatProviderValues),
     providerModel: z.string().min(1).nullable(),
     promptPreview: z.string().nullable(),
@@ -479,7 +514,7 @@ export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
     intentId: z.string().min(1),
-    sessionId: z.string().min(1),
+    sessionId: assistantSessionIdSchema,
     turnId: z.string().min(1),
     createdAt: isoTimestampSchema,
     updatedAt: isoTimestampSchema,
@@ -768,6 +803,14 @@ export const assistantCronExpressionScheduleSchema = z
   .object({
     kind: z.literal('cron'),
     expression: z.string().min(1),
+    timeZone: timeZoneSchema,
+  })
+  .strict()
+
+export const assistantCronExpressionScheduleInputSchema = z
+  .object({
+    kind: z.literal('cron'),
+    expression: z.string().min(1),
     timeZone: timeZoneSchema.optional(),
   })
   .strict()
@@ -786,6 +829,13 @@ export const assistantCronScheduleSchema = z.discriminatedUnion('kind', [
   assistantCronAtScheduleSchema,
   assistantCronEveryScheduleSchema,
   assistantCronExpressionScheduleSchema,
+  assistantCronDailyLocalScheduleSchema,
+])
+
+export const assistantCronScheduleInputSchema = z.discriminatedUnion('kind', [
+  assistantCronAtScheduleSchema,
+  assistantCronEveryScheduleSchema,
+  assistantCronExpressionScheduleInputSchema,
   assistantCronDailyLocalScheduleSchema,
 ])
 
@@ -883,7 +933,7 @@ export const assistantCronPresetSchema = z
     title: z.string().min(1),
     description: z.string().min(1),
     suggestedName: z.string().min(1),
-    suggestedSchedule: assistantCronScheduleSchema,
+    suggestedSchedule: assistantCronScheduleInputSchema,
     suggestedScheduleLabel: z.string().min(1),
     variables: z.array(assistantCronPresetVariableSchema),
   })
@@ -1302,6 +1352,7 @@ export type AssistantStateDeleteResult = z.infer<
   typeof assistantStateDeleteResultSchema
 >
 export type AssistantCronSchedule = z.infer<typeof assistantCronScheduleSchema>
+export type AssistantCronScheduleInput = z.infer<typeof assistantCronScheduleInputSchema>
 export type AssistantCronTarget = z.infer<typeof assistantCronTargetSchema>
 export type AssistantCronJobState = z.infer<typeof assistantCronJobStateSchema>
 export type AssistantCronFoodAutoLog = z.infer<typeof assistantCronFoodAutoLogSchema>
@@ -1371,6 +1422,13 @@ export type AssistantStatusResult = z.infer<
 export type AssistantDoctorCheck = z.infer<typeof assistantDoctorCheckSchema>
 export type AssistantDoctorResult = z.infer<
   typeof assistantDoctorResultSchema
+>
+export type AssistantSessionSecrets = z.infer<typeof assistantSessionSecretsSchema>
+export type AssistantProviderRouteRecoverySecretsRoute = z.infer<
+  typeof assistantProviderRouteRecoverySecretsRouteSchema
+>
+export type AssistantProviderRouteRecoverySecrets = z.infer<
+  typeof assistantProviderRouteRecoverySecretsSchema
 >
 export type AssistantAutomationCursor = z.infer<
   typeof assistantAutomationCursorSchema

@@ -32,7 +32,6 @@ import {
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
   type AssistantOutboxDispatchHooks,
-  type AssistantOutboxDispatchMode,
   type DeliverAssistantOutboxMessageResult,
   type DispatchAssistantOutboxIntentResult,
 } from './outbox.js'
@@ -54,6 +53,13 @@ import {
   readAssistantDiagnosticsSnapshot,
 } from './diagnostics.js'
 import {
+  type AssistantMemoryGetInput,
+  type AssistantMemoryPromptInput,
+  type AssistantMemoryRecord,
+  type AssistantMemorySearchInput,
+  type AssistantMemorySearchResponse,
+  type AssistantMemoryUpsertInput,
+  type AssistantMemoryUpsertWriteResult,
   getAssistantMemory,
   loadAssistantMemoryPromptBlock,
   searchAssistantMemory,
@@ -61,7 +67,6 @@ import {
 } from './memory.js'
 
 type AssistantStatusInput = Exclude<Parameters<typeof getAssistantStatus>[0], string>
-type OmitVault<T> = T extends { vault: string } ? Omit<T, 'vault'> : T
 type RecordAssistantDiagnosticEventInput = Omit<Parameters<
   typeof recordAssistantDiagnosticEvent
 >[0], 'vault'>
@@ -83,13 +88,10 @@ type UpdateAssistantTurnReceiptInput = Omit<Parameters<
 type FinalizeAssistantTurnReceiptInput = Omit<Parameters<
   typeof finalizeAssistantTurnReceipt
 >[0], 'vault'>
-type AssistantMemoryGetInput = Omit<Parameters<typeof getAssistantMemory>[0], 'vault'>
-type AssistantMemoryPromptBlockInput = Omit<
-  Parameters<typeof loadAssistantMemoryPromptBlock>[0],
-  'vault'
->
-type AssistantMemorySearchInput = Omit<Parameters<typeof searchAssistantMemory>[0], 'vault'>
-type AssistantMemoryUpsertInput = Omit<Parameters<typeof upsertAssistantMemory>[0], 'vault'>
+type AssistantRuntimeMemoryGetOptions = Omit<AssistantMemoryGetInput, 'id' | 'vault'>
+type AssistantRuntimeMemoryPromptBlockInput = Omit<AssistantMemoryPromptInput, 'vault'>
+type AssistantRuntimeMemorySearchInput = Omit<AssistantMemorySearchInput, 'vault'>
+type AssistantRuntimeMemoryUpsertInput = Omit<AssistantMemoryUpsertInput, 'vault'>
 
 export interface AssistantRuntimeStateService {
   diagnostics: {
@@ -97,10 +99,10 @@ export interface AssistantRuntimeStateService {
     recordEvent: (input: RecordAssistantDiagnosticEventInput) => ReturnType<typeof recordAssistantDiagnosticEvent>
   }
   memory: {
-    get: (input: AssistantMemoryGetInput) => ReturnType<typeof getAssistantMemory>
-    loadPromptBlock: (input: AssistantMemoryPromptBlockInput) => ReturnType<typeof loadAssistantMemoryPromptBlock>
-    search: (input: AssistantMemorySearchInput) => ReturnType<typeof searchAssistantMemory>
-    upsert: (input: AssistantMemoryUpsertInput) => ReturnType<typeof upsertAssistantMemory>
+    get: (memoryId: string, options?: AssistantRuntimeMemoryGetOptions) => Promise<AssistantMemoryRecord>
+    loadPromptBlock: (input?: AssistantRuntimeMemoryPromptBlockInput) => Promise<string | null>
+    search: (input?: AssistantRuntimeMemorySearchInput) => Promise<AssistantMemorySearchResponse>
+    upsert: (input: AssistantRuntimeMemoryUpsertInput) => Promise<AssistantMemoryUpsertWriteResult>
   }
   outbox: {
     createIntent: (input: CreateAssistantOutboxIntentInput) => ReturnType<typeof createAssistantOutboxIntent>
@@ -148,7 +150,6 @@ export interface AssistantRuntimeStateService {
     readReceipt: (turnId: string) => Promise<AssistantTurnReceipt | null>
     updateReceipt: (input: UpdateAssistantTurnReceiptInput) => ReturnType<typeof updateAssistantTurnReceipt>
   }
-  vault: string
 }
 
 export function createAssistantRuntimeStateService(vault: string): AssistantRuntimeStateService {
@@ -158,9 +159,17 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
       recordEvent: (input) => recordAssistantDiagnosticEvent({ ...input, vault }),
     },
     memory: {
-      get: (input) => getAssistantMemory({ ...input, vault }),
-      loadPromptBlock: (input) => loadAssistantMemoryPromptBlock({ ...input, vault }),
-      search: (input) => searchAssistantMemory({ ...input, vault }),
+      get: (memoryId, options) => getAssistantMemory({ ...(options ?? {}), id: memoryId, vault }),
+      loadPromptBlock: (input) =>
+        loadAssistantMemoryPromptBlock({
+          ...(input ?? {}),
+          vault,
+        }),
+      search: (input) =>
+        searchAssistantMemory({
+          ...(input ?? {}),
+          vault,
+        }),
       upsert: (input) => upsertAssistantMemory({ ...input, vault }),
     },
     outbox: {
@@ -216,6 +225,5 @@ export function createAssistantRuntimeStateService(vault: string): AssistantRunt
       readReceipt: (turnId) => readAssistantTurnReceipt(vault, turnId),
       updateReceipt: (input) => updateAssistantTurnReceipt({ ...input, vault }),
     },
-    vault,
   }
 }
