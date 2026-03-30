@@ -38,10 +38,6 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "legacy-cleanup" \
   "hard-cut" \
   "greenfield-hard-cut"
-review_gpt_register_preset "test-coverage-audit" "agent-docs/prompts/test-coverage-audit.md" \
-  "Post-simplify test-coverage audit that adds the highest-impact missing tests." \
-  "coverage" \
-  "coverage-audit"
 review_gpt_register_preset "task-finish-review" "agent-docs/prompts/task-finish-review.md" \
   "Final completion audit for regressions, correctness, and security." \
   "finish" \
@@ -49,5 +45,4 @@ review_gpt_register_preset "task-finish-review" "agent-docs/prompts/task-finish-
 review_gpt_register_preset_group "completion" \
   "Run the full completion workflow audit sequence." \
   "simplify" \
-  "test-coverage-audit" \
   "task-finish-review"

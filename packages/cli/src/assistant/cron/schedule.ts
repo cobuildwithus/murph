@@ -3,7 +3,10 @@ import {
   normalizeIanaTimeZone,
   parseDailyTime,
 } from '@murph/contracts'
-import type { AssistantCronSchedule } from '../../assistant-cli-contracts.js'
+import type {
+  AssistantCronSchedule,
+  AssistantCronScheduleInput,
+} from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 
 const DURATION_UNITS = {
@@ -34,7 +37,8 @@ export function buildAssistantCronSchedule(input: {
   every?: string | null
   cron?: string | null
   now?: Date
-}): AssistantCronSchedule {
+  timeZone?: string | null
+}): AssistantCronScheduleInput {
   const at = normalizeNullableString(input.at)
   const every = normalizeNullableString(input.every)
   const cron = normalizeNullableString(input.cron)
@@ -88,11 +92,16 @@ export function buildAssistantCronSchedule(input: {
 
   validateAssistantCronExpression(cron)
 
-  return {
-    kind: 'cron',
-    expression: cron,
+    return {
+      kind: 'cron',
+      expression: cron,
+      ...(normalizeNullableString(input.timeZone)
+        ? {
+            timeZone: normalizeNullableString(input.timeZone) ?? undefined,
+          }
+        : {}),
+    }
   }
-}
 
 export function parseAssistantCronEveryDuration(value: string): number {
   const normalized = normalizeNullableString(value)?.toLowerCase() ?? null

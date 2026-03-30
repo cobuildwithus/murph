@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -450,7 +450,7 @@ test('assistant cron assigns vault timezones to cron schedules and computes next
   assert.equal(job.state.nextRunAt, '2026-03-27T21:00:00.000Z')
 })
 
-test('assistant cron re-enable preserves missing legacy cron timezones instead of backfilling them', async () => {
+test('assistant cron quarantines legacy stored cron jobs that are missing persisted timezones', async () => {
   vi.useFakeTimers()
 
   try {
@@ -496,14 +496,16 @@ test('assistant cron re-enable preserves missing legacy cron timezones instead o
 
     await writeFile(paths.cronJobsPath, `${JSON.stringify(store, null, 2)}\n`, 'utf8')
 
-    const reenabled = await setAssistantCronJobEnabled(vaultRoot, job.jobId, true)
+    const listed = await listAssistantCronJobs(vaultRoot)
+    assert.deepEqual(listed, [])
 
-    assert.equal(reenabled.enabled, true)
-    assert.equal(reenabled.schedule.kind, 'cron')
-    assert.equal(reenabled.schedule.timeZone, undefined)
+    const quarantineEntries = await readdir(
+      path.join(paths.quarantineDirectory, 'cron-store'),
+    )
+    assert.equal(quarantineEntries.some((entry) => entry.endsWith('.meta.json')), true)
     assert.equal(
-      reenabled.state.nextRunAt,
-      computeAssistantCronNextRunAt(reenabled.schedule, new Date('2026-03-26T21:30:00.000Z')),
+      quarantineEntries.some((entry) => entry.includes('assistant-cron-jobs.json')),
+      true,
     )
   } finally {
     vi.useRealTimers()

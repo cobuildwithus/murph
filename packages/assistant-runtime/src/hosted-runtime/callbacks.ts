@@ -15,7 +15,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "@murph/assistant-services/outbox";
+} from "murph/assistant-core";
 
 import type {
   HostedCommittedExecutionState,
@@ -225,13 +225,22 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
       };
       vault: string;
     }) => {
+      if (!delivery.idempotencyKey) {
+        throw new Error(
+          "Hosted assistant delivery side effects require a non-empty idempotencyKey.",
+        );
+      }
+
       await callHostedRunnerSideEffectJournal({
         commit: input.commit,
         commitTimeoutMs: input.commitTimeoutMs,
         fetchImpl: input.fetchImpl,
         method: "PUT",
         record: {
-          delivery,
+          delivery: {
+            ...delivery,
+            idempotencyKey: delivery.idempotencyKey,
+          },
           effectId: intent.intentId,
           fingerprint: intent.dedupeKey,
           intentId: intent.intentId,
@@ -268,8 +277,7 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
 
       return {
         channel: record.delivery.channel,
-        idempotencyKey:
-          (record.delivery as { idempotencyKey?: string | null }).idempotencyKey ?? null,
+        idempotencyKey: record.delivery.idempotencyKey,
         messageLength: record.delivery.messageLength,
         sentAt: record.delivery.sentAt,
         target: record.delivery.target,
