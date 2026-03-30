@@ -1,7 +1,7 @@
 import type { AssistantAutomationState } from '../../assistant-cli-contracts.js'
-import type { InboxCliServices } from '../../inbox-services.js'
+import type { InboxServices } from '../../inbox-services.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
-import type { VaultCliServices } from '../../vault-cli-services.js'
+import type { VaultServices } from '../../vault-services.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
@@ -26,9 +26,9 @@ import {
 } from './shared.js'
 
 type AssistantInboxCaptureSummary = Awaited<
-  ReturnType<InboxCliServices['list']>
+  ReturnType<InboxServices['list']>
 >['items'][number]
-type AssistantInboxListResult = Awaited<ReturnType<InboxCliServices['list']>>
+type AssistantInboxListResult = Awaited<ReturnType<InboxServices['list']>>
 
 interface AssistantAutomationCandidate {
   replyPending: boolean
@@ -39,7 +39,7 @@ interface AssistantAutomationCandidate {
 export async function scanAssistantAutomationOnce(input: {
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
   onEvent?: (event: AssistantRunEvent) => void
@@ -61,14 +61,25 @@ export async function scanAssistantAutomationOnce(input: {
     | 'inboxScanCursor'
   >
   vault: string
-  vaultServices?: VaultCliServices
+  vaultServices?: VaultServices
 }): Promise<AssistantAutomationScanResult> {
   const routing = createEmptyInboxScanResult()
   const replies = createEmptyAutoReplyScanResult()
   const scanState = cloneAutomationScanState(input.state)
   let persistedState = cloneAutomationScanState(scanState)
-  const routingEnabled = Boolean(input.modelSpec?.model)
+  const routingModelSpec = input.modelSpec?.model ? input.modelSpec : null
+  const routingEnabled = routingModelSpec !== null
   const replyBacklogActive = scanState.autoReplyBacklogChannels.length > 0
+  const persistScanState = async () => {
+    await persistAssistantAutomationScanState({
+      onStateProgress: input.onStateProgress,
+      persistedState,
+      scanState,
+      updatePersistedState: (next) => {
+        persistedState = next
+      },
+    })
+  }
   const replyChannels = normalizeEnabledChannels(
     replyBacklogActive
       ? scanState.autoReplyBacklogChannels
@@ -95,14 +106,7 @@ export async function scanAssistantAutomationOnce(input: {
       vault: input.vault,
     })
     scanState.autoReplyPrimed = true
-    await persistAssistantAutomationScanState({
-      onStateProgress: input.onStateProgress,
-      persistedState,
-      scanState,
-      updatePersistedState: (next) => {
-        persistedState = next
-      },
-    })
+    await persistScanState()
     input.onEvent?.({
       type: 'reply.scan.primed',
       details:
@@ -128,14 +132,7 @@ export async function scanAssistantAutomationOnce(input: {
     // Once the configured backlog is drained, continue from the current
     // reply cursor instead of re-priming to the newest capture.
     scanState.autoReplyPrimed = true
-    await persistAssistantAutomationScanState({
-      onStateProgress: input.onStateProgress,
-      persistedState,
-      scanState,
-      updatePersistedState: (next) => {
-        persistedState = next
-      },
-    })
+    await persistScanState()
   }
 
   const candidates = constrainAssistantAutomationCandidates({
@@ -160,6 +157,35 @@ export async function scanAssistantAutomationOnce(input: {
     candidates.map((candidate) => [candidate.summary.captureId, candidate] as const),
   )
   let routingCursorBlocked = false
+  const routeCandidate = async (candidate: AssistantAutomationCandidate) => {
+    if (!routingModelSpec) {
+      return
+    }
+
+    routing.considered += 1
+    const outcome = await routeAssistantInboxCapture({
+      capture: candidate.summary,
+      inboxServices: input.inboxServices,
+      modelSpec: routingModelSpec,
+      requestId: input.requestId,
+      vault: input.vault,
+      vaultServices: input.vaultServices,
+    })
+    applyRoutingOutcome({
+      captureId: candidate.summary.captureId,
+      onEvent: input.onEvent,
+      outcome,
+      summary: routing,
+    })
+    if (!outcome.advanceCursor) {
+      routingCursorBlocked = true
+      return
+    }
+
+    if (!routingCursorBlocked) {
+      scanState.inboxScanCursor = cursorFromCapture(candidate.summary)
+    }
+  }
 
   for (let index = 0; index < candidates.length; index += 1) {
     if (input.signal?.aborted) {
@@ -186,31 +212,11 @@ export async function scanAssistantAutomationOnce(input: {
 
       for (const item of context.items) {
         const groupCandidate = candidatesByCaptureId.get(item.summary.captureId)
-        if (!groupCandidate?.routingPending || !input.modelSpec) {
+        if (!groupCandidate?.routingPending || !routingModelSpec) {
           continue
         }
-        routing.considered += 1
-        const outcome = await routeAssistantInboxCapture({
-          capture: groupCandidate.summary,
-          inboxServices: input.inboxServices,
-          modelSpec: input.modelSpec,
-          requestId: input.requestId,
-          vault: input.vault,
-          vaultServices: input.vaultServices,
-        })
-        applyRoutingOutcome({
-          captureId: groupCandidate.summary.captureId,
-          onEvent: input.onEvent,
-          outcome,
-          summary: routing,
-        })
-        if (outcome.advanceCursor) {
-          if (!routingCursorBlocked) {
-            scanState.inboxScanCursor = cursorFromCapture(groupCandidate.summary)
-          }
-        } else {
-          routingCursorBlocked = true
-        }
+
+        await routeCandidate(groupCandidate)
       }
 
       replies.considered += context.captureCount
@@ -239,14 +245,7 @@ export async function scanAssistantAutomationOnce(input: {
         },
       })
 
-      await persistAssistantAutomationScanState({
-        onStateProgress: input.onStateProgress,
-        persistedState,
-        scanState,
-        updatePersistedState: (next) => {
-          persistedState = next
-        },
-      })
+      await persistScanState()
 
       if (stopReplyScan) {
         break
@@ -255,41 +254,12 @@ export async function scanAssistantAutomationOnce(input: {
       continue
     }
 
-    if (!candidate.routingPending || !input.modelSpec) {
+    if (!candidate.routingPending || !routingModelSpec) {
       continue
     }
 
-    routing.considered += 1
-    const outcome = await routeAssistantInboxCapture({
-      capture: candidate.summary,
-      inboxServices: input.inboxServices,
-      modelSpec: input.modelSpec,
-      requestId: input.requestId,
-      vault: input.vault,
-      vaultServices: input.vaultServices,
-    })
-    applyRoutingOutcome({
-      captureId: candidate.summary.captureId,
-      onEvent: input.onEvent,
-      outcome,
-      summary: routing,
-    })
-    if (outcome.advanceCursor) {
-      if (!routingCursorBlocked) {
-        scanState.inboxScanCursor = cursorFromCapture(candidate.summary)
-      }
-    } else {
-      routingCursorBlocked = true
-    }
-
-    await persistAssistantAutomationScanState({
-      onStateProgress: input.onStateProgress,
-      persistedState,
-      scanState,
-      updatePersistedState: (next) => {
-        persistedState = next
-      },
-    })
+    await routeCandidate(candidate)
+    await persistScanState()
   }
 
   return {
@@ -300,7 +270,7 @@ export async function scanAssistantAutomationOnce(input: {
 
 async function primeAssistantAutoReplyCursor(input: {
   afterCursor: AssistantAutomationScanStateProgress['autoReplyScanCursor']
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   requestId: string | null
   vault: string
 }): Promise<AssistantAutomationScanStateProgress['autoReplyScanCursor']> {
@@ -318,7 +288,7 @@ async function primeAssistantAutoReplyCursor(input: {
 }
 
 async function listAssistantAutomationCandidates(input: {
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   maxPerScan?: number
   restrictReplyToChannels: boolean
   replyChannels: readonly string[]
@@ -363,7 +333,7 @@ async function listAssistantAutomationCandidates(input: {
 }
 
 async function listAssistantReplyCandidates(input: {
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   limit: number
   replyChannels: readonly string[]
   requestId: string | null

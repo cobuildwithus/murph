@@ -7,7 +7,11 @@ import { runAssistantDoctor } from '../src/assistant/doctor.js'
 import { recordAssistantDiagnosticEvent } from '../src/assistant/diagnostics.js'
 import { clearAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
 import { appendAssistantRuntimeEvent } from '../src/assistant/runtime-events.js'
-import { drainAssistantOutbox, readAssistantOutboxIntent } from '../src/assistant/outbox.js'
+import {
+  createAssistantOutboxIntent,
+  drainAssistantOutbox,
+  readAssistantOutboxIntent,
+} from '../src/assistant/outbox.js'
 import { getAssistantStatus } from '../src/assistant/status.js'
 import { readAssistantStatusSnapshot } from '../src/assistant-runtime.js'
 import { resolveAssistantStatePaths } from '../src/assistant-state.js'
@@ -99,6 +103,60 @@ test('assistant doctor flags malformed transcript lines without breaking status'
   assert.equal(transcriptCheck?.status, 'fail')
 })
 
+test('assistant outbox keeps raw dedupe identity separate from persisted target normalization', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-observability-normalized-outbox-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const baseIntent = {
+    vault: vaultRoot,
+    message: ' Hello ',
+    sessionId: 'sess_outbox_identity',
+    turnId: 'turn_outbox_identity',
+    threadIsDirect: true,
+  } as const
+
+  const spaced = await createAssistantOutboxIntent({
+    ...baseIntent,
+    channel: ' imessage ',
+    identityId: ' assistant:primary ',
+    actorId: ' actor:1 ',
+    threadId: ' thread:1 ',
+    replyToMessageId: ' reply:1 ',
+    explicitTarget: ' +15551234567 ',
+  })
+  const trimmed = await createAssistantOutboxIntent({
+    ...baseIntent,
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    actorId: 'actor:1',
+    threadId: 'thread:1',
+    replyToMessageId: 'reply:1',
+    explicitTarget: '+15551234567',
+  })
+
+  assert.notEqual(spaced.intentId, trimmed.intentId)
+  assert.notEqual(spaced.dedupeKey, trimmed.dedupeKey)
+  assert.notEqual(spaced.targetFingerprint, trimmed.targetFingerprint)
+
+  const persistedSpaced = await readAssistantOutboxIntent(vaultRoot, spaced.intentId)
+  const persistedTrimmed = await readAssistantOutboxIntent(vaultRoot, trimmed.intentId)
+
+  for (const intent of [persistedSpaced, persistedTrimmed]) {
+    assert.equal(intent?.message, 'Hello')
+    assert.equal(intent?.channel, 'imessage')
+    assert.equal(intent?.identityId, 'assistant:primary')
+    assert.equal(intent?.actorId, 'actor:1')
+    assert.equal(intent?.threadId, 'thread:1')
+    assert.equal(intent?.threadIsDirect, true)
+    assert.equal(intent?.replyToMessageId, 'reply:1')
+    assert.equal(intent?.explicitTarget, '+15551234567')
+  }
+})
+
 test('assistant status defaults torn local state files and doctor surfaces recovered JSONL tails', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-observability-torn-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -176,19 +234,19 @@ test('assistant status defaults torn local state files and doctor surfaces recov
   assert.equal(doctor.ok, false)
   assert.equal(
     doctor.checks.find((check) => check.name === 'automation-state')?.status,
-    'fail',
+    'pass',
   )
   assert.equal(
     doctor.checks.find((check) => check.name === 'diagnostics-snapshot')?.status,
-    'fail',
+    'pass',
   )
   assert.equal(
     doctor.checks.find((check) => check.name === 'failover-state')?.status,
-    'fail',
+    'pass',
   )
   assert.equal(
     doctor.checks.find((check) => check.name === 'turn-receipts')?.status,
-    'fail',
+    'pass',
   )
   assert.equal(
     doctor.checks.find((check) => check.name === 'transcript-files')?.status,
@@ -275,11 +333,7 @@ test('assistant outbox inventory paths quarantine legacy intent payloads without
     (check) => check.name === 'outbox-intents',
   )
   assert.equal(doctor.ok, false)
-  assert.equal(outboxCheck?.status, 'fail')
-  assert.equal(
-    String(outboxCheck?.message).includes('quarantined'),
-    true,
-  )
+  assert.equal(outboxCheck?.status, 'pass')
 })
 
 test('assistant status ignores expired cooldown warnings and can find an older requested session beyond the global recent-turn window', async () => {

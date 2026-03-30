@@ -83,6 +83,32 @@ export type DeliverAssistantOutboxMessageResult =
       session: AssistantSession | null
     }
 
+type AssistantOutboxRawTargetIdentityInput = {
+  actorId?: string | null
+  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
+  channel?: string | null
+  explicitTarget?: string | null
+  identityId?: string | null
+  replyToMessageId?: string | null
+  threadId?: string | null
+}
+
+type AssistantOutboxPersistedTargetInput = AssistantOutboxRawTargetIdentityInput & {
+  threadIsDirect?: boolean | null
+}
+
+type AssistantOutboxPersistedTarget = Pick<
+  AssistantOutboxIntent,
+  | 'actorId'
+  | 'bindingDelivery'
+  | 'channel'
+  | 'explicitTarget'
+  | 'identityId'
+  | 'replyToMessageId'
+  | 'threadId'
+  | 'threadIsDirect'
+>
+
 export async function createAssistantOutboxIntent(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
@@ -102,17 +128,12 @@ export async function createAssistantOutboxIntent(input: {
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
     const message = normalizeRequiredMessage(input.message)
+    const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(input)
     const dedupeKey = hashAssistantOutboxIdentity({
       message,
       sessionId: input.sessionId,
       turnId: input.turnId,
-      channel: input.channel,
-      identityId: input.identityId,
-      actorId: input.actorId,
-      threadId: input.threadId,
-      replyToMessageId: input.replyToMessageId,
-      explicitTarget: input.explicitTarget,
-      bindingDelivery: input.bindingDelivery,
+      ...rawTargetIdentity,
     })
     const existing = await findAssistantOutboxIntentByDedupeKey(input.vault, dedupeKey)
     if (existing) {
@@ -133,24 +154,8 @@ export async function createAssistantOutboxIntent(input: {
       status: 'pending',
       message,
       dedupeKey,
-      targetFingerprint: hashAssistantOutboxTargetFingerprint({
-        channel: input.channel,
-        identityId: input.identityId,
-        actorId: input.actorId,
-        threadId: input.threadId,
-        replyToMessageId: input.replyToMessageId,
-        explicitTarget: input.explicitTarget,
-        bindingDelivery: input.bindingDelivery,
-      }),
-      channel: normalizeNullableString(input.channel),
-      identityId: normalizeNullableString(input.identityId),
-      actorId: normalizeNullableString(input.actorId),
-      threadId: normalizeNullableString(input.threadId),
-      threadIsDirect:
-        typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
-      replyToMessageId: normalizeNullableString(input.replyToMessageId),
-      bindingDelivery: input.bindingDelivery ?? null,
-      explicitTarget: normalizeNullableString(input.explicitTarget),
+      targetFingerprint: hashAssistantOutboxTargetFingerprint(rawTargetIdentity),
+      ...buildAssistantOutboxPersistedTarget(input),
       delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey: null,
@@ -907,6 +912,36 @@ async function findAssistantOutboxIntentByDedupeKey(
       return intent.status !== 'failed' && intent.status !== 'abandoned'
     }) ?? null
   )
+}
+
+function buildAssistantOutboxRawTargetIdentity(
+  input: AssistantOutboxRawTargetIdentityInput,
+): AssistantOutboxRawTargetIdentityInput {
+  return {
+    channel: input.channel,
+    identityId: input.identityId,
+    actorId: input.actorId,
+    threadId: input.threadId,
+    replyToMessageId: input.replyToMessageId,
+    explicitTarget: input.explicitTarget,
+    bindingDelivery: input.bindingDelivery,
+  }
+}
+
+function buildAssistantOutboxPersistedTarget(
+  input: AssistantOutboxPersistedTargetInput,
+): AssistantOutboxPersistedTarget {
+  return {
+    channel: normalizeNullableString(input.channel),
+    identityId: normalizeNullableString(input.identityId),
+    actorId: normalizeNullableString(input.actorId),
+    threadId: normalizeNullableString(input.threadId),
+    threadIsDirect:
+      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
+    replyToMessageId: normalizeNullableString(input.replyToMessageId),
+    bindingDelivery: input.bindingDelivery ?? null,
+    explicitTarget: normalizeNullableString(input.explicitTarget),
+  }
 }
 
 function hashAssistantOutboxIdentity(input: {

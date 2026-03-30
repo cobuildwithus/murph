@@ -6,6 +6,9 @@ import {
   createHostedEmailThreadTarget,
   isHostedEmailInboundSenderAuthorized,
   normalizeHostedEmailAddress,
+  normalizeHostedEmailMessageId,
+  normalizeHostedEmailRouteKey,
+  normalizeHostedEmailSubject,
   resolveHostedEmailAuthorizedSenderAddresses,
   resolveHostedEmailInboundSenderAddress,
 } from "../src/index.ts";
@@ -37,6 +40,18 @@ test("hosted email sender helpers reject mismatched sender identities and normal
     }),
     ["owner@example.test", "teammate@example.test", "friend@example.test"],
   );
+});
+
+test("hosted email shared text normalization trims empty message ids, route keys, and subjects", () => {
+  assert.equal(
+    normalizeHostedEmailMessageId("  <message@example.test>  "),
+    "<message@example.test>",
+  );
+  assert.equal(normalizeHostedEmailRouteKey("  reply-key  "), "reply-key");
+  assert.equal(normalizeHostedEmailSubject("  Subject line  "), "Subject line");
+  assert.equal(normalizeHostedEmailMessageId("   "), null);
+  assert.equal(normalizeHostedEmailRouteKey(null), null);
+  assert.equal(normalizeHostedEmailSubject(undefined), null);
 });
 
 test("hosted email sender helpers authorize only the verified email or saved thread participants", () => {
