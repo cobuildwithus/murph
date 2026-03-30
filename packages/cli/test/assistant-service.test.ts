@@ -269,13 +269,11 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     ),
     {
       vault: '/tmp/vault',
-      sessionId: undefined,
       alias: 'chat:bob',
       channel: 'imessage',
       identityId: 'assistant:primary',
       actorId: 'contact:bob',
       threadId: 'thread-1',
-      threadIsDirect: undefined,
       provider: 'codex-cli',
       model: 'gpt-5.4-mini',
       maxSessionAgeMs: null,
@@ -312,13 +310,9 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
     ),
     {
       vault: '/tmp/vault',
-      sessionId: undefined,
-      alias: undefined,
-      channel: undefined,
       identityId: 'assistant:override',
       actorId: 'actor:override',
       threadId: 'thread-explicit',
-      threadIsDirect: undefined,
       provider: 'codex-cli',
       model: 'gpt-oss:20b',
       maxSessionAgeMs: null,
@@ -331,6 +325,33 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'low',
+    },
+  )
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+        alias: 'chat:bob',
+      },
+      defaults,
+    ),
+    {
+      vault: '/tmp/vault',
+      alias: 'chat:bob',
+      identityId: 'assistant:primary',
+      provider: 'codex-cli',
+      model: 'gpt-5.4-mini',
+      maxSessionAgeMs: null,
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      oss: true,
+      profile: 'ops',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+      reasoningEffort: 'high',
     },
   )
 })
@@ -536,7 +557,10 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   assert.match(firstCall?.systemPrompt ?? '', /assistant cron preset install/u)
   assert.match(firstCall?.systemPrompt ?? '', /Prefer digest-style or summary-style automation over nagging coaching/u)
   assert.match(firstCall?.systemPrompt ?? '', /assistant run/u)
-  assert.match(firstCall?.systemPrompt ?? '', /broad current-evidence scan/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /keep waiting on the tool unless it actually errors or times out/u)
   assert.match(firstCall?.systemPrompt ?? '', /`--timeout` is the normal control/u)
   assert.match(firstCall?.systemPrompt ?? '', /`--wait-timeout` is only for the uncommon case/u)
@@ -1289,11 +1313,9 @@ test('resolveAssistantConversationPolicy withholds sensitive health context when
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'person@example.com',
-      maxSessionAgeMs: null,
       sourceThreadId: 'thread-123',
       threadId: 'thread-123',
       threadIsDirect: true,
-      turnTrigger: 'manual-ask',
     },
     session: {
       binding: privateBinding,
@@ -1306,11 +1328,9 @@ test('resolveAssistantConversationPolicy withholds sensitive health context when
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'other@example.com',
-      maxSessionAgeMs: null,
       sourceThreadId: 'thread-123',
       threadId: 'thread-123',
       threadIsDirect: true,
-      turnTrigger: 'manual-ask',
     },
     session: {
       binding: privateBinding,
@@ -1339,11 +1359,9 @@ test('resolveAssistantConversationPolicy uses the effective audience instead of 
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'person@example.com',
-      maxSessionAgeMs: null,
       sourceThreadId: 'thread-private',
       threadId: 'thread-private',
       threadIsDirect: true,
-      turnTrigger: 'manual-ask',
     },
     session: {
       binding: historicallySharedBinding,
@@ -1356,17 +1374,96 @@ test('resolveAssistantConversationPolicy uses the effective audience instead of 
       deliverResponse: true,
       deliveryReplyToMessageId: null,
       deliveryTarget: 'other@example.com',
-      maxSessionAgeMs: null,
       sourceThreadId: 'thread-private',
       threadId: 'thread-private',
       threadIsDirect: true,
-      turnTrigger: 'manual-ask',
     },
     session: {
       binding: historicallySharedBinding,
     } as any,
   })
   assert.equal(directOverrideToDifferentAudience.allowSensitiveHealthContext, false)
+})
+
+test('resolveAssistantConversationPolicy infers a private explicit delivery target even when stored thread directness is stale', () => {
+  const historicallySharedBinding = {
+    conversationKey: 'email:shared',
+    channel: 'email',
+    identityId: 'assistant@example.com',
+    actorId: 'person@example.com',
+    threadId: 'thread-group',
+    threadIsDirect: false,
+    delivery: {
+      channel: 'email',
+      target: 'person@example.com',
+      targetKind: 'email',
+      kind: 'participant',
+    },
+  }
+
+  const directOverrideAudience = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: 'person@example.com',
+      sourceThreadId: 'thread-private',
+      threadId: 'thread-private',
+    },
+    session: {
+      binding: historicallySharedBinding,
+    } as any,
+  })
+  assert.equal(directOverrideAudience.audience.threadIsDirect, false)
+  assert.equal(directOverrideAudience.audience.effectiveThreadIsDirect, true)
+  assert.equal(directOverrideAudience.allowSensitiveHealthContext, true)
+
+  const redirectedAudience = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: 'other@example.com',
+      sourceThreadId: 'thread-private',
+      threadId: 'thread-private',
+    },
+    session: {
+      binding: historicallySharedBinding,
+    } as any,
+  })
+  assert.equal(redirectedAudience.allowSensitiveHealthContext, false)
+})
+
+test('resolveAssistantConversationPolicy infers a private bound participant delivery audience even when stored thread directness is stale', () => {
+  const staleBinding = {
+    conversationKey: 'email:participant-target',
+    channel: 'email',
+    identityId: 'assistant@example.com',
+    actorId: 'person@example.com',
+    threadId: 'thread-group',
+    threadIsDirect: false,
+    delivery: {
+      channel: 'email',
+      target: 'person@example.com',
+      targetKind: 'email',
+      kind: 'participant',
+    },
+  }
+
+  const policy = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: null,
+      sourceThreadId: 'thread-private',
+      threadId: 'thread-private',
+    },
+    session: {
+      binding: staleBinding,
+    } as any,
+  })
+
+  assert.equal(policy.audience.threadIsDirect, false)
+  assert.equal(policy.audience.effectiveThreadIsDirect, true)
+  assert.equal(policy.allowSensitiveHealthContext, true)
 })
 
 
