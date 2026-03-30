@@ -15,7 +15,9 @@ import {
   fetchGatewayAttachmentsLocal,
   getGatewayConversationLocal,
   listGatewayConversationsLocal,
+  pollGatewayEventsLocalWrapper,
   readGatewayMessagesLocal,
+  sendGatewayMessageLocal,
 } from '../src/gateway-core-local.js'
 
 test('local gateway projection derives route-backed conversations and transcripts from inbox captures plus assistant state', async () => {
@@ -231,5 +233,147 @@ test('local gateway projection derives route-backed conversations and transcript
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
     await rm(attachmentSourceRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway send uses route-bound assistant delivery and live events diff the derived projection', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-send-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      source: 'telegram',
+      externalId: 'telegram-send-1',
+      thread: {
+        id: 'chat-send-1',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'Can you check in later today?',
+      attachments: [],
+      raw: {
+        provider: 'telegram',
+      },
+    })
+    runtime.close()
+
+    await saveAssistantSession(
+      vaultRoot,
+      assistantSessionSchema.parse({
+        schema: 'murph.assistant-session.v3',
+        sessionId: 'asst_gateway_send',
+        provider: 'codex-cli',
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: null,
+          approvalPolicy: null,
+          profile: null,
+          oss: false,
+        },
+        providerBinding: null,
+        alias: 'Taylor check-ins',
+        binding: createAssistantBinding({
+          actorId: 'contact:taylor',
+          channel: 'telegram',
+          deliveryKind: 'participant',
+          identityId: null,
+          threadId: 'chat-send-1',
+          threadIsDirect: true,
+        }),
+        createdAt: '2026-03-30T09:55:00.000Z',
+        updatedAt: '2026-03-30T10:00:00.000Z',
+        lastTurnAt: null,
+        turnCount: 1,
+      }),
+    )
+
+    const listed = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    const conversation = listed.conversations[0]
+    assert.ok(conversation)
+    assert.equal(conversation.canSend, true)
+
+    const baseline = await pollGatewayEventsLocalWrapper(vaultRoot, {
+      cursor: 0,
+      kinds: [],
+      limit: 20,
+      sessionKey: conversation.sessionKey,
+    })
+    assert.equal(baseline.events.length, 0)
+
+    const sent = await sendGatewayMessageLocal({
+      dispatchMode: 'queue-only',
+      replyToMessageId: null,
+      sessionKey: conversation.sessionKey,
+      text: 'I will check in later today.',
+      vault: vaultRoot,
+    })
+    assert.equal(sent.sessionKey, conversation.sessionKey)
+    assert.equal(sent.queued, true)
+    assert.match(sent.messageId ?? '', /^gwcm_/u)
+
+    const runtimeAfterBaseline = await openInboxRuntime({ vaultRoot })
+    const pipelineAfterBaseline = await createInboxPipeline({
+      vaultRoot,
+      runtime: runtimeAfterBaseline,
+    })
+    await pipelineAfterBaseline.processCapture({
+      source: 'telegram',
+      externalId: 'telegram-send-2',
+      thread: {
+        id: 'chat-send-1',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:05:00.000Z',
+      receivedAt: '2026-03-30T10:05:01.000Z',
+      text: 'Sounds good, thank you!',
+      attachments: [],
+      raw: {
+        provider: 'telegram',
+      },
+    })
+    runtimeAfterBaseline.close()
+
+    const events = await pollGatewayEventsLocalWrapper(vaultRoot, {
+      cursor: baseline.nextCursor,
+      kinds: [],
+      limit: 20,
+      sessionKey: conversation.sessionKey,
+    })
+    assert.ok(events.events.some((event) => event.kind === 'message.created'))
+    assert.ok(events.events.some((event) => event.kind === 'conversation.updated'))
+
+    const messages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation.sessionKey,
+    })
+    assert.equal(messages.messages.length, 2)
+    assert.equal(messages.messages[1]?.text, 'Sounds good, thank you!')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
   }
 })

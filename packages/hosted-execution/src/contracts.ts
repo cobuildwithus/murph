@@ -16,6 +16,7 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.cron.tick",
   "device-sync.wake",
   "vault.share.accepted",
+  "gateway.message.send",
 ] as const;
 
 export type HostedExecutionEventKind =
@@ -97,6 +98,13 @@ export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionB
   share: HostedExecutionShareReference;
 }
 
+export interface HostedExecutionGatewayMessageSendEvent extends HostedExecutionBaseEvent {
+  kind: "gateway.message.send";
+  replyToMessageId: string | null;
+  sessionKey: string;
+  text: string;
+}
+
 export type HostedExecutionEvent =
   | HostedExecutionMemberActivatedEvent
   | HostedExecutionLinqMessageReceivedEvent
@@ -104,7 +112,8 @@ export type HostedExecutionEvent =
   | HostedExecutionEmailMessageReceivedEvent
   | HostedExecutionAssistantCronTickEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionVaultShareAcceptedEvent;
+  | HostedExecutionVaultShareAcceptedEvent
+  | HostedExecutionGatewayMessageSendEvent;
 
 export interface HostedExecutionDispatchRequest {
   event: HostedExecutionEvent;

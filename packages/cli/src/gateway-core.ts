@@ -26,6 +26,7 @@ export {
   gatewayPermissionStatusValues,
   gatewayPollEventsInputSchema,
   gatewayPollEventsResultSchema,
+  gatewayProjectionSnapshotSchema,
   gatewayReadMessagesInputSchema,
   gatewayReadMessagesResultSchema,
   gatewayReplyRouteSchema,
@@ -51,6 +52,7 @@ export {
   type GatewayPermissionStatus,
   type GatewayPollEventsInput,
   type GatewayPollEventsResult,
+  type GatewayProjectionSnapshot,
   type GatewayReadMessagesInput,
   type GatewayReadMessagesResult,
   type GatewayReplyRoute,
@@ -72,3 +74,13 @@ export {
   type GatewayConversationRouteInput,
   type GatewayInboundCaptureRouteInput,
 } from './gateway/routes.js'
+
+export {
+  diffGatewayProjectionSnapshots,
+  fetchGatewayAttachmentsFromSnapshot,
+  getGatewayConversationFromSnapshot,
+  listGatewayConversationsFromSnapshot,
+  listGatewayOpenPermissionsFromSnapshot,
+  readGatewayMessagesFromSnapshot,
+  type GatewayEventEmission,
+} from './gateway/snapshot.js'

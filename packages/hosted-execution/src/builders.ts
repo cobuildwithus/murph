@@ -3,6 +3,7 @@ import type {
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDispatchRequest,
   HostedExecutionEmailMessageReceivedEvent,
+  HostedExecutionGatewayMessageSendEvent,
   HostedExecutionLinqMessageReceivedEvent,
   HostedExecutionMemberActivatedEvent,
   HostedExecutionTelegramMessageReceivedEvent,
@@ -139,6 +140,27 @@ export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
       share: input.share,
       userId: input.memberId,
     } satisfies HostedExecutionVaultShareAcceptedEvent,
+    eventId: input.eventId,
+    occurredAt: input.occurredAt,
+  });
+}
+
+export function buildHostedExecutionGatewayMessageSendDispatch(input: {
+  eventId: string;
+  occurredAt: string;
+  replyToMessageId?: string | null;
+  sessionKey: string;
+  text: string;
+  userId: string;
+}): HostedExecutionDispatchRequest {
+  return buildHostedExecutionDispatch({
+    event: {
+      kind: "gateway.message.send",
+      replyToMessageId: input.replyToMessageId ?? null,
+      sessionKey: input.sessionKey,
+      text: input.text,
+      userId: input.userId,
+    } satisfies HostedExecutionGatewayMessageSendEvent,
     eventId: input.eventId,
     occurredAt: input.occurredAt,
   });

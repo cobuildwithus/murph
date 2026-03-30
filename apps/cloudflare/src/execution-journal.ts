@@ -1,3 +1,4 @@
+import type { GatewayProjectionSnapshot } from "murph/gateway-core";
 import {
   decodeHostedBundleBase64,
   sha256HostedBundleHex,
@@ -38,12 +39,14 @@ export interface HostedExecutionCommittedResult {
 
 export interface HostedExecutionCommitPayload {
   bundles: HostedExecutionRunnerResult["bundles"];
+  gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
   sideEffects?: HostedExecutionSideEffect[];
 }
 
 export interface HostedExecutionFinalizePayload {
   bundles: HostedExecutionRunnerResult["bundles"];
+  gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
 }
 
 export interface HostedExecutionJournalStore {

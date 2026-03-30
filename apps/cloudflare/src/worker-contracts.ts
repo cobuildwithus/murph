@@ -1,3 +1,19 @@
+import type {
+  GatewayFetchAttachmentsInput,
+  GatewayGetConversationInput,
+  GatewayListConversationsInput,
+  GatewayAttachment,
+  GatewayConversation,
+  GatewayListConversationsResult,
+  GatewayListOpenPermissionsInput,
+  GatewayPermissionRequest,
+  GatewayPollEventsInput,
+  GatewayPollEventsResult,
+  GatewayReadMessagesInput,
+  GatewayReadMessagesResult,
+  GatewayRespondToPermissionInput,
+} from "murph/gateway-core";
+
 import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.ts";
@@ -28,6 +44,13 @@ export interface WorkerUserRunnerStubLike {
   bootstrapUser?(userId: string): Promise<{ userId: string }>;
   commit(input: WorkerUserRunnerCommitInput): Promise<HostedExecutionCommittedResult>;
   finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult>;
+  gatewayFetchAttachments?(input: GatewayFetchAttachmentsInput): Promise<GatewayAttachment[]>;
+  gatewayGetConversation?(input: GatewayGetConversationInput): Promise<GatewayConversation | null>;
+  gatewayListConversations?(input?: GatewayListConversationsInput): Promise<GatewayListConversationsResult>;
+  gatewayListOpenPermissions?(input?: GatewayListOpenPermissionsInput): Promise<GatewayPermissionRequest[]>;
+  gatewayPollEvents?(input?: GatewayPollEventsInput): Promise<GatewayPollEventsResult>;
+  gatewayReadMessages?(input: GatewayReadMessagesInput): Promise<GatewayReadMessagesResult>;
+  gatewayRespondToPermission?(input: GatewayRespondToPermissionInput): Promise<GatewayPermissionRequest | null>;
 }
 
 export interface WorkerUserRunnerNamespaceLike<

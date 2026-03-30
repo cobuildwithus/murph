@@ -34,6 +34,8 @@ export function summarizeDispatch(
       const title = metrics.shareImportTitle ?? dispatch.event.share.shareId;
       return `Imported share pack "${title}" (${importedFoods} foods, ${importedProtocols} protocols, ${importedRecipes} recipes).${loggedMeal}${suffix}`;
     }
+    case "gateway.message.send":
+      return `Queued a hosted gateway reply for ${dispatch.event.sessionKey} and ran the hosted maintenance loop.${suffix}`;
     default:
       return assertNever(dispatch.event);
   }

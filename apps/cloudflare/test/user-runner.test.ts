@@ -28,6 +28,17 @@ import {
 import { HostedUserRunner } from "../src/user-runner.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
+function createGatewayConversationSessionKey(routeKey: string): string {
+  return `gwcs_${Buffer.from(
+    JSON.stringify({
+      kind: "conversation",
+      routeKey,
+      version: 1,
+    }),
+    "utf8",
+  ).toString("base64url")}`;
+}
+
 describe("HostedUserRunner", () => {
   const bucket = createBucket();
   const storage = createStorage();
@@ -515,6 +526,138 @@ describe("HostedUserRunner", () => {
     ).rejects.toThrow(
       "Hosted execution commit evt_duplicate_runner_commit vault bundle ref does not match the existing durable commit.",
     );
+  });
+
+  it("projects gateway snapshots into the hot hosted gateway store during commit and finalize", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const routeKey = "channel:email|identity:murph%40example.com|thread:thread-labs";
+    const sessionKey = createGatewayConversationSessionKey(routeKey);
+    await runner.bootstrapUser("member_123");
+
+    await runner.commit({
+      eventId: "evt_gateway_projection",
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
+        },
+        currentBundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        gatewayProjectionSnapshot: {
+          conversations: [{
+            canSend: true,
+            lastActivityAt: "2026-03-26T12:00:00.000Z",
+            lastMessagePreview: "Here is the latest lab PDF.",
+            messageCount: 1,
+            route: {
+              channel: "email",
+              directness: "group",
+              identityId: "murph@example.com",
+              participantId: "contact:alex",
+              reply: {
+                kind: "thread",
+                target: "thread-labs",
+              },
+              threadId: "thread-labs",
+            },
+            schema: "murph.gateway-conversation.v1",
+            sessionKey,
+            title: "Lab thread",
+          }],
+          generatedAt: "2026-03-26T12:00:00.000Z",
+          messages: [{
+            actorDisplayName: "Alex",
+            attachments: [],
+            createdAt: "2026-03-26T12:00:00.000Z",
+            direction: "inbound",
+            messageId: "gwcm_projection_initial",
+            schema: "murph.gateway-message.v1",
+            sessionKey,
+            text: "Here is the latest lab PDF.",
+          }],
+          permissions: [],
+          schema: "murph.gateway-projection-snapshot.v1",
+        },
+        result: {
+          eventsHandled: 1,
+          summary: "ok",
+        },
+      },
+    });
+
+    const listed = await runner.gatewayListConversations({ limit: 10 });
+    expect(listed.conversations).toHaveLength(1);
+    expect(listed.conversations[0]?.sessionKey).toBe(sessionKey);
+
+    const baselineEvents = await runner.gatewayPollEvents({ cursor: 0, limit: 10 });
+    expect(baselineEvents.events).toHaveLength(0);
+
+    await runner.finalizeCommit({
+      eventId: "evt_gateway_projection",
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state-final").toString("base64"),
+          vault: Buffer.from("vault-final").toString("base64"),
+        },
+        gatewayProjectionSnapshot: {
+          conversations: [{
+            canSend: true,
+            lastActivityAt: "2026-03-26T12:05:00.000Z",
+            lastMessagePreview: "Please send the latest PDF.",
+            messageCount: 2,
+            route: {
+              channel: "email",
+              directness: "group",
+              identityId: "murph@example.com",
+              participantId: "contact:alex",
+              reply: {
+                kind: "thread",
+                target: "thread-labs",
+              },
+              threadId: "thread-labs",
+            },
+            schema: "murph.gateway-conversation.v1",
+            sessionKey,
+            title: "Lab thread",
+          }],
+          generatedAt: "2026-03-26T12:05:00.000Z",
+          messages: [{
+            actorDisplayName: "Alex",
+            attachments: [],
+            createdAt: "2026-03-26T12:00:00.000Z",
+            direction: "inbound",
+            messageId: "gwcm_projection_initial",
+            schema: "murph.gateway-message.v1",
+            sessionKey,
+            text: "Here is the latest lab PDF.",
+          }, {
+            actorDisplayName: null,
+            attachments: [],
+            createdAt: "2026-03-26T12:05:00.000Z",
+            direction: "outbound",
+            messageId: "gwcm_projection_followup",
+            schema: "murph.gateway-message.v1",
+            sessionKey,
+            text: "Please send the latest PDF.",
+          }],
+          permissions: [],
+          schema: "murph.gateway-projection-snapshot.v1",
+        },
+      },
+    });
+
+    const messages = await runner.gatewayReadMessages({
+      oldestFirst: true,
+      sessionKey,
+    });
+    expect(messages.messages).toHaveLength(2);
+    expect(messages.messages[1]?.messageId).toBe("gwcm_projection_followup");
+
+    const updatedEvents = await runner.gatewayPollEvents({ cursor: 0, limit: 10 });
+    expect(updatedEvents.events.map((event) => event.kind)).toContain("message.created");
+    expect(updatedEvents.events.map((event) => event.kind)).toContain("conversation.updated");
   });
 
   it("recovers finalized committed results encrypted with a previous key id after rotation", async () => {

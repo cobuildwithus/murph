@@ -1,4 +1,5 @@
 import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+import { sendGatewayMessageLocal } from "murph/gateway-core-local";
 
 import { prepareHostedDispatchContext } from "./context.ts";
 import { ingestHostedEmailMessage } from "./events/email.ts";
@@ -96,6 +97,15 @@ async function handleHostedDispatchEvent(input: {
         runtime: input.runtime,
         vaultRoot: input.vaultRoot,
       });
+    case "gateway.message.send":
+      await sendGatewayMessageLocal({
+        dispatchMode: "queue-only",
+        replyToMessageId: dispatch.event.replyToMessageId,
+        sessionKey: dispatch.event.sessionKey,
+        text: dispatch.event.text,
+        vault: input.vaultRoot,
+      });
+      return createNoopDispatchEffect();
     default:
       return assertNever(dispatch.event);
   }
