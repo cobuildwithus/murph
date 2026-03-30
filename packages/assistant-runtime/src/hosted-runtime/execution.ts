@@ -15,7 +15,7 @@ import {
 } from "@murph/hosted-execution";
 import {
   refreshAssistantStatusSnapshot,
-} from "@murph/assistant-services/status";
+} from "murph/assistant-core";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
@@ -147,7 +147,6 @@ export async function completeHostedExecutionAfterCommit(input: {
     internalToken: input.runtime.webControlPlane.internalToken,
     timeoutMs: input.runtime.commitTimeoutMs,
     userId: input.dispatch.event.userId,
-    userEnvKeys: Object.keys(input.runtime.userEnv),
     vaultRoot: input.restored.vaultRoot,
   });
   await reconcileHostedVerifiedEmailSelfTarget({

@@ -97,6 +97,7 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
   assert.deepEqual(
     parseAssistantUsageRecord({
       attemptCount: 1,
+      credentialSource: "platform",
       inputTokens: 10,
       occurredAt: "2026-03-29T12:00:00.000Z",
       outputTokens: 5,
@@ -112,7 +113,7 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       baseUrl: null,
       cacheWriteTokens: null,
       cachedInputTokens: null,
-      credentialSource: null,
+      credentialSource: "platform",
       inputTokens: 10,
       memberId: null,
       occurredAt: "2026-03-29T12:00:00.000Z",
@@ -133,6 +134,23 @@ test("assistant usage parsing preserves a missing totalTokens value", () => {
       turnId: "turn_123",
       usageId: "turn_123.attempt-1",
     },
+  );
+});
+
+test("assistant usage parsing rejects missing credentialSource", () => {
+  assert.throws(
+    () => parseAssistantUsageRecord({
+      attemptCount: 1,
+      inputTokens: 10,
+      occurredAt: "2026-03-29T12:00:00.000Z",
+      outputTokens: 5,
+      provider: "codex-cli",
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: "asst_123",
+      turnId: "turn_123",
+      usageId: "turn_123.attempt-1",
+    }),
+    /credentialSource must be a non-empty string/u,
   );
 });
 

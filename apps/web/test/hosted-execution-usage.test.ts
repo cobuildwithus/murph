@@ -97,6 +97,7 @@ describe("importHostedAiUsageRecords", () => {
         usage: [
           {
             attemptCount: 1,
+            credentialSource: "platform",
             memberId: "member_other",
             occurredAt: "2026-03-29T12:00:00.000Z",
             provider: "openai-compatible",
@@ -146,6 +147,9 @@ describe("listHostedAiUsagePendingStripeMetering", () => {
 
     expect(findMany).toHaveBeenCalledWith({
       where: {
+        credentialSource: {
+          not: null,
+        },
         stripeMeterStatus: "pending",
         member: {
           stripeCustomerId: {

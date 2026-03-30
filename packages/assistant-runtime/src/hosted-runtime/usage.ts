@@ -1,7 +1,6 @@
 import {
   deletePendingAssistantUsageRecord,
   listPendingAssistantUsageRecords,
-  resolveAssistantUsageCredentialSource,
 } from "@murph/runtime-state";
 import {
   resolveHostedExecutionAiUsageClient,
@@ -22,7 +21,6 @@ export async function exportHostedPendingAssistantUsage(input: {
   internalToken: string | null;
   timeoutMs: number | null;
   userId: string;
-  userEnvKeys?: readonly string[];
   vaultRoot: string;
 }): Promise<HostedPendingAssistantUsageExportResult> {
   const pendingRecords = await listPendingAssistantUsageRecords({
@@ -64,7 +62,6 @@ export async function exportHostedPendingAssistantUsage(input: {
       const result = await exportHostedUsageBatch({
         batch,
         client,
-        userEnvKeys: input.userEnvKeys ?? [],
         vaultRoot: input.vaultRoot,
       });
       exported += result.exported;
@@ -87,7 +84,6 @@ export async function exportHostedPendingAssistantUsage(input: {
           const result = await exportHostedUsageBatch({
             batch: [record],
             client,
-            userEnvKeys: input.userEnvKeys ?? [],
             vaultRoot: input.vaultRoot,
           });
           exported += result.exported;
@@ -122,25 +118,9 @@ function chunkPendingUsageRecords<T>(records: readonly T[], size: number): T[][]
 async function exportHostedUsageBatch(input: {
   batch: readonly Awaited<ReturnType<typeof listPendingAssistantUsageRecords>>[number][];
   client: NonNullable<ReturnType<typeof resolveHostedExecutionAiUsageClient>>;
-  userEnvKeys: readonly string[];
   vaultRoot: string;
 }): Promise<{ exported: number; failed: number }> {
-  const response = await input.client.recordUsage(
-    input.batch.map((record): Record<string, unknown> =>
-      record.credentialSource === null
-        ? {
-            ...record,
-            credentialSource: resolveAssistantUsageCredentialSource({
-              apiKeyEnv: record.apiKeyEnv,
-              provider: record.provider,
-              userEnvKeys: input.userEnvKeys,
-            }),
-          }
-        : {
-            ...record,
-          }
-    ),
-  );
+  const response = await input.client.recordUsage(input.batch);
 
   const batchUsageIds = new Set(input.batch.map((record) => record.usageId));
   const acknowledgedUsageIds = response.usageIds.filter((usageId) => batchUsageIds.has(usageId));

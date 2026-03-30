@@ -1,7 +1,8 @@
-import { mkdir, readdir, readFile, rm } from "node:fs/promises";
+import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 
 import { writeJsonFileAtomic } from "./atomic-write.ts";
+import { ensureAssistantStateDirectory } from "./assistant-state-security.ts";
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
@@ -29,7 +30,7 @@ export interface AssistantUsageRecord {
   baseUrl: string | null;
   cacheWriteTokens: number | null;
   cachedInputTokens: number | null;
-  credentialSource: AssistantUsageCredentialSource | null;
+  credentialSource: AssistantUsageCredentialSource;
   inputTokens: number | null;
   memberId: string | null;
   occurredAt: string;
@@ -75,9 +76,7 @@ export async function writePendingAssistantUsageRecord(input: {
 }): Promise<void> {
   const paths = resolveAssistantUsagePaths(input.vault, input.paths);
   const record = parseAssistantUsageRecord(input.record);
-  await mkdir(paths.usagePendingDirectory, {
-    recursive: true,
-  });
+  await ensureAssistantStateDirectory(paths.usagePendingDirectory);
   await writeJsonFileAtomic(resolvePendingAssistantUsagePath(paths, record.usageId), record);
 }
 
@@ -217,12 +216,8 @@ function normalizeUsageSchema(value: unknown): typeof ASSISTANT_USAGE_SCHEMA {
   return ASSISTANT_USAGE_SCHEMA;
 }
 
-function normalizeCredentialSource(value: unknown): AssistantUsageCredentialSource | null {
-  const normalized = normalizeOptionalString(value, "credentialSource");
-
-  if (!normalized) {
-    return null;
-  }
+function normalizeCredentialSource(value: unknown): AssistantUsageCredentialSource {
+  const normalized = normalizeRequiredString(value, "credentialSource");
 
   if (normalized !== "member" && normalized !== "platform" && normalized !== "unknown") {
     throw new TypeError("credentialSource must be 'member', 'platform', or 'unknown'.");
