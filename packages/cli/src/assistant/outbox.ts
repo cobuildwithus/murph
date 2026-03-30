@@ -1,6 +1,10 @@
-import { maybeDrainAssistantOutboxViaDaemon } from '../assistant-daemon-client.js'
+import {
+  maybeDrainAssistantOutboxViaDaemon,
+  maybeGetAssistantOutboxIntentViaDaemon,
+  maybeListAssistantOutboxIntentsViaDaemon,
+} from '../assistant-daemon-client.js'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rename } from 'node:fs/promises'
+import { readdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 import {
   type AssistantChannelDelivery,
@@ -16,17 +20,19 @@ import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
+import { redactAssistantStateString } from './redaction.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, saveAssistantSession } from './store.js'
 import { appendAssistantTurnReceiptEvent, updateAssistantTurnReceipt } from './turns.js'
 import {
+  ensureAssistantStateDirectory,
   isMissingFileError,
   normalizeNullableString,
   warnAssistantBestEffortFailure,
   writeJsonFileAtomic,
 } from './shared.js'
-import { assertAssistantOutboxIntentId } from './state-ids.js'
+import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
 const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
@@ -199,6 +205,14 @@ export async function readAssistantOutboxIntent(
   vault: string,
   intentId: string,
 ): Promise<AssistantOutboxIntent | null> {
+  const remote = await maybeGetAssistantOutboxIntentViaDaemon({
+    intentId,
+    vault,
+  })
+  if (remote !== undefined) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
 
@@ -233,6 +247,11 @@ export async function saveAssistantOutboxIntent(
 export async function listAssistantOutboxIntents(
   vault: string,
 ): Promise<AssistantOutboxIntent[]> {
+  const remote = await maybeListAssistantOutboxIntentsViaDaemon({ vault })
+  if (remote !== null) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   const entries = await readdir(paths.outboxDirectory, {
@@ -824,10 +843,11 @@ export function normalizeAssistantDeliveryError(
       typeof (error as { code?: unknown }).code === 'string'
         ? (error as { code: string }).code
         : null,
-    message:
+    message: redactAssistantStateString(
       error instanceof Error && error.message.trim().length > 0
         ? error.message
         : String(error),
+    ),
   })
 }
 
@@ -844,7 +864,12 @@ function resolveAssistantOutboxIntentPath(
   outboxDirectory: string,
   intentId: string,
 ): string {
-  return path.join(outboxDirectory, `${assertAssistantOutboxIntentId(intentId)}.json`)
+  return resolveAssistantOpaqueStateFilePath({
+    directory: outboxDirectory,
+    extension: '.json',
+    kind: 'outbox intent',
+    value: intentId,
+  })
 }
 
 function resolveAssistantOutboxQuarantineDirectory(
@@ -977,7 +1002,7 @@ async function quarantineAssistantOutboxIntentFile(input: {
   )
 
   try {
-    await mkdir(quarantineDirectory, { recursive: true })
+    await ensureAssistantStateDirectory(quarantineDirectory)
     await rename(input.intentPath, quarantinePath)
   } catch (error) {
     if (isMissingFileError(error)) {

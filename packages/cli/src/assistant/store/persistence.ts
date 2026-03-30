@@ -1,5 +1,4 @@
-import { access, appendFile, mkdir, readdir, readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { access, readdir, readFile } from 'node:fs/promises'
 import {
   assistantAliasStoreSchema,
   assistantAutomationStateSchema,
@@ -24,6 +23,8 @@ import {
   ASSISTANT_SESSION_CACHE,
 } from '../runtime-budget-policy.js'
 import {
+  appendTextFile,
+  ensureAssistantStateDirectory,
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
   writeTextFileAtomic,
@@ -31,9 +32,15 @@ import {
 } from '../shared.js'
 import { serializeAssistantProviderSessionOptions } from '../provider-config.js'
 import { normalizeAssistantSessionSnapshot } from '../provider-state.js'
+import {
+  extractAssistantSessionSecretsForPersistence,
+  mergeAssistantSessionSecrets,
+  persistAssistantSessionSecrets,
+  readAssistantSessionSecrets,
+} from '../state-secrets.js'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from '../runtime-events.js'
-import { assertAssistantSessionId } from '../state-ids.js'
+import { resolveAssistantOpaqueStateFilePath } from '../state-ids.js'
 import type { AssistantStatePaths } from './paths.js'
 import type { ResolvedAssistantSession } from './types.js'
 
@@ -59,45 +66,23 @@ export async function ensureAssistantState(
   paths: AssistantStatePaths,
 ): Promise<void> {
   await Promise.all([
-    mkdir(paths.sessionsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.transcriptsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.outboxDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.outboxQuarantineDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.turnsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.diagnosticsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.distillationsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.journalsDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.providerRouteRecoveryDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.quarantineDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.stateDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.usageDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.usagePendingDirectory, {
-      recursive: true,
-    }),
+    ensureAssistantStateDirectory(paths.assistantStateRoot),
+    ensureAssistantStateDirectory(paths.sessionsDirectory),
+    ensureAssistantStateDirectory(paths.transcriptsDirectory),
+    ensureAssistantStateDirectory(paths.outboxDirectory),
+    ensureAssistantStateDirectory(paths.outboxQuarantineDirectory),
+    ensureAssistantStateDirectory(paths.turnsDirectory),
+    ensureAssistantStateDirectory(paths.diagnosticsDirectory),
+    ensureAssistantStateDirectory(paths.distillationsDirectory),
+    ensureAssistantStateDirectory(paths.journalsDirectory),
+    ensureAssistantStateDirectory(paths.providerRouteRecoveryDirectory),
+    ensureAssistantStateDirectory(paths.providerRouteRecoverySecretsDirectory),
+    ensureAssistantStateDirectory(paths.quarantineDirectory),
+    ensureAssistantStateDirectory(paths.stateDirectory),
+    ensureAssistantStateDirectory(paths.secretsDirectory),
+    ensureAssistantStateDirectory(paths.sessionSecretsDirectory),
+    ensureAssistantStateDirectory(paths.usageDirectory),
+    ensureAssistantStateDirectory(paths.usagePendingDirectory),
   ])
 }
 
@@ -119,9 +104,14 @@ export async function readAssistantSession(input: {
   }
 
   try {
-    const session = normalizeAssistantSessionSnapshot(
+    const persistedSession = normalizeAssistantSessionSnapshot(
       parseAssistantSessionRecord(JSON.parse(raw) as unknown),
     )
+    const secrets = await readAssistantSessionSecrets({
+      paths: input.paths,
+      sessionId: input.sessionId,
+    })
+    const session = mergeAssistantSessionSecrets(persistedSession, secrets)
     assistantSessionCache.set(sessionPath, session)
     return session
   } catch (error) {
@@ -149,9 +139,18 @@ export async function writeAssistantSession(
 ): Promise<void> {
   const sessionPath = resolveAssistantSessionPath(paths, session.sessionId)
   const normalized = normalizeAssistantSessionSnapshot(session)
+  const {
+    persisted: redactedSession,
+    secrets,
+  } = extractAssistantSessionSecretsForPersistence(normalized)
   const persisted = assistantSessionSchema.parse(
-    normalizeAssistantSessionForWrite(normalized),
+    normalizeAssistantSessionForWrite(redactedSession),
   )
+  await persistAssistantSessionSecrets({
+    paths,
+    secrets,
+    sessionId: normalized.sessionId,
+  })
   await writeJsonFileAtomic(sessionPath, persisted)
   assistantSessionCache.set(sessionPath, normalized)
   await appendAssistantRuntimeEventAtPaths(paths, {
@@ -196,20 +195,24 @@ export function resolveAssistantTranscriptPath(
   paths: AssistantStatePaths,
   sessionId: string,
 ): string {
-  return path.join(
-    paths.transcriptsDirectory,
-    `${assertAssistantSessionId(sessionId)}.jsonl`,
-  )
+  return resolveAssistantOpaqueStateFilePath({
+    directory: paths.transcriptsDirectory,
+    extension: '.jsonl',
+    kind: 'session',
+    value: sessionId,
+  })
 }
 
 export function resolveAssistantSessionPath(
   paths: AssistantStatePaths,
   sessionId: string,
 ): string {
-  return path.join(
-    paths.sessionsDirectory,
-    `${assertAssistantSessionId(sessionId)}.json`,
-  )
+  return resolveAssistantOpaqueStateFilePath({
+    directory: paths.sessionsDirectory,
+    extension: '.json',
+    kind: 'session',
+    value: sessionId,
+  })
 }
 
 export async function inspectAssistantSessionStorage(input: {
@@ -248,10 +251,7 @@ export async function appendTranscriptEntries(
   const transcriptPath = resolveAssistantTranscriptPath(paths, sessionId)
   const serialized = `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`
 
-  await mkdir(path.dirname(transcriptPath), {
-    recursive: true,
-  })
-  await appendFile(transcriptPath, serialized, 'utf8')
+  await appendTextFile(transcriptPath, serialized)
 }
 
 export async function replaceTranscriptEntries(
@@ -265,9 +265,6 @@ export async function replaceTranscriptEntries(
       ? `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`
       : ''
 
-  await mkdir(path.dirname(transcriptPath), {
-    recursive: true,
-  })
   await writeTextFileAtomic(transcriptPath, serialized)
 }
 
