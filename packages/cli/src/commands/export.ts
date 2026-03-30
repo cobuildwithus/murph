@@ -11,7 +11,7 @@ import {
   pathSchema,
   slugSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   exportPackManifestSchema,
   listStoredExportPacks,
@@ -94,7 +94,7 @@ const exportPackPruneResultSchema = z.object({
   pruned: z.literal(true),
 })
 
-export function registerExportCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerExportCommands(cli: Cli.Cli, services: VaultServices) {
   const exportCli = Cli.create('export', {
     description: 'Export commands routed through the query layer.',
   })

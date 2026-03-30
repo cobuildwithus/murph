@@ -12,7 +12,7 @@ import {
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
 } from '../device-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 
 const providerNameSchema = z
   .string()
@@ -44,7 +44,7 @@ const deviceDaemonOptionsSchema = withBaseOptions({
 
 export function registerDeviceCommands(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
 ) {
   const device = Cli.create('device', {
     description:

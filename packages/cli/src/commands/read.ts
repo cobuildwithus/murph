@@ -5,9 +5,9 @@ import {
   listResultSchema,
   showResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 
-export function registerReadCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
     'show',
     {

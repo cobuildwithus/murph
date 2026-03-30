@@ -11,7 +11,7 @@ import { registerProviderCommands } from '../src/commands/provider.js'
 import { registerRecipeCommands } from '../src/commands/recipe.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
+import { createIntegratedVaultServices } from '../src/vault-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -28,7 +28,7 @@ function createSliceCli() {
     description: 'provider/food/recipe/event/samples slice test cli',
     version: '0.0.0-test',
   })
-  const services = createIntegratedVaultCliServices()
+  const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
   registerProviderCommands(cli, services)

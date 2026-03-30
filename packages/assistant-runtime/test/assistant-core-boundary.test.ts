@@ -8,9 +8,7 @@ import { test } from "vitest";
 
 import {
   assistantAutomationStateSchema,
-  createIntegratedInboxCliServices,
   createIntegratedInboxServices,
-  createIntegratedVaultCliServices,
   createIntegratedVaultServices,
   readAssistantAutomationState,
   resolveAssistantSelfDeliveryTarget,
@@ -45,6 +43,10 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
     new URL("../../../apps/cloudflare/test/node-runner.test.ts", import.meta.url),
     "utf8",
   );
+  const assistantCoreModule = await import("murph/assistant-core");
+  const inboxServicesModule = await import("murph/inbox-services");
+  const vaultServicesModule = await import("murph/vault-services");
+  const vaultCliServicesModule = await import("murph/vault-cli-services");
   let sawAssistantCoreImport = false;
 
   assert.equal(runtimeManifest.dependencies?.murph, "workspace:*");
@@ -53,6 +55,14 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
   assert.deepEqual(cliManifest.exports["./assistant-core"], {
     default: "./dist/assistant-core.js",
     types: "./dist/assistant-core.d.ts",
+  });
+  assert.deepEqual(cliManifest.exports["./vault-services"], {
+    default: "./dist/vault-services.js",
+    types: "./dist/vault-services.d.ts",
+  });
+  assert.deepEqual(cliManifest.exports["./vault-cli-services"], {
+    default: "./dist/vault-cli-services.js",
+    types: "./dist/vault-cli-services.d.ts",
   });
   assert.match(cloudflareNodeRunnerSource, /from ["']murph\/assistant-core["']/u);
   assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph["']/u);
@@ -66,8 +76,36 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
   }
 
   assert.equal(sawAssistantCoreImport, true);
-  assert.equal(createIntegratedInboxServices, createIntegratedInboxCliServices);
-  assert.equal(createIntegratedVaultServices, createIntegratedVaultCliServices);
+  assert.equal(assistantCoreModule.createIntegratedInboxServices, createIntegratedInboxServices);
+  assert.equal(assistantCoreModule.createIntegratedVaultServices, createIntegratedVaultServices);
+  assert.equal(
+    Object.hasOwn(assistantCoreModule, "createIntegratedInboxCliServices"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(assistantCoreModule, "createIntegratedVaultCliServices"),
+    false,
+  );
+  assert.equal(
+    inboxServicesModule.createIntegratedInboxCliServices,
+    inboxServicesModule.createIntegratedInboxServices,
+  );
+  assert.equal(
+    Object.hasOwn(vaultServicesModule, "createIntegratedVaultCliServices"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(vaultServicesModule, "createUnwiredVaultCliServices"),
+    false,
+  );
+  assert.equal(
+    vaultCliServicesModule.createIntegratedVaultCliServices,
+    vaultServicesModule.createIntegratedVaultServices,
+  );
+  assert.equal(
+    vaultCliServicesModule.createUnwiredVaultCliServices,
+    vaultServicesModule.createUnwiredVaultServices,
+  );
   assert.equal(resolveAssistantSelfDeliveryTarget, resolveCliAssistantSelfDeliveryTarget);
   assert.equal(saveAssistantSelfDeliveryTarget, saveCliAssistantSelfDeliveryTarget);
   assert.equal(readAssistantAutomationState, readCliAssistantAutomationState);

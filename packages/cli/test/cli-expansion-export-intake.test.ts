@@ -16,9 +16,9 @@ import {
 import { registerIntakeCommands } from '../src/commands/intake.js'
 import { materializeExportPack } from '../src/usecases/shared.js'
 import {
-  createIntegratedVaultCliServices,
-  createUnwiredVaultCliServices,
-} from '../src/vault-cli-services.js'
+  createIntegratedVaultServices,
+  createUnwiredVaultServices,
+} from '../src/vault-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 
@@ -27,7 +27,7 @@ function createSliceCli() {
     description: 'export/intake slice test cli',
     version: '0.0.0-test',
   })
-  const services = createUnwiredVaultCliServices()
+  const services = createUnwiredVaultServices()
 
   registerExportCommands(cli, services)
   registerIntakeCommands(cli, services)
@@ -280,7 +280,7 @@ test.sequential(
     try {
       await initializeVault({ vaultRoot })
 
-      const services = createIntegratedVaultCliServices()
+      const services = createIntegratedVaultServices()
       const packResult = await services.query.exportPack({
         vault: vaultRoot,
         requestId: 'test-export-pack-vault-only',
@@ -372,7 +372,7 @@ test.sequential(
     try {
       await initializeVault({ vaultRoot })
 
-      const services = createIntegratedVaultCliServices()
+      const services = createIntegratedVaultServices()
       const packResult = await services.query.exportPack({
         vault: vaultRoot,
         requestId: 'test-export-pack',

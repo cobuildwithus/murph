@@ -7,7 +7,7 @@ import type {
   DoctorContext,
   DoctorTargetResolution,
   InboxAppEnvironment,
-  InboxCliServices,
+  InboxServices,
 } from './types.js'
 import {
   assertBootstrapStrictReady,
@@ -33,7 +33,7 @@ import { DOCTOR_STRATEGIES } from './bootstrap-doctor-strategies.js'
 
 export function createInboxBootstrapDoctorOps(
   env: InboxAppEnvironment,
-): Pick<InboxCliServices, 'bootstrap' | 'init' | 'doctor' | 'setup'> {
+): Pick<InboxServices, 'bootstrap' | 'init' | 'doctor' | 'setup'> {
   const initInboxRuntime = async (input: {
     vault: string
     requestId: string | null

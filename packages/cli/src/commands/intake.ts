@@ -9,7 +9,7 @@ import {
   showResultSchema,
 } from '../vault-cli-contracts.js'
 import { loadImportersRuntimeModule } from '../usecases/runtime.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   showAssessmentManifest,
   showAssessmentRaw,
@@ -53,8 +53,8 @@ const intakeRawResultSchema = z.object({
   raw: z.unknown(),
 })
 
-interface IntakeServices extends VaultCliServices {
-  core: VaultCliServices['core'] & {
+interface IntakeServices extends VaultServices {
+  core: VaultServices['core'] & {
     projectAssessment(input: {
       assessmentId: string
       vault: string
@@ -63,7 +63,7 @@ interface IntakeServices extends VaultCliServices {
   }
 }
 
-export function registerIntakeCommands(cli: Cli.Cli, services: VaultCliServices) {
+export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
   const healthServices = services as IntakeServices
   const intake = Cli.create('intake', {
     description: 'Assessment intake commands for health extension workflows.',

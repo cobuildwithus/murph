@@ -15,20 +15,20 @@ import {
   createInboxRoutingAssistantToolCatalog,
 } from '../src/assistant-cli-tools.js'
 import { materializeInboxModelBundle } from '../src/inbox-model-harness.js'
-import type { InboxCliServices } from '../src/inbox-services.js'
-import type { VaultCliServices } from '../src/vault-cli-services.js'
+import type { InboxServices } from '../src/inbox-services.js'
+import type { VaultServices } from '../src/vault-services.js'
 
-function createStubVaultServices(overrides: Partial<VaultCliServices> = {}): VaultCliServices {
+function createStubVaultServices(overrides: Partial<VaultServices> = {}): VaultServices {
   return {
-    core: {} as VaultCliServices['core'],
-    importers: {} as VaultCliServices['importers'],
-    query: {} as VaultCliServices['query'],
-    devices: {} as VaultCliServices['devices'],
+    core: {} as VaultServices['core'],
+    importers: {} as VaultServices['importers'],
+    query: {} as VaultServices['query'],
+    devices: {} as VaultServices['devices'],
     ...overrides,
   }
 }
 
-function createStubInboxServices(showResult: Awaited<ReturnType<InboxCliServices['show']>>): InboxCliServices {
+function createStubInboxServices(showResult: Awaited<ReturnType<InboxServices['show']>>): InboxServices {
   return {
     init: async () => {
       throw new Error('not implemented')
@@ -696,7 +696,7 @@ test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and r
   const vaultServices = createStubVaultServices({
     importers: {
       importDocument,
-    } as unknown as VaultCliServices['importers'],
+    } as unknown as VaultServices['importers'],
   })
 
   try {
@@ -1079,7 +1079,7 @@ test('createDefaultAssistantToolCatalog recipe upsert writes payload files and c
           path: 'bank/recipes/sheet-pan-salmon-bowls.md',
         }
       },
-    } as VaultCliServices['core'],
+    } as VaultServices['core'],
   })
 
   try {
@@ -1154,7 +1154,7 @@ test('createDefaultAssistantToolCatalog food upsert writes payload files and cal
           path: 'bank/foods/regular-acai-bowl.md',
         }
       },
-    } as VaultCliServices['core'],
+    } as VaultServices['core'],
   })
 
   try {
@@ -1428,7 +1428,7 @@ test('createDefaultAssistantToolCatalog health upserts write payload files and c
           path: 'bank/goals/goal_1.md',
         }
       },
-    } as VaultCliServices['core'],
+    } as VaultServices['core'],
   })
 
   try {

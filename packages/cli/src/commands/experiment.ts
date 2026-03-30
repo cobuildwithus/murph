@@ -13,7 +13,7 @@ import {
   showResultSchema,
   slugSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import { registerLifecycleEntityGroup } from './health-command-factory.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
@@ -46,7 +46,7 @@ const experimentLifecycleResultSchema = experimentUpdateResultSchema.extend({
 
 export function registerExperimentCommands(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
 ) {
   registerLifecycleEntityGroup(cli, {
     commandName: 'experiment',

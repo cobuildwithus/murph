@@ -11,7 +11,7 @@ import {
 } from '@murph/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
-import { createIntegratedVaultCliServices } from '../src/vault-cli-services.js'
+import { createIntegratedVaultServices } from '../src/vault-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -88,7 +88,7 @@ function createSliceCli() {
     description: 'workout slice test cli',
     version: '0.0.0-test',
   })
-  const services = createIntegratedVaultCliServices()
+  const services = createIntegratedVaultServices()
 
   registerVaultCommands(cli, services)
   registerWorkoutCommands(cli, services)

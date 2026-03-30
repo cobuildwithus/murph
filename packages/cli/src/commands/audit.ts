@@ -15,7 +15,7 @@ import {
   listAudits,
   showAudit,
 } from './audit-command-helpers.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 
 const auditIdSchema = z
   .string()
@@ -47,7 +47,7 @@ const auditListResultSchema = z.object({
 
 export function registerAuditCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  _services: VaultServices,
 ) {
   const audit = Cli.create('audit', {
     description: 'Audit inspection commands routed through the query read model.',

@@ -681,7 +681,7 @@ export interface PromoteInput extends CommandContext {
   captureId: string
 }
 
-export interface InboxCliServices {
+export interface InboxServices {
   bootstrap(input: BootstrapInput): Promise<InboxBootstrapResult>
   init(input: InitInput): Promise<InboxInitResult>
   sourceAdd(input: SourceAddInput): Promise<InboxSourceAddResult>
@@ -727,6 +727,8 @@ export interface InboxCliServices {
     input: PromoteInput,
   ): Promise<InboxPromoteExperimentNoteResult>
 }
+
+export type InboxCliServices = InboxServices
 
 export interface RecoveredProvisionedMailbox {
   accountId: string

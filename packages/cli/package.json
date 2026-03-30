@@ -19,6 +19,10 @@
       "types": "./dist/inbox-services.d.ts",
       "default": "./dist/inbox-services.js"
     },
+    "./vault-services": {
+      "types": "./dist/vault-services.d.ts",
+      "default": "./dist/vault-services.js"
+    },
     "./vault-cli-services": {
       "types": "./dist/vault-cli-services.d.ts",
       "default": "./dist/vault-cli-services.js"

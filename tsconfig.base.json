@@ -94,6 +94,9 @@
       "murph/inbox-services": [
         "packages/cli/src/inbox-services.ts"
       ],
+      "murph/vault-services": [
+        "packages/cli/src/vault-services.ts"
+      ],
       "murph/vault-cli-services": [
         "packages/cli/src/vault-cli-services.ts"
       ],

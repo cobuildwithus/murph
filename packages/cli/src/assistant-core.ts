@@ -8,25 +8,20 @@
  */
 
 export {
-  createIntegratedInboxCliServices,
-  createIntegratedInboxCliServices as createIntegratedInboxServices,
-  type InboxCliServices,
-  type InboxCliServices as InboxServices,
+  createIntegratedInboxServices,
+  type InboxServices,
 } from './inbox-services.js'
 
 export {
-  createIntegratedVaultCliServices,
-  createIntegratedVaultCliServices as createIntegratedVaultServices,
-  createUnwiredVaultCliServices,
-  createUnwiredVaultCliServices as createUnwiredVaultServices,
+  createIntegratedVaultServices,
+  createUnwiredVaultServices,
   type CommandContext,
   type CoreWriteServices,
   type DeviceSyncServices,
   type ImporterServices,
   type QueryServices,
-  type VaultCliServices,
-  type VaultCliServices as VaultServices,
-} from './vault-cli-services.js'
+  type VaultServices,
+} from './vault-services.js'
 
 export {
   assistantAutomationStateSchema,

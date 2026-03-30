@@ -5,7 +5,7 @@ import {
 import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
 import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
 import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '../inbox-app/linq-endpoint.js'
-import type { InboxCliServices } from '../inbox-services.js'
+import type { InboxServices } from '../inbox-services.js'
 import type {
   SetupAgentmailInboxSelection,
   SetupAgentmailSelectionResolver,
@@ -46,9 +46,9 @@ function isSetupChannelSupportedOnPlatform(
   return channel !== 'imessage' || platform === 'darwin'
 }
 
-type SetupChannelInboxServices = Pick<InboxCliServices, 'bootstrap'> &
+type SetupChannelInboxServices = Pick<InboxServices, 'bootstrap'> &
   Partial<
-    Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
+    Pick<InboxServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
   >
 
 type SetupListedConnector =
@@ -843,7 +843,7 @@ function mapConfiguredSetupChannelResolution(
 
 async function resolveSetupChannelReadiness(input: {
   connectorId: string
-  doctor?: InboxCliServices['doctor']
+  doctor?: InboxServices['doctor']
   requestId: string | null
   readiness: SetupChannelReadinessMode
   vault: string
@@ -867,7 +867,7 @@ async function resolveSetupChannelReadiness(input: {
 
 async function probeSetupReadiness(input: {
   connectorId: string
-  doctor?: InboxCliServices['doctor']
+  doctor?: InboxServices['doctor']
   requestId: string | null
   treatProbeWarnAsReady?: boolean
   vault: string
@@ -1022,7 +1022,7 @@ async function ensureSetupConnectorEnabled(input: {
   connectorId: string
   enabled: boolean
   requestId: string | null
-  sourceSetEnabled?: InboxCliServices['sourceSetEnabled']
+  sourceSetEnabled?: InboxServices['sourceSetEnabled']
   vault: string
 }): Promise<boolean> {
   if (input.enabled) {

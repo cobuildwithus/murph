@@ -1,10 +1,10 @@
 import type { AssistantAutomationCursor } from '../../assistant-cli-contracts.js'
 import type { InboxShowResult } from '../../inbox-cli-contracts.js'
-import type { InboxCliServices } from '../../inbox-services.js'
+import type { InboxServices } from '../../inbox-services.js'
 import { routeInboxCaptureWithModel } from '../../inbox-model-harness.js'
 import { shouldBypassParserWaitForRouting } from '../../inbox-routing-vision.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
-import type { VaultCliServices } from '../../vault-cli-services.js'
+import type { VaultServices } from '../../vault-services.js'
 import { errorMessage } from '../shared.js'
 import { assistantResultArtifactExists } from './artifacts.js'
 import {
@@ -17,7 +17,7 @@ import {
 } from './shared.js'
 
 type AssistantInboxCaptureSummary = Awaited<
-  ReturnType<InboxCliServices['list']>
+  ReturnType<InboxServices['list']>
 >['items'][number]
 
 export interface AssistantRoutingCaptureOutcome {
@@ -29,11 +29,11 @@ export interface AssistantRoutingCaptureOutcome {
 
 export async function routeAssistantInboxCapture(input: {
   capture: AssistantInboxCaptureSummary
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   modelSpec: AssistantModelSpec
   requestId?: string | null
   vault: string
-  vaultServices?: VaultCliServices
+  vaultServices?: VaultServices
 }): Promise<AssistantRoutingCaptureOutcome> {
   const capture = input.capture
 
@@ -118,7 +118,7 @@ export async function routeAssistantInboxCapture(input: {
 
 export async function scanAssistantInboxOnce(input: {
   afterCursor?: AssistantAutomationCursor | null
-  inboxServices: InboxCliServices
+  inboxServices: InboxServices
   maxPerScan?: number
   modelSpec: AssistantModelSpec
   oldestFirst?: boolean
@@ -129,7 +129,7 @@ export async function scanAssistantInboxOnce(input: {
   requestId?: string | null
   signal?: AbortSignal
   vault: string
-  vaultServices?: VaultCliServices
+  vaultServices?: VaultServices
 }): Promise<AssistantInboxScanResult> {
   const listed = await input.inboxServices.list({
     vault: input.vault,

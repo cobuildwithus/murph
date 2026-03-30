@@ -1,7 +1,7 @@
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {
   InboxAppEnvironment,
-  InboxCliServices,
+  InboxServices,
   InboxPaths,
   RuntimeStore,
 } from './types.js'
@@ -35,7 +35,7 @@ import {
 export function createInboxReadOps(
   env: InboxAppEnvironment,
 ): Pick<
-  InboxCliServices,
+  InboxServices,
   | 'list'
   | 'listAttachments'
   | 'showAttachment'

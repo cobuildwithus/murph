@@ -7,7 +7,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerAuditCommands } from '../src/commands/audit.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
-import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import { createUnwiredVaultServices } from '../src/vault-services.js'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
@@ -16,7 +16,7 @@ function createSliceCli() {
     description: 'samples/audit slice test cli',
     version: '0.0.0-test',
   })
-  const services = createUnwiredVaultCliServices()
+  const services = createUnwiredVaultServices()
 
   registerSamplesCommands(cli, services)
   registerAuditCommands(cli, services)

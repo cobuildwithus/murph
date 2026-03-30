@@ -23,7 +23,7 @@ import type {
   QueryEntity,
   QueryServices,
   StopProtocolInput,
-  VaultCliServices,
+  VaultServices,
 } from "./types.js"
 import {
   createExplicitHealthCoreServices,
@@ -735,7 +735,7 @@ function createIntegratedDeviceSyncServices(): DeviceSyncServices {
   } satisfies DeviceSyncServices
 }
 
-function createIntegratedVaultCliServiceGroups(): VaultCliServices {
+function createIntegratedVaultServiceGroups(): VaultServices {
   return {
     core: createIntegratedCoreServices(),
     importers: createIntegratedImporterServices(),
@@ -758,12 +758,12 @@ function createUnwiredServiceGroup<
   ) as unknown as TServiceGroup
 }
 
-export function createIntegratedVaultCliServices(): VaultCliServices {
-  return createIntegratedVaultCliServiceGroups()
+export function createIntegratedVaultServices(): VaultServices {
+  return createIntegratedVaultServiceGroups()
 }
 
-export function createUnwiredVaultCliServices(): VaultCliServices {
-  const integratedServices = createIntegratedVaultCliServiceGroups()
+export function createUnwiredVaultServices(): VaultServices {
+  const integratedServices = createIntegratedVaultServiceGroups()
 
   return {
     core: createUnwiredServiceGroup("core", integratedServices.core),
@@ -772,3 +772,6 @@ export function createUnwiredVaultCliServices(): VaultCliServices {
     devices: createUnwiredServiceGroup("devices", integratedServices.devices),
   }
 }
+
+export const createIntegratedVaultCliServices = createIntegratedVaultServices
+export const createUnwiredVaultCliServices = createUnwiredVaultServices

@@ -105,6 +105,14 @@ assert(
   'package.json must publish assistant-core types from dist/assistant-core.d.ts.',
 )
 assert(
+  packageJson.exports?.['./vault-services']?.default === './dist/vault-services.js',
+  'package.json must publish the neutral vault-services surface from dist/vault-services.js.',
+)
+assert(
+  packageJson.exports?.['./vault-services']?.types === './dist/vault-services.d.ts',
+  'package.json must publish vault-services types from dist/vault-services.d.ts.',
+)
+assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===
     'https://github.com/cobuildwithus/murph',
   'package.json repository.url must stay pinned to the Murph repository.',

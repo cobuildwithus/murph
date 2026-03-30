@@ -755,12 +755,14 @@ export interface DeviceSyncServices {
   }): Promise<DeviceDaemonStopResult>
 }
 
-export interface VaultCliServices {
+export interface VaultServices {
   core: CoreWriteServices
   importers: ImporterServices
   query: QueryServices
   devices: DeviceSyncServices
 }
+
+export type VaultCliServices = VaultServices
 
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   REQUIRED_DIRECTORIES: readonly string[]

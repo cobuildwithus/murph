@@ -11,7 +11,7 @@ import {
   showResultSchema,
   samplesImportCsvResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   importCsvSamples as importCsvSamplesWithArtifacts,
 } from './sample-import-command-helpers.js'
@@ -101,7 +101,7 @@ const sampleBatchListResultSchema = z.object({
 
 export function registerSamplesCommands(
   cli: Cli.Cli,
-  services: VaultCliServices,
+  services: VaultServices,
 ) {
   const samples = Cli.create('samples', {
     description: 'Sample ingestion and inspection commands routed through importers and the query read model.',

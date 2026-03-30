@@ -16,7 +16,7 @@ import {
   showMealRecord,
 } from '../usecases/document-meal-read.js'
 import { loadImportersRuntimeModule } from '../usecases/runtime.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,
@@ -25,7 +25,7 @@ import {
 
 const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
-export function registerMealCommands(cli: Cli.Cli, _services: VaultCliServices) {
+export function registerMealCommands(cli: Cli.Cli, _services: VaultServices) {
   registerArtifactBackedEntityGroup(cli, {
     commandName: 'meal',
     description: 'Meal capture commands routed through the core write API.',

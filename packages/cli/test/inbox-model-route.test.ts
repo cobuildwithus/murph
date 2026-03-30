@@ -4,7 +4,7 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, test, vi } from 'vitest'
 import type { InboxShowResult } from '../src/inbox-cli-contracts.js'
-import type { InboxCliServices } from '../src/inbox-services.js'
+import type { InboxServices } from '../src/inbox-services.js'
 
 const routeHarnessMocks = vi.hoisted(() => ({
   generateAssistantObject: vi.fn(),
@@ -34,10 +34,10 @@ afterEach(() => {
 })
 
 function createStubInboxServices(input: {
-  promoteDocument?: InboxCliServices['promoteDocument']
-  promoteMeal?: InboxCliServices['promoteMeal']
+  promoteDocument?: InboxServices['promoteDocument']
+  promoteMeal?: InboxServices['promoteMeal']
   showResult: InboxShowResult
-}): InboxCliServices {
+}): InboxServices {
   return {
     init: async () => {
       throw new Error('not implemented')

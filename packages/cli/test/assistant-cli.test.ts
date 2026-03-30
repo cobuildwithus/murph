@@ -26,12 +26,12 @@ import {
   resolveAssistantStatePaths,
 } from '../src/assistant-state.js'
 import type { AssistantRunEvent } from '../src/assistant/automation/shared.js'
-import { createIntegratedInboxCliServices } from '../src/inbox-services.js'
+import { createIntegratedInboxServices } from '../src/inbox-services.js'
 import { formatAssistantRunEventForTerminal } from '../src/run-terminal-logging.js'
 import { formatStructuredErrorMessage } from '../src/text/shared.js'
 import { collectVaultCliDescriptorRootCommandNames } from '../src/vault-cli-command-manifest.js'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultCliServices } from '../src/vault-cli-services.js'
+import { createUnwiredVaultServices } from '../src/vault-services.js'
 import {
   ensureCliRuntimeArtifacts,
   repoRoot,
@@ -1318,8 +1318,8 @@ test('default-vault root coverage stays aligned with manifest-backed root comman
 
 test('root status, doctor, and stop aliases reuse the assistant command schemas', () => {
   const cli = createVaultCli(
-    createUnwiredVaultCliServices(),
-    createIntegratedInboxCliServices(),
+    createUnwiredVaultServices(),
+    createIntegratedInboxServices(),
   )
   const commands = Cli.toCommands.get(cli)
   const assistant = commands?.get('assistant') as
@@ -1570,8 +1570,8 @@ async function runInProcessCliWithTty(args: string[]): Promise<{
   stdout: string
 }> {
   const cli = createVaultCli(
-    createUnwiredVaultCliServices(),
-    createIntegratedInboxCliServices(),
+    createUnwiredVaultServices(),
+    createIntegratedInboxServices(),
   )
   const stdout: string[] = []
   const stderr: string[] = []

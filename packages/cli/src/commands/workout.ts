@@ -7,7 +7,7 @@ import {
   workoutFormatListResultSchema,
   workoutFormatSaveResultSchema,
 } from '../vault-cli-contracts.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 import {
   listWorkoutFormats,
   logWorkoutFormat,
@@ -28,7 +28,7 @@ const eventSourceSchema = z.enum(['manual', 'import', 'device', 'derived'])
 
 export function registerWorkoutCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  _services: VaultServices,
 ) {
   const workout = Cli.create('workout', {
     description:

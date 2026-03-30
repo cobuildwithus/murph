@@ -3,13 +3,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  createIntegratedInboxCliServices,
-  type InboxCliServices,
+  createIntegratedInboxServices,
+  type InboxServices,
 } from './inbox-services.js'
 import {
-  createIntegratedVaultCliServices,
-  type VaultCliServices,
-} from './vault-cli-services.js'
+  createIntegratedVaultServices,
+  type VaultServices,
+} from './vault-services.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import { resolveEffectiveTopLevelToken } from './command-helpers.js'
 import {
@@ -108,12 +108,12 @@ interface SetupServicesDependencies {
   platform?: () => NodeJS.Platform
   resolveCliBinPath?: () => string
   runCommand?: (input: CommandRunInput) => Promise<CommandRunResult>
-  inboxServices?: Pick<InboxCliServices, 'bootstrap'> &
+  inboxServices?: Pick<InboxServices, 'bootstrap'> &
     Partial<
-      Pick<InboxCliServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
+      Pick<InboxServices, 'doctor' | 'sourceAdd' | 'sourceList' | 'sourceSetEnabled'>
     >
   resolveAgentmailInboxSelection?: SetupAgentmailSelectionResolver
-  vaultServices?: Pick<VaultCliServices, 'core'>
+  vaultServices?: Pick<VaultServices, 'core'>
 }
 
 interface SetupServices {
@@ -173,9 +173,9 @@ export function createSetupServices(
   const runCommand = dependencies.runCommand ?? createDefaultCommandRunner(log)
   const downloadFile = dependencies.downloadFile ?? defaultDownloadFile
   const vaultServices =
-    dependencies.vaultServices ?? createIntegratedVaultCliServices()
+    dependencies.vaultServices ?? createIntegratedVaultServices()
   const inboxServices =
-    dependencies.inboxServices ?? createIntegratedInboxCliServices()
+    dependencies.inboxServices ?? createIntegratedInboxServices()
   const resolveAgentmailInboxSelection =
     dependencies.resolveAgentmailInboxSelection ??
     createSetupAgentmailSelectionResolver()

@@ -1,6 +1,9 @@
-import { ALL_VAULT_RECORD_TYPES } from '@murph/query'
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
+import {
+  ALL_VAULT_RECORD_TYPES,
+  loadQueryRuntime,
+} from '../query-runtime.js'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -12,8 +15,7 @@ import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
 } from '../option-utils.js'
-import { loadQueryRuntime } from '../query-runtime.js'
-import type { VaultCliServices } from '../vault-cli-services.js'
+import type { VaultServices } from '../vault-services.js'
 
 const recordTypeValues = ALL_VAULT_RECORD_TYPES
 
@@ -113,7 +115,7 @@ const searchIndexRebuildSchema = searchIndexStatusSchema.extend({
 
 export function registerSearchCommands(
   cli: Cli.Cli,
-  _services: VaultCliServices,
+  _services: VaultServices,
 ) {
   const search = Cli.create('search', {
     description:
