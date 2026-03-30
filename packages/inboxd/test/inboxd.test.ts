@@ -194,6 +194,21 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   });
   assert.match(envelope.stored.attachments[0]?.attachmentId ?? "", /^att_/u);
 
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, 1);
+  assert.equal(captureRecords[0]?.captureId, first.captureId);
+  assert.equal(captureRecords[0]?.eventId, first.eventId);
+  assert.equal(captureRecords[0]?.auditId, first.auditId);
+  assert.equal(captureRecords[0]?.envelopePath, capture.envelopePath);
+  assert.equal(
+    Array.isArray(captureRecords[0]?.rawRefs) &&
+      captureRecords[0]?.rawRefs.includes(capture.envelopePath),
+    true,
+  );
+
   const eventRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: "ledger/events/2026/2026-03.jsonl",
@@ -212,6 +227,11 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
   });
   assert.equal(auditRecords.length, 2);
   assert.equal(auditRecords.at(-1)?.action, "intake_import");
+  assert.equal(
+    Array.isArray(auditRecords.at(-1)?.changes) &&
+      auditRecords.at(-1)?.changes.some((change) => change.path === "ledger/inbox-captures/2026/2026-03.jsonl"),
+    true,
+  );
 
   pipeline.close();
 });

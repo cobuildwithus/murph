@@ -30,6 +30,7 @@ vault/
   raw/samples/<stream>/YYYY/MM/<transformId>/manifest.json
   raw/integrations/<provider>/YYYY/MM/<transformId>/<filename>
   raw/integrations/<provider>/YYYY/MM/<transformId>/manifest.json
+  ledger/inbox-captures/YYYY/YYYY-MM.jsonl
   ledger/assessments/YYYY/YYYY-MM.jsonl
   ledger/events/YYYY/YYYY-MM.jsonl
   ledger/profile-snapshots/YYYY/YYYY-MM.jsonl
@@ -61,11 +62,12 @@ Generated artifact: `packages/contracts/generated/vault-metadata.schema.json`
 - Markdown docs remain human-readable and reviewable in place.
 - Raw imports are copied under stable type-specific folders in `raw/` and remain immutable in place.
 - Each raw import directory also stores an immutable `manifest.json` sidecar with artifact checksums and import provenance.
-- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus copied attachments as canonical evidence and do not use the generic raw-import manifest contract.
+- `raw/inbox/**` is the exception: inbox captures store immutable `envelope.json` plus copied attachments as canonical evidence, and the structured canonical capture facts live in `ledger/inbox-captures/YYYY/YYYY-MM.jsonl` instead of the generic raw-import manifest contract.
 - Assessment source payloads are copied to `raw/assessments/YYYY/MM/<assessmentId>/source.json` and remain immutable in place.
 - `raw/samples/<stream>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from `samples import-csv`; baseline does not write a standalone transform record.
 - `raw/integrations/<provider>/YYYY/MM/<transformId>/` uses an import-batch identifier returned from normalized device/provider imports and keeps provider API snapshots immutable alongside a manifest.
 - Assessment shards use `recordedAt`: `ledger/assessments/YYYY/YYYY-MM.jsonl`.
+- Inbox-capture shards use `occurredAt`: `ledger/inbox-captures/YYYY/YYYY-MM.jsonl`.
 - Event shards use `occurredAt`: `ledger/events/YYYY/YYYY-MM.jsonl`.
 - Profile snapshot shards use `recordedAt`: `ledger/profile-snapshots/YYYY/YYYY-MM.jsonl`.
 - Sample shards use `recordedAt`: `ledger/samples/<stream>/YYYY/YYYY-MM.jsonl`.

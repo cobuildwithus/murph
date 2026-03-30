@@ -233,6 +233,7 @@ export {
   appendImportAudit,
   appendInboxCaptureEvent,
   ensureInboxVault,
+  persistCanonicalInboxCapture,
   persistRawCapture,
   rebuildRuntimeFromVault,
 } from "./indexing/persist.ts";

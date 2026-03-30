@@ -1,12 +1,10 @@
 import type { InboundCapture, PersistedCapture } from "../contracts/capture.ts";
 import type { InboxRuntimeStore } from "./sqlite.ts";
 import {
-  appendImportAudit,
-  appendInboxCaptureEvent,
   ensureStoredCaptureCanonicalEvidence,
   ensureInboxVault,
   findStoredCaptureEnvelope,
-  persistRawCapture,
+  persistCanonicalInboxCapture,
 } from "../indexing/persist.ts";
 import { createDeterministicInboxCaptureId, generatePrefixedId } from "../shared.ts";
 
@@ -95,44 +93,30 @@ export async function processCapture(
   const eventId = ids.event();
   const auditId = ids.audit();
 
-  const stored = await persistRawCapture({
+  const persisted = await persistCanonicalInboxCapture({
     vaultRoot,
     captureId,
     eventId,
-    input,
-  });
-  const event = await appendInboxCaptureEvent({
-    vaultRoot,
-    eventId,
-    occurredAt: input.occurredAt,
-    inbound: input,
-    stored,
-  });
-  await appendImportAudit({
-    vaultRoot,
     auditId,
-    eventId,
-    inbound: input,
-    stored,
-    eventPath: event.relativePath,
+    input,
   });
   const runtimeCaptureId = runtime.upsertCaptureIndex({
     captureId,
     eventId,
     input,
-    stored,
+    stored: persisted.stored,
   });
   runtime.enqueueDerivedJobs({
     captureId: runtimeCaptureId,
-    stored,
+    stored: persisted.stored,
   });
 
   return {
     captureId: runtimeCaptureId,
     eventId,
     auditId,
-    envelopePath: stored.envelopePath,
-    createdAt: stored.storedAt,
+    envelopePath: persisted.stored.envelopePath,
+    createdAt: persisted.stored.storedAt,
     deduped: false,
   };
 }
