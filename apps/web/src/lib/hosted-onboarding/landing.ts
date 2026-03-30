@@ -1,4 +1,5 @@
 import { normalizePhoneNumber } from "./phone";
+import { resolveHostedPublicBaseUrl as resolveHostedWebPublicBaseUrl } from "../hosted-web/public-url";
 
 export interface HostedSignupPhoneDetails {
   displayValue: string;
@@ -12,7 +13,7 @@ export function resolveHostedSignupPhoneNumber(
 }
 
 export function resolveHostedInstallScriptUrl(source: NodeJS.ProcessEnv = process.env): string | null {
-  const baseUrl = resolveHostedPublicBaseUrl(source);
+  const baseUrl = resolveHostedPublicBaseUrlObject(source);
 
   if (!baseUrl) {
     return null;
@@ -48,10 +49,8 @@ export function hasHostedPrivyClientConfig(source: NodeJS.ProcessEnv = process.e
   return Boolean(resolveHostedPrivyClientAppId(source));
 }
 
-function resolveHostedPublicBaseUrl(source: NodeJS.ProcessEnv): URL | null {
-  const value = normalizeEnvValue(
-    source.HOSTED_ONBOARDING_PUBLIC_BASE_URL ?? source.NEXT_PUBLIC_SITE_URL,
-  );
+function resolveHostedPublicBaseUrlObject(source: NodeJS.ProcessEnv): URL | null {
+  const value = resolveHostedWebPublicBaseUrl(source);
 
   if (!value) {
     return null;
