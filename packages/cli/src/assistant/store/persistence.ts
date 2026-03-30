@@ -13,6 +13,7 @@ import {
 } from '../../assistant-cli-contracts.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 import {
+  getAssistantBindingIsolationConflicts,
   mergeAssistantBinding,
   type AssistantBindingPatch,
 } from '../bindings.js'
@@ -317,8 +318,21 @@ export async function persistResolvedSession(
   input: {
     alias: string | null
     bindingPatch: AssistantBindingPatch
+    lookupSource: 'alias' | 'conversation-key' | 'session-id'
   },
 ): Promise<AssistantSession> {
+  const routingConflicts = getAssistantBindingIsolationConflicts(
+    session.binding,
+    input.bindingPatch,
+  )
+  if (routingConflicts.length > 0) {
+    throw createAssistantSessionRoutingConflictError({
+      conflicts: routingConflicts,
+      lookupSource: input.lookupSource,
+      session,
+    })
+  }
+
   const nextBinding = mergeAssistantBinding(session.binding, input.bindingPatch)
   const aliasChanged = input.alias !== null && input.alias !== session.alias
   const bindingChanged = !areAssistantBindingsEqual(nextBinding, session.binding)
@@ -348,6 +362,7 @@ export async function loadAndPersistResolvedSession(input: {
   persistenceInput: {
     alias: string | null
     bindingPatch: AssistantBindingPatch
+    lookupSource: 'alias' | 'conversation-key' | 'session-id'
   }
   skipIfExpired?: boolean
   maxSessionAgeMs?: number | null
@@ -645,6 +660,24 @@ function createAssistantSessionCorruptedError(input: {
       sessionId: input.sessionId,
       sessionPath: input.sessionPath,
       reason: input.error instanceof Error ? input.error.message : String(input.error),
+    },
+  )
+}
+
+function createAssistantSessionRoutingConflictError(input: {
+  conflicts: ReturnType<typeof getAssistantBindingIsolationConflicts>
+  lookupSource: 'alias' | 'conversation-key' | 'session-id'
+  session: AssistantSession
+}): VaultCliError {
+  return new VaultCliError(
+    'ASSISTANT_SESSION_ROUTING_CONFLICT',
+    `Assistant session "${input.session.sessionId}" is already bound to a different routed audience. Resume it without changing channel, identity, participant, or thread metadata, or send a one-off explicit target override instead.`,
+    {
+      alias: input.session.alias,
+      conflicts: input.conflicts,
+      conversationKey: input.session.binding.conversationKey,
+      lookupSource: input.lookupSource,
+      sessionId: input.session.sessionId,
     },
   )
 }

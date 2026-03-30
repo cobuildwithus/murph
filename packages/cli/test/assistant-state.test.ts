@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
@@ -32,8 +32,19 @@ import {
   searchAssistantMemory,
   upsertAssistantMemory,
 } from '../src/assistant/memory.js'
+import {
+  getAssistantStatus,
+} from '../src/assistant-runtime.js'
+import {
+  readAssistantRuntimeBudgetStatus,
+  runAssistantRuntimeMaintenance,
+} from '../src/assistant/runtime-budgets.js'
 import { withAssistantMemoryWriteLock } from '../src/assistant/memory/locking.js'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.js'
+import {
+  assistantSessionSchema,
+  parseAssistantSessionRecord,
+} from '../src/assistant-cli-contracts.js'
 
 const cleanupPaths: string[] = []
 
@@ -69,7 +80,7 @@ test('resolveAssistantAliasKey prefers explicit alias and otherwise derives a st
   assert.equal(resolveAssistantAliasKey({}), null)
 })
 
-test('resolveAssistantAliasKey merges conversation refs with explicit locator overrides', () => {
+test('resolveAssistantAliasKey only derives actor-scoped fallback keys when the conversation is not explicitly group-scoped', () => {
   assert.equal(
     resolveAssistantAliasKey({
       conversation: {
@@ -80,7 +91,7 @@ test('resolveAssistantAliasKey merges conversation refs with explicit locator ov
       },
       actorId: 'contact:override',
     }),
-    'channel:telegram|identity:assistant%3Aprimary|actor:contact%3Aoverride',
+    null,
   )
   assert.equal(
     resolveAssistantAliasKey({
@@ -96,6 +107,31 @@ test('resolveAssistantAliasKey merges conversation refs with explicit locator ov
     }),
     'channel:telegram|identity:assistant%3Aprimary|thread:chat-override',
   )
+})
+
+test('resolveAssistantSession does not auto-reuse actor-scoped conversation keys for explicit group conversations without thread ids', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-group-routing-scope-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const first = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'contact:group-member',
+    threadIsDirect: false,
+  })
+  const second = await resolveAssistantSession({
+    vault: vaultRoot,
+    channel: 'telegram',
+    participantId: 'contact:group-member',
+    threadIsDirect: false,
+  })
+
+  assert.equal(first.session.binding.conversationKey, null)
+  assert.equal(second.session.binding.conversationKey, null)
+  assert.equal(second.created, true)
+  assert.notEqual(second.session.sessionId, first.session.sessionId)
 })
 
 test('assistant sessions live outside the vault, omit redundant path metadata, and reuse alias mappings', async () => {
@@ -484,7 +520,7 @@ test('resolveAssistantSession ignores primitive conversation payloads when patch
   assert.equal(resolved.session.binding.threadIsDirect, true)
 })
 
-test('resolveAssistantSession only patches nested conversation fields that were explicitly provided', async () => {
+test('resolveAssistantSession only enriches missing nested conversation fields that were explicitly provided', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-partial-conversation-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -492,11 +528,7 @@ test('resolveAssistantSession only patches nested conversation fields that were 
 
   const created = await resolveAssistantSession({
     vault: vaultRoot,
-    channel: 'telegram',
-    identityId: 'assistant:primary',
-    participantId: 'contact:bob',
-    sourceThreadId: 'chat-1',
-    threadIsDirect: true,
+    alias: 'chat:partial-conversation',
   })
 
   const resolved = await resolveAssistantSession({
@@ -510,17 +542,17 @@ test('resolveAssistantSession only patches nested conversation fields that were 
 
   assert.equal(resolved.created, false)
   assert.equal(resolved.session.binding.channel, 'linq')
-  assert.equal(resolved.session.binding.identityId, 'assistant:primary')
-  assert.equal(resolved.session.binding.actorId, 'contact:bob')
-  assert.equal(resolved.session.binding.threadId, 'chat-1')
-  assert.equal(resolved.session.binding.threadIsDirect, true)
+  assert.equal(resolved.session.binding.identityId, null)
+  assert.equal(resolved.session.binding.actorId, null)
+  assert.equal(resolved.session.binding.threadId, null)
+  assert.equal(resolved.session.binding.threadIsDirect, null)
 
   const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
   assert.equal(persisted.binding.channel, 'linq')
-  assert.equal(persisted.binding.identityId, 'assistant:primary')
-  assert.equal(persisted.binding.actorId, 'contact:bob')
-  assert.equal(persisted.binding.threadId, 'chat-1')
-  assert.equal(persisted.binding.threadIsDirect, true)
+  assert.equal(persisted.binding.identityId, null)
+  assert.equal(persisted.binding.actorId, null)
+  assert.equal(persisted.binding.threadId, null)
+  assert.equal(persisted.binding.threadIsDirect, null)
 })
 
 test('resolveAssistantSession ignores alias-only nested conversation payloads when patching bindings', async () => {
@@ -563,8 +595,8 @@ test('resolveAssistantSession ignores alias-only nested conversation payloads wh
   assert.equal(persisted.binding.threadIsDirect, true)
 })
 
-test('resolveAssistantSession retargets participant delivery when actorId overrides an existing participant binding', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-participant-retarget-'))
+test('resolveAssistantSession rejects participant retargeting when a saved session is already bound to a different actor', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-participant-conflict-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -575,26 +607,31 @@ test('resolveAssistantSession retargets participant delivery when actorId overri
     participantId: '+15551234567',
   })
 
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    sessionId: created.session.sessionId,
-    actorId: '+15557654321',
-    createIfMissing: false,
-  })
-
-  assert.equal(resolved.created, false)
-  assert.equal(resolved.session.binding.actorId, '+15557654321')
-  assert.equal(resolved.session.binding.delivery?.kind, 'participant')
-  assert.equal(resolved.session.binding.delivery?.target, '+15557654321')
+  await assert.rejects(
+    () =>
+      resolveAssistantSession({
+        vault: vaultRoot,
+        sessionId: created.session.sessionId,
+        actorId: '+15557654321',
+        createIfMissing: false,
+      }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown })?.code,
+        'ASSISTANT_SESSION_ROUTING_CONFLICT',
+      )
+      return true
+    },
+  )
 
   const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
-  assert.equal(persisted.binding.actorId, '+15557654321')
+  assert.equal(persisted.binding.actorId, '+15551234567')
   assert.equal(persisted.binding.delivery?.kind, 'participant')
-  assert.equal(persisted.binding.delivery?.target, '+15557654321')
+  assert.equal(persisted.binding.delivery?.target, '+15551234567')
 })
 
-test('resolveAssistantSession clears thread delivery targets when nested conversation explicitly nulls threadId', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-thread-target-'))
+test('resolveAssistantSession rejects clearing a saved thread binding because that would broaden the routed audience', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-thread-conflict-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -608,26 +645,33 @@ test('resolveAssistantSession clears thread delivery targets when nested convers
     },
   })
 
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    sessionId: created.session.sessionId,
-    conversation: {
-      threadId: null,
+  await assert.rejects(
+    () =>
+      resolveAssistantSession({
+        vault: vaultRoot,
+        sessionId: created.session.sessionId,
+        conversation: {
+          threadId: null,
+        },
+        createIfMissing: false,
+      }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown })?.code,
+        'ASSISTANT_SESSION_ROUTING_CONFLICT',
+      )
+      return true
     },
-    createIfMissing: false,
-  })
-
-  assert.equal(resolved.created, false)
-  assert.equal(resolved.session.binding.threadId, null)
-  assert.equal(resolved.session.binding.delivery, null)
+  )
 
   const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
-  assert.equal(persisted.binding.threadId, null)
-  assert.equal(persisted.binding.delivery, null)
+  assert.equal(persisted.binding.threadId, 'chat-1')
+  assert.equal(persisted.binding.delivery?.kind, 'thread')
+  assert.equal(persisted.binding.delivery?.target, 'chat-1')
 })
 
-test('resolveAssistantSession clears participant delivery targets when nested conversation explicitly nulls participantId', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-participant-target-'))
+test('resolveAssistantSession rejects clearing a saved participant binding because that would broaden the routed audience', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-clear-participant-conflict-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -638,26 +682,33 @@ test('resolveAssistantSession clears participant delivery targets when nested co
     participantId: '+15551234567',
   })
 
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    sessionId: created.session.sessionId,
-    conversation: {
-      participantId: null,
+  await assert.rejects(
+    () =>
+      resolveAssistantSession({
+        vault: vaultRoot,
+        sessionId: created.session.sessionId,
+        conversation: {
+          participantId: null,
+        },
+        createIfMissing: false,
+      }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown })?.code,
+        'ASSISTANT_SESSION_ROUTING_CONFLICT',
+      )
+      return true
     },
-    createIfMissing: false,
-  })
-
-  assert.equal(resolved.created, false)
-  assert.equal(resolved.session.binding.actorId, null)
-  assert.equal(resolved.session.binding.delivery, null)
+  )
 
   const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
-  assert.equal(persisted.binding.actorId, null)
-  assert.equal(persisted.binding.delivery, null)
+  assert.equal(persisted.binding.actorId, '+15551234567')
+  assert.equal(persisted.binding.delivery?.kind, 'participant')
+  assert.equal(persisted.binding.delivery?.target, '+15551234567')
 })
 
-test('resolveAssistantSession prefers alias matches over conversation-key matches', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-precedence-'))
+test('resolveAssistantSession rejects alias reuse when the supplied routing metadata points at a different conversation', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-routing-conflict-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -684,25 +735,29 @@ test('resolveAssistantSession prefers alias matches over conversation-key matche
     conversationMatch.session.sessionId,
   )
 
-  const resolved = await resolveAssistantSession({
-    vault: vaultRoot,
-    alias: 'chat:alias',
-    channel: 'imessage',
-    identityId: 'assistant:primary',
-    participantId: 'contact:conversation',
-    sourceThreadId: 'thread-conversation',
-    createIfMissing: false,
-  })
-
-  assert.equal(resolved.created, false)
-  assert.equal(resolved.session.sessionId, aliasMatch.session.sessionId)
-  assert.equal(resolved.session.alias, 'chat:alias')
-  assert.equal(resolved.session.binding.actorId, 'contact:conversation')
-  assert.equal(resolved.session.binding.threadId, 'thread-conversation')
+  await assert.rejects(
+    () =>
+      resolveAssistantSession({
+        vault: vaultRoot,
+        alias: 'chat:alias',
+        channel: 'imessage',
+        identityId: 'assistant:primary',
+        participantId: 'contact:conversation',
+        sourceThreadId: 'thread-conversation',
+        createIfMissing: false,
+      }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown })?.code,
+        'ASSISTANT_SESSION_ROUTING_CONFLICT',
+      )
+      return true
+    },
+  )
 
   const persisted = await getAssistantSession(vaultRoot, aliasMatch.session.sessionId)
   assert.equal(persisted.alias, 'chat:alias')
-  assert.equal(persisted.binding.threadId, 'thread-conversation')
+  assert.equal(persisted.binding.threadId, 'thread-alias')
 })
 
 test('resolveAssistantSession rotates conversation-key sessions after the max age threshold', async () => {
@@ -1293,7 +1348,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
   )
 })
 
-test('readAssistantAutomationState rejects legacy automation v1 payloads', async () => {
+test('readAssistantAutomationState quarantines and rebuilds legacy automation v1 payloads', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-automation-hard-cut-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
@@ -1317,7 +1372,17 @@ test('readAssistantAutomationState rejects legacy automation v1 payloads', async
     'utf8',
   )
 
-  await assert.rejects(() => readAssistantAutomationState(vaultRoot))
+  const recovered = await readAssistantAutomationState(vaultRoot)
+  assert.equal(recovered.autoReplyPrimed, true)
+  assert.deepEqual(recovered.autoReplyChannels, [])
+
+  const automationQuarantineDirectory = path.join(
+    statePaths.quarantineDirectory,
+    'automation',
+  )
+  const quarantineEntries = await readdir(automationQuarantineDirectory)
+  assert.equal(quarantineEntries.some((entry) => entry.endsWith('.meta.json')), true)
+  assert.equal(quarantineEntries.some((entry) => entry.includes('.invalid')), true)
 })
 
 test('redactAssistantDisplayPath hides HOME-prefixed paths and leaves external paths untouched', async () => {
@@ -1764,5 +1829,150 @@ test('upsertAssistantMemory requires explicit remember intent for health context
       section: 'Health context',
     }),
     /explicit remember request/u,
+  )
+})
+
+test('assistant session schema rejects path-like session identifiers before persistence', () => {
+  const valid = {
+    schema: 'murph.assistant-session.v3',
+    sessionId: 'session_safe_123',
+    provider: 'codex-cli',
+    providerOptions: {
+      model: null,
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+    },
+    providerBinding: null,
+    alias: 'chat:test',
+    binding: {
+      conversationKey: 'chat:test',
+      channel: 'local',
+      identityId: null,
+      actorId: null,
+      threadId: null,
+      threadIsDirect: true,
+      delivery: null,
+    },
+    createdAt: '2026-03-29T00:00:00.000Z',
+    updatedAt: '2026-03-29T00:00:00.000Z',
+    lastTurnAt: null,
+    turnCount: 0,
+  } as const
+
+  assert.equal(assistantSessionSchema.parse(valid).sessionId, 'session_safe_123')
+  assert.equal(parseAssistantSessionRecord(valid).sessionId, 'session_safe_123')
+  assert.throws(
+    () =>
+      assistantSessionSchema.parse({
+        ...valid,
+        sessionId: '../escape',
+      }),
+    /opaque runtime ids/u,
+  )
+  assert.throws(
+    () =>
+      parseAssistantSessionRecord({
+        ...valid,
+        sessionId: 'nested/escape',
+      }),
+    /opaque runtime ids/u,
+  )
+})
+
+test('assistant runtime budget snapshots are quarantined, recreated, and fully pruned with orphan payload cleanup', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-budget-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(path.dirname(paths.resourceBudgetPath), {
+    recursive: true,
+  })
+  await writeFile(
+    paths.resourceBudgetPath,
+    JSON.stringify({
+      schema: 'murph.assistant-runtime-budget.v1',
+      updatedAt: 42,
+    }),
+    'utf8',
+  )
+
+  const recovered = await readAssistantRuntimeBudgetStatus(vaultRoot)
+  assert.equal(recovered.schema, 'murph.assistant-runtime-budget.v1')
+  assert.deepEqual(recovered.maintenance.notes, [])
+
+  const runtimeBudgetQuarantineDirectory = path.join(
+    paths.quarantineDirectory,
+    'runtime-budget',
+  )
+  const quarantinedEntries = await readdir(runtimeBudgetQuarantineDirectory)
+  const metadataName = quarantinedEntries.find((entry) => entry.endsWith('.meta.json'))
+  assert.ok(metadataName)
+  const payloadName = quarantinedEntries.find((entry) => !entry.endsWith('.meta.json'))
+  assert.ok(payloadName)
+
+  const metadataPath = path.join(runtimeBudgetQuarantineDirectory, metadataName!)
+  const payloadPath = path.join(runtimeBudgetQuarantineDirectory, payloadName!)
+  const metadataRecord = JSON.parse(
+    await readFile(metadataPath, 'utf8'),
+  ) as Record<string, unknown>
+  metadataRecord.quarantinedAt = '2026-01-01T00:00:00.000Z'
+  await writeFile(metadataPath, `${JSON.stringify(metadataRecord, null, 2)}\n`, 'utf8')
+
+  const orphanPayloadPath = path.join(
+    runtimeBudgetQuarantineDirectory,
+    'orphan-runtime-budget.1700000000000.invalid.json',
+  )
+  await writeFile(orphanPayloadPath, '{"stale":true}\n', 'utf8')
+  const staleDate = new Date('2026-01-01T00:00:00.000Z')
+  await utimes(orphanPayloadPath, staleDate, staleDate)
+
+  await runAssistantRuntimeMaintenance({
+    now: new Date('2026-03-29T12:00:00.000Z'),
+    vault: vaultRoot,
+  })
+
+  const remainingEntries: string[] = await readdir(
+    runtimeBudgetQuarantineDirectory,
+  ).catch(() => [])
+  assert.equal(remainingEntries.includes(path.basename(metadataPath)), false)
+  assert.equal(remainingEntries.includes(path.basename(payloadPath)), false)
+  assert.equal(remainingEntries.includes(path.basename(orphanPayloadPath)), false)
+})
+
+test('assistant status includes runtime-budget quarantine details on the same recovery read', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-status-runtime-budget-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  await mkdir(path.dirname(paths.resourceBudgetPath), {
+    recursive: true,
+  })
+  await writeFile(
+    paths.resourceBudgetPath,
+    JSON.stringify({
+      schema: 'murph.assistant-runtime-budget.v1',
+      updatedAt: 42,
+    }),
+    'utf8',
+  )
+
+  const status = await getAssistantStatus(vaultRoot)
+  assert.equal(status.runtimeBudget.schema, 'murph.assistant-runtime-budget.v1')
+  assert.equal(status.quarantine.byKind['runtime-budget'], 1)
+  assert.equal(status.quarantine.total >= 1, true)
+  assert.equal(
+    status.warnings.some((warning) => warning.includes('quarantined for repair')),
+    true,
   )
 })
