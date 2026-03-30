@@ -134,6 +134,30 @@ test('gateway route merging preserves existing reply routes while allowing proje
   })
 })
 
+test('gateway route merging rewrites inherited thread reply targets when the thread id changes', () => {
+  const merged = mergeGatewayConversationRoutes(
+    gatewayConversationRouteFromBinding({
+      actorId: 'contact:alex',
+      channel: 'email',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-123',
+      },
+      identityId: 'murph@example.com',
+      threadId: 'thread-123',
+      threadIsDirect: false,
+    }),
+    {
+      threadId: 'thread-456',
+    },
+  )
+
+  assert.deepEqual(merged.reply, {
+    kind: 'thread',
+    target: 'thread-456',
+  })
+})
+
 test('gateway read schemas keep the future transcript surface bounded and cursor-oriented', () => {
   const parsed = gatewayReadMessagesInputSchema.parse({
     oldestFirst: true,
@@ -144,6 +168,38 @@ test('gateway read schemas keep the future transcript surface bounded and cursor
   assert.equal(parsed.oldestFirst, true)
   assert.equal(parsed.sessionKey, 'sess_opaque')
   assert.equal(parsed.afterMessageId, null)
+})
+
+test('gateway sendability respects current channel delivery constraints', () => {
+  assert.equal(
+    gatewayConversationRouteCanSend({
+      channel: 'email',
+      directness: 'direct',
+      identityId: null,
+      participantId: 'contact:alex',
+      reply: {
+        kind: 'participant',
+        target: 'contact:alex',
+      },
+      threadId: null,
+    }),
+    false,
+  )
+
+  assert.equal(
+    gatewayConversationRouteCanSend({
+      channel: 'linq',
+      directness: 'direct',
+      identityId: 'workspace:linq',
+      participantId: 'contact:alex',
+      reply: {
+        kind: 'participant',
+        target: 'contact:alex',
+      },
+      threadId: null,
+    }),
+    false,
+  )
 })
 
 test('built gateway-core import stays free of assistant runtime warnings', async () => {
