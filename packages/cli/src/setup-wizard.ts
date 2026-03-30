@@ -98,6 +98,27 @@ type SetupWizardSelectionStep = Extract<
   SetupWizardFlowStep,
   'assistant' | 'scheduled-updates' | 'channels' | 'wearables'
 >
+type SetupWizardTone = 'accent' | 'success' | 'warn' | 'danger' | 'muted'
+
+interface SetupWizardInlineBadge {
+  label: string
+  tone: SetupWizardTone
+}
+
+interface SetupWizardHint {
+  label: string
+  tone: SetupWizardTone
+}
+
+interface SetupWizardSelectionLine {
+  active: boolean
+  badges: readonly SetupWizardInlineBadge[]
+  description: string
+  detail?: string
+  key: string
+  selected: boolean
+  title: string
+}
 
 const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://localhost:8788'
 const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
@@ -106,17 +127,17 @@ const setupWizardAssistantOptions: readonly SetupWizardAssistantOption[] = [
   {
     preset: 'codex-cli',
     title: 'Codex CLI',
-    description: 'Hosted-model Codex flow with a saved default like gpt-5.4.',
+    description: 'Best default when you want hosted models and the saved Codex flow.',
   },
   {
     preset: 'codex-oss',
     title: 'Codex OSS / local model',
-    description: 'Keep the Codex CLI path, but default it to a local OSS model.',
+    description: 'Keep the Codex path, but point the default at a local OSS model.',
   },
   {
     preset: 'openai-compatible',
     title: 'OpenAI-compatible endpoint',
-    description: 'Save one base URL for Ollama, a local gateway, or a hosted API.',
+    description: 'Use Ollama, a local gateway, LM Studio, or a hosted compatible API.',
   },
   {
     preset: 'skip',
@@ -336,6 +357,7 @@ export async function runSetupWizard(
   )
   const commandName = input.commandName ?? 'murph'
   const completion = createSetupWizardCompletionController()
+  const defaultScheduledUpdateIds = new Set(getDefaultSetupWizardScheduledUpdates())
 
   let instance:
     | {
@@ -384,6 +406,7 @@ export async function runSetupWizard(
           strategy: publicUrlReview.recommendedStrategy,
         })
       : null
+    const wideLayout = (process.stderr.columns ?? 0) >= 108
 
     React.useEffect(() => {
       latestAssistantRef.current = selectedAssistantPreset
@@ -401,16 +424,7 @@ export async function runSetupWizard(
       latestWearablesRef.current = selectedWearables
     }, [selectedWearables])
 
-    type SetupWizardSelectionLine = {
-      active: boolean
-      description: string
-      key: string
-      selected: boolean
-      title: string
-    }
-
     type SetupWizardSelectionConfig = {
-      instructions: string
       lines: SetupWizardSelectionLine[]
       marker: 'checkbox' | 'radio'
       nextStep: SetupWizardStep
@@ -427,10 +441,12 @@ export async function runSetupWizard(
       SetupWizardSelectionConfig
     > = {
       assistant: {
-        instructions:
-          'Use ↑/↓ to move, Space to select, Enter to continue, or Esc to go back.',
         lines: setupWizardAssistantOptions.map((option, index) => ({
           active: index === assistantIndex,
+          badges: buildSetupWizardAssistantBadges({
+            currentPreset: initialAssistantPreset,
+            preset: option.preset,
+          }),
           description: option.description,
           key: option.preset,
           selected: option.preset === selectedAssistantPreset,
@@ -442,6 +458,8 @@ export async function runSetupWizard(
         selectCurrentOnEnter: true,
         setIndex: setAssistantIndex,
         step: 'assistant',
+        stepIntro:
+          'Choose the default model and auth path Murph should save into operator defaults.',
         toggleCurrent: () => {
           const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
           if (activePreset) {
@@ -450,14 +468,16 @@ export async function runSetupWizard(
         },
       },
       'scheduled-updates': {
-        instructions:
-          'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
         lines: setupWizardScheduledUpdateOptions.map((option, index) => ({
           active: index === scheduledUpdateIndex,
+          badges: buildSetupWizardScheduledUpdateBadges({
+            isStarter: defaultScheduledUpdateIds.has(option.id),
+          }),
           description: option.description,
+          detail: `Suggested cadence: ${option.scheduleLabel}.`,
           key: option.id,
           selected: selectedScheduledUpdates.includes(option.id),
-          title: `${option.title} · ${option.scheduleLabel}`,
+          title: option.title,
         })),
         marker: 'checkbox',
         nextStep: 'channels',
@@ -466,7 +486,7 @@ export async function runSetupWizard(
         setIndex: setScheduledUpdateIndex,
         step: 'scheduled-updates',
         stepIntro:
-          'Two broad starter updates are selected by default. Onboarding will not install them automatically because cron jobs now require an explicit outbound destination; use this screen to review what you may want to install later with `assistant cron preset install --channel ...`.',
+          'Keep or trim the starter automation bundle. These remain recommendations here and are installed later once you choose a delivery route.',
         toggleCurrent: () => {
           const activePresetId =
             setupWizardScheduledUpdateOptions[scheduledUpdateIndex]?.id
@@ -478,16 +498,21 @@ export async function runSetupWizard(
         },
       },
       channels: {
-        instructions:
-          'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
         lines: setupWizardChannelOptions.map((option, index) => {
           const status = getChannelStatus(option.channel)
           return {
             active: index === channelIndex,
-            description: `${option.description} ${status.detail}`.trim(),
+            badges: [
+              {
+                label: status.badge,
+                tone: resolveSetupWizardRuntimeTone(status),
+              },
+            ],
+            description: option.description,
+            detail: formatSetupWizardRuntimeDetail(status),
             key: option.channel,
             selected: selectedChannels.includes(option.channel),
-            title: `${option.title} · ${status.badge}`,
+            title: option.title,
           }
         }),
         marker: 'checkbox',
@@ -496,6 +521,8 @@ export async function runSetupWizard(
         selectCurrentOnEnter: false,
         setIndex: setChannelIndex,
         step: 'channels',
+        stepIntro:
+          'Pick the chat lanes you want live first. Missing tokens can be entered for this run or left for later.',
         toggleCurrent: () => {
           const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
           if (activeChannel) {
@@ -506,16 +533,21 @@ export async function runSetupWizard(
         },
       },
       wearables: {
-        instructions:
-          'Use ↑/↓ to move, Space to toggle, Enter to continue, or Esc to go back.',
         lines: setupWizardWearableOptions.map((option, index) => {
           const status = getWearableStatus(option.wearable)
           return {
             active: index === wearableIndex,
-            description: `${option.description} ${status.detail}`.trim(),
+            badges: [
+              {
+                label: status.badge,
+                tone: resolveSetupWizardRuntimeTone(status),
+              },
+            ],
+            description: option.description,
+            detail: formatSetupWizardRuntimeDetail(status),
             key: option.wearable,
             selected: selectedWearables.includes(option.wearable),
-            title: `${option.title} · ${status.badge}`,
+            title: option.title,
           }
         }),
         marker: 'checkbox',
@@ -524,6 +556,8 @@ export async function runSetupWizard(
         selectCurrentOnEnter: false,
         setIndex: setWearableIndex,
         step: 'wearables',
+        stepIntro:
+          'Select the health data sources you want next. Ready items can open their connect flows after setup finishes.',
         toggleCurrent: () => {
           const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
           if (activeWearable) {
@@ -632,17 +666,20 @@ export async function runSetupWizard(
     })
 
     const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
-    const selectedChannelSummary = formatSelectionSummary(
-      selectedChannels.map((channel) => formatSetupChannel(channel)),
+    const selectedChannelNames = selectedChannels.map((channel) =>
+      formatSetupChannel(channel),
     )
+    const selectedWearableNames = selectedWearables.map((wearable) =>
+      formatSetupWearable(wearable),
+    )
+    const selectedScheduledUpdateNames = selectedScheduledUpdates.map((presetId) =>
+      formatSetupScheduledUpdate(presetId),
+    )
+    const selectedChannelSummary = formatSelectionSummary(selectedChannelNames)
     const selectedScheduledUpdateSummary = formatSelectionSummary(
-      selectedScheduledUpdates.map((presetId) =>
-        formatSetupScheduledUpdate(presetId),
-      ),
+      selectedScheduledUpdateNames,
     )
-    const selectedWearableSummary = formatSelectionSummary(
-      selectedWearables.map((wearable) => formatSetupWearable(wearable)),
-    )
+    const selectedWearableSummary = formatSelectionSummary(selectedWearableNames)
     const selectedReadyNow = [
       ...selectedChannels.flatMap((channel) =>
         getChannelStatus(channel).ready ? [formatSetupChannel(channel)] : [],
@@ -665,37 +702,259 @@ export async function runSetupWizard(
           : []
       }),
     ]
-
-    const selectionStepLines =
-      selectionStep?.lines.map((line) =>
-        createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            key: line.key,
-            marginBottom: 1,
-          },
-          createElement(
-            Text,
-            null,
-            `${line.active ? '>' : ' '} ${
-              selectionStep.marker === 'checkbox'
-                ? line.selected
-                  ? '[x]'
-                  : '[ ]'
-                : line.selected
-                  ? '(x)'
-                  : '( )'
-            } ${line.title}`,
-          ),
-          createElement(Text, null, `    ${line.description}`),
+    const hintRow = createSetupWizardHintRow(
+      resolveSetupWizardHints({
+        commandName,
+        selectionMarker: selectionStep?.marker,
+        step,
+      }),
+    )
+    const stepper = createSetupWizardStepper({
+      includePublicUrlStep,
+      step,
+    })
+    const snapshotPanel = createSetupWizardPanel({
+      title: 'Snapshot',
+      tone: 'accent',
+      children: [
+        createSetupWizardKeyValueRow({ label: 'Vault', value: input.vault }, 'vault'),
+        createSetupWizardKeyValueRow(
+          { label: 'Assistant', value: assistantSummary },
+          'assistant',
         ),
-      ) ?? []
+        createSetupWizardKeyValueRow(
+          {
+            label: 'Channels',
+            value: formatCompactSelectionSummary(selectedChannelNames),
+          },
+          'channels',
+        ),
+        createSetupWizardKeyValueRow(
+          {
+            label: 'Wearables',
+            value: formatCompactSelectionSummary(selectedWearableNames),
+          },
+          'wearables',
+        ),
+        createSetupWizardKeyValueRow(
+          {
+            label: 'Schedules',
+            value: formatCompactSelectionSummary(selectedScheduledUpdateNames),
+          },
+          'schedules',
+        ),
+        createSetupWizardKeyValueRow(
+          {
+            label: 'Ready now',
+            value: formatCompactSelectionSummary(selectedReadyNow),
+          },
+          'ready-now',
+        ),
+        createSetupWizardKeyValueRow(
+          {
+            label: 'Needs env',
+            value: formatCompactSelectionSummary(selectedNeedsEnv),
+          },
+          'needs-env',
+        ),
+        publicUrlReview.enabled
+          ? createSetupWizardKeyValueRow(
+              {
+                label: 'Ingress',
+                value: formatSetupPublicUrlStrategy(
+                  publicUrlReview.recommendedStrategy,
+                ),
+              },
+              'ingress',
+            )
+          : null,
+      ],
+    })
 
-    const publicUrlTargetLines = publicUrlReview.targets.flatMap((target) => [
-      createElement(Text, { key: `${target.label}:url` }, `${target.label}: ${target.url}`),
-      createElement(Text, { key: `${target.label}:detail` }, `    ${target.detail}`),
-    ])
+    const confirmNextStep = describeSetupWizardReviewNextStep({
+      needsEnv: selectedNeedsEnv.length > 0,
+      hasScheduledUpdates: selectedScheduledUpdates.length > 0,
+    })
+
+    const mainPanel =
+      step === 'intro'
+        ? createSetupWizardPanel({
+            title: 'Start here',
+            tone: 'accent',
+            children: [
+              createElement(
+                Text,
+                null,
+                'Pick the assistant default, trim the starter automations, choose the first live channels, and queue any wearable connects in one pass.',
+              ),
+              createElement(Text, null, ''),
+              createSetupWizardBulletRow(
+                {
+                  body: 'Save the model and auth path Murph should reach for by default.',
+                  label: 'Assistant + auth',
+                  tone: 'accent',
+                },
+                'intro-assistant',
+              ),
+              createSetupWizardBulletRow(
+                {
+                  body: 'Keep or drop the recommended update bundle without installing cron jobs yet.',
+                  label: 'Starter schedules',
+                  tone: 'warn',
+                },
+                'intro-schedules',
+              ),
+              createSetupWizardBulletRow(
+                {
+                  body: 'Turn on the channels and wearables you want Murph to wire up next.',
+                  label: 'Channels + wearables',
+                  tone: 'success',
+                },
+                'intro-integrations',
+              ),
+              createElement(Text, null, ''),
+              createSetupWizardBulletRow(
+                {
+                  body: SETUP_RUNTIME_ENV_NOTICE,
+                  label: 'Run-only environment',
+                  tone: 'accent',
+                },
+                'intro-env',
+              ),
+              createSetupWizardBulletRow(
+                {
+                  body: 'Missing credentials can be entered after review for this run only, or left for later.',
+                  label: 'No lock-in',
+                  tone: 'muted',
+                },
+                'intro-lock-in',
+              ),
+            ],
+          })
+        : selectionStep
+          ? createSetupWizardPanel({
+              title: formatSetupWizardStepTitle(
+                selectionStep.step,
+                includePublicUrlStep,
+              ),
+              tone: 'accent',
+              children: [
+                selectionStep.stepIntro
+                  ? createElement(
+                      Text,
+                      { color: resolveSetupWizardToneColor('muted') },
+                      selectionStep.stepIntro,
+                    )
+                  : null,
+                selectionStep.stepIntro ? createElement(Text, null, '') : null,
+                ...selectionStep.lines.map((line) =>
+                  createSetupWizardSelectionRow(
+                    {
+                      line,
+                      marker: selectionStep.marker,
+                    },
+                    line.key,
+                  ),
+                ),
+              ],
+            })
+          : step === 'public-url'
+            ? createSetupWizardPanel({
+                title: formatSetupWizardStepTitle('public-url', includePublicUrlStep),
+                tone: 'accent',
+                children: [
+                  createElement(Text, null, publicUrlReview.summary),
+                  createElement(Text, null, ''),
+                  createSetupWizardBulletRow(
+                    {
+                      body: publicUrlGuidance ?? '',
+                      label: `Recommended: ${formatSetupPublicUrlStrategy(
+                        publicUrlReview.recommendedStrategy,
+                      )}`,
+                      tone: 'accent',
+                    },
+                    'public-url-recommended',
+                  ),
+                  createElement(Text, null, ''),
+                  createElement(
+                    Text,
+                    { color: resolveSetupWizardToneColor('muted'), bold: true },
+                    'Local targets',
+                  ),
+                  createElement(Text, null, ''),
+                  ...publicUrlReview.targets.map((target) =>
+                    createSetupWizardPublicUrlTargetRow(target),
+                  ),
+                  createElement(Text, null, ''),
+                  createElement(
+                    Text,
+                    { color: resolveSetupWizardToneColor('muted') },
+                    'Info only — Murph does not save a public URL mode yet.',
+                  ),
+                ],
+              })
+            : createSetupWizardPanel({
+                title: formatSetupWizardStepTitle('confirm', includePublicUrlStep),
+                tone: 'accent',
+                children: [
+                  createSetupWizardKeyValueRow(
+                    { label: 'Assistant', value: assistantSummary },
+                    'confirm-assistant',
+                  ),
+                  createSetupWizardKeyValueRow(
+                    { label: 'Channels', value: selectedChannelSummary },
+                    'confirm-channels',
+                  ),
+                  createSetupWizardKeyValueRow(
+                    { label: 'Wearables', value: selectedWearableSummary },
+                    'confirm-wearables',
+                  ),
+                  createSetupWizardKeyValueRow(
+                    {
+                      label: 'Schedules',
+                      value: selectedScheduledUpdateSummary,
+                    },
+                    'confirm-schedules',
+                  ),
+                  createElement(Text, null, ''),
+                  createSetupWizardBulletRow(
+                    {
+                      body: formatSelectionSummary(selectedReadyNow),
+                      label: 'Ready now',
+                      tone: 'success',
+                    },
+                    'confirm-ready',
+                  ),
+                  createSetupWizardBulletRow(
+                    {
+                      body: formatSelectionSummary(selectedNeedsEnv),
+                      label: 'Needs env',
+                      tone:
+                        selectedNeedsEnv.length > 0 ? 'warn' : 'muted',
+                    },
+                    'confirm-needs-env',
+                  ),
+                  publicUrlGuidance
+                    ? createSetupWizardBulletRow(
+                        {
+                          body: publicUrlGuidance,
+                          label: 'Public ingress',
+                          tone: 'accent',
+                        },
+                        'confirm-public-url',
+                      )
+                    : null,
+                  createElement(Text, null, ''),
+                  createSetupWizardBulletRow(
+                    {
+                      body: confirmNextStep,
+                      label: 'After you continue',
+                      tone: 'accent',
+                    },
+                    'confirm-next-step',
+                  ),
+                ],
+              })
 
     return createElement(
       Box,
@@ -704,151 +963,46 @@ export async function runSetupWizard(
         paddingX: 1,
         paddingY: 1,
       },
-      createElement(Text, null, 'Murph onboarding'),
-      createElement(Text, null, formatSetupWizardStepper(step, includePublicUrlStep)),
+      createElement(
+        Text,
+        { color: resolveSetupWizardToneColor('accent'), bold: true },
+        '✦ Murph setup',
+      ),
+      createElement(
+        Text,
+        { color: resolveSetupWizardToneColor('muted') },
+        'Cleaner onboarding, better hierarchy, and less copy between you and a working local health assistant.',
+      ),
       createElement(Text, null, ''),
-      createElement(Text, null, `Vault: ${input.vault}`),
-      createElement(Text, null, `Assistant: ${assistantSummary}`),
-      createElement(Text, null, `Schedules: ${selectedScheduledUpdateSummary}`),
-      createElement(Text, null, `Channels: ${selectedChannelSummary}`),
-      createElement(Text, null, `Wearables: ${selectedWearableSummary}`),
+      stepper,
       createElement(Text, null, ''),
-      step === 'intro'
-        ? createElement(
-            Box,
-            { flexDirection: 'column' },
-            createElement(
-              Text,
-              null,
-              'Set your default assistant, review a small starter bundle of scheduled-update presets, choose message channels, and optionally connect wearables in the same onboarding flow.',
-            ),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              'The next screens highlight preset-backed scheduled updates like weekly health compass summaries, environment checks, ingestible watchlists, and research roundups. Cron jobs now require an explicit outbound destination, so onboarding leaves these for later installation with `assistant cron preset install --channel ...`.',
-            ),
-            createElement(Text, null, ''),
-            createElement(Text, null, SETUP_RUNTIME_ENV_NOTICE),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              'Missing credentials can be entered after review for this run only, or left for later.',
-            ),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              `Press Enter to continue with ${commandName}, or q to cancel.`,
-            ),
-          )
-        : null,
-      selectionStep
-        ? createElement(
-            Box,
-            { flexDirection: 'column' },
-            createElement(
-              Text,
-              null,
-              formatSetupWizardStepTitle(selectionStep.step, includePublicUrlStep),
-            ),
-            createElement(Text, null, ''),
-            selectionStep.stepIntro
-              ? createElement(Text, null, selectionStep.stepIntro)
-              : null,
-            selectionStep.stepIntro ? createElement(Text, null, '') : null,
-            ...selectionStepLines,
-            createElement(Text, null, selectionStep.instructions),
-          )
-        : null,
-      step === 'public-url'
-        ? createElement(
-            Box,
-            { flexDirection: 'column' },
-            createElement(
-              Text,
-              null,
-              formatSetupWizardStepTitle('public-url', includePublicUrlStep),
-            ),
-            createElement(Text, null, ''),
-            createElement(Text, null, publicUrlReview.summary),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              `Recommended starting point: ${formatSetupPublicUrlStrategy(publicUrlReview.recommendedStrategy)}`,
-            ),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              publicUrlReview.recommendedStrategy === 'hosted'
-                ? 'Hosted app first keeps WHOOP/Oura callbacks and webhook ingress on the hosted `apps/web` surface, which is the easier stable base when you need public device-sync ingress.'
-                : 'Tunnel first keeps ingress local and exposes callback or webhook routes through a tunnel, which is the recommended starting point for Linq today.',
-            ),
-            createElement(Text, null, ''),
-            createElement(Text, null, 'Local targets for tunnel mode or smoke tests:'),
-            createElement(Text, null, ''),
-            ...publicUrlTargetLines,
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              'This screen is informational only. Murph does not save a public URL mode yet.',
-            ),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              'Press Enter to continue, or Esc to go back.',
-            ),
-          )
-        : null,
-      step === 'confirm'
-        ? createElement(
-            Box,
-            { flexDirection: 'column' },
-            createElement(
-              Text,
-              null,
-              formatSetupWizardStepTitle('confirm', includePublicUrlStep),
-            ),
-            createElement(Text, null, ''),
-            createElement(Text, null, `Ready now: ${formatSelectionSummary(selectedReadyNow)}`),
-            createElement(
-              Text,
-              null,
-              `Still needs env: ${formatSelectionSummary(selectedNeedsEnv)}`,
-            ),
-            createElement(
-              Text,
-              null,
-              `Scheduled updates: ${selectedScheduledUpdateSummary}`,
-            ),
-            publicUrlGuidance
-              ? createElement(Text, null, `Public URL note: ${publicUrlGuidance}`)
-              : null,
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              selectedNeedsEnv.length > 0
-                ? selectedScheduledUpdates.length > 0
-                  ? 'Murph will prompt for missing runtime credentials next, then finish setup, leave the selected scheduled updates for explicit later installation, and open any ready wearable connect flows.'
-                  : 'Murph will prompt for missing runtime credentials next, then finish setup and open any ready wearable connect flows.'
-                : selectedScheduledUpdates.length > 0
-                  ? 'Murph will finish setup, leave the selected scheduled updates for explicit later installation, and open any selected wearable connect flows that are ready.'
-                  : 'Murph will finish setup and open any selected wearable connect flows that are ready.',
-            ),
-            createElement(Text, null, ''),
-            createElement(
-              Text,
-              null,
-              'Press Enter to run setup, or Esc to change the selection.',
-            ),
-          )
-        : null,
+      createElement(
+        Box,
+        {
+          flexDirection: wideLayout ? 'row' : 'column',
+          alignItems: 'flex-start',
+        },
+        createElement(
+          Box,
+          {
+            flexDirection: 'column',
+            flexGrow: 1,
+            marginRight: wideLayout ? 2 : 0,
+          },
+          mainPanel,
+        ),
+        createElement(
+          Box,
+          {
+            flexDirection: 'column',
+            marginTop: wideLayout ? 0 : 1,
+            width: wideLayout ? 36 : undefined,
+          },
+          snapshotPanel,
+        ),
+      ),
+      createElement(Text, null, ''),
+      hintRow,
     )
 
     function getChannelStatus(channel: SetupChannel): SetupWizardRuntimeStatus {
@@ -991,6 +1145,18 @@ function formatSelectionSummary(values: readonly string[]): string {
   return values.length > 0 ? values.join(', ') : 'none'
 }
 
+function formatCompactSelectionSummary(values: readonly string[]): string {
+  if (values.length === 0) {
+    return 'none'
+  }
+
+  if (values.length <= 2) {
+    return values.join(', ')
+  }
+
+  return `${values.slice(0, 2).join(', ')} +${values.length - 2}`
+}
+
 function formatMissingEnv(values: readonly string[]): string {
   if (values.length === 0) {
     return 'none'
@@ -1010,7 +1176,7 @@ function formatSetupPublicUrlStrategy(strategy: SetupPublicUrlStrategy): string 
 function formatSetupWizardStepLabel(step: SetupWizardStep): string {
   switch (step) {
     case 'intro':
-      return 'Intro'
+      return 'Start'
     case 'assistant':
       return 'Assistant'
     case 'scheduled-updates':
@@ -1020,7 +1186,7 @@ function formatSetupWizardStepLabel(step: SetupWizardStep): string {
     case 'wearables':
       return 'Wearables'
     case 'public-url':
-      return 'Public URL'
+      return 'Public ingress'
     case 'confirm':
       return 'Review'
   }
@@ -1054,23 +1220,455 @@ function formatSetupWizardStepTitle(
 ): string {
   const steps = listSetupWizardFlowSteps(includePublicUrlStep)
   const index = steps.indexOf(step)
-  return `${index + 1} of ${steps.length} · ${formatSetupWizardStepLabel(step)}`
+  return `${index + 1}/${steps.length} · ${formatSetupWizardStepLabel(step)}`
 }
 
-function formatSetupWizardStepper(
-  step: SetupWizardStep,
-  includePublicUrlStep: boolean,
-): string {
-  const steps = listSetupWizardSteps(includePublicUrlStep)
-  const currentIndex = steps.indexOf(step)
+function resolveSetupWizardToneColor(tone: SetupWizardTone): string {
+  switch (tone) {
+    case 'accent':
+      return 'cyan'
+    case 'success':
+      return 'green'
+    case 'warn':
+      return 'yellow'
+    case 'danger':
+      return 'red'
+    case 'muted':
+      return 'gray'
+  }
+}
 
-  return steps
-    .map((wizardStep, index) =>
-      index === currentIndex
-        ? `[${formatSetupWizardStepLabel(wizardStep)}]`
-        : `${index + 1}.${formatSetupWizardStepLabel(wizardStep)}`,
+function resolveSetupWizardRuntimeTone(
+  status: SetupWizardRuntimeStatus,
+): SetupWizardTone {
+  if (status.ready) {
+    return 'success'
+  }
+
+  return status.badge.toLowerCase().includes('macos') ? 'accent' : 'warn'
+}
+
+function formatSetupWizardRuntimeDetail(
+  status: SetupWizardRuntimeStatus,
+): string {
+  if (!status.ready && status.missingEnv.length > 0) {
+    return `Needs ${formatMissingEnv(status.missingEnv)} in the current environment.`
+  }
+
+  return status.detail
+}
+
+function buildSetupWizardAssistantBadges(input: {
+  currentPreset: SetupAssistantPreset
+  preset: SetupAssistantPreset
+}): SetupWizardInlineBadge[] {
+  const badges: SetupWizardInlineBadge[] = []
+
+  switch (input.preset) {
+    case 'codex-cli':
+      badges.push({ label: 'recommended', tone: 'success' })
+      break
+    case 'codex-oss':
+      badges.push({ label: 'local model', tone: 'accent' })
+      break
+    case 'openai-compatible':
+      badges.push({ label: 'gateway/api', tone: 'accent' })
+      break
+    case 'skip':
+      badges.push({ label: 'no change', tone: 'muted' })
+      break
+  }
+
+  if (input.currentPreset === input.preset) {
+    badges.push({ label: 'current', tone: 'accent' })
+  }
+
+  return badges
+}
+
+function buildSetupWizardScheduledUpdateBadges(input: {
+  isStarter: boolean
+}): SetupWizardInlineBadge[] {
+  return [
+    ...(input.isStarter ? [{ label: 'starter', tone: 'accent' as const }] : []),
+    { label: 'install later', tone: 'muted' },
+  ]
+}
+
+function createSetupWizardPanel(input: {
+  children: readonly React.ReactNode[]
+  title: string
+  tone: SetupWizardTone
+}): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      borderColor: resolveSetupWizardToneColor(input.tone),
+      borderStyle: 'round',
+      flexDirection: 'column',
+      paddingX: 1,
+      paddingY: 0,
+    },
+    createElement(
+      Text,
+      { color: resolveSetupWizardToneColor(input.tone), bold: true },
+      input.title,
+    ),
+    input.children.length > 0 ? createElement(Text, null, '') : null,
+    ...input.children,
+  )
+}
+
+function createSetupWizardInlineBadgeElements(
+  badges: readonly SetupWizardInlineBadge[],
+  keyPrefix: string,
+): React.ReactElement[] {
+  const createElement = React.createElement
+  const elements: React.ReactElement[] = []
+
+  for (const [index, badge] of badges.entries()) {
+    if (index > 0) {
+      elements.push(
+        createElement(Text, { key: `${keyPrefix}:space:${index}` }, ' '),
+      )
+    }
+
+    elements.push(
+      createElement(
+        Text,
+        {
+          bold: true,
+          color: resolveSetupWizardToneColor(badge.tone),
+          key: `${keyPrefix}:badge:${badge.label}:${index}`,
+        },
+        `[${badge.label}]`,
+      ),
     )
-    .join('  ')
+  }
+
+  return elements
+}
+
+function createSetupWizardSelectionRow(
+  input: {
+    line: SetupWizardSelectionLine
+    marker: 'checkbox' | 'radio'
+  },
+  key: string,
+): React.ReactElement {
+  const createElement = React.createElement
+  const markerSymbol =
+    input.marker === 'checkbox'
+      ? input.line.selected
+        ? '■'
+        : '□'
+      : input.line.selected
+        ? '●'
+        : '○'
+  const markerTone: SetupWizardTone = input.line.active
+    ? 'accent'
+    : input.line.selected
+      ? 'success'
+      : 'muted'
+  const titleColor = input.line.active
+    ? resolveSetupWizardToneColor('accent')
+    : input.line.selected
+      ? resolveSetupWizardToneColor('success')
+      : undefined
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      key,
+      marginBottom: 1,
+    },
+    createElement(
+      Box,
+      { flexDirection: 'row' },
+      createElement(
+        Text,
+        {
+          color: input.line.active
+            ? resolveSetupWizardToneColor('accent')
+            : resolveSetupWizardToneColor('muted'),
+          bold: input.line.active,
+        },
+        `${input.line.active ? '›' : ' '} `,
+      ),
+      createElement(
+        Text,
+        {
+          color: resolveSetupWizardToneColor(markerTone),
+          bold: true,
+        },
+        `${markerSymbol} `,
+      ),
+      createElement(
+        Text,
+        {
+          color: titleColor,
+          bold: true,
+        },
+        input.line.title,
+      ),
+      input.line.badges.length > 0
+        ? createElement(
+            Box,
+            {
+              flexDirection: 'row',
+              marginLeft: 1,
+            },
+            createElement(
+              Text,
+              null,
+              ...createSetupWizardInlineBadgeElements(input.line.badges, key),
+            ),
+          )
+        : null,
+    ),
+    createElement(
+      Text,
+      { color: resolveSetupWizardToneColor('muted') },
+      `  ${input.line.description}`,
+    ),
+    input.line.detail
+      ? createElement(
+          Text,
+          {
+            color: resolveSetupWizardToneColor('muted'),
+            dimColor: true,
+          },
+          `  ${input.line.detail}`,
+        )
+      : null,
+  )
+}
+
+function createSetupWizardBulletRow(
+  input: {
+    body: string
+    label: string
+    tone: SetupWizardTone
+  },
+  key: string,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      key,
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      null,
+      createElement(
+        Text,
+        {
+          color: resolveSetupWizardToneColor(input.tone),
+          bold: true,
+        },
+        `• ${input.label}: `,
+      ),
+      input.body,
+    ),
+  )
+}
+
+function createSetupWizardKeyValueRow(
+  input: {
+    label: string
+    value: string
+  },
+  key: string,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      key,
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      null,
+      createElement(
+        Text,
+        {
+          color: resolveSetupWizardToneColor('muted'),
+          bold: true,
+        },
+        `${input.label}: `,
+      ),
+      input.value,
+    ),
+  )
+}
+
+function createSetupWizardPublicUrlTargetRow(
+  target: SetupWizardPublicUrlTarget,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      key: target.label,
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      null,
+      createElement(
+        Text,
+        {
+          color: resolveSetupWizardToneColor('muted'),
+          bold: true,
+        },
+        `${target.label}: `,
+      ),
+      createElement(
+        Text,
+        { color: resolveSetupWizardToneColor('accent') },
+        target.url,
+      ),
+    ),
+    createElement(
+      Text,
+      {
+        color: resolveSetupWizardToneColor('muted'),
+        dimColor: true,
+      },
+      `  ${target.detail}`,
+    ),
+  )
+}
+
+function createSetupWizardStepper(input: {
+  includePublicUrlStep: boolean
+  step: SetupWizardStep
+}): React.ReactElement {
+  const createElement = React.createElement
+  const steps = listSetupWizardSteps(input.includePublicUrlStep)
+  const currentIndex = steps.indexOf(input.step)
+  const children: React.ReactNode[] = []
+
+  for (const [index, wizardStep] of steps.entries()) {
+    if (index > 0) {
+      children.push(
+        createElement(
+          Text,
+          {
+            color: resolveSetupWizardToneColor('muted'),
+            key: `${wizardStep}:separator`,
+          },
+          '  ·  ',
+        ),
+      )
+    }
+
+    const tone: SetupWizardTone =
+      index < currentIndex ? 'success' : index === currentIndex ? 'accent' : 'muted'
+    const prefix =
+      index < currentIndex
+        ? '✓'
+        : index === currentIndex
+          ? '→'
+          : `${index + 1}.`
+
+    children.push(
+      createElement(
+        Text,
+        {
+          bold: index === currentIndex,
+          color: resolveSetupWizardToneColor(tone),
+          key: wizardStep,
+        },
+        `${prefix} ${formatSetupWizardStepLabel(wizardStep)}`,
+      ),
+    )
+  }
+
+  return createElement(Text, null, ...children)
+}
+
+function resolveSetupWizardHints(input: {
+  commandName: string
+  selectionMarker: 'checkbox' | 'radio' | undefined
+  step: SetupWizardStep
+}): SetupWizardHint[] {
+  switch (input.step) {
+    case 'intro':
+      return [
+        { label: `Enter start ${input.commandName}`, tone: 'accent' },
+        { label: 'q quit', tone: 'muted' },
+      ]
+    case 'assistant':
+    case 'scheduled-updates':
+    case 'channels':
+    case 'wearables':
+      return [
+        { label: '↑/↓ move', tone: 'muted' },
+        {
+          label: input.selectionMarker === 'radio' ? 'Space select' : 'Space toggle',
+          tone: 'accent',
+        },
+        { label: 'Enter continue', tone: 'success' },
+        { label: 'Esc back', tone: 'muted' },
+        { label: 'q quit', tone: 'muted' },
+      ]
+    case 'public-url':
+      return [
+        { label: 'Enter continue', tone: 'success' },
+        { label: 'Esc back', tone: 'muted' },
+        { label: 'q quit', tone: 'muted' },
+      ]
+    case 'confirm':
+      return [
+        { label: 'Enter run setup', tone: 'success' },
+        { label: 'Esc back', tone: 'muted' },
+        { label: 'q quit', tone: 'muted' },
+      ]
+  }
+}
+
+function createSetupWizardHintRow(
+  hints: readonly SetupWizardHint[],
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Text,
+    null,
+    ...createSetupWizardInlineBadgeElements(hints, 'hint'),
+  )
+}
+
+function describeSetupWizardReviewNextStep(input: {
+  hasScheduledUpdates: boolean
+  needsEnv: boolean
+}): string {
+  if (input.needsEnv && input.hasScheduledUpdates) {
+    return 'Murph will collect any missing runtime env, finish setup, keep the selected schedules ready for later install, and open wearable connect flows that are already ready.'
+  }
+
+  if (input.needsEnv) {
+    return 'Murph will collect any missing runtime env, finish setup, and open wearable connect flows that are already ready.'
+  }
+
+  if (input.hasScheduledUpdates) {
+    return 'Murph will finish setup, keep the selected schedules ready for later install, and open wearable connect flows that are already ready.'
+  }
+
+  return 'Murph will finish setup and open any wearable connect flows that are already ready.'
 }
 
 export function buildSetupWizardPublicUrlReview(input: {
