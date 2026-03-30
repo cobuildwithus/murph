@@ -10,6 +10,7 @@ import type {
   FoodFrontmatter,
   GeneticVariantFrontmatter,
   GoalFrontmatter,
+  InboxCaptureRecord,
   JournalDayFrontmatter,
   ProfileCurrentFrontmatter,
   ProfileSnapshotRecord,
@@ -106,6 +107,57 @@ export const exampleVaultMetadata: Readonly<VaultMetadata> = Object.freeze<Vault
     audit: "audit/YYYY/YYYY-MM.jsonl",
   },
 });
+
+export const exampleInboxCaptureRecords: readonly Readonly<InboxCaptureRecord>[] = Object.freeze([
+  {
+    schemaVersion: "murph.inbox-capture.v1",
+    captureId: "cap_3f9f0d778d89c3beec6b8a13dc",
+    identityKey: "imessage\u0000self\u0000msg-123",
+    eventId: "evt_01JNV41B483QH9GQ1Y08D7RMTA",
+    auditId: "aud_01JNV45RHN0TQ9ZXE0A7YSE1YQ",
+    source: "imessage",
+    accountId: "self",
+    externalId: "msg-123",
+    thread: {
+      id: "chat-1",
+      title: "Breakfast",
+      isDirect: false,
+    },
+    actor: {
+      id: "contact-1",
+      displayName: "Friend",
+      isSelf: false,
+    },
+    occurredAt: "2026-03-12T08:15:00Z",
+    recordedAt: "2026-03-12T08:16:00Z",
+    receivedAt: "2026-03-12T08:16:04Z",
+    text: "Breakfast photo and note",
+    raw: {
+      source: "imessage",
+      attachmentCount: 1,
+    },
+    sourceDirectory: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc",
+    envelopePath: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
+    rawRefs: [
+      "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/envelope.json",
+      "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
+    ],
+    attachments: [
+      {
+        attachmentId: "att_cap_3f9f0d778d89c3beec6b8a13dc_01",
+        ordinal: 1,
+        externalId: "att-1",
+        kind: "image",
+        mime: "image/jpeg",
+        originalPath: null,
+        fileName: "breakfast.jpg",
+        byteSize: 12345,
+        storedPath: "raw/inbox/imessage/self/2026/03/cap_3f9f0d778d89c3beec6b8a13dc/attachments/01__breakfast.jpg",
+        sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    ],
+  },
+]);
 
 export const exampleEventRecords: readonly Readonly<EventRecord>[] = Object.freeze([
   {

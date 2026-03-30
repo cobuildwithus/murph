@@ -246,7 +246,7 @@ Canonical ids use one policy: `<prefix>_<ULID>`. Examples include `vault_*`, `ev
 | `packages/core` | Canonical vault initialization, filesystem rules, audit emission, raw-copy rules, and all write mutations. |
 | `packages/importers` | Adapters that normalize external inputs and then call `core`. |
 | `packages/device-syncd` | Local wearable OAuth/webhook/reconcile daemon that Murph can launch and manage for a vault. |
-| `packages/inboxd` | Source-agnostic inbox capture, raw evidence persistence, runtime indexing, and attachment parse-job orchestration. |
+| `packages/inboxd` | Source-agnostic inbox capture, raw evidence persistence, canonical `ledger/inbox-captures` append, runtime indexing, and attachment parse-job orchestration. |
 | `packages/parsers` | Local-first attachment parsing, provider selection, and derived artifact publication under `derived/inbox/**`. |
 | `packages/query` | Read model assembly, lookups, list filters, summaries, and export-pack generation. |
 | `packages/web` | Local-only Next.js app that reads the vault on the server through `packages/query` and exposes a read-only observability surface. |

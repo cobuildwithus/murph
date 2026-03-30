@@ -49,7 +49,7 @@ repo/
 - `packages/core` owns vault bootstrap, filesystem primitives, domain mutations, audit emission, and canonical write rules.
 - `packages/importers` parses external inputs, hosts provider-adapter normalization for direct API connectors, and delegates all canonical writes to core.
 - `packages/device-syncd` owns local provider OAuth state, reconnect/disconnect control, scheduled wearable imports, and optional webhook intake while keeping provider credentials outside the canonical vault.
-- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
+- `packages/inboxd` owns source-agnostic inbox capture, raw evidence persistence, the append-only `ledger/inbox-captures` canonical capture log, inbox-local runtime cursors/source-specific checkpoints/capture indexes, and attachment-level derived-job orchestration.
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, and owns the optional lexical search index under `.runtime/search.sqlite`.
 - `packages/cli` exposes the `vault-cli` command surface, provider-backed assistant orchestration plus outbound channel delivery, and must not bypass core for canonical writes.
@@ -62,6 +62,7 @@ repo/
   - `journal/YYYY/YYYY-MM-DD.md`
   - `bank/experiments/<slug>.md`
 - Append-only JSONL ledgers:
+  - `ledger/inbox-captures/*.jsonl`
   - `ledger/events/*.jsonl`
   - `ledger/samples/**.jsonl`
   - `audit/*.jsonl`

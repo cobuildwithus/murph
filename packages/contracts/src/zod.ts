@@ -331,11 +331,19 @@ const baseEventShape = {
   title: boundedString(1, 160),
 } satisfies z.ZodRawShape;
 
+const eventLifecycleSchema = z
+  .object({
+    revision: integerSchema(1),
+    state: z.enum(["deleted"]).optional(),
+  })
+  .strict();
+
 const baseEventOptionalShape = {
   tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
   relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
   rawRefs: uniqueArray(patternedString(RAW_PATH_PATTERN), { uniqueItems: true }).optional(),
   externalRef: externalRefSchema.optional(),
+  lifecycle: eventLifecycleSchema.optional(),
   timeZone: timeZoneString({ optional: true }),
 } satisfies z.ZodRawShape;
 
@@ -626,6 +634,71 @@ export const auditRecordSchema = withContractMetadata(
   "@murph/contracts/audit-record.schema.json",
   "Murph Audit Record",
 );
+
+const INBOX_CAPTURE_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9_-]*$";
+const INBOX_ATTACHMENT_ID_PATTERN = "^att_[A-Za-z0-9][A-Za-z0-9_-]*_[0-9]{2}$";
+const INBOX_CAPTURE_ATTACHMENT_KIND_VALUES = ["image", "audio", "video", "document", "other"] as const;
+const HEX_SHA256_PATTERN = "^[a-f0-9]{64}$";
+
+const inboxCaptureThreadSchema = z
+  .object({
+    id: boundedString(1, 4000),
+    title: boundedString(1, 4000).nullable().optional(),
+    isDirect: z.boolean().nullable(),
+  })
+  .strict();
+
+const inboxCaptureActorSchema = z
+  .object({
+    id: boundedString(1, 255).nullable().optional(),
+    displayName: boundedString(1, 255).nullable().optional(),
+    isSelf: z.boolean(),
+  })
+  .strict();
+
+const inboxCaptureAttachmentSchema = z
+  .object({
+    attachmentId: patternedString(INBOX_ATTACHMENT_ID_PATTERN),
+    ordinal: integerSchema(1),
+    externalId: boundedString(1, 255).nullable().optional(),
+    kind: z.enum(INBOX_CAPTURE_ATTACHMENT_KIND_VALUES),
+    mime: boundedString(1, 255).nullable().optional(),
+    originalPath: z.null().optional(),
+    fileName: boundedString(1, 255).nullable().optional(),
+    byteSize: integerSchema(0).nullable().optional(),
+    storedPath: patternedString(RELATIVE_PATH_PATTERN).nullable().optional(),
+    sha256: patternedString(HEX_SHA256_PATTERN).nullable().optional(),
+  })
+  .strict();
+
+export const inboxCaptureRecordSchema = withContractMetadata(
+  z
+    .object({
+      schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.inboxCapture),
+      captureId: patternedString(INBOX_CAPTURE_ID_PATTERN),
+      identityKey: boundedString(1, 1024),
+      eventId: idSchema(ID_PREFIXES.event),
+      auditId: idSchema(ID_PREFIXES.audit),
+      source: boundedString(1, 160),
+      accountId: boundedString(1, 255).nullable().optional(),
+      externalId: boundedString(1, 255),
+      thread: inboxCaptureThreadSchema,
+      actor: inboxCaptureActorSchema,
+      occurredAt: isoDateTimeString(),
+      recordedAt: isoDateTimeString(),
+      receivedAt: isoDateTimeString().nullable().optional(),
+      text: boundedString(1, 4000).nullable().optional(),
+      raw: jsonObjectSchema,
+      sourceDirectory: patternedString(RELATIVE_PATH_PATTERN),
+      envelopePath: patternedString(RELATIVE_PATH_PATTERN),
+      rawRefs: uniqueArray(patternedString(RELATIVE_PATH_PATTERN), { uniqueItems: true }),
+      attachments: z.array(inboxCaptureAttachmentSchema),
+    })
+    .strict(),
+  "@murph/contracts/inbox-capture-record.schema.json",
+  "Murph Inbox Capture Record",
+);
+
 
 export const coreFrontmatterSchema = withContractMetadata(
   z
@@ -1062,6 +1135,8 @@ export type TemperatureSampleRecord = Extract<z.infer<typeof sampleRecordSchema>
 export type GlucoseSampleRecord = Extract<z.infer<typeof sampleRecordSchema>, { stream: "glucose" }>;
 export type SampleRecord = z.infer<typeof sampleRecordSchema>;
 export type AuditRecord = z.infer<typeof auditRecordSchema>;
+export type InboxCaptureAttachmentRecord = z.infer<typeof inboxCaptureAttachmentSchema>;
+export type InboxCaptureRecord = z.infer<typeof inboxCaptureRecordSchema>;
 export type CoreFrontmatter = z.infer<typeof coreFrontmatterSchema>;
 export type JournalDayFrontmatter = z.infer<typeof journalDayFrontmatterSchema>;
 export type ExperimentFrontmatter = z.infer<typeof experimentFrontmatterSchema>;

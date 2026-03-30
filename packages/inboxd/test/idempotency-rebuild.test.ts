@@ -92,6 +92,21 @@ async function readEventRecordsForCapture(vaultRoot: string, occurredAt: string)
   }
 }
 
+async function readInboxCaptureRecordsForCapture(vaultRoot: string, occurredAt: string) {
+  try {
+    return await readJsonlRecords({
+      vaultRoot,
+      relativePath: `ledger/inbox-captures/${occurredAt.slice(0, 4)}/${occurredAt.slice(0, 7)}.jsonl`,
+    });
+  } catch (error) {
+    if (isVaultError(error) && error.code === "VAULT_FILE_MISSING") {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
 async function readImportAuditsForCapture(vaultRoot: string, storedAt: string) {
   let records: unknown[];
 
@@ -182,6 +197,14 @@ test("processCapture recovers from a crash after vault persistence without dupli
   });
   assert.equal(envelopeFiles.length, 1);
 
+  const captureRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-03.jsonl",
+  });
+  assert.equal(captureRecords.length, 1);
+  assert.equal(captureRecords[0]?.captureId, captureId);
+  assert.equal(captureRecords[0]?.auditId, auditId);
+
   const eventRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: "ledger/events/2026/2026-03.jsonl",
@@ -267,7 +290,7 @@ test("persistRawCapture stores in-memory attachment bytes through audited raw op
   }
 });
 
-test("processCapture repairs a raw-only stored envelope by appending missing event and audit rows", async () => {
+test("processCapture repairs a raw-only stored envelope by appending missing inbox-capture, event, and audit rows", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-replay-raw-only-vault");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
@@ -295,6 +318,7 @@ test("processCapture repairs a raw-only stored envelope by appending missing eve
   assert.equal(repaired.captureId, captureId);
   assert.equal(repaired.eventId, eventId);
   assert.match(repaired.auditId ?? "", /^aud_/u);
+  assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
@@ -310,6 +334,10 @@ test("processCapture repairs a raw-only stored envelope by appending missing eve
         typeof action.committedPayloadReceipt?.sha256 === "string" &&
         typeof action.committedPayloadReceipt?.byteLength === "number",
     ),
+    true,
+  );
+  assert.equal(
+    repairOperation.actions.some((action) => action.targetRelativePath === "ledger/inbox-captures/2026/2026-03.jsonl"),
     true,
   );
   assert.equal(
@@ -359,6 +387,7 @@ test("processCapture repairs a stored envelope when only the audit append was lo
   assert.equal(repaired.captureId, captureId);
   assert.equal(repaired.eventId, eventId);
   assert.match(repaired.auditId ?? "", /^aud_/u);
+  assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
@@ -476,6 +505,7 @@ test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent a
   assert.equal(capture.attachments.length, 1);
   assert.equal(countRows(runtime.databasePath, "capture"), 1);
   assert.equal(countRows(runtime.databasePath, "attachment_parse_job"), 1);
+  assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 1);
   assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 1);
 
@@ -571,6 +601,7 @@ test("rebuildRuntimeFromVault quarantines stored envelopes with malicious captur
 
   assert.equal(runtime.getCapture(captureId), null);
   assert.equal(countRows(runtime.databasePath, "capture"), 0);
+  assert.equal((await readInboxCaptureRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 0);
   assert.equal((await readEventRecordsForCapture(vaultRoot, inbound.occurredAt)).length, 0);
   assert.equal((await readImportAuditsForCapture(vaultRoot, stored.storedAt)).length, 0);
   assert.equal(await pathExists(envelopePath), false);

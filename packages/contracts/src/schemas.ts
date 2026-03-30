@@ -11,6 +11,7 @@ import {
   familyMemberFrontmatterSchema as familyMemberFrontmatterContract,
   foodFrontmatterSchema as foodFrontmatterContract,
   geneticVariantFrontmatterSchema as geneticVariantFrontmatterContract,
+  inboxCaptureRecordSchema as inboxCaptureRecordContract,
   goalFrontmatterSchema as goalFrontmatterContract,
   journalDayFrontmatterSchema as journalDayFrontmatterContract,
   profileCurrentFrontmatterSchema as profileCurrentFrontmatterContract,
@@ -35,6 +36,7 @@ export const vaultMetadataSchema = toJsonSchema(vaultMetadataContract);
 export const eventRecordSchema = toJsonSchema(eventRecordContract);
 export const sampleRecordSchema = toJsonSchema(sampleRecordContract);
 export const auditRecordSchema = toJsonSchema(auditRecordContract);
+export const inboxCaptureRecordSchema = toJsonSchema(inboxCaptureRecordContract);
 export const coreFrontmatterSchema = toJsonSchema(coreFrontmatterContract);
 export const journalDayFrontmatterSchema = toJsonSchema(journalDayFrontmatterContract);
 export const experimentFrontmatterSchema = toJsonSchema(experimentFrontmatterContract);
@@ -56,6 +58,7 @@ export const schemaCatalog = Object.freeze({
   "assessment-response": assessmentResponseSchema,
   "audit-record": auditRecordSchema,
   "event-record": eventRecordSchema,
+  "inbox-capture-record": inboxCaptureRecordSchema,
   "frontmatter-allergy": allergyFrontmatterSchema,
   "frontmatter-condition": conditionFrontmatterSchema,
   "frontmatter-core": coreFrontmatterSchema,
