@@ -97,7 +97,7 @@ import {
 
 // Bump this when changing the durable Codex bootstrap prompt text so existing
 // Codex provider sessions re-bootstrap cleanly on their next turn.
-export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-27.2'
+export const CURRENT_CODEX_PROMPT_VERSION = '2026-03-30.1'
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 
 interface AssistantSessionResolutionFields {
