@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   type AssistantMemoryLongTermSection,
@@ -13,6 +13,7 @@ import { VaultCliError } from '../vault-cli-errors.js'
 import { appendAssistantRuntimeEvent } from './runtime-events.js'
 import { redactAssistantDisplayPath } from './store.js'
 import {
+  ensureAssistantStateDirectory,
   isMissingFileError,
   normalizeNullableString,
   writeTextFileAtomic,
@@ -708,7 +709,7 @@ async function mergeLongTermAssistantMemory(
   }
 
   if (changed) {
-    await mkdir(path.dirname(paths.longTermMemoryPath), { recursive: true })
+    await ensureAssistantStateDirectory(path.dirname(paths.longTermMemoryPath))
     await writeTextFileAtomic(
       paths.longTermMemoryPath,
       renderMarkdownDocument(document),
@@ -755,7 +756,7 @@ async function appendAssistantDailyMemory(
 
   if (added > 0) {
     section.lines = renderSectionBulletLines(bullets)
-    await mkdir(path.dirname(dailyPath), { recursive: true })
+    await ensureAssistantStateDirectory(path.dirname(dailyPath))
     await writeTextFileAtomic(dailyPath, renderMarkdownDocument(document))
   }
 

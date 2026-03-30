@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, rename, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { chmod, rename, rm, writeFile } from "node:fs/promises";
+
+import {
+  ensureAssistantStateParentDirectory,
+  resolveAssistantStateFileMode,
+} from "./assistant-state-security.ts";
 
 export interface AtomicWriteOptions {
   mode?: number;
@@ -15,14 +19,15 @@ export async function writeTextFileAtomic(
   const normalizedValue =
     options.trailingNewline && !value.endsWith("\n") ? `${value}\n` : value;
   const tempPath = `${filePath}.${randomUUID().replace(/-/g, "")}.tmp`;
+  const mode = resolveAssistantStateFileMode(filePath, options.mode);
 
-  await mkdir(path.dirname(filePath), { recursive: true });
+  await ensureAssistantStateParentDirectory(filePath);
 
   try {
     await writeFile(tempPath, normalizedValue, "utf8");
 
-    if (typeof options.mode === "number") {
-      await chmod(tempPath, options.mode);
+    if (typeof mode === "number") {
+      await chmod(tempPath, mode);
     }
 
     await rename(tempPath, filePath);

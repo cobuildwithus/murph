@@ -33,6 +33,7 @@ import {
   mergeAssistantProviderRouteRecoverySecrets,
   persistAssistantProviderRouteRecoverySecrets,
   readAssistantProviderRouteRecoverySecrets,
+  resolveAssistantProviderRouteRecoverySecretsPath,
 } from './state-secrets.js'
 
 const ASSISTANT_PROVIDER_ROUTE_RECOVERY_SCHEMA =
@@ -136,9 +137,14 @@ export async function clearAssistantProviderRouteRecovery(input: {
 }): Promise<void> {
   await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
     await ensureAssistantState(paths)
-    await rm(resolveAssistantProviderRouteRecoveryPath(paths, input.sessionId), {
-      force: true,
-    })
+    await Promise.all([
+      rm(resolveAssistantProviderRouteRecoveryPath(paths, input.sessionId), {
+        force: true,
+      }),
+      rm(resolveAssistantProviderRouteRecoverySecretsPath(paths, input.sessionId), {
+        force: true,
+      }),
+    ])
   })
 }
 
@@ -304,10 +310,15 @@ async function readAssistantProviderRouteRecoveryAtPath(
   try {
     const raw = await readFile(filePath, 'utf8')
     const recovery = assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
-    const secrets = await readAssistantProviderRouteRecoverySecrets({
-      paths,
-      sessionId: recovery.sessionId,
-    })
+    let secrets: Awaited<ReturnType<typeof readAssistantProviderRouteRecoverySecrets>>
+    try {
+      secrets = await readAssistantProviderRouteRecoverySecrets({
+        paths,
+        sessionId: recovery.sessionId,
+      })
+    } catch {
+      return null
+    }
     return mergeAssistantProviderRouteRecoverySecrets(recovery, secrets)
   } catch (error) {
     if (isMissingFileError(error)) {

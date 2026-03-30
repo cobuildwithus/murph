@@ -1,3 +1,4 @@
+export * from "./assistant-state-security.ts";
 export * from "./assistant-state.ts";
 export * from "./assistant-usage.ts";
 export * from "./atomic-write.ts";

@@ -43,6 +43,7 @@ import { readAssistantCronRuns } from '../src/assistant/cron/store.js'
 import { withAssistantMemoryWriteLock } from '../src/assistant/memory/locking.js'
 import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { readAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
+import { summarizeAssistantQuarantines } from '../src/assistant/quarantine.js'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.js'
 import { readAssistantSession } from '../src/assistant/store/persistence.js'
 import { listAssistantTranscriptDistillations } from '../src/assistant/transcript-distillation.js'
@@ -2145,4 +2146,123 @@ test('assistant session secrets persist in private sidecars with private permiss
   assert.equal((await stat(statePaths.sessionSecretsDirectory)).mode & 0o777, 0o700)
   assert.equal((await stat(sessionPath)).mode & 0o777, 0o600)
   assert.equal((await stat(sessionSecretsPath)).mode & 0o777, 0o600)
+})
+
+test('malformed secret sidecars are quarantined instead of being treated as cleanly missing', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-sidecar-corruption-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'assistant:corrupted-sidecar',
+    channel: 'imessage',
+    participantId: 'contact:corrupted-sidecar',
+  })
+  const updatedSession = await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'openai-compatible',
+    providerOptions: {
+      model: 'gpt-4.1-mini',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'https://api.example.test/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      providerName: 'example',
+      headers: {
+        Authorization: 'Bearer session-secret-token',
+      },
+    },
+    updatedAt: '2026-03-29T12:10:00.000Z',
+  })
+  const sessionSecretsPath = path.join(
+    statePaths.sessionSecretsDirectory,
+    `${updatedSession.sessionId}.json`,
+  )
+  await writeFile(sessionSecretsPath, '{"schema":"murph.assistant-session-secrets.v1"', 'utf8')
+
+  await assert.rejects(
+    () =>
+      readAssistantSession({
+        paths: statePaths,
+        sessionId: updatedSession.sessionId,
+      }),
+    (error) => {
+      assert.equal((error as { code?: unknown }).code, 'ASSISTANT_SESSION_CORRUPTED')
+      assert.match(
+        String((error as { context?: { reason?: unknown } }).context?.reason),
+        /secret sidecar is corrupted and was quarantined/u,
+      )
+      return true
+    },
+  )
+  await assert.rejects(() => stat(sessionSecretsPath))
+
+  const recoveryPath = path.join(
+    statePaths.providerRouteRecoveryDirectory,
+    `${updatedSession.sessionId}.json`,
+  )
+  const recoverySecretsPath = path.join(
+    statePaths.providerRouteRecoverySecretsDirectory,
+    `${updatedSession.sessionId}.json`,
+  )
+  await Promise.all([
+    mkdir(statePaths.providerRouteRecoveryDirectory, { recursive: true }),
+    mkdir(statePaths.providerRouteRecoverySecretsDirectory, { recursive: true }),
+  ])
+  await writeFile(
+    recoveryPath,
+    `${JSON.stringify({
+      schema: 'murph.assistant-provider-route-recovery.v1',
+      sessionId: updatedSession.sessionId,
+      updatedAt: '2026-03-29T12:11:00.000Z',
+      routes: [
+        {
+          routeId: 'route_primary',
+          provider: 'openai-compatible',
+          providerSessionId: 'route-session-1',
+          providerOptions: {
+            model: 'gpt-4.1-mini',
+            reasoningEffort: null,
+            sandbox: null,
+            approvalPolicy: null,
+            profile: null,
+            oss: false,
+            baseUrl: 'https://api.example.test/v1',
+            apiKeyEnv: 'OPENAI_API_KEY',
+            providerName: 'example',
+            headers: {
+              'X-Visible': 'public-header',
+            },
+          },
+          providerState: null,
+          recoveredAt: '2026-03-29T12:11:00.000Z',
+        },
+      ],
+    }, null, 2)}\n`,
+    'utf8',
+  )
+  await writeFile(
+    recoverySecretsPath,
+    '{"schema":"murph.assistant-provider-route-recovery-secrets.v1"',
+    'utf8',
+  )
+
+  assert.equal(
+    await readAssistantProviderRouteRecovery(vaultRoot, updatedSession.sessionId),
+    null,
+  )
+  await assert.rejects(() => stat(recoverySecretsPath))
+
+  const quarantine = await summarizeAssistantQuarantines({
+    paths: statePaths,
+  })
+  assert.equal(quarantine.total >= 2, true)
+  assert.equal(quarantine.byKind.session >= 1, true)
+  assert.equal(quarantine.byKind['provider-route-recovery'] >= 1, true)
 })

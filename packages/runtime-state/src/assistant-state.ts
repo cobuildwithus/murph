@@ -24,8 +24,11 @@ export interface AssistantStatePaths {
   outboxDirectory: string;
   outboxQuarantineDirectory: string;
   providerRouteRecoveryDirectory: string;
+  providerRouteRecoverySecretsDirectory: string;
   quarantineDirectory: string;
   receiptsDirectory: string;
+  secretsDirectory: string;
+  sessionSecretsDirectory: string;
   resourceBudgetPath: string;
   runtimeEventsPath: string;
   sessionsDirectory: string;
@@ -48,6 +51,12 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   const journalsDirectory = path.join(rootPath, "journals");
   const outboxDirectory = path.join(rootPath, "outbox");
   const receiptsDirectory = path.join(rootPath, "receipts");
+  const secretsDirectory = path.join(rootPath, "secrets");
+  const sessionSecretsDirectory = path.join(secretsDirectory, "sessions");
+  const providerRouteRecoverySecretsDirectory = path.join(
+    secretsDirectory,
+    "provider-route-recovery",
+  );
   const usageDirectory = path.join(rootPath, "usage");
 
   return {
@@ -69,8 +78,11 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     outboxDirectory,
     outboxQuarantineDirectory: path.join(outboxDirectory, ".quarantine"),
     providerRouteRecoveryDirectory: path.join(rootPath, "provider-route-recovery"),
+    providerRouteRecoverySecretsDirectory,
     quarantineDirectory: path.join(rootPath, "quarantine"),
     receiptsDirectory,
+    secretsDirectory,
+    sessionSecretsDirectory,
     resourceBudgetPath: path.join(rootPath, "runtime-budgets.json"),
     runtimeEventsPath: path.join(journalsDirectory, "runtime-events.jsonl"),
     sessionsDirectory: path.join(rootPath, "sessions"),

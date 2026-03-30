@@ -68,6 +68,10 @@ import {
 import { runAssistantDoctor } from '../assistant/doctor.js'
 import { getAssistantStatus } from '../assistant/status.js'
 import {
+  redactAssistantSessionForDisplay,
+  redactAssistantSessionsForDisplay,
+} from '../assistant/redaction.js'
+import {
   assertAssistantMemoryTurnContextVault,
   forgetAssistantMemory,
   getAssistantMemory,
@@ -443,15 +447,25 @@ function createAssistantDoctorCommandDefinition(input?: {
       'Run lightweight assistant-state diagnostics for session files, receipts, transcripts, automation state, and the outbound outbox.',
     hint:
       input?.hint ??
-      'This is a read-only health check for local assistant-state and is safe to run before or after runtime changes.',
-    options: withBaseOptions(),
+      'Use --repair to migrate legacy inline secret headers into private sidecars and to tighten assistant-state permissions in place.',
+    options: withBaseOptions({
+      repair: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Repair assistant-state secrecy issues in place by moving legacy inline secret headers into private sidecars and fixing private file permissions.',
+        ),
+    }),
     output: assistantDoctorResultSchema,
     async run(context: {
       options: {
+        repair: boolean
         vault: string
       }
     }) {
-      return runAssistantDoctor(context.options.vault)
+      return runAssistantDoctor(context.options.vault, {
+        repair: context.options.repair,
+      })
     },
   }
 }
@@ -1966,7 +1980,7 @@ export function registerAssistantCommands(
         const sessions = await listAssistantSessions(context.options.vault)
         return assistantSessionListResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
-          sessions,
+          sessions: redactAssistantSessionsForDisplay(sessions),
         })
       },
     })
@@ -1985,7 +1999,7 @@ export function registerAssistantCommands(
         )
         return assistantSessionShowResultSchema.parse({
           ...buildAssistantStateResultPaths(context.options.vault),
-          session,
+          session: redactAssistantSessionForDisplay(session),
         })
       },
     })

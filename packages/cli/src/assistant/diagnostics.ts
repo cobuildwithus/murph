@@ -1,4 +1,4 @@
-import { appendFile, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import {
   assistantDiagnosticEventSchema,
   assistantDiagnosticsCountersSchema,
@@ -13,8 +13,13 @@ import { quarantineAssistantStateFile } from './quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
+import {
+  redactAssistantStateString,
+  redactAssistantStateStructuredValue,
+} from './redaction.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
+  appendTextFile,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
@@ -85,15 +90,16 @@ export async function recordAssistantDiagnosticEvent(input: {
       level: input.level ?? 'info',
       component: input.component,
       kind: input.kind,
-      message: input.message,
+      message: redactAssistantStateString(input.message),
       code: input.code ?? null,
       sessionId: input.sessionId ?? null,
       turnId: input.turnId ?? null,
       intentId: input.intentId ?? null,
-      dataJson: input.data ? JSON.stringify(input.data) : null,
+      dataJson:
+        input.data ? JSON.stringify(redactAssistantStateStructuredValue(input.data)) : null,
     })
 
-    await appendFile(paths.diagnosticEventsPath, `${JSON.stringify(event)}\n`, 'utf8')
+    await appendTextFile(paths.diagnosticEventsPath, `${JSON.stringify(event)}\n`)
 
     const snapshot = await readAssistantDiagnosticsSnapshotAtPath(
       paths,

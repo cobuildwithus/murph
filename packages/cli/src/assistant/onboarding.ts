@@ -1,8 +1,13 @@
-import { mkdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
 import { searchAssistantMemory } from './memory.js'
-import { isMissingFileError, normalizeNullableString, writeJsonFileAtomic } from './shared.js'
+import {
+  ensureAssistantStateDirectory,
+  isMissingFileError,
+  normalizeNullableString,
+  writeJsonFileAtomic,
+} from './shared.js'
 import { createAssistantStateWriteLock } from './state-write-lock.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store.js'
 
@@ -68,7 +73,7 @@ export async function updateAssistantOnboardingSummary(input: {
       markToneAsked: summary.missingSlots.includes('tone'),
     })
     if (JSON.stringify(next) !== JSON.stringify(current)) {
-      await mkdir(paths.assistantStateRoot, { recursive: true })
+      await ensureAssistantStateDirectory(paths.assistantStateRoot)
       await writeJsonFileAtomic(resolveAssistantOnboardingPath(paths), next)
     }
 
