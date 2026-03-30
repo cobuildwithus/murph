@@ -299,22 +299,7 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
 }
 
 export async function rebuildCliRuntimeArtifacts(): Promise<void> {
-  const packageBuildDirs = [
-    'packages/contracts',
-    'packages/hosted-execution',
-    'packages/runtime-state',
-    'packages/core',
-    'packages/importers',
-    'packages/device-syncd',
-    'packages/query',
-    'packages/inboxd',
-    'packages/parsers',
-    'packages/cli',
-  ] as const
-
-  for (const packageDir of packageBuildDirs) {
-    await execWorkspaceCommand(['--dir', packageDir, 'build'], { retryOnce: true })
-  }
+  await execWorkspaceCommand(['build:test-runtime'], { retryOnce: true })
 
   await execWorkspaceCommand([
     'exec',
@@ -484,7 +469,7 @@ function createMissingRuntimeArtifactsError(): Error {
       : ''
 
   return new Error(
-    `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build\` before invoking CLI integration tests.`,
+    `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build:test-runtime\` before invoking CLI integration tests.`,
   )
 }
 
