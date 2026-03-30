@@ -88,6 +88,7 @@ test('assistant cron presets stay separate from scheduler state until installed'
   assert.match(mindfulnessPreset.promptTemplate, /morning mindfulness prompt/u)
   assert.match(mindfulnessPreset.promptTemplate, /text-message friendly/u)
   assert.match(conditionPreset.promptTemplate, /Anchor the roundup to my own context first/u)
+  assert.match(conditionPreset.promptTemplate, /If the research tool is available in this run, use it/u)
   assert.match(conditionPreset.promptTemplate, /plain language for a smart non-specialist/u)
   assert.match(conditionPreset.promptTemplate, /Do not end with a long source dump/u)
   assert.match(conditionPreset.promptTemplate, /worth watching next for me/u)
