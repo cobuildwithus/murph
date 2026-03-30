@@ -176,6 +176,14 @@ test('resolveAssistantDaemonClientConfig trims loopback URLs, honors disable fla
       }),
     /loopback-only http:\/\//u,
   )
+  assert.throws(
+    () =>
+      resolveAssistantDaemonClientConfig({
+        MURPH_ASSISTANTD_BASE_URL: 'http://127.example.com:50241/',
+        MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+      }),
+    /loopback-only http:\/\//u,
+  )
 })
 
 test('canUseAssistantDaemonForMessage declines turns that rely on local progress or snapshots', () => {
@@ -206,6 +214,50 @@ test('canUseAssistantDaemonForMessage declines turns that rely on local progress
       },
     ),
     false,
+  )
+})
+
+test('assistant daemon client surfaces invalid non-JSON daemon responses clearly', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('<html>not json</html>', { status: 200 })),
+  )
+
+  await assert.rejects(
+    () =>
+      maybeGetAssistantStatusViaDaemon(
+        {
+          vault: '/tmp/vault',
+        },
+        {
+          MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241',
+          MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        },
+      ),
+    /invalid JSON response/u,
+  )
+})
+
+test('assistant daemon client surfaces pre-response fetch failures clearly', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => {
+      throw new TypeError('network unreachable')
+    }),
+  )
+
+  await assert.rejects(
+    () =>
+      maybeGetAssistantStatusViaDaemon(
+        {
+          vault: '/tmp/vault',
+        },
+        {
+          MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241',
+          MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        },
+      ),
+    /failed before receiving a response/u,
   )
 })
 

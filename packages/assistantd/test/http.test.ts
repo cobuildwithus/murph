@@ -474,6 +474,39 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(invalidSession.status, 400)
     assert.match(await invalidSession.text(), /session id/u)
 
+    const invalidOutboxIntent = await fetch(
+      `${handle.address.baseUrl}/outbox/${encodeURIComponent('../outside')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(invalidOutboxIntent.status, 400)
+    assert.match(await invalidOutboxIntent.text(), /outbox intent/u)
+
+    const invalidCronJob = await fetch(
+      `${handle.address.baseUrl}/cron/jobs/${encodeURIComponent('../outside')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(invalidCronJob.status, 400)
+    assert.match(await invalidCronJob.text(), /cron job id/u)
+
+    const invalidCronRunsJob = await fetch(
+      `${handle.address.baseUrl}/cron/runs?job=${encodeURIComponent('../outside')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(invalidCronRunsJob.status, 400)
+    assert.match(await invalidCronRunsJob.text(), /cron job id/u)
+
     const invalidConversationField = await fetch(`${handle.address.baseUrl}/message`, {
       method: 'POST',
       headers: {

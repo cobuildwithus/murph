@@ -5,7 +5,10 @@ import {
   readFile,
   rm,
 } from 'node:fs/promises'
-import { writeTextFileAtomic } from '@murph/runtime-state'
+import {
+  isLoopbackHostname,
+  writeTextFileAtomic,
+} from '@murph/runtime-state'
 
 import {
   DEVICE_SYNC_BASE_URL_ENV,
@@ -438,17 +441,6 @@ function assertLoopbackBaseUrl(baseUrl: string): void {
     { baseUrl },
   )
 }
-
-function isLoopbackHostname(hostname: string): boolean {
-  const normalized = hostname.trim().toLowerCase()
-  return (
-    normalized === 'localhost' ||
-    normalized === '127.0.0.1' ||
-    normalized === '::1' ||
-    normalized.startsWith('127.')
-  )
-}
-
 function generateDeviceSyncControlToken(): string {
   return randomBytes(24).toString('hex')
 }

@@ -22,7 +22,10 @@ import {
   redactAssistantDisplayPath,
   resolveAssistantStatePaths,
 } from './store.js'
-import { listRecentAssistantTurnReceipts } from './turns.js'
+import {
+  listRecentAssistantTurnReceipts,
+  listRecentAssistantTurnReceiptsForSession,
+} from './turns.js'
 import {
   isMissingFileError,
   writeJsonFileAtomic,
@@ -195,16 +198,15 @@ async function resolveRecentTurns(
     | undefined,
 ): Promise<AssistantTurnReceipt[]> {
   const limit = normalizeTurnLimit(input?.limit)
-  const sessionFilter = input?.sessionId?.trim()
-  const recentTurns = await listRecentAssistantTurnReceipts(
-    vault,
-    sessionFilter ? Number.MAX_SAFE_INTEGER : limit,
-  )
-  const filtered =
-    sessionFilter
-      ? recentTurns.filter((turn) => turn.sessionId === sessionFilter)
-      : recentTurns
-  return filtered.slice(0, limit)
+  const sessionFilter = input?.sessionId?.trim() || null
+  if (sessionFilter) {
+    return await listRecentAssistantTurnReceiptsForSession(
+      vault,
+      sessionFilter,
+      limit,
+    )
+  }
+  return await listRecentAssistantTurnReceipts(vault, limit)
 }
 
 function normalizeTurnLimit(value?: number): number {

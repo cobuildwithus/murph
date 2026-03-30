@@ -475,15 +475,24 @@ async function assistantDaemonFetchJson(
     headers.set('Content-Type', 'application/json')
   }
 
-  const response = await fetch(`${config.baseUrl}${routePath}`, {
-    method: input.method,
-    headers,
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${config.baseUrl}${routePath}`, {
+      method: input.method,
+      headers,
+      body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    })
+  } catch (error) {
+    throw new Error(
+      `Assistant daemon request failed before receiving a response for ${routePath}.`,
+      { cause: error },
+    )
+  }
 
   const text = await response.text()
-  const payload = text.trim().length > 0 ? JSON.parse(text) : null
+  const parsedPayload = parseAssistantDaemonJsonPayload(text)
   if (!response.ok) {
+    const payload = parsedPayload.ok ? parsedPayload.value : null
     const message =
       payload &&
       typeof payload === 'object' &&
@@ -494,7 +503,14 @@ async function assistantDaemonFetchJson(
     throw new Error(message)
   }
 
-  return payload
+  if (!parsedPayload.ok) {
+    throw new Error(
+      `Assistant daemon returned an invalid JSON response for ${routePath}.`,
+      { cause: parsedPayload.error },
+    )
+  }
+
+  return parsedPayload.value
 }
 
 function serializeAssistantMessageInput(
@@ -648,6 +664,30 @@ function parseAssistantCountField(value: unknown, field: string): number {
     throw new Error(`Assistant daemon payload field ${field} was invalid.`)
   }
   return value
+}
+
+function parseAssistantDaemonJsonPayload(text: string):
+  | { ok: true; value: unknown }
+  | { error: unknown; ok: false } {
+  const trimmed = text.trim()
+  if (trimmed.length === 0) {
+    return {
+      ok: true,
+      value: null,
+    }
+  }
+
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(trimmed) as unknown,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error,
+    }
+  }
 }
 
 function buildAssistantDaemonRoutePath(
