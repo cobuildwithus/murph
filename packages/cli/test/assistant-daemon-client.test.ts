@@ -705,3 +705,41 @@ test('assistant daemon client refuses daemon routes that require local hooks or 
     null,
   )
 })
+
+test('assistant daemon client preserves typed error codes from the control plane', async () => {
+  const fetchMock = vi.fn(async () =>
+    new Response(
+      JSON.stringify({
+        code: 'ASSISTANT_SESSION_NOT_FOUND',
+        error: 'Assistant session "missing" was not found.',
+      }),
+      { status: 404 },
+    ),
+  )
+  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch)
+
+  await assert.rejects(
+    () =>
+      maybeGetAssistantSessionViaDaemon(
+        {
+          sessionId: 'missing',
+          vault: '/tmp/vault',
+        },
+        {
+          MURPH_ASSISTANTD_BASE_URL: 'http://127.0.0.1:50241',
+          MURPH_ASSISTANTD_CONTROL_TOKEN: 'secret-token',
+        },
+      ),
+    (error) => {
+      assert.equal(error instanceof Error, true)
+      assert.equal(
+        (error as { code?: string; cause?: { code?: string } }).code ??
+          (error as { cause?: { code?: string } }).cause?.code,
+        'ASSISTANT_SESSION_NOT_FOUND',
+      )
+      assert.equal((error as Error).message, 'Assistant session "missing" was not found.')
+      assert.equal((error as { status?: number }).status, 404)
+      return true
+    },
+  )
+})

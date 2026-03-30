@@ -169,22 +169,8 @@ async function handleAssistantRequest(
 
     sendJson(response, 404, { error: 'Not found.' })
   } catch (error) {
-    const statusCode =
-      error instanceof AssistantHttpRequestError
-        ? error.statusCode
-        : error instanceof SyntaxError
-          ? 400
-          : isAssistantSessionNotFoundError(error)
-            ? 404
-            : 500
-    sendJson(response, statusCode, {
-      error:
-        statusCode >= 500
-          ? 'Assistant daemon request failed.'
-          : error instanceof Error
-            ? error.message
-            : 'Assistant daemon request failed.',
-    })
+    const statusCode = resolveAssistantHttpErrorStatus(error)
+    sendJson(response, statusCode, buildAssistantHttpErrorPayload(error, statusCode))
   }
 }
 
@@ -618,6 +604,7 @@ function parseAssistantSessionIdField(value: unknown, context: string): string {
     throw new AssistantHttpRequestError(
       error instanceof Error ? error.message : 'Assistant session id was invalid.',
       400,
+      readAssistantErrorCode(error),
     )
   }
 }
@@ -636,6 +623,7 @@ function parseAssistantOutboxIntentIdField(value: unknown, context: string): str
     throw new AssistantHttpRequestError(
       error instanceof Error ? error.message : 'Assistant outbox intent id was invalid.',
       400,
+      readAssistantErrorCode(error),
     )
   }
 }
@@ -654,6 +642,7 @@ function parseAssistantCronJobIdField(value: unknown, context: string): string {
     throw new AssistantHttpRequestError(
       error instanceof Error ? error.message : 'Assistant cron job id was invalid.',
       400,
+      readAssistantErrorCode(error),
     )
   }
 }
@@ -682,6 +671,55 @@ function parseRequiredRouteSegment(
   } catch {
     throw new AssistantHttpRequestError(`Assistant ${context} contained an invalid encoding.`, 400)
   }
+}
+
+function resolveAssistantHttpErrorStatus(error: unknown): number {
+  if (error instanceof AssistantHttpRequestError) {
+    return error.statusCode
+  }
+  if (error instanceof SyntaxError) {
+    return 400
+  }
+
+  const code = readAssistantErrorCode(error)
+  if (code === 'ASSISTANT_INVALID_RUNTIME_ID' || code === 'ASSISTANT_STATE_INVALID_DOC_ID') {
+    return 400
+  }
+  if (code === 'ASSISTANT_SESSION_NOT_FOUND' || code === 'ASSISTANT_CRON_JOB_NOT_FOUND') {
+    return 404
+  }
+  if (isAssistantSessionNotFoundError(error)) {
+    return 404
+  }
+
+  return 500
+}
+
+function buildAssistantHttpErrorPayload(
+  error: unknown,
+  statusCode: number,
+): {
+  code?: string
+  error: string
+} {
+  const code = statusCode < 500 ? readAssistantErrorCode(error) : null
+  return {
+    ...(code ? { code } : {}),
+    error:
+      statusCode >= 500
+        ? 'Assistant daemon request failed.'
+        : error instanceof Error
+          ? error.message
+          : 'Assistant daemon request failed.',
+  }
+}
+
+function readAssistantErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+  const value = (error as { code?: unknown }).code
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 function isAuthorizedAssistantRequest(
@@ -737,6 +775,7 @@ class AssistantHttpRequestError extends Error {
   constructor(
     message: string,
     readonly statusCode: number,
+    readonly code?: string | null,
   ) {
     super(message)
     this.name = 'AssistantHttpRequestError'
