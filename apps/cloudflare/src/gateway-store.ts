@@ -43,6 +43,12 @@ export class HostedGatewayProjectionStore {
 
     const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
     const current = await this.readState();
+    if (
+      current.snapshot &&
+      current.snapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
+    ) {
+      return;
+    }
     await this.writeState(
       applyGatewayProjectionSnapshotToEventLog(
         current,
