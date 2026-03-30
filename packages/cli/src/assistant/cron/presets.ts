@@ -155,7 +155,7 @@ const assistantCronPresetDefinitions: readonly AssistantCronPresetDefinition[] =
       'Treat these as the main relevance filters: {{relevance_criteria}}.',
       'Anchor the roundup to my own context first: current goals, recent labs, medications, supplements, experiments, symptoms, family history, recent logs, and remembered preferences when available. If important personal context is missing, say what is missing instead of pretending you can personalize it.',
       'Look for meaningful new evidence, clinical developments, emerging therapies, notable expert discussion, or anything else that would materially update my understanding of the space this week.',
-      'If a broader current-evidence scan would materially improve the answer, you may first use the research tool before writing the final roundup.',
+      'If the research tool is available in this run, use it before writing the final roundup. If it is not available, say that briefly and continue with the best direct synthesis you can.',
       'Explain the answer in plain language for a smart non-specialist. Translate jargon quickly, avoid sounding like a paper abstract, and focus on what the finding means in real life.',
       'Prioritize signal over hype. Separate strong evidence from speculative or preliminary findings, and call out limitations, uncertainty, or conflicts between sources when they matter.',
       'Connect the main updates back to my own data and situation instead of just listing facts.',
