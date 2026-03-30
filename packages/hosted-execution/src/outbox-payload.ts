@@ -103,6 +103,7 @@ export function resolveHostedExecutionOutboxPayloadStorage(
     case "assistant.cron.tick":
     case "device-sync.wake":
     case "vault.share.accepted":
+    case "gateway.message.send":
       return "inline";
     default:
       throw new TypeError("Unsupported hosted execution event kind.");

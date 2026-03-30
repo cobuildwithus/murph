@@ -1,12 +1,3 @@
-import type {
-  AssistantOutboxIntent,
-  AssistantSessionBinding,
-} from '../assistant-cli-contracts.js'
-import type { ConversationRef } from '../assistant/conversation-ref.js'
-import {
-  inferFallbackBindingDelivery,
-  inferThreadFirstBindingDelivery,
-} from '../assistant/channels/helpers.js'
 import { normalizeNullableString } from '../text/shared.js'
 import {
   gatewayConversationDirectnessValues,
@@ -48,6 +39,30 @@ interface GatewayConversationRef {
   threadId?: string | null
 }
 
+interface GatewayBindingLike {
+  actorId?: string | null
+  channel?: string | null
+  delivery?: {
+    kind?: GatewayReplyRouteKind | null
+    target?: string | null
+  } | null
+  identityId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}
+
+interface GatewayOutboxIntentLike {
+  actorId?: string | null
+  bindingDelivery?: {
+    kind?: GatewayReplyRouteKind | null
+    target?: string | null
+  } | null
+  channel?: string | null
+  identityId?: string | null
+  threadId?: string | null
+  threadIsDirect?: boolean | null
+}
+
 export function normalizeGatewayConversationRoute(
   input: GatewayConversationRouteInput | null | undefined,
 ): GatewayConversationRoute {
@@ -65,10 +80,7 @@ export function normalizeGatewayConversationRoute(
 }
 
 export function gatewayConversationRouteFromBinding(
-  binding: Pick<
-    AssistantSessionBinding,
-    'actorId' | 'channel' | 'delivery' | 'identityId' | 'threadId' | 'threadIsDirect'
-  >,
+  binding: GatewayBindingLike,
 ): GatewayConversationRoute {
   const conversation = gatewayConversationRefFromBinding(binding)
   return gatewayConversationRouteFromConversationRef(conversation, {
@@ -78,10 +90,7 @@ export function gatewayConversationRouteFromBinding(
 }
 
 export function gatewayConversationRouteFromOutboxIntent(
-  intent: Pick<
-    AssistantOutboxIntent,
-    'actorId' | 'bindingDelivery' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
-  >,
+  intent: GatewayOutboxIntentLike,
 ): GatewayConversationRoute {
   const conversation = gatewayConversationRefFromBinding({
     actorId: intent.actorId,
@@ -168,32 +177,28 @@ export function gatewayConversationRouteCanSend(
 
 function inferGatewayBindingDelivery(input: {
   channel?: string | null
-  conversation?: ConversationRef | null
+  conversation?: GatewayConversationRef | null
   deliveryKind?: 'participant' | 'thread' | null
   deliveryTarget?: string | null
 }) {
   switch (input.channel) {
     case 'telegram':
     case 'email':
-      return inferThreadFirstBindingDelivery(
-        {
-          conversation: input.conversation ?? {},
-          deliveryKind: input.deliveryKind ?? null,
-          deliveryTarget: input.deliveryTarget ?? null,
-        },
-        { includeParticipant: true },
-      )
+      return inferThreadFirstGatewayReply({
+        conversation: input.conversation ?? {},
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+        includeParticipant: true,
+      })
     case 'linq':
-      return inferThreadFirstBindingDelivery(
-        {
-          conversation: input.conversation ?? {},
-          deliveryKind: input.deliveryKind ?? null,
-          deliveryTarget: input.deliveryTarget ?? null,
-        },
-        { includeParticipant: false },
-      )
+      return inferThreadFirstGatewayReply({
+        conversation: input.conversation ?? {},
+        deliveryKind: input.deliveryKind ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+        includeParticipant: false,
+      })
     default:
-      return inferFallbackBindingDelivery({
+      return inferFallbackGatewayReply({
         conversation: input.conversation ?? {},
         deliveryKind: input.deliveryKind ?? null,
         deliveryTarget: input.deliveryTarget ?? null,
@@ -237,7 +242,7 @@ function gatewayConversationRouteToConversationRef(
 
 function gatewayConversationRefFromBinding(
   binding: Pick<
-    AssistantSessionBinding,
+    GatewayBindingLike,
     'channel' | 'identityId' | 'actorId' | 'threadId' | 'threadIsDirect'
   >,
 ): GatewayConversationRef {
@@ -405,4 +410,71 @@ function gatewayConversationDirectnessFromThreadIsDirect(
     return 'group'
   }
   return null
+}
+
+function inferThreadFirstGatewayReply(input: {
+  conversation: GatewayConversationRef
+  deliveryKind?: GatewayReplyRouteKind | null
+  deliveryTarget?: string | null
+  includeParticipant: boolean
+}): { kind: GatewayReplyRouteKind; target: string } | null {
+  const explicit = resolveExplicitGatewayReply(input)
+  if (explicit) {
+    return explicit
+  }
+  if (input.conversation.threadId) {
+    return {
+      kind: 'thread',
+      target: input.conversation.threadId,
+    }
+  }
+  if (input.includeParticipant && input.conversation.participantId) {
+    return {
+      kind: 'participant',
+      target: input.conversation.participantId,
+    }
+  }
+  return null
+}
+
+function inferFallbackGatewayReply(input: {
+  conversation: GatewayConversationRef
+  deliveryKind?: GatewayReplyRouteKind | null
+  deliveryTarget?: string | null
+}): { kind: GatewayReplyRouteKind; target: string } | null {
+  const explicit = resolveExplicitGatewayReply(input)
+  if (explicit) {
+    return explicit
+  }
+  if (input.conversation.directness === 'group' && input.conversation.threadId) {
+    return {
+      kind: 'thread',
+      target: input.conversation.threadId,
+    }
+  }
+  if (input.conversation.participantId) {
+    return {
+      kind: 'participant',
+      target: input.conversation.participantId,
+    }
+  }
+  if (input.conversation.threadId) {
+    return {
+      kind: 'thread',
+      target: input.conversation.threadId,
+    }
+  }
+  return null
+}
+
+function resolveExplicitGatewayReply(input: {
+  deliveryKind?: GatewayReplyRouteKind | null
+  deliveryTarget?: string | null
+}): { kind: GatewayReplyRouteKind; target: string } | null {
+  const kind = input.deliveryKind ?? null
+  const target = normalizeNullableString(input.deliveryTarget)
+  if (!kind || !target) {
+    return null
+  }
+  return { kind, target }
 }

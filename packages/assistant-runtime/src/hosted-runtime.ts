@@ -138,6 +138,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
             commit: input.request.commit ?? null,
             dispatch: input.request.dispatch,
             fetchImpl: internalWorkerFetch,
+            gatewayProjectionSnapshot: committedExecution.committedGatewayProjectionSnapshot,
             result: committedExecution.committedResult,
             sideEffects: committedExecution.committedSideEffects,
             runtime,

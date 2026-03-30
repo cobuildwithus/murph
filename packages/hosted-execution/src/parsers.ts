@@ -13,6 +13,7 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionEmailMessageReceivedEvent,
   HostedExecutionEvent,
+  HostedExecutionGatewayMessageSendEvent,
   HostedExecutionTelegramMessageReceivedEvent,
   HostedExecutionEventDispatchState,
   HostedExecutionRunnerRequest,
@@ -534,6 +535,20 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         share: parseHostedExecutionShareReference(record.share),
         userId,
       } satisfies HostedExecutionVaultShareAcceptedEvent;
+    case "gateway.message.send":
+      return {
+        kind,
+        replyToMessageId: readNullableString(
+          record.replyToMessageId,
+          "Hosted execution gateway.message.send replyToMessageId",
+        ),
+        sessionKey: requireString(
+          record.sessionKey,
+          "Hosted execution gateway.message.send sessionKey",
+        ),
+        text: requireString(record.text, "Hosted execution gateway.message.send text"),
+        userId,
+      } satisfies HostedExecutionGatewayMessageSendEvent;
     default:
       throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
   }

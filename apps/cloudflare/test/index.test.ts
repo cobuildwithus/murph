@@ -720,6 +720,101 @@ describe("cloudflare worker routes", () => {
     expect(stub.status).toHaveBeenCalledWith();
   });
 
+  it("forwards hosted gateway read and send routes through the gateway seam", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const listResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/conversations/list", {
+        body: JSON.stringify({ limit: 5 }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(listResponse.status).toBe(200);
+    expect(stub.gatewayListConversations).toHaveBeenCalledWith({
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 5,
+      search: null,
+    });
+
+    const readResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/read", {
+        body: JSON.stringify({ sessionKey: "gwcs_worker_test" }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(readResponse.status).toBe(200);
+    expect(stub.gatewayReadMessages).toHaveBeenCalledWith({
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: false,
+      sessionKey: "gwcs_worker_test",
+    });
+
+    const waitResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/events/wait", {
+        body: JSON.stringify({ cursor: 7, timeoutMs: 1 }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(waitResponse.status).toBe(200);
+    expect(stub.gatewayPollEvents).toHaveBeenCalled();
+
+    const sendResponse = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+        body: JSON.stringify({
+          sessionKey: "gwcs_worker_test",
+          text: "Please follow up.",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(sendResponse.status).toBe(200);
+    expect(stub.gatewayGetConversation).toHaveBeenCalledWith({
+      sessionKey: "gwcs_worker_test",
+    });
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      event: {
+        kind: "gateway.message.send",
+        replyToMessageId: null,
+        sessionKey: "gwcs_worker_test",
+        text: "Please follow up.",
+        userId: "member_123",
+      },
+      eventId: expect.stringMatching(/^gateway-send:/u),
+    }));
+    await expect(sendResponse.json()).resolves.toMatchObject({
+      delivery: null,
+      messageId: null,
+      queued: true,
+      sessionKey: "gwcs_worker_test",
+    });
+  });
+
   it("returns a stable invalid JSON error for malformed worker control payloads", async () => {
     const env = createWorkerEnv(createUserRunnerStub(), {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -1987,6 +2082,81 @@ function createUserRunnerStub() {
         summary: "ok",
       },
     })),
+    gatewayFetchAttachments: vi.fn(async () => ([{
+      attachmentId: "gwca_worker_test",
+      byteSize: 3,
+      extractedText: null,
+      fileName: "labs.pdf",
+      kind: "document",
+      messageId: "gwcm_worker_test",
+      mime: "application/pdf",
+      parseState: "pending",
+      schema: "murph.gateway-attachment.v1",
+      transcriptText: null,
+    }])),
+    gatewayGetConversation: vi.fn(async () => ({
+      canSend: true,
+      lastActivityAt: "2026-03-26T12:00:00.000Z",
+      lastMessagePreview: "Please send the latest PDF.",
+      messageCount: 2,
+      route: {
+        channel: "email",
+        directness: "group",
+        identityId: "murph@example.com",
+        participantId: "contact:alex",
+        reply: {
+          kind: "thread",
+          target: "thread-labs",
+        },
+        threadId: "thread-labs",
+      },
+      schema: "murph.gateway-conversation.v1",
+      sessionKey: "gwcs_worker_test",
+      title: "Lab thread",
+    })),
+    gatewayListConversations: vi.fn(async () => ({
+      conversations: [{
+        canSend: true,
+        lastActivityAt: "2026-03-26T12:00:00.000Z",
+        lastMessagePreview: "Please send the latest PDF.",
+        messageCount: 2,
+        route: {
+          channel: "email",
+          directness: "group",
+          identityId: "murph@example.com",
+          participantId: "contact:alex",
+          reply: {
+            kind: "thread",
+            target: "thread-labs",
+          },
+          threadId: "thread-labs",
+        },
+        schema: "murph.gateway-conversation.v1",
+        sessionKey: "gwcs_worker_test",
+        title: "Lab thread",
+      }],
+      nextCursor: null,
+    })),
+    gatewayListOpenPermissions: vi.fn(async () => []),
+    gatewayPollEvents: vi.fn(async (input?: { cursor?: number }) => ({
+      events: [],
+      live: true,
+      nextCursor: input?.cursor ?? 0,
+    })),
+    gatewayReadMessages: vi.fn(async () => ({
+      messages: [{
+        actorDisplayName: "Alex",
+        attachments: [],
+        createdAt: "2026-03-26T12:00:00.000Z",
+        direction: "inbound",
+        messageId: "gwcm_worker_test",
+        schema: "murph.gateway-message.v1",
+        sessionKey: "gwcs_worker_test",
+        text: "Here is the latest lab PDF.",
+      }],
+      nextCursor: null,
+    })),
+    gatewayRespondToPermission: vi.fn(async () => null),
     getUserEnvStatus: vi.fn(async () => ({
       configuredUserEnvKeys: [],
       userId: "member_123",

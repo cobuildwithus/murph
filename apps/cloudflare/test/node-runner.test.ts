@@ -203,10 +203,10 @@ describe("runHostedExecutionJob", () => {
       },
     });
 
-    const result = await runHostedExecutionJob({
-      bundles: activation.bundles,
-      dispatch: {
-        event: {
+	      const result = await runHostedExecutionJob({
+	        bundles: activation.bundles,
+	        dispatch: {
+	          event: {
           botUserId: null,
           kind: "telegram.message.received",
           telegramUpdate: {
@@ -500,10 +500,13 @@ describe("runHostedExecutionJob", () => {
             threadTarget: null,
             userId: "member_email_fetch",
           },
-          eventId: "evt_email_fetch",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
-      });
+	          eventId: "evt_email_fetch",
+	          occurredAt: "2026-03-26T12:05:00.000Z",
+	        },
+	        userEnv: {
+	          HOSTED_USER_VERIFIED_EMAIL: "alice@example.test",
+	        },
+	      });
 
       expect(result.result.summary).toContain("Persisted hosted email capture");
       expect(requests).toEqual(["GET /messages/raw_email_123"]);
@@ -567,10 +570,10 @@ describe("runHostedExecutionJob", () => {
         emailBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
-      const result = await runHostedExecutionJob({
-        bundles: activation.bundles,
-        dispatch: {
-          event: {
+	      const result = await runHostedExecutionJob({
+	        bundles: activation.bundles,
+	        dispatch: {
+	          event: {
             envelopeFrom: "alice@example.test",
             envelopeTo: "assistant+u-member_email_alias@mail.example.test",
             identityId: "assistant@mail.example.test",
@@ -579,10 +582,13 @@ describe("runHostedExecutionJob", () => {
             threadTarget: null,
             userId: "member_email_alias",
           },
-          eventId: "evt_email_alias",
-          occurredAt: "2026-03-26T12:05:00.000Z",
-        },
-      });
+	          eventId: "evt_email_alias",
+	          occurredAt: "2026-03-26T12:05:00.000Z",
+	        },
+	        userEnv: {
+	          HOSTED_USER_VERIFIED_EMAIL: "alice@example.test",
+	        },
+	      });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-alias-"));
       cleanupPaths.push(workspaceRoot);
       const restored = await restoreHostedExecutionContext({
@@ -2375,8 +2381,15 @@ describe("runHostedExecutionJob", () => {
       expect(finalizeInit?.headers).toMatchObject({
         "content-type": "application/json; charset=utf-8",
       });
-      expect(JSON.parse(String(finalizeInit?.body))).toEqual({
+      expect(JSON.parse(String(finalizeInit?.body))).toMatchObject({
         bundles: result.bundles,
+        gatewayProjectionSnapshot: {
+          conversations: [],
+          generatedAt: expect.any(String),
+          messages: [],
+          permissions: [],
+          schema: "murph.gateway-projection-snapshot.v1",
+        },
       });
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);

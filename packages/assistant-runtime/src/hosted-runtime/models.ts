@@ -1,4 +1,5 @@
 import { importSharePackIntoVault } from "@murph/core";
+import type { GatewayProjectionSnapshot } from "murph/gateway-core";
 import {
   restoreHostedExecutionContext,
 } from "@murph/runtime-state";
@@ -64,6 +65,7 @@ export interface NormalizedHostedAssistantRuntimeConfig {
 }
 
 export interface HostedCommittedExecutionState {
+  committedGatewayProjectionSnapshot: GatewayProjectionSnapshot;
   committedResult: HostedExecutionRunnerResult;
   committedSideEffects: HostedExecutionSideEffect[];
 }

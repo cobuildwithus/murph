@@ -18,6 +18,7 @@ import {
   type HostedEmailSendRequest,
   type HostedExecutionSideEffectRecord,
 } from "@murph/assistant-runtime";
+import { gatewayProjectionSnapshotSchema } from "murph/gateway-core";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";
@@ -565,6 +566,10 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
       vault: readHostedBundleBase64Value(bundles.vault, "bundles.vault"),
     },
     currentBundleRefs: readCommittedBundleRefs(payload.currentBundleRefs),
+    gatewayProjectionSnapshot:
+      payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
+        ? null
+        : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
     result: {
       eventsHandled: requireNumber(result.eventsHandled, "result.eventsHandled"),
       nextWakeAt: readOptionalString(result.nextWakeAt, "result.nextWakeAt"),
@@ -584,6 +589,10 @@ function parseHostedExecutionFinalizeRequest(
       agentState: readHostedBundleBase64Value(bundles.agentState, "bundles.agentState"),
       vault: readHostedBundleBase64Value(bundles.vault, "bundles.vault"),
     },
+    gatewayProjectionSnapshot:
+      payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
+        ? null
+        : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
   };
 }
 

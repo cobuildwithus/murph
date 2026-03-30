@@ -6,6 +6,7 @@ import {
   type HostedExecutionSideEffect,
   type HostedExecutionSideEffectRecord,
 } from "@murph/hosted-execution";
+import type { GatewayProjectionSnapshot } from "murph/gateway-core";
 import {
   createHostedEmailChannelDependencies,
 } from "../hosted-email.ts";
@@ -32,6 +33,13 @@ export function resumeHostedCommittedExecution(
   request: HostedAssistantRuntimeJobRequest,
 ): HostedCommittedExecutionState {
   return {
+    committedGatewayProjectionSnapshot: {
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: new Date().toISOString(),
+      conversations: [],
+      messages: [],
+      permissions: [],
+    },
     committedResult: {
       bundles: {
         agentState: request.bundles.agentState,
@@ -49,6 +57,7 @@ export async function commitHostedExecutionResult(input: {
   commit: HostedExecutionCommitCallback | null;
   dispatch: HostedExecutionDispatchRequest;
   fetchImpl?: typeof fetch;
+  gatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult;
   sideEffects: HostedExecutionSideEffect[];
   runtime: {
@@ -69,6 +78,7 @@ export async function commitHostedExecutionResult(input: {
     {
       body: JSON.stringify({
         currentBundleRefs: input.commit.bundleRefs,
+        gatewayProjectionSnapshot: input.gatewayProjectionSnapshot ?? null,
         ...input.result,
         sideEffects: input.sideEffects,
       }),
@@ -92,6 +102,7 @@ export async function finalizeHostedExecutionResult(input: {
   committedResult: HostedExecutionRunnerResult;
   dispatch: HostedExecutionDispatchRequest;
   fetchImpl?: typeof fetch;
+  finalGatewayProjectionSnapshot?: GatewayProjectionSnapshot | null;
   finalResult: HostedExecutionRunnerResult;
   runtime: {
     commitBaseUrl: string;
@@ -111,6 +122,7 @@ export async function finalizeHostedExecutionResult(input: {
     {
       body: JSON.stringify({
         bundles: input.finalResult.bundles,
+        gatewayProjectionSnapshot: input.finalGatewayProjectionSnapshot ?? null,
       }),
       headers: {
         "content-type": "application/json; charset=utf-8",

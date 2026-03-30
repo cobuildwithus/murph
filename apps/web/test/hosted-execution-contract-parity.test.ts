@@ -7,6 +7,7 @@ import {
   buildHostedExecutionDispatchRef,
   buildHostedExecutionDeviceSyncWakeDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionMemberActivatedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
@@ -108,6 +109,14 @@ describe("hosted execution contract parity", () => {
           shareCode: "share_code_123",
           shareId: "share_123",
         },
+      }),
+      "gateway.message.send": () => buildHostedExecutionGatewayMessageSendDispatch({
+        eventId: "evt_gateway_send",
+        occurredAt: "2026-03-26T12:06:00.000Z",
+        replyToMessageId: null,
+        sessionKey: "gwcs_test",
+        text: "please follow up",
+        userId: "member_123",
       }),
     };
 

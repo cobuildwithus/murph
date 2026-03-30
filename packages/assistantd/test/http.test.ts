@@ -320,11 +320,34 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     nextCursor: null,
   }))
   const fetchGatewayAttachments = vi.fn(async () => [TEST_GATEWAY_ATTACHMENT as any])
+  const gatewaySendMessage = vi.fn(async (input: any) => ({
+    sessionKey: input.sessionKey,
+    messageId: 'gwcm_sent_http_test',
+    queued: true,
+    delivery: null,
+  }))
+  const gatewayPollEvents = vi.fn(async (input?: any) => ({
+    events: [],
+    nextCursor: input?.cursor ?? 0,
+    live: true,
+  }))
+  const gatewayWaitForEvents = vi.fn(async (input?: any) => ({
+    events: [],
+    nextCursor: input?.cursor ?? 0,
+    live: true,
+  }))
+  const gatewayListOpenPermissions = vi.fn(async () => [])
+  const gatewayRespondToPermission = vi.fn(async () => null)
   const gateway = createGatewayServiceMock({
     fetchAttachments: fetchGatewayAttachments,
     getConversation: getGatewayConversation,
     listConversations: listGatewayConversations,
+    listOpenPermissions: gatewayListOpenPermissions,
+    pollEvents: gatewayPollEvents,
     readMessages: readGatewayMessages,
+    respondToPermission: gatewayRespondToPermission,
+    sendMessage: gatewaySendMessage,
+    waitForEvents: gatewayWaitForEvents,
   })
   const service = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
@@ -587,6 +610,94 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       fetchGatewayAttachments.mock.calls[0]?.[0]?.messageId,
       TEST_GATEWAY_MESSAGE.messageId,
     )
+
+    const gatewaySend = await fetch(`${handle.address.baseUrl}/gateway/messages/send`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+        text: 'please follow up',
+      }),
+    })
+    assert.equal(gatewaySend.status, 200)
+    const gatewaySendPayload = await gatewaySend.json() as {
+      queued: boolean
+      sessionKey: string
+    }
+    assert.equal(gatewaySendPayload.sessionKey, TEST_GATEWAY_CONVERSATION.sessionKey)
+    assert.equal(gatewaySendPayload.queued, true)
+    assert.equal(gatewaySendMessage.mock.calls[0]?.[0]?.text, 'please follow up')
+
+    const gatewayPoll = await fetch(`${handle.address.baseUrl}/gateway/events/poll`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        cursor: 7,
+      }),
+    })
+    assert.equal(gatewayPoll.status, 200)
+    assert.equal(gatewayPollEvents.mock.calls[0]?.[0]?.cursor, 7)
+
+    const gatewayWait = await fetch(`${handle.address.baseUrl}/gateway/events/wait`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        cursor: 8,
+        timeoutMs: 100,
+      }),
+    })
+    assert.equal(gatewayWait.status, 200)
+    assert.equal(gatewayWaitForEvents.mock.calls[0]?.[0]?.timeoutMs, 100)
+
+    const gatewayPermissions = await fetch(
+      `${handle.address.baseUrl}/gateway/permissions/list-open`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          vault: '/tmp/vault',
+          sessionKey: TEST_GATEWAY_CONVERSATION.sessionKey,
+        }),
+      },
+    )
+    assert.equal(gatewayPermissions.status, 200)
+    assert.equal(
+      gatewayListOpenPermissions.mock.calls[0]?.[0]?.sessionKey,
+      TEST_GATEWAY_CONVERSATION.sessionKey,
+    )
+
+    const gatewayPermissionResponse = await fetch(
+      `${handle.address.baseUrl}/gateway/permissions/respond`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          vault: '/tmp/vault',
+          decision: 'approve',
+          requestId: 'perm_http_test',
+        }),
+      },
+    )
+    assert.equal(gatewayPermissionResponse.status, 200)
+    assert.equal(gatewayRespondToPermission.mock.calls[0]?.[0]?.requestId, 'perm_http_test')
 
     const mismatchedGatewayVault = await fetch(
       `${handle.address.baseUrl}/gateway/conversations/list`,

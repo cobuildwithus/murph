@@ -4,6 +4,7 @@ export { ContainerProxy } from "@cloudflare/containers";
 import {
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionGatewayMessageSendDispatch,
   emitHostedExecutionStructuredLog,
   parseHostedExecutionDispatchRequest,
   readHostedEmailCapabilities,
@@ -12,6 +13,29 @@ import {
   type HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
 import { parseRawEmailMessage, readRawEmailHeaderValue } from "@murph/inboxd";
+
+import {
+  gatewayFetchAttachmentsInputSchema,
+  gatewayGetConversationInputSchema,
+  gatewayListConversationsInputSchema,
+  gatewayListOpenPermissionsInputSchema,
+  gatewayPollEventsInputSchema,
+  gatewayReadMessagesInputSchema,
+  gatewayRespondToPermissionInputSchema,
+  gatewaySendMessageResultSchema,
+  gatewaySendMessageInputSchema,
+  gatewayWaitForEventsInputSchema,
+  type GatewayFetchAttachmentsInput,
+  type GatewayGetConversationInput,
+  type GatewayListConversationsInput,
+  type GatewayListOpenPermissionsInput,
+  type GatewayPollEventsInput,
+  type GatewayPollEventsResult,
+  type GatewayReadMessagesInput,
+  type GatewayRespondToPermissionInput,
+  type GatewaySendMessageInput,
+  type GatewayWaitForEventsInput,
+} from "murph/gateway-core";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
 import { createHostedUserEnvStore } from "./bundle-store.ts";
@@ -153,6 +177,16 @@ const workerInternalRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
     methods: ["GET"],
     wrongMethodResponse: "method-not-allowed",
   },
+  {
+    authorizeBeforeMethod: true,
+    authorization: "control",
+    async handle(context, params) {
+      return handleGatewayRoute(context, params.userId, params.resource);
+    },
+    match: matchNamedPath(/^\/internal\/users\/(?<userId>[^/]+)\/gateway\/(?<resource>conversations\/list|conversations\/get|messages\/read|messages\/send|attachments\/fetch|events\/poll|events\/wait|permissions\/list-open|permissions\/respond)$/u),
+    methods: ["POST"],
+    wrongMethodResponse: "method-not-allowed",
+  },
 ];
 
 export default {
@@ -221,6 +255,34 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async finalizeCommit(input: WorkerUserRunnerFinalizeInput): Promise<HostedExecutionCommittedResult> {
     return this.runner.finalizeCommit(input);
+  }
+
+  async gatewayListConversations(input?: GatewayListConversationsInput) {
+    return this.runner.gatewayListConversations(input);
+  }
+
+  async gatewayGetConversation(input: GatewayGetConversationInput) {
+    return this.runner.gatewayGetConversation(input);
+  }
+
+  async gatewayReadMessages(input: GatewayReadMessagesInput) {
+    return this.runner.gatewayReadMessages(input);
+  }
+
+  async gatewayFetchAttachments(input: GatewayFetchAttachmentsInput) {
+    return this.runner.gatewayFetchAttachments(input);
+  }
+
+  async gatewayPollEvents(input?: GatewayPollEventsInput) {
+    return this.runner.gatewayPollEvents(input);
+  }
+
+  async gatewayListOpenPermissions(input?: GatewayListOpenPermissionsInput) {
+    return this.runner.gatewayListOpenPermissions(input);
+  }
+
+  async gatewayRespondToPermission(input: GatewayRespondToPermissionInput) {
+    return this.runner.gatewayRespondToPermission(input);
   }
 
   async status(): Promise<HostedExecutionUserStatus> {
@@ -395,6 +457,170 @@ async function handleUserEmailAddressRoute(
     identityId: capabilities.senderIdentity,
     userId,
   });
+}
+
+async function handleGatewayRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+  resource: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  const stub = await resolveUserRunnerStub(context.env, userId);
+  const payload = await readOptionalJsonObject(context.request);
+
+  switch (resource) {
+    case "conversations/list":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayListConversations")(
+          gatewayListConversationsInputSchema.parse(payload),
+        ),
+      );
+    case "conversations/get":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayGetConversation")(
+          gatewayGetConversationInputSchema.parse(payload),
+        ),
+      );
+    case "messages/read":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayReadMessages")(
+          gatewayReadMessagesInputSchema.parse(payload),
+        ),
+      );
+    case "attachments/fetch":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayFetchAttachments")(
+          gatewayFetchAttachmentsInputSchema.parse(payload),
+        ),
+      );
+    case "events/poll":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayPollEvents")(
+          gatewayPollEventsInputSchema.parse(payload),
+        ),
+      );
+    case "events/wait":
+      return json(
+        await waitForHostedGatewayEvents(
+          requireGatewayStubMethod(stub, "gatewayPollEvents"),
+          gatewayWaitForEventsInputSchema.parse(payload),
+        ),
+      );
+    case "messages/send":
+      return handleGatewaySendRoute(
+        stub,
+        userId,
+        gatewaySendMessageInputSchema.parse(payload),
+      );
+    case "permissions/list-open":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayListOpenPermissions")(
+          gatewayListOpenPermissionsInputSchema.parse(payload),
+        ),
+      );
+    case "permissions/respond":
+      return json(
+        await requireGatewayStubMethod(stub, "gatewayRespondToPermission")(
+          gatewayRespondToPermissionInputSchema.parse(payload),
+        ),
+      );
+    default:
+      return notFound();
+  }
+}
+
+async function handleGatewaySendRoute(
+  stub: UserRunnerDurableObjectStubLike,
+  userId: string,
+  input: GatewaySendMessageInput,
+): Promise<Response> {
+  const conversation = await requireGatewayStubMethod(stub, "gatewayGetConversation")({
+    sessionKey: input.sessionKey,
+  });
+  if (!conversation) {
+    return json({ error: "Gateway session was not found." }, 404);
+  }
+  if (!conversation.canSend) {
+    return json({ error: "Gateway session does not have a routable reply target." }, 409);
+  }
+
+  const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
+    eventId: createGatewayDispatchEventId(),
+    occurredAt: new Date().toISOString(),
+    replyToMessageId: input.replyToMessageId,
+    sessionKey: input.sessionKey,
+    text: input.text,
+    userId,
+  });
+  const result = await stub.dispatchWithOutcome(dispatch);
+
+  if (result.event.state === "backpressured") {
+    return json({ error: "Hosted runner is backpressured." }, 429);
+  }
+
+  if (result.event.state === "poisoned") {
+    return json({ error: result.event.lastError ?? "Hosted runner failed." }, 500);
+  }
+
+  return json(
+    gatewaySendMessageResultSchema.parse({
+      delivery: null,
+      messageId: null,
+      queued: true,
+      sessionKey: input.sessionKey,
+    }),
+  );
+}
+
+async function waitForHostedGatewayEvents(
+  poll: (input?: GatewayPollEventsInput) => Promise<GatewayPollEventsResult>,
+  input: GatewayWaitForEventsInput,
+): Promise<GatewayPollEventsResult> {
+  let result = await poll({
+    cursor: input.cursor,
+    kinds: input.kinds,
+    limit: input.limit,
+    sessionKey: input.sessionKey,
+  });
+  if (result.events.length > 0 || input.timeoutMs <= 0) {
+    return result;
+  }
+
+  const deadline = Date.now() + input.timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+    result = await poll({
+      cursor: input.cursor,
+      kinds: input.kinds,
+      limit: input.limit,
+      sessionKey: input.sessionKey,
+    });
+    if (result.events.length > 0) {
+      return result;
+    }
+  }
+
+  return result;
+}
+
+function requireGatewayStubMethod<TKey extends keyof UserRunnerDurableObjectStubLike>(
+  stub: UserRunnerDurableObjectStubLike,
+  key: TKey,
+): Exclude<UserRunnerDurableObjectStubLike[TKey], undefined> {
+  const method = stub[key];
+  if (typeof method !== "function") {
+    throw new TypeError(`User runner stub does not implement ${String(key)}.`);
+  }
+
+  return method as Exclude<UserRunnerDurableObjectStubLike[TKey], undefined>;
+}
+
+function createGatewayDispatchEventId(): string {
+  return `gateway-send:${Date.now()}:${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function handleHostedEmailIngress(

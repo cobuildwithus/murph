@@ -8,12 +8,26 @@ import type {
   HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
+import type {
+  GatewayFetchAttachmentsInput,
+  GatewayGetConversationInput,
+  GatewayListConversationsInput,
+  GatewayListConversationsResult,
+  GatewayListOpenPermissionsInput,
+  GatewayPermissionRequest,
+  GatewayPollEventsInput,
+  GatewayPollEventsResult,
+  GatewayReadMessagesInput,
+  GatewayReadMessagesResult,
+  GatewayRespondToPermissionInput,
+} from "murph/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
   resolveHostedExecutionDispatchOutcomeState,
 } from "@murph/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
+import { HostedGatewayProjectionStore } from "./gateway-store.js";
 import type { HostedExecutionEnvironment } from "./env.js";
 import {
   persistHostedExecutionCommit,
@@ -55,6 +69,7 @@ export class HostedUserRunner {
   private readonly queueStore: RunnerQueueStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly scheduler: RunnerScheduler;
+  private readonly gatewayStore: HostedGatewayProjectionStore;
   private userEnvLock: Promise<void> | null = null;
 
   constructor(
@@ -71,6 +86,7 @@ export class HostedUserRunner {
     this.runnerContainerNamespace = runnerContainerNamespace;
     this.queueStore = new RunnerQueueStore(state);
     this.scheduler = new RunnerScheduler(this.queueStore, state, env.defaultAlarmDelayMs);
+    this.gatewayStore = new HostedGatewayProjectionStore(state);
     this.bundleSync = new RunnerBundleSync(
       bucket,
       env.bundleEncryptionKey,
@@ -87,6 +103,44 @@ export class HostedUserRunner {
       queueStore: this.queueStore,
       scheduler: this.scheduler,
     });
+  }
+
+  async gatewayListConversations(
+    input?: GatewayListConversationsInput,
+  ): Promise<GatewayListConversationsResult> {
+    return this.gatewayStore.listConversations(input);
+  }
+
+  async gatewayGetConversation(input: GatewayGetConversationInput) {
+    return this.gatewayStore.getConversation(input);
+  }
+
+  async gatewayReadMessages(
+    input: GatewayReadMessagesInput,
+  ): Promise<GatewayReadMessagesResult> {
+    return this.gatewayStore.readMessages(input);
+  }
+
+  async gatewayFetchAttachments(input: GatewayFetchAttachmentsInput) {
+    return this.gatewayStore.fetchAttachments(input);
+  }
+
+  async gatewayPollEvents(
+    input?: GatewayPollEventsInput,
+  ): Promise<GatewayPollEventsResult> {
+    return this.gatewayStore.pollEvents(input);
+  }
+
+  async gatewayListOpenPermissions(
+    input?: GatewayListOpenPermissionsInput,
+  ): Promise<GatewayPermissionRequest[]> {
+    return this.gatewayStore.listOpenPermissions(input);
+  }
+
+  async gatewayRespondToPermission(
+    input: GatewayRespondToPermissionInput,
+  ): Promise<GatewayPermissionRequest | null> {
+    return this.gatewayStore.respondToPermission(input);
   }
 
   async bootstrapUser(userId: string): Promise<{ userId: string }> {
@@ -651,7 +705,7 @@ export class HostedUserRunner {
     };
   }): Promise<HostedExecutionCommittedResult> {
     const userId = await this.requireBoundUserId();
-    return persistHostedExecutionCommit({
+    const committed = await persistHostedExecutionCommit({
       bucket: this.bucket,
       currentBundleRefs: input.payload.currentBundleRefs,
       eventId: input.eventId,
@@ -661,6 +715,8 @@ export class HostedUserRunner {
       payload: input.payload,
       userId,
     });
+    await this.gatewayStore.applySnapshot(input.payload.gatewayProjectionSnapshot ?? null);
+    return committed;
   }
 
   private async finalizeOnce(input: {
@@ -668,7 +724,7 @@ export class HostedUserRunner {
     payload: HostedExecutionFinalizePayload;
   }): Promise<HostedExecutionCommittedResult> {
     const userId = await this.requireBoundUserId();
-    return persistHostedExecutionFinalBundles({
+    const finalized = await persistHostedExecutionFinalBundles({
       bucket: this.bucket,
       eventId: input.eventId,
       key: this.env.bundleEncryptionKey,
@@ -677,6 +733,8 @@ export class HostedUserRunner {
       payload: input.payload,
       userId,
     });
+    await this.gatewayStore.applySnapshot(input.payload.gatewayProjectionSnapshot ?? null);
+    return finalized;
   }
 
   private readUserEnvSource(): Readonly<Record<string, string | undefined>> {

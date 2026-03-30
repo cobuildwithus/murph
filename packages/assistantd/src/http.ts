@@ -12,11 +12,21 @@ import {
   gatewayFetchAttachmentsInputSchema,
   gatewayGetConversationInputSchema,
   gatewayListConversationsInputSchema,
+  gatewayListOpenPermissionsInputSchema,
+  gatewayPollEventsInputSchema,
   gatewayReadMessagesInputSchema,
+  gatewayRespondToPermissionInputSchema,
+  gatewaySendMessageInputSchema,
+  gatewayWaitForEventsInputSchema,
   type GatewayFetchAttachmentsInput,
   type GatewayGetConversationInput,
   type GatewayListConversationsInput,
+  type GatewayListOpenPermissionsInput,
+  type GatewayPollEventsInput,
   type GatewayReadMessagesInput,
+  type GatewayRespondToPermissionInput,
+  type GatewaySendMessageInput,
+  type GatewayWaitForEventsInput,
 } from 'murph/gateway-core'
 import { isLoopbackRemoteAddress } from '@murph/runtime-state'
 import type { AssistantLocalService } from './service.js'
@@ -73,6 +83,21 @@ type AssistantGatewayReadMessagesRequest = GatewayReadMessagesInput & {
   vault?: string | null
 }
 type AssistantGatewayFetchAttachmentsRequest = GatewayFetchAttachmentsInput & {
+  vault?: string | null
+}
+type AssistantGatewayPollEventsRequest = GatewayPollEventsInput & {
+  vault?: string | null
+}
+type AssistantGatewayWaitForEventsRequest = GatewayWaitForEventsInput & {
+  vault?: string | null
+}
+type AssistantGatewaySendMessageRequest = GatewaySendMessageInput & {
+  vault?: string | null
+}
+type AssistantGatewayListOpenPermissionsRequest = GatewayListOpenPermissionsInput & {
+  vault?: string | null
+}
+type AssistantGatewayRespondToPermissionRequest = GatewayRespondToPermissionInput & {
   vault?: string | null
 }
 
@@ -188,6 +213,41 @@ async function handleAssistantRequest(
       const { vault, ...gatewayInput } = body
       assertAssistantBoundVault(vault, input.service.vault)
       sendJson(response, 200, await input.service.gateway.fetchAttachments(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/messages/send') {
+      const body = parseGatewaySendMessageRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.sendMessage(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/events/poll') {
+      const body = parseGatewayPollEventsRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.pollEvents(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/events/wait') {
+      const body = parseGatewayWaitForEventsRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.waitForEvents(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/permissions/list-open') {
+      const body = parseGatewayListOpenPermissionsRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.listOpenPermissions(gatewayInput))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/gateway/permissions/respond') {
+      const body = parseGatewayRespondToPermissionRequestBody(await readJsonBody(request))
+      const { vault, ...gatewayInput } = body
+      assertAssistantBoundVault(vault, input.service.vault)
+      sendJson(response, 200, await input.service.gateway.respondToPermission(gatewayInput))
       return
     }
     if (method === 'GET' && url.pathname === '/cron/status') {
@@ -408,6 +468,121 @@ function parseGatewayFetchAttachmentsRequestBody(
       error instanceof Error
         ? error.message
         : 'Assistant gateway attachment-fetch request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewaySendMessageRequestBody(
+  payload: unknown,
+): AssistantGatewaySendMessageRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/messages/send')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewaySendMessageInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/messages/send'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway message-send request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayPollEventsRequestBody(
+  payload: unknown,
+): AssistantGatewayPollEventsRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/events/poll')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayPollEventsInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/events/poll'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway event-poll request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayWaitForEventsRequestBody(
+  payload: unknown,
+): AssistantGatewayWaitForEventsRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/events/wait')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayWaitForEventsInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/events/wait'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway event-wait request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayListOpenPermissionsRequestBody(
+  payload: unknown,
+): AssistantGatewayListOpenPermissionsRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/permissions/list-open')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayListOpenPermissionsInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/permissions/list-open'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway permission-list request was invalid.',
+      400,
+    )
+  }
+}
+
+function parseGatewayRespondToPermissionRequestBody(
+  payload: unknown,
+): AssistantGatewayRespondToPermissionRequest {
+  const record = asAssistantRequestRecord(payload, 'gateway/permissions/respond')
+  const { vault, ...gatewayRecord } = record
+  try {
+    return {
+      ...gatewayRespondToPermissionInputSchema.parse(gatewayRecord),
+      vault:
+        typeof vault === 'undefined'
+          ? undefined
+          : readOptionalNullableStringField(record, 'vault', 'gateway/permissions/respond'),
+    }
+  } catch (error) {
+    throw new AssistantHttpRequestError(
+      error instanceof Error
+        ? error.message
+        : 'Assistant gateway permission-response request was invalid.',
       400,
     )
   }

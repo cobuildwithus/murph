@@ -128,6 +128,17 @@ export const gatewayPermissionRequestSchema = z
   })
   .strict()
 
+
+export const gatewayProjectionSnapshotSchema = z
+  .object({
+    schema: z.literal('murph.gateway-projection-snapshot.v1'),
+    generatedAt: isoTimestampSchema,
+    conversations: z.array(gatewayConversationSchema).default([]),
+    messages: z.array(gatewayMessageSchema).default([]),
+    permissions: z.array(gatewayPermissionRequestSchema).default([]),
+  })
+  .strict()
+
 export const gatewayListConversationsInputSchema = z
   .object({
     channel: gatewayOptionalStringSchema,
@@ -286,6 +297,7 @@ export type GatewayMessageDirection = (typeof gatewayMessageDirectionValues)[num
 export type GatewayPermissionDecision =
   (typeof gatewayPermissionDecisionValues)[number]
 export type GatewayPermissionRequest = z.infer<typeof gatewayPermissionRequestSchema>
+export type GatewayProjectionSnapshot = z.infer<typeof gatewayProjectionSnapshotSchema>
 export type GatewayPermissionStatus = (typeof gatewayPermissionStatusValues)[number]
 export type GatewayPollEventsInput = z.infer<typeof gatewayPollEventsInputSchema>
 export type GatewayPollEventsResult = z.infer<typeof gatewayPollEventsResultSchema>

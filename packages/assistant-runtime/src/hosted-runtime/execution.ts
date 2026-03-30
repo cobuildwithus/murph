@@ -16,6 +16,7 @@ import {
 import {
   refreshAssistantStatusSnapshot,
 } from "murph/assistant-core";
+import { exportGatewayProjectionSnapshotLocal } from "murph/gateway-core-local";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";
@@ -91,8 +92,10 @@ export async function executeHostedDispatchForCommit(input: {
     vaultRoot: input.restored.vaultRoot,
   });
   const committedSideEffects = await collectHostedExecutionSideEffects(input.restored.vaultRoot);
+  const committedGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(input.restored.vaultRoot);
 
   return {
+    committedGatewayProjectionSnapshot,
     committedResult: {
       bundles: {
         agentState: encodeHostedBundleBase64(committedSnapshot.agentStateBundle),
@@ -172,6 +175,7 @@ export async function completeHostedExecutionAfterCommit(input: {
     }),
     vaultRoot: input.restored.vaultRoot,
   });
+  const finalGatewayProjectionSnapshot = await exportGatewayProjectionSnapshotLocal(input.restored.vaultRoot);
   const finalResult: HostedExecutionRunnerResult = {
     bundles: {
       agentState: encodeHostedBundleBase64(finalSnapshot.agentStateBundle),
@@ -185,6 +189,7 @@ export async function completeHostedExecutionAfterCommit(input: {
     committedResult: input.committedExecution.committedResult,
     dispatch: input.dispatch,
     fetchImpl: input.internalWorkerFetch,
+    finalGatewayProjectionSnapshot,
     finalResult,
     runtime: input.runtime,
   });
