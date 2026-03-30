@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantProviderBindingSchema,
@@ -23,10 +23,17 @@ import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 import {
+  ensureAssistantStateDirectory,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
-import { assertAssistantSessionId } from './state-ids.js'
+import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'
+import {
+  extractAssistantProviderRouteRecoverySecretsForPersistence,
+  mergeAssistantProviderRouteRecoverySecrets,
+  persistAssistantProviderRouteRecoverySecrets,
+  readAssistantProviderRouteRecoverySecrets,
+} from './state-secrets.js'
 
 const ASSISTANT_PROVIDER_ROUTE_RECOVERY_SCHEMA =
   'murph.assistant-provider-route-recovery.v1'
@@ -247,9 +254,7 @@ async function saveAssistantProviderRouteRecovery(input: {
       paths,
       input.sessionId,
     )
-    await mkdir(path.dirname(recoveryPath), {
-      recursive: true,
-    })
+    await ensureAssistantStateDirectory(path.dirname(recoveryPath))
     const existing = await readAssistantProviderRouteRecoveryAtPath(paths, recoveryPath)
     const routes = [
       ...(existing?.routes.filter((route) => route.routeId !== input.routeId) ?? []),
@@ -268,7 +273,14 @@ async function saveAssistantProviderRouteRecovery(input: {
       updatedAt: input.at,
       routes,
     })
-    await writeJsonFileAtomic(recoveryPath, next)
+    const { persisted, secrets } =
+      extractAssistantProviderRouteRecoverySecretsForPersistence(next)
+    await persistAssistantProviderRouteRecoverySecrets({
+      paths,
+      secrets,
+      sessionId: input.sessionId,
+    })
+    await writeJsonFileAtomic(recoveryPath, persisted)
     await appendAssistantRuntimeEventAtPaths(paths, {
       at: input.at,
       component: 'provider-recovery',
@@ -291,7 +303,12 @@ async function readAssistantProviderRouteRecoveryAtPath(
 ): Promise<AssistantProviderRouteRecovery | null> {
   try {
     const raw = await readFile(filePath, 'utf8')
-    return assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
+    const recovery = assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
+    const secrets = await readAssistantProviderRouteRecoverySecrets({
+      paths,
+      sessionId: recovery.sessionId,
+    })
+    return mergeAssistantProviderRouteRecoverySecrets(recovery, secrets)
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -311,10 +328,12 @@ function resolveAssistantProviderRouteRecoveryPath(
   paths: ReturnType<typeof resolveAssistantStatePaths>,
   sessionId: string,
 ): string {
-  return path.join(
-    paths.providerRouteRecoveryDirectory,
-    `${assertAssistantSessionId(sessionId)}.json`,
-  )
+  return resolveAssistantOpaqueStateFilePath({
+    directory: paths.providerRouteRecoveryDirectory,
+    extension: '.json',
+    kind: 'session',
+    value: sessionId,
+  })
 }
 
 function readAssistantProviderErrorContext(

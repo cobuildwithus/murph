@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { z } from 'incur'
 import {
   assistantCronJobSchema,
@@ -13,6 +12,8 @@ import { VaultCliError } from '../../vault-cli-errors.js'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import type { AssistantStatePaths } from '../store/paths.js'
 import {
+  appendTextFile,
+  ensureAssistantStateDirectory,
   isMissingFileError,
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
@@ -21,6 +22,7 @@ import {
 import {
   assertAssistantCronJobId,
   assertAssistantCronRunId,
+  resolveAssistantOpaqueStateFilePath,
 } from '../state-ids.js'
 
 const ASSISTANT_CRON_STORE_VERSION = 1
@@ -49,12 +51,8 @@ export async function ensureAssistantCronState(
   paths: AssistantStatePaths,
 ): Promise<void> {
   await Promise.all([
-    mkdir(paths.cronDirectory, {
-      recursive: true,
-    }),
-    mkdir(paths.cronRunsDirectory, {
-      recursive: true,
-    }),
+    ensureAssistantStateDirectory(paths.cronDirectory),
+    ensureAssistantStateDirectory(paths.cronRunsDirectory),
   ])
 }
 
@@ -135,10 +133,8 @@ export async function appendAssistantCronRun(
   run: AssistantCronRunRecord,
 ): Promise<void> {
   const runsPath = resolveAssistantCronRunsPath(paths, run.jobId)
-  await mkdir(paths.cronRunsDirectory, {
-    recursive: true,
-  })
-  await appendFile(runsPath, `${JSON.stringify(run)}\n`, 'utf8')
+  await ensureAssistantStateDirectory(paths.cronRunsDirectory)
+  await appendTextFile(runsPath, `${JSON.stringify(run)}\n`)
 }
 
 export function resolveAssistantCronJobIndex(
@@ -298,10 +294,12 @@ function resolveAssistantCronRunsPath(
   paths: AssistantStatePaths,
   jobId: string,
 ): string {
-  return path.join(
-    paths.cronRunsDirectory,
-    `${assertAssistantCronJobId(jobId)}.jsonl`,
-  )
+  return resolveAssistantOpaqueStateFilePath({
+    directory: paths.cronRunsDirectory,
+    extension: '.jsonl',
+    kind: 'cron job',
+    value: jobId,
+  })
 }
 
 function compareNullableIsoTimestamps(

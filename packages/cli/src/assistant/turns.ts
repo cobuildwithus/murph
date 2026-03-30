@@ -12,7 +12,7 @@ import {
 } from '../assistant-cli-contracts.js'
 import { quarantineAssistantStateFile } from './quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
-import { assertAssistantTurnId } from './state-ids.js'
+import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'
 import { ensureAssistantState } from './store/persistence.js'
 import {
   resolveAssistantStatePaths,
@@ -239,7 +239,12 @@ export function resolveAssistantTurnReceiptPath(
   paths: AssistantStatePaths,
   turnId: string,
 ): string {
-  return path.join(paths.turnsDirectory, `${assertAssistantTurnId(turnId)}.json`)
+  return resolveAssistantOpaqueStateFilePath({
+    directory: paths.turnsDirectory,
+    extension: '.json',
+    kind: 'turn',
+    value: turnId,
+  })
 }
 
 async function readAssistantTurnReceiptAtPath(

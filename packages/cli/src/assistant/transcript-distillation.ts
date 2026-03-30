@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFile, readFile } from 'node:fs/promises'
-import path from 'node:path'
+import { readFile } from 'node:fs/promises'
 import {
   assistantTranscriptDistillationSchema,
   type AssistantTranscriptDistillation,
@@ -8,10 +7,14 @@ import {
 } from '../assistant-cli-contracts.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { quarantineAssistantStateFile } from './quarantine.js'
-import { assertAssistantSessionId, assertAssistantTranscriptDistillationId } from './state-ids.js'
+import {
+  assertAssistantTranscriptDistillationId,
+  resolveAssistantOpaqueStateFilePath,
+} from './state-ids.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths } from './store.js'
 import {
+  appendTextFile,
   isMissingFileError,
   normalizeNullableString,
   parseAssistantJsonLinesWithTailSalvage,
@@ -102,10 +105,9 @@ export async function appendAssistantTranscriptDistillation(
     paths.distillationsDirectory,
     distillation.sessionId,
   )
-  await appendFile(
+  await appendTextFile(
     distillationPath,
     `${JSON.stringify(assistantTranscriptDistillationSchema.parse(distillation))}\n`,
-    'utf8',
   )
   return distillation
 }
@@ -191,10 +193,12 @@ export function resolveAssistantTranscriptDistillationPath(
   distillationsDirectory: string,
   sessionId: string,
 ): string {
-  return path.join(
-    distillationsDirectory,
-    `${assertAssistantSessionId(sessionId)}.jsonl`,
-  )
+  return resolveAssistantOpaqueStateFilePath({
+    directory: distillationsDirectory,
+    extension: '.jsonl',
+    kind: 'session',
+    value: sessionId,
+  })
 }
 
 function buildAssistantTranscriptDistillationSummaryLines(
