@@ -201,6 +201,30 @@ describe("@murph/hosted-execution", () => {
     });
   });
 
+  it("falls back to the Vercel production domain for hosted web control-plane defaults", () => {
+    expect(
+      readHostedExecutionWebControlPlaneEnvironment({
+        HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
+        VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",
+      }),
+    ).toEqual({
+      deviceSyncRuntimeBaseUrl: "https://www.withmurph.ai",
+      internalToken: "internal-token",
+      schedulerToken: null,
+      shareBaseUrl: "https://www.withmurph.ai",
+      shareToken: null,
+      usageBaseUrl: "https://www.withmurph.ai",
+    });
+  });
+
+  it("rejects an invalid Vercel production-domain fallback for hosted web control-plane URLs", () => {
+    expect(() =>
+      readHostedExecutionWebControlPlaneEnvironment({
+        VERCEL_PROJECT_PRODUCTION_URL: "http://www.withmurph.ai",
+      }),
+    ).toThrow(/Hosted execution base URLs must use HTTPS/u);
+  });
+
   it("reads hosted worker env defaults from the canonical signing-secret name", () => {
     expect(
       readHostedExecutionWorkerEnvironment({
