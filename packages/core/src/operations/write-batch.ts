@@ -1,8 +1,12 @@
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
 import { promises as fs } from "node:fs";
 
+import {
+  copyFileAtomic,
+  copyFileAtomicExclusive,
+  writeTextFileAtomic,
+} from "../atomic-write.ts";
 import { VaultError } from "../errors.ts";
 import { ensureDirectory, pathExists, walkVaultFiles } from "../fs.ts";
 import { VAULT_LAYOUT } from "../constants.ts";
@@ -1040,7 +1044,7 @@ export class WriteBatch {
   }
 
   private async persist(): Promise<void> {
-    await fs.writeFile(this.metadataAbsolutePath, `${JSON.stringify(this.record, null, 2)}\n`, "utf8");
+    await writeTextFileAtomic(this.metadataAbsolutePath, `${JSON.stringify(this.record, null, 2)}\n`);
   }
 
   private async cleanupStageArtifacts(): Promise<void> {
@@ -1138,7 +1142,7 @@ export class WriteBatch {
     const result = await applyImmutableWriteTarget({
       allowExistingMatch: action.allowExistingMatch,
       createEffect: "copy",
-      createTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL),
+      createTarget: () => copyFileAtomicExclusive(stageAbsolutePath, target.absolutePath),
       existsErrorMessage: "Raw target already exists and may not be overwritten.",
       matchesExistingContent: async () => {
         const existingContent = await fs.readFile(target.absolutePath);
@@ -1169,18 +1173,19 @@ export class WriteBatch {
               action.backupRelativePath ??
               backupArtifactRelativePath(this.operationId, `${String(index).padStart(4, "0")}.bak`);
             const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
-            await ensureDirectory(path.dirname(backupAbsolutePath));
-            await fs.copyFile(target.absolutePath, backupAbsolutePath);
+            if (!(await pathExists(backupAbsolutePath))) {
+              await copyFileAtomicExclusive(target.absolutePath, backupAbsolutePath);
+            }
             action.backupRelativePath = backupRelativePath;
           }
         : undefined,
-      createTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath, fsConstants.COPYFILE_EXCL),
+      createTarget: () => copyFileAtomicExclusive(stageAbsolutePath, target.absolutePath),
       matchesExistingContent: async () => {
         const existingContent = await readText(target.absolutePath);
         return existingContent === stagedContent;
       },
       overwrite: action.overwrite,
-      replaceTarget: () => fs.copyFile(stageAbsolutePath, target.absolutePath),
+      replaceTarget: () => copyFileAtomic(stageAbsolutePath, target.absolutePath),
       target,
     });
     action.state = result.effect === "reuse" ? "reused" : "applied";
@@ -1233,8 +1238,9 @@ export class WriteBatch {
       `${String(index).padStart(4, "0")}.bak`,
     );
     const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
-    await ensureDirectory(path.dirname(backupAbsolutePath));
-    await fs.copyFile(target.absolutePath, backupAbsolutePath);
+    if (!(await pathExists(backupAbsolutePath))) {
+      await copyFileAtomicExclusive(target.absolutePath, backupAbsolutePath);
+    }
     await fs.unlink(target.absolutePath);
 
     action.state = "applied";
@@ -1260,7 +1266,7 @@ export class WriteBatch {
         } else if (action.backupRelativePath) {
           const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
           const backupAbsolutePath = resolveVaultPath(this.vaultRoot, action.backupRelativePath).absolutePath;
-          await fs.copyFile(backupAbsolutePath, targetAbsolutePath);
+          await copyFileAtomic(backupAbsolutePath, targetAbsolutePath);
         }
       } else if (action.kind === "jsonl_append") {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
@@ -1272,8 +1278,7 @@ export class WriteBatch {
       } else if (action.kind === "delete" && action.backupRelativePath) {
         const targetAbsolutePath = resolveVaultPath(this.vaultRoot, action.targetRelativePath).absolutePath;
         const backupAbsolutePath = resolveVaultPath(this.vaultRoot, action.backupRelativePath).absolutePath;
-        await ensureDirectory(path.dirname(targetAbsolutePath));
-        await fs.copyFile(backupAbsolutePath, targetAbsolutePath);
+        await copyFileAtomic(backupAbsolutePath, targetAbsolutePath);
       }
 
       action.state = "rolled_back";

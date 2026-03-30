@@ -225,4 +225,16 @@ test("buildWebReturnTo falls back to root for invalid returnTo values", () => {
     ),
     "http://127.0.0.1:3000/",
   );
+  assert.equal(
+    buildWebReturnTo(
+      new URL("http://127.0.0.1:3000/devices/connect/whoop?returnTo=//evil.test/settings"),
+    ),
+    "http://127.0.0.1:3000/",
+  );
+  assert.equal(
+    buildWebReturnTo(
+      new URL("http://127.0.0.1:3000/devices/connect/whoop?returnTo=/%5Cevil.test"),
+    ),
+    "http://127.0.0.1:3000/",
+  );
 });

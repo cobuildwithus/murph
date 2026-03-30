@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import type {
   AuditRecord,
@@ -365,7 +365,7 @@ test("upsertEvent accepts typed public event drafts and still validates against 
   assert.equal((eventRecord as Extract<EventRecord, { kind: "activity_session" }>).activityType, "strength-training");
 });
 
-test("upsertEvent rewrites existing events into the correct shard and deleteEvent removes them", async () => {
+test("upsertEvent appends revisions across shards and deleteEvent appends a tombstone", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-rewrite");
   await initializeVault({ vaultRoot });
 
@@ -395,29 +395,25 @@ test("upsertEvent rewrites existing events into the correct shard and deleteEven
   assert.equal(aprilResult.created, false);
   assert.notEqual(aprilResult.ledgerFile, marchResult.ledgerFile);
 
+  const marchRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: marchResult.ledgerFile,
+  });
   const aprilRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: aprilResult.ledgerFile,
   });
-
-  await assert.rejects(
-    () =>
-      readJsonlRecords({
-        vaultRoot,
-        relativePath: marchResult.ledgerFile,
-      }),
-    (error: unknown) => {
-      if (!error || typeof error !== "object") {
-        return false;
-      }
-
-      return "code" in error && (error as { code?: unknown }).code === "VAULT_FILE_MISSING";
-    },
-  );
+  const originalEvent = marchRecords.find(
+    (record) => expectRecord<{ id?: string }>(record).id === eventId,
+  ) as EventRecord | undefined;
   const updatedEvent = aprilRecords.find(
     (record) => expectRecord<{ id?: string }>(record).id === eventId,
   ) as EventRecord | undefined;
+  assert.ok(originalEvent);
+  assert.equal(originalEvent.lifecycle?.revision, 1);
+  assert.equal(originalEvent.note, "Original note.");
   assert.ok(updatedEvent);
+  assert.equal(updatedEvent.lifecycle?.revision, 2);
   assert.equal(updatedEvent.note, "Updated note.");
 
   const deleted = await deleteEvent({
@@ -429,107 +425,74 @@ test("upsertEvent rewrites existing events into the correct shard and deleteEven
   assert.deepEqual(deleted.retainedPaths, []);
   assert.equal(deleted.deleted, true);
 
-  await assert.rejects(
-    () =>
-      readJsonlRecords({
-        vaultRoot,
-        relativePath: aprilResult.ledgerFile,
-      }),
-    (error: unknown) => {
-      if (!error || typeof error !== "object") {
-        return false;
-      }
+  const aprilRecordsAfterDelete = await readJsonlRecords({
+    vaultRoot,
+    relativePath: aprilResult.ledgerFile,
+  });
+  const tombstoneEvent = aprilRecordsAfterDelete
+    .filter((record) => expectRecord<{ id?: string }>(record).id === eventId)
+    .map((record) => record as EventRecord)
+    .find((record) => record.lifecycle?.state === "deleted");
 
-      return (
-        "code" in error &&
-        ((error as { code?: unknown }).code === "ENOENT" ||
-          (error as { code?: unknown }).code === "VAULT_FILE_MISSING")
-      );
-    },
-  );
+  assert.equal(aprilRecordsAfterDelete.length, 2);
+  assert.ok(tombstoneEvent);
+  assert.equal(tombstoneEvent.lifecycle?.revision, 3);
+  assert.equal(tombstoneEvent.note, "Updated note.");
 });
 
-test("deleteEvent removes duplicate stored event entries across shards while preserving other events", async () => {
+test("deleteEvent leaves historical rows in place and the same event id can be revived later", async () => {
   const vaultRoot = await makeTempDirectory("murph-event-delete-duplicates");
-  const sourceRoot = await makeTempDirectory("murph-source");
   await initializeVault({ vaultRoot });
 
-  const photoPath = await writeExternalFile(sourceRoot, "meal photo.jpg", "photo");
-  const meal = await addMeal({
+  const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1B1";
+  const marchResult = await upsertEvent({
     vaultRoot,
-    occurredAt: "2026-03-12T08:15:00.000Z",
-    photoPath,
-    note: "Meal that should be deleted.",
+    payload: {
+      id: eventId,
+      kind: "note",
+      occurredAt: "2026-03-12T08:15:00.000Z",
+      title: "Original note",
+      note: "First revision.",
+    },
   });
-
-  const mealEvents = await readJsonlRecords({
-    vaultRoot,
-    relativePath: meal.eventPath,
-  });
-  const mealEvent = expectRecord<MealEventRecord>(mealEvents[0]);
-  const eventId = mealEvent.id;
-
-  const expectedRetainedPaths = [
-    ...(mealEvent.rawRefs ?? []),
-    ...(mealEvent.photoPaths ?? []),
-    ...(mealEvent.audioPaths ?? []),
-  ]
-    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    .reduce((acc, value) => acc.add(value), new Set<string>());
-
+  await deleteEvent({ vaultRoot, eventId });
   const aprilResult = await upsertEvent({
     vaultRoot,
     payload: {
-      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1B1",
+      id: eventId,
       kind: "note",
       occurredAt: "2026-04-03T08:00:00.000Z",
-      title: "Other note",
-      note: "This note should remain in April.",
+      title: "Revived note",
+      note: "Latest active revision.",
     },
   });
 
-  await fs.appendFile(
-    path.join(vaultRoot, aprilResult.ledgerFile),
-    `${JSON.stringify(mealEvent)}\n`,
-  );
+  assert.equal(marchResult.created, true);
+  assert.equal(aprilResult.created, false);
 
-  const deleted = await deleteEvent({ vaultRoot, eventId });
-  assert.equal(deleted.eventId, eventId);
-  assert.equal(deleted.kind, "meal");
-  assert.deepEqual(
-    deleted.retainedPaths,
-    [...expectedRetainedPaths].sort((left, right) => left.localeCompare(right)),
-  );
-  assert.equal(deleted.deleted, true);
-
-  await assert.rejects(
-    () =>
-      readJsonlRecords({
-        vaultRoot,
-        relativePath: meal.eventPath,
-      }),
-    (error: unknown) => {
-      if (!error || typeof error !== "object") {
-        return false;
-      }
-
-      return (
-        "code" in error &&
-        ((error as { code?: unknown }).code === "ENOENT" ||
-          (error as { code?: unknown }).code === "VAULT_FILE_MISSING")
-      );
-    },
-  );
-
+  const marchRecords = await readJsonlRecords({
+    vaultRoot,
+    relativePath: marchResult.ledgerFile,
+  });
   const aprilRecords = await readJsonlRecords({
     vaultRoot,
     relativePath: aprilResult.ledgerFile,
   });
-  assert.equal(
-    aprilRecords.some((record) => expectRecord<{ id?: string }>(record).id === eventId),
-    false,
-  );
+
+  const revisions = [...marchRecords, ...aprilRecords]
+    .filter((record) => expectRecord<{ id?: string }>(record).id === eventId)
+    .map((record) => (record as EventRecord).lifecycle?.revision)
+    .sort((left, right) => (left ?? 0) - (right ?? 0));
+
+  assert.equal(marchRecords.length, 2);
   assert.equal(aprilRecords.length, 1);
+  assert.deepEqual(revisions, [1, 2, 3]);
+  assert.equal(
+    (aprilRecords[0] as EventRecord).lifecycle?.state,
+    undefined,
+  );
+  assert.equal((aprilRecords[0] as EventRecord).lifecycle?.revision, 3);
+  assert.equal((aprilRecords[0] as EventRecord).note, "Latest active revision.");
 });
 
 test("loadVault backfills additive metadata defaults in memory and repairVault persists them", async () => {
@@ -2093,6 +2056,40 @@ test("direct and batched text writes keep no-overwrite and append semantics alig
   assert.equal(appendOperation.status, "committed");
   assert.equal(appendOperation.actions[0]?.effect, "append");
   assert.equal(appendOperation.actions[0]?.existedBefore, true);
+});
+
+test("writeVaultTextFile leaves the prior canonical file intact when an atomic replace cannot commit", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault-atomic-write");
+  await initializeVault({ vaultRoot });
+
+  const notePath = "notes/source-of-truth.md";
+  await writeVaultTextFile(vaultRoot, notePath, "before\n");
+
+  const renameSpy = vi.spyOn(fs, "rename").mockRejectedValueOnce(
+    Object.assign(new Error("rename blocked"), {
+      code: "EACCES",
+    }),
+  );
+
+  try {
+    await assert.rejects(
+      () => writeVaultTextFile(vaultRoot, notePath, "after\n"),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "EACCES",
+    );
+  } finally {
+    renameSpy.mockRestore();
+  }
+
+  const noteAbsolutePath = path.join(vaultRoot, notePath);
+  const noteDirectory = path.dirname(noteAbsolutePath);
+  const noteContent = await fs.readFile(noteAbsolutePath, "utf8");
+  const noteEntries = await fs.readdir(noteDirectory);
+
+  assert.equal(noteContent, "before\n");
+  assert.deepEqual(noteEntries, ["source-of-truth.md"]);
 });
 
 test("validateVault reports unresolved write operations", async () => {

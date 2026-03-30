@@ -1,7 +1,11 @@
 import path from "node:path";
-import { constants as fsConstants } from "node:fs";
 import { promises as fs } from "node:fs";
 
+import {
+  copyFileAtomicExclusive,
+  writeTextFileAtomic,
+  writeTextFileAtomicExclusive,
+} from "./atomic-write.ts";
 import { VaultError } from "./errors.ts";
 import {
   assertPathWithinVaultOnDisk,
@@ -102,21 +106,13 @@ export async function writeVaultTextFile(
     },
   });
   await applyTextWriteTarget({
-    createTarget: () =>
-      fs.writeFile(resolved.absolutePath, content, {
-        encoding: "utf8",
-        flag: "wx",
-      }),
+    createTarget: () => writeTextFileAtomicExclusive(resolved.absolutePath, content),
     matchesExistingContent: async () => {
       const existingContent = await fs.readFile(resolved.absolutePath, "utf8");
       return existingContent === content;
     },
     overwrite,
-    replaceTarget: () =>
-      fs.writeFile(resolved.absolutePath, content, {
-        encoding: "utf8",
-        flag: "w",
-      }),
+    replaceTarget: () => writeTextFileAtomic(resolved.absolutePath, content),
     target: resolved,
   });
 
@@ -181,7 +177,7 @@ export async function copyImmutableFileIntoVaultRaw(
   await applyImmutableWriteTarget({
     allowExistingMatch: options.allowExistingMatch,
     createEffect: "copy",
-    createTarget: () => fs.copyFile(sourceAbsolutePath, resolved.absolutePath, fsConstants.COPYFILE_EXCL),
+    createTarget: () => copyFileAtomicExclusive(sourceAbsolutePath, resolved.absolutePath),
     existsErrorMessage: "Raw target already exists and may not be overwritten.",
     matchesExistingContent: () => fileContentsEqual(sourceAbsolutePath, resolved.absolutePath),
     target: resolved,
@@ -205,11 +201,7 @@ export async function writeImmutableJsonFileIntoVaultRaw(
   });
   await applyImmutableWriteTarget({
     allowExistingMatch: options.allowExistingMatch,
-    createTarget: () =>
-      fs.writeFile(resolved.absolutePath, content, {
-        encoding: "utf8",
-        flag: "wx",
-      }),
+    createTarget: () => writeTextFileAtomicExclusive(resolved.absolutePath, content),
     existsErrorMessage: "Raw target already exists and may not be overwritten.",
     matchesExistingContent: async () => {
       const existingContent = await fs.readFile(resolved.absolutePath, "utf8");

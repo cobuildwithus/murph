@@ -292,7 +292,7 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
     returnTo: "https://app.example.test/settings/devices",
   });
   assert.match(begin.authorizationUrl, /^https:\/\/example\.test\/oauth\?state=/u);
-  assert.match(begin.authorizationUrl, /redirect_uri=https%3A%2F%2Fsync\.murph\.test%2Fdevice-sync%2Foauth%2Fdemo%2Fcallback/u);
+  assert.match(begin.authorizationUrl, /redirect_uri=https%3A%2F%2Fsync\.example\.test%2Fdevice-sync%2Foauth%2Fdemo%2Fcallback/u);
 
   const connected = await ingress.handleOAuthCallback({
     provider: "demo",
@@ -576,6 +576,33 @@ test("public ingress preserves callback redirect context on OAuth callback failu
       error.details?.provider === "demo" &&
       error.details?.returnTo === "https://app.example.test/settings/devices",
   );
+});
+
+test("public ingress rejects protocol-relative, backslash-prefixed, and credential-bearing returnTo values", async () => {
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    allowedReturnOrigins: ["https://app.example.test"],
+    registry: createDeviceSyncRegistry([createFakeProvider()]),
+    store: new InMemoryPublicIngressStore(),
+  });
+
+  for (const returnTo of [
+    "//evil.test/steal",
+    "/\\evil.test",
+    "https://operator:secret@app.example.test/settings/devices",
+  ]) {
+    await assert.rejects(
+      () =>
+        ingress.startConnection({
+          provider: "demo",
+          returnTo,
+        }),
+      (error: unknown) =>
+        error instanceof DeviceSyncError &&
+        error.code === "RETURN_TO_INVALID" &&
+        error.httpStatus === 400,
+    );
+  }
 });
 
 test("public ingress stores webhook receipt timestamps using ingestion time, not provider event time", async () => {
