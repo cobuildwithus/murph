@@ -19,10 +19,10 @@ const mocks = vi.hoisted(() => ({
   createInboxParserService: vi.fn(() => ({
     drain: vi.fn(async () => []),
   })),
-  createIntegratedInboxCliServices: vi.fn(() => ({
+  createIntegratedInboxServices: vi.fn(() => ({
     init: vi.fn(async () => undefined),
   })),
-  createIntegratedVaultCliServices: vi.fn(() => ({
+  createIntegratedVaultServices: vi.fn(() => ({
     core: {
       init: vi.fn(async () => undefined),
     },
@@ -49,25 +49,13 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@murph/assistant-services/automation", () => ({
-  runAssistantAutomation: mocks.runAssistantAutomation,
-}));
-
-vi.mock("@murph/assistant-services/cron", () => ({
+vi.mock("murph/assistant-core", () => ({
+  createIntegratedInboxServices: mocks.createIntegratedInboxServices,
+  createIntegratedVaultServices: mocks.createIntegratedVaultServices,
   getAssistantCronStatus: mocks.getAssistantCronStatus,
-}));
-
-vi.mock("@murph/assistant-services/inbox-services", () => ({
-  createIntegratedInboxCliServices: mocks.createIntegratedInboxCliServices,
-}));
-
-vi.mock("@murph/assistant-services/store", () => ({
   readAssistantAutomationState: mocks.readAssistantAutomationState,
+  runAssistantAutomation: mocks.runAssistantAutomation,
   saveAssistantAutomationState: mocks.saveAssistantAutomationState,
-}));
-
-vi.mock("@murph/assistant-services/vault-services", () => ({
-  createIntegratedVaultCliServices: mocks.createIntegratedVaultCliServices,
 }));
 
 vi.mock("@murph/device-syncd", () => ({

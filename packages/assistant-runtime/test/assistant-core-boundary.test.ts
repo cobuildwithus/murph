@@ -1,77 +1,75 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { test } from "vitest";
 
 import {
+  assistantAutomationStateSchema,
+  createIntegratedInboxCliServices,
+  createIntegratedInboxServices,
+  createIntegratedVaultCliServices,
+  createIntegratedVaultServices,
+  readAssistantAutomationState,
   resolveAssistantSelfDeliveryTarget,
+  saveAssistantAutomationState,
   saveAssistantSelfDeliveryTarget,
-} from "@murph/assistant-services/operator-config";
-import {
-  readAssistantAutomationState as readHostedAssistantAutomationState,
-  saveAssistantAutomationState as saveHostedAssistantAutomationState,
-} from "@murph/assistant-services/store";
+} from "murph/assistant-core";
 import {
   readOperatorConfig,
   resolveAssistantSelfDeliveryTarget as resolveCliAssistantSelfDeliveryTarget,
   saveAssistantOperatorDefaultsPatch,
+  saveAssistantSelfDeliveryTarget as saveCliAssistantSelfDeliveryTarget,
   saveDefaultVaultConfig,
 } from "murph/operator-config";
-import { assistantAutomationStateSchema } from "murph/assistant-core";
 import {
   readAssistantAutomationState as readCliAssistantAutomationState,
   saveAssistantAutomationState as saveCliAssistantAutomationState,
 } from "murph/assistant/store";
 
-test("assistant-services publishes the hosted boundary entrypoints needed by assistant-runtime", async () => {
-  const assistantServicesManifest = JSON.parse(
-    await readFile(
-      new URL("../../assistant-services/package.json", import.meta.url),
-      "utf8",
-    ),
+test("assistant-runtime uses murph/assistant-core as its only assistant boundary", async () => {
+  const runtimeManifest = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
-    dependencies?: Record<string, string>;
-    exports: Record<string, { default?: string; import?: string; types?: string }>;
+    dependencies?: Record<string, string | undefined>;
   };
   const cliManifest = JSON.parse(
-    await readFile(
-      new URL("../../cli/package.json", import.meta.url),
-      "utf8",
-    ),
+    await readFile(new URL("../../cli/package.json", import.meta.url), "utf8"),
   ) as {
-    exports: Record<string, { default?: string; import?: string; types?: string }>;
+    exports: Record<string, { default?: string; types?: string }>;
   };
+  const sourceFiles = await listFilesRecursive(new URL("../src/", import.meta.url));
+  let sawAssistantCoreImport = false;
 
-  assert.deepEqual(assistantServicesManifest.exports["."], {
-    default: "./dist/index.js",
-    import: "./dist/index.js",
-    types: "./dist/index.d.ts",
-  });
-  assert.deepEqual(assistantServicesManifest.exports["./operator-config"], {
-    default: "./dist/operator-config.js",
-    import: "./dist/operator-config.js",
-    types: "./dist/operator-config.d.ts",
-  });
-  assert.deepEqual(assistantServicesManifest.exports["./runtime"], {
-    default: "./dist/runtime.js",
-    import: "./dist/runtime.js",
-    types: "./dist/runtime.d.ts",
-  });
+  assert.equal(runtimeManifest.dependencies?.murph, "workspace:*");
+  assert.equal(existsSync(new URL("../../assistant-services/package.json", import.meta.url)), false);
+  assert.equal(runtimeManifest.dependencies?.["@murph/assistant-services"], undefined);
   assert.deepEqual(cliManifest.exports["./assistant-core"], {
     default: "./dist/assistant-core.js",
     types: "./dist/assistant-core.d.ts",
   });
-  assert.equal(
-    "@murph/runtime-state" in (assistantServicesManifest.dependencies ?? {}),
-    false,
-    "assistant-services should stay a compatibility boundary over murph/assistant-core instead of owning runtime-state writes.",
-  );
+
+  for (const fileUrl of sourceFiles) {
+    const source = await readFile(fileUrl, "utf8");
+    assert.doesNotMatch(source, /@murph\/assistant-services/u);
+    if (/from ["']murph\/assistant-core["']/u.test(source)) {
+      sawAssistantCoreImport = true;
+    }
+  }
+
+  assert.equal(sawAssistantCoreImport, true);
+  assert.equal(createIntegratedInboxServices, createIntegratedInboxCliServices);
+  assert.equal(createIntegratedVaultServices, createIntegratedVaultCliServices);
+  assert.equal(resolveAssistantSelfDeliveryTarget, resolveCliAssistantSelfDeliveryTarget);
+  assert.equal(saveAssistantSelfDeliveryTarget, saveCliAssistantSelfDeliveryTarget);
+  assert.equal(readAssistantAutomationState, readCliAssistantAutomationState);
+  assert.equal(saveAssistantAutomationState, saveCliAssistantAutomationState);
 });
 
-test("assistant-services operator-config writes targets back in a CLI-readable shape", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-services-boundary-"));
+test("assistant-core operator-config writes targets back in a CLI-readable shape", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-"));
 
   try {
     const homeRoot = path.join(workspaceRoot, "home");
@@ -152,8 +150,8 @@ test("assistant-services operator-config writes targets back in a CLI-readable s
   }
 });
 
-test("assistant-services operator-config tolerates malformed existing config", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-services-boundary-"));
+test("assistant-core operator-config tolerates malformed existing config", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-"));
 
   try {
     const homeRoot = path.join(workspaceRoot, "home");
@@ -182,8 +180,8 @@ test("assistant-services operator-config tolerates malformed existing config", a
   }
 });
 
-test("assistant-services operator-config rewrites schema-invalid assistant defaults into a CLI-readable config", async () => {
-  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-services-boundary-"));
+test("assistant-core operator-config rewrites schema-invalid assistant defaults into a CLI-readable config", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-"));
 
   try {
     const homeRoot = path.join(workspaceRoot, "home");
@@ -231,15 +229,15 @@ test("assistant-services operator-config rewrites schema-invalid assistant defau
   }
 });
 
-test("assistant-services automation state stays CLI-readable in both directions", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "assistant-services-boundary-vault-"));
+test("assistant-core automation state stays CLI-readable in both directions", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-vault-"));
 
   try {
-    const initial = await readHostedAssistantAutomationState(vaultRoot);
+    const initial = await readAssistantAutomationState(vaultRoot);
     assert.equal(initial.autoReplyPrimed, true);
     assert.deepEqual(initial.autoReplyChannels, []);
 
-    const hostedSaved = await saveHostedAssistantAutomationState(
+    const coreSaved = await saveAssistantAutomationState(
       vaultRoot,
       assistantAutomationStateSchema.parse({
         ...initial,
@@ -250,19 +248,37 @@ test("assistant-services automation state stays CLI-readable in both directions"
       }),
     );
 
-    assert.deepEqual(await readCliAssistantAutomationState(vaultRoot), hostedSaved);
+    assert.deepEqual(await readCliAssistantAutomationState(vaultRoot), coreSaved);
 
     const cliSaved = await saveCliAssistantAutomationState(
       vaultRoot,
       assistantAutomationStateSchema.parse({
-        ...hostedSaved,
+        ...coreSaved,
         preferredChannels: ["telegram"],
         updatedAt: "2026-03-28T12:00:00.000Z",
       }),
     );
 
-    assert.deepEqual(await readHostedAssistantAutomationState(vaultRoot), cliSaved);
+    assert.deepEqual(await readAssistantAutomationState(vaultRoot), cliSaved);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }
 });
+
+async function listFilesRecursive(directoryUrl: URL): Promise<URL[]> {
+  const entries = await readdir(directoryUrl, { withFileTypes: true });
+  const files: URL[] = [];
+
+  for (const entry of entries) {
+    const nextUrl = new URL(entry.name, directoryUrl);
+    if (entry.isDirectory()) {
+      files.push(...(await listFilesRecursive(new URL(`${entry.name}/`, directoryUrl))));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(nextUrl);
+    }
+  }
+
+  return files;
+}

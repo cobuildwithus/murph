@@ -11,7 +11,7 @@
       "path": "../runtime-state"
     },
     {
-      "path": "../assistant-services"
+      "path": "../cli"
     }
   ],
   "include": [
