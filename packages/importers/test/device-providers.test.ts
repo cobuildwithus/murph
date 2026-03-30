@@ -776,13 +776,13 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "epoch-summary:epoch-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "sleep:sleep-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity:activity-1"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:fit"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-asset:activity-1:fit"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "women-health:cycle-1"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "deletion:activity:activity-deleted"));
 
   const sleepEvent = payload.events?.find((event) => event.kind === "sleep_session");
   const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
-  const activityFile = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-1:fit");
+  const activityFile = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-asset:activity-1:fit");
   const dailyStepsObservation = payload.events?.find(
     (event) => event.kind === "observation" && event.fields?.metric === "daily-steps",
   );
@@ -796,7 +796,7 @@ test("prepareDeviceProviderSnapshotImport normalizes Garmin snapshots into canon
   assert.equal(dailyStepsObservation?.timeZone, undefined);
   assert.equal(activityEvent?.fields?.activityType, "running");
   assert.equal(activityEvent?.fields?.distanceKm, 7.25);
-  assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-file:activity-1:fit"));
+  assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-asset:activity-1:fit"));
   assert.equal(activityFile?.fileName, "activity-1.fit");
   assert.equal(activityFile?.mediaType, "application/octet-stream");
   assert.equal(activityFile?.metadata?.checksum, "abc123");
@@ -829,7 +829,7 @@ test("prepareDeviceProviderSnapshotImport rounds fractional integer sample strea
   );
 });
 
-test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, aliases, and string numerics", async () => {
+test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, unsupported legacy file sections, and string numerics", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
     vaultRoot: "fixture-vault",
@@ -930,12 +930,8 @@ test("prepareDeviceProviderSnapshotImport handles Garmin alias collections, alia
         event.fields?.sourceEventType === "activity.deleted",
     ),
   );
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-2:tcx"));
-
-  const activityFile = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-2:tcx");
-  assert.equal(activityFile?.fileName, "activity-2.tcx");
-  assert.equal(activityFile?.mediaType, "application/xml");
-  assert.equal(activityFile?.metadata?.checksum, "xyz789");
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role === "activity-asset:activity-2:tcx"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:files"));
 });
 
 test("prepareDeviceProviderSnapshotImport keeps Garmin date buckets on the provider day and honors summaryDate aliases", async () => {
@@ -1097,7 +1093,7 @@ test("prepareDeviceProviderSnapshotImport drops unsupported Garmin sleep stage l
   );
 });
 
-test("prepareDeviceProviderSnapshotImport keeps metadata-only Garmin activityFiles on stable legacy roles and links them from the activity event", async () => {
+test("prepareDeviceProviderSnapshotImport keeps metadata-only Garmin activityFiles on first-class asset roles and links them from the activity event", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
     snapshot: {
@@ -1121,16 +1117,16 @@ test("prepareDeviceProviderSnapshotImport keeps metadata-only Garmin activityFil
     },
   });
 
-  const descriptor = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-file:activity-1:fit");
+  const descriptor = payload.rawArtifacts?.find((artifact) => artifact.role === "activity-asset:activity-1:fit");
   const activityEvent = payload.events?.find((event) => event.kind === "activity_session");
 
   assert.ok(descriptor);
-  assert.equal(descriptor?.fileName, "activity-1-fit-descriptor.json");
+  assert.equal(descriptor?.fileName, "activity-1-fit-asset-descriptor.json");
   assert.equal(descriptor?.mediaType, "application/json");
   assert.equal(descriptor?.metadata?.intendedFileType, "fit");
   assert.equal(descriptor?.metadata?.intendedFileName, "activity-1.fit");
-  assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-file:activity-1:fit"));
-  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-file-descriptor:")));
+  assert.ok(activityEvent?.rawArtifactRoles?.includes("activity-asset:activity-1:fit"));
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-file:")));
 });
 
 test("importDeviceProviderSnapshot re-imports metadata-only Garmin activity files without churning the canonical activity-session id", async () => {
@@ -1196,7 +1192,7 @@ test("importDeviceProviderSnapshot re-imports metadata-only Garmin activity file
   );
 });
 
-test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections and keeps the legacy files alias conservative", async () => {
+test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections and treats the old files alias as an unsupported retained section", async () => {
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "garmin",
     snapshot: {
@@ -1233,12 +1229,12 @@ test("prepareDeviceProviderSnapshotImport preserves unsupported Garmin sections 
   const retainedSnapshotSections =
     (payload.provenance?.importedSections as { retainedSnapshotSections?: string[] } | undefined)?.retainedSnapshotSections;
 
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-1:gpx"));
-  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-file:activity-2:tcx"));
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role === "activity-asset:activity-1:gpx"));
+  assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "activity-asset:activity-2:tcx"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:activityfiles"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:files"));
   assert.ok(payload.rawArtifacts?.some((artifact) => artifact.role === "snapshot-section:readinesswidgets"));
-  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-file:unknown:fit")));
+  assert.ok(!payload.rawArtifacts?.some((artifact) => artifact.role.startsWith("activity-asset:unknown:fit")));
   assert.deepEqual(
     [...(retainedSnapshotSections ?? [])].sort(),
     ["activityfiles", "files", "readinesswidgets"],

@@ -48,7 +48,6 @@ export interface GarminSnapshotInput {
   sleeps?: unknown[];
   activities?: unknown[];
   activityFiles?: unknown[];
-  files?: unknown[];
   womenHealth?: unknown[];
   womenHealthSummaries?: unknown[];
   deletions?: unknown[];
@@ -69,7 +68,6 @@ const garminSnapshotSchema = z.object({
   sleeps: garminHandledCollectionSchema.optional(),
   activities: garminHandledCollectionSchema.optional(),
   activityFiles: garminConservativeFileCollectionSchema.optional(),
-  files: garminConservativeFileCollectionSchema.optional(),
   womenHealth: garminHandledCollectionSchema.optional(),
   womenHealthSummaries: garminHandledCollectionSchema.optional(),
   deletions: garminHandledCollectionSchema.optional(),
@@ -86,7 +84,6 @@ const GARMIN_HANDLED_KEYS = new Set([
   "sleeps",
   "activities",
   "activityFiles",
-  "files",
   "womenHealth",
   "womenHealthSummaries",
   "deletions",
@@ -94,18 +91,6 @@ const GARMIN_HANDLED_KEYS = new Set([
 
 function parseGarminSnapshot(snapshot: unknown): GarminSnapshotInput {
   return garminSnapshotSchema.parse(snapshot);
-}
-
-function isLegacyActivityFile(record: PlainObject): boolean {
-  return Boolean(
-    firstIdentifierFromPaths(record, [
-      "activityId",
-      "activity_id",
-      "activity.activityId",
-      "activity.id",
-      "metadata.activityId",
-    ]),
-  );
 }
 
 function pushGarminSnapshotSectionArtifacts(
@@ -196,14 +181,6 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
   const explicitActivityFileEntries = asArray(request.activityFiles);
   const explicitActivityFiles = asObjectArray(request.activityFiles);
   const unsupportedExplicitActivityFiles = explicitActivityFileEntries.filter((entry) => !asPlainObject(entry));
-  const legacyFileEntries = asArray(request.files);
-  const legacyFiles = asObjectArray(request.files);
-  const legacyActivityFiles = legacyFiles.filter((file) => isLegacyActivityFile(file));
-  const unsupportedLegacyFiles = legacyFileEntries.filter((entry) => {
-    const record = asPlainObject(entry);
-    return !record || !isLegacyActivityFile(record);
-  });
-  const activityFiles = [...explicitActivityFiles, ...legacyActivityFiles];
   const womenHealth = asObjectArray(request.womenHealth ?? request.womenHealthSummaries);
   const deletions = asObjectArray(request.deletions);
   const events: DeviceEventPayload[] = [];
@@ -227,13 +204,12 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
   normalizeGarminEpochSummaries({ importedAt, events, samples, rawArtifacts }, epochSummaries);
   normalizeGarminSleeps({ importedAt, events, samples, rawArtifacts }, sleeps);
 
-  const activityFileRoles = normalizeGarminActivityFiles(rawArtifacts, activityFiles);
+  const activityFileRoles = normalizeGarminActivityFiles(rawArtifacts, explicitActivityFiles);
   normalizeGarminActivities({ importedAt, events, rawArtifacts }, activities, activityFileRoles);
   normalizeGarminWomenHealth({ importedAt, events, samples, rawArtifacts }, womenHealth);
 
   const retainedSections = pushGarminSnapshotSectionArtifacts(rawArtifacts, request, {
     ...(unsupportedExplicitActivityFiles.length > 0 ? { activityFiles: unsupportedExplicitActivityFiles } : {}),
-    ...(unsupportedLegacyFiles.length > 0 ? { files: unsupportedLegacyFiles } : {}),
   });
 
   for (const deletion of deletions) {
@@ -248,7 +224,7 @@ export function normalizeGarminSnapshot(snapshot: GarminSnapshotInput): Normaliz
       epochSummaries: epochSummaries.length,
       sleeps: sleeps.length,
       activities: activities.length,
-      activityFiles: activityFiles.length,
+      activityFiles: explicitActivityFiles.length,
       womenHealth: womenHealth.length,
       deletions: deletions.length,
       retainedSnapshotSections: retainedSections,

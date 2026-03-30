@@ -1,5 +1,11 @@
 import { resolveSystemTimeZone } from '@murph/contracts'
-import { maybeProcessDueAssistantCronViaDaemon } from '../assistant-daemon-client.js'
+import {
+  maybeGetAssistantCronJobViaDaemon,
+  maybeGetAssistantCronStatusViaDaemon,
+  maybeListAssistantCronJobsViaDaemon,
+  maybeListAssistantCronRunsViaDaemon,
+  maybeProcessDueAssistantCronViaDaemon,
+} from '../assistant-daemon-client.js'
 import { loadVault } from '@murph/core'
 import {
   assistantCronJobSchema,
@@ -9,6 +15,7 @@ import {
   type AssistantCronPreset,
   type AssistantCronRunRecord,
   type AssistantCronSchedule,
+  type AssistantCronScheduleInput,
   type AssistantCronTrigger,
 } from '../assistant-cli-contracts.ts'
 import { loadRuntimeModule } from '../runtime-import.ts'
@@ -90,7 +97,7 @@ export interface AddAssistantCronJobInput extends AssistantCronTargetInput {
   name: string
   now?: Date
   prompt: string
-  schedule: AssistantCronSchedule
+  schedule: AssistantCronScheduleInput
   stateDocId?: string | null
   vault: string
 }
@@ -135,7 +142,7 @@ export interface InstallAssistantCronPresetInput extends AssistantCronTargetInpu
   enabled?: boolean
   name?: string | null
   presetId: string
-  schedule?: AssistantCronSchedule | null
+  schedule?: AssistantCronScheduleInput | null
   stateDocId?: string | null
   variables?: Record<string, string | null | undefined> | null
   vault: string
@@ -297,6 +304,11 @@ async function resolveAssistantCronTargetDefaults(
 export async function listAssistantCronJobs(
   vault: string,
 ): Promise<AssistantCronJob[]> {
+  const remote = await maybeListAssistantCronJobsViaDaemon({ vault })
+  if (remote !== null) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   const store = await readAssistantCronStore(paths)
   return sortAssistantCronJobs(store.jobs)
@@ -306,6 +318,14 @@ export async function getAssistantCronJob(
   vault: string,
   job: string,
 ): Promise<AssistantCronJob> {
+  const remote = await maybeGetAssistantCronJobViaDaemon({
+    job,
+    vault,
+  })
+  if (remote) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   const store = await readAssistantCronStore(paths)
   return resolveAssistantCronJobFromStore(store, job)
@@ -371,6 +391,11 @@ export async function setAssistantCronJobEnabled(
 export async function getAssistantCronStatus(
   vault: string,
 ): Promise<AssistantCronStatusSnapshot> {
+  const remote = await maybeGetAssistantCronStatusViaDaemon({ vault })
+  if (remote) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(vault)
   const store = await readAssistantCronStore(paths)
   const now = new Date().toISOString()
@@ -401,6 +426,11 @@ export async function listAssistantCronRuns(input: {
   jobId: string
   runs: AssistantCronRunRecord[]
 }> {
+  const remote = await maybeListAssistantCronRunsViaDaemon(input)
+  if (remote !== null) {
+    return remote
+  }
+
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
   const store = await readAssistantCronStore(paths)
@@ -886,10 +916,10 @@ function resolveAssistantCronFailureBackoffMs(failureCount: number): number {
 
 async function resolveAssistantCronScheduleForVault(
   vault: string,
-  schedule: AssistantCronSchedule,
+  schedule: AssistantCronScheduleInput,
 ): Promise<AssistantCronSchedule> {
   if (schedule.kind !== 'cron' || schedule.timeZone) {
-    return schedule
+    return assistantCronScheduleSchema.parse(schedule)
   }
 
   return assistantCronScheduleSchema.parse({

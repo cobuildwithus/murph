@@ -59,7 +59,7 @@ function pushGarminActivityObservation(
   });
 }
 
-function nextActivityFileRole(
+function nextActivityAssetRole(
   activityId: string | undefined,
   format: string,
   activityFileRoles: Map<string, string[]>,
@@ -68,16 +68,16 @@ function nextActivityFileRole(
   if (!activityId) {
     const suffix = anonymousCount + 1;
     return {
-      role: `activity-file:unknown:${format}-${suffix}`,
+      role: `activity-asset:unknown:${format}-${suffix}`,
       nextAnonymousCount: suffix,
     };
   }
 
   const existing = activityFileRoles.get(activityId) ?? [];
-  const ordinal = existing.filter((role) => role.startsWith(`activity-file:${activityId}:${format}`)).length + 1;
+  const ordinal = existing.filter((role) => role.startsWith(`activity-asset:${activityId}:${format}`)).length + 1;
   const role = ordinal === 1
-    ? `activity-file:${activityId}:${format}`
-    : `activity-file:${activityId}:${format}-${ordinal}`;
+    ? `activity-asset:${activityId}:${format}`
+    : `activity-asset:${activityId}:${format}-${ordinal}`;
 
   return {
     role,
@@ -85,19 +85,19 @@ function nextActivityFileRole(
   };
 }
 
-function nextActivityFileDescriptorFileName(
+function nextActivityAssetDescriptorFileName(
   activityId: string | undefined,
   format: string,
   role: string,
   anonymousCount: number,
 ): string {
   if (!activityId) {
-    return `activity-file-${anonymousCount || 1}-${format}-descriptor.json`;
+    return `activity-asset-${anonymousCount || 1}-${format}-descriptor.json`;
   }
 
   const match = role.match(/-(\d+)$/);
   const ordinal = match ? Number(match[1]) : 1;
-  const baseFileName = `${activityId}-${format}-descriptor`;
+  const baseFileName = `${activityId}-${format}-asset-descriptor`;
 
   return ordinal === 1 ? `${baseFileName}.json` : `${baseFileName}-${ordinal}.json`;
 }
@@ -118,7 +118,7 @@ export function normalizeGarminActivityFiles(
       "metadata.activityId",
     ]);
     const format = inferGarminFileFormat(file);
-    const { role, nextAnonymousCount } = nextActivityFileRole(activityId, format, activityFileRoles, anonymousCount);
+    const { role, nextAnonymousCount } = nextActivityAssetRole(activityId, format, activityFileRoles, anonymousCount);
     anonymousCount = nextAnonymousCount;
     const extractedContent = firstDefined(file.content, file.fileContent, file.payload, file.data);
     const hasFileContent = extractedContent !== undefined && extractedContent !== null;
@@ -145,7 +145,7 @@ export function normalizeGarminActivityFiles(
       pushGarminArtifact(
         rawArtifacts,
         role,
-        nextActivityFileDescriptorFileName(activityId, format, role, anonymousCount),
+        nextActivityAssetDescriptorFileName(activityId, format, role, anonymousCount),
         file,
         {
           mediaType: "application/json",
@@ -164,7 +164,7 @@ export function normalizeGarminActivityFiles(
 
     const fileName =
       firstStringFromPaths(file, ["fileName", "filename", "name"]) ??
-      `${activityId ?? `activity-file-${anonymousCount || rawArtifacts.length + 1}`}.${format}`;
+      `${activityId ?? `activity-asset-${anonymousCount || rawArtifacts.length + 1}`}.${format}`;
     const mediaType =
       firstStringFromPaths(file, ["mediaType", "mimeType", "contentType"]) ??
       inferGarminFileMediaType(format, fileName);

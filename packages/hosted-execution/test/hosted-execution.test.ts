@@ -820,8 +820,8 @@ describe("@murph/hosted-execution", () => {
     ).toEqual(referencePayload);
   });
 
-  it("parses legacy hosted assistant delivery side effects without idempotency keys", () => {
-    const record = parseHostedExecutionSideEffectRecord({
+  it("rejects hosted assistant delivery side effects without idempotency keys", () => {
+    expect(() => parseHostedExecutionSideEffectRecord({
       delivery: {
         channel: "telegram",
         messageLength: 12,
@@ -834,9 +834,7 @@ describe("@murph/hosted-execution", () => {
       intentId: "outbox_intent_123",
       kind: "assistant.delivery",
       recordedAt: "2026-03-28T10:00:00.000Z",
-    });
-
-    expect(record.delivery.idempotencyKey).toBeNull();
+    })).toThrow("Hosted assistant side effect record delivery.idempotencyKey must be a non-empty string.");
   });
 
   it("parses hosted assistant delivery side effects with explicit idempotency keys", () => {

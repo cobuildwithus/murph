@@ -257,6 +257,7 @@ describe("handleRunnerOutboundRequest", () => {
         body: JSON.stringify({
           delivery: {
             channel: "telegram",
+            idempotencyKey: "assistant-outbox:intent_123",
             messageLength: 12,
             sentAt: "2026-03-26T12:00:00.000Z",
             target: "thread_123",

@@ -16,7 +16,7 @@ export type HostedExecutionSideEffect = HostedAssistantDeliverySideEffect;
 
 export interface HostedExecutionAssistantDelivery {
   channel: string;
-  idempotencyKey: string | null;
+  idempotencyKey: string;
   messageLength: number;
   sentAt: string;
   target: string;
@@ -132,14 +132,6 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
-function requireNullableString(value: unknown, label: string): string | null {
-  if (value == null) {
-    return null;
-  }
-
-  return requireString(value, label);
-}
-
 function requireNonNegativeInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new TypeError(`${label} must be a non-negative integer.`);
@@ -175,7 +167,7 @@ function parseHostedExecutionAssistantDelivery(
 
   return {
     channel: requireString(record.channel, `${label}.channel`),
-    idempotencyKey: requireNullableString(
+    idempotencyKey: requireString(
       record.idempotencyKey,
       `${label}.idempotencyKey`,
     ),
