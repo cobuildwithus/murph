@@ -1,4 +1,5 @@
 import type {
+  AssistantMemoryRecord,
   AssistantOutboxIntent,
   AssistantSession,
   AssistantStatusResult,
@@ -55,7 +56,6 @@ import {
 import {
   type AssistantMemoryGetInput,
   type AssistantMemoryPromptInput,
-  type AssistantMemoryRecord,
   type AssistantMemorySearchInput,
   type AssistantMemorySearchResponse,
   type AssistantMemoryUpsertInput,

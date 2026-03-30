@@ -1,9 +1,17 @@
 import { isLoopbackHttpBaseUrl } from '@murph/runtime-state'
 import {
   assistantAskResultSchema,
+  assistantCronJobSchema,
+  assistantCronRunRecordSchema,
+  assistantOutboxIntentSchema,
+  assistantRunResultSchema,
   assistantSessionCompatSchema,
   assistantStatusResultSchema,
   type AssistantAskResult,
+  type AssistantCronJob,
+  type AssistantCronRunRecord,
+  type AssistantOutboxIntent,
+  type AssistantRunResult,
   type AssistantSession,
   type AssistantStatusResult,
 } from './assistant-cli-contracts.js'
@@ -11,7 +19,11 @@ import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
 } from './assistant/service-contracts.js'
-import type { AssistantCronProcessDueResult } from './assistant/cron.js'
+import type { RunAssistantAutomationInput } from './assistant/automation.js'
+import type {
+  AssistantCronProcessDueResult,
+  AssistantCronStatusSnapshot,
+} from './assistant/cron.js'
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
 import { normalizeNullableString } from './assistant/shared.js'
 
@@ -34,6 +46,11 @@ export interface AssistantDaemonOpenConversationResult {
   created: boolean
   session: AssistantSession
 }
+
+export type AssistantDaemonAutomationInput = Omit<
+  RunAssistantAutomationInput,
+  'inboxServices' | 'onEvent' | 'onInboxEvent' | 'signal' | 'vaultServices'
+>
 
 export function resolveAssistantDaemonClientConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -123,6 +140,52 @@ export async function maybeUpdateAssistantSessionOptionsViaDaemon(
   return assistantSessionCompatSchema.parse(payload)
 }
 
+export async function maybeListAssistantOutboxIntentsViaDaemon(
+  input: { vault: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantOutboxIntent[] | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath('/outbox', {
+      vault: input.vault,
+    }),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return parseAssistantOutboxIntentListPayload(payload)
+}
+
+export async function maybeGetAssistantOutboxIntentViaDaemon(
+  input: {
+    intentId: string
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantOutboxIntent | null | undefined> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return undefined
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath(
+      `/outbox/${encodeURIComponent(input.intentId)}`,
+      {
+        vault: input.vault,
+      },
+    ),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return parseAssistantNullableOutboxIntentPayload(payload)
+}
+
 export async function maybeGetAssistantStatusViaDaemon(
   input: {
     limit?: number
@@ -198,6 +261,101 @@ export async function maybeGetAssistantSessionViaDaemon(
   return assistantSessionCompatSchema.parse(payload)
 }
 
+export async function maybeGetAssistantCronStatusViaDaemon(
+  input: { vault: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantCronStatusSnapshot | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath('/cron/status', {
+      vault: input.vault,
+    }),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return parseAssistantCronStatusPayload(payload)
+}
+
+export async function maybeListAssistantCronJobsViaDaemon(
+  input: { vault: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantCronJob[] | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath('/cron/jobs', {
+      vault: input.vault,
+    }),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return parseAssistantCronJobListPayload(payload)
+}
+
+export async function maybeGetAssistantCronJobViaDaemon(
+  input: {
+    job: string
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantCronJob | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath(
+      `/cron/jobs/${encodeURIComponent(input.job)}`,
+      {
+        vault: input.vault,
+      },
+    ),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return assistantCronJobSchema.parse(payload)
+}
+
+export async function maybeListAssistantCronRunsViaDaemon(
+  input: {
+    job: string
+    limit?: number
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ jobId: string; runs: AssistantCronRunRecord[] } | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath('/cron/runs', {
+      job: input.job,
+      limit:
+        typeof input.limit === 'number' && Number.isFinite(input.limit)
+          ? String(Math.trunc(input.limit))
+          : null,
+      vault: input.vault,
+    }),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return parseAssistantCronRunsPayload(payload)
+}
+
 export async function maybeDrainAssistantOutboxViaDaemon(
   input: {
     dependencies?: unknown
@@ -236,6 +394,34 @@ export async function maybeDrainAssistantOutboxViaDaemon(
     },
   })
   return parseAssistantOutboxDrainPayload(payload)
+}
+
+export async function maybeRunAssistantAutomationViaDaemon(
+  input: AssistantDaemonAutomationInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantRunResult | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson('/automation/run-once', {
+    env,
+    method: 'POST',
+    body: {
+      allowSelfAuthored: input.allowSelfAuthored,
+      deliveryDispatchMode: input.deliveryDispatchMode,
+      drainOutbox: input.drainOutbox,
+      maxPerScan: input.maxPerScan,
+      modelSpec: input.modelSpec,
+      once: input.once,
+      requestId: input.requestId ?? null,
+      scanIntervalMs: input.scanIntervalMs,
+      sessionMaxAgeMs: input.sessionMaxAgeMs ?? null,
+      startDaemon: input.startDaemon,
+      vault: input.vault,
+    },
+  })
+  return assistantRunResultSchema.parse(payload)
 }
 
 export async function maybeProcessDueAssistantCronViaDaemon(
@@ -353,6 +539,24 @@ function parseAssistantSessionListPayload(payload: unknown): AssistantSession[] 
   return payload.map((entry) => assistantSessionCompatSchema.parse(entry))
 }
 
+function parseAssistantOutboxIntentListPayload(
+  payload: unknown,
+): AssistantOutboxIntent[] {
+  if (!Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid outbox intent list payload.')
+  }
+  return payload.map((entry) => assistantOutboxIntentSchema.parse(entry))
+}
+
+function parseAssistantNullableOutboxIntentPayload(
+  payload: unknown,
+): AssistantOutboxIntent | null {
+  if (payload === null) {
+    return null
+  }
+  return assistantOutboxIntentSchema.parse(payload)
+}
+
 function parseAssistantOutboxDrainPayload(payload: unknown): {
   attempted: number
   failed: number
@@ -369,6 +573,58 @@ function parseAssistantOutboxDrainPayload(payload: unknown): {
     failed: parseAssistantCountField(record.failed, 'failed'),
     queued: parseAssistantCountField(record.queued, 'queued'),
     sent: parseAssistantCountField(record.sent, 'sent'),
+  }
+}
+
+function parseAssistantCronStatusPayload(
+  payload: unknown,
+): AssistantCronStatusSnapshot {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid cron status payload.')
+  }
+
+  const record = payload as Record<string, unknown>
+  const nextRunAt = record.nextRunAt
+  if (nextRunAt !== null && nextRunAt !== undefined && typeof nextRunAt !== 'string') {
+    throw new Error('Assistant daemon payload field nextRunAt was invalid.')
+  }
+
+  return {
+    dueJobs: parseAssistantCountField(record.dueJobs, 'dueJobs'),
+    enabledJobs: parseAssistantCountField(record.enabledJobs, 'enabledJobs'),
+    nextRunAt: nextRunAt ?? null,
+    runningJobs: parseAssistantCountField(record.runningJobs, 'runningJobs'),
+    totalJobs: parseAssistantCountField(record.totalJobs, 'totalJobs'),
+  }
+}
+
+function parseAssistantCronJobListPayload(
+  payload: unknown,
+): AssistantCronJob[] {
+  if (!Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid cron job list payload.')
+  }
+  return payload.map((entry) => assistantCronJobSchema.parse(entry))
+}
+
+function parseAssistantCronRunsPayload(
+  payload: unknown,
+): { jobId: string; runs: AssistantCronRunRecord[] } {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid cron runs payload.')
+  }
+
+  const record = payload as Record<string, unknown>
+  if (typeof record.jobId !== 'string' || record.jobId.length === 0) {
+    throw new Error('Assistant daemon payload field jobId was invalid.')
+  }
+  if (!Array.isArray(record.runs)) {
+    throw new Error('Assistant daemon payload field runs was invalid.')
+  }
+
+  return {
+    jobId: record.jobId,
+    runs: record.runs.map((entry) => assistantCronRunRecordSchema.parse(entry)),
   }
 }
 

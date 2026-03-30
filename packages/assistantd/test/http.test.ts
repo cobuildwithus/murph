@@ -32,6 +32,89 @@ const TEST_SESSION = {
   turnCount: 0,
 } as const
 
+const TEST_OUTBOX_INTENT = {
+  schema: 'murph.assistant-outbox-intent.v1',
+  intentId: 'outbox_http_test',
+  sessionId: TEST_SESSION.sessionId,
+  turnId: 'turn_http_test',
+  createdAt: '2026-03-28T00:00:00.000Z',
+  updatedAt: '2026-03-28T00:00:00.000Z',
+  lastAttemptAt: null,
+  nextAttemptAt: '2026-03-28T00:00:00.000Z',
+  sentAt: null,
+  attemptCount: 0,
+  status: 'pending',
+  message: 'queued hello',
+  dedupeKey: 'dedupe-key',
+  targetFingerprint: 'target-fingerprint',
+  channel: 'telegram',
+  identityId: null,
+  actorId: 'chat-123',
+  threadId: 'chat-123',
+  threadIsDirect: true,
+  replyToMessageId: null,
+  bindingDelivery: {
+    kind: 'participant',
+    target: 'chat-123',
+  },
+  explicitTarget: null,
+  delivery: null,
+  deliveryConfirmationPending: false,
+  deliveryIdempotencyKey: null,
+  deliveryTransportIdempotent: false,
+  lastError: null,
+} as const
+
+const TEST_CRON_JOB = {
+  schema: 'murph.assistant-cron-job.v1',
+  jobId: 'cron_http_test',
+  name: 'daily-checkin',
+  enabled: true,
+  keepAfterRun: true,
+  prompt: 'Send a quick check-in.',
+  schedule: {
+    kind: 'every',
+    everyMs: 86_400_000,
+  },
+  target: {
+    sessionId: TEST_SESSION.sessionId,
+    alias: null,
+    channel: 'telegram',
+    identityId: null,
+    participantId: 'chat-123',
+    sourceThreadId: 'chat-123',
+    deliveryTarget: null,
+    deliverResponse: true,
+  },
+  stateDocId: null,
+  createdAt: '2026-03-28T00:00:00.000Z',
+  updatedAt: '2026-03-28T00:00:00.000Z',
+  state: {
+    nextRunAt: '2026-03-29T00:00:00.000Z',
+    lastRunAt: null,
+    lastSucceededAt: null,
+    lastFailedAt: null,
+    consecutiveFailures: 0,
+    lastError: null,
+    runningAt: null,
+    runningPid: null,
+  },
+} as const
+
+const TEST_CRON_RUN = {
+  schema: 'murph.assistant-cron-run.v1',
+  runId: 'cronrun_http_test',
+  jobId: TEST_CRON_JOB.jobId,
+  trigger: 'scheduled',
+  status: 'succeeded',
+  startedAt: '2026-03-28T00:00:00.000Z',
+  finishedAt: '2026-03-28T00:00:10.000Z',
+  sessionId: TEST_SESSION.sessionId,
+  response: 'done',
+  responseLength: 4,
+  error: null,
+} as const
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -52,6 +135,14 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   const getSession = vi.fn(async (input: { sessionId: string }) => ({
     ...TEST_SESSION,
     sessionId: input.sessionId,
+  }))
+  const getCronJob = vi.fn(async (input: { job: string }) => ({
+    ...TEST_CRON_JOB,
+    jobId: input.job,
+  }))
+  const getOutboxIntent = vi.fn(async (input: { intentId: string }) => ({
+    ...TEST_OUTBOX_INTENT,
+    intentId: input.intentId,
   }))
   const getStatus = vi.fn(async () => ({
     vault: '/tmp/vault',
@@ -140,6 +231,15 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   } as any))
   const service = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+    getCronJob,
+    getCronStatus: async () => ({
+      totalJobs: 1,
+      enabledJobs: 1,
+      dueJobs: 0,
+      runningJobs: 0,
+      nextRunAt: TEST_CRON_JOB.state.nextRunAt,
+    } as any),
+    getOutboxIntent,
     getSession,
     health: async () => ({
       generatedAt: '2026-03-28T00:00:00.000Z',
@@ -148,6 +248,12 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       vaultBound: true,
     }),
     getStatus,
+    listCronJobs: async () => [TEST_CRON_JOB as any],
+    listCronRuns: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      runs: [TEST_CRON_RUN],
+    }),
+    listOutbox: async () => [TEST_OUTBOX_INTENT as any],
     listSessions: async () => [TEST_SESSION as any],
     openConversation: async () => ({
       created: true,
@@ -264,6 +370,98 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     const sessionPayload = await session.json() as { sessionId: string }
     assert.equal(sessionPayload.sessionId, 'session_http_route')
     assert.equal(getSession.mock.calls[0]?.[0]?.sessionId, 'session_http_route')
+
+    const outbox = await fetch(
+      `${handle.address.baseUrl}/outbox?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(outbox.status, 200)
+    const outboxPayload = await outbox.json() as Array<{ intentId: string }>
+    assert.equal(outboxPayload[0]?.intentId, TEST_OUTBOX_INTENT.intentId)
+
+    const outboxIntent = await fetch(
+      `${handle.address.baseUrl}/outbox/${encodeURIComponent('outbox_http_route')}?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(outboxIntent.status, 200)
+    const outboxIntentPayload = await outboxIntent.json() as { intentId: string }
+    assert.equal(outboxIntentPayload.intentId, 'outbox_http_route')
+    assert.equal(getOutboxIntent.mock.calls[0]?.[0]?.intentId, 'outbox_http_route')
+
+    const cronStatus = await fetch(
+      `${handle.address.baseUrl}/cron/status?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(cronStatus.status, 200)
+
+    const cronJobs = await fetch(
+      `${handle.address.baseUrl}/cron/jobs?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(cronJobs.status, 200)
+    const cronJobsPayload = await cronJobs.json() as Array<{ jobId: string }>
+    assert.equal(cronJobsPayload[0]?.jobId, TEST_CRON_JOB.jobId)
+
+    const cronJob = await fetch(
+      `${handle.address.baseUrl}/cron/jobs/${encodeURIComponent('cron_http_route')}?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(cronJob.status, 200)
+    const cronJobPayload = await cronJob.json() as { jobId: string }
+    assert.equal(cronJobPayload.jobId, 'cron_http_route')
+    assert.equal(getCronJob.mock.calls[0]?.[0]?.job, 'cron_http_route')
+
+    const cronRuns = await fetch(
+      `${handle.address.baseUrl}/cron/runs?job=${encodeURIComponent(TEST_CRON_JOB.jobId)}&limit=3&vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(cronRuns.status, 200)
+    const cronRunsPayload = await cronRuns.json() as {
+      jobId: string
+      runs: Array<{ runId: string }>
+    }
+    assert.equal(cronRunsPayload.jobId, TEST_CRON_JOB.jobId)
+    assert.equal(cronRunsPayload.runs[0]?.runId, TEST_CRON_RUN.runId)
+
+    const automation = await fetch(`${handle.address.baseUrl}/automation/run-once`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        once: true,
+        startDaemon: false,
+      }),
+    })
+    assert.equal(automation.status, 200)
+    const automationPayload = await automation.json() as { scans: number }
+    assert.equal(automationPayload.scans, 1)
 
     const invalidSession = await fetch(
       `${handle.address.baseUrl}/sessions/${encodeURIComponent('../outside')}`,

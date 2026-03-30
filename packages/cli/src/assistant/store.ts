@@ -189,7 +189,7 @@ export async function listAssistantSessions(
   vault: string,
 ): Promise<AssistantSession[]> {
   const remote = await maybeListAssistantSessionsViaDaemon({ vault })
-  if (remote) {
+  if (remote !== null) {
     return remote
   }
 
