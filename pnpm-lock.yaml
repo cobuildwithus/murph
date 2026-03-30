@@ -9,11 +9,11 @@ importers:
   .:
     devDependencies:
       '@cobuild/repo-tools':
-        specifier: ^0.1.14
-        version: 0.1.14
+        specifier: ^0.1.15
+        version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.8
-        version: 0.5.8(openapi-types@12.1.3)
+        specifier: ^0.5.9
+        version: 0.5.9(openapi-types@12.1.3)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -519,12 +519,12 @@ packages:
   '@cloudflare/workers-types@4.20260317.1':
     resolution: {integrity: sha512-+G4eVwyCpm8Au1ex8vQBCuA9wnwqetz4tPNRoB/53qvktERWBRMQnrtvC1k584yRE3emMThtuY0gWshvSJ++PQ==}
 
-  '@cobuild/repo-tools@0.1.14':
-    resolution: {integrity: sha512-/DKNFA3n1Y1pMKnbSiIctY57pZNdnVCNcB9ukKqAwQQRjt7sc9NoYuWBmb9H407Of9GvBNGg2BCMmQemKLtN6w==}
+  '@cobuild/repo-tools@0.1.15':
+    resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.8':
-    resolution: {integrity: sha512-U0KEqz57YUCMsy5GN4btTeu8mnCsGBs5jsofHNpSqUj5pNB7tGk1cCPLrj+uvCz8wJ1O/NSMFEo53kBiwYh3Ag==}
+  '@cobuild/review-gpt@0.5.9':
+    resolution: {integrity: sha512-dtR1KF38itmjA3Jp9kjbYwGFfs8pQ6+hUB9J6YexHhIUZXnj2vzIjg5hP4eXtEH/7WCcI90R0e147XpyjvBksw==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -5874,10 +5874,11 @@ snapshots:
 
   '@cloudflare/workers-types@4.20260317.1': {}
 
-  '@cobuild/repo-tools@0.1.14': {}
+  '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.8(openapi-types@12.1.3)':
+  '@cobuild/review-gpt@0.5.9(openapi-types@12.1.3)':
     dependencies:
+      '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(openapi-types@12.1.3)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
