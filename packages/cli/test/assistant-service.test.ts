@@ -527,6 +527,22 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   )
   assert.match(firstCall?.systemPrompt ?? '', /vault-cli meal add/u)
   assert.match(firstCall?.systemPrompt ?? '', /no longer requires a photo/u)
+  assert.match(firstCall?.systemPrompt ?? '', /meal or drink as recurring or already known/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /"my morning drink", "usual", "same as always", or "autologged"/u,
+  )
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli food list/u)
+  assert.match(firstCall?.systemPrompt ?? '', /vault-cli food show <id>/u)
+  assert.match(firstCall?.systemPrompt ?? '', /already auto-logs daily/u)
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /prefer updating the existing remembered food instead of inventing a separate one-off/u,
+  )
+  assert.match(
+    firstCall?.systemPrompt ?? '',
+    /ask a short disambiguating question instead of guessing/u,
+  )
   assert.match(firstCall?.systemPrompt ?? '', /Older food logs may still live/u)
   assert.match(
     firstCall?.systemPrompt ?? '',
