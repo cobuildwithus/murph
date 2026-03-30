@@ -1,3 +1,5 @@
+import type { BankEntityKind } from "@murph/contracts";
+
 import {
   compareCanonicalEntities,
   projectAssessmentEntity,
@@ -44,19 +46,7 @@ import {
 } from "./registries.ts";
 import type { MarkdownDocumentRecord } from "./shared.ts";
 
-type RegistryFamily = Extract<
-  CanonicalEntityFamily,
-  | "allergy"
-  | "condition"
-  | "family"
-  | "food"
-  | "genetics"
-  | "goal"
-  | "protocol"
-  | "provider"
-  | "recipe"
-  | "workout_format"
->;
+type RegistryFamily = BankEntityKind;
 
 type RegistryCollectionKey =
   | "goals"

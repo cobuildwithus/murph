@@ -61,19 +61,7 @@ export interface RegistryListOptions {
   limit?: number;
 }
 
-type ProjectedRegistryFamily = Extract<
-  CanonicalEntityFamily,
-  | "allergy"
-  | "condition"
-  | "family"
-  | "food"
-  | "genetics"
-  | "goal"
-  | "protocol"
-  | "provider"
-  | "recipe"
-  | "workout_format"
->;
+type ProjectedRegistryFamily = BankEntityKind;
 
 interface RegistryDefinition<TEntity extends RegistryQueryEntity> {
   directory: string;

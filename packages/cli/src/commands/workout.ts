@@ -240,13 +240,13 @@ export function registerWorkoutCommands(
   })
 
   format.command('show', {
-    description: 'Show one saved workout format by name or slug.',
+    description: 'Show one saved workout format by name, slug, or id.',
     args: z.object({
       name: z
         .string()
         .min(1)
         .max(160)
-        .describe('Saved workout format name or slug.'),
+        .describe('Saved workout format name, slug, or id.'),
     }),
     options: withBaseOptions(),
     output: showResultSchema,
@@ -278,7 +278,7 @@ export function registerWorkoutCommands(
         .string()
         .min(1)
         .max(160)
-        .describe('Saved workout format name or slug.'),
+        .describe('Saved workout format name, slug, or id.'),
     }),
     examples: [
       {

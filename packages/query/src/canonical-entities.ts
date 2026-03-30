@@ -19,26 +19,17 @@ import type { RegistryMarkdownRecord } from "./health/registries.ts";
 export type CanonicalRecordClass = "bank" | "ledger" | "sample" | "snapshot";
 
 export type CanonicalEntityFamily =
-  | "allergy"
+  | BankEntityKind
   | "assessment"
   | "audit"
-  | "condition"
   | "core"
   | "current_profile"
   | "event"
   | "experiment"
-  | "family"
-  | "food"
-  | "genetics"
-  | "goal"
   | "history"
   | "journal"
   | "profile_snapshot"
-  | "protocol"
-  | "provider"
-  | "recipe"
-  | "sample"
-  | "workout_format";
+  | "sample";
 
 export interface CanonicalEntity {
   entityId: string;
@@ -86,19 +77,7 @@ export const HEALTH_HISTORY_KINDS = new Set([
   "exposure",
 ] as const);
 
-type RegistryEntityFamily = Extract<
-  CanonicalEntityFamily,
-  | "allergy"
-  | "condition"
-  | "family"
-  | "food"
-  | "genetics"
-  | "goal"
-  | "protocol"
-  | "provider"
-  | "recipe"
-  | "workout_format"
->;
+type RegistryEntityFamily = BankEntityKind;
 
 export function resolveCanonicalRecordClass(
   family: CanonicalEntityFamily,
@@ -264,7 +243,7 @@ function buildRegistryLinks(
     family === "protocol" ? firstString(attributes, ["protocolId"]) : null;
 
   return normalizeCanonicalLinks(
-    extractBankEntityRegistryLinks(family as BankEntityKind, attributes)
+    extractBankEntityRegistryLinks(family, attributes)
       .filter((link) =>
         !(
           family === "protocol" &&
