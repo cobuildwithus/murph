@@ -1,21 +1,23 @@
 import { defineConfig } from "vitest/config";
 
+const ROOT_PACKAGE_PROJECTS = [
+  "assistant-runtime",
+  "assistantd",
+  "cli",
+  "core",
+  "device-syncd",
+  "hosted-execution",
+  "importers",
+  "inboxd",
+  "parsers",
+  "query",
+  "runtime-state",
+] as const;
+
 export default defineConfig({
   test: {
     coverage: {
-      include: [
-        "packages/assistant-runtime/src/**/*.ts",
-        "packages/assistantd/src/**/*.ts",
-        "packages/cli/src/**/*.ts",
-        "packages/core/src/**/*.ts",
-        "packages/device-syncd/src/**/*.ts",
-        "packages/hosted-execution/src/**/*.ts",
-        "packages/importers/src/**/*.ts",
-        "packages/inboxd/src/**/*.ts",
-        "packages/parsers/src/**/*.ts",
-        "packages/query/src/**/*.ts",
-        "packages/runtime-state/src/**/*.ts",
-      ],
+      include: ROOT_PACKAGE_PROJECTS.map((packageName) => `packages/${packageName}/src/**/*.ts`),
       exclude: [
         "**/*.d.ts",
         "**/dist/**",
@@ -27,18 +29,6 @@ export default defineConfig({
     },
     // packages/web, apps/web, and apps/cloudflare stay in their dedicated
     // verify lanes so the root multi-project run does not execute them twice.
-    projects: [
-      "packages/assistant-runtime/vitest.config.ts",
-      "packages/assistantd/vitest.config.ts",
-      "packages/cli/vitest.config.ts",
-      "packages/core/vitest.config.ts",
-      "packages/device-syncd/vitest.config.ts",
-      "packages/hosted-execution/vitest.config.ts",
-      "packages/importers/vitest.config.ts",
-      "packages/inboxd/vitest.config.ts",
-      "packages/parsers/vitest.config.ts",
-      "packages/query/vitest.config.ts",
-      "packages/runtime-state/vitest.config.ts",
-    ],
+    projects: ROOT_PACKAGE_PROJECTS.map((packageName) => `packages/${packageName}/vitest.config.ts`),
   },
 });
