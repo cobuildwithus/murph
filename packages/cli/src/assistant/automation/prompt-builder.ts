@@ -3,6 +3,9 @@ import path from 'node:path'
 import type { InboxShowResult } from '../../inbox-cli-contracts.js'
 import { normalizeNullableString } from '../shared.js'
 
+const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
+const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
+
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
   replyContext: string | null
@@ -154,23 +157,59 @@ function renderAttachmentPromptSection(
 ): string | null {
   const transcript = normalizeNullableString(attachment.transcriptText)
   const extractedText = normalizeNullableString(attachment.extractedText)
+  const metadataLines = [
+    attachment.attachmentId ? `attachmentId: ${attachment.attachmentId}` : null,
+    attachment.mime ? `mime: ${attachment.mime}` : null,
+    typeof attachment.byteSize === 'number' ? `byteSize: ${attachment.byteSize}` : null,
+    attachment.parseState ? `parseState: ${attachment.parseState}` : null,
+    attachment.storedPath ? `storedPath: ${attachment.storedPath}` : null,
+    attachment.derivedPath ? `derivedPath: ${attachment.derivedPath}` : null,
+  ].filter((line): line is string => line !== null)
   const chunks: string[] = []
+  const omittedKinds: string[] = []
 
-  if (transcript) {
+  if (transcript && transcript.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
     chunks.push(`Transcript:
 ${transcript}`)
+  } else if (transcript) {
+    omittedKinds.push(`transcript (${transcript.length} chars)`)
+    chunks.push(`Transcript excerpt:
+${buildAttachmentTextExcerpt(transcript)}`)
   }
-  if (extractedText) {
+  if (extractedText && extractedText.length <= MAX_INLINE_ATTACHMENT_TEXT_CHARS) {
     chunks.push(`Extracted text:
 ${extractedText}`)
+  } else if (extractedText) {
+    omittedKinds.push(`extracted text (${extractedText.length} chars)`)
+    chunks.push(`Extracted text excerpt:
+${buildAttachmentTextExcerpt(extractedText)}`)
+  }
+
+  if (omittedKinds.length > 0) {
+    chunks.push(
+      `Large parsed attachment content omitted from prompt to keep context small: ${omittedKinds.join(', ')}.`,
+    )
   }
 
   if (chunks.length === 0) {
     return null
   }
 
+  if (metadataLines.length > 0) {
+    chunks.unshift(metadataLines.join('\n'))
+  }
+
   const label = `Attachment ${attachment.ordinal} (${attachment.kind}${attachment.fileName ? `, ${attachment.fileName}` : ''})`
   return `${label}\n${chunks.join('\n\n')}`
+}
+
+function buildAttachmentTextExcerpt(text: string): string {
+  if (text.length <= MAX_ATTACHMENT_TEXT_EXCERPT_CHARS) {
+    return text
+  }
+
+  const omittedChars = text.length - MAX_ATTACHMENT_TEXT_EXCERPT_CHARS
+  return `${text.slice(0, MAX_ATTACHMENT_TEXT_EXCERPT_CHARS)}\n\n[truncated ${omittedChars} characters]`
 }
 
 function extractTelegramRawMessage(
