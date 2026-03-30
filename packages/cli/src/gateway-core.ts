@@ -76,12 +76,16 @@ export {
 } from './gateway/routes.js'
 
 export {
+  applyGatewayProjectionSnapshotToEventLog,
+  DEFAULT_GATEWAY_EVENT_RETENTION,
   diffGatewayProjectionSnapshots,
   fetchGatewayAttachmentsFromSnapshot,
   getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
   listGatewayOpenPermissionsFromSnapshot,
+  pollGatewayEventLogState,
   readGatewayMessagesFromSnapshot,
+  type GatewayEventLogState,
   type GatewayEventEmission,
 } from './gateway/snapshot.js'
 

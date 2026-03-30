@@ -1,10 +1,14 @@
 import {
   gatewayFetchAttachmentsInputSchema,
   gatewayConversationSchema,
+  gatewayEventSchema,
   gatewayGetConversationInputSchema,
   gatewayListConversationsInputSchema,
   gatewayListConversationsResultSchema,
+  gatewayPollEventsInputSchema,
+  gatewayPollEventsResultSchema,
   gatewayPermissionRequestSchema,
+  gatewayProjectionSnapshotSchema,
   gatewayReadMessagesInputSchema,
   gatewayReadMessagesResultSchema,
   type GatewayAttachment,
@@ -16,6 +20,8 @@ import {
   type GatewayListConversationsResult,
   type GatewayMessage,
   type GatewayPermissionRequest,
+  type GatewayPollEventsInput,
+  type GatewayPollEventsResult,
   type GatewayProjectionSnapshot,
   type GatewayReadMessagesInput,
   type GatewayReadMessagesResult,
@@ -24,11 +30,20 @@ import {
   readGatewayAttachmentId,
   readGatewayConversationSessionToken,
   readGatewayMessageRouteToken,
+  sameGatewayConversationSession,
 } from './opaque-ids.js'
 import { createGatewayInvalidRuntimeIdError } from './errors.js'
 
 export interface GatewayEventEmission
   extends Omit<GatewayEvent, 'cursor' | 'schema'> {}
+
+export interface GatewayEventLogState {
+  events: GatewayEvent[]
+  nextCursor: number
+  snapshot: GatewayProjectionSnapshot | null
+}
+
+export const DEFAULT_GATEWAY_EVENT_RETENTION = 512
 
 export function listGatewayConversationsFromSnapshot(
   snapshot: GatewayProjectionSnapshot,
@@ -269,6 +284,75 @@ export function diffGatewayProjectionSnapshots(
   }
 
   return emissions.sort(compareGatewayEventEmissionsAscending)
+}
+
+export function applyGatewayProjectionSnapshotToEventLog(
+  state: GatewayEventLogState,
+  snapshot: GatewayProjectionSnapshot,
+  retention: number = DEFAULT_GATEWAY_EVENT_RETENTION,
+): GatewayEventLogState {
+  const parsedSnapshot = gatewayProjectionSnapshotSchema.parse(snapshot)
+  const normalizedRetention =
+    Number.isFinite(retention) && retention > 0
+      ? Math.floor(retention)
+      : DEFAULT_GATEWAY_EVENT_RETENTION
+
+  if (
+    state.snapshot &&
+    stableStringify(state.snapshot) === stableStringify(parsedSnapshot)
+  ) {
+    return state
+  }
+
+  const nextEvents = state.events.map((event) => gatewayEventSchema.parse(event))
+  let nextCursor =
+    Number.isFinite(state.nextCursor) && state.nextCursor >= 0
+      ? Math.floor(state.nextCursor)
+      : 0
+
+  for (const emission of diffGatewayProjectionSnapshots(state.snapshot, parsedSnapshot)) {
+    nextCursor += 1
+    nextEvents.push(
+      gatewayEventSchema.parse({
+        schema: 'murph.gateway-event.v1',
+        cursor: nextCursor,
+        ...emission,
+      }),
+    )
+  }
+
+  if (nextEvents.length > normalizedRetention) {
+    nextEvents.splice(0, nextEvents.length - normalizedRetention)
+  }
+
+  return {
+    events: nextEvents,
+    nextCursor,
+    snapshot: parsedSnapshot,
+  }
+}
+
+export function pollGatewayEventLogState(
+  state: GatewayEventLogState,
+  input?: GatewayPollEventsInput,
+): GatewayPollEventsResult {
+  const parsed = gatewayPollEventsInputSchema.parse(input ?? {})
+  const events = state.events
+    .map((event) => gatewayEventSchema.parse(event))
+    .filter((event) => event.cursor > parsed.cursor)
+    .filter((event) => parsed.kinds.length === 0 || parsed.kinds.includes(event.kind))
+    .filter(
+      (event) =>
+        parsed.sessionKey === null ||
+        (event.sessionKey !== null && sameGatewayConversationSession(event.sessionKey, parsed.sessionKey)),
+    )
+    .slice(0, parsed.limit)
+
+  return gatewayPollEventsResultSchema.parse({
+    events,
+    nextCursor: events[events.length - 1]?.cursor ?? state.nextCursor,
+    live: true,
+  })
 }
 
 export function compareGatewayConversationsDescending(

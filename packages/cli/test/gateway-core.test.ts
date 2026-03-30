@@ -7,14 +7,17 @@ import { promisify } from 'node:util'
 import { test } from 'vitest'
 
 import {
+  applyGatewayProjectionSnapshotToEventLog,
   gatewayConversationRouteCanSend,
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
   gatewayConversationRouteFromOutboxIntent,
+  pollGatewayEventLogState,
   gatewayReadMessagesInputSchema,
   mergeGatewayConversationRoutes,
   resolveGatewayConversationRouteKey,
 } from '../src/gateway-core.js'
+import { createGatewayConversationSessionKey } from '../src/gateway/opaque-ids.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -206,6 +209,77 @@ test('gateway read schemas keep the future transcript surface bounded and cursor
   assert.equal(parsed.oldestFirst, true)
   assert.equal(parsed.sessionKey, 'sess_opaque')
   assert.equal(parsed.afterMessageId, null)
+})
+
+test('gateway event-log helpers append and filter snapshot emissions without duplicating identical snapshots', () => {
+  const sessionKey = createGatewayConversationSessionKey(
+    'channel:email|identity:murph%40example.com|thread:thread-123',
+  )
+  const initialSnapshot = {
+    schema: 'murph.gateway-projection-snapshot.v1' as const,
+    generatedAt: '2026-03-30T21:00:00.000Z',
+    conversations: [],
+    messages: [],
+    permissions: [{
+      action: 'send-message',
+      description: 'Need operator approval',
+      note: null,
+      requestId: 'perm_123',
+      requestedAt: '2026-03-30T21:00:00.000Z',
+      resolvedAt: null,
+      schema: 'murph.gateway-permission-request.v1' as const,
+      sessionKey,
+      status: 'open' as const,
+    }],
+  }
+  const resolvedSnapshot = {
+    ...initialSnapshot,
+    generatedAt: '2026-03-30T21:05:00.000Z',
+    messages: [{
+      actorDisplayName: 'Alex',
+      attachments: [],
+      createdAt: '2026-03-30T21:05:00.000Z',
+      direction: 'inbound' as const,
+      messageId: 'gwcm_123',
+      schema: 'murph.gateway-message.v1' as const,
+      sessionKey,
+      text: 'Can you send the file now?',
+    }],
+    permissions: [{
+      ...initialSnapshot.permissions[0],
+      note: 'Approved by operator',
+      resolvedAt: '2026-03-30T21:05:30.000Z',
+      status: 'approved' as const,
+    }],
+  }
+
+  const updated = applyGatewayProjectionSnapshotToEventLog(
+    {
+      events: [],
+      nextCursor: 0,
+      snapshot: initialSnapshot,
+    },
+    resolvedSnapshot,
+  )
+  const duplicated = applyGatewayProjectionSnapshotToEventLog(updated, resolvedSnapshot)
+
+  assert.equal(updated.nextCursor, 2)
+  assert.deepEqual(
+    updated.events.map((event) => event.kind),
+    ['message.created', 'permission.resolved'],
+  )
+  assert.equal(duplicated, updated)
+
+  const filtered = pollGatewayEventLogState(updated, {
+    cursor: 0,
+    kinds: ['permission.resolved'],
+    limit: 10,
+    sessionKey,
+  })
+
+  assert.equal(filtered.events.length, 1)
+  assert.equal(filtered.events[0]?.permissionRequestId, 'perm_123')
+  assert.equal(filtered.nextCursor, 2)
 })
 
 test('gateway sendability respects current channel delivery constraints', () => {
