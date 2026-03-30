@@ -1,8 +1,10 @@
-import { readdir, readFile, rm } from 'node:fs/promises'
+import { readdir, readFile, rm, rmdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantProviderRouteRecoverySchema,
+  assistantQuarantineEntrySchema,
   assistantRuntimeBudgetSnapshotSchema,
+  type AssistantQuarantineEntry,
   type AssistantRuntimeBudgetSnapshot,
 } from '../assistant-cli-contracts.js'
 import {
@@ -21,20 +23,17 @@ import {
   pruneAssistantRuntimeCaches,
 } from './runtime-cache.js'
 import {
-  createAssistantBoundedRuntimeCache,
-} from './runtime-budget-policy.js'
-import {
-  isJsonSyntaxError,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
 import { quarantineAssistantStateFile } from './quarantine.js'
-import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
+import type { AssistantStatePaths } from './store/paths.js'
 
 const ASSISTANT_RUNTIME_BUDGET_SCHEMA = 'murph.assistant-runtime-budget.v1'
 const ASSISTANT_RUNTIME_MAINTENANCE_MIN_INTERVAL_MS = 5 * 60 * 1000
 const ASSISTANT_QUARANTINE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const ASSISTANT_PROVIDER_ROUTE_RECOVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
+const QUARANTINE_METADATA_SUFFIX = '.meta.json'
 
 export async function maybeRunAssistantRuntimeMaintenance(input: {
   now?: Date
@@ -44,7 +43,10 @@ export async function maybeRunAssistantRuntimeMaintenance(input: {
   const now = input.now ?? new Date()
   const lastRunAt = current.maintenance.lastRunAt
   const lastRunMs = lastRunAt ? Date.parse(lastRunAt) : Number.NaN
-  if (Number.isFinite(lastRunMs) && now.getTime() - lastRunMs < ASSISTANT_RUNTIME_MAINTENANCE_MIN_INTERVAL_MS) {
+  if (
+    Number.isFinite(lastRunMs) &&
+    now.getTime() - lastRunMs < ASSISTANT_RUNTIME_MAINTENANCE_MIN_INTERVAL_MS
+  ) {
     return current
   }
 
@@ -65,15 +67,24 @@ export async function runAssistantRuntimeMaintenance(input: {
     const notes: string[] = []
     const expiredCacheEntries = pruneAssistantRuntimeCaches(now.getTime())
     if (expiredCacheEntries > 0) {
-      notes.push(`${expiredCacheEntries} expired runtime cache entr${expiredCacheEntries === 1 ? 'y was' : 'ies were'} pruned.`)
+      notes.push(
+        `${expiredCacheEntries} expired runtime cache entr${expiredCacheEntries === 1 ? 'y was' : 'ies were'} pruned.`,
+      )
     }
-    const staleProviderRecoveryPruned = await pruneAssistantProviderRouteRecoveryFiles(paths, now)
+    const staleProviderRecoveryPruned = await pruneAssistantProviderRouteRecoveryFiles(
+      paths,
+      now,
+    )
     if (staleProviderRecoveryPruned > 0) {
-      notes.push(`${staleProviderRecoveryPruned} stale provider recovery file(s) were removed.`)
+      notes.push(
+        `${staleProviderRecoveryPruned} stale provider recovery file(s) were removed.`,
+      )
     }
     const staleQuarantinePruned = await pruneAssistantQuarantineFiles(paths, now)
     if (staleQuarantinePruned > 0) {
-      notes.push(`${staleQuarantinePruned} expired quarantine artifact(s) were removed.`)
+      notes.push(
+        `${staleQuarantinePruned} expired quarantine artifact(s) were removed.`,
+      )
     }
     const staleLocksCleared = await clearStaleAssistantLocks({
       paths,
@@ -101,7 +112,10 @@ export async function runAssistantRuntimeMaintenance(input: {
       component: 'runtime',
       kind: 'runtime.maintenance',
       level: 'info',
-      message: notes.length > 0 ? notes.join(' ') : 'Assistant runtime maintenance ran with no corrective actions.',
+      message:
+        notes.length > 0
+          ? notes.join(' ')
+          : 'Assistant runtime maintenance ran with no corrective actions.',
       data: {
         staleProviderRecoveryPruned,
         staleQuarantinePruned,
@@ -115,30 +129,73 @@ export async function runAssistantRuntimeMaintenance(input: {
 export async function readAssistantRuntimeBudgetStatus(
   vault: string,
 ): Promise<AssistantRuntimeBudgetSnapshot> {
-  const paths = resolveAssistantStatePaths(vault)
-  const existing = await readAssistantRuntimeBudgetSnapshotAtPath(paths.resourceBudgetPath)
-  return assistantRuntimeBudgetSnapshotSchema.parse({
-    ...existing,
-    updatedAt: existing.updatedAt,
-    caches: listAssistantRuntimeCacheSnapshots(),
+  return await withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const existing = await readAssistantRuntimeBudgetSnapshotAtPaths({
+      paths,
+      vault,
+    })
+    return assistantRuntimeBudgetSnapshotSchema.parse({
+      ...existing,
+      updatedAt: existing.updatedAt,
+      caches: listAssistantRuntimeCacheSnapshots(),
+    })
   })
 }
 
-async function readAssistantRuntimeBudgetSnapshotAtPath(
-  filePath: string,
-): Promise<AssistantRuntimeBudgetSnapshot> {
+async function readAssistantRuntimeBudgetSnapshotAtPaths(input: {
+  paths: AssistantStatePaths
+  vault: string
+}): Promise<AssistantRuntimeBudgetSnapshot> {
+  const defaultSnapshot = buildDefaultAssistantRuntimeBudgetSnapshot()
+
+  let raw: string
   try {
-    const raw = await readFile(filePath, 'utf8')
-    return assistantRuntimeBudgetSnapshotSchema.parse(JSON.parse(raw) as unknown)
+    raw = await readFile(input.paths.resourceBudgetPath, 'utf8')
   } catch (error) {
-    if (!isMissingFileError(error) && !isJsonSyntaxError(error)) {
-      throw error
+    if (isMissingFileError(error)) {
+      return defaultSnapshot
     }
+    throw error
   }
 
+  try {
+    return assistantRuntimeBudgetSnapshotSchema.parse(JSON.parse(raw) as unknown)
+  } catch (error) {
+    const recoveredAt = new Date().toISOString()
+    const recoveredSnapshot =
+      buildDefaultAssistantRuntimeBudgetSnapshot(recoveredAt)
+    const quarantine = await quarantineAssistantStateFile({
+      artifactKind: 'runtime-budget',
+      error,
+      filePath: input.paths.resourceBudgetPath,
+      paths: input.paths,
+    })
+    await writeJsonFileAtomic(input.paths.resourceBudgetPath, recoveredSnapshot)
+    await appendAssistantRuntimeEventAtPaths(input.paths, {
+      at: recoveredAt,
+      component: 'runtime',
+      entityId: 'assistant-runtime-budget',
+      entityType: 'runtime-budget',
+      kind: 'runtime-budget.recovered',
+      level: 'warn',
+      message:
+        'Assistant runtime budget snapshot was recreated after a corrupted snapshot was quarantined.',
+      data: {
+        quarantineId: quarantine?.quarantineId ?? null,
+        quarantinedPath: quarantine?.quarantinedPath ?? null,
+      },
+    }).catch(() => undefined)
+    return recoveredSnapshot
+  }
+}
+
+function buildDefaultAssistantRuntimeBudgetSnapshot(
+  updatedAt = new Date(0).toISOString(),
+): AssistantRuntimeBudgetSnapshot {
   return assistantRuntimeBudgetSnapshotSchema.parse({
     schema: ASSISTANT_RUNTIME_BUDGET_SCHEMA,
-    updatedAt: new Date(0).toISOString(),
+    updatedAt,
     caches: listAssistantRuntimeCacheSnapshots(),
     maintenance: {
       lastRunAt: null,
@@ -165,7 +222,9 @@ async function pruneAssistantProviderRouteRecoveryFiles(
     const filePath = path.join(paths.providerRouteRecoveryDirectory, entry)
     try {
       const raw = await readFile(filePath, 'utf8')
-      const parsed = assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
+      const parsed = assistantProviderRouteRecoverySchema.parse(
+        JSON.parse(raw) as unknown,
+      )
       const updatedAtMs = Date.parse(parsed.updatedAt)
       if (!Number.isFinite(updatedAtMs) || updatedAtMs > cutoffMs) {
         continue
@@ -196,24 +255,7 @@ async function pruneAssistantQuarantineFiles(
   let removed = 0
 
   for (const directory of directories) {
-    for (const entry of await readDirectoryEntries(directory)) {
-      const targetPath = path.join(directory, entry.name)
-      if (entry.isDirectory()) {
-        removed += await pruneAssistantQuarantineFilesAtDirectory(targetPath, cutoffMs)
-        continue
-      }
-      if (!entry.isFile()) {
-        continue
-      }
-      const timestampMs = await readAssistantQuarantineTimestampMs(targetPath)
-      if (timestampMs === null || timestampMs > cutoffMs) {
-        continue
-      }
-      await rm(targetPath, {
-        force: true,
-      })
-      removed += 1
-    }
+    removed += await pruneAssistantQuarantineFilesAtDirectory(directory, cutoffMs)
   }
 
   return removed
@@ -228,33 +270,126 @@ async function pruneAssistantQuarantineFilesAtDirectory(
     const targetPath = path.join(directory, entry.name)
     if (entry.isDirectory()) {
       removed += await pruneAssistantQuarantineFilesAtDirectory(targetPath, cutoffMs)
+      await removeDirectoryIfEmpty(targetPath)
       continue
     }
     if (!entry.isFile()) {
       continue
     }
-    const timestampMs = await readAssistantQuarantineTimestampMs(targetPath)
-    if (timestampMs === null || timestampMs > cutoffMs) {
+    if (entry.name.endsWith(QUARANTINE_METADATA_SUFFIX)) {
+      removed += await pruneAssistantQuarantinePair(targetPath, cutoffMs)
       continue
     }
-    await rm(targetPath, {
-      force: true,
-    })
-    removed += 1
+    removed += await pruneAssistantQuarantineOrphanPayload(targetPath, cutoffMs)
   }
   return removed
 }
 
-async function readAssistantQuarantineTimestampMs(filePath: string): Promise<number | null> {
-  if (!filePath.endsWith('.meta.json')) {
-    return null
+async function pruneAssistantQuarantinePair(
+  metadataPath: string,
+  cutoffMs: number,
+): Promise<number> {
+  const metadata = await readAssistantQuarantineMetadata(metadataPath)
+  const timestampMs =
+    metadata === null
+      ? await readFileTimestampMs(metadataPath)
+      : Date.parse(metadata.quarantinedAt)
+
+  if (!Number.isFinite(timestampMs) || timestampMs > cutoffMs) {
+    return 0
   }
+
+  const payloadPath =
+    metadata?.quarantinedPath ??
+    metadataPath.slice(0, -QUARANTINE_METADATA_SUFFIX.length)
+  await Promise.all([
+    rm(metadataPath, {
+      force: true,
+    }),
+    rm(payloadPath, {
+      force: true,
+    }),
+  ])
+  return 1
+}
+
+async function pruneAssistantQuarantineOrphanPayload(
+  payloadPath: string,
+  cutoffMs: number,
+): Promise<number> {
+  if (!path.basename(payloadPath).includes('.invalid')) {
+    return 0
+  }
+
+  const metadataPath = `${payloadPath}${QUARANTINE_METADATA_SUFFIX}`
+  if (await pathExists(metadataPath)) {
+    return 0
+  }
+
+  const timestampMs = await readFileTimestampMs(payloadPath)
+  if (!Number.isFinite(timestampMs) || timestampMs > cutoffMs) {
+    return 0
+  }
+
+  await rm(payloadPath, {
+    force: true,
+  })
+  return 1
+}
+
+async function readAssistantQuarantineMetadata(
+  metadataPath: string,
+): Promise<AssistantQuarantineEntry | null> {
   try {
-    const raw = await readFile(filePath, 'utf8')
-    const parsed = JSON.parse(raw) as { quarantinedAt?: unknown }
-    return typeof parsed.quarantinedAt === 'string' ? Date.parse(parsed.quarantinedAt) : null
+    const raw = await readFile(metadataPath, 'utf8')
+    return assistantQuarantineEntrySchema.parse(JSON.parse(raw) as unknown)
   } catch {
     return null
+  }
+}
+
+async function readFileTimestampMs(filePath: string): Promise<number> {
+  try {
+    return (await stat(filePath)).mtimeMs
+  } catch {
+    return Number.NaN
+  }
+}
+
+async function removeDirectoryIfEmpty(directory: string): Promise<void> {
+  try {
+    const entries = await readdir(directory)
+    if (entries.length > 0) {
+      return
+    }
+    await rmdir(directory)
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return
+    }
+    const code =
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : null
+    if (code === 'ENOTEMPTY') {
+      return
+    }
+    throw error
+  }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath)
+    return true
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
   }
 }
 

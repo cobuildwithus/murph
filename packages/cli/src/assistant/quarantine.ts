@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rename } from 'node:fs/promises'
+import { readdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 import {
   assistantQuarantineEntrySchema,
@@ -9,11 +9,13 @@ import {
   type AssistantQuarantineSummary,
 } from '../assistant-cli-contracts.js'
 import {
+  ensureAssistantStateDirectory,
   errorMessage,
   isMissingFileError,
   writeJsonFileAtomic,
 } from './shared.js'
 import { appendAssistantRuntimeEventAtPaths } from './runtime-events.js'
+import { redactAssistantStateString } from './redaction.js'
 import type { AssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 
@@ -41,9 +43,7 @@ export async function quarantineAssistantStateFile(input: {
   const metadataPath = `${quarantinedPath}.meta.json`
 
   try {
-    await mkdir(quarantineRoot, {
-      recursive: true,
-    })
+    await ensureAssistantStateDirectory(quarantineRoot)
     await rename(input.filePath, quarantinedPath)
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -61,7 +61,7 @@ export async function quarantineAssistantStateFile(input: {
     metadataPath,
     quarantinedAt,
     errorCode: readErrorCode(input.error),
-    message: errorMessage(input.error),
+    message: redactAssistantStateString(errorMessage(input.error)),
   })
 
   await writeJsonFileAtomic(metadataPath, parsed)
@@ -180,6 +180,8 @@ function mapAssistantQuarantineRuntimeEventKind(
       return 'failover.state.quarantined' as const
     case 'provider-route-recovery':
       return 'provider-route-recovery.quarantined' as const
+    case 'runtime-budget':
+      return 'runtime-budget.quarantined' as const
     case 'cron-store':
       return 'cron.store.quarantined' as const
     case 'cron-run':

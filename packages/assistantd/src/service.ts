@@ -2,22 +2,33 @@ import {
   createIntegratedInboxCliServices,
   createIntegratedVaultCliServices,
   drainAssistantOutbox,
+  getAssistantCronJob,
+  getAssistantCronStatus,
   getAssistantSession,
   getAssistantStatus,
+  listAssistantCronJobs,
+  listAssistantCronRuns,
+  listAssistantOutboxIntents,
   listAssistantSessions,
   openAssistantConversation,
   processDueAssistantCronJobs,
+  readAssistantOutboxIntent,
   runAssistantAutomation,
   sendAssistantMessage,
   updateAssistantSessionOptions,
   type AssistantAskResult,
+  type AssistantCronJob,
   type AssistantCronProcessDueResult,
+  type AssistantCronRunRecord,
+  type AssistantCronStatusSnapshot,
   type AssistantMessageInput,
   type AssistantOutboxDispatchMode,
+  type AssistantOutboxIntent,
+  type AssistantRunResult,
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-} from 'murph/assistant-core'
+} from '@murph/assistant-services/runtime'
 
 export interface AssistantLocalAutomationRunInput {
   allowSelfAuthored?: boolean
@@ -44,6 +55,17 @@ export interface AssistantLocalService {
     now?: string | null
     vault?: string | null
   }): ReturnType<typeof drainAssistantOutbox>
+  getCronJob(input: {
+    job: string
+    vault?: string | null
+  }): Promise<AssistantCronJob>
+  getCronStatus(input?: {
+    vault?: string | null
+  }): Promise<AssistantCronStatusSnapshot>
+  getOutboxIntent(input: {
+    intentId: string
+    vault?: string | null
+  }): Promise<AssistantOutboxIntent | null>
   getSession(input: {
     sessionId: string
     vault?: string | null
@@ -62,6 +84,20 @@ export interface AssistantLocalService {
   listSessions(input?: {
     vault?: string | null
   }): Promise<AssistantSession[]>
+  listCronJobs(input?: {
+    vault?: string | null
+  }): Promise<AssistantCronJob[]>
+  listCronRuns(input: {
+    job: string
+    limit?: number
+    vault?: string | null
+  }): Promise<{
+    jobId: string
+    runs: AssistantCronRunRecord[]
+  }>
+  listOutbox(input?: {
+    vault?: string | null
+  }): Promise<AssistantOutboxIntent[]>
   openConversation(
     input: Omit<Parameters<typeof openAssistantConversation>[0], 'vault'> & { vault?: string | null },
   ): Promise<AssistantLocalOpenConversationResult>
@@ -72,7 +108,7 @@ export interface AssistantLocalService {
   }): Promise<AssistantCronProcessDueResult>
   runAutomationOnce(
     input?: AssistantLocalAutomationRunInput,
-  ): ReturnType<typeof runAssistantAutomation>
+  ): Promise<AssistantRunResult>
   sendMessage(
     input: Omit<AssistantMessageInput, 'vault'> & { vault?: string | null },
   ): Promise<AssistantAskResult>
@@ -98,6 +134,18 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
         now: input?.now ? new Date(input.now) : undefined,
         vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
       }),
+    getCronJob: (input) =>
+      getAssistantCronJob(
+        resolveAssistantdRequestVault(input.vault, vaultRoot),
+        input.job,
+      ),
+    getCronStatus: (input) =>
+      getAssistantCronStatus(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+    getOutboxIntent: (input) =>
+      readAssistantOutboxIntent(
+        resolveAssistantdRequestVault(input.vault, vaultRoot),
+        input.intentId,
+      ),
     getSession: (input) =>
       getAssistantSession(
         resolveAssistantdRequestVault(input.vault, vaultRoot),
@@ -120,6 +168,19 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
       }),
     listSessions: (input) =>
       listAssistantSessions(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+    listCronJobs: (input) =>
+      listAssistantCronJobs(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+    listCronRuns: (input) =>
+      listAssistantCronRuns({
+        job: input.job,
+        limit:
+          typeof input.limit === 'number' && Number.isFinite(input.limit)
+            ? Math.trunc(input.limit)
+            : undefined,
+        vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
+      }),
+    listOutbox: (input) =>
+      listAssistantOutboxIntents(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
     openConversation: async (input) => {
       const resolved = await openAssistantConversation({
         ...input,

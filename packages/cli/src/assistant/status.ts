@@ -55,7 +55,6 @@ export async function getAssistantStatus(
     outbox,
     diagnostics,
     failover,
-    quarantine,
     runtimeBudget,
     recentTurns,
   ] = await Promise.all([
@@ -64,10 +63,10 @@ export async function getAssistantStatus(
     buildAssistantOutboxSummary(vault),
     readAssistantDiagnosticsSnapshot(vault),
     readAssistantFailoverState(vault),
-    summarizeAssistantQuarantines({ paths }),
     readAssistantRuntimeBudgetStatus(vault),
     resolveRecentTurns(vault, typeof input === 'string' ? undefined : input),
   ])
+  const quarantine = await summarizeAssistantQuarantines({ paths })
   const warnings = buildAssistantStatusWarnings({
     diagnostics,
     failover,

@@ -32,8 +32,8 @@
     "test": "pnpm --dir ../.. exec vitest run packages/assistantd/test/http.test.ts packages/assistantd/test/assistant-core-boundary.test.ts --no-coverage --maxWorkers 1"
   },
   "dependencies": {
-    "@murph/runtime-state": "workspace:*",
-    "murph": "workspace:*"
+    "@murph/assistant-services": "workspace:*",
+    "@murph/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

@@ -220,8 +220,8 @@ export type AssistantDeliveryOutcome =
     }
 
 export interface AssistantTurnDeliveryFinalizationPlan {
-  diagnostic: Parameters<typeof recordAssistantDiagnosticEvent>[0]
-  receipt: Parameters<typeof finalizeAssistantTurnReceipt>[0]
+  diagnostic: Omit<Parameters<typeof recordAssistantDiagnosticEvent>[0], 'vault'>
+  receipt: Omit<Parameters<typeof finalizeAssistantTurnReceipt>[0], 'vault'>
 }
 
 export type { ResolvedAssistantSession }

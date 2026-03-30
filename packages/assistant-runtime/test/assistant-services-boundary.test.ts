@@ -54,6 +54,11 @@ test("assistant-services publishes the hosted boundary entrypoints needed by ass
     import: "./dist/operator-config.js",
     types: "./dist/operator-config.d.ts",
   });
+  assert.deepEqual(assistantServicesManifest.exports["./runtime"], {
+    default: "./dist/runtime.js",
+    import: "./dist/runtime.js",
+    types: "./dist/runtime.d.ts",
+  });
   assert.deepEqual(cliManifest.exports["./assistant-core"], {
     default: "./dist/assistant-core.js",
     types: "./dist/assistant-core.d.ts",

@@ -39,12 +39,19 @@ import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
 } from '../src/assistant/runtime-budgets.js'
+import { readAssistantCronRuns } from '../src/assistant/cron/store.js'
 import { withAssistantMemoryWriteLock } from '../src/assistant/memory/locking.js'
+import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
+import { readAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
 import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.js'
+import { readAssistantSession } from '../src/assistant/store/persistence.js'
+import { listAssistantTranscriptDistillations } from '../src/assistant/transcript-distillation.js'
+import { readAssistantTurnReceipt } from '../src/assistant/turns.js'
 import {
   assistantSessionSchema,
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.js'
+import { redactAssistantSessionForDisplay } from '../src/assistant/redaction.js'
 
 const cleanupPaths: string[] = []
 
@@ -1886,6 +1893,42 @@ test('assistant session schema rejects path-like session identifiers before pers
   )
 })
 
+test('assistant storage readers reject traversal-like opaque ids at the filesystem boundary', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-storage-ids-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const paths = resolveAssistantStatePaths(vaultRoot)
+  const invalidId = '../escape'
+  const expectInvalidRuntimeId = async (callback: () => Promise<unknown>) => {
+    await assert.rejects(callback, (error) => {
+      assert.equal(error instanceof Error, true)
+      assert.equal(
+        (error as { code?: unknown }).code,
+        'ASSISTANT_INVALID_RUNTIME_ID',
+      )
+      return true
+    })
+  }
+
+  await expectInvalidRuntimeId(() =>
+    readAssistantSession({
+      paths,
+      sessionId: invalidId,
+    }),
+  )
+  await expectInvalidRuntimeId(() =>
+    listAssistantTranscriptDistillations(vaultRoot, invalidId),
+  )
+  await expectInvalidRuntimeId(() => readAssistantOutboxIntent(vaultRoot, invalidId))
+  await expectInvalidRuntimeId(() => readAssistantTurnReceipt(vaultRoot, invalidId))
+  await expectInvalidRuntimeId(() => readAssistantCronRuns(paths, invalidId))
+  await expectInvalidRuntimeId(() =>
+    readAssistantProviderRouteRecovery(vaultRoot, invalidId),
+  )
+})
+
 test('assistant runtime budget snapshots are quarantined, recreated, and fully pruned with orphan payload cleanup', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-budget-'))
   const vaultRoot = path.join(parent, 'vault')
@@ -1975,4 +2018,131 @@ test('assistant status includes runtime-budget quarantine details on the same re
     status.warnings.some((warning) => warning.includes('quarantined for repair')),
     true,
   )
+})
+
+test('assistant session secrets persist in private sidecars with private permissions and redacted display output', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-secrets-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'assistant:secret-session',
+    channel: 'imessage',
+    participantId: 'contact:secret-user',
+  })
+  const statePaths = resolveAssistantStatePaths(vaultRoot)
+  const updatedSession = await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'openai-compatible',
+    providerOptions: {
+      model: 'gpt-4.1-mini',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'https://api.example.test/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      providerName: 'example',
+      headers: {
+        Authorization: 'Bearer session-secret-token',
+        'X-Visible': 'public-header',
+      },
+    },
+    providerBinding: {
+      provider: 'openai-compatible',
+      providerSessionId: 'provider-session-1',
+      providerState: null,
+      providerOptions: {
+        model: 'gpt-4.1-mini',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'https://api.example.test/v1',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        providerName: 'example',
+        headers: {
+          Authorization: 'Bearer binding-secret-token',
+          'X-Binding-Visible': 'binding-public',
+        },
+      },
+    },
+    updatedAt: '2026-03-29T12:00:00.000Z',
+  })
+
+  const sessionPath = path.join(
+    statePaths.sessionsDirectory,
+    `${updatedSession.sessionId}.json`,
+  )
+  const sessionSecretsPath = path.join(
+    statePaths.sessionSecretsDirectory,
+    `${updatedSession.sessionId}.json`,
+  )
+
+  const persistedRaw = await readFile(sessionPath, 'utf8')
+  const persisted = JSON.parse(persistedRaw) as {
+    providerBinding?: {
+      providerOptions?: {
+        headers?: Record<string, string> | null
+      } | null
+    } | null
+    providerOptions?: {
+      headers?: Record<string, string> | null
+    } | null
+  }
+  const secretSidecar = JSON.parse(
+    await readFile(sessionSecretsPath, 'utf8'),
+  ) as {
+    providerBindingHeaders?: Record<string, string> | null
+    providerHeaders?: Record<string, string> | null
+  }
+
+  assert.deepEqual(persisted.providerOptions?.headers, {
+    'X-Visible': 'public-header',
+  })
+  assert.deepEqual(persisted.providerBinding?.providerOptions?.headers, {
+    'X-Binding-Visible': 'binding-public',
+  })
+  assert.equal(/session-secret-token|binding-secret-token/u.test(persistedRaw), false)
+  assert.deepEqual(secretSidecar.providerHeaders, {
+    Authorization: 'Bearer session-secret-token',
+  })
+  assert.deepEqual(secretSidecar.providerBindingHeaders, {
+    Authorization: 'Bearer binding-secret-token',
+  })
+
+  const reloaded = await readAssistantSession({
+    paths: statePaths,
+    sessionId: updatedSession.sessionId,
+  })
+  assert.equal(
+    reloaded?.providerOptions.headers?.Authorization,
+    'Bearer session-secret-token',
+  )
+  assert.equal(
+    reloaded?.providerBinding?.providerOptions.headers?.Authorization,
+    'Bearer binding-secret-token',
+  )
+
+  const redacted = redactAssistantSessionForDisplay(reloaded!)
+  assert.equal(redacted.providerOptions.headers?.Authorization, '[REDACTED]')
+  assert.equal(redacted.providerOptions.headers?.['X-Visible'], 'public-header')
+  assert.equal(
+    redacted.providerBinding?.providerOptions.headers?.Authorization,
+    '[REDACTED]',
+  )
+  assert.equal(
+    redacted.providerBinding?.providerOptions.headers?.['X-Binding-Visible'],
+    'binding-public',
+  )
+
+  assert.equal((await stat(statePaths.assistantStateRoot)).mode & 0o777, 0o700)
+  assert.equal((await stat(statePaths.sessionsDirectory)).mode & 0o777, 0o700)
+  assert.equal((await stat(statePaths.sessionSecretsDirectory)).mode & 0o777, 0o700)
+  assert.equal((await stat(sessionPath)).mode & 0o777, 0o600)
+  assert.equal((await stat(sessionSecretsPath)).mode & 0o777, 0o600)
 })

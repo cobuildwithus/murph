@@ -14,16 +14,13 @@ export async function resolveAssistantTurnSharedPlan(
   const cliAccess = resolveAssistantCliAccessContext()
   const requestedWorkingDirectory = input.workingDirectory ?? input.vault
   const conversationPolicy = resolveAssistantConversationPolicy({
-    conversation: input.conversation,
     message: {
       deliverResponse: input.deliverResponse,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       deliveryTarget: input.deliveryTarget,
-      maxSessionAgeMs: input.maxSessionAgeMs,
       sourceThreadId: input.sourceThreadId,
       threadId: input.threadId,
       threadIsDirect: input.threadIsDirect,
-      turnTrigger: input.turnTrigger,
     },
     session: resolved.session,
   })

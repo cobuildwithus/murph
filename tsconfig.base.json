@@ -139,6 +139,9 @@
       "@murph/assistant-services/outbox": [
         "packages/assistant-services/src/outbox.ts"
       ],
+      "@murph/assistant-services/runtime": [
+        "packages/assistant-services/src/runtime.ts"
+      ],
       "@murph/assistant-services/status": [
         "packages/assistant-services/src/status.ts"
       ],

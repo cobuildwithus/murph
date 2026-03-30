@@ -125,9 +125,33 @@ async function handleAssistantRequest(
       sendJson(response, 200, await input.service.getSession(parseAssistantSessionRoute(url)))
       return
     }
+    if (method === 'GET' && url.pathname === '/outbox') {
+      sendJson(response, 200, await input.service.listOutbox(parseAssistantVaultQuery(url)))
+      return
+    }
+    if (method === 'GET' && url.pathname.startsWith('/outbox/')) {
+      sendJson(response, 200, await input.service.getOutboxIntent(parseAssistantOutboxRoute(url)))
+      return
+    }
     if (method === 'POST' && url.pathname === '/outbox/drain') {
       const body = parseAssistantOutboxDrainRequestBody(await readJsonBody(request))
       sendJson(response, 200, await input.service.drainOutbox(body))
+      return
+    }
+    if (method === 'GET' && url.pathname === '/cron/status') {
+      sendJson(response, 200, await input.service.getCronStatus(parseAssistantVaultQuery(url)))
+      return
+    }
+    if (method === 'GET' && url.pathname === '/cron/jobs') {
+      sendJson(response, 200, await input.service.listCronJobs(parseAssistantVaultQuery(url)))
+      return
+    }
+    if (method === 'GET' && url.pathname.startsWith('/cron/jobs/')) {
+      sendJson(response, 200, await input.service.getCronJob(parseAssistantCronJobRoute(url)))
+      return
+    }
+    if (method === 'GET' && url.pathname === '/cron/runs') {
+      sendJson(response, 200, await input.service.listCronRuns(parseAssistantCronRunsQuery(url)))
       return
     }
     if (method === 'POST' && url.pathname === '/automation/run-once') {
@@ -247,6 +271,16 @@ function parseAssistantOutboxDrainRequestBody(payload: unknown): AssistantOutbox
   }
 }
 
+function parseAssistantOutboxRoute(url: URL): {
+  intentId: string
+  vault?: string | null
+} {
+  return {
+    intentId: parseRequiredRouteSegment(url.pathname, '/outbox/', 'outbox route'),
+    vault: readOptionalNullableQuery(url, 'vault'),
+  }
+}
+
 function parseAssistantAutomationRunRequestBody(payload: unknown): AssistantAutomationRunRequest {
   const record = asAssistantRequestRecord(payload, 'automation/run-once')
   assertOptionalNullableStringField(record, 'vault', 'automation/run-once')
@@ -286,6 +320,33 @@ function parseAssistantCronProcessRequestBody(payload: unknown): AssistantCronPr
     deliveryDispatchMode: deliveryDispatchMode ?? undefined,
     limit: readOptionalIntegerField(record, 'limit', 'cron/process-due'),
     vault: readOptionalNullableStringField(record, 'vault', 'cron/process-due'),
+  }
+}
+
+function parseAssistantCronJobRoute(url: URL): {
+  job: string
+  vault?: string | null
+} {
+  return {
+    job: parseRequiredRouteSegment(url.pathname, '/cron/jobs/', 'cron job route'),
+    vault: readOptionalNullableQuery(url, 'vault'),
+  }
+}
+
+function parseAssistantCronRunsQuery(url: URL): {
+  job: string
+  limit?: number
+  vault?: string | null
+} {
+  const job = readOptionalNullableQuery(url, 'job')
+  if (typeof job !== 'string' || job.length === 0) {
+    throw new AssistantHttpRequestError('Assistant cron runs requests require a job query parameter.', 400)
+  }
+
+  return {
+    job,
+    limit: readOptionalIntegerQuery(url, 'limit'),
+    vault: readOptionalNullableQuery(url, 'vault'),
   }
 }
 
@@ -530,6 +591,23 @@ function parseAssistantSessionIdField(value: unknown, context: string): string {
       error instanceof Error ? error.message : 'Assistant session id was invalid.',
       400,
     )
+  }
+}
+
+function parseRequiredRouteSegment(
+  pathname: string,
+  prefix: string,
+  context: string,
+): string {
+  const encoded = pathname.replace(new RegExp(`^${prefix}`.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'), 'u'), '')
+  if (!encoded) {
+    throw new AssistantHttpRequestError(`Assistant ${context} requires an identifier.`, 400)
+  }
+
+  try {
+    return decodeURIComponent(encoded)
+  } catch {
+    throw new AssistantHttpRequestError(`Assistant ${context} contained an invalid encoding.`, 400)
   }
 }
 

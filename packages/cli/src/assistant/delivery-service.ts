@@ -94,7 +94,6 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
     outcome: input.outcome,
     response: input.response,
     turnId: input.turnId,
-    vault: input.vault,
   })
   const state = createAssistantRuntimeStateService(input.vault)
   await state.turns.finalizeReceipt(plan.receipt)
@@ -106,13 +105,11 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
   outcome: AssistantDeliveryOutcome
   response: string
   turnId: string
-  vault: string
 }): AssistantTurnDeliveryFinalizationPlan {
   switch (input.outcome.kind) {
     case 'not-requested':
       return {
         receipt: {
-          vault: input.vault,
           turnId: input.turnId,
           status: 'completed',
           deliveryDisposition: 'not-requested',
@@ -120,7 +117,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           completedAt: input.completedAt,
         },
         diagnostic: {
-          vault: input.vault,
           component: 'assistant',
           kind: 'turn.completed',
           message: 'Assistant turn completed without outbound delivery.',
@@ -135,7 +131,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
     case 'sent':
       return {
         receipt: {
-          vault: input.vault,
           turnId: input.turnId,
           status: 'completed',
           deliveryDisposition: 'sent',
@@ -144,7 +139,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           completedAt: input.completedAt,
         },
         diagnostic: {
-          vault: input.vault,
           component: 'assistant',
           kind: 'turn.completed',
           message: 'Assistant turn completed and delivered successfully.',
@@ -160,7 +154,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
     case 'queued':
       return {
         receipt: {
-          vault: input.vault,
           turnId: input.turnId,
           status: 'deferred',
           deliveryDisposition: input.outcome.error ? 'retryable' : 'queued',
@@ -170,7 +163,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           completedAt: input.completedAt,
         },
         diagnostic: {
-          vault: input.vault,
           component: 'assistant',
           kind: 'turn.deferred',
           level: input.outcome.error ? 'warn' : 'info',
@@ -190,7 +182,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
     case 'failed':
       return {
         receipt: {
-          vault: input.vault,
           turnId: input.turnId,
           status: 'failed',
           deliveryDisposition: 'failed',
@@ -200,7 +191,6 @@ export function buildAssistantTurnDeliveryFinalizationPlan(input: {
           completedAt: input.completedAt,
         },
         diagnostic: {
-          vault: input.vault,
           component: 'assistant',
           kind: 'turn.failed',
           level: 'error',

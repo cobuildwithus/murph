@@ -48,44 +48,48 @@ export function buildResolveAssistantSessionInput(
       ...input,
     }),
   )
-  const sessionId = input.conversation?.sessionId ?? input.sessionId
-  const alias = input.conversation?.alias ?? input.alias
-  const channel = input.conversation?.channel ?? input.channel
+  const sessionId = input.conversation?.sessionId ?? input.sessionId ?? undefined
+  const alias = input.conversation?.alias ?? input.alias ?? undefined
+  const channel = input.conversation?.channel ?? input.channel ?? undefined
   const identityId =
     input.conversation?.identityId ??
     input.identityId ??
     defaults?.identityId ??
-    null
+    undefined
   const participantId =
     input.conversation?.participantId ??
     input.actorId ??
     input.participantId ??
-    null
+    undefined
   const threadId =
-    input.conversation?.threadId ?? input.threadId ?? input.sourceThreadId ?? null
+    input.conversation?.threadId ??
+    input.threadId ??
+    input.sourceThreadId ??
+    undefined
   const directness =
     typeof input.threadIsDirect === 'boolean'
       ? input.threadIsDirect
         ? 'direct'
         : 'group'
       : input.conversation?.directness ?? null
+  const threadIsDirect =
+    typeof input.threadIsDirect === 'boolean'
+      ? input.threadIsDirect
+      : directness === 'direct'
+        ? true
+        : directness === 'group'
+          ? false
+          : undefined
 
   return {
     vault: input.vault,
-    sessionId,
-    alias,
-    channel,
-    identityId,
-    actorId: participantId,
-    threadId,
-    threadIsDirect:
-      typeof input.threadIsDirect === 'boolean'
-        ? input.threadIsDirect
-        : directness === 'direct'
-          ? true
-          : directness === 'group'
-            ? false
-            : undefined,
+    ...(sessionId !== undefined ? { sessionId } : {}),
+    ...(alias !== undefined ? { alias } : {}),
+    ...(channel !== undefined ? { channel } : {}),
+    ...(identityId !== undefined ? { identityId } : {}),
+    ...(participantId !== undefined ? { actorId: participantId } : {}),
+    ...(threadId !== undefined ? { threadId } : {}),
+    ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
     provider: providerConfig.provider,
     model: providerConfig.model,
     sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox) ?? 'workspace-write',
