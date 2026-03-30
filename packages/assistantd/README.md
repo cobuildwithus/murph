@@ -32,6 +32,10 @@ CLI client configuration:
 - `MURPH_ASSISTANTD_BASE_URL`
 - `MURPH_ASSISTANTD_CONTROL_TOKEN`
 
+Startup env loading:
+- `murph-assistantd` loads `.env.local` first and then `.env` from its launch cwd before reading startup config.
+- Already-exported shell variables still win over those file defaults.
+
 `assistantd` sets `MURPH_ASSISTANTD_DISABLE_CLIENT=1` in its own process so daemon-local calls never recurse back through the HTTP client.
 
 ## HTTP routes

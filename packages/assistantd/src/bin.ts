@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { loadAssistantdEnvironment } from './config.js'
+import { loadAssistantdEnvironment, loadAssistantdEnvFiles } from './config.js'
 import { startAssistantHttpServer } from './http.js'
 import { createAssistantLocalService } from './service.js'
 
 async function main(): Promise<void> {
   process.env.MURPH_ASSISTANTD_DISABLE_CLIENT = '1'
+  loadAssistantdEnvFiles()
   const env = loadAssistantdEnvironment()
   const service = createAssistantLocalService(env.vaultRoot)
   const handle = await startAssistantHttpServer({
