@@ -1,4 +1,5 @@
 import type { AssistantSessionBinding } from '../assistant-cli-contracts.js'
+import { inferAssistantBindingDelivery } from '../assistant/channel-adapters.js'
 import { normalizeNullableString } from '../text/shared.js'
 import {
   gatewayConversationDirectnessValues,
@@ -92,9 +93,10 @@ export function mergeGatewayConversationRoutes(
     gatewayConversationRouteToConversationRef(patch),
   )
 
+  const reply = mergeGatewayReplyRoute(base?.reply, patch?.reply, merged)
   return gatewayConversationRouteFromConversationRef(merged, {
-    kind: patch?.reply?.kind ?? base?.reply.kind ?? null,
-    target: patch?.reply?.target ?? base?.reply.target ?? null,
+    kind: reply.kind,
+    target: reply.target,
   })
 }
 
@@ -115,10 +117,26 @@ export function gatewayConversationRouteCanSend(
   route: GatewayConversationRoute | null | undefined,
 ): boolean {
   const normalized = normalizeGatewayConversationRoute(route)
-  const inferredReplyRoute = inferGatewayReplyRoute(normalized)
-  return Boolean(
-    normalized.channel && inferredReplyRoute?.kind && inferredReplyRoute.target,
-  )
+  const inferredDelivery = inferAssistantBindingDelivery({
+    channel: normalized.channel,
+    conversation: gatewayConversationRouteToConversationRef(normalized),
+    deliveryKind: normalized.reply.kind,
+    deliveryTarget: normalized.reply.target,
+  })
+
+  if (!normalized.channel || !inferredDelivery) {
+    return false
+  }
+
+  if (normalized.channel === 'email' && !normalized.identityId) {
+    return false
+  }
+
+  if (normalized.channel === 'linq' && inferredDelivery.kind !== 'thread') {
+    return false
+  }
+
+  return true
 }
 
 function gatewayConversationRouteFromConversationRef(
@@ -219,36 +237,39 @@ function mergeGatewayConversationRefs(
   }
 }
 
-function inferGatewayReplyRoute(
-  route: GatewayConversationRoute,
+function mergeGatewayReplyRoute(
+  base: GatewayConversationRoute['reply'] | null | undefined,
+  patch: GatewayConversationRouteInput['reply'] | null | undefined,
+  mergedConversation: GatewayConversationRef,
 ): {
-  kind: GatewayReplyRouteKind
-  target: string
-} | null {
-  const explicitKind = route.reply.kind ?? null
-  const explicitTarget = normalizeNullableString(route.reply.target)
-  if (explicitKind && explicitTarget) {
+  kind: GatewayReplyRouteKind | null
+  target: string | null
+} {
+  const explicitKind =
+    patch && 'kind' in patch ? patch.kind ?? null : base?.kind ?? null
+  const explicitTarget =
+    patch && 'target' in patch
+      ? normalizeNullableString(patch.target)
+      : normalizeNullableString(base?.target)
+
+  if (patch && 'kind' in patch) {
     return {
       kind: explicitKind,
       target: explicitTarget,
     }
   }
 
-  if (route.threadId) {
+  if (explicitKind === 'thread' && (!patch || !('target' in patch))) {
     return {
       kind: 'thread',
-      target: route.threadId,
+      target: mergedConversation.threadId ?? null,
     }
   }
 
-  if (route.participantId) {
-    return {
-      kind: 'participant',
-      target: route.participantId,
-    }
+  return {
+    kind: explicitKind,
+    target: explicitTarget,
   }
-
-  return null
 }
 
 function resolveGatewayConversationKey(input: {
