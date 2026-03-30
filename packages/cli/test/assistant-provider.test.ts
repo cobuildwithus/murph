@@ -791,7 +791,7 @@ test('executeAssistantProviderTurn keeps totalTokens null when an OpenAI-compati
 
   assert.equal(result.usage?.inputTokens, 120)
   assert.equal(result.usage?.outputTokens, 45)
-  assert.equal(result.usage?.totalTokens, null)
+  assert.equal(result.usage?.totalTokens, 165)
 })
 
 test('executeAssistantProviderTurn extracts best-effort Codex usage from the final completion event', async () => {
@@ -883,7 +883,7 @@ test('executeAssistantProviderTurn keeps totalTokens null when Codex omits an ex
 
   assert.equal(result.usage?.inputTokens, 210)
   assert.equal(result.usage?.outputTokens, 98)
-  assert.equal(result.usage?.totalTokens, null)
+  assert.equal(result.usage?.totalTokens, 308)
 })
 
 test('executeAssistantProviderTurn infers the OpenAI-compatible provider when endpoint config is supplied without an explicit provider', async () => {
@@ -1018,10 +1018,10 @@ test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model 
   assert.equal(resolved.model, 'custom-model')
   assert.match(outputChunks.join(''), /A model id is required\./u)
   assert.deepEqual(promptMocks.prompts, [
-    'OpenAI-compatible base URL [http://127.0.0.1:11434/v1]: ',
-    'API key environment variable (leave blank for local/no auth): ',
-    'Default model for the OpenAI-compatible endpoint: ',
-    'Default model for the OpenAI-compatible endpoint: ',
+    'Model endpoint URL [http://127.0.0.1:11434/v1]: ',
+    'API key env var name (leave blank if this endpoint does not need one): ',
+    'Default model to use: ',
+    'Default model to use: ',
   ])
 })
 

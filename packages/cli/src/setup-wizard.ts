@@ -1,7 +1,10 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
 import { listAssistantCronPresets } from './assistant/cron/presets.js'
-import { getDefaultSetupAssistantPreset as getDefaultAssistantPreset } from './setup-assistant.js'
+import {
+  DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
+  getDefaultSetupAssistantPreset as getDefaultAssistantPreset,
+} from './setup-assistant.js'
 import {
   type SetupAssistantPreset,
   type SetupChannel,
@@ -16,7 +19,10 @@ import {
 import { VaultCliError } from './vault-cli-errors.js'
 
 export interface SetupWizardResult {
+  assistantApiKeyEnv?: string | null
+  assistantBaseUrl?: string | null
   assistantPreset?: SetupAssistantPreset
+  assistantProviderName?: string | null
   channels: SetupChannel[]
   scheduledUpdates: string[]
   wearables: SetupWearable[]
@@ -26,7 +32,10 @@ export interface SetupWizardInput {
   channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
   commandName?: string
   deviceSyncLocalBaseUrl?: string | null
+  initialAssistantApiKeyEnv?: string | null
+  initialAssistantBaseUrl?: string | null
   initialAssistantPreset?: SetupAssistantPreset
+  initialAssistantProviderName?: string | null
   initialChannels?: readonly SetupChannel[]
   initialScheduledUpdates?: readonly string[]
   initialWearables?: readonly SetupWearable[]
@@ -44,10 +53,38 @@ export interface SetupWizardCompletionController {
   waitForResult(): Promise<SetupWizardResult>
 }
 
-interface SetupWizardAssistantOption {
+export type SetupWizardAssistantProvider = 'openai' | 'compatible' | 'skip'
+
+export type SetupWizardAssistantMethod =
+  | 'openai-codex'
+  | 'openai-api-key'
+  | 'compatible-endpoint'
+  | 'compatible-codex-oss'
+  | 'skip'
+
+interface SetupWizardAssistantProviderOption {
   description: string
-  preset: SetupAssistantPreset
+  provider: SetupWizardAssistantProvider
   title: string
+}
+
+interface SetupWizardAssistantMethodOption {
+  badges?: readonly SetupWizardInlineBadge[]
+  description: string
+  detail?: string
+  method: SetupWizardAssistantMethod
+  title: string
+}
+
+export interface SetupWizardResolvedAssistantSelection {
+  apiKeyEnv: string | null
+  baseUrl: string | null
+  detail: string
+  methodLabel: string | null
+  preset: SetupAssistantPreset
+  providerLabel: string
+  providerName: string | null
+  summary: string
 }
 
 interface SetupWizardChannelOption {
@@ -86,7 +123,8 @@ export interface SetupWizardPublicUrlReview {
 
 type SetupWizardStep =
   | 'intro'
-  | 'assistant'
+  | 'assistant-provider'
+  | 'assistant-method'
   | 'scheduled-updates'
   | 'channels'
   | 'wearables'
@@ -96,7 +134,7 @@ type SetupWizardStep =
 type SetupWizardFlowStep = Exclude<SetupWizardStep, 'intro'>
 type SetupWizardSelectionStep = Extract<
   SetupWizardFlowStep,
-  'assistant' | 'scheduled-updates' | 'channels' | 'wearables'
+  'assistant-provider' | 'assistant-method' | 'scheduled-updates' | 'channels' | 'wearables'
 >
 type SetupWizardTone = 'accent' | 'success' | 'warn' | 'danger' | 'muted'
 
@@ -122,49 +160,77 @@ interface SetupWizardSelectionLine {
 
 const DEFAULT_SETUP_DEVICE_SYNC_LOCAL_BASE_URL = 'http://localhost:8788'
 const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
+const DEFAULT_SETUP_OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
 
-const setupWizardAssistantOptions: readonly SetupWizardAssistantOption[] = [
+const setupWizardAssistantProviderOptions: readonly SetupWizardAssistantProviderOption[] = [
   {
-    preset: 'codex-cli',
-    title: 'Codex CLI',
-    description: 'Best default when you want hosted models and the saved Codex flow.',
+    provider: 'openai',
+    title: 'OpenAI',
+    description: 'Use OpenAI for Murph’s default assistant.',
   },
   {
-    preset: 'codex-oss',
-    title: 'Codex OSS / local model',
-    description: 'Keep the Codex path, but point the default at a local OSS model.',
+    provider: 'compatible',
+    title: 'Local or compatible endpoint',
+    description: 'Use Ollama, LM Studio, vLLM, or another OpenAI-style endpoint.',
   },
   {
-    preset: 'openai-compatible',
-    title: 'OpenAI-compatible endpoint',
-    description: 'Use Ollama, a local gateway, LM Studio, or a hosted compatible API.',
-  },
-  {
-    preset: 'skip',
+    provider: 'skip',
     title: 'Skip for now',
-    description: 'Leave the current assistant backend unchanged.',
+    description: 'Leave the current assistant settings alone.',
+  },
+]
+
+const setupWizardOpenAIAssistantMethodOptions: readonly SetupWizardAssistantMethodOption[] = [
+  {
+    method: 'openai-codex',
+    title: 'ChatGPT / Codex sign-in',
+    description: 'Best if you already use the Codex sign-in flow.',
+    detail: 'Murph will use your saved Codex / ChatGPT login and ask which default model to use next.',
+    badges: [{ label: 'recommended', tone: 'success' }],
+  },
+  {
+    method: 'openai-api-key',
+    title: 'OpenAI API key',
+    description: 'Use OPENAI_API_KEY and choose a model.',
+    detail: 'Good if you want direct API billing instead of the Codex sign-in path.',
+  },
+]
+
+const setupWizardCompatibleAssistantMethodOptions: readonly SetupWizardAssistantMethodOption[] = [
+  {
+    method: 'compatible-endpoint',
+    title: 'Compatible endpoint',
+    description: 'Use Ollama, LM Studio, vLLM, or another OpenAI-style endpoint.',
+    detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
+    badges: [{ label: 'local-friendly', tone: 'accent' }],
+  },
+  {
+    method: 'compatible-codex-oss',
+    title: 'Codex local model',
+    description: 'Keep the Codex flow, but point it at a local OSS model.',
+    detail: 'Good if you want the Codex tooling path with a local model by default.',
   },
 ]
 
 const setupWizardChannelOptions: readonly SetupWizardChannelOption[] = [
   {
     channel: 'imessage',
-    description: 'Messages.app auto-reply on macOS.',
+    description: 'Reply from Messages on this Mac.',
     title: 'iMessage',
   },
   {
     channel: 'telegram',
-    description: 'Telegram bot auto-reply.',
+    description: 'Reply through a Telegram bot.',
     title: 'Telegram',
   },
   {
     channel: 'linq',
-    description: 'Linq iMessage/SMS/RCS auto-reply via webhook.',
+    description: 'Reply by SMS, iMessage, or RCS through Linq.',
     title: 'Linq',
   },
   {
     channel: 'email',
-    description: 'AgentMail inbox plus email auto-reply.',
+    description: 'Read and reply in email.',
     title: 'Email',
   },
 ]
@@ -184,12 +250,12 @@ const DEFAULT_SETUP_WIZARD_SCHEDULED_UPDATE_IDS = [
 
 const setupWizardWearableOptions: readonly SetupWizardWearableOption[] = [
   {
-    description: 'OAuth connect plus scheduled sync.',
+    description: 'Import sleep, readiness, and recovery from Oura.',
     title: 'Oura',
     wearable: 'oura',
   },
   {
-    description: 'OAuth connect plus ongoing sync.',
+    description: 'Import sleep, strain, and recovery from WHOOP.',
     title: 'WHOOP',
     wearable: 'whoop',
   },
@@ -369,15 +435,34 @@ export async function runSetupWizard(
   const App = (): React.ReactElement => {
     const createElement = React.createElement
     const { exit } = useApp()
+    const initialAssistantProvider = inferSetupWizardAssistantProvider({
+      apiKeyEnv: input.initialAssistantApiKeyEnv,
+      baseUrl: input.initialAssistantBaseUrl,
+      preset: initialAssistantPreset,
+      providerName: input.initialAssistantProviderName,
+    })
+    const initialAssistantMethod = inferSetupWizardAssistantMethod({
+      preset: initialAssistantPreset,
+      provider: initialAssistantProvider,
+    })
     const [step, setStep] = React.useState<SetupWizardStep>('intro')
-    const [assistantIndex, setAssistantIndex] = React.useState(
-      findSetupWizardAssistantOptionIndex(initialAssistantPreset),
+    const [assistantProviderIndex, setAssistantProviderIndex] = React.useState(
+      findSetupWizardAssistantProviderIndex(initialAssistantProvider),
+    )
+    const [assistantMethodIndex, setAssistantMethodIndex] = React.useState(
+      findSetupWizardAssistantMethodIndex(
+        initialAssistantProvider,
+        initialAssistantMethod,
+      ),
     )
     const [scheduledUpdateIndex, setScheduledUpdateIndex] = React.useState(0)
     const [channelIndex, setChannelIndex] = React.useState(0)
     const [wearableIndex, setWearableIndex] = React.useState(0)
-    const [selectedAssistantPreset, setSelectedAssistantPreset] =
-      React.useState<SetupAssistantPreset>(initialAssistantPreset)
+    const [selectedAssistantProvider, setSelectedAssistantProvider] =
+      React.useState<SetupWizardAssistantProvider>(initialAssistantProvider)
+    const [selectedAssistantMethod, setSelectedAssistantMethod] = React.useState<
+      SetupWizardAssistantMethod
+    >(initialAssistantMethod)
     const [selectedChannels, setSelectedChannels] = React.useState<SetupChannel[]>(
       initialChannels,
     )
@@ -386,8 +471,16 @@ export async function runSetupWizard(
     const [selectedWearables, setSelectedWearables] = React.useState<SetupWearable[]>(
       initialWearables,
     )
-    const latestAssistantRef = React.useRef<SetupAssistantPreset>(
-      initialAssistantPreset,
+    const assistantSelection = resolveSetupWizardAssistantSelection({
+      initialApiKeyEnv: input.initialAssistantApiKeyEnv,
+      initialBaseUrl: input.initialAssistantBaseUrl,
+      initialProvider: initialAssistantProvider,
+      initialProviderName: input.initialAssistantProviderName,
+      method: selectedAssistantMethod,
+      provider: selectedAssistantProvider,
+    })
+    const latestAssistantRef = React.useRef<SetupWizardResolvedAssistantSelection>(
+      assistantSelection,
     )
     const latestChannelsRef = React.useRef<SetupChannel[]>(initialChannels)
     const latestScheduledUpdatesRef = React.useRef<string[]>(initialScheduledUpdates)
@@ -400,17 +493,17 @@ export async function runSetupWizard(
       linqLocalWebhookUrl: input.linqLocalWebhookUrl,
     })
     const includePublicUrlStep = publicUrlReview.enabled
+    const includeAssistantMethodStep = selectedAssistantProvider !== 'skip'
     const publicUrlGuidance = publicUrlReview.enabled
       ? describeSetupWizardPublicUrlStrategyChoice({
           review: publicUrlReview,
           strategy: publicUrlReview.recommendedStrategy,
         })
       : null
-    const wideLayout = (process.stderr.columns ?? 0) >= 108
 
     React.useEffect(() => {
-      latestAssistantRef.current = selectedAssistantPreset
-    }, [selectedAssistantPreset])
+      latestAssistantRef.current = assistantSelection
+    }, [assistantSelection])
 
     React.useEffect(() => {
       latestChannelsRef.current = selectedChannels
@@ -424,6 +517,15 @@ export async function runSetupWizard(
       latestWearablesRef.current = selectedWearables
     }, [selectedWearables])
 
+    React.useEffect(() => {
+      setAssistantMethodIndex(
+        findSetupWizardAssistantMethodIndex(
+          selectedAssistantProvider,
+          selectedAssistantMethod,
+        ),
+      )
+    }, [selectedAssistantMethod, selectedAssistantProvider])
+
     type SetupWizardSelectionConfig = {
       lines: SetupWizardSelectionLine[]
       marker: 'checkbox' | 'radio'
@@ -436,34 +538,84 @@ export async function runSetupWizard(
       toggleCurrent: () => void
     }
 
+    const assistantMethodOptions = listSetupWizardAssistantMethodOptions(
+      selectedAssistantProvider,
+    )
     const selectionSteps: Record<
       SetupWizardSelectionStep,
       SetupWizardSelectionConfig
     > = {
-      assistant: {
-        lines: setupWizardAssistantOptions.map((option, index) => ({
-          active: index === assistantIndex,
-          badges: buildSetupWizardAssistantBadges({
-            currentPreset: initialAssistantPreset,
-            preset: option.preset,
+      'assistant-provider': {
+        lines: setupWizardAssistantProviderOptions.map((option, index) => ({
+          active: index === assistantProviderIndex,
+          badges: buildSetupWizardAssistantProviderBadges({
+            currentProvider: initialAssistantProvider,
+            provider: option.provider,
           }),
           description: option.description,
-          key: option.preset,
-          selected: option.preset === selectedAssistantPreset,
+          key: option.provider,
+          selected: option.provider === selectedAssistantProvider,
+          title: option.title,
+        })),
+        marker: 'radio',
+        nextStep:
+          selectedAssistantProvider === 'skip'
+            ? 'scheduled-updates'
+            : 'assistant-method',
+        previousStep: 'intro',
+        selectCurrentOnEnter: true,
+        setIndex: setAssistantProviderIndex,
+        step: 'assistant-provider',
+        stepIntro: formatSetupWizardStepIntro(
+          'assistant-provider',
+          selectedAssistantProvider,
+        ),
+        toggleCurrent: () => {
+          const activeProvider =
+            setupWizardAssistantProviderOptions[assistantProviderIndex]?.provider
+          if (!activeProvider) {
+            return
+          }
+
+          const nextMethod = resolveSetupWizardAssistantMethodForProvider({
+            currentMethod: selectedAssistantMethod,
+            provider: activeProvider,
+          })
+          setSelectedAssistantProvider(activeProvider)
+          setSelectedAssistantMethod(nextMethod)
+          setAssistantMethodIndex(
+            findSetupWizardAssistantMethodIndex(activeProvider, nextMethod),
+          )
+        },
+      },
+      'assistant-method': {
+        lines: assistantMethodOptions.map((option, index) => ({
+          active: index === assistantMethodIndex,
+          badges: buildSetupWizardAssistantMethodBadges({
+            currentMethod: initialAssistantMethod,
+            method: option.method,
+            optionBadges: option.badges,
+          }),
+          description: option.description,
+          detail: option.detail,
+          key: option.method,
+          selected: option.method === selectedAssistantMethod,
           title: option.title,
         })),
         marker: 'radio',
         nextStep: 'scheduled-updates',
-        previousStep: 'intro',
+        previousStep: 'assistant-provider',
         selectCurrentOnEnter: true,
-        setIndex: setAssistantIndex,
-        step: 'assistant',
-        stepIntro:
-          'Choose the default model and auth path Murph should save into operator defaults.',
+        setIndex: setAssistantMethodIndex,
+        step: 'assistant-method',
+        stepIntro: formatSetupWizardStepIntro(
+          'assistant-method',
+          selectedAssistantProvider,
+        ),
         toggleCurrent: () => {
-          const activePreset = setupWizardAssistantOptions[assistantIndex]?.preset
-          if (activePreset) {
-            setSelectedAssistantPreset(activePreset)
+          const activeMethod = assistantMethodOptions[assistantMethodIndex]?.method
+          if (activeMethod) {
+            setSelectedAssistantMethod(activeMethod)
           }
         },
       },
@@ -481,12 +633,16 @@ export async function runSetupWizard(
         })),
         marker: 'checkbox',
         nextStep: 'channels',
-        previousStep: 'assistant',
+        previousStep: includeAssistantMethodStep
+          ? 'assistant-method'
+          : 'assistant-provider',
         selectCurrentOnEnter: false,
         setIndex: setScheduledUpdateIndex,
         step: 'scheduled-updates',
-        stepIntro:
-          'Keep or trim the starter automation bundle. These remain recommendations here and are installed later once you choose a delivery route.',
+        stepIntro: formatSetupWizardStepIntro(
+          'scheduled-updates',
+          selectedAssistantProvider,
+        ),
         toggleCurrent: () => {
           const activePresetId =
             setupWizardScheduledUpdateOptions[scheduledUpdateIndex]?.id
@@ -521,8 +677,7 @@ export async function runSetupWizard(
         selectCurrentOnEnter: false,
         setIndex: setChannelIndex,
         step: 'channels',
-        stepIntro:
-          'Pick the chat lanes you want live first. Missing tokens can be entered for this run or left for later.',
+        stepIntro: formatSetupWizardStepIntro('channels', selectedAssistantProvider),
         toggleCurrent: () => {
           const activeChannel = setupWizardChannelOptions[channelIndex]?.channel
           if (activeChannel) {
@@ -556,8 +711,7 @@ export async function runSetupWizard(
         selectCurrentOnEnter: false,
         setIndex: setWearableIndex,
         step: 'wearables',
-        stepIntro:
-          'Select the health data sources you want next. Ready items can open their connect flows after setup finishes.',
+        stepIntro: formatSetupWizardStepIntro('wearables', selectedAssistantProvider),
         toggleCurrent: () => {
           const activeWearable = setupWizardWearableOptions[wearableIndex]?.wearable
           if (activeWearable) {
@@ -585,7 +739,7 @@ export async function runSetupWizard(
 
       if (step === 'intro') {
         if (key.return || value === ' ') {
-          setStep('assistant')
+          setStep('assistant-provider')
           return
         }
 
@@ -653,7 +807,10 @@ export async function runSetupWizard(
 
         if (key.return || value === ' ') {
           completion.submit({
-            assistantPreset: latestAssistantRef.current,
+            assistantApiKeyEnv: latestAssistantRef.current.apiKeyEnv,
+            assistantBaseUrl: latestAssistantRef.current.baseUrl,
+            assistantPreset: latestAssistantRef.current.preset,
+            assistantProviderName: latestAssistantRef.current.providerName,
             channels: sortSetupWizardChannels(latestChannelsRef.current),
             scheduledUpdates: sortSetupWizardScheduledUpdates(
               latestScheduledUpdatesRef.current,
@@ -665,7 +822,6 @@ export async function runSetupWizard(
       }
     })
 
-    const assistantSummary = formatSetupAssistantPreset(selectedAssistantPreset)
     const selectedChannelNames = selectedChannels.map((channel) =>
       formatSetupChannel(channel),
     )
@@ -701,6 +857,12 @@ export async function runSetupWizard(
           ? [`${formatSetupWearable(wearable)} (${formatMissingEnv(status.missingEnv)})`]
           : []
       }),
+      ...(assistantSelection.apiKeyEnv &&
+      normalizeSetupWizardText(process.env[assistantSelection.apiKeyEnv]) === null
+        ? [
+            `Assistant (${assistantSelection.apiKeyEnv})`,
+          ]
+        : []),
     ]
     const hintRow = createSetupWizardHintRow(
       resolveSetupWizardHints({
@@ -709,133 +871,184 @@ export async function runSetupWizard(
         step,
       }),
     )
-    const stepper = createSetupWizardStepper({
-      includePublicUrlStep,
-      step,
-    })
-    const snapshotPanel = createSetupWizardPanel({
-      title: 'Snapshot',
-      tone: 'accent',
-      children: [
-        createSetupWizardKeyValueRow({ label: 'Vault', value: input.vault }, 'vault'),
-        createSetupWizardKeyValueRow(
-          { label: 'Assistant', value: assistantSummary },
-          'assistant',
-        ),
-        createSetupWizardKeyValueRow(
-          {
-            label: 'Channels',
-            value: formatCompactSelectionSummary(selectedChannelNames),
-          },
-          'channels',
-        ),
-        createSetupWizardKeyValueRow(
-          {
-            label: 'Wearables',
-            value: formatCompactSelectionSummary(selectedWearableNames),
-          },
-          'wearables',
-        ),
-        createSetupWizardKeyValueRow(
-          {
-            label: 'Schedules',
-            value: formatCompactSelectionSummary(selectedScheduledUpdateNames),
-          },
-          'schedules',
-        ),
-        createSetupWizardKeyValueRow(
-          {
-            label: 'Ready now',
-            value: formatCompactSelectionSummary(selectedReadyNow),
-          },
-          'ready-now',
-        ),
-        createSetupWizardKeyValueRow(
-          {
-            label: 'Needs env',
-            value: formatCompactSelectionSummary(selectedNeedsEnv),
-          },
-          'needs-env',
-        ),
-        publicUrlReview.enabled
-          ? createSetupWizardKeyValueRow(
-              {
-                label: 'Ingress',
-                value: formatSetupPublicUrlStrategy(
-                  publicUrlReview.recommendedStrategy,
-                ),
-              },
-              'ingress',
-            )
-          : null,
-      ],
-    })
-
     const confirmNextStep = describeSetupWizardReviewNextStep({
       needsEnv: selectedNeedsEnv.length > 0,
       hasScheduledUpdates: selectedScheduledUpdates.length > 0,
     })
+    const completedBlocks: React.ReactElement[] = []
 
-    const mainPanel =
+    if (
+      hasSetupWizardStepPassed({
+        currentStep: step,
+        includeAssistantMethodStep,
+        includePublicUrlStep,
+        stepToCheck: 'assistant-provider',
+      })
+    ) {
+      completedBlocks.push(
+        createSetupWizardAnsweredBlock(
+          {
+            label: formatSetupWizardPromptTitle(
+              'assistant-provider',
+              selectedAssistantProvider,
+            ),
+            value: assistantSelection.providerLabel,
+          },
+          'completed-assistant-provider',
+        ),
+      )
+    }
+
+    if (
+      includeAssistantMethodStep &&
+      hasSetupWizardStepPassed({
+        currentStep: step,
+        includeAssistantMethodStep,
+        includePublicUrlStep,
+        stepToCheck: 'assistant-method',
+      })
+    ) {
+      completedBlocks.push(
+        createSetupWizardAnsweredBlock(
+          {
+            label: formatSetupWizardPromptTitle(
+              'assistant-method',
+              selectedAssistantProvider,
+            ),
+            value: assistantSelection.methodLabel ?? 'Skip',
+            detail: assistantSelection.detail,
+          },
+          'completed-assistant-method',
+        ),
+      )
+    }
+
+    if (
+      hasSetupWizardStepPassed({
+        currentStep: step,
+        includeAssistantMethodStep,
+        includePublicUrlStep,
+        stepToCheck: 'scheduled-updates',
+      })
+    ) {
+      completedBlocks.push(
+        createSetupWizardAnsweredBlock(
+          {
+            label: formatSetupWizardPromptTitle(
+              'scheduled-updates',
+              selectedAssistantProvider,
+            ),
+            value: formatSelectionSummary(selectedScheduledUpdateNames),
+          },
+          'completed-scheduled-updates',
+        ),
+      )
+    }
+
+    if (
+      hasSetupWizardStepPassed({
+        currentStep: step,
+        includeAssistantMethodStep,
+        includePublicUrlStep,
+        stepToCheck: 'channels',
+      })
+    ) {
+      completedBlocks.push(
+        createSetupWizardAnsweredBlock(
+          {
+            label: formatSetupWizardPromptTitle('channels', selectedAssistantProvider),
+            value: formatSelectionSummary(selectedChannelNames),
+          },
+          'completed-channels',
+        ),
+      )
+    }
+
+    if (
+      hasSetupWizardStepPassed({
+        currentStep: step,
+        includeAssistantMethodStep,
+        includePublicUrlStep,
+        stepToCheck: 'wearables',
+      })
+    ) {
+      completedBlocks.push(
+        createSetupWizardAnsweredBlock(
+          {
+            label: formatSetupWizardPromptTitle('wearables', selectedAssistantProvider),
+            value: formatSelectionSummary(selectedWearableNames),
+          },
+          'completed-wearables',
+        ),
+      )
+    }
+
+    if (
+      includePublicUrlStep &&
+      hasSetupWizardStepPassed({
+        currentStep: step,
+        includeAssistantMethodStep,
+        includePublicUrlStep,
+        stepToCheck: 'public-url',
+      })
+    ) {
+      completedBlocks.push(
+        createSetupWizardAnsweredBlock(
+          {
+            label: formatSetupWizardPromptTitle('public-url', selectedAssistantProvider),
+            value: formatSetupPublicUrlStrategy(
+              publicUrlReview.recommendedStrategy,
+            ),
+            detail: publicUrlGuidance ?? publicUrlReview.summary,
+          },
+          'completed-public-url',
+        ),
+      )
+    }
+
+    const activePanel =
       step === 'intro'
         ? createSetupWizardPanel({
-            title: 'Start here',
+            title: 'Before you start',
             tone: 'accent',
             children: [
               createElement(
                 Text,
                 null,
-                'Pick the assistant default, trim the starter automations, choose the first live channels, and queue any wearable connects in one pass.',
+                'We’ll help you choose how Murph should answer, which chats to turn on, and any health data you want to connect.',
               ),
               createElement(Text, null, ''),
               createSetupWizardBulletRow(
                 {
-                  body: 'Save the model and auth path Murph should reach for by default.',
-                  label: 'Assistant + auth',
-                  tone: 'accent',
-                },
-                'intro-assistant',
-              ),
-              createSetupWizardBulletRow(
-                {
-                  body: 'Keep or drop the recommended update bundle without installing cron jobs yet.',
-                  label: 'Starter schedules',
-                  tone: 'warn',
-                },
-                'intro-schedules',
-              ),
-              createSetupWizardBulletRow(
-                {
-                  body: 'Turn on the channels and wearables you want Murph to wire up next.',
-                  label: 'Channels + wearables',
+                  body: 'You can skip anything now and change it later.',
+                  label: 'Nothing is locked in',
                   tone: 'success',
                 },
-                'intro-integrations',
+                'intro-change-later',
               ),
-              createElement(Text, null, ''),
+              createSetupWizardBulletRow(
+                {
+                  body: 'If something needs a key or token, you can enter it for this setup run only or leave it for later.',
+                  label: 'Keys and tokens',
+                  tone: 'accent',
+                },
+                'intro-keys',
+              ),
               createSetupWizardBulletRow(
                 {
                   body: SETUP_RUNTIME_ENV_NOTICE,
-                  label: 'Run-only environment',
-                  tone: 'accent',
-                },
-                'intro-env',
-              ),
-              createSetupWizardBulletRow(
-                {
-                  body: 'Missing credentials can be entered after review for this run only, or left for later.',
-                  label: 'No lock-in',
+                  label: 'This setup run only',
                   tone: 'muted',
                 },
-                'intro-lock-in',
+                'intro-runtime-env',
               ),
             ],
           })
         : selectionStep
           ? createSetupWizardPanel({
-              title: formatSetupWizardStepTitle(
+              title: formatSetupWizardPromptTitle(
                 selectionStep.step,
-                includePublicUrlStep,
+                selectedAssistantProvider,
               ),
               tone: 'accent',
               children: [
@@ -860,7 +1073,10 @@ export async function runSetupWizard(
             })
           : step === 'public-url'
             ? createSetupWizardPanel({
-                title: formatSetupWizardStepTitle('public-url', includePublicUrlStep),
+                title: formatSetupWizardPromptTitle(
+                  'public-url',
+                  selectedAssistantProvider,
+                ),
                 tone: 'accent',
                 children: [
                   createElement(Text, null, publicUrlReview.summary),
@@ -868,7 +1084,7 @@ export async function runSetupWizard(
                   createSetupWizardBulletRow(
                     {
                       body: publicUrlGuidance ?? '',
-                      label: `Recommended: ${formatSetupPublicUrlStrategy(
+                      label: `Easiest path: ${formatSetupPublicUrlStrategy(
                         publicUrlReview.recommendedStrategy,
                       )}`,
                       tone: 'accent',
@@ -879,7 +1095,7 @@ export async function runSetupWizard(
                   createElement(
                     Text,
                     { color: resolveSetupWizardToneColor('muted'), bold: true },
-                    'Local targets',
+                    'If you keep things local, use these URLs',
                   ),
                   createElement(Text, null, ''),
                   ...publicUrlReview.targets.map((target) =>
@@ -889,29 +1105,29 @@ export async function runSetupWizard(
                   createElement(
                     Text,
                     { color: resolveSetupWizardToneColor('muted') },
-                    'Info only — Murph does not save a public URL mode yet.',
+                    'This step is informational only. Murph does not save a public URL choice yet.',
                   ),
                 ],
               })
             : createSetupWizardPanel({
-                title: formatSetupWizardStepTitle('confirm', includePublicUrlStep),
+                title: 'Review your setup',
                 tone: 'accent',
                 children: [
                   createSetupWizardKeyValueRow(
-                    { label: 'Assistant', value: assistantSummary },
+                    { label: 'Assistant', value: assistantSelection.summary },
                     'confirm-assistant',
                   ),
                   createSetupWizardKeyValueRow(
-                    { label: 'Channels', value: selectedChannelSummary },
+                    { label: 'Chat channels', value: selectedChannelSummary },
                     'confirm-channels',
                   ),
                   createSetupWizardKeyValueRow(
-                    { label: 'Wearables', value: selectedWearableSummary },
+                    { label: 'Health data', value: selectedWearableSummary },
                     'confirm-wearables',
                   ),
                   createSetupWizardKeyValueRow(
                     {
-                      label: 'Schedules',
+                      label: 'Auto updates',
                       value: selectedScheduledUpdateSummary,
                     },
                     'confirm-schedules',
@@ -920,7 +1136,7 @@ export async function runSetupWizard(
                   createSetupWizardBulletRow(
                     {
                       body: formatSelectionSummary(selectedReadyNow),
-                      label: 'Ready now',
+                      label: 'Can connect now',
                       tone: 'success',
                     },
                     'confirm-ready',
@@ -928,9 +1144,8 @@ export async function runSetupWizard(
                   createSetupWizardBulletRow(
                     {
                       body: formatSelectionSummary(selectedNeedsEnv),
-                      label: 'Needs env',
-                      tone:
-                        selectedNeedsEnv.length > 0 ? 'warn' : 'muted',
+                      label: 'Needs keys first',
+                      tone: selectedNeedsEnv.length > 0 ? 'warn' : 'muted',
                     },
                     'confirm-needs-env',
                   ),
@@ -938,7 +1153,7 @@ export async function runSetupWizard(
                     ? createSetupWizardBulletRow(
                         {
                           body: publicUrlGuidance,
-                          label: 'Public ingress',
+                          label: 'Public links',
                           tone: 'accent',
                         },
                         'confirm-public-url',
@@ -948,7 +1163,7 @@ export async function runSetupWizard(
                   createSetupWizardBulletRow(
                     {
                       body: confirmNextStep,
-                      label: 'After you continue',
+                      label: 'Next',
                       tone: 'accent',
                     },
                     'confirm-next-step',
@@ -971,36 +1186,16 @@ export async function runSetupWizard(
       createElement(
         Text,
         { color: resolveSetupWizardToneColor('muted') },
-        'Cleaner onboarding, better hierarchy, and less copy between you and a working local health assistant.',
+        'Choose the basics now. You can change anything later.',
       ),
-      createElement(Text, null, ''),
-      stepper,
-      createElement(Text, null, ''),
       createElement(
-        Box,
-        {
-          flexDirection: wideLayout ? 'row' : 'column',
-          alignItems: 'flex-start',
-        },
-        createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            flexGrow: 1,
-            marginRight: wideLayout ? 2 : 0,
-          },
-          mainPanel,
-        ),
-        createElement(
-          Box,
-          {
-            flexDirection: 'column',
-            marginTop: wideLayout ? 0 : 1,
-            width: wideLayout ? 36 : undefined,
-          },
-          snapshotPanel,
-        ),
+        Text,
+        { color: resolveSetupWizardToneColor('muted'), dimColor: true },
+        `Vault: ${input.vault}`,
       ),
+      createElement(Text, null, ''),
+      ...completedBlocks,
+      activePanel,
       createElement(Text, null, ''),
       hintRow,
     )
@@ -1013,7 +1208,6 @@ export async function runSetupWizard(
       return normalizeSetupWizardRuntimeStatus(input.wearableStatuses?.[wearable])
     }
   }
-
   try {
     instance = render(React.createElement(App), {
       stderr: process.stderr,
@@ -1095,25 +1289,198 @@ function sortSetupWizardScheduledUpdates(
   )
 }
 
-function findSetupWizardAssistantOptionIndex(
-  preset: SetupAssistantPreset,
+function findSetupWizardAssistantProviderIndex(
+  provider: SetupWizardAssistantProvider,
 ): number {
-  const index = setupWizardAssistantOptions.findIndex(
-    (option) => option.preset === preset,
+  const index = setupWizardAssistantProviderOptions.findIndex(
+    (option) => option.provider === provider,
   )
   return index >= 0 ? index : 0
 }
 
-function formatSetupAssistantPreset(preset: SetupAssistantPreset): string {
-  switch (preset) {
+function findSetupWizardAssistantMethodIndex(
+  provider: SetupWizardAssistantProvider,
+  method: SetupWizardAssistantMethod,
+): number {
+  const options = listSetupWizardAssistantMethodOptions(provider)
+  const index = options.findIndex((option) => option.method === method)
+  return index >= 0 ? index : 0
+}
+
+export function inferSetupWizardAssistantProvider(input: {
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  preset: SetupAssistantPreset
+  providerName?: string | null
+}): SetupWizardAssistantProvider {
+  switch (input.preset) {
     case 'codex-cli':
-      return 'Codex CLI'
+      return 'openai'
     case 'codex-oss':
-      return 'Codex OSS / local model'
-    case 'openai-compatible':
-      return 'OpenAI-compatible endpoint'
+      return 'compatible'
     case 'skip':
-      return 'Skip for now'
+      return 'skip'
+    case 'openai-compatible':
+      return isOpenAIAssistantSelection(input) ? 'openai' : 'compatible'
+  }
+}
+
+function inferSetupWizardAssistantMethod(input: {
+  preset: SetupAssistantPreset
+  provider: SetupWizardAssistantProvider
+}): SetupWizardAssistantMethod {
+  switch (input.preset) {
+    case 'codex-cli':
+      return 'openai-codex'
+    case 'codex-oss':
+      return 'compatible-codex-oss'
+    case 'skip':
+      return 'skip'
+    case 'openai-compatible':
+      return input.provider === 'openai'
+        ? 'openai-api-key'
+        : 'compatible-endpoint'
+  }
+}
+
+function resolveSetupWizardAssistantMethodForProvider(input: {
+  currentMethod: SetupWizardAssistantMethod
+  provider: SetupWizardAssistantProvider
+}): SetupWizardAssistantMethod {
+  if (input.provider === 'skip') {
+    return 'skip'
+  }
+
+  if (input.provider === 'openai') {
+    return input.currentMethod === 'openai-api-key'
+      ? 'openai-api-key'
+      : 'openai-codex'
+  }
+
+  return input.currentMethod === 'compatible-codex-oss'
+    ? 'compatible-codex-oss'
+    : 'compatible-endpoint'
+}
+
+function listSetupWizardAssistantMethodOptions(
+  provider: SetupWizardAssistantProvider,
+): readonly SetupWizardAssistantMethodOption[] {
+  switch (provider) {
+    case 'openai':
+      return setupWizardOpenAIAssistantMethodOptions
+    case 'compatible':
+      return setupWizardCompatibleAssistantMethodOptions
+    case 'skip':
+      return []
+  }
+}
+
+export function resolveSetupWizardAssistantSelection(input: {
+  initialApiKeyEnv?: string | null
+  initialBaseUrl?: string | null
+  initialProvider?: SetupWizardAssistantProvider
+  initialProviderName?: string | null
+  method: SetupWizardAssistantMethod
+  provider: SetupWizardAssistantProvider
+}): SetupWizardResolvedAssistantSelection {
+  const preservedCompatibleBaseUrl =
+    input.initialProvider === 'compatible'
+      ? normalizeSetupWizardText(input.initialBaseUrl)
+      : null
+  const preservedCompatibleApiKeyEnv =
+    input.initialProvider === 'compatible'
+      ? normalizeSetupWizardText(input.initialApiKeyEnv)
+      : null
+  const preservedCompatibleProviderName =
+    input.initialProvider === 'compatible'
+      ? normalizeSetupWizardText(input.initialProviderName)
+      : null
+
+  if (input.provider === 'skip') {
+    return {
+      apiKeyEnv: null,
+      baseUrl: null,
+      detail: 'Murph will leave your current assistant settings alone for now.',
+      methodLabel: null,
+      preset: 'skip',
+      providerLabel: 'Skip for now',
+      providerName: null,
+      summary: 'Skip for now',
+    }
+  }
+
+  if (input.provider === 'openai') {
+    if (input.method === 'openai-api-key') {
+      return {
+        apiKeyEnv: 'OPENAI_API_KEY',
+        baseUrl: DEFAULT_SETUP_OPENAI_API_BASE_URL,
+        detail: 'Murph will use OPENAI_API_KEY and ask which model to save next.',
+        methodLabel: 'OpenAI API key',
+        preset: 'openai-compatible',
+        providerLabel: 'OpenAI',
+        providerName: 'OpenAI',
+        summary: 'OpenAI · API key',
+      }
+    }
+
+    return {
+      apiKeyEnv: null,
+      baseUrl: null,
+      detail: 'Murph will use your saved Codex / ChatGPT sign-in and ask which default model to use next.',
+      methodLabel: 'ChatGPT / Codex sign-in',
+      preset: 'codex-cli',
+      providerLabel: 'OpenAI',
+      providerName: null,
+      summary: 'OpenAI · ChatGPT / Codex sign-in',
+    }
+  }
+
+  if (input.method === 'compatible-codex-oss') {
+    return {
+      apiKeyEnv: null,
+      baseUrl: null,
+      detail: 'Murph will keep the Codex flow and ask which local model to save next.',
+      methodLabel: 'Codex local model',
+      preset: 'codex-oss',
+      providerLabel: 'Local or compatible endpoint',
+      providerName: null,
+      summary: 'Local or compatible endpoint · Codex local model',
+    }
+  }
+
+  return {
+    apiKeyEnv: preservedCompatibleApiKeyEnv,
+    baseUrl:
+      preservedCompatibleBaseUrl ?? DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
+    detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
+    methodLabel: 'Compatible endpoint',
+    preset: 'openai-compatible',
+    providerLabel: 'Local or compatible endpoint',
+    providerName: preservedCompatibleProviderName,
+    summary: 'Local or compatible endpoint · Compatible endpoint',
+  }
+}
+
+function isOpenAIAssistantSelection(input: {
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  providerName?: string | null
+}): boolean {
+  const providerName = normalizeSetupWizardText(input.providerName)?.toLowerCase()
+  const baseUrl = normalizeSetupWizardText(input.baseUrl)
+
+  return providerName === 'openai' || isOpenAIBaseUrl(baseUrl)
+}
+
+function isOpenAIBaseUrl(value: string | null | undefined): boolean {
+  if (value == null) {
+    return false
+  }
+
+  try {
+    return new URL(value).hostname.toLowerCase() === 'api.openai.com'
+  } catch {
+    return false
   }
 }
 
@@ -1142,85 +1509,55 @@ function formatSetupScheduledUpdate(presetId: string): string {
 }
 
 function formatSelectionSummary(values: readonly string[]): string {
-  return values.length > 0 ? values.join(', ') : 'none'
-}
-
-function formatCompactSelectionSummary(values: readonly string[]): string {
-  if (values.length === 0) {
-    return 'none'
-  }
-
-  if (values.length <= 2) {
-    return values.join(', ')
-  }
-
-  return `${values.slice(0, 2).join(', ')} +${values.length - 2}`
+  return values.length > 0 ? values.join(', ') : 'None'
 }
 
 function formatMissingEnv(values: readonly string[]): string {
   if (values.length === 0) {
-    return 'none'
+    return 'nothing else'
   }
 
   if (values.length === 1) {
     return values[0] ?? ''
   }
 
-  return values.join(' + ')
+  return values.join(', ')
 }
 
 function formatSetupPublicUrlStrategy(strategy: SetupPublicUrlStrategy): string {
-  return strategy === 'hosted' ? 'Hosted app first' : 'Tunnel first'
+  return strategy === 'hosted' ? 'Hosted web app' : 'Local tunnel'
 }
 
-function formatSetupWizardStepLabel(step: SetupWizardStep): string {
-  switch (step) {
-    case 'intro':
-      return 'Start'
-    case 'assistant':
-      return 'Assistant'
-    case 'scheduled-updates':
-      return 'Schedules'
-    case 'channels':
-      return 'Channels'
-    case 'wearables':
-      return 'Wearables'
-    case 'public-url':
-      return 'Public ingress'
-    case 'confirm':
-      return 'Review'
-  }
+function listSetupWizardSteps(input: {
+  includeAssistantMethodStep: boolean
+  includePublicUrlStep: boolean
+}): SetupWizardStep[] {
+  return [
+    'intro',
+    'assistant-provider',
+    ...(input.includeAssistantMethodStep ? (['assistant-method'] as const) : []),
+    'scheduled-updates',
+    'channels',
+    'wearables',
+    ...(input.includePublicUrlStep ? (['public-url'] as const) : []),
+    'confirm',
+  ]
 }
 
-function listSetupWizardSteps(includePublicUrlStep: boolean): SetupWizardStep[] {
-  return includePublicUrlStep
-    ? [
-        'intro',
-        'assistant',
-        'scheduled-updates',
-        'channels',
-        'wearables',
-        'public-url',
-        'confirm',
-      ]
-    : ['intro', 'assistant', 'scheduled-updates', 'channels', 'wearables', 'confirm']
-}
+function hasSetupWizardStepPassed(input: {
+  currentStep: SetupWizardStep
+  includeAssistantMethodStep: boolean
+  includePublicUrlStep: boolean
+  stepToCheck: SetupWizardStep
+}): boolean {
+  const steps = listSetupWizardSteps({
+    includeAssistantMethodStep: input.includeAssistantMethodStep,
+    includePublicUrlStep: input.includePublicUrlStep,
+  })
+  const currentIndex = steps.indexOf(input.currentStep)
+  const stepIndex = steps.indexOf(input.stepToCheck)
 
-function listSetupWizardFlowSteps(
-  includePublicUrlStep: boolean,
-): Array<Exclude<SetupWizardStep, 'intro'>> {
-  return includePublicUrlStep
-    ? ['assistant', 'scheduled-updates', 'channels', 'wearables', 'public-url', 'confirm']
-    : ['assistant', 'scheduled-updates', 'channels', 'wearables', 'confirm']
-}
-
-function formatSetupWizardStepTitle(
-  step: Exclude<SetupWizardStep, 'intro'>,
-  includePublicUrlStep: boolean,
-): string {
-  const steps = listSetupWizardFlowSteps(includePublicUrlStep)
-  const index = steps.indexOf(step)
-  return `${index + 1}/${steps.length} · ${formatSetupWizardStepLabel(step)}`
+  return currentIndex > stepIndex
 }
 
 function resolveSetupWizardToneColor(tone: SetupWizardTone): string {
@@ -1251,48 +1588,112 @@ function resolveSetupWizardRuntimeTone(
 function formatSetupWizardRuntimeDetail(
   status: SetupWizardRuntimeStatus,
 ): string {
-  if (!status.ready && status.missingEnv.length > 0) {
-    return `Needs ${formatMissingEnv(status.missingEnv)} in the current environment.`
+  if (status.ready) {
+    return 'Ready to connect now.'
   }
 
-  return status.detail
+  if (!status.ready && status.missingEnv.length > 0) {
+    return `Needs ${formatMissingEnv(status.missingEnv)} before this can connect.`
+  }
+
+  return status.badge.toLowerCase().includes('macos')
+    ? 'Only available on macOS.'
+    : status.detail
 }
 
-function buildSetupWizardAssistantBadges(input: {
-  currentPreset: SetupAssistantPreset
-  preset: SetupAssistantPreset
+function buildSetupWizardAssistantProviderBadges(input: {
+  currentProvider: SetupWizardAssistantProvider
+  provider: SetupWizardAssistantProvider
 }): SetupWizardInlineBadge[] {
   const badges: SetupWizardInlineBadge[] = []
 
-  switch (input.preset) {
-    case 'codex-cli':
+  switch (input.provider) {
+    case 'openai':
       badges.push({ label: 'recommended', tone: 'success' })
       break
-    case 'codex-oss':
-      badges.push({ label: 'local model', tone: 'accent' })
-      break
-    case 'openai-compatible':
-      badges.push({ label: 'gateway/api', tone: 'accent' })
+    case 'compatible':
+      badges.push({ label: 'local', tone: 'accent' })
       break
     case 'skip':
       badges.push({ label: 'no change', tone: 'muted' })
       break
   }
 
-  if (input.currentPreset === input.preset) {
+  if (input.currentProvider === input.provider) {
     badges.push({ label: 'current', tone: 'accent' })
   }
 
   return badges
 }
 
+function buildSetupWizardAssistantMethodBadges(input: {
+  currentMethod: SetupWizardAssistantMethod
+  method: SetupWizardAssistantMethod
+  optionBadges?: readonly SetupWizardInlineBadge[]
+}): SetupWizardInlineBadge[] {
+  return [
+    ...(input.optionBadges ? [...input.optionBadges] : []),
+    ...(input.currentMethod === input.method
+      ? ([{ label: 'current', tone: 'accent' }] as const)
+      : []),
+  ]
+}
+
 function buildSetupWizardScheduledUpdateBadges(input: {
   isStarter: boolean
 }): SetupWizardInlineBadge[] {
   return [
-    ...(input.isStarter ? [{ label: 'starter', tone: 'accent' as const }] : []),
-    { label: 'install later', tone: 'muted' },
+    ...(input.isStarter ? ([{ label: 'recommended', tone: 'accent' }] as const) : []),
+    { label: 'set up later', tone: 'muted' },
   ]
+}
+
+function formatSetupWizardPromptTitle(
+  step: SetupWizardStep,
+  provider: SetupWizardAssistantProvider,
+): string {
+  switch (step) {
+    case 'intro':
+      return 'Before you start'
+    case 'assistant-provider':
+      return 'How should Murph answer?'
+    case 'assistant-method':
+      return provider === 'openai'
+        ? 'How should Murph connect to OpenAI?'
+        : 'What kind of model source do you want?'
+    case 'scheduled-updates':
+      return 'Auto updates'
+    case 'channels':
+      return 'Chat channels'
+    case 'wearables':
+      return 'Health data'
+    case 'public-url':
+      return 'Public links'
+    case 'confirm':
+      return 'Review'
+  }
+}
+
+function formatSetupWizardStepIntro(
+  step: SetupWizardStep,
+  provider: SetupWizardAssistantProvider,
+): string | undefined {
+  switch (step) {
+    case 'assistant-provider':
+      return 'Choose where Murph should get its default model.'
+    case 'assistant-method':
+      return provider === 'openai'
+        ? 'Pick the OpenAI path that fits you best.'
+        : 'Choose a local model source or another compatible endpoint.'
+    case 'scheduled-updates':
+      return 'These are optional check-ins Murph can send later.'
+    case 'channels':
+      return 'Turn on the chats you want Murph to use first.'
+    case 'wearables':
+      return 'Pick any health data sources you want to connect after setup.'
+    default:
+      return undefined
+  }
 }
 
 function createSetupWizardPanel(input: {
@@ -1447,6 +1848,46 @@ function createSetupWizardSelectionRow(
   )
 }
 
+function createSetupWizardAnsweredBlock(
+  input: {
+    detail?: string
+    label: string
+    value: string
+  },
+  key: string,
+): React.ReactElement {
+  const createElement = React.createElement
+
+  return createElement(
+    Box,
+    {
+      flexDirection: 'column',
+      key,
+      marginBottom: 1,
+    },
+    createElement(
+      Text,
+      { color: resolveSetupWizardToneColor('accent'), bold: true },
+      `◇ ${input.label}`,
+    ),
+    createElement(
+      Text,
+      { bold: true },
+      `  ${input.value}`,
+    ),
+    input.detail
+      ? createElement(
+          Text,
+          {
+            color: resolveSetupWizardToneColor('muted'),
+            dimColor: true,
+          },
+          `  ${input.detail}`,
+        )
+      : null,
+  )
+}
+
 function createSetupWizardBulletRow(
   input: {
     body: string
@@ -1552,54 +1993,6 @@ function createSetupWizardPublicUrlTargetRow(
   )
 }
 
-function createSetupWizardStepper(input: {
-  includePublicUrlStep: boolean
-  step: SetupWizardStep
-}): React.ReactElement {
-  const createElement = React.createElement
-  const steps = listSetupWizardSteps(input.includePublicUrlStep)
-  const currentIndex = steps.indexOf(input.step)
-  const children: React.ReactNode[] = []
-
-  for (const [index, wizardStep] of steps.entries()) {
-    if (index > 0) {
-      children.push(
-        createElement(
-          Text,
-          {
-            color: resolveSetupWizardToneColor('muted'),
-            key: `${wizardStep}:separator`,
-          },
-          '  ·  ',
-        ),
-      )
-    }
-
-    const tone: SetupWizardTone =
-      index < currentIndex ? 'success' : index === currentIndex ? 'accent' : 'muted'
-    const prefix =
-      index < currentIndex
-        ? '✓'
-        : index === currentIndex
-          ? '→'
-          : `${index + 1}.`
-
-    children.push(
-      createElement(
-        Text,
-        {
-          bold: index === currentIndex,
-          color: resolveSetupWizardToneColor(tone),
-          key: wizardStep,
-        },
-        `${prefix} ${formatSetupWizardStepLabel(wizardStep)}`,
-      ),
-    )
-  }
-
-  return createElement(Text, null, ...children)
-}
-
 function resolveSetupWizardHints(input: {
   commandName: string
   selectionMarker: 'checkbox' | 'radio' | undefined
@@ -1611,29 +2004,30 @@ function resolveSetupWizardHints(input: {
         { label: `Enter start ${input.commandName}`, tone: 'accent' },
         { label: 'q quit', tone: 'muted' },
       ]
-    case 'assistant':
+    case 'assistant-provider':
+    case 'assistant-method':
     case 'scheduled-updates':
     case 'channels':
     case 'wearables':
       return [
         { label: '↑/↓ move', tone: 'muted' },
         {
-          label: input.selectionMarker === 'radio' ? 'Space select' : 'Space toggle',
+          label: input.selectionMarker === 'radio' ? 'Space choose' : 'Space toggle',
           tone: 'accent',
         },
-        { label: 'Enter continue', tone: 'success' },
+        { label: 'Enter next', tone: 'success' },
         { label: 'Esc back', tone: 'muted' },
         { label: 'q quit', tone: 'muted' },
       ]
     case 'public-url':
       return [
-        { label: 'Enter continue', tone: 'success' },
+        { label: 'Enter next', tone: 'success' },
         { label: 'Esc back', tone: 'muted' },
         { label: 'q quit', tone: 'muted' },
       ]
     case 'confirm':
       return [
-        { label: 'Enter run setup', tone: 'success' },
+        { label: 'Enter start setup', tone: 'success' },
         { label: 'Esc back', tone: 'muted' },
         { label: 'q quit', tone: 'muted' },
       ]
@@ -1657,18 +2051,18 @@ function describeSetupWizardReviewNextStep(input: {
   needsEnv: boolean
 }): string {
   if (input.needsEnv && input.hasScheduledUpdates) {
-    return 'Murph will collect any missing runtime env, finish setup, keep the selected schedules ready for later install, and open wearable connect flows that are already ready.'
+    return 'Murph will ask for any missing keys for this setup run, finish setup, keep your update picks ready for later, and open anything that can connect right away.'
   }
 
   if (input.needsEnv) {
-    return 'Murph will collect any missing runtime env, finish setup, and open wearable connect flows that are already ready.'
+    return 'Murph will ask for any missing keys for this setup run, finish setup, and open anything that can connect right away.'
   }
 
   if (input.hasScheduledUpdates) {
-    return 'Murph will finish setup, keep the selected schedules ready for later install, and open wearable connect flows that are already ready.'
+    return 'Murph will finish setup, keep your update picks ready for later, and open anything that can connect right away.'
   }
 
-  return 'Murph will finish setup and open any wearable connect flows that are already ready.'
+  return 'Murph will finish setup and open anything that can connect right away.'
 }
 
 export function buildSetupWizardPublicUrlReview(input: {
@@ -1726,7 +2120,7 @@ export function describeSetupWizardPublicUrlStrategyChoice(input: {
   if (input.strategy === 'hosted') {
     const hasLinq = input.review.targets.some((target) => target.label === 'Linq webhook')
     return hasLinq
-      ? 'Use hosted `apps/web` for WHOOP/Oura, but keep Linq on the local webhook path until a hosted Linq bridge exists.'
+      ? 'Use hosted `apps/web` for WHOOP/Oura, but keep Linq on the local webhook path for now.'
       : 'Use hosted `apps/web` for WHOOP/Oura so callbacks and webhooks stay on one stable public base.'
   }
 
@@ -1734,10 +2128,10 @@ export function describeSetupWizardPublicUrlStrategyChoice(input: {
     target.label.startsWith('WHOOP') || target.label.startsWith('Oura'),
   )
   if (hasWearableTargets) {
-    return 'Expose the local callback and webhook routes through a tunnel instead of deploying hosted ingress first.'
+    return 'Expose the local callback and webhook routes through a tunnel instead of setting up hosted `apps/web` first.'
   }
 
-  return 'Expose the local Linq webhook through a tunnel. Murph does not provide a hosted Linq ingress yet.'
+  return 'Expose the local Linq webhook through a tunnel. Murph does not have a hosted Linq webhook yet.'
 }
 
 function describeSetupWizardPublicUrlSummary(input: {
@@ -1745,14 +2139,14 @@ function describeSetupWizardPublicUrlSummary(input: {
   wearables: readonly SetupWearable[]
 }): string {
   if (input.wearables.length > 0 && input.hasLinq) {
-    return 'WHOOP/Oura are easiest behind hosted `apps/web`, while Linq still expects the local inbox webhook today.'
+    return 'WHOOP/Oura are easiest through hosted `apps/web`, while Linq still needs the local inbox webhook today.'
   }
 
   if (input.wearables.length > 0) {
-    return 'WHOOP/Oura can use either hosted `apps/web` or a local tunnel. Hosted mode is the easier stable callback base.'
+    return 'WHOOP/Oura need a public callback URL. Hosted `apps/web` is the easiest stable base.'
   }
 
-  return 'Linq still uses the local inbox webhook today, so tunnel mode is the recommended public path.'
+  return 'Linq still uses the local inbox webhook today, so a tunnel to your machine is the simplest public path.'
 }
 
 function buildSetupWizardPublicUrlTargets(input: {
@@ -1767,12 +2161,12 @@ function buildSetupWizardPublicUrlTargets(input: {
     targets.push({
       label: 'WHOOP callback',
       url: new URL('/oauth/whoop/callback', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this local callback path when you keep WHOOP ingress on the local daemon.',
+      detail: 'Use this if WHOOP sends the callback directly to your machine through a tunnel.',
     })
     targets.push({
       label: 'WHOOP webhook',
       url: new URL('/webhooks/whoop', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this local webhook path if WHOOP posts directly to your machine through a tunnel.',
+      detail: 'Use this if WHOOP sends webhooks straight to your machine through a tunnel.',
     })
   }
 
@@ -1780,12 +2174,12 @@ function buildSetupWizardPublicUrlTargets(input: {
     targets.push({
       label: 'Oura callback',
       url: new URL('/oauth/oura/callback', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Use this local callback path when you keep Oura OAuth completion on the local daemon.',
+      detail: 'Use this if Oura finishes sign-in on your machine through a tunnel.',
     })
     targets.push({
       label: 'Oura webhook',
       url: new URL('/webhooks/oura', input.deviceSyncLocalBaseUrl).toString(),
-      detail: 'Optional today. Oura still works in polling-first mode, but this is the local webhook target if you enable it.',
+      detail: 'Optional today. Oura can still work without this, but this is the local webhook URL if you enable it.',
     })
   }
 
@@ -1793,7 +2187,7 @@ function buildSetupWizardPublicUrlTargets(input: {
     targets.push({
       label: 'Linq webhook',
       url: input.linqLocalWebhookUrl,
-      detail: 'Point Linq here through a tunnel. Hosted `apps/web` does not replace this inbox webhook path yet.',
+      detail: 'Point your tunnel here. Hosted `apps/web` does not replace this Linq webhook yet.',
     })
   }
 

@@ -55,7 +55,10 @@ export interface SetupWizardRunner {
     channelStatuses?: Partial<Record<SetupChannel, SetupWizardRuntimeStatus>>
     commandName: string
     deviceSyncLocalBaseUrl?: string | null
+    initialAssistantApiKeyEnv?: string | null
+    initialAssistantBaseUrl?: string | null
     initialAssistantPreset?: SetupAssistantPreset
+    initialAssistantProviderName?: string | null
     initialChannels: readonly SetupChannel[]
     initialScheduledUpdates: readonly string[]
     initialWearables: readonly SetupWearable[]
@@ -117,6 +120,12 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     let selectedScheduledUpdates: string[] | null = null
     let selectedWearables: SetupWearable[] | null = null
     let selectedAssistantPreset: SetupAssistantPreset | null = null
+    let selectedAssistantBaseUrl: string | null | undefined =
+      context.options.assistantBaseUrl
+    let selectedAssistantApiKeyEnv: string | null | undefined =
+      context.options.assistantApiKeyEnv
+    let selectedAssistantProviderName: string | null | undefined =
+      context.options.assistantProviderName
     let envOverrides: NodeJS.ProcessEnv | undefined
 
     if (interactiveWizard) {
@@ -126,8 +135,11 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         commandName,
         deviceSyncLocalBaseUrl:
           resolveSetupWizardDeviceSyncLocalBaseUrl(currentEnv),
+        initialAssistantApiKeyEnv: context.options.assistantApiKeyEnv,
+        initialAssistantBaseUrl: context.options.assistantBaseUrl,
         initialAssistantPreset:
           context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
+        initialAssistantProviderName: context.options.assistantProviderName,
         initialChannels: await resolveInitialSetupWizardChannels(
           context.options.vault,
           getPlatform(),
@@ -148,8 +160,18 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         wizardResult.assistantPreset ??
         context.options.assistantPreset ??
         null
+      if ('assistantBaseUrl' in wizardResult) {
+        selectedAssistantBaseUrl = wizardResult.assistantBaseUrl
+      }
+      if ('assistantApiKeyEnv' in wizardResult) {
+        selectedAssistantApiKeyEnv = wizardResult.assistantApiKeyEnv
+      }
+      if ('assistantProviderName' in wizardResult) {
+        selectedAssistantProviderName = wizardResult.assistantProviderName
+      }
 
       envOverrides = await runtimeEnv.promptForMissing({
+        assistantApiKeyEnv: selectedAssistantApiKeyEnv,
         channels: selectedChannels,
         env: currentEnv,
         wearables: selectedWearables,
@@ -159,13 +181,20 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       selectedAssistantPreset = inferSetupAssistantPresetFromOptions(context.options)
     }
 
+    const resolvedAssistantOptions = {
+      ...context.options,
+      assistantApiKeyEnv: selectedAssistantApiKeyEnv,
+      assistantBaseUrl: selectedAssistantBaseUrl,
+      assistantProviderName: selectedAssistantProviderName,
+    }
+
     const selectedAssistant =
       selectedAssistantPreset === null
         ? null
         : await assistantSetup.resolve({
             allowPrompt: interactiveWizard,
             commandName,
-            options: context.options,
+            options: resolvedAssistantOptions,
             preset: selectedAssistantPreset,
           })
 
