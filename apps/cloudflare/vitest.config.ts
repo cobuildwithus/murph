@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { defineProject } from "vitest/config";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
 
@@ -15,7 +15,7 @@ const nodeOnlyAliases = [
   },
 ];
 
-export default defineConfig({
+export default defineProject({
   resolve: {
     alias: [
       ...nodeOnlyAliases,
@@ -23,7 +23,9 @@ export default defineConfig({
     ],
   },
   test: {
+    name: "cloudflare-node",
     environment: "node",
+    fileParallelism: false,
     exclude: ["apps/cloudflare/test/workers/**/*.test.ts"],
     include: ["apps/cloudflare/test/**/*.test.ts"],
   },

@@ -400,25 +400,25 @@ test("processCapture keeps importing a capture when one local attachment file di
   const sourceRoot = await makeTempDirectory("murph-inbox-missing-attachment-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const keptAttachmentPath = await writeExternalFile(sourceRoot, "kept.jpg", "kept");
-  const missingAttachmentPath = path.join(sourceRoot, "missing.jpg");
+  const keptAttachmentPath = await writeExternalFile(sourceRoot, "kept.pdf", "kept");
+  const missingAttachmentPath = path.join(sourceRoot, "missing.pdf");
   const inbound = createCapture({
     externalId: "msg-missing-attachment",
     occurredAt: "2026-03-13T10:47:00.000Z",
     attachments: [
       {
         externalId: "att-kept",
-        kind: "image",
-        mime: "image/jpeg",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: keptAttachmentPath,
-        fileName: "kept.jpg",
+        fileName: "kept.pdf",
       },
       {
         externalId: "att-missing",
-        kind: "image",
-        mime: "image/jpeg",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: missingAttachmentPath,
-        fileName: "missing.jpg",
+        fileName: "missing.pdf",
       },
     ],
   });
@@ -437,7 +437,7 @@ test("processCapture keeps importing a capture when one local attachment file di
     (attachment) => attachment.externalId === "att-kept",
   );
   assert.ok(keptAttachment);
-  assert.match(keptAttachment.storedPath ?? "", /kept\.jpg$/u);
+  assert.match(keptAttachment.storedPath ?? "", /kept\.pdf$/u);
   assert.notEqual(keptAttachment.sha256, null);
 
   const missingAttachment = capture.attachments.find(
@@ -470,7 +470,7 @@ test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent a
   const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const attachmentPath = await writeExternalFile(sourceRoot, "photo.jpg", "image");
+  const attachmentPath = await writeExternalFile(sourceRoot, "photo.pdf", "document");
   const inbound = createCapture({
     externalId: "msg-rebuild-1",
     occurredAt: "2026-03-13T11:00:00.000Z",
@@ -478,10 +478,10 @@ test("rebuildRuntimeFromVault repairs raw-only captures and remains idempotent a
     attachments: [
       {
         externalId: "att-rebuild",
-        kind: "image",
-        mime: "image/jpeg",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: attachmentPath,
-        fileName: "photo.jpg",
+        fileName: "photo.pdf",
       },
     ],
   });
@@ -517,7 +517,7 @@ test("rebuildRuntimeFromVault canonicalizes safe stored capture ids back to the 
   const sourceRoot = await makeTempDirectory("murph-inbox-rebuild-canonicalize-source");
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
-  const attachmentPath = await writeExternalFile(sourceRoot, "canonicalize.jpg", "image");
+  const attachmentPath = await writeExternalFile(sourceRoot, "canonicalize.pdf", "document");
   const inbound = createCapture({
     externalId: "msg-rebuild-canonicalize",
     occurredAt: "2026-03-13T11:05:00.000Z",
@@ -525,10 +525,10 @@ test("rebuildRuntimeFromVault canonicalizes safe stored capture ids back to the 
     attachments: [
       {
         externalId: "att-canonicalize",
-        kind: "image",
-        mime: "image/jpeg",
+        kind: "document",
+        mime: "application/pdf",
         originalPath: attachmentPath,
-        fileName: "canonicalize.jpg",
+        fileName: "canonicalize.pdf",
       },
     ],
   });

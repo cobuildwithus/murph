@@ -22,8 +22,8 @@ test('extractAssistantMemory classifies durable long-term memory apart from dail
       text: 'Call the user Sam.',
     },
     {
-      section: 'Preferences',
-      text: 'Use bullet points.',
+      section: 'Standing instructions',
+      text: 'use bullet points.',
     },
   ])
   assert.deepEqual(extracted.daily, [

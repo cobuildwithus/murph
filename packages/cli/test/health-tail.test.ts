@@ -1823,8 +1823,9 @@ test.sequential("profile current lookup stays wired for both noun-specific and g
       JSON.stringify({
         source: "manual",
         profile: {
-          domains: ["sleep"],
-          topGoalIds: [],
+          goals: {
+            topGoalIds: [],
+          },
         },
       }),
       "utf8",
@@ -1951,8 +1952,9 @@ test.sequential("profile list and current show preserve canonical links and stri
         sourceAssessmentIds: [assessmentId],
         sourceEventIds: [eventId],
         profile: {
-          domains: ["sleep"],
-          topGoalIds: [goalId],
+          goals: {
+            topGoalIds: [goalId],
+          },
         },
       }),
       "utf8",
@@ -2066,7 +2068,9 @@ test.sequential("profile list preserves date-range filters after explicit adapte
       JSON.stringify({
         recordedAt: "2026-03-12T09:00:00Z",
         profile: {
-          topGoalIds: [],
+          goals: {
+            topGoalIds: [],
+          },
         },
       }),
       "utf8",
@@ -2076,7 +2080,9 @@ test.sequential("profile list preserves date-range filters after explicit adapte
       JSON.stringify({
         recordedAt: "2026-03-20T09:00:00Z",
         profile: {
-          topGoalIds: [],
+          goals: {
+            topGoalIds: [],
+          },
         },
       }),
       "utf8",

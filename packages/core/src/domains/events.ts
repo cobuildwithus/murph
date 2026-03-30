@@ -6,7 +6,6 @@ import { VaultError } from "../errors.ts";
 import { walkVaultFiles } from "../fs.ts";
 import { generateRecordId } from "../ids.ts";
 import { readJsonlRecords, toMonthlyShardRelativePath } from "../jsonl.ts";
-import type { WriteBatch } from "../operations/write-batch.ts";
 import { defaultTimeZone, normalizeTimeZone, toLocalDayKey } from "../time.ts";
 import { loadVault } from "../vault.ts";
 
@@ -38,7 +37,7 @@ const PUBLIC_EVENT_WRITE_KIND_LIST = [
 export type PublicWritableEventKind = (typeof PUBLIC_EVENT_WRITE_KIND_LIST)[number];
 export type EventDraftByKind<K extends PublicWritableEventKind> = Omit<
   EventRecordByKind<K>,
-  "schemaVersion" | "kind" | "occurredAt" | "recordedAt" | "dayKey" | "source"
+  "schemaVersion" | "id" | "kind" | "occurredAt" | "recordedAt" | "dayKey" | "source" | "lifecycle"
 > & {
   kind: K;
   id?: string;
@@ -53,9 +52,14 @@ export type PublicEventDraft = {
 
 interface LoadedEventLedgerShard {
   relativePath: string;
-  records: JsonObject[];
   matchingRecords: EventRecord[];
 }
+
+type EventLifecycle = NonNullable<EventRecord["lifecycle"]>;
+type MatchedEventRecord = {
+  relativePath: string;
+  record: EventRecord;
+};
 
 export interface UpsertEventPayloadInput {
   vaultRoot: string;
@@ -104,6 +108,7 @@ const RESERVED_EVENT_KEYS = new Set([
   "tags",
   "relatedIds",
   "rawRefs",
+  "lifecycle",
 ]);
 
 const PUBLIC_EVENT_WRITE_KINDS = new Set<EventRecord["kind"]>(PUBLIC_EVENT_WRITE_KIND_LIST);
@@ -132,6 +137,28 @@ function normalizeDraftEventId(value: unknown): string | undefined {
   return typeof value === "string" ? normalizeOptionalText(value) ?? undefined : undefined;
 }
 
+function buildEventLifecycle(
+  revision: number,
+  state?: EventLifecycle["state"],
+): EventLifecycle {
+  if (!Number.isInteger(revision) || revision < 1) {
+    throw new VaultError("INVALID_INPUT", "Event lifecycle revision must be a positive integer.");
+  }
+
+  return compactObject({
+    revision,
+    state,
+  }) as EventLifecycle;
+}
+
+function eventRevision(record: Pick<EventRecord, "lifecycle">): number {
+  return record.lifecycle?.revision ?? 1;
+}
+
+function isDeletedEventRecord(record: Pick<EventRecord, "lifecycle">): boolean {
+  return record.lifecycle?.state === "deleted";
+}
+
 function eventSpecificFields(payload: JsonObject): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(payload).filter(
@@ -149,7 +176,11 @@ function normalizeEventKind(payload: JsonObject): EventRecord["kind"] {
   return kind as EventRecord["kind"];
 }
 
-function buildEventRecord(payload: JsonObject, fallbackTimeZone?: string): EventRecord {
+function buildEventRecord(
+  payload: JsonObject,
+  fallbackTimeZone?: string,
+  lifecycle?: EventLifecycle,
+): EventRecord {
   const kind = normalizeEventKind(payload);
 
   const occurredAt = normalizeTimestampInput(payload.occurredAt);
@@ -179,6 +210,7 @@ function buildEventRecord(payload: JsonObject, fallbackTimeZone?: string): Event
       tags: uniqueTrimmedStringList(payload.tags) ?? undefined,
       relatedIds: uniqueTrimmedStringList(payload.relatedIds) ?? undefined,
       rawRefs: uniqueTrimmedStringList(payload.rawRefs) ?? undefined,
+      lifecycle,
       ...eventSpecificFields(payload),
     }),
     "EVENT_CONTRACT_INVALID",
@@ -221,6 +253,7 @@ function buildBaseEventContractInput(
 function buildTypedEventRecord(
   draft: PublicEventDraft,
   fallbackTimeZone?: string,
+  lifecycle?: EventLifecycle,
 ): EventRecord {
   const base = buildBaseEventContractInput(draft, fallbackTimeZone);
 
@@ -293,7 +326,10 @@ function buildTypedEventRecord(
 
   return validateContract(
     eventRecordSchema,
-    record,
+    compactObject({
+      ...record,
+      lifecycle,
+    }),
     "EVENT_CONTRACT_INVALID",
     `Event draft for kind "${draft.kind}" is invalid.`,
   );
@@ -406,12 +442,6 @@ function toEventLedgerFile(occurredAt: string): string {
   );
 }
 
-function stringifyJsonlRecords(records: readonly JsonObject[]): string {
-  return records.length > 0
-    ? `${records.map((record) => JSON.stringify(record)).join("\n")}\n`
-    : "";
-}
-
 function isMatchingEventId(record: unknown, eventId: string): record is JsonObject & { id: string } {
   return (
     typeof record === "object" &&
@@ -427,6 +457,49 @@ function validateStoredEventRecord(record: JsonObject): EventRecord {
     record,
     "EVENT_CONTRACT_INVALID",
     "Stored event record is invalid.",
+  );
+}
+
+function compareMatchedEventRecords(left: MatchedEventRecord, right: MatchedEventRecord): number {
+  const revisionComparison = eventRevision(left.record) - eventRevision(right.record);
+  if (revisionComparison !== 0) {
+    return revisionComparison;
+  }
+
+  const recordedAtComparison = left.record.recordedAt.localeCompare(right.record.recordedAt);
+  if (recordedAtComparison !== 0) {
+    return recordedAtComparison;
+  }
+
+  const occurredAtComparison = left.record.occurredAt.localeCompare(right.record.occurredAt);
+  if (occurredAtComparison !== 0) {
+    return occurredAtComparison;
+  }
+
+  return left.relativePath.localeCompare(right.relativePath);
+}
+
+function flattenMatchedEventRecords(
+  matchedShards: readonly LoadedEventLedgerShard[],
+): MatchedEventRecord[] {
+  return matchedShards.flatMap((shard) =>
+    shard.matchingRecords.map((record) => ({
+      relativePath: shard.relativePath,
+      record,
+    })),
+  );
+}
+
+function selectLatestMatchedEvent(
+  matchedShards: readonly LoadedEventLedgerShard[],
+): MatchedEventRecord | null {
+  const flattened = flattenMatchedEventRecords(matchedShards);
+  if (flattened.length === 0) {
+    return null;
+  }
+
+  return flattened.reduce((latest, candidate) =>
+    compareMatchedEventRecords(latest, candidate) >= 0 ? latest : candidate,
   );
 }
 
@@ -451,31 +524,12 @@ async function loadEventLedgerShardsById(
     if (matchingRecords.length > 0) {
       matches.push({
         relativePath,
-        records: records as JsonObject[],
         matchingRecords,
       });
     }
   }
 
   return matches;
-}
-
-async function stageEventLedgerWrites(
-  batch: WriteBatch,
-  rewritten: ReadonlyMap<string, JsonObject[]>,
-): Promise<void> {
-  for (const [relativePath, records] of rewritten) {
-    if (records.length === 0) {
-      await batch.stageDelete(relativePath, {
-        allowAppendOnlyJsonl: true,
-      });
-      continue;
-    }
-
-    await batch.stageTextWrite(relativePath, stringifyJsonlRecords(records), {
-      allowAppendOnlyJsonl: true,
-    });
-  }
 }
 
 function extractRetainedPaths(record: EventRecord): string[] {
@@ -541,23 +595,15 @@ export async function upsertEvent(
     );
   }
 
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  const lifecycle = buildEventLifecycle(
+    latestMatchedEvent ? eventRevision(latestMatchedEvent.record) + 1 : 1,
+  );
   const eventRecord = isDraftUpsertInput(input)
-    ? buildTypedEventRecord(input.draft, vault.metadata.timezone)
-    : buildEventRecord(input.payload, vault.metadata.timezone);
+    ? buildTypedEventRecord(input.draft, vault.metadata.timezone, lifecycle)
+    : buildEventRecord(input.payload, vault.metadata.timezone, lifecycle);
 
   const ledgerFile = toEventLedgerFile(eventRecord.occurredAt);
-  const rewritten = new Map<string, JsonObject[]>();
-
-  for (const shard of matchedShards) {
-    rewritten.set(
-      shard.relativePath,
-      shard.records.filter((record) => !isMatchingEventId(record, eventRecord.id)),
-    );
-  }
-
-  if (rewritten.has(ledgerFile)) {
-    rewritten.set(ledgerFile, [...(rewritten.get(ledgerFile) ?? []), eventRecord]);
-  }
 
   return runLoadedCanonicalWrite<UpsertEventResult>({
     vaultRoot: input.vaultRoot,
@@ -565,11 +611,7 @@ export async function upsertEvent(
     summary: `Upsert event ${eventRecord.id}`,
     occurredAt: eventRecord.occurredAt,
     mutate: async ({ batch }) => {
-      await stageEventLedgerWrites(batch, rewritten);
-
-      if (!rewritten.has(ledgerFile)) {
-        await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
-      }
+      await batch.stageJsonlAppend(ledgerFile, `${JSON.stringify(eventRecord)}\n`);
 
       return {
         eventId: eventRecord.id,
@@ -589,24 +631,21 @@ export async function deleteEvent(
     throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
   }
 
-  const firstRecord = matchedShards[0]?.matchingRecords[0];
-  if (!firstRecord) {
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  if (!latestMatchedEvent || isDeletedEventRecord(latestMatchedEvent.record)) {
     throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
   }
-
-  const rewritten = new Map<string, JsonObject[]>();
-  const retainedPaths = new Set<string>();
-
-  for (const shard of matchedShards) {
-    shard.matchingRecords
-      .flatMap((record) => extractRetainedPaths(record))
-      .forEach((relativePath) => retainedPaths.add(relativePath));
-
-    rewritten.set(
-      shard.relativePath,
-      shard.records.filter((record) => !isMatchingEventId(record, input.eventId)),
-    );
-  }
+  const tombstoneRecord = validateContract(
+    eventRecordSchema,
+    compactObject({
+      ...latestMatchedEvent.record,
+      recordedAt: new Date().toISOString(),
+      lifecycle: buildEventLifecycle(eventRevision(latestMatchedEvent.record) + 1, "deleted"),
+    }),
+    "EVENT_CONTRACT_INVALID",
+    "Deleted event tombstone is invalid.",
+  );
+  const tombstoneLedgerFile = toEventLedgerFile(tombstoneRecord.occurredAt);
 
   return runLoadedCanonicalWrite<DeleteEventResult>({
     vaultRoot: input.vaultRoot,
@@ -614,12 +653,12 @@ export async function deleteEvent(
     summary: `Delete event ${input.eventId}`,
     occurredAt: new Date(),
     mutate: async ({ batch }) => {
-      await stageEventLedgerWrites(batch, rewritten);
+      await batch.stageJsonlAppend(tombstoneLedgerFile, `${JSON.stringify(tombstoneRecord)}\n`);
 
       return {
         eventId: input.eventId,
-        kind: firstRecord.kind,
-        retainedPaths: [...retainedPaths].sort((left, right) => left.localeCompare(right)),
+        kind: latestMatchedEvent.record.kind,
+        retainedPaths: extractRetainedPaths(latestMatchedEvent.record),
         deleted: true,
       };
     },

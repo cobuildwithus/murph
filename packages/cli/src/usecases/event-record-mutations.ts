@@ -100,6 +100,7 @@ function buildMutableEventPayload(record: QueryVaultRecord): JsonObject {
 
   delete base.entityId
   delete base.eventIds
+  delete base.lifecycle
 
   if (typeof base.id !== 'string' || base.id.trim().length === 0) {
     base.id = record.primaryLookupId

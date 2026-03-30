@@ -35,7 +35,6 @@ const ATTACHMENT_PARSE_PIPELINE = "attachment_text" as const;
 const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
   "audio",
   "document",
-  "image",
   "video",
 ]);
 

@@ -232,12 +232,15 @@ describe("hosted device-sync runtime", () => {
       },
     });
 
-    expect(mocks.fetchHostedDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith({
+    expect(mocks.fetchHostedDeviceSyncRuntimeSnapshot).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: "http://device-sync.worker",
+      connectionId: null,
+      fetchImpl: undefined,
       internalToken: null,
+      provider: null,
       timeoutMs: 5_000,
       userId: "user-123",
-    });
+    }));
     expect(state.snapshot).toEqual({
       connections: [],
       generatedAt: "2026-03-27T08:05:00.000Z",

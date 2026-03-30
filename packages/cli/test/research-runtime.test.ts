@@ -133,10 +133,10 @@ test('runResearchPrompt waits for review:gpt, saves a markdown note path, and re
       '--prompt',
       'Research weekly cholesterol updates and emphasize practical interventions.',
       '--deep-research',
-      '--timeout',
-      '40m',
       '--chat',
       '69abc',
+      '--timeout',
+      '40m',
     ],
     cwd: '/repo',
   })

@@ -1,9 +1,9 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
-import { defineConfig } from "vitest/config";
+import { defineProject } from "vitest/config";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
 
-export default defineConfig({
+export default defineProject({
   plugins: [
     cloudflareTest({
       main: "./apps/cloudflare/test/workers/worker-entry.ts",
@@ -16,6 +16,8 @@ export default defineConfig({
     alias: cloudflareVitestAliases,
   },
   test: {
+    name: "cloudflare-workers",
+    fileParallelism: false,
     include: ["apps/cloudflare/test/workers/**/*.test.ts"],
   },
 });

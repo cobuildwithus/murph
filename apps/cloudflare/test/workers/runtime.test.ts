@@ -215,7 +215,7 @@ describe("cloudflare worker runtime suite", () => {
 
     expect(rejectedResponse.status).toBe(400);
     await expect(rejectedResponse.json()).resolves.toEqual({
-      error: "Hosted user env key is not allowed: AGENTMAIL_API_BASE_URL",
+      error: "Invalid request.",
     });
     await expect(getUserRunnerStub(userId).getUserEnvStatus()).resolves.toEqual({
       configuredUserEnvKeys: [],
@@ -226,9 +226,8 @@ describe("cloudflare worker runtime suite", () => {
       new Request(`https://runner.example.test/internal/users/${userId}/env`, {
         body: JSON.stringify({
           env: {
-            AGENTMAIL_API_KEY: "agentmail-secret",
-            AGENTMAIL_BASE_URL: "https://mail.example.test/v0",
             FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+            OPENAI_API_KEY: "sk-user",
           },
           mode: "merge",
         }),
@@ -242,11 +241,7 @@ describe("cloudflare worker runtime suite", () => {
 
     expect(acceptedResponse.status).toBe(200);
     await expect(acceptedResponse.json()).resolves.toEqual({
-      configuredUserEnvKeys: [
-        "AGENTMAIL_API_KEY",
-        "AGENTMAIL_BASE_URL",
-        "FFMPEG_COMMAND",
-      ],
+      configuredUserEnvKeys: ["FFMPEG_COMMAND", "OPENAI_API_KEY"],
       userId,
     });
   });

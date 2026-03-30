@@ -13,19 +13,28 @@ const runSourceCli = runCli
 const runRawSourceCli = runRawCli
 const CLI_LIST_TIMEOUT_MS = 30_000
 
+function listCliOptions() {
+  const env = { ...process.env }
+  delete env.VAULT
+  return { env }
+}
+
 test('list help and schemas no longer expose cursor pagination options', async () => {
-  const help = await runRawSourceCli(['goal', 'list', '--help'])
-  const profileHelp = await runRawSourceCli(['profile', 'list', '--help'])
-  const historyHelp = await runRawSourceCli(['history', 'list', '--help'])
+  const help = await runRawSourceCli(['goal', 'list', '--help'], listCliOptions())
+  const profileHelp = await runRawSourceCli(['profile', 'list', '--help'], listCliOptions())
+  const historyHelp = await runRawSourceCli(['history', 'list', '--help'], listCliOptions())
   const readSchema = JSON.parse(
-    await runRawSourceCli(['list', '--schema', '--format', 'json']),
+    await runRawSourceCli(['list', '--schema', '--format', 'json'], listCliOptions()),
   ) as {
     options: {
       properties: Record<string, unknown>
     }
   }
   const intakeSchema = JSON.parse(
-    await runRawSourceCli(['intake', 'list', '--schema', '--format', 'json']),
+    await runRawSourceCli(
+      ['intake', 'list', '--schema', '--format', 'json'],
+      listCliOptions(),
+    ),
   ) as {
     options: {
       properties: Record<string, unknown>
@@ -57,9 +66,13 @@ test('list help and schemas no longer expose cursor pagination options', async (
 
 test.sequential('list commands still run after cursor removal', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
+  const options = listCliOptions()
 
   try {
-    const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
+    const initResult = await runSourceCli<{ created: boolean }>(
+      ['init', '--vault', vaultRoot],
+      options,
+    )
     assert.equal(initResult.ok, true)
     assert.equal(requireData(initResult).created, true)
 
@@ -73,7 +86,7 @@ test.sequential('list commands still run after cursor removal', async () => {
       '5',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     assert.equal(readList.ok, true)
     assert.equal(readList.meta?.command, 'list')
     assert.equal(requireData(readList).count, 0)
@@ -91,7 +104,7 @@ test.sequential('list commands still run after cursor removal', async () => {
       '5',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     assert.equal(intakeList.ok, true)
     assert.equal(intakeList.meta?.command, 'intake list')
     assert.equal(requireData(intakeList).count, 0)
@@ -108,7 +121,7 @@ test.sequential('list commands still run after cursor removal', async () => {
       '5',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     assert.equal(goalList.ok, true)
     assert.equal(goalList.meta?.command, 'goal list')
     assert.equal(requireData(goalList).count, 0)
@@ -120,9 +133,13 @@ test.sequential('list commands still run after cursor removal', async () => {
 
 test.sequential('generic list applies date bounds and echoes renamed filter keys', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
+  const options = listCliOptions()
 
   try {
-    const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
+    const initResult = await runSourceCli<{ created: boolean }>(
+      ['init', '--vault', vaultRoot],
+      options,
+    )
     assert.equal(initResult.ok, true)
     assert.equal(requireData(initResult).created, true)
 
@@ -171,7 +188,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
       '2026-03-12',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
 
     assert.equal(result.ok, true)
     assert.equal(requireData(result).filters.from, '2026-03-12')
@@ -192,9 +209,13 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const activeGoalPath = path.join(vaultRoot, 'goal-active.json')
   const pausedGoalPath = path.join(vaultRoot, 'goal-paused.json')
+  const options = listCliOptions()
 
   try {
-    const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
+    const initResult = await runSourceCli<{ created: boolean }>(
+      ['init', '--vault', vaultRoot],
+      options,
+    )
     assert.equal(initResult.ok, true)
     assert.equal(requireData(initResult).created, true)
 
@@ -226,7 +247,7 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
       `@${activeGoalPath}`,
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     const pausedUpsert = await runSourceCli<{ goalId: string }>([
       'goal',
       'upsert',
@@ -234,7 +255,7 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
       `@${pausedGoalPath}`,
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     const activeGoalId = requireData(activeUpsert).goalId
     const pausedGoalId = requireData(pausedUpsert).goalId
 
@@ -257,7 +278,7 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
       '5',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
 
     assert.equal(result.ok, true)
     assert.equal(requireData(result).filters.status, 'active')
@@ -291,9 +312,13 @@ test.sequential('generic list exposes record-type, status, stream, and tag filte
     'bank/experiments/sleep-window.md',
   )
   const experimentId = 'exp_01JNY0B2W4VG5C2A0G9S8M7R6Q'
+  const options = listCliOptions()
 
   try {
-    const initResult = await runSourceCli<{ created: boolean }>(['init', '--vault', vaultRoot])
+    const initResult = await runSourceCli<{ created: boolean }>(
+      ['init', '--vault', vaultRoot],
+      options,
+    )
     assert.equal(initResult.ok, true)
     assert.equal(requireData(initResult).created, true)
 
@@ -346,7 +371,7 @@ test.sequential('generic list exposes record-type, status, stream, and tag filte
       'bpm',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     assert.equal(importResult.ok, true)
     assert.equal(requireData(importResult).importedCount, 2)
 
@@ -374,7 +399,7 @@ test.sequential('generic list exposes record-type, status, stream, and tag filte
       'sleep',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     assert.equal(experimentList.ok, true)
     assert.deepEqual(requireData(experimentList).filters.recordType, [
       'experiment',
@@ -410,7 +435,7 @@ test.sequential('generic list exposes record-type, status, stream, and tag filte
       'glucose',
       '--vault',
       vaultRoot,
-    ])
+    ], options)
     assert.equal(sampleList.ok, true)
     assert.deepEqual(requireData(sampleList).filters.recordType, [
       'sample',
@@ -437,7 +462,7 @@ test.sequential('generic list rejects comma-delimited repeatable filter tokens',
     'sample,event',
     '--vault',
     path.join(repoRoot, 'fixtures/minimal-vault'),
-  ])
+  ], listCliOptions())
 
   assert.equal(result.ok, false)
   assert.match(
@@ -453,7 +478,7 @@ test.sequential('generic list rejects unsupported record-type values', async () 
     'not_a_real_record_type',
     '--vault',
     path.join(repoRoot, 'fixtures/minimal-vault'),
-  ])
+  ], listCliOptions())
 
   assert.equal(result.ok, false)
   assert.match(

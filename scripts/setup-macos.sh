@@ -109,7 +109,6 @@ print_install_plan() {
   printf '  - Homebrew, Node >= %s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model'
-  printf '%s\n' '  - PaddleX OCR on Apple Silicon unless you pass --skip-ocr'
   printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
 }
 

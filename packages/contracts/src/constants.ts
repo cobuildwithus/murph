@@ -69,6 +69,16 @@ export const EVENT_KINDS = Object.freeze([
   "intervention_session",
 ] as const);
 
+export const HEALTH_HISTORY_EVENT_KINDS = Object.freeze([
+  "encounter",
+  "procedure",
+  "test",
+  "adverse_effect",
+  "exposure",
+] as const);
+
+export type HealthHistoryEventKind = (typeof HEALTH_HISTORY_EVENT_KINDS)[number];
+
 export const EVENT_SOURCES = Object.freeze(["manual", "import", "device", "derived"] as const);
 
 export const EXPERIMENT_PHASES = Object.freeze(["start", "checkpoint", "stop"] as const);

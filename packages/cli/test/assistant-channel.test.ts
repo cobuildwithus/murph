@@ -56,6 +56,25 @@ async function resolveAssistantStatePaths(vaultRoot: string) {
   return (await import('../src/assistant-state.ts')).resolveAssistantStatePaths(vaultRoot)
 }
 
+function assertAssistantOutboxDispatch<TExpected extends object>(
+  actual:
+    | (Record<string, unknown> & { idempotencyKey?: string | null })
+    | undefined,
+  expected: TExpected,
+) {
+  if (!actual) {
+    assert.fail('Expected an assistant outbox dispatch.')
+  }
+
+  assert.match(String(actual.idempotencyKey), /^assistant-outbox:outbox_/u)
+  const { idempotencyKey: _ignored, ...rest } = actual
+  assert.deepEqual(rest, expected)
+}
+
+async function listJsonFiles(directory: string) {
+  return (await readdir(directory)).filter((fileName) => fileName.endsWith('.json'))
+}
+
 afterEach(async () => {
   await Promise.all(
     cleanupPaths.splice(0).map(async (target) => {
@@ -124,7 +143,12 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ message: string; replyToMessageId?: string | null; target: string }> = []
+  const sent: Array<{
+    idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -140,7 +164,7 @@ test('deliverAssistantMessage resolves a session, sends over iMessage, and keeps
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     target: '+15551234567',
     message: 'Lunch is logged.',
   })
@@ -196,7 +220,7 @@ test('deliverAssistantMessage writes a manual delivery receipt plus a sent outbo
     ['turn.started', 'delivery.queued', 'delivery.attempt.started', 'delivery.sent'],
   )
 
-  const outboxFiles = await readdir(statePaths.outboxDirectory)
+  const outboxFiles = await listJsonFiles(statePaths.outboxDirectory)
   assert.equal(outboxFiles.length, 1)
   const intent = JSON.parse(
     await readFile(path.join(statePaths.outboxDirectory, outboxFiles[0]!), 'utf8'),
@@ -264,7 +288,7 @@ test('deliverAssistantMessage preserves a deferred receipt when outbound deliver
   assert.equal(receipt.status, 'deferred')
   assert.equal(receipt.deliveryDisposition, 'retryable')
 
-  const outboxFiles = await readdir(statePaths.outboxDirectory)
+  const outboxFiles = await listJsonFiles(statePaths.outboxDirectory)
   assert.equal(outboxFiles.length, 1)
   const intent = JSON.parse(
     await readFile(path.join(statePaths.outboxDirectory, outboxFiles[0]!), 'utf8'),
@@ -306,7 +330,7 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ message: string; target: string }> = []
+  const sent: Array<{ idempotencyKey?: string | null; message: string; target: string }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -324,7 +348,7 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     target: '-1001234567890:topic:42',
     message: 'Telegram thread reply.',
   })
@@ -345,7 +369,7 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ message: string; target: string }> = []
+  const sent: Array<{ idempotencyKey?: string | null; message: string; target: string }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -366,7 +390,7 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     target: '-1001234567890:topic:42',
     message: 'Telegram thread reply.',
   })
@@ -396,7 +420,7 @@ test('deliverAssistantMessage rejects rebinding a saved session to a different r
     },
   })
 
-  const sent: Array<{ message: string; target: string }> = []
+  const sent: Array<{ idempotencyKey?: string | null; message: string; target: string }> = []
   await assert.rejects(
     () =>
       deliverAssistantMessage(
@@ -474,7 +498,7 @@ test('deliverAssistantMessage ignores lookup-only nested conversation metadata w
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     target: 'chat-1',
     message: 'Reuse the stored thread.',
   })
@@ -498,7 +522,12 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ message: string; target: string }> = []
+  const sent: Array<{
+    idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -517,7 +546,7 @@ test('deliverAssistantMessage uses stored Linq thread bindings so one assistant 
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     target: 'chat_123',
     message: 'Linq thread reply.',
     replyToMessageId: null,
@@ -540,7 +569,12 @@ test('deliverAssistantMessage forwards Linq reply anchors when one is available'
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ message: string; replyToMessageId?: string | null; target: string }> = []
+  const sent: Array<{
+    idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  }> = []
   await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -559,13 +593,12 @@ test('deliverAssistantMessage forwards Linq reply anchors when one is available'
     },
   )
 
-  assert.deepEqual(sent, [
-    {
-      target: 'chat_123',
-      message: 'Anchored Linq reply.',
-      replyToMessageId: 'msg_parent_123',
-    },
-  ])
+  assert.equal(sent.length, 1)
+  assertAssistantOutboxDispatch(sent[0], {
+    target: 'chat_123',
+    message: 'Anchored Linq reply.',
+    replyToMessageId: 'msg_parent_123',
+  })
 })
 
 test('deliverAssistantMessage uses stored email thread bindings so one assistant session can reply back into the same email thread', async () => {
@@ -575,6 +608,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
   cleanupPaths.push(parent)
 
   const sent: Array<{
+    idempotencyKey?: string | null
     identityId: string | null
     message: string
     target: string
@@ -598,7 +632,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     identityId: 'inbox_123',
     target: 'thread_123',
     targetKind: 'thread',
@@ -631,6 +665,7 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
     to: ['user@example.com'],
   }))
   const sent: Array<{
+    idempotencyKey?: string | null
     identityId: string | null
     message: string
     target: string
@@ -658,7 +693,7 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
   )
 
   assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
+  assertAssistantOutboxDispatch(sent[0], {
     identityId: 'assistant@example.test',
     message: 'Canonical email thread reply.',
     target: 'thread_123',

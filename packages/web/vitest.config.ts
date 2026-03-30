@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { defineProject } from "vitest/config";
 
 import {
   createVitestWorkspaceRuntimeAliases,
@@ -10,7 +10,7 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 
-export default defineConfig({
+export default defineProject({
   oxc: {
     jsx: {
       importSource: "react",
@@ -21,6 +21,7 @@ export default defineConfig({
     alias: createVitestWorkspaceRuntimeAliases(resolveLocalWebWorkspaceSourceEntries(packageDir)),
   },
   test: {
+    name: "local-web",
     environment: "node",
     fileParallelism: false,
     include: ["packages/web/test/**/*.test.ts"],

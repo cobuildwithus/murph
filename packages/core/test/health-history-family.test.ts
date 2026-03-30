@@ -19,6 +19,10 @@ import {
   listHistoryEvents,
   readHistoryEvent,
 } from "../src/history/index.ts";
+import type {
+  EncounterHistoryEventRecord,
+  TestHistoryEventRecord,
+} from "../src/history/index.ts";
 import { listFamilyMembers, readFamilyMember, upsertFamilyMember } from "../src/family/index.ts";
 import { listGeneticVariants, readGeneticVariant, upsertGeneticVariant } from "../src/genetics/index.ts";
 import { listWriteOperationMetadataPaths, readStoredWriteOperation } from "../src/operations/index.ts";
@@ -127,6 +131,144 @@ test("health history writes store the vault-local dayKey and timezone when UTC c
   assert.equal(appended.record.timeZone, "Australia/Melbourne");
   assert.equal(storedRecord?.dayKey, "2026-03-27");
   assert.equal(storedRecord?.timeZone, "Australia/Melbourne");
+});
+
+test("history read and list collapse append-only revisions, tombstones, and later revival", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-collapse");
+  await initializeVault({ vaultRoot });
+
+  const original = await appendHistoryEvent({
+    vaultRoot,
+    eventId: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8",
+    kind: "encounter",
+    occurredAt: "2026-03-03T12:00:00.000Z",
+    title: "Original visit",
+    encounterType: "office_visit",
+  });
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: original.relativePath,
+    record: {
+      ...original.record,
+      recordedAt: "2026-03-03T12:05:00.000Z",
+      title: "Updated visit",
+      location: "Follow-up clinic",
+      lifecycle: {
+        revision: 2,
+      },
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: original.relativePath,
+    record: {
+      ...original.record,
+      recordedAt: "2026-03-03T12:10:00.000Z",
+      title: "Updated visit",
+      location: "Follow-up clinic",
+      lifecycle: {
+        revision: 3,
+        state: "deleted",
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      readHistoryEvent({
+        vaultRoot,
+        eventId: original.record.id,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_HISTORY_EVENT_MISSING",
+  );
+  assert.deepEqual(
+    await listHistoryEvents({
+      vaultRoot,
+      kinds: ["encounter"],
+    }),
+    [],
+  );
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: original.relativePath,
+    record: {
+      ...original.record,
+      recordedAt: "2026-03-03T12:15:00.000Z",
+      title: "Revived visit",
+      location: "Revival clinic",
+      lifecycle: {
+        revision: 4,
+      },
+    },
+  });
+
+  const listed = await listHistoryEvents({
+    vaultRoot,
+    kinds: ["encounter"],
+  });
+  const read = await readHistoryEvent({
+    vaultRoot,
+    eventId: original.record.id,
+  });
+  const listedEncounter = listed[0] as EncounterHistoryEventRecord | undefined;
+  const readEncounter = read.record as EncounterHistoryEventRecord;
+
+  assert.equal(listed.length, 1);
+  assert.equal(listedEncounter?.title, "Revived visit");
+  assert.equal(listedEncounter?.location, "Revival clinic");
+  assert.equal(listedEncounter?.lifecycle?.revision, 4);
+  assert.equal(readEncounter.title, "Revived visit");
+  assert.equal(readEncounter.location, "Revival clinic");
+  assert.equal(readEncounter.lifecycle?.revision, 4);
+});
+
+test("history read and list fail closed when a stored lifecycle is malformed", async () => {
+  const vaultRoot = await makeTempDirectory("murph-history-invalid-lifecycle");
+  await initializeVault({ vaultRoot });
+
+  const original = await appendHistoryEvent({
+    vaultRoot,
+    eventId: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9",
+    kind: "encounter",
+    occurredAt: "2026-03-04T12:00:00.000Z",
+    title: "Original visit",
+    encounterType: "office_visit",
+  });
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: original.relativePath,
+    record: {
+      ...original.record,
+      recordedAt: "2026-03-04T12:05:00.000Z",
+      title: "Corrupt revision",
+      lifecycle: {
+        revision: 0,
+      },
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      listHistoryEvents({
+        vaultRoot,
+        kinds: ["encounter"],
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_HISTORY_EVENT",
+  );
+  await assert.rejects(
+    () =>
+      readHistoryEvent({
+        vaultRoot,
+        eventId: original.record.id,
+      }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "VAULT_INVALID_HISTORY_EVENT",
+  );
 });
 
 test("history test-event normalization keeps writes canonical and ignores legacy status aliases on read", async () => {
@@ -326,9 +468,9 @@ test("history append keeps per-kind defaults and ignores the removed resultSumma
   assert.equal(storedById.get(labResult.record.id)?.summary, undefined);
   assert.equal(storedById.get(labResult.record.id)?.resultSummary, undefined);
 
-  assert.equal(canonicalLabResult.record.summary, "Canonical summary text.");
+  assert.equal((canonicalLabResult.record as TestHistoryEventRecord).summary, "Canonical summary text.");
   assert.equal(readCanonicalLabResult.record.kind, "test");
-  assert.equal(readCanonicalLabResult.record.summary, "Canonical summary text.");
+  assert.equal((readCanonicalLabResult.record as TestHistoryEventRecord).summary, "Canonical summary text.");
   assert.equal(
     (listedById.get(canonicalLabResult.record.id) as { summary?: string } | undefined)?.summary,
     "Canonical summary text.",

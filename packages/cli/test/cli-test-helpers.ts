@@ -72,6 +72,8 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/index.d.ts'),
   path.join(repoRoot, 'packages/contracts/dist/command-capabilities.js'),
   path.join(repoRoot, 'packages/contracts/dist/command-capabilities.d.ts'),
+  path.join(repoRoot, 'packages/hosted-execution/dist/index.js'),
+  path.join(repoRoot, 'packages/hosted-execution/dist/index.d.ts'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.d.ts'),
   path.join(repoRoot, 'packages/core/dist/index.js'),
@@ -99,6 +101,7 @@ const importSmokeArtifactPaths = [
   path.join(repoRoot, 'packages/cli/dist/setup-cli.js'),
   path.join(repoRoot, 'packages/cli/dist/setup-runtime-env.js'),
 ]
+const PREPARED_CLI_RUNTIME_ARTIFACTS_ENV = 'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS' as const
 let cliRuntimeArtifactsVerified = false
 const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
 const strippedTestRunnerEnvPrefixes = ['VITEST_', 'C8_', 'NYC_'] as const
@@ -261,6 +264,15 @@ export async function ensureCliRuntimeArtifacts(): Promise<void> {
 export async function ensureCliRuntimeArtifactsWithOptions(options?: {
   forceReverify?: boolean
 }): Promise<void> {
+  if (
+    options?.forceReverify !== true &&
+    process.env[PREPARED_CLI_RUNTIME_ARTIFACTS_ENV] === '1' &&
+    requiredRuntimeArtifactPaths.every((artifactPath) => existsSync(artifactPath))
+  ) {
+    cliRuntimeArtifactsVerified = true
+    return
+  }
+
   if (
     options?.forceReverify !== true &&
     cliRuntimeArtifactsVerified &&

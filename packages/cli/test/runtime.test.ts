@@ -4,16 +4,12 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import { createRuntimeUnavailableError } from '../src/runtime-errors.js'
-import { repoRoot, requireData, runCli } from './cli-test-helpers.js'
-import './cli-expansion-document-meal.test.js'
-import './cli-expansion-experiment-journal-vault.test.js'
-import './cli-expansion-experiment-journal-vault-phase2.test.js'
-import './cli-expansion-inbox-attachments.test.js'
-import './cli-expansion-intervention.test.js'
-import './cli-expansion-provider-event-samples.test.js'
-import './cli-expansion-samples-audit.test.js'
-import './cli-expansion-workout.test.js'
-import './device-cli.test.js'
+import {
+  ensureCliRuntimeArtifactsWithOptions,
+  repoRoot,
+  requireData,
+  runCli,
+} from './cli-test-helpers.js'
 
 interface FixtureVault {
   vaultRoot: string
@@ -118,6 +114,7 @@ async function makeFixtureVault(): Promise<FixtureVault> {
       vaultRoot,
     ]),
   )
+  await ensureCliRuntimeArtifactsWithOptions({ forceReverify: true })
   const samples = requireData(
     await runCli<{
       lookupIds: string[]
