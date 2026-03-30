@@ -1,4 +1,7 @@
-import type { GatewayProjectionSnapshot } from "murph/gateway-core";
+import {
+  gatewayProjectionSnapshotSchema,
+  type GatewayProjectionSnapshot,
+} from "murph/gateway-core";
 import {
   decodeHostedBundleBase64,
   sha256HostedBundleHex,
@@ -32,6 +35,7 @@ export interface HostedExecutionCommittedResult {
   committedAt: string;
   eventId: string;
   finalizedAt: string | null;
+  gatewayProjectionSnapshot: GatewayProjectionSnapshot | null;
   result: HostedExecutionRunnerResult["result"];
   sideEffects: HostedExecutionSideEffect[];
   userId: string;
@@ -138,6 +142,7 @@ export async function persistHostedExecutionCommit(input: {
     committedAt,
     eventId: input.eventId,
     finalizedAt: null,
+    gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
     result: input.payload.result,
     sideEffects: parseHostedExecutionSideEffects(input.payload.sideEffects),
     userId: input.userId,
@@ -209,6 +214,8 @@ export async function persistHostedExecutionFinalBundles(input: {
     ...existing,
     bundleRefs: nextBundleRefs,
     finalizedAt: existing.finalizedAt ?? new Date().toISOString(),
+    gatewayProjectionSnapshot:
+      input.payload.gatewayProjectionSnapshot ?? existing.gatewayProjectionSnapshot,
   };
   await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
   return finalizedResult;
@@ -253,6 +260,13 @@ function normalizeHostedExecutionCommittedResult(
   return {
     ...value,
     finalizedAt: value.finalizedAt ?? null,
+    gatewayProjectionSnapshot:
+      (value as { gatewayProjectionSnapshot?: unknown }).gatewayProjectionSnapshot === undefined
+      || (value as { gatewayProjectionSnapshot?: unknown }).gatewayProjectionSnapshot === null
+        ? null
+        : gatewayProjectionSnapshotSchema.parse(
+            (value as { gatewayProjectionSnapshot: unknown }).gatewayProjectionSnapshot,
+          ),
     sideEffects: parseHostedExecutionSideEffects((value as { sideEffects?: unknown }).sideEffects),
     userId: typeof (value as { userId?: unknown }).userId === "string"
       ? (value as { userId: string }).userId
@@ -285,6 +299,18 @@ function assertEquivalentDuplicateCommit(
   if (!sameStructuredValue(existing.sideEffects, expectedSideEffects)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} side effects do not match the existing durable commit.`,
+    );
+  }
+
+  const expectedGatewayProjectionSnapshot = input.payload.gatewayProjectionSnapshot ?? null;
+  if (
+    !sameStructuredValue(
+      existing.gatewayProjectionSnapshot ?? null,
+      expectedGatewayProjectionSnapshot,
+    )
+  ) {
+    throw new Error(
+      `Hosted execution commit ${input.eventId} gateway projection snapshot does not match the existing durable commit.`,
     );
   }
 

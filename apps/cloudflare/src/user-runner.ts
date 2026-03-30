@@ -192,6 +192,7 @@ export class HostedUserRunner {
             input.event.userId,
             committed,
           );
+          await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
 
           return toUserStatus(
             await this.advanceRunPhase({
@@ -207,6 +208,7 @@ export class HostedUserRunner {
           );
         }
 
+        await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
         return toUserStatus(
           presence.pending
             ? await this.applyCommittedDispatchAndCleanup(input.event.userId, committed, input)
@@ -370,6 +372,9 @@ export class HostedUserRunner {
           record.userId,
           nextPending.dispatch.eventId,
         );
+        if (committed && !isCommittedResultFinalized(committed)) {
+          await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
+        }
         record = await this.advanceRunPhase({
           clearError: true,
           dispatch: nextPending.dispatch,
@@ -554,6 +559,7 @@ export class HostedUserRunner {
     }
 
     if (recovered.committedEventId) {
+      await this.gatewayStore.applySnapshot(recovered.committed.gatewayProjectionSnapshot ?? null);
       const completedRecord = await this.advanceRunPhase({
         clearError: true,
         dispatch: {
@@ -586,6 +592,7 @@ export class HostedUserRunner {
     },
     run: HostedExecutionRunContext | null = null,
   ): Promise<RunnerStateRecord> {
+    await this.gatewayStore.applySnapshot(committed.gatewayProjectionSnapshot ?? null);
     let record = await this.commitRecovery.applyCommittedDispatch(userId, committed);
     record = await this.advanceRunPhase({
       clearError: true,

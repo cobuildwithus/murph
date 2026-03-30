@@ -180,6 +180,12 @@ test('local gateway projection derives route-backed conversations and transcript
     assert.equal(emailConversation.messageCount, 2)
     assert.match(emailConversation.sessionKey, /^gwcs_/u)
     assert.doesNotMatch(emailConversation.sessionKey, /channel:email/u)
+    assertGatewayOpaqueIdDoesNotExposeRawRoute(emailConversation.sessionKey, [
+      'channel:email',
+      'thread-labs',
+      'contact:alex',
+      'murph@example.com',
+    ])
 
     const fetched = await getGatewayConversationLocal(vaultRoot, {
       sessionKey: emailConversation.sessionKey,
@@ -197,8 +203,33 @@ test('local gateway projection derives route-backed conversations and transcript
     assert.equal(messages.messages[0]?.direction, 'inbound')
     assert.equal(messages.messages[0]?.text, 'Here is the latest lab PDF.')
     assert.match(messages.messages[0]?.attachments[0]?.attachmentId ?? '', /^gwca_/u)
+    assertGatewayOpaqueIdDoesNotExposeRawRoute(messages.messages[0]?.messageId ?? '', [
+      'channel:email',
+      'thread-labs',
+      'contact:alex',
+      'murph@example.com',
+    ])
+    assertGatewayOpaqueIdDoesNotExposeRawRoute(
+      messages.messages[0]?.attachments[0]?.attachmentId ?? '',
+      ['channel:email', 'thread-labs', 'contact:alex', 'murph@example.com'],
+    )
     assert.equal(messages.messages[1]?.direction, 'outbound')
     assert.equal(messages.messages[1]?.text, 'Please send the latest PDF.')
+
+    const legacySessionKey = createLegacyGatewayConversationSessionKey(
+      'channel:email|identity:murph%40example.com|thread:thread-labs',
+    )
+    const fetchedFromLegacySessionKey = await getGatewayConversationLocal(vaultRoot, {
+      sessionKey: legacySessionKey,
+    })
+    assert.equal(fetchedFromLegacySessionKey?.sessionKey, emailConversation.sessionKey)
+    const messagesFromLegacySessionKey = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: legacySessionKey,
+    })
+    assert.equal(messagesFromLegacySessionKey.messages.length, 2)
 
     const attachments = await fetchGatewayAttachmentsLocal(vaultRoot, {
       attachmentIds: [],
@@ -233,6 +264,61 @@ test('local gateway projection derives route-backed conversations and transcript
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
     await rm(attachmentSourceRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway hides actor-derived titles unless includeDerivedTitles is enabled', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-derived-title-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      source: 'telegram',
+      externalId: 'telegram-derived-title-1',
+      thread: {
+        id: 'chat-derived-title',
+        title: null,
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:jordan',
+        displayName: 'Jordan',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T11:00:00.000Z',
+      receivedAt: '2026-03-30T11:00:01.000Z',
+      text: 'Checking in.',
+      attachments: [],
+      raw: {
+        provider: 'telegram',
+      },
+    })
+    runtime.close()
+
+    const withoutDerivedTitles = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: false,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(withoutDerivedTitles.conversations.length, 1)
+    assert.equal(withoutDerivedTitles.conversations[0]?.title, null)
+
+    const withDerivedTitles = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(withDerivedTitles.conversations.length, 1)
+    assert.equal(withDerivedTitles.conversations[0]?.title, 'Jordan')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
   }
 })
 
@@ -377,3 +463,29 @@ test('local gateway send uses route-bound assistant delivery and live events dif
     await rm(vaultRoot, { force: true, recursive: true })
   }
 })
+
+function assertGatewayOpaqueIdDoesNotExposeRawRoute(
+  opaqueId: string,
+  forbiddenFragments: string[],
+): void {
+  const encoded = opaqueId.slice(opaqueId.indexOf('_') + 1)
+  const decoded = Buffer.from(encoded, 'base64url').toString('utf8')
+  for (const fragment of forbiddenFragments) {
+    assert.doesNotMatch(decoded, new RegExp(escapeRegExp(fragment), 'u'))
+  }
+}
+
+function createLegacyGatewayConversationSessionKey(routeKey: string): string {
+  return `gwcs_${Buffer.from(
+    JSON.stringify({
+      kind: 'conversation',
+      routeKey,
+      version: 1,
+    }),
+    'utf8',
+  ).toString('base64url')}`
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+}

@@ -1,155 +1,140 @@
+import { createHash } from 'node:crypto'
+
 interface GatewayOpaqueEnvelope {
   kind: string
-  routeKey: string
-  version: 1
+  routeKey?: string
+  routeToken?: string
+  version: 1 | 2
 }
 
 interface GatewayConversationEnvelope extends GatewayOpaqueEnvelope {
   kind: 'conversation'
 }
 
-interface GatewayCaptureMessageEnvelope extends GatewayOpaqueEnvelope {
-  captureId: string
-  kind: 'capture-message'
-}
-
-interface GatewayOutboxMessageEnvelope extends GatewayOpaqueEnvelope {
-  intentId: string
-  kind: 'outbox-message'
+interface GatewayMessageEnvelope extends GatewayOpaqueEnvelope {
+  kind: 'capture-message' | 'outbox-message'
+  sourceToken?: string
 }
 
 interface GatewayAttachmentEnvelope extends GatewayOpaqueEnvelope {
-  attachmentId: string
-  captureId: string
   kind: 'attachment'
+  sourceToken?: string
 }
 
 const GATEWAY_CONVERSATION_PREFIX = 'gwcs_'
 const GATEWAY_MESSAGE_PREFIX = 'gwcm_'
 const GATEWAY_ATTACHMENT_PREFIX = 'gwca_'
 
-export function createGatewayConversationSessionKey(routeKey: string): string {
+/**
+ * Gateway ids should behave like opaque transport identifiers. New ids therefore
+ * embed stable hashed route/source tokens instead of raw route keys or provider ids.
+ * Readers still accept legacy v1 envelopes so rollouts can validate or compare older ids.
+ */
+export function createGatewayConversationSessionKey(routeKeyOrToken: string): string {
   const envelope: GatewayConversationEnvelope = {
     kind: 'conversation',
-    routeKey,
-    version: 1,
+    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    version: 2,
   }
   return encodeGatewayOpaqueId(GATEWAY_CONVERSATION_PREFIX, envelope)
 }
 
-export function readGatewayConversationSessionKey(sessionKey: string): string {
-  return readGatewayConversationEnvelope(sessionKey).routeKey
+export function readGatewayConversationSessionToken(sessionKey: string): string {
+  return readGatewayConversationEnvelope(sessionKey).routeToken
+}
+
+export function sameGatewayConversationSession(
+  leftSessionKey: string,
+  rightSessionKey: string,
+): boolean {
+  try {
+    return (
+      readGatewayConversationSessionToken(leftSessionKey) ===
+      readGatewayConversationSessionToken(rightSessionKey)
+    )
+  } catch {
+    return false
+  }
 }
 
 export function createGatewayCaptureMessageId(
-  routeKey: string,
+  routeKeyOrToken: string,
   captureId: string,
 ): string {
-  const envelope: GatewayCaptureMessageEnvelope = {
-    captureId,
+  const envelope: GatewayMessageEnvelope = {
     kind: 'capture-message',
-    routeKey,
-    version: 1,
+    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    sourceToken: createGatewaySourceToken('capture', captureId),
+    version: 2,
   }
   return encodeGatewayOpaqueId(GATEWAY_MESSAGE_PREFIX, envelope)
 }
 
 export function createGatewayOutboxMessageId(
-  routeKey: string,
+  routeKeyOrToken: string,
   intentId: string,
 ): string {
-  const envelope: GatewayOutboxMessageEnvelope = {
-    intentId,
+  const envelope: GatewayMessageEnvelope = {
     kind: 'outbox-message',
-    routeKey,
-    version: 1,
+    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    sourceToken: createGatewaySourceToken('outbox', intentId),
+    version: 2,
   }
   return encodeGatewayOpaqueId(GATEWAY_MESSAGE_PREFIX, envelope)
 }
 
-export function readGatewayMessageRouteKey(messageId: string): string {
-  return readGatewayMessageEnvelope(messageId).routeKey
-}
-
-export function readGatewayCaptureMessageId(
-  messageId: string,
-): GatewayCaptureMessageEnvelope {
-  const envelope = readGatewayMessageEnvelope(messageId)
-  if (envelope.kind !== 'capture-message') {
-    throw new Error('Gateway message id does not refer to an inbox capture message.')
-  }
-  return envelope
-}
-
-export function readGatewayOutboxMessageId(
-  messageId: string,
-): GatewayOutboxMessageEnvelope {
-  const envelope = readGatewayMessageEnvelope(messageId)
-  if (envelope.kind !== 'outbox-message') {
-    throw new Error('Gateway message id does not refer to an assistant outbox message.')
-  }
-  return envelope
+export function readGatewayMessageRouteToken(messageId: string): string {
+  return readGatewayMessageEnvelope(messageId).routeToken
 }
 
 export function createGatewayAttachmentId(
-  routeKey: string,
+  routeKeyOrToken: string,
   captureId: string,
   attachmentId: string,
 ): string {
   const envelope: GatewayAttachmentEnvelope = {
-    attachmentId,
-    captureId,
     kind: 'attachment',
-    routeKey,
-    version: 1,
+    routeToken: normalizeGatewayRouteToken(routeKeyOrToken),
+    sourceToken: createGatewaySourceToken('attachment', `${captureId}:${attachmentId}`),
+    version: 2,
   }
   return encodeGatewayOpaqueId(GATEWAY_ATTACHMENT_PREFIX, envelope)
 }
 
 export function readGatewayAttachmentId(
   attachmentId: string,
-): GatewayAttachmentEnvelope {
-  const envelope = decodeGatewayOpaqueId(attachmentId, GATEWAY_ATTACHMENT_PREFIX)
+): GatewayAttachmentEnvelope & { routeToken: string } {
+  const envelope = normalizeGatewayAttachmentEnvelope(
+    decodeGatewayOpaqueId(attachmentId, GATEWAY_ATTACHMENT_PREFIX),
+  )
   if (envelope.kind !== 'attachment') {
     throw new Error('Gateway attachment id is invalid.')
   }
-  if (typeof envelope.captureId !== 'string' || envelope.captureId.length === 0) {
-    throw new Error('Gateway attachment id was missing the capture reference.')
-  }
-  if (typeof envelope.attachmentId !== 'string' || envelope.attachmentId.length === 0) {
-    throw new Error('Gateway attachment id was missing the attachment reference.')
-  }
-  return envelope as unknown as GatewayAttachmentEnvelope
+  return envelope
 }
 
 function readGatewayConversationEnvelope(
   sessionKey: string,
-): GatewayConversationEnvelope {
-  const envelope = decodeGatewayOpaqueId(sessionKey, GATEWAY_CONVERSATION_PREFIX)
+): GatewayConversationEnvelope & { routeToken: string } {
+  const envelope = normalizeGatewayOpaqueEnvelope(
+    decodeGatewayOpaqueId(sessionKey, GATEWAY_CONVERSATION_PREFIX),
+  )
   if (envelope.kind !== 'conversation') {
     throw new Error('Gateway session key is invalid.')
   }
-  return envelope as unknown as GatewayConversationEnvelope
+  return envelope as GatewayConversationEnvelope & { routeToken: string }
 }
 
 function readGatewayMessageEnvelope(
   messageId: string,
-): GatewayCaptureMessageEnvelope | GatewayOutboxMessageEnvelope {
-  const envelope = decodeGatewayOpaqueId(messageId, GATEWAY_MESSAGE_PREFIX)
-  if (envelope.kind === 'capture-message') {
-    if (typeof envelope.captureId !== 'string' || envelope.captureId.length === 0) {
-      throw new Error('Gateway message id was missing the capture reference.')
-    }
-    return envelope as unknown as GatewayCaptureMessageEnvelope
+): GatewayMessageEnvelope & { routeToken: string } {
+  const envelope = normalizeGatewayOpaqueEnvelope(
+    decodeGatewayOpaqueId(messageId, GATEWAY_MESSAGE_PREFIX),
+  )
+  if (envelope.kind !== 'capture-message' && envelope.kind !== 'outbox-message') {
+    throw new Error('Gateway message id is invalid.')
   }
-  if (envelope.kind === 'outbox-message') {
-    if (typeof envelope.intentId !== 'string' || envelope.intentId.length === 0) {
-      throw new Error('Gateway message id was missing the outbox intent reference.')
-    }
-    return envelope as unknown as GatewayOutboxMessageEnvelope
-  }
-
-  throw new Error('Gateway message id is invalid.')
+  return envelope as GatewayMessageEnvelope & { routeToken: string }
 }
 
 function encodeGatewayOpaqueId<T extends GatewayOpaqueEnvelope>(
@@ -183,16 +168,76 @@ function decodeGatewayOpaqueId(
     throw new Error('Gateway opaque id is invalid.')
   }
 
-  const envelope = parsed as Record<string, unknown>
-  if (envelope.version !== 1) {
+  const envelope = parsed as Record<string, unknown> & GatewayOpaqueEnvelope
+  if (envelope.version !== 1 && envelope.version !== 2) {
     throw new Error('Gateway opaque id version is unsupported.')
   }
   if (typeof envelope.kind !== 'string' || envelope.kind.length === 0) {
     throw new Error('Gateway opaque id was missing the kind field.')
   }
-  if (typeof envelope.routeKey !== 'string' || envelope.routeKey.length === 0) {
-    throw new Error('Gateway opaque id was missing the route key.')
-  }
 
-  return envelope as Record<string, unknown> & GatewayOpaqueEnvelope
+  return envelope
+}
+
+function normalizeGatewayOpaqueEnvelope(
+  envelope: Record<string, unknown> & GatewayOpaqueEnvelope,
+): GatewayOpaqueEnvelope & { routeToken: string; sourceToken?: string } {
+  return {
+    ...envelope,
+    routeToken: readGatewayRouteTokenField(envelope),
+  }
+}
+
+function normalizeGatewayAttachmentEnvelope(
+  envelope: Record<string, unknown> & GatewayOpaqueEnvelope,
+): GatewayAttachmentEnvelope & { routeToken: string } {
+  const normalized = normalizeGatewayOpaqueEnvelope(envelope)
+  if (typeof normalized.sourceToken !== 'string' || normalized.sourceToken.length === 0) {
+    throw new Error('Gateway attachment id was missing the attachment reference.')
+  }
+  return normalized as GatewayAttachmentEnvelope & { routeToken: string }
+}
+
+function readGatewayRouteTokenField(
+  envelope: Record<string, unknown> & GatewayOpaqueEnvelope,
+): string {
+  if (typeof envelope.routeToken === 'string' && envelope.routeToken.length > 0) {
+    return envelope.routeToken
+  }
+  if (typeof envelope.routeKey === 'string' && envelope.routeKey.length > 0) {
+    return createGatewayRouteToken(envelope.routeKey)
+  }
+  throw new Error('Gateway opaque id was missing the route token.')
+}
+
+function normalizeGatewayRouteToken(routeKeyOrToken: string): string {
+  if (typeof routeKeyOrToken !== 'string' || routeKeyOrToken.length === 0) {
+    throw new Error('Gateway route token input is invalid.')
+  }
+  return looksLikeGatewayRouteToken(routeKeyOrToken)
+    ? routeKeyOrToken
+    : createGatewayRouteToken(routeKeyOrToken)
+}
+
+function looksLikeGatewayRouteToken(value: string): boolean {
+  return !value.includes(':') && !value.includes('|')
+}
+
+function createGatewayRouteToken(routeKey: string): string {
+  return createGatewayOpaqueToken('route', routeKey)
+}
+
+function createGatewaySourceToken(
+  scope: 'attachment' | 'capture' | 'outbox',
+  value: string,
+): string {
+  return createGatewayOpaqueToken(scope, value)
+}
+
+function createGatewayOpaqueToken(scope: string, value: string): string {
+  return createHash('sha256')
+    .update(scope)
+    .update('\u0000')
+    .update(value)
+    .digest('base64url')
 }

@@ -55,8 +55,6 @@ const INBOX_CAPTURE_PAGE_SIZE = 500
 
 interface GatewayConversationAccumulator {
   alias: string | null
-  latestParticipantDisplayName: string | null
-  latestParticipantDisplayNameAt: string | null
   latestThreadTitle: string | null
   latestThreadTitleAt: string | null
   messages: GatewayMessage[]
@@ -74,12 +72,7 @@ export async function exportGatewayProjectionSnapshotLocal(
 ): Promise<GatewayProjectionSnapshot> {
   const projection = await buildLocalGatewayProjection(vault)
   const conversations = Array.from(projection.conversations.values())
-    .map((conversation) =>
-      materializeGatewayConversation(conversation, {
-        includeDerivedTitles: true,
-        includeLastMessage: true,
-      }),
-    )
+    .map((conversation) => materializeGatewayConversation(conversation))
     .sort(compareGatewayConversationsDescending)
   const messages = Array.from(projection.conversations.values())
     .flatMap((conversation) => conversation.messages)
@@ -238,15 +231,6 @@ function integrateInboxCapture(
     conversation.latestThreadTitleAt = capture.occurredAt
   }
 
-  if (
-    capture.actor.displayName &&
-    (conversation.latestParticipantDisplayNameAt === null ||
-      capture.occurredAt >= conversation.latestParticipantDisplayNameAt)
-  ) {
-    conversation.latestParticipantDisplayName = capture.actor.displayName
-    conversation.latestParticipantDisplayNameAt = capture.occurredAt
-  }
-
   conversation.messages.push(materializeGatewayCaptureMessage(routeKey, capture))
 }
 
@@ -261,8 +245,6 @@ function ensureGatewayConversationAccumulator(
 
   const created: GatewayConversationAccumulator = {
     alias: null,
-    latestParticipantDisplayName: null,
-    latestParticipantDisplayNameAt: null,
     latestThreadTitle: null,
     latestThreadTitleAt: null,
     messages: [],
@@ -327,22 +309,15 @@ function materializeGatewayAttachment(
 
 function materializeGatewayConversation(
   conversation: GatewayConversationAccumulator,
-  input: {
-    includeDerivedTitles: boolean
-    includeLastMessage: boolean
-  },
 ): GatewayConversation {
   const lastMessage = conversation.messages[conversation.messages.length - 1] ?? null
-  const title = deriveGatewayConversationTitle(
-    conversation,
-    input.includeDerivedTitles,
-  )
+  const title = deriveGatewayConversationExplicitTitle(conversation)
 
   return gatewayConversationSchema.parse({
     schema: 'murph.gateway-conversation.v1',
     sessionKey: createGatewayConversationSessionKey(conversation.routeKey),
     title,
-    lastMessagePreview: input.includeLastMessage ? deriveLastMessagePreview(lastMessage) : null,
+    lastMessagePreview: deriveLastMessagePreview(lastMessage),
     lastActivityAt: lastMessage?.createdAt ?? conversation.sessionUpdatedAt ?? null,
     messageCount: conversation.messages.length,
     canSend: gatewayConversationRouteCanSend(conversation.route),
@@ -350,24 +325,11 @@ function materializeGatewayConversation(
   })
 }
 
-function deriveGatewayConversationTitle(
+function deriveGatewayConversationExplicitTitle(
   conversation: GatewayConversationAccumulator,
-  includeDerivedTitles: boolean,
 ): string | null {
-  const explicit =
+  return (
     normalizeNullableString(conversation.alias) ??
     normalizeNullableString(conversation.latestThreadTitle)
-  if (explicit) {
-    return explicit
-  }
-  if (!includeDerivedTitles) {
-    return null
-  }
-
-  return (
-    normalizeNullableString(conversation.latestParticipantDisplayName) ??
-    normalizeNullableString(conversation.route.participantId) ??
-    normalizeNullableString(conversation.route.threadId) ??
-    normalizeNullableString(conversation.route.channel)
   )
 }

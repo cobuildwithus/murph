@@ -1,5 +1,6 @@
 import {
   gatewayFetchAttachmentsInputSchema,
+  gatewayConversationSchema,
   gatewayGetConversationInputSchema,
   gatewayListConversationsInputSchema,
   gatewayListConversationsResultSchema,
@@ -21,8 +22,8 @@ import {
 } from './contracts.js'
 import {
   readGatewayAttachmentId,
-  readGatewayConversationSessionKey,
-  readGatewayMessageRouteKey,
+  readGatewayConversationSessionToken,
+  readGatewayMessageRouteToken,
 } from './opaque-ids.js'
 import { createGatewayInvalidRuntimeIdError } from './errors.js'
 
@@ -47,7 +48,7 @@ export function listGatewayConversationsFromSnapshot(
 
   conversations = conversations
     .map((conversation) =>
-      conversationPresentationForRequest(conversation, parsed),
+      conversationPresentationForRequest(snapshot, conversation, parsed),
     )
     .sort(compareGatewayConversationsDescending)
 
@@ -62,13 +63,13 @@ export function getGatewayConversationFromSnapshot(
   input: GatewayGetConversationInput,
 ): GatewayConversation | null {
   const parsed = gatewayGetConversationInputSchema.parse(input)
-  const sessionKey = readGatewayConversationSessionKeyOrThrow(parsed.sessionKey)
-  const conversation = snapshot.conversations.find(
-    (entry) => readGatewayConversationSessionKeyOrThrow(entry.sessionKey) === sessionKey,
+  const sessionToken = readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
+  const conversation = snapshot.conversations.find((entry) =>
+    gatewaySessionKeyMatchesRouteToken(entry.sessionKey, sessionToken),
   )
 
   return conversation
-    ? conversationPresentationForRequest(conversation, {
+    ? conversationPresentationForRequest(snapshot, conversation, {
         channel: null,
         includeDerivedTitles: true,
         includeLastMessage: true,
@@ -83,13 +84,13 @@ export function readGatewayMessagesFromSnapshot(
   input: GatewayReadMessagesInput,
 ): GatewayReadMessagesResult {
   const parsed = gatewayReadMessagesInputSchema.parse(input)
-  const sessionKey = readGatewayConversationSessionKeyOrThrow(parsed.sessionKey)
+  const sessionToken = readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
   if (parsed.afterMessageId) {
-    assertGatewayMessageBelongsToRoute(parsed.afterMessageId, sessionKey)
+    assertGatewayMessageBelongsToRoute(parsed.afterMessageId, sessionToken)
   }
 
   const messages = snapshot.messages
-    .filter((message) => message.sessionKey === parsed.sessionKey)
+    .filter((message) => gatewaySessionKeyMatchesRouteToken(message.sessionKey, sessionToken))
     .sort(compareGatewayMessagesAscending)
   const ordered = parsed.oldestFirst ? messages : [...messages].reverse()
   const startIndex =
@@ -112,15 +113,15 @@ export function fetchGatewayAttachmentsFromSnapshot(
   input: GatewayFetchAttachmentsInput,
 ): GatewayAttachment[] {
   const parsed = gatewayFetchAttachmentsInputSchema.parse(input)
-  const requestedRouteKey = parsed.sessionKey
-    ? readGatewayConversationSessionKeyOrThrow(parsed.sessionKey)
+  const requestedRouteToken = parsed.sessionKey
+    ? readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
     : null
 
   if (parsed.attachmentIds.length > 0) {
     const attachments: GatewayAttachment[] = []
     for (const attachmentId of parsed.attachmentIds) {
       const envelope = readGatewayAttachmentIdOrThrow(attachmentId)
-      if (requestedRouteKey && envelope.routeKey !== requestedRouteKey) {
+      if (requestedRouteToken && envelope.routeToken !== requestedRouteToken) {
         throw createGatewayInvalidRuntimeIdError(
           'Gateway attachment id did not belong to the requested session key.',
         )
@@ -136,8 +137,8 @@ export function fetchGatewayAttachmentsFromSnapshot(
   }
 
   if (parsed.messageId) {
-    const routeKey = readGatewayMessageRouteKeyOrThrow(parsed.messageId)
-    if (requestedRouteKey && requestedRouteKey !== routeKey) {
+    const routeToken = readGatewayMessageRouteTokenOrThrow(parsed.messageId)
+    if (requestedRouteToken && requestedRouteToken !== routeToken) {
       throw createGatewayInvalidRuntimeIdError(
         'Gateway message id did not belong to the requested session key.',
       )
@@ -146,13 +147,13 @@ export function fetchGatewayAttachmentsFromSnapshot(
     return dedupeGatewayAttachments(message?.attachments ?? [])
   }
 
-  if (requestedRouteKey) {
+  if (requestedRouteToken) {
     return dedupeGatewayAttachments(
       snapshot.messages
         .filter(
           (message) =>
-            readGatewayConversationSessionKeyOrThrow(message.sessionKey) ===
-            requestedRouteKey,
+            readGatewayConversationSessionTokenOrThrow(message.sessionKey) ===
+            requestedRouteToken,
         )
         .flatMap((message) => message.attachments),
     )
@@ -168,9 +169,17 @@ export function listGatewayOpenPermissionsFromSnapshot(
   },
 ): GatewayPermissionRequest[] {
   const sessionKey = input?.sessionKey ?? null
+  const sessionToken = sessionKey
+    ? readGatewayConversationSessionTokenOrThrow(sessionKey)
+    : null
   return snapshot.permissions
     .filter((permission) => permission.status === 'open')
-    .filter((permission) => !sessionKey || permission.sessionKey === sessionKey)
+    .filter(
+      (permission) =>
+        sessionToken === null ||
+        (permission.sessionKey !== null &&
+          gatewaySessionKeyMatchesRouteToken(permission.sessionKey, sessionToken)),
+    )
     .map((permission) => gatewayPermissionRequestSchema.parse(permission))
     .sort(
       (left, right) =>
@@ -293,22 +302,55 @@ export function deriveLastMessagePreview(message: GatewayMessage | null): string
 }
 
 function conversationPresentationForRequest(
+  snapshot: GatewayProjectionSnapshot,
   conversation: GatewayConversation,
   input: GatewayListConversationsInput,
 ): GatewayConversation {
-  return {
+  return gatewayConversationSchema.parse({
     ...conversation,
-    title:
-      input.includeDerivedTitles === false &&
-      conversation.title ===
-        (normalizeNullableString(conversation.route.participantId) ??
-          normalizeNullableString(conversation.route.threadId) ??
-          normalizeNullableString(conversation.route.channel))
-        ? null
-        : conversation.title,
+    title: deriveGatewayConversationDisplayTitle(
+      snapshot,
+      conversation,
+      input.includeDerivedTitles,
+    ),
     lastMessagePreview:
       input.includeLastMessage === false ? null : conversation.lastMessagePreview,
+  })
+}
+
+function deriveGatewayConversationDisplayTitle(
+  snapshot: GatewayProjectionSnapshot,
+  conversation: GatewayConversation,
+  includeDerivedTitles: boolean,
+): string | null {
+  const explicitTitle = normalizeNullableString(conversation.title)
+  if (explicitTitle) {
+    return explicitTitle
   }
+  if (!includeDerivedTitles) {
+    return null
+  }
+
+  const messages = snapshot.messages.filter(
+    (message) => message.sessionKey === conversation.sessionKey,
+  )
+  const latestInboundActorDisplayName = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.direction === 'inbound' && normalizeNullableString(message.actorDisplayName),
+    )?.actorDisplayName
+  const latestActorDisplayName = [...messages]
+    .reverse()
+    .find((message) => normalizeNullableString(message.actorDisplayName))?.actorDisplayName
+
+  return (
+    normalizeNullableString(latestInboundActorDisplayName) ??
+    normalizeNullableString(latestActorDisplayName) ??
+    normalizeNullableString(conversation.route.participantId) ??
+    normalizeNullableString(conversation.route.threadId) ??
+    normalizeNullableString(conversation.route.channel)
+  )
 }
 
 function conversationMatchesSearch(
@@ -403,19 +445,26 @@ function dedupeGatewayAttachments(
 
 function assertGatewayMessageBelongsToRoute(
   messageId: string,
-  routeKey: string,
+  routeToken: string,
 ): void {
-  const messageRouteKey = readGatewayMessageRouteKeyOrThrow(messageId)
-  if (messageRouteKey !== routeKey) {
+  const messageRouteToken = readGatewayMessageRouteTokenOrThrow(messageId)
+  if (messageRouteToken !== routeToken) {
     throw createGatewayInvalidRuntimeIdError(
       'Gateway message id did not belong to the requested session key.',
     )
   }
 }
 
-function readGatewayConversationSessionKeyOrThrow(sessionKey: string): string {
+function gatewaySessionKeyMatchesRouteToken(
+  sessionKey: string,
+  routeToken: string,
+): boolean {
+  return readGatewayConversationSessionTokenOrThrow(sessionKey) === routeToken
+}
+
+function readGatewayConversationSessionTokenOrThrow(sessionKey: string): string {
   try {
-    return readGatewayConversationSessionKey(sessionKey)
+    return readGatewayConversationSessionToken(sessionKey)
   } catch (error) {
     throw createGatewayInvalidRuntimeIdError(
       error instanceof Error ? error.message : 'Gateway session key is invalid.',
@@ -423,9 +472,9 @@ function readGatewayConversationSessionKeyOrThrow(sessionKey: string): string {
   }
 }
 
-function readGatewayMessageRouteKeyOrThrow(messageId: string): string {
+function readGatewayMessageRouteTokenOrThrow(messageId: string): string {
   try {
-    return readGatewayMessageRouteKey(messageId)
+    return readGatewayMessageRouteToken(messageId)
   } catch (error) {
     throw createGatewayInvalidRuntimeIdError(
       error instanceof Error ? error.message : 'Gateway message id is invalid.',
