@@ -43,6 +43,13 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 - Remove the row immediately when the task is complete or abandoned.
 - Vault-only data tasks do not use the coordination ledger.
 
+## Narrow Patch Landings
+
+- For user-supplied patches or externally prepared diffs, default to a ledger-first workflow.
+- A dedicated execution plan is optional when the landing stays bounded, low-design, and single-turn.
+- Open a plan before continuing if the patch requires architecture decisions, broad manual merge work, cross-cutting refactors, or is likely to spill across turns.
+- Treat the supplied patch as behavioral intent, not as authority to overwrite live files blindly; read the current tree first, preserve adjacent edits, and port only the intended delta.
+
 ## Vault-Only Data Tasks
 
 - Limit writes to `vault/**` plus the canonical audit or runtime artifacts produced by the invoked mutation path.
