@@ -143,21 +143,7 @@ function readHostedWebhookReceiptResponse(
 function readHostedWebhookReceiptError(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): HostedWebhookReceiptErrorState | null {
-  const errorObject = toHostedWebhookReceiptObject(value);
-  const message = readHostedWebhookReceiptString(errorObject.message);
-  const name = readHostedWebhookReceiptString(errorObject.name);
-
-  return message && name
-    ? {
-        code: readHostedWebhookReceiptString(errorObject.code),
-        message,
-        name,
-        retryable:
-          typeof errorObject.retryable === "boolean"
-            ? errorObject.retryable
-            : null,
-      }
-    : null;
+  return readHostedWebhookErrorState<HostedWebhookReceiptErrorState>(value);
 }
 
 function readHostedWebhookReceiptSideEffects(
@@ -214,21 +200,29 @@ function readHostedWebhookSideEffectStatusValue(
 function readHostedWebhookSideEffectError(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): HostedWebhookSideEffectErrorState | null {
+  return readHostedWebhookErrorState<HostedWebhookSideEffectErrorState>(value);
+}
+
+function readHostedWebhookErrorState<TErrorState extends HostedWebhookReceiptErrorState | HostedWebhookSideEffectErrorState>(
+  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+): TErrorState | null {
   const errorObject = toHostedWebhookReceiptObject(value);
   const message = readHostedWebhookReceiptString(errorObject.message);
   const name = readHostedWebhookReceiptString(errorObject.name);
 
-  return message && name
-    ? {
-        code: readHostedWebhookReceiptString(errorObject.code),
-        message,
-        name,
-        retryable:
-          typeof errorObject.retryable === "boolean"
-            ? errorObject.retryable
-            : null,
-      }
-    : null;
+  if (!message || !name) {
+    return null;
+  }
+
+  return {
+    code: readHostedWebhookReceiptString(errorObject.code),
+    message,
+    name,
+    retryable:
+      typeof errorObject.retryable === "boolean"
+        ? errorObject.retryable
+        : null,
+  } as TErrorState;
 }
 
 function serializeHostedWebhookSideEffect(
@@ -386,6 +380,6 @@ function readHostedWebhookSideEffect(
   }
 }
 
-function generateHostedWebhookReceiptAttemptId(): string {
+export function generateHostedWebhookReceiptAttemptId(): string {
   return randomBytes(16).toString("hex");
 }

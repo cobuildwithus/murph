@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 import {
   buildHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
@@ -7,7 +5,11 @@ import {
 
 import { isHostedOnboardingError } from "./errors";
 import { serializeHostedExecutionOutboxPayload } from "../hosted-execution/outbox-payload";
-import { serializeHostedWebhookReceiptState } from "./webhook-receipt-codec";
+import {
+  generateHostedWebhookReceiptAttemptId,
+  readHostedWebhookDispatchPayloadDispatch,
+  serializeHostedWebhookReceiptState,
+} from "./webhook-receipt-codec";
 import type {
   HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
@@ -55,14 +57,19 @@ export function queueHostedWebhookReceiptSideEffects(
     response: HostedWebhookResponsePayload;
   },
 ): HostedWebhookReceiptState {
-  if (desiredSideEffects.length === 0) {
+  const nextSideEffects =
+    desiredSideEffects.length === 0
+      ? currentState.sideEffects
+      : mergeHostedWebhookSideEffects(currentState.sideEffects, desiredSideEffects);
+
+  if (!input && nextSideEffects === currentState.sideEffects) {
     return currentState;
   }
 
   return updateHostedWebhookReceiptState(currentState, {
     plannedAt: input?.plannedAt ?? currentState.plannedAt,
     response: input?.response ?? currentState.response,
-    sideEffects: mergeHostedWebhookSideEffects(currentState.sideEffects, desiredSideEffects),
+    sideEffects: nextSideEffects,
   });
 }
 
@@ -111,18 +118,12 @@ export function markHostedWebhookReceiptSideEffectFailed(
   effectId: string,
   error: unknown,
 ): HostedWebhookReceiptState {
-  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) =>
-    effect.status === "pending"
-      ? {
-          ...effect,
-          lastError: serializeHostedWebhookSideEffectError(error),
-          status: "pending",
-        }
-      : {
-          ...effect,
-          lastError: serializeHostedWebhookSideEffectError(error),
-        },
-  );
+  const lastError = serializeHostedWebhookSideEffectError(error);
+
+  return updateHostedWebhookReceiptSideEffect(currentState, effectId, (effect) => ({
+    ...effect,
+    lastError,
+  }));
 }
 
 export function completeHostedWebhookReceipt(
@@ -376,49 +377,36 @@ function markHostedWebhookSideEffectSent(
 }
 
 function serializeHostedWebhookReceiptError(error: unknown): HostedWebhookReceiptErrorState {
-  if (isHostedOnboardingError(error)) {
-    return {
-      code: error.code,
-      message: error.message,
-      name: error.name,
-      retryable: error.retryable ?? null,
-    };
-  }
-
-  if (error instanceof Error) {
-    return {
-      code: null,
-      message: error.message,
-      name: error.name,
-      retryable: null,
-    };
-  }
-
-  if (typeof error === "string") {
-    return {
-      code: null,
-      message: error,
-      name: "Error",
-      retryable: null,
-    };
-  }
-
-  return {
-    code: null,
-    message: "Unknown hosted webhook failure.",
-    name: "UnknownError",
-    retryable: null,
-  };
+  return serializeHostedWebhookErrorState<HostedWebhookReceiptErrorState>({
+    error,
+    unknownMessage: "Unknown hosted webhook failure.",
+  });
 }
 
 function serializeHostedWebhookSideEffectError(error: unknown): HostedWebhookSideEffectErrorState {
+  return serializeHostedWebhookErrorState<HostedWebhookSideEffectErrorState>({
+    error,
+    deriveRetryable: readHostedWebhookSideEffectRetryable,
+    unknownMessage: "Unknown hosted side-effect failure.",
+  });
+}
+
+function serializeHostedWebhookErrorState<
+  TErrorState extends HostedWebhookReceiptErrorState | HostedWebhookSideEffectErrorState,
+>(input: {
+  error: unknown;
+  deriveRetryable?: (error: Error) => boolean | null;
+  unknownMessage: string;
+}): TErrorState {
+  const { error } = input;
+
   if (isHostedOnboardingError(error)) {
     return {
       code: error.code,
       message: error.message,
       name: error.name,
       retryable: error.retryable ?? null,
-    };
+    } as TErrorState;
   }
 
   if (error instanceof Error) {
@@ -426,8 +414,8 @@ function serializeHostedWebhookSideEffectError(error: unknown): HostedWebhookSid
       code: null,
       message: error.message,
       name: error.name,
-      retryable: readHostedWebhookSideEffectRetryable(error),
-    };
+      retryable: input.deriveRetryable?.(error) ?? null,
+    } as TErrorState;
   }
 
   if (typeof error === "string") {
@@ -436,15 +424,15 @@ function serializeHostedWebhookSideEffectError(error: unknown): HostedWebhookSid
       message: error,
       name: "Error",
       retryable: null,
-    };
+    } as TErrorState;
   }
 
   return {
     code: null,
-    message: "Unknown hosted side-effect failure.",
+    message: input.unknownMessage,
     name: "UnknownError",
     retryable: null,
-  };
+  } as TErrorState;
 }
 
 function readHostedWebhookSideEffectRetryable(error: Error): boolean | null {
@@ -453,28 +441,19 @@ function readHostedWebhookSideEffectRetryable(error: Error): boolean | null {
     : null;
 }
 
-function generateHostedWebhookReceiptAttemptId(): string {
-  return randomBytes(16).toString("hex");
-}
-
-function readHostedWebhookDispatchPayloadDispatch(
-  payload: HostedWebhookDispatchSideEffect["payload"],
-): HostedExecutionDispatchRequest | null {
-  return "dispatch" in payload
-    ? payload.dispatch
-    : null;
-}
 
 function minimizeHostedWebhookDispatchPayload(
   dispatch: HostedExecutionDispatchRequest,
 ): HostedWebhookDispatchSideEffect["payload"] {
   const serializedDispatch = serializeHostedExecutionOutboxPayload(dispatch);
+  const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
+  const schemaVersion = serializedDispatch.schemaVersion as string;
 
   if (dispatch.event.kind === "linq.message.received") {
     return {
-      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+      dispatchRef,
       linqEvent: { ...dispatch.event.linqEvent },
-      schemaVersion: serializedDispatch.schemaVersion as string,
+      schemaVersion,
       storage: "reference",
     };
   }
@@ -482,16 +461,16 @@ function minimizeHostedWebhookDispatchPayload(
   if (dispatch.event.kind === "telegram.message.received") {
     return {
       botUserId: dispatch.event.botUserId,
-      dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-      schemaVersion: serializedDispatch.schemaVersion as string,
+      dispatchRef,
+      schemaVersion,
       storage: "reference",
       telegramUpdate: { ...dispatch.event.telegramUpdate },
     };
   }
 
   return {
-    dispatchRef: buildHostedExecutionDispatchRef(dispatch),
-    schemaVersion: serializedDispatch.schemaVersion as string,
+    dispatchRef,
+    schemaVersion,
     storage: "reference",
   };
 }
