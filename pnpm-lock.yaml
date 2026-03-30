@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.14
         version: 0.1.14
       '@cobuild/review-gpt':
-        specifier: ^0.5.7
-        version: 0.5.7(openapi-types@12.1.3)
+        specifier: ^0.5.8
+        version: 0.5.8(openapi-types@12.1.3)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -523,8 +523,8 @@ packages:
     resolution: {integrity: sha512-/DKNFA3n1Y1pMKnbSiIctY57pZNdnVCNcB9ukKqAwQQRjt7sc9NoYuWBmb9H407Of9GvBNGg2BCMmQemKLtN6w==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.7':
-    resolution: {integrity: sha512-DZ0Au/EGV0CqJMMQ8hp6YVdXJl4OfmgKKjDSe55dx2aGyeqWYaKfFnf7AJeSb3vsVWImxUsb9YquBuUwdONsMA==}
+  '@cobuild/review-gpt@0.5.8':
+    resolution: {integrity: sha512-U0KEqz57YUCMsy5GN4btTeu8mnCsGBs5jsofHNpSqUj5pNB7tGk1cCPLrj+uvCz8wJ1O/NSMFEo53kBiwYh3Ag==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -5876,7 +5876,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.14': {}
 
-  '@cobuild/review-gpt@0.5.7(openapi-types@12.1.3)':
+  '@cobuild/review-gpt@0.5.8(openapi-types@12.1.3)':
     dependencies:
       incur: 0.3.13(openapi-types@12.1.3)
     transitivePeerDependencies:
