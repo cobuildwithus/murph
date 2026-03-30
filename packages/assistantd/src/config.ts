@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { isLoopbackHostname } from '@murph/runtime-state'
 
 export interface AssistantdEnvironment {
@@ -9,6 +10,26 @@ export interface AssistantdEnvironment {
 
 const DEFAULT_ASSISTANTD_HOST = '127.0.0.1'
 const DEFAULT_ASSISTANTD_PORT = 50_241
+
+export function loadAssistantdEnvFiles(cwd = process.cwd()): void {
+  for (const fileName of ['.env.local', '.env']) {
+    const filePath = path.join(cwd, fileName)
+    try {
+      process.loadEnvFile(filePath)
+    } catch (error) {
+      if (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        error.code === 'ENOENT'
+      ) {
+        continue
+      }
+
+      throw error
+    }
+  }
+}
 
 export function loadAssistantdEnvironment(
   env: NodeJS.ProcessEnv = process.env,
