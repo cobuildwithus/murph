@@ -70,7 +70,6 @@ export const setupToolsSchema = z.object({
   pdftotextCommand: pathSchema.nullable(),
   whisperCommand: pathSchema.nullable(),
   whisperModelPath: pathSchema,
-  paddleocrCommand: pathSchema.nullable(),
 })
 
 export const setupConfiguredChannelSchema = z.object({
@@ -166,10 +165,6 @@ export const setupCommandOptionsSchema = z.object({
   whisperModel: whisperModelSchema
     .default('base.en')
     .describe('whisper.cpp model to download for local transcription.'),
-  skipOcr: z
-    .boolean()
-    .optional()
-    .describe('Skip PaddleX OCR installation even when the host supports it.'),
   assistantPreset: setupAssistantPresetSchema
     .optional()
     .describe('Optional onboarding assistant preset: Codex CLI, Codex OSS/local model, OpenAI-compatible endpoint, or skip.'),

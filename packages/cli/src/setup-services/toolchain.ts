@@ -14,8 +14,6 @@ import {
 } from './process.js'
 import {
   BREW_INSTALL_COMMAND,
-  PADDLEX_REQUIREMENT,
-  PADDLEX_VENV_NAME,
   createStep,
 } from './steps.js'
 import { hasNonEmptyFile } from './shell.js'
@@ -273,105 +271,6 @@ export async function ensureWhisperModel(input: {
       title: input.title,
     }),
   )
-}
-
-export async function ensurePaddleXOcr(input: {
-  dryRun: boolean
-  env: NodeJS.ProcessEnv
-  fileExists: (absolutePath: string) => Promise<boolean>
-  pythonCommand: string | null
-  runCommand: (input: CommandRunInput) => Promise<CommandRunResult>
-  steps: SetupStepResult[]
-  toolchainRoot: string
-}): Promise<string | null> {
-  const venvRoot = path.join(input.toolchainRoot, 'venvs', PADDLEX_VENV_NAME)
-  const paddlexCommand = path.join(venvRoot, 'bin', 'paddlex')
-  const venvPython = path.join(venvRoot, 'bin', 'python')
-
-  if (await input.fileExists(paddlexCommand)) {
-    input.steps.push(
-      createStep({
-        detail: `Reusing PaddleX OCR from ${paddlexCommand}.`,
-        id: 'paddlex-ocr',
-        kind: 'install',
-        status: 'reused',
-        title: 'PaddleX OCR',
-      }),
-    )
-    return paddlexCommand
-  }
-
-  if (input.dryRun) {
-    input.steps.push(
-      createStep({
-        detail: `Would create ${venvRoot} and install paddlepaddle plus ${PADDLEX_REQUIREMENT}.`,
-        id: 'paddlex-ocr',
-        kind: 'install',
-        status: 'planned',
-        title: 'PaddleX OCR',
-      }),
-    )
-    return null
-  }
-
-  if (!input.pythonCommand) {
-    throw new VaultCliError(
-      'python_command_missing',
-      'Python 3.12 was expected for OCR setup, but no Python command was resolved.',
-    )
-  }
-
-  await mkdir(path.dirname(venvRoot), { recursive: true })
-  if (!(await input.fileExists(venvPython))) {
-    const venvResult = await input.runCommand({
-      args: ['-m', 'venv', venvRoot],
-      env: input.env,
-      file: input.pythonCommand,
-    })
-    assertCommandSucceeded(venvResult, 'python_venv_failed', {
-      venvRoot,
-    })
-  }
-
-  const upgradePipResult = await input.runCommand({
-    args: ['-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel'],
-    env: input.env,
-    file: venvPython,
-  })
-  assertCommandSucceeded(upgradePipResult, 'pip_install_failed', {
-    package: 'pip setuptools wheel',
-  })
-
-  const installOcrResult = await input.runCommand({
-    args: ['-m', 'pip', 'install', 'paddlepaddle', PADDLEX_REQUIREMENT],
-    env: input.env,
-    file: venvPython,
-  })
-  assertCommandSucceeded(installOcrResult, 'pip_install_failed', {
-    package: `paddlepaddle ${PADDLEX_REQUIREMENT}`,
-  })
-
-  if (!(await input.fileExists(paddlexCommand))) {
-    throw new VaultCliError(
-      'paddlex_install_failed',
-      'PaddleX OCR installation completed, but the paddlex command was not created.',
-      {
-        paddlexCommand,
-      },
-    )
-  }
-
-  input.steps.push(
-    createStep({
-      detail: `Installed PaddleX OCR in ${venvRoot}.`,
-      id: 'paddlex-ocr',
-      kind: 'install',
-      status: 'completed',
-      title: 'PaddleX OCR',
-    }),
-  )
-
-  return paddlexCommand
 }
 
 async function isBrewFormulaInstalled(

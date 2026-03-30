@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { FfmpegToolOptions } from "../adapters/ffmpeg.js";
-import { createPaddleOcrProvider } from "../adapters/paddleocr.js";
 import { createPdfToTextProvider } from "../adapters/pdftotext.js";
 import { createTextFileProvider } from "../adapters/text-file.js";
 import { createWhisperCppProvider } from "../adapters/whisper-cpp.js";
@@ -76,13 +75,6 @@ async function discoverParserToolchainFromContext(input: {
         missingReason: "pdftotext CLI not found.",
       }),
       whisper: await discoverWhisperTool(input.config, input.vaultRoot),
-      paddleocr: await discoverCommandTool({
-        config: input.config?.tools.paddleocr,
-        envValue: readConfiguredEnvValue(process.env, ["PADDLEOCR_COMMAND"]),
-        fallbackCommands: ["paddleocr", "paddlex"],
-        availableReason: "PaddleOCR CLI available.",
-        missingReason: "PaddleOCR CLI not found.",
-      }),
     },
   };
 }
@@ -120,11 +112,6 @@ export async function createConfiguredParserRegistry(input: {
       createPdfToTextProvider({
         commandCandidates: toCommandCandidates(
           context.config?.tools.pdftotext?.command,
-        ),
-      }),
-      createPaddleOcrProvider({
-        commandCandidates: toCommandCandidates(
-          context.config?.tools.paddleocr?.command,
         ),
       }),
     ]),

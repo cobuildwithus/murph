@@ -410,7 +410,6 @@ export interface ParserDoctorRuntimeReport {
     whisper: ParserToolRuntimeStatus & {
       modelPath: string | null
     }
-    paddleocr: ParserToolRuntimeStatus
   }
 }
 
@@ -637,7 +636,6 @@ export interface InitInput extends CommandContext {
 
 export interface SetupInput extends CommandContext {
   ffmpegCommand?: string
-  paddleocrCommand?: string
   pdftotextCommand?: string
   whisperCommand?: string
   whisperModelPath?: string

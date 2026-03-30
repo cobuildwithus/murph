@@ -54,7 +54,6 @@ export const inboxParserToolchainStatusSchema = z.object({
     whisper: inboxParserToolStatusSchema.extend({
       modelPath: z.string().min(1).nullable(),
     }),
-    paddleocr: inboxParserToolStatusSchema,
   }),
 })
 

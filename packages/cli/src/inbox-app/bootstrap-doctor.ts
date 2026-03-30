@@ -83,7 +83,6 @@ export function createInboxBootstrapDoctorOps(
     vault: string
     requestId: string | null
     ffmpegCommand?: string
-    paddleocrCommand?: string
     pdftotextCommand?: string
     whisperCommand?: string
     whisperModelPath?: string
@@ -124,13 +123,6 @@ export function createInboxBootstrapDoctorOps(
                       modelPath: input.whisperModelPath,
                     }
                   : {}),
-              },
-            }
-          : {}),
-        ...(input.paddleocrCommand
-          ? {
-              paddleocr: {
-                command: input.paddleocrCommand,
               },
             }
           : {}),

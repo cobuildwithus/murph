@@ -76,11 +76,6 @@ const inboxSetupOptionFields = {
     .min(1)
     .optional()
     .describe('Optional explicit whisper model path to persist.'),
-  paddleocrCommand: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('Optional explicit PaddleOCR command or path to persist.'),
 }
 
 export function registerInboxCommands(
@@ -216,7 +211,6 @@ export function registerInboxCommands(
         pdftotextCommand: context.options.pdftotextCommand,
         whisperCommand: context.options.whisperCommand,
         whisperModelPath: context.options.whisperModelPath,
-        paddleocrCommand: context.options.paddleocrCommand,
         strict: context.options.strict,
       })
 
@@ -254,7 +248,6 @@ export function registerInboxCommands(
         pdftotextCommand: context.options.pdftotextCommand,
         whisperCommand: context.options.whisperCommand,
         whisperModelPath: context.options.whisperModelPath,
-        paddleocrCommand: context.options.paddleocrCommand,
       })
     },
   })

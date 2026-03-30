@@ -182,7 +182,6 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
       envOverrides,
       rebuild: context.options.rebuild,
       requestId: context.options.requestId ?? null,
-      skipOcr: context.options.skipOcr,
       strict: context.options.strict,
       scheduledUpdatePresetIds: selectedScheduledUpdates,
       toolchainRoot: context.options.toolchainRoot,
@@ -522,9 +521,8 @@ function registerSetupCommand(
         },
       },
       {
-        description: 'Skip OCR and choose a different Whisper model.',
+        description: 'Choose a different Whisper model.',
         options: {
-          skipOcr: true,
           vault: './vault',
           whisperModel: 'small.en',
         },

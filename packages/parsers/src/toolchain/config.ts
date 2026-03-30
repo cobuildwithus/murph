@@ -7,7 +7,7 @@ import { ensureDirectory, fileExists, readUtf8IfExists } from "../shared.js";
 
 export const PARSER_TOOLCHAIN_VERSION = 1 as const;
 
-export type ParserToolName = "ffmpeg" | "pdftotext" | "whisper" | "paddleocr";
+export type ParserToolName = "ffmpeg" | "pdftotext" | "whisper";
 
 export interface ParserToolchainToolConfig {
   command?: string | null;
@@ -227,5 +227,4 @@ const parserToolNames = [
   "ffmpeg",
   "pdftotext",
   "whisper",
-  "paddleocr",
 ] as const satisfies readonly ParserToolName[];
