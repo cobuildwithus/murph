@@ -379,8 +379,8 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   )
 })
 
-test('deliverAssistantMessage preserves explicit locator overrides over nested conversation refs when resuming a session', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-conversation-overrides-'))
+test('deliverAssistantMessage rejects rebinding a saved session to a different routed audience', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-channel-routing-conflict-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
@@ -397,46 +397,47 @@ test('deliverAssistantMessage preserves explicit locator overrides over nested c
   })
 
   const sent: Array<{ message: string; target: string }> = []
-  const result = await deliverAssistantMessage(
-    {
-      vault: vaultRoot,
-      sessionId: created.session.sessionId,
-      conversation: {
-        channel: 'telegram',
-        identityId: 'assistant:primary',
-        participantId: 'contact:base',
-        threadId: 'chat-base',
-        directness: 'group',
-      },
-      actorId: 'contact:override',
-      sourceThreadId: 'chat-override',
-      threadIsDirect: true,
-      message: 'Telegram thread override.',
-    },
-    {
-      sendTelegram: async (input: { message: string; target: string }) => {
-        sent.push(input)
-      },
+  await assert.rejects(
+    () =>
+      deliverAssistantMessage(
+        {
+          vault: vaultRoot,
+          sessionId: created.session.sessionId,
+          conversation: {
+            channel: 'telegram',
+            identityId: 'assistant:primary',
+            participantId: 'contact:base',
+            threadId: 'chat-base',
+            directness: 'group',
+          },
+          actorId: 'contact:override',
+          sourceThreadId: 'chat-override',
+          threadIsDirect: true,
+          message: 'Telegram thread override.',
+        },
+        {
+          sendTelegram: async (input: { message: string; target: string }) => {
+            sent.push(input)
+          },
+        },
+      ),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown })?.code,
+        'ASSISTANT_SESSION_ROUTING_CONFLICT',
+      )
+      return true
     },
   )
 
-  assert.equal(sent.length, 1)
-  assert.deepEqual(sent[0], {
-    target: 'chat-override',
-    message: 'Telegram thread override.',
-  })
-  assert.equal(result.session.binding.channel, 'telegram')
-  assert.equal(result.session.binding.identityId, 'assistant:primary')
-  assert.equal(result.session.binding.actorId, 'contact:override')
-  assert.equal(result.session.binding.threadId, 'chat-override')
-  assert.equal(result.session.binding.threadIsDirect, true)
+  assert.equal(sent.length, 0)
 
   const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
   assert.equal(persisted.binding.channel, 'telegram')
   assert.equal(persisted.binding.identityId, 'assistant:primary')
-  assert.equal(persisted.binding.actorId, 'contact:override')
-  assert.equal(persisted.binding.threadId, 'chat-override')
-  assert.equal(persisted.binding.threadIsDirect, true)
+  assert.equal(persisted.binding.actorId, 'contact:base')
+  assert.equal(persisted.binding.threadId, 'chat-base')
+  assert.equal(persisted.binding.threadIsDirect, false)
 })
 
 test('deliverAssistantMessage ignores lookup-only nested conversation metadata when resuming a session', async () => {

@@ -94,6 +94,7 @@ export async function resolveAssistantSession(
     const persistenceInput = {
       alias: manualAlias,
       bindingPatch,
+      lookupSource: 'session-id' as const,
     }
     const conversationKey = resolveAssistantConversationLookupKey(input)
 
@@ -120,7 +121,10 @@ export async function resolveAssistantSession(
         const resolved = await loadAndPersistResolvedSession({
           paths,
           sessionId,
-          persistenceInput,
+          persistenceInput: {
+            ...persistenceInput,
+            lookupSource: 'alias',
+          },
         })
         if (resolved) {
           return resolved
@@ -134,7 +138,10 @@ export async function resolveAssistantSession(
         const resolved = await loadAndPersistResolvedSession({
           paths,
           sessionId,
-          persistenceInput,
+          persistenceInput: {
+            ...persistenceInput,
+            lookupSource: 'conversation-key',
+          },
           skipIfExpired: true,
           maxSessionAgeMs: input.maxSessionAgeMs,
           now: input.now,

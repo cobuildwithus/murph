@@ -2,11 +2,28 @@ import { timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { URL } from 'node:url'
+import {
+  assertAssistantSessionId,
+  isAssistantSessionNotFoundError,
+} from '@murph/assistant-services/runtime'
 import { isLoopbackRemoteAddress } from '@murph/runtime-state'
-import { assertAssistantSessionId, isAssistantSessionNotFoundError } from 'murph/assistant-core'
 import type { AssistantLocalService } from './service.js'
 
 const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024
+const assistantConversationDirectnessValues = new Set([
+  'direct',
+  'group',
+  'unknown',
+])
+const assistantCanonicalConversationFields = new Set([
+  'alias',
+  'channel',
+  'directness',
+  'identityId',
+  'participantId',
+  'sessionId',
+  'threadId',
+])
 
 export interface CreateAssistantHttpServerInput {
   controlToken: string
@@ -303,16 +320,50 @@ function validateAssistantSessionResolutionRecord(
   const conversation = record.conversation
   if (conversation !== undefined) {
     const conversationRecord = readRequiredRecordField(record, 'conversation', context)
-    const nestedSessionId = conversationRecord.sessionId
-    if (typeof nestedSessionId === 'string') {
-      parseAssistantSessionIdField(nestedSessionId, `${context} conversation`)
-    } else if (nestedSessionId !== undefined && nestedSessionId !== null) {
+    validateAssistantConversationRecord(conversationRecord, context)
+  }
+}
+
+function validateAssistantConversationRecord(
+  record: Record<string, unknown>,
+  context: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!assistantCanonicalConversationFields.has(key)) {
       throw new AssistantHttpRequestError(
-        `Assistant ${context} conversation sessionId must be a string when present.`,
+        `Assistant ${context} conversation field ${key} is not supported. Use the canonical nested conversation-ref shape instead.`,
         400,
       )
     }
-    assertOptionalNullableStringField(conversationRecord, 'alias', `${context} conversation`)
+  }
+
+  const nestedContext = `${context} conversation`
+  const nestedSessionId = record.sessionId
+  if (typeof nestedSessionId === 'string') {
+    parseAssistantSessionIdField(nestedSessionId, nestedContext)
+  } else if (nestedSessionId !== undefined && nestedSessionId !== null) {
+    throw new AssistantHttpRequestError(
+      `Assistant ${nestedContext} sessionId must be a string when present.`,
+      400,
+    )
+  }
+
+  assertOptionalNullableStringField(record, 'alias', nestedContext)
+  assertOptionalNullableStringField(record, 'channel', nestedContext)
+  assertOptionalNullableStringField(record, 'identityId', nestedContext)
+  assertOptionalNullableStringField(record, 'participantId', nestedContext)
+  assertOptionalNullableStringField(record, 'threadId', nestedContext)
+
+  const directness = readOptionalNullableStringField(record, 'directness', nestedContext)
+  if (
+    directness !== undefined &&
+    directness !== null &&
+    !assistantConversationDirectnessValues.has(directness)
+  ) {
+    throw new AssistantHttpRequestError(
+      `Assistant ${nestedContext} directness must be one of direct, group, or unknown when present.`,
+      400,
+    )
   }
 }
 

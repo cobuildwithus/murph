@@ -276,6 +276,47 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(invalidSession.status, 400)
     assert.match(await invalidSession.text(), /session id/u)
 
+    const invalidConversationField = await fetch(`${handle.address.baseUrl}/message`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        prompt: 'hello over assistantd',
+        conversation: {
+          actorId: 'legacy-contact',
+        },
+      }),
+    })
+    assert.equal(invalidConversationField.status, 400)
+    assert.match(
+      await invalidConversationField.text(),
+      /canonical nested conversation-ref shape/u,
+    )
+
+    const invalidConversationDirectness = await fetch(`${handle.address.baseUrl}/message`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        prompt: 'hello over assistantd',
+        conversation: {
+          channel: 'telegram',
+          directness: 'private-thread',
+        },
+      }),
+    })
+    assert.equal(invalidConversationDirectness.status, 400)
+    assert.match(
+      await invalidConversationDirectness.text(),
+      /directness must be one of direct, group, or unknown/u,
+    )
+
     const oversizedBody = await fetch(`${handle.address.baseUrl}/message`, {
       method: 'POST',
       headers: {

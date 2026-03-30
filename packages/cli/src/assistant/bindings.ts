@@ -25,6 +25,20 @@ export interface AssistantBindingInput {
 
 export interface AssistantBindingPatch extends AssistantBindingInput {}
 
+export type AssistantBindingIsolationField =
+  | 'actorId'
+  | 'channel'
+  | 'identityId'
+  | 'threadId'
+  | 'threadIsDirect'
+
+export interface AssistantBindingIsolationConflict {
+  current: string | boolean | null
+  field: AssistantBindingIsolationField
+  next: string | boolean | null
+  reason: 'clear' | 'replace'
+}
+
 export function resolveAssistantConversationKey(
   input: AssistantBindingInput,
 ): string | null {
@@ -39,7 +53,7 @@ export function resolveAssistantConversationKey(
 
   const scope: [string, string] | null = threadId
     ? ['thread', threadId]
-    : actorId
+    : actorId && canUseActorScopedConversationKey(input)
       ? ['actor', actorId]
       : null
 
@@ -56,6 +70,38 @@ export function resolveAssistantConversationKey(
   return entries
     .map(([key, value]) => `${key}:${encodeURIComponent(value)}`)
     .join('|')
+}
+
+export function getAssistantBindingIsolationConflicts(
+  binding: Pick<
+    AssistantSessionBinding,
+    'actorId' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
+  >,
+  patch: AssistantBindingPatch,
+): AssistantBindingIsolationConflict[] {
+  const conflicts: AssistantBindingIsolationConflict[] = []
+
+  for (const field of assistantBindingIsolationFields) {
+    if (!(field in patch)) {
+      continue
+    }
+
+    const current = readAssistantBindingIsolationValue(binding, field)
+    const next = readAssistantBindingIsolationPatchValue(patch, field)
+
+    if (current === null || current === next) {
+      continue
+    }
+
+    conflicts.push({
+      current,
+      field,
+      next,
+      reason: next === null ? 'clear' : 'replace',
+    })
+  }
+
+  return conflicts
 }
 
 export function createAssistantBinding(
@@ -216,5 +262,60 @@ function bindingConversationRef(input: {
     participantId: normalizeNullableString(input.actorId),
     threadId: normalizeNullableString(input.threadId),
     directness: conversationDirectnessFromThreadIsDirect(input.threadIsDirect),
+  }
+}
+
+const assistantBindingIsolationFields = [
+  'channel',
+  'identityId',
+  'actorId',
+  'threadId',
+  'threadIsDirect',
+] as const satisfies readonly AssistantBindingIsolationField[]
+
+function canUseActorScopedConversationKey(
+  input: Pick<AssistantBindingInput, 'threadIsDirect'>,
+): boolean {
+  return input.threadIsDirect !== false
+}
+
+function readAssistantBindingIsolationValue(
+  binding: Pick<
+    AssistantSessionBinding,
+    'actorId' | 'channel' | 'identityId' | 'threadId' | 'threadIsDirect'
+  >,
+  field: AssistantBindingIsolationField,
+): string | boolean | null {
+  switch (field) {
+    case 'actorId':
+      return normalizeNullableString(binding.actorId)
+    case 'channel':
+      return normalizeNullableString(binding.channel)
+    case 'identityId':
+      return normalizeNullableString(binding.identityId)
+    case 'threadId':
+      return normalizeNullableString(binding.threadId)
+    case 'threadIsDirect':
+      return typeof binding.threadIsDirect === 'boolean'
+        ? binding.threadIsDirect
+        : null
+  }
+}
+
+function readAssistantBindingIsolationPatchValue(
+  patch: AssistantBindingPatch,
+  field: AssistantBindingIsolationField,
+): string | boolean | null {
+  switch (field) {
+    case 'actorId':
+      return normalizeNullableString(patch.actorId)
+    case 'channel':
+      return normalizeNullableString(patch.channel)
+    case 'identityId':
+      return normalizeNullableString(patch.identityId)
+    case 'threadId':
+      return normalizeNullableString(patch.threadId)
+    case 'threadIsDirect':
+      return typeof patch.threadIsDirect === 'boolean' ? patch.threadIsDirect : null
   }
 }
