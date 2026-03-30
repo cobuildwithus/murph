@@ -77,6 +77,7 @@ test('assistant cron presets stay separate from scheduler state until installed'
 
   const presets = listAssistantCronPresets()
   const mindfulnessPreset = getAssistantCronPreset('morning-mindfulness')
+  const conditionPreset = getAssistantCronPreset('condition-research-roundup')
   const weeklyPreset = getAssistantCronPreset('weekly-health-snapshot')
   const listedJobs = await listAssistantCronJobs(vaultRoot)
 
@@ -86,6 +87,10 @@ test('assistant cron presets stay separate from scheduler state until installed'
   assert.equal(mindfulnessPreset.id, 'morning-mindfulness')
   assert.match(mindfulnessPreset.promptTemplate, /morning mindfulness prompt/u)
   assert.match(mindfulnessPreset.promptTemplate, /text-message friendly/u)
+  assert.match(conditionPreset.promptTemplate, /Anchor the roundup to my own context first/u)
+  assert.match(conditionPreset.promptTemplate, /plain language for a smart non-specialist/u)
+  assert.match(conditionPreset.promptTemplate, /Do not end with a long source dump/u)
+  assert.match(conditionPreset.promptTemplate, /worth watching next for me/u)
   assert.equal(weeklyPreset.title, 'Weekly health compass')
   assert.match(weeklyPreset.promptTemplate, /weekly health compass/u)
   assert.match(weeklyPreset.promptTemplate, /what changed, what stayed steady/u)
