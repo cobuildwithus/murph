@@ -1,5 +1,6 @@
 export {
   ALL_VAULT_RECORD_TYPES,
+  createVaultReadModel,
   getExperiment,
   getVaultEntities,
   getJournalEntry,

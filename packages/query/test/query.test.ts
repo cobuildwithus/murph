@@ -15,6 +15,7 @@ import {
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
   buildExportPack,
+  createVaultReadModel,
   describeLookupConstraint,
   inferIdEntityKind,
   isQueryableLookupId,
@@ -44,6 +45,7 @@ import {
   projectProfileSnapshotEntity,
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
+import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
 import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
@@ -129,6 +131,165 @@ test("id-family helpers no longer register the hard-cut legacy colon-prefixed fa
     "workout_format",
   );
   assert.equal(describeLookupConstraint("food_01JNV40W8VFYQ2H7CMJY5A9R4K"), null);
+});
+
+test("readVault collapses append-only event revisions to the latest active current-view record", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-events-"));
+
+  try {
+    const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1C1";
+    const marchShard = path.join(vaultRoot, "ledger/events/2026");
+    const aprilShard = path.join(vaultRoot, "ledger/events/2026");
+    const mayShard = path.join(vaultRoot, "ledger/events/2026");
+    await mkdir(marchShard, { recursive: true });
+    await mkdir(aprilShard, { recursive: true });
+    await mkdir(mayShard, { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: eventId,
+        kind: "note",
+        occurredAt: "2026-03-12T08:15:00.000Z",
+        recordedAt: "2026-03-12T08:16:00.000Z",
+        dayKey: "2026-03-12",
+        source: "manual",
+        title: "Original note",
+        note: "First revision.",
+        lifecycle: {
+          revision: 1,
+        },
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-04.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: eventId,
+          kind: "note",
+          occurredAt: "2026-04-02T07:00:00.000Z",
+          recordedAt: "2026-04-02T07:05:00.000Z",
+          dayKey: "2026-04-02",
+          source: "manual",
+          title: "Updated note",
+          note: "Second revision.",
+          lifecycle: {
+            revision: 2,
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: eventId,
+          kind: "note",
+          occurredAt: "2026-04-02T07:00:00.000Z",
+          recordedAt: "2026-04-02T07:10:00.000Z",
+          dayKey: "2026-04-02",
+          source: "manual",
+          title: "Updated note",
+          note: "Second revision.",
+          lifecycle: {
+            revision: 3,
+            state: "deleted",
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-05.jsonl"),
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: eventId,
+        kind: "note",
+        occurredAt: "2026-05-01T09:30:00.000Z",
+        recordedAt: "2026-05-01T09:35:00.000Z",
+        dayKey: "2026-05-01",
+        source: "manual",
+        title: "Revived note",
+        note: "Latest active revision.",
+        lifecycle: {
+          revision: 4,
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const matchingEvents = listRecords(vault, {
+      recordTypes: ["event"],
+    }).filter((record) => record.primaryLookupId === eventId);
+    const revivedEvent = lookupRecordById(vault, eventId);
+
+    assert.equal(matchingEvents.length, 1);
+    assert.equal(revivedEvent?.recordType, "event");
+    assert.equal(revivedEvent?.title, "Revived note");
+    assert.equal(revivedEvent?.occurredAt, "2026-05-01T09:30:00.000Z");
+    assert.deepEqual(revivedEvent?.data.lifecycle, { revision: 4 });
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("readVault ignores malformed event lifecycles instead of promoting them into the current view", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-events-invalid-lifecycle-"));
+
+  try {
+    const eventId = "evt_01JQ9R7WF97M1WAB2B4QF2Q1C2";
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl"),
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: eventId,
+          kind: "note",
+          occurredAt: "2026-03-12T08:15:00.000Z",
+          recordedAt: "2026-03-12T08:16:00.000Z",
+          dayKey: "2026-03-12",
+          source: "manual",
+          title: "Original note",
+          note: "Valid revision.",
+          lifecycle: {
+            revision: 1,
+          },
+        },
+        {
+          schemaVersion: "murph.event.v1",
+          id: eventId,
+          kind: "note",
+          occurredAt: "2026-03-13T09:15:00.000Z",
+          recordedAt: "2026-03-13T09:16:00.000Z",
+          dayKey: "2026-03-13",
+          source: "manual",
+          title: "Corrupt note",
+          note: "Malformed lifecycle should be ignored.",
+          lifecycle: {
+            revision: 0,
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")
+        .concat("\n"),
+      "utf8",
+    );
+
+    const vault = await readVault(vaultRoot);
+    const survivingEvent = lookupRecordById(vault, eventId);
+
+    assert.equal(survivingEvent?.title, "Original note");
+    assert.equal(survivingEvent?.occurredAt, "2026-03-12T08:15:00.000Z");
+    assert.deepEqual(survivingEvent?.data.lifecycle, { revision: 1 });
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("normalizeCanonicalLinks drops blank targets and dedupes identical pairs", () => {
@@ -378,7 +539,7 @@ test("listRecords prefers stored local day keys over UTC-derived dates", () => {
   );
 });
 
-test("syncVaultDerivedFields keeps manual query fixtures aligned with byFamily", () => {
+test("createVaultReadModel keeps manual query fixtures aligned with records and byFamily", () => {
   const vault = createEmptyReadModel();
   const sample = createSampleRecord({
     id: "smp_sync_01",
@@ -392,7 +553,6 @@ test("syncVaultDerivedFields keeps manual query fixtures aligned with byFamily",
   });
 
   vault.samples = [sample];
-  syncVaultDerivedFields(vault);
 
   assert.deepEqual(vault.records.map((record) => record.displayId), ["smp_sync_01"]);
   assert.deepEqual(vault.byFamily.sample?.map((record) => record.displayId), [
@@ -2253,129 +2413,22 @@ function createEmptyReadModel(): Awaited<ReturnType<typeof readVault>> {
 function createReadModelFromRecords(
   records: Awaited<ReturnType<typeof readVault>>["records"],
 ): Awaited<ReturnType<typeof readVault>> {
-  const byFamily = groupRecordsByFamily(records);
-
-  return {
-    format: "murph.query.v1",
+  return createVaultReadModel({
     vaultRoot: "/tmp/empty-vault",
     metadata: null,
-    entities: records.map((record) => ({
-      entityId: record.displayId,
-      primaryLookupId: record.primaryLookupId,
-      lookupIds: [...record.lookupIds],
-      family: record.recordType,
-      recordClass: record.recordClass,
-      kind: record.kind ?? record.recordType,
-      status: record.status ?? null,
-      occurredAt: record.occurredAt,
-      date: record.date,
-      path: record.sourcePath,
-      title: record.title,
-      body: record.body,
-      attributes: record.data,
-      frontmatter: record.frontmatter,
-      links: record.links,
-      relatedIds: record.relatedIds ?? [],
-      stream: record.stream,
-      experimentSlug: record.experimentSlug,
-      tags: [...record.tags],
-    })),
-    byFamily,
-    coreDocument: byFamily.core?.[0] ?? null,
-    experiments: byFamily.experiment?.slice() ?? [],
-    journalEntries: byFamily.journal?.slice() ?? [],
-    events: byFamily.event?.slice() ?? [],
-    samples: byFamily.sample?.slice() ?? [],
-    audits: byFamily.audit?.slice() ?? [],
-    assessments: byFamily.assessment?.slice() ?? [],
-    profileSnapshots: byFamily.profile_snapshot?.slice() ?? [],
-    currentProfile: byFamily.current_profile?.[0] ?? null,
-    goals: byFamily.goal?.slice() ?? [],
-    conditions: byFamily.condition?.slice() ?? [],
-    allergies: byFamily.allergy?.slice() ?? [],
-    protocols: byFamily.protocol?.slice() ?? [],
-    history: byFamily.history?.slice() ?? [],
-    familyMembers: byFamily.family?.slice() ?? [],
-    geneticVariants: byFamily.genetics?.slice() ?? [],
-    foods: byFamily.food?.slice() ?? [],
-    recipes: byFamily.recipe?.slice() ?? [],
-    providers: byFamily.provider?.slice() ?? [],
-    workoutFormats: byFamily.workout_format?.slice() ?? [],
-    records: records.slice(),
-  };
+    records,
+  });
 }
 
 function syncVaultDerivedFields(vault: Awaited<ReturnType<typeof readVault>>): void {
-  const canonicalRecords =
-    vault.records.length > 0 ? vault.records.slice() : collectVaultRecords(vault);
-  const next = createReadModelFromRecords(canonicalRecords);
-
-  vault.entities = next.entities;
-  vault.byFamily = next.byFamily;
-  vault.coreDocument = next.coreDocument;
-  vault.experiments = next.experiments;
-  vault.journalEntries = next.journalEntries;
-  vault.events = next.events;
-  vault.samples = next.samples;
-  vault.audits = next.audits;
-  vault.assessments = next.assessments;
-  vault.profileSnapshots = next.profileSnapshots;
-  vault.currentProfile = next.currentProfile;
-  vault.goals = next.goals;
-  vault.conditions = next.conditions;
-  vault.allergies = next.allergies;
-  vault.protocols = next.protocols;
-  vault.history = next.history;
-  vault.familyMembers = next.familyMembers;
-  vault.geneticVariants = next.geneticVariants;
-  vault.foods = next.foods;
-  vault.recipes = next.recipes;
-  vault.providers = next.providers;
-  vault.workoutFormats = next.workoutFormats;
-  vault.records = next.records;
+  vault.records = vault.records.length > 0 ? vault.records.slice() : collectVaultRecords(vault);
 }
 
 function collectVaultRecords(
   vault: Awaited<ReturnType<typeof readVault>>,
 ): Awaited<ReturnType<typeof readVault>>["records"] {
-  return [
-    ...(vault.coreDocument ? [vault.coreDocument] : []),
-    ...vault.experiments,
-    ...vault.journalEntries,
-    ...vault.events,
-    ...vault.samples,
-    ...vault.audits,
-    ...vault.assessments,
-    ...vault.profileSnapshots,
-    ...(vault.currentProfile ? [vault.currentProfile] : []),
-    ...vault.goals,
-    ...vault.conditions,
-    ...vault.allergies,
-    ...vault.protocols,
-    ...vault.history,
-    ...vault.familyMembers,
-    ...vault.geneticVariants,
-    ...vault.foods,
-    ...vault.recipes,
-    ...vault.providers,
-    ...vault.workoutFormats,
-  ];
-}
-
-function groupRecordsByFamily(
-  records: Awaited<ReturnType<typeof readVault>>["records"],
-): Awaited<ReturnType<typeof readVault>>["byFamily"] {
-  return records.reduce<Awaited<ReturnType<typeof readVault>>["byFamily"]>(
-    (byFamily, record) => {
-      const familyRecords = byFamily[record.recordType];
-      if (familyRecords) {
-        familyRecords.push(record);
-      } else {
-        byFamily[record.recordType] = [record];
-      }
-      return byFamily;
-    },
-    {},
+  return ALL_VAULT_RECORD_TYPES.flatMap(
+    (recordType) => vault.byFamily[recordType]?.slice() ?? [],
   );
 }
 

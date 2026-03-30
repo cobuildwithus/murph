@@ -11,6 +11,7 @@ import {
   healthEntityDescriptorByKind,
   inferHealthEntityKind,
 } from "../src/health-cli-descriptors.js";
+import { getHealthRegistryCommandMetadata } from "../src/health-registry-command-metadata.js";
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
@@ -54,25 +55,23 @@ test("assessment list capabilities only advertise supported date-range filtering
   assert.deepEqual(descriptor?.query?.genericListFilterCapabilities, ["date-range"]);
 });
 
-test("protocol CLI descriptor reuses shared registry command and runtime metadata", () => {
+test("protocol CLI descriptor reuses CLI-owned registry command and runtime metadata", () => {
   const descriptor = healthEntityDescriptorByKind.get("protocol");
-  const command = protocolRegistryEntityDefinition.registry.command;
+  const command = getHealthRegistryCommandMetadata("protocol");
 
   assert.ok(descriptor?.command);
   assert.ok(descriptor?.core);
   assert.ok(descriptor?.query);
-  assert.ok(command);
-
-  assert.equal(descriptor?.command?.commandName, command?.commandName);
-  assert.equal(descriptor?.command?.description, command?.commandDescription);
-  assert.equal(descriptor?.command?.payloadFile, command?.payloadFile);
-  assert.deepEqual(descriptor?.command?.showId, command?.showId);
-  assert.equal(descriptor?.core?.runtimeMethod, command?.runtimeMethod);
-  assert.equal(descriptor?.core?.upsertServiceMethod, command?.upsertServiceMethod);
-  assert.equal(descriptor?.query?.runtimeListMethod, command?.runtimeListMethod);
-  assert.equal(descriptor?.query?.runtimeShowMethod, command?.runtimeShowMethod);
-  assert.equal(descriptor?.query?.showServiceMethod, command?.showServiceMethod);
-  assert.equal(descriptor?.query?.listServiceMethod, command?.listServiceMethod);
+  assert.equal(descriptor?.command?.commandName, command.commandName);
+  assert.equal(descriptor?.command?.description, command.commandDescription);
+  assert.equal(descriptor?.command?.payloadFile, command.payloadFile);
+  assert.deepEqual(descriptor?.command?.showId, command.showId);
+  assert.equal(descriptor?.core?.runtimeMethod, command.runtimeMethod);
+  assert.equal(descriptor?.core?.upsertServiceMethod, command.upsertServiceMethod);
+  assert.equal(descriptor?.query?.runtimeListMethod, command.runtimeListMethod);
+  assert.equal(descriptor?.query?.runtimeShowMethod, command.runtimeShowMethod);
+  assert.equal(descriptor?.query?.showServiceMethod, command.showServiceMethod);
+  assert.equal(descriptor?.query?.listServiceMethod, command.listServiceMethod);
   assert.equal(descriptor?.core?.resultIdField, protocolRegistryEntityDefinition.registry.idField);
 });
 

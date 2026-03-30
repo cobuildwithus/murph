@@ -4,6 +4,7 @@ import path from "node:path";
 
 import {
   HEALTH_HISTORY_KINDS,
+  collapseEventLedgerEntities,
   compareCanonicalEntities,
   linkTargetIds,
   normalizeCanonicalDate,
@@ -77,6 +78,37 @@ export interface VaultReadModel {
   providers: VaultRecord[];
   workoutFormats: VaultRecord[];
   records: VaultRecord[];
+}
+
+export interface CreateVaultReadModelInput {
+  metadata?: QueryRecordData | null;
+  records: readonly VaultRecord[];
+  vaultRoot: string;
+}
+
+interface VaultReadModelDerivedViews {
+  entities: CanonicalEntity[];
+  byFamily: VaultRecordsByFamily;
+  coreDocument: VaultRecord | null;
+  experiments: VaultRecord[];
+  journalEntries: VaultRecord[];
+  events: VaultRecord[];
+  samples: VaultRecord[];
+  audits: VaultRecord[];
+  assessments: VaultRecord[];
+  profileSnapshots: VaultRecord[];
+  currentProfile: VaultRecord | null;
+  goals: VaultRecord[];
+  conditions: VaultRecord[];
+  allergies: VaultRecord[];
+  protocols: VaultRecord[];
+  history: VaultRecord[];
+  familyMembers: VaultRecord[];
+  geneticVariants: VaultRecord[];
+  foods: VaultRecord[];
+  recipes: VaultRecord[];
+  providers: VaultRecord[];
+  workoutFormats: VaultRecord[];
 }
 
 export interface EntityFilter {
@@ -189,6 +221,329 @@ export const ALL_VAULT_RECORD_TYPES = [
   "workout_format",
 ] as const satisfies readonly VaultRecordType[];
 
+
+function toCanonicalEntity(record: VaultRecord): CanonicalEntity {
+  return {
+    entityId: record.displayId,
+    primaryLookupId: record.primaryLookupId,
+    lookupIds: [...record.lookupIds],
+    family: record.recordType,
+    recordClass: record.recordClass,
+    kind: record.kind ?? '',
+    status: record.status ?? null,
+    occurredAt: record.occurredAt,
+    date: record.date,
+    path: record.sourcePath,
+    title: record.title,
+    body: record.body,
+    attributes: record.data,
+    frontmatter: record.frontmatter,
+    links: record.links,
+    relatedIds: record.relatedIds ?? [],
+    stream: record.stream,
+    experimentSlug: record.experimentSlug,
+    tags: [...record.tags],
+  };
+}
+
+function deriveVaultReadModelViews(
+  records: readonly VaultRecord[],
+): VaultReadModelDerivedViews {
+  const byFamily = groupRecordsByFamily(records);
+
+  return {
+    entities: records.map((record) => toCanonicalEntity(record)),
+    byFamily,
+    coreDocument: firstRecordOfType(byFamily, "core"),
+    experiments: recordsOfType(byFamily, "experiment"),
+    journalEntries: recordsOfType(byFamily, "journal"),
+    events: recordsOfType(byFamily, "event"),
+    samples: recordsOfType(byFamily, "sample"),
+    audits: recordsOfType(byFamily, "audit"),
+    assessments: recordsOfType(byFamily, "assessment"),
+    profileSnapshots: recordsOfType(byFamily, "profile_snapshot"),
+    currentProfile: firstRecordOfType(byFamily, "current_profile"),
+    goals: recordsOfType(byFamily, "goal"),
+    conditions: recordsOfType(byFamily, "condition"),
+    allergies: recordsOfType(byFamily, "allergy"),
+    protocols: recordsOfType(byFamily, "protocol"),
+    history: recordsOfType(byFamily, "history"),
+    familyMembers: recordsOfType(byFamily, "family"),
+    geneticVariants: recordsOfType(byFamily, "genetics"),
+    foods: recordsOfType(byFamily, "food"),
+    recipes: recordsOfType(byFamily, "recipe"),
+    providers: recordsOfType(byFamily, "provider"),
+    workoutFormats: recordsOfType(byFamily, "workout_format"),
+  };
+}
+
+function flattenVaultRecordsByFamily(
+  byFamily: VaultRecordsByFamily,
+): VaultRecord[] {
+  return ALL_VAULT_RECORD_TYPES.flatMap((recordType) => byFamily[recordType]?.slice() ?? []);
+}
+
+function replaceVaultRecordFamily(
+  records: readonly VaultRecord[],
+  recordType: VaultRecordType,
+  nextRecords: readonly VaultRecord[],
+): VaultRecord[] {
+  const byFamily = groupRecordsByFamily(records);
+
+  if (nextRecords.length > 0) {
+    byFamily[recordType] = nextRecords.slice();
+  } else {
+    delete byFamily[recordType];
+  }
+
+  return flattenVaultRecordsByFamily(byFamily);
+}
+
+export function createVaultReadModel(
+  input: CreateVaultReadModelInput,
+): VaultReadModel {
+  let recordState = input.records.slice();
+  let cachedViews: VaultReadModelDerivedViews | null = null;
+
+  const readViews = (): VaultReadModelDerivedViews => {
+    if (cachedViews === null) {
+      cachedViews = deriveVaultReadModelViews(recordState);
+    }
+
+    return cachedViews;
+  };
+
+  const updateRecords = (nextRecords: readonly VaultRecord[]): void => {
+    recordState = nextRecords.slice();
+    cachedViews = null;
+  };
+
+  const updateRecordFamily = (
+    recordType: VaultRecordType,
+    nextRecords: readonly VaultRecord[],
+  ): void => {
+    updateRecords(replaceVaultRecordFamily(recordState, recordType, nextRecords));
+  };
+
+  const model = {
+    format: "murph.query.v1" as const,
+    metadata: input.metadata ?? null,
+    vaultRoot: input.vaultRoot,
+  } as VaultReadModel;
+
+  Object.defineProperties(model, {
+    records: {
+      enumerable: true,
+      get() {
+        return recordState;
+      },
+      set(value: VaultRecord[]) {
+        updateRecords(value);
+      },
+    },
+    entities: {
+      enumerable: true,
+      get() {
+        return readViews().entities;
+      },
+      set(value: CanonicalEntity[]) {
+        updateRecords(value.map((entity) => toVaultRecord(entity, input.vaultRoot)));
+      },
+    },
+    byFamily: {
+      enumerable: true,
+      get() {
+        return readViews().byFamily;
+      },
+      set(value: VaultRecordsByFamily) {
+        updateRecords(flattenVaultRecordsByFamily(value));
+      },
+    },
+    coreDocument: {
+      enumerable: true,
+      get() {
+        return readViews().coreDocument;
+      },
+      set(value: VaultRecord | null) {
+        updateRecordFamily("core", value ? [value] : []);
+      },
+    },
+    experiments: {
+      enumerable: true,
+      get() {
+        return readViews().experiments;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("experiment", value);
+      },
+    },
+    journalEntries: {
+      enumerable: true,
+      get() {
+        return readViews().journalEntries;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("journal", value);
+      },
+    },
+    events: {
+      enumerable: true,
+      get() {
+        return readViews().events;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("event", value);
+      },
+    },
+    samples: {
+      enumerable: true,
+      get() {
+        return readViews().samples;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("sample", value);
+      },
+    },
+    audits: {
+      enumerable: true,
+      get() {
+        return readViews().audits;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("audit", value);
+      },
+    },
+    assessments: {
+      enumerable: true,
+      get() {
+        return readViews().assessments;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("assessment", value);
+      },
+    },
+    profileSnapshots: {
+      enumerable: true,
+      get() {
+        return readViews().profileSnapshots;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("profile_snapshot", value);
+      },
+    },
+    currentProfile: {
+      enumerable: true,
+      get() {
+        return readViews().currentProfile;
+      },
+      set(value: VaultRecord | null) {
+        updateRecordFamily("current_profile", value ? [value] : []);
+      },
+    },
+    goals: {
+      enumerable: true,
+      get() {
+        return readViews().goals;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("goal", value);
+      },
+    },
+    conditions: {
+      enumerable: true,
+      get() {
+        return readViews().conditions;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("condition", value);
+      },
+    },
+    allergies: {
+      enumerable: true,
+      get() {
+        return readViews().allergies;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("allergy", value);
+      },
+    },
+    protocols: {
+      enumerable: true,
+      get() {
+        return readViews().protocols;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("protocol", value);
+      },
+    },
+    history: {
+      enumerable: true,
+      get() {
+        return readViews().history;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("history", value);
+      },
+    },
+    familyMembers: {
+      enumerable: true,
+      get() {
+        return readViews().familyMembers;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("family", value);
+      },
+    },
+    geneticVariants: {
+      enumerable: true,
+      get() {
+        return readViews().geneticVariants;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("genetics", value);
+      },
+    },
+    foods: {
+      enumerable: true,
+      get() {
+        return readViews().foods;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("food", value);
+      },
+    },
+    recipes: {
+      enumerable: true,
+      get() {
+        return readViews().recipes;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("recipe", value);
+      },
+    },
+    providers: {
+      enumerable: true,
+      get() {
+        return readViews().providers;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("provider", value);
+      },
+    },
+    workoutFormats: {
+      enumerable: true,
+      get() {
+        return readViews().workoutFormats;
+      },
+      set(value: VaultRecord[]) {
+        updateRecordFamily("workout_format", value);
+      },
+    },
+  });
+
+  return model;
+}
+
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   return readVaultWithHealthMode(vaultRoot, "strict-async");
 }
@@ -214,58 +569,12 @@ async function readVaultWithHealthMode(
   ]);
   const entities = [...baseEntities, ...healthEntities.entities]
     .sort(compareCanonicalEntities);
-  const records = entities.map((entity) => toVaultRecord(entity, vaultRoot));
-  const byFamily = groupRecordsByFamily(records);
 
-  const coreDocument = firstRecordOfType(byFamily, "core");
-  const experiments = recordsOfType(byFamily, "experiment");
-  const journalEntries = recordsOfType(byFamily, "journal");
-  const events = recordsOfType(byFamily, "event");
-  const samples = recordsOfType(byFamily, "sample");
-  const audits = recordsOfType(byFamily, "audit");
-  const assessments = recordsOfType(byFamily, "assessment");
-  const profileSnapshots = recordsOfType(byFamily, "profile_snapshot");
-  const currentProfile = firstRecordOfType(byFamily, "current_profile");
-  const goals = recordsOfType(byFamily, "goal");
-  const conditions = recordsOfType(byFamily, "condition");
-  const allergies = recordsOfType(byFamily, "allergy");
-  const protocols = recordsOfType(byFamily, "protocol");
-  const history = recordsOfType(byFamily, "history");
-  const familyMembers = recordsOfType(byFamily, "family");
-  const geneticVariants = recordsOfType(byFamily, "genetics");
-  const foods = recordsOfType(byFamily, "food");
-  const recipes = recordsOfType(byFamily, "recipe");
-  const providers = recordsOfType(byFamily, "provider");
-  const workoutFormats = recordsOfType(byFamily, "workout_format");
-
-  return {
-    format: "murph.query.v1",
+  return createVaultReadModel({
     vaultRoot,
     metadata,
-    entities,
-    byFamily,
-    coreDocument,
-    experiments,
-    journalEntries,
-    events,
-    samples,
-    audits,
-    assessments,
-    profileSnapshots,
-    currentProfile,
-    goals,
-    conditions,
-    allergies,
-    protocols,
-    history,
-    familyMembers,
-    geneticVariants,
-    foods,
-    recipes,
-    providers,
-    workoutFormats,
-    records,
-  };
+    records: entities.map((entity) => toVaultRecord(entity, vaultRoot)),
+  });
 }
 
 export function getVaultEntities(vault: VaultReadModel): CanonicalEntity[] {
@@ -614,7 +923,7 @@ async function readJsonlRecordFamily(
   relativeDir: string,
   recordType: Exclude<JsonRecordType, "sample">,
 ): Promise<CanonicalEntity[]> {
-  return readSortedJsonlRecords(
+  const entities = await readSortedJsonlRecords(
     vaultRoot,
     relativeDir,
     (sourcePath, lineNumber, rawPayload) => {
@@ -679,6 +988,8 @@ async function readJsonlRecordFamily(
       };
     },
   );
+
+  return recordType === "event" ? collapseEventLedgerEntities(entities) : entities;
 }
 
 async function readSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {

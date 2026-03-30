@@ -26,6 +26,7 @@ import type {
   QueryServices,
   StopProtocolInput,
 } from "./types.js";
+import { getHealthRegistryCommandMetadata } from "../health-registry-command-metadata.js";
 import {
   asEntityEnvelope,
   asListEnvelope,
@@ -211,11 +212,11 @@ function buildSharedRegistryDocFamilyConfig(
     kind: RegistryDocFamilyKind;
   },
 ): RegistryDocFamilyConfig<string> {
-  const command = definition.registry.command;
+  const command = getHealthRegistryCommandMetadata(definition.kind);
   const idField = definition.registry.idField;
 
-  if (!command || !idField) {
-    throw new Error(`Registry entity "${definition.kind}" is missing shared command metadata.`);
+  if (!idField) {
+    throw new Error(`Registry entity "${definition.kind}" is missing a canonical id field.`);
   }
 
   return {
@@ -1077,7 +1078,7 @@ export function createExplicitHealthQueryServices(
         items,
       );
     },
-  } as Pick<
+  } as unknown as Pick<
     QueryServices,
     | "showAssessment"
     | "listAssessments"

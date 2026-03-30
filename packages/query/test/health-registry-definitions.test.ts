@@ -41,10 +41,11 @@ import {
   workoutFormatRecordFromEntity,
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
+import { getHealthRegistryQueryMetadata } from "../src/health/health-registry-query-metadata.ts";
 import { projectRegistryEntity } from "../src/canonical-entities.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 
-test("query registry definitions inherit canonical registry metadata from shared health entity definitions", () => {
+test("query registry definitions combine canonical registry metadata with query-owned projection metadata", () => {
   const registryDefinitions = [
     ["goal", goalRegistryDefinition],
     ["condition", conditionRegistryDefinition],
@@ -67,6 +68,8 @@ test("query registry definitions inherit canonical registry metadata from shared
       continue;
     }
 
+    const queryMetadata = getHealthRegistryQueryMetadata(kind);
+
     assert.equal(registryDefinition.directory, definition.registry.directory);
     assert.deepEqual(registryDefinition.idKeys, definition.registry.idKeys);
     assert.deepEqual(registryDefinition.titleKeys, definition.registry.titleKeys);
@@ -74,7 +77,7 @@ test("query registry definitions inherit canonical registry metadata from shared
     assert.equal(typeof registryDefinition.transform, "function");
     assert.equal(
       typeof registryDefinition.compare,
-      definition.registry.sortBehavior ? "function" : "undefined",
+      queryMetadata.sortBehavior ? "function" : "undefined",
     );
   }
 });
@@ -98,12 +101,10 @@ test("protocol registry projection keeps the shared relative-path grouping rule"
   assert.equal(projected?.entity.group, "supplements/sleep");
 });
 
-test("protocol shared registry definition owns payload, command, and relation metadata", () => {
+test("protocol shared registry definition owns payload and relation metadata", () => {
   assert.equal(protocolRegistryEntityDefinition.registry.idField, "protocolId");
   assert.ok(protocolRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(protocolRegistryEntityDefinition.registry.upsertPayloadSchema);
-  assert.equal(protocolRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertProtocolItem");
-  assert.equal(protocolRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showProtocol");
 
   const parsedPayload = protocolRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     title: "Magnesium glycinate",
@@ -287,12 +288,10 @@ test("protocol query projection round-trips shared protocol relation and ingredi
   assert.equal(roundTripped?.entity.group, "supplements/sleep");
 });
 
-test("goal shared registry definition owns payload, command, and relation metadata", () => {
+test("goal shared registry definition owns payload and relation metadata", () => {
   assert.equal(goalRegistryEntityDefinition.registry.idField, "goalId");
   assert.ok(goalRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(goalRegistryEntityDefinition.registry.upsertPayloadSchema);
-  assert.equal(goalRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertGoal");
-  assert.equal(goalRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showGoal");
 
   const goalPayloadSchema = goalRegistryEntityDefinition.registry.upsertPayloadSchema;
 
@@ -335,19 +334,15 @@ test("goal shared registry definition owns payload, command, and relation metada
   );
 });
 
-test("condition and allergy shared registry definitions own payload, command, and relation metadata", () => {
+test("condition and allergy shared registry definitions own payload and relation metadata", () => {
   assert.equal(conditionRegistryEntityDefinition.registry.idField, "conditionId");
   assert.ok(conditionRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(conditionRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(conditionRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(conditionRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertCondition");
-  assert.equal(conditionRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showCondition");
   assert.equal(allergyRegistryEntityDefinition.registry.idField, "allergyId");
   assert.ok(allergyRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(allergyRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(allergyRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(allergyRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertAllergy");
-  assert.equal(allergyRegistryEntityDefinition.registry.command?.runtimeShowMethod, "showAllergy");
 
   const conditionPayloadSchema = conditionRegistryEntityDefinition.registry.upsertPayloadSchema;
   const allergyPayloadSchema = allergyRegistryEntityDefinition.registry.upsertPayloadSchema;
@@ -418,14 +413,13 @@ test("condition and allergy shared registry definitions own payload, command, an
   );
 });
 
-test("family and genetics shared registry definitions own payload, command, relation, and sort metadata", () => {
+test("family and genetics split canonical payload metadata from query sort metadata", () => {
   assert.equal(familyRegistryEntityDefinition.registry.idField, "familyMemberId");
   assert.equal(familyRegistryEntityDefinition.noun, "family member");
   assert.ok(familyRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(familyRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(familyRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(familyRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertFamilyMember");
-  assert.equal(familyRegistryEntityDefinition.registry.sortBehavior, "title");
+  assert.equal(getHealthRegistryQueryMetadata("family").sortBehavior, "title");
 
   const parsedFamilyPayload = familyRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     title: "Mother",
@@ -451,8 +445,7 @@ test("family and genetics shared registry definitions own payload, command, rela
   assert.ok(geneticsRegistryEntityDefinition.registry.frontmatterSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.upsertPayloadSchema);
   assert.ok(geneticsRegistryEntityDefinition.registry.patchPayloadSchema);
-  assert.equal(geneticsRegistryEntityDefinition.registry.command?.runtimeMethod, "upsertGeneticVariant");
-  assert.equal(geneticsRegistryEntityDefinition.registry.sortBehavior, "gene-title");
+  assert.equal(getHealthRegistryQueryMetadata("genetics").sortBehavior, "gene-title");
 
   const parsedGeneticsPayload = geneticsRegistryEntityDefinition.registry.upsertPayloadSchema?.safeParse({
     gene: "APOE",
