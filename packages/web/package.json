@@ -13,7 +13,8 @@
     "build": "pnpm build:app",
     "start": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts start",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts packages/web && tsc -p tsconfig.json --pretty false",
-    "test": "pnpm typecheck && pnpm --dir ../.. exec vitest run --config packages/web/vitest.config.ts --no-coverage --maxWorkers 1 && pnpm build:app"
+    "test": "pnpm --dir ../.. exec vitest run --config packages/web/vitest.config.ts --project local-web --no-coverage",
+    "verify": "pnpm typecheck && pnpm test && pnpm build:app"
   },
   "dependencies": {
     "@murph/contracts": "workspace:*",

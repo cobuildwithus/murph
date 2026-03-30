@@ -15,6 +15,7 @@
     "typecheck:packages": "bash scripts/workspace-verify.sh typecheck:packages",
     "test": "bash scripts/workspace-verify.sh test",
     "test:packages": "bash scripts/workspace-verify.sh test:packages",
+    "test:apps": "bash scripts/workspace-verify.sh test:apps",
     "test:packages:coverage": "bash scripts/workspace-verify.sh test:packages:coverage",
     "test:coverage": "bash scripts/workspace-verify.sh test:coverage",
     "test:smoke": "tsx e2e/smoke/verify-fixtures.ts",
