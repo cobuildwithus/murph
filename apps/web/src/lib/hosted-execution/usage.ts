@@ -19,7 +19,7 @@ type HostedAiUsageClient = PrismaClient | Prisma.TransactionClient;
 
 export interface HostedAiUsageStripeCandidate {
   apiKeyEnv: string | null;
-  credentialSource: AssistantUsageCredentialSource | null;
+  credentialSource: AssistantUsageCredentialSource;
   id: string;
   inputTokens: number | null;
   memberId: string;
@@ -42,6 +42,9 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
 
   const records = await prisma.hostedAiUsage.findMany({
     where: {
+      credentialSource: {
+        not: null,
+      },
       stripeMeterStatus: "pending",
       member: {
         stripeCustomerId: {
@@ -79,9 +82,10 @@ export async function listHostedAiUsagePendingStripeMetering(input: {
   });
 
   return records.flatMap((record) =>
-    record.member.stripeCustomerId
+    record.member.stripeCustomerId && record.credentialSource
       ? [{
           ...record,
+          credentialSource: record.credentialSource,
           member: {
             stripeCustomerId: record.member.stripeCustomerId,
           },

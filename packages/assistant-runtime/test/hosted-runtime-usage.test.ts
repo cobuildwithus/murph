@@ -84,7 +84,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
-      userEnvKeys: [],
       vaultRoot: "/tmp/vault",
     });
 
@@ -152,7 +151,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
-      userEnvKeys: [],
       vaultRoot: "/tmp/vault",
     });
 
@@ -238,7 +236,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
-      userEnvKeys: [],
       vaultRoot: "/tmp/vault",
     });
 
@@ -261,61 +258,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       vault: "/tmp/vault",
     });
     expect(mocks.warn).toHaveBeenCalledTimes(1);
-  });
-
-  it("uses a legacy export-time fallback only for pre-existing rows with null credentialSource", async () => {
-    mocks.resolveHostedExecutionAiUsageClient.mockReturnValue({
-      recordUsage: mocks.recordUsage,
-    });
-    mocks.listPendingAssistantUsageRecords.mockResolvedValue([
-      {
-        apiKeyEnv: null,
-        attemptCount: 1,
-        baseUrl: null,
-        cacheWriteTokens: null,
-        cachedInputTokens: null,
-        credentialSource: null,
-        inputTokens: 10,
-        memberId: "member_123",
-        occurredAt: "2026-03-29T12:00:00.000Z",
-        outputTokens: 5,
-        provider: "codex-cli",
-        providerMetadataJson: null,
-        providerName: null,
-        providerRequestId: null,
-        providerSessionId: "sess_123",
-        rawUsageJson: null,
-        reasoningTokens: null,
-        requestedModel: "gpt-5.4",
-        routeId: "primary",
-        schema: "murph.assistant-usage.v1",
-        servedModel: "gpt-5.4",
-        sessionId: "asst_123",
-        totalTokens: 15,
-        turnId: "turn_123",
-        usageId: "turn_123.attempt-1",
-      },
-    ]);
-    mocks.recordUsage.mockResolvedValue({
-      recorded: 1,
-      usageIds: ["turn_123.attempt-1"],
-    });
-
-    await exportHostedPendingAssistantUsage({
-      baseUrl: "https://join.example.test",
-      internalToken: "internal-token",
-      timeoutMs: 10_000,
-      userId: "member_123",
-      userEnvKeys: [],
-      vaultRoot: "/tmp/vault",
-    });
-
-    expect(mocks.recordUsage).toHaveBeenCalledWith([
-      expect.objectContaining({
-        credentialSource: "platform",
-        usageId: "turn_123.attempt-1",
-      }),
-    ]);
   });
 
   it("falls back to single-record retries when a batch request fails", async () => {
@@ -394,7 +336,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
-      userEnvKeys: [],
       vaultRoot: "/tmp/vault",
     });
 
@@ -481,7 +422,6 @@ describe("exportHostedPendingAssistantUsage", () => {
       internalToken: "internal-token",
       timeoutMs: 10_000,
       userId: "member_123",
-      userEnvKeys: [],
       vaultRoot: "/tmp/vault",
     });
 

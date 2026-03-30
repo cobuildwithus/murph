@@ -22,7 +22,7 @@ import {
 } from "./routes.ts";
 
 export interface HostedExecutionAiUsageRecordRequest {
-  usage: readonly Record<string, unknown>[];
+  usage: readonly object[];
 }
 
 export interface HostedExecutionAiUsageRecordResponse {

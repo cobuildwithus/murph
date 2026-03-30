@@ -176,4 +176,16 @@ describe("hosted user env helpers", () => {
     });
   });
 
+  it("rejects the removed legacy hosted user env schema", () => {
+    const payload = new TextEncoder().encode(JSON.stringify({
+      env: {
+        VENICE_API_KEY: "venice-user",
+      },
+      schema: "healthybob.hosted-user-env.v1",
+      updatedAt: "2026-03-26T12:00:00.000Z",
+    }));
+
+    expect(() => decodeHostedUserEnvPayload(payload)).toThrow("Hosted user env config is invalid.");
+  });
+
 });

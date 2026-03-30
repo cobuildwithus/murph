@@ -25,23 +25,14 @@ const hostedCliMocks = vi.hoisted(() => ({
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("@murph/assistant-services/outbox", async () => {
-  const actual = await vi.importActual<typeof import("@murph/assistant-services/outbox")>(
-    "@murph/assistant-services/outbox",
+vi.mock("murph/assistant-core", async () => {
+  const actual = await vi.importActual<typeof import("murph/assistant-core")>(
+    "murph/assistant-core",
   );
   return {
     ...actual,
     dispatchAssistantOutboxIntent: (...args: Parameters<typeof actual.dispatchAssistantOutboxIntent>) =>
       hostedCliMocks.dispatchAssistantOutboxIntent(...args),
-  };
-});
-
-vi.mock("@murph/assistant-services/automation", async () => {
-  const actual = await vi.importActual<typeof import("@murph/assistant-services/automation")>(
-    "@murph/assistant-services/automation",
-  );
-  return {
-    ...actual,
     runAssistantAutomation: (...args: Parameters<typeof actual.runAssistantAutomation>) =>
       hostedCliMocks.runAssistantAutomation(...args),
   };
@@ -61,16 +52,13 @@ describe("runHostedExecutionJob", () => {
     vi.restoreAllMocks();
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actualOutbox = await vi.importActual<typeof import("@murph/assistant-services/outbox")>(
-      "@murph/assistant-services/outbox",
-    );
-    const actualAutomation = await vi.importActual<typeof import("@murph/assistant-services/automation")>(
-      "@murph/assistant-services/automation",
+    const actualAssistantCore = await vi.importActual<typeof import("murph/assistant-core")>(
+      "murph/assistant-core",
     );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
-      actualOutbox.dispatchAssistantOutboxIntent(input));
+      actualAssistantCore.dispatchAssistantOutboxIntent(input));
     hostedCliMocks.runAssistantAutomation.mockImplementation((input) =>
-      actualAutomation.runAssistantAutomation(input));
+      actualAssistantCore.runAssistantAutomation(input));
   });
 
   afterEach(async () => {
@@ -1484,7 +1472,7 @@ describe("runHostedExecutionJob", () => {
         baseUrl: null,
         cacheWriteTokens: null,
         cachedInputTokens: null,
-        credentialSource: null,
+        credentialSource: "platform",
         inputTokens: 10,
         memberId: "member_usage_proxy",
         occurredAt: "2026-03-29T10:05:00.000Z",
@@ -1898,6 +1886,7 @@ describe("runHostedExecutionJob", () => {
     const sentAt = "2026-03-26T12:00:05.000Z";
     const delivery = {
       channel: "linq" as const,
+      idempotencyKey: "assistant-outbox:outbox_hosted_send",
       sentAt,
       target: "chat_123",
       targetKind: "thread" as const,
@@ -2096,10 +2085,7 @@ describe("runHostedExecutionJob", () => {
       };
 
       expect(savedIntent.status).toBe("sent");
-      expect(savedIntent.delivery).toEqual({
-        ...delivery,
-        idempotencyKey: null,
-      });
+      expect(savedIntent.delivery).toEqual(delivery);
       expect(statusSnapshot.outbox.pending).toBe(0);
       expect(statusSnapshot.outbox.sent).toBe(1);
       expect(statusSnapshot.recentTurns).toEqual([]);
@@ -2123,6 +2109,7 @@ describe("runHostedExecutionJob", () => {
     const sentAt = "2026-03-26T12:00:05.000Z";
     const delivery = {
       channel: "linq" as const,
+      idempotencyKey: "assistant-outbox:outbox_hosted_resume",
       sentAt,
       target: "chat_123",
       targetKind: "thread" as const,
@@ -2326,10 +2313,7 @@ describe("runHostedExecutionJob", () => {
     };
 
     expect(savedIntent.status).toBe("sent");
-    expect(savedIntent.delivery).toEqual({
-      ...delivery,
-      idempotencyKey: null,
-    });
+    expect(savedIntent.delivery).toEqual(delivery);
     expect(statusSnapshot.outbox.pending).toBe(0);
     expect(statusSnapshot.outbox.sent).toBe(1);
     expect(statusSnapshot.recentTurns).toEqual([]);
