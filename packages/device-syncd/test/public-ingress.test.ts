@@ -589,6 +589,7 @@ test("public ingress rejects protocol-relative, backslash-prefixed, and credenti
   for (const returnTo of [
     "//evil.test/steal",
     "/\\evil.test",
+    "/settings\nsteal",
     "https://operator:secret@app.example.test/settings/devices",
   ]) {
     await assert.rejects(

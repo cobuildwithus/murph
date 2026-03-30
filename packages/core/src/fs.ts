@@ -35,6 +35,11 @@ interface WalkVaultFilesOptions {
   extension?: string | null;
 }
 
+async function readUtf8FileMatches(absolutePath: string, expectedContent: string): Promise<boolean> {
+  const existingContent = await fs.readFile(absolutePath, "utf8");
+  return existingContent === expectedContent;
+}
+
 export async function pathExists(absolutePath: string): Promise<boolean> {
   try {
     await fs.access(absolutePath);
@@ -107,10 +112,7 @@ export async function writeVaultTextFile(
   });
   await applyTextWriteTarget({
     createTarget: () => writeTextFileAtomicExclusive(resolved.absolutePath, content),
-    matchesExistingContent: async () => {
-      const existingContent = await fs.readFile(resolved.absolutePath, "utf8");
-      return existingContent === content;
-    },
+    matchesExistingContent: () => readUtf8FileMatches(resolved.absolutePath, content),
     overwrite,
     replaceTarget: () => writeTextFileAtomic(resolved.absolutePath, content),
     target: resolved,
@@ -203,10 +205,7 @@ export async function writeImmutableJsonFileIntoVaultRaw(
     allowExistingMatch: options.allowExistingMatch,
     createTarget: () => writeTextFileAtomicExclusive(resolved.absolutePath, content),
     existsErrorMessage: "Raw target already exists and may not be overwritten.",
-    matchesExistingContent: async () => {
-      const existingContent = await fs.readFile(resolved.absolutePath, "utf8");
-      return existingContent === content;
-    },
+    matchesExistingContent: () => readUtf8FileMatches(resolved.absolutePath, content),
     target: resolved,
   });
 

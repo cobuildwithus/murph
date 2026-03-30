@@ -1118,7 +1118,7 @@ export class WriteBatch {
 
   private async applyAction(index: number, action: StoredWriteAction): Promise<void> {
     if (action.kind === "raw_copy") {
-      await this.applyRawCopy(index, action);
+      await this.applyRawCopy(action);
       return;
     }
 
@@ -1128,14 +1128,14 @@ export class WriteBatch {
     }
 
     if (action.kind === "jsonl_append") {
-      await this.applyJsonlAppend(index, action);
+      await this.applyJsonlAppend(action);
       return;
     }
 
     await this.applyDelete(index, action);
   }
 
-  private async applyRawCopy(index: number, action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
+  private async applyRawCopy(action: Extract<StoredWriteAction, { kind: "raw_copy" }>): Promise<void> {
     const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
     const stagedContent = await fs.readFile(stageAbsolutePath);
@@ -1172,10 +1172,7 @@ export class WriteBatch {
             const backupRelativePath =
               action.backupRelativePath ??
               backupArtifactRelativePath(this.operationId, `${String(index).padStart(4, "0")}.bak`);
-            const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
-            if (!(await pathExists(backupAbsolutePath))) {
-              await copyFileAtomicExclusive(target.absolutePath, backupAbsolutePath);
-            }
+            await this.ensureBackupArtifactExists(target.absolutePath, backupRelativePath);
             action.backupRelativePath = backupRelativePath;
           }
         : undefined,
@@ -1197,10 +1194,7 @@ export class WriteBatch {
     await this.persist();
   }
 
-  private async applyJsonlAppend(
-    index: number,
-    action: Extract<StoredWriteAction, { kind: "jsonl_append" }>,
-  ): Promise<void> {
+  private async applyJsonlAppend(action: Extract<StoredWriteAction, { kind: "jsonl_append" }>): Promise<void> {
     const target = await prepareVerifiedWriteTarget(this.vaultRoot, action.targetRelativePath);
     const stageAbsolutePath = resolveVaultPath(this.vaultRoot, action.stageRelativePath).absolutePath;
     const payload = await readText(stageAbsolutePath);
@@ -1237,10 +1231,7 @@ export class WriteBatch {
       this.operationId,
       `${String(index).padStart(4, "0")}.bak`,
     );
-    const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
-    if (!(await pathExists(backupAbsolutePath))) {
-      await copyFileAtomicExclusive(target.absolutePath, backupAbsolutePath);
-    }
+    await this.ensureBackupArtifactExists(target.absolutePath, backupRelativePath);
     await fs.unlink(target.absolutePath);
 
     action.state = "applied";
@@ -1283,6 +1274,17 @@ export class WriteBatch {
 
       action.state = "rolled_back";
       action.rolledBackAt = nowIso();
+    }
+  }
+
+  private async ensureBackupArtifactExists(
+    sourceAbsolutePath: string,
+    backupRelativePath: string,
+  ): Promise<void> {
+    const backupAbsolutePath = resolveVaultPath(this.vaultRoot, backupRelativePath).absolutePath;
+
+    if (!(await pathExists(backupAbsolutePath))) {
+      await copyFileAtomicExclusive(sourceAbsolutePath, backupAbsolutePath);
     }
   }
 }
