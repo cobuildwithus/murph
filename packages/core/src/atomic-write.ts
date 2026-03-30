@@ -37,6 +37,20 @@ function supportsExclusiveCreateLinkFallback(error: unknown): boolean {
   return isErrnoException(error) && EXCLUSIVE_CREATE_LINK_FALLBACK_CODES.has(error.code ?? "");
 }
 
+async function preserveExistingTargetMode(
+  targetAbsolutePath: string,
+  replacementAbsolutePath: string,
+): Promise<void> {
+  try {
+    const existingTarget = await fs.stat(targetAbsolutePath);
+    await fs.chmod(replacementAbsolutePath, existingTarget.mode & 0o7777);
+  } catch (error) {
+    if (!isErrnoException(error) || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
 export async function writeTextFileAtomic(targetAbsolutePath: string, content: string): Promise<void> {
   const tempAbsolutePath = buildAtomicTempPath(targetAbsolutePath);
   await ensureTargetDirectory(targetAbsolutePath);
@@ -46,6 +60,7 @@ export async function writeTextFileAtomic(targetAbsolutePath: string, content: s
       encoding: "utf8",
       flag: "wx",
     });
+    await preserveExistingTargetMode(targetAbsolutePath, tempAbsolutePath);
     await fs.rename(tempAbsolutePath, targetAbsolutePath);
   } catch (error) {
     await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
@@ -59,6 +74,7 @@ export async function copyFileAtomic(sourceAbsolutePath: string, targetAbsoluteP
 
   try {
     await fs.copyFile(sourceAbsolutePath, tempAbsolutePath, fsConstants.COPYFILE_EXCL);
+    await preserveExistingTargetMode(targetAbsolutePath, tempAbsolutePath);
     await fs.rename(tempAbsolutePath, targetAbsolutePath);
   } catch (error) {
     await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);

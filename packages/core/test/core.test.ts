@@ -103,6 +103,10 @@ function expectRecord<T>(value: unknown): T {
   return value as T;
 }
 
+function readFileMode(stats: { mode: number }): number {
+  return stats.mode & 0o777;
+}
+
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
@@ -2090,6 +2094,42 @@ test("writeVaultTextFile leaves the prior canonical file intact when an atomic r
 
   assert.equal(noteContent, "before\n");
   assert.deepEqual(noteEntries, ["source-of-truth.md"]);
+});
+
+test("writeVaultTextFile preserves an existing file mode when overwriting", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault-permissions");
+  await initializeVault({ vaultRoot });
+
+  const notePath = "notes/private.md";
+  const noteAbsolutePath = path.join(vaultRoot, notePath);
+  await writeVaultTextFile(vaultRoot, notePath, "before\n");
+  await fs.chmod(noteAbsolutePath, 0o600);
+
+  await writeVaultTextFile(vaultRoot, notePath, "after\n");
+
+  const stats = await fs.stat(noteAbsolutePath);
+  assert.equal(readFileMode(stats), 0o600);
+});
+
+test("WriteBatch text overwrites preserve an existing file mode", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault-batch-permissions");
+  await initializeVault({ vaultRoot });
+
+  const notePath = "notes/private-batch.md";
+  const noteAbsolutePath = path.join(vaultRoot, notePath);
+  await writeVaultTextFile(vaultRoot, notePath, "before\n");
+  await fs.chmod(noteAbsolutePath, 0o600);
+
+  const batch = await WriteBatch.create({
+    vaultRoot,
+    operationType: "test_preserve_permissions_batch",
+    summary: "preserve restrictive permissions while overwriting a text file",
+  });
+  await batch.stageTextWrite(notePath, "after\n", { overwrite: true });
+  await batch.commit();
+
+  const stats = await fs.stat(noteAbsolutePath);
+  assert.equal(readFileMode(stats), 0o600);
 });
 
 test("validateVault reports unresolved write operations", async () => {
