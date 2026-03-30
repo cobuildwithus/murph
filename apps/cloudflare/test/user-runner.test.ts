@@ -418,6 +418,7 @@ describe("HostedUserRunner", () => {
       committedAt: "2026-03-27T00:00:00.000Z",
       eventId: "evt_roundtrip",
       finalizedAt: null,
+      gatewayProjectionSnapshot: null,
       result: {
         eventsHandled: 1,
         summary: "ok",
@@ -660,6 +661,143 @@ describe("HostedUserRunner", () => {
     expect(updatedEvents.events.map((event) => event.kind)).toContain("conversation.updated");
   });
 
+  it("reapplies committed gateway snapshots from the durable journal before finalize completes", async () => {
+    seedRunnerQueueState(storage, {
+      activated: true,
+      pendingEvents: [{
+        attempts: 1,
+        availableAt: "2026-03-26T12:00:00.000Z",
+        dispatch: createDispatch("evt_gateway_recovery"),
+        enqueuedAt: "2026-03-26T12:00:00.000Z",
+        lastError: "lost ack",
+      }],
+      retryingEventId: "evt_gateway_recovery",
+      userId: "member_123",
+    });
+
+    await createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    }).writeCommittedResult("member_123", "evt_gateway_recovery", {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-26T12:00:01.000Z",
+      eventId: "evt_gateway_recovery",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
+        generatedAt: "2026-03-26T12:00:01.000Z",
+        lastActivityAt: "2026-03-26T12:00:01.000Z",
+        lastMessagePreview: "Committed before finalize.",
+        messages: [{
+          actorDisplayName: "Alex",
+          createdAt: "2026-03-26T12:00:01.000Z",
+          direction: "inbound",
+          messageId: "gwcm_projection_recovery",
+          text: "Committed before finalize.",
+        }],
+        messageCount: 1,
+        title: "Recovery thread",
+      }),
+      result: {
+        eventsHandled: 1,
+        summary: "commit recorded",
+      },
+      sideEffects: [],
+      userId: "member_123",
+    });
+
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    const status = await runner.dispatch(createDispatch("evt_gateway_recovery"));
+
+    expect(status.run?.phase).toBe("commit.recorded");
+    const listed = await runner.gatewayListConversations({ limit: 10 });
+    expect(listed.conversations).toHaveLength(1);
+    expect(listed.conversations[0]?.title).toBe("Recovery thread");
+    expect(listed.conversations[0]?.lastMessagePreview).toBe("Committed before finalize.");
+  });
+
+  it("ignores stale gateway snapshots so finalize cannot rewind the hot projection", async () => {
+    const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+    await runner.bootstrapUser("member_123");
+
+    await runner.commit({
+      eventId: "evt_gateway_stale_projection",
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state-newer").toString("base64"),
+          vault: Buffer.from("vault-newer").toString("base64"),
+        },
+        currentBundleRefs: {
+          agentState: null,
+          vault: null,
+        },
+        gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
+          generatedAt: "2026-03-26T12:05:00.000Z",
+          lastActivityAt: "2026-03-26T12:05:00.000Z",
+          lastMessagePreview: "Newer projection",
+          messages: [{
+            actorDisplayName: "Alex",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            direction: "inbound",
+            messageId: "gwcm_projection_initial",
+            text: "Initial projection",
+          }, {
+            actorDisplayName: null,
+            createdAt: "2026-03-26T12:05:00.000Z",
+            direction: "outbound",
+            messageId: "gwcm_projection_newer",
+            text: "Newer projection",
+          }],
+          messageCount: 2,
+          title: "Lab thread",
+        }),
+        result: {
+          eventsHandled: 1,
+          summary: "ok",
+        },
+      },
+    });
+
+    await runner.finalizeCommit({
+      eventId: "evt_gateway_stale_projection",
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state-older").toString("base64"),
+          vault: Buffer.from("vault-older").toString("base64"),
+        },
+        gatewayProjectionSnapshot: createGatewayProjectionSnapshot({
+          generatedAt: "2026-03-26T12:00:00.000Z",
+          lastActivityAt: "2026-03-26T12:00:00.000Z",
+          lastMessagePreview: "Initial projection",
+          messages: [{
+            actorDisplayName: "Alex",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            direction: "inbound",
+            messageId: "gwcm_projection_initial",
+            text: "Initial projection",
+          }],
+          messageCount: 1,
+          title: "Lab thread",
+        }),
+      },
+    });
+
+    const listed = await runner.gatewayListConversations({ limit: 10 });
+    expect(listed.conversations).toHaveLength(1);
+    expect(listed.conversations[0]?.lastMessagePreview).toBe("Newer projection");
+    expect(listed.conversations[0]?.messageCount).toBe(2);
+
+    const messages = await runner.gatewayReadMessages({
+      oldestFirst: true,
+      sessionKey: listed.conversations[0]!.sessionKey,
+    });
+    expect(messages.messages).toHaveLength(2);
+    expect(messages.messages[1]?.messageId).toBe("gwcm_projection_newer");
+  });
+
   it("recovers finalized committed results encrypted with a previous key id after rotation", async () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const rotatedEnvironment = {
@@ -701,6 +839,7 @@ describe("HostedUserRunner", () => {
       committedAt: "2026-03-26T12:00:01.000Z",
       eventId: dispatch.eventId,
       finalizedAt: "2026-03-26T12:00:02.000Z",
+      gatewayProjectionSnapshot: null,
       result: {
         eventsHandled: 1,
         summary: "recovered",
@@ -2734,6 +2873,60 @@ function expectHostedBundleKeys(
       new RegExp(`^bundles/${kind}/[0-9a-f]+\\.bundle\\.json$`, "u"),
     ));
   }
+}
+
+function createGatewayProjectionSnapshot(input: {
+  generatedAt: string;
+  lastActivityAt: string;
+  lastMessagePreview: string;
+  messageCount: number;
+  messages: Array<{
+    actorDisplayName: string | null;
+    createdAt: string;
+    direction: "inbound" | "outbound";
+    messageId: string;
+    text: string;
+  }>;
+  title: string;
+}) {
+  const routeKey = "channel:email|identity:murph%40example.com|thread:thread-labs";
+  const sessionKey = createGatewayConversationSessionKey(routeKey);
+
+  return {
+    conversations: [{
+      canSend: true,
+      lastActivityAt: input.lastActivityAt,
+      lastMessagePreview: input.lastMessagePreview,
+      messageCount: input.messageCount,
+      route: {
+        channel: "email",
+        directness: "group",
+        identityId: "murph@example.com",
+        participantId: "contact:alex",
+        reply: {
+          kind: "thread",
+          target: "thread-labs",
+        },
+        threadId: "thread-labs",
+      },
+      schema: "murph.gateway-conversation.v1",
+      sessionKey,
+      title: input.title,
+    }],
+    generatedAt: input.generatedAt,
+    messages: input.messages.map((message) => ({
+      actorDisplayName: message.actorDisplayName,
+      attachments: [],
+      createdAt: message.createdAt,
+      direction: message.direction,
+      messageId: message.messageId,
+      schema: "murph.gateway-message.v1",
+      sessionKey,
+      text: message.text,
+    })),
+    permissions: [],
+    schema: "murph.gateway-projection-snapshot.v1",
+  };
 }
 
 function createDispatch(eventId: string) {

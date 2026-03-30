@@ -6,10 +6,12 @@ import {
   listGatewayOpenPermissionsFromSnapshot,
   readGatewayMessagesFromSnapshot,
   gatewayListOpenPermissionsInputSchema,
+  gatewayEventSchema,
   gatewayPollEventsInputSchema,
   gatewayPollEventsResultSchema,
   gatewayProjectionSnapshotSchema,
   gatewayRespondToPermissionInputSchema,
+  sameGatewayConversationSession,
   type GatewayEvent,
   type GatewayFetchAttachmentsInput,
   type GatewayGetConversationInput,
@@ -41,6 +43,9 @@ export class HostedGatewayProjectionStore {
 
     const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
     const previous = await this.readSnapshot();
+    if (previous && previous.generatedAt.localeCompare(parsed.generatedAt) > 0) {
+      return;
+    }
     const emissions = diffGatewayProjectionSnapshots(previous, parsed);
     const nextCursor = await this.readNextCursor();
     let cursor = nextCursor;
@@ -113,7 +118,11 @@ export class HostedGatewayProjectionStore {
     const events = (await this.readEvents())
       .filter((event) => event.cursor > parsed.cursor)
       .filter((event) => parsed.kinds.length === 0 || parsed.kinds.includes(event.kind))
-      .filter((event) => parsed.sessionKey === null || event.sessionKey === parsed.sessionKey)
+      .filter(
+        (event) =>
+          parsed.sessionKey === null ||
+          (event.sessionKey !== null && sameGatewayConversationSession(event.sessionKey, parsed.sessionKey)),
+      )
       .slice(0, parsed.limit);
 
     return gatewayPollEventsResultSchema.parse({
@@ -133,11 +142,14 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readEvents(): Promise<GatewayEvent[]> {
-    return (await this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY)) ?? [];
+    return ((await this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY)) ?? []).map((event) =>
+      gatewayEventSchema.parse(event),
+    );
   }
 
   private async readNextCursor(): Promise<number> {
-    return (await this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY)) ?? 0;
+    const value = await this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY);
+    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
   }
 }
 

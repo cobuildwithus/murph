@@ -6,6 +6,7 @@ import { RunnerScheduler } from "./runner-scheduler.js";
 import type { RunnerStateRecord } from "./types.js";
 
 export interface RecoveredCommittedPendingDispatch {
+  committed: HostedExecutionCommittedResult;
   committedEventId: string | null;
   record: RunnerStateRecord;
 }
@@ -42,6 +43,7 @@ export class RunnerCommitRecovery {
 
       if (isCommittedResultFinalized(committed)) {
         return {
+          committed,
           committedEventId: pending.eventId,
           record: await this.applyCommittedDispatch(record.userId, committed),
         };

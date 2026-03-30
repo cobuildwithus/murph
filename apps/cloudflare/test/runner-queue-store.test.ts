@@ -239,6 +239,7 @@ describe("RunnerQueueStore", () => {
       committedAt: "2026-03-29T10:00:00.000Z",
       eventId: "evt_secret_finalize",
       finalizedAt: null,
+      gatewayProjectionSnapshot: null,
       result: {
         eventsHandled: 1,
         summary: "ok",

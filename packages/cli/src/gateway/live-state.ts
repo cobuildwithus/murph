@@ -18,6 +18,7 @@ import {
   exportGatewayProjectionSnapshotLocal,
   listGatewayOpenPermissionsFromSnapshot,
 } from './projection.js'
+import { sameGatewayConversationSession } from './opaque-ids.js'
 
 const LOCAL_GATEWAY_EVENT_POLL_INTERVAL_MS = 250
 const LOCAL_GATEWAY_EVENT_RETENTION = 512
@@ -132,7 +133,11 @@ function filterGatewayEvents(
   return events
     .filter((event) => event.cursor > input.cursor)
     .filter((event) => input.kinds.length === 0 || input.kinds.includes(event.kind))
-    .filter((event) => input.sessionKey === null || event.sessionKey === input.sessionKey)
+    .filter(
+      (event) =>
+        input.sessionKey === null ||
+        (event.sessionKey !== null && sameGatewayConversationSession(event.sessionKey, input.sessionKey)),
+    )
     .slice(0, input.limit)
 }
 

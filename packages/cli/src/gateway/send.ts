@@ -13,8 +13,8 @@ import {
 } from './contracts.js'
 import {
   createGatewayOutboxMessageId,
-  readGatewayConversationSessionKey,
-  readGatewayMessageRouteKey,
+  readGatewayConversationSessionToken,
+  readGatewayMessageRouteToken,
 } from './opaque-ids.js'
 import {
   createGatewayInvalidRuntimeIdError,
@@ -33,9 +33,9 @@ export async function sendGatewayMessageLocal(input: {
 } & GatewaySendMessageInput): Promise<GatewaySendMessageResult> {
   const { dispatchMode, snapshot: providedSnapshot, vault, ...gatewayInput } = input
   const parsed = gatewaySendMessageInputSchema.parse(gatewayInput)
-  const routeKey = readGatewayConversationSessionKeyOrThrow(parsed.sessionKey)
+  const routeToken = readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
   if (parsed.replyToMessageId) {
-    assertGatewayMessageBelongsToRoute(parsed.replyToMessageId, routeKey)
+    assertGatewayMessageBelongsToRoute(parsed.replyToMessageId, routeToken)
   }
 
   const snapshot =
@@ -109,7 +109,7 @@ export async function sendGatewayMessageLocal(input: {
 
   return gatewaySendMessageResultSchema.parse({
     sessionKey: parsed.sessionKey,
-    messageId: createGatewayOutboxMessageId(routeKey, delivered.intent.intentId),
+    messageId: createGatewayOutboxMessageId(routeToken, delivered.intent.intentId),
     queued: delivered.kind !== 'sent',
     delivery: delivered.delivery
       ? {
@@ -135,9 +135,9 @@ function threadIsDirectFromRoute(route: GatewayConversationRoute): boolean | nul
   }
 }
 
-function readGatewayConversationSessionKeyOrThrow(sessionKey: string): string {
+function readGatewayConversationSessionTokenOrThrow(sessionKey: string): string {
   try {
-    return readGatewayConversationSessionKey(sessionKey)
+    return readGatewayConversationSessionToken(sessionKey)
   } catch (error) {
     throw createGatewayInvalidRuntimeIdError(
       error instanceof Error ? error.message : 'Gateway session key is invalid.',
@@ -147,19 +147,19 @@ function readGatewayConversationSessionKeyOrThrow(sessionKey: string): string {
 
 function assertGatewayMessageBelongsToRoute(
   messageId: string,
-  routeKey: string,
+  routeToken: string,
 ): void {
-  const messageRouteKey = readGatewayMessageRouteKeyOrThrow(messageId)
-  if (messageRouteKey !== routeKey) {
+  const messageRouteToken = readGatewayMessageRouteTokenOrThrow(messageId)
+  if (messageRouteToken !== routeToken) {
     throw createGatewayInvalidRuntimeIdError(
       'Gateway message id did not belong to the requested session key.',
     )
   }
 }
 
-function readGatewayMessageRouteKeyOrThrow(messageId: string): string {
+function readGatewayMessageRouteTokenOrThrow(messageId: string): string {
   try {
-    return readGatewayMessageRouteKey(messageId)
+    return readGatewayMessageRouteToken(messageId)
   } catch (error) {
     throw createGatewayInvalidRuntimeIdError(
       error instanceof Error ? error.message : 'Gateway message id is invalid.',

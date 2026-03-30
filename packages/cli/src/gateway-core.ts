@@ -84,3 +84,8 @@ export {
   readGatewayMessagesFromSnapshot,
   type GatewayEventEmission,
 } from './gateway/snapshot.js'
+
+export {
+  readGatewayConversationSessionToken,
+  sameGatewayConversationSession,
+} from './gateway/opaque-ids.js'
