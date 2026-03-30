@@ -1,7 +1,8 @@
 import { access, mkdir } from 'node:fs/promises'
-import { writeJsonFileAtomic, errorMessage } from '../shared.js'
+import { writeJsonFileAtomic } from '../shared.js'
 import { resolveAssistantInboxArtifactPath } from '../../assistant-vault-paths.js'
 import type { sendAssistantMessage } from '../service.js'
+import type { AssistantAutoReplyFailureSnapshot } from './failure-observability.js'
 
 const ASSISTANT_AUTO_REPLY_GROUP_OUTCOME_ARTIFACT =
   'chat-group-outcome.json'
@@ -188,18 +189,9 @@ export async function writeAssistantChatDeferredArtifacts(input: {
 
 export async function writeAssistantChatErrorArtifacts(input: {
   captureIds: readonly string[]
-  error: unknown
+  failure: AssistantAutoReplyFailureSnapshot
   vault: string
 }): Promise<void> {
-  const message = errorMessage(input.error)
-  const code =
-    typeof input.error === 'object' &&
-    input.error !== null &&
-    'code' in input.error &&
-    typeof (input.error as { code?: unknown }).code === 'string'
-      ? (input.error as { code: string }).code
-      : null
-
   const artifactPaths = await Promise.all(
     input.captureIds.map((captureId) =>
       resolveAssistantInboxArtifactPath(
@@ -219,9 +211,13 @@ export async function writeAssistantChatErrorArtifacts(input: {
           schema: 'murph.assistant-chat-error.v1',
           captureId: artifactPath.captureId,
           groupCaptureIds: [...normalizedCaptureIds],
-          code,
+          code: input.failure.code,
+          context: input.failure.context,
           failedAt: new Date().toISOString(),
-          message,
+          kind: input.failure.kind,
+          message: input.failure.message,
+          retryable: input.failure.retryable,
+          safeSummary: input.failure.safeSummary,
         },
       ),
     ),

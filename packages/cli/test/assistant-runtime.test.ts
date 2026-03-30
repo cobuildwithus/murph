@@ -5444,8 +5444,16 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
       stdout: '',
       rawEvents: [],
     })
+  const deliveryFailure = Object.assign(new Error('Telegram delivery failed'), {
+    context: {
+      error: 'upstream send failed for private-target-987',
+      migrateToChatId: 'private-chat-654',
+      status: 429,
+      target: 'private-target-987',
+    },
+  })
   runtimeMocks.deliverAssistantMessageOverBinding
-    .mockRejectedValueOnce(new Error('Telegram delivery failed'))
+    .mockRejectedValueOnce(deliveryFailure)
     .mockImplementationOnce(async (input: any) => ({
       message: input.message,
       session: {
@@ -5491,6 +5499,13 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
   const stateProgress: Array<{
     cursor: { occurredAt: string; captureId: string } | null
     primed: boolean
+  }> = []
+  const events: Array<{
+    captureId?: string
+    details?: string
+    errorCode?: string
+    safeDetails?: string
+    type: string
   }> = []
 
   const inboxServices = {
@@ -5574,6 +5589,9 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     autoReplyPrimed: true,
     enabledChannels: ['telegram'],
     inboxServices,
+    onEvent(event) {
+      events.push(event)
+    },
     vault: vaultRoot,
     async onStateProgress(next) {
       stateProgress.push(next)
@@ -5595,21 +5613,46 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
-
-  const errorArtifact = JSON.parse(
-    await readFile(
-      path.join(
-        vaultRoot,
-        'derived',
-        'inbox',
-        'cap-fail',
-        'assistant',
-        'chat-error.json',
-      ),
-      'utf8',
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-failed' &&
+        event.captureId === 'cap-fail' &&
+        event.errorCode === undefined &&
+        event.safeDetails === 'outbound delivery failed',
     ),
+    true,
   )
+
+  const errorArtifactRaw = await readFile(
+    path.join(
+      vaultRoot,
+      'derived',
+      'inbox',
+      'cap-fail',
+      'assistant',
+      'chat-error.json',
+    ),
+    'utf8',
+  )
+  const errorArtifact = JSON.parse(errorArtifactRaw)
   assert.equal(errorArtifact.schema, 'murph.assistant-chat-error.v1')
+  assert.equal(errorArtifact.code, null)
+  assert.equal(errorArtifact.kind, 'delivery')
+  assert.equal(errorArtifact.retryable, null)
+  assert.equal(errorArtifact.safeSummary, 'outbound delivery failed')
+  assert.match(errorArtifact.context.outboxIntentId, /^outbox_[a-z0-9]+$/u)
+  assert.equal(
+    (
+      await readdir(resolveAssistantStatePaths(vaultRoot).outboxDirectory)
+    ).includes(`${errorArtifact.context.outboxIntentId}.json`),
+    true,
+  )
+  assert.equal('target' in errorArtifact.context, false)
+  assert.equal('migrateToChatId' in errorArtifact.context, false)
+  assert.equal('error' in errorArtifact.context, false)
+  assert.equal(errorArtifactRaw.includes('private-target-987'), false)
+  assert.equal(errorArtifactRaw.includes('private-chat-654'), false)
 
   const successArtifact = JSON.parse(
     await readFile(
@@ -5625,6 +5668,136 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
     ),
   )
   assert.equal(successArtifact.captureId, 'cap-pass')
+})
+
+test('scanAssistantAutoReplyOnce records provider quota failures with a safe summary', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-auto-reply-usage-limit-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  runtimeMocks.executeAssistantProviderTurn.mockRejectedValueOnce(
+    new VaultCliError(
+      'ASSISTANT_CODEX_FAILED',
+      "Codex CLI failed. exit code 1. You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Apr 3rd, 2026 1:20 PM.",
+      {
+        providerSessionId: 'thread-usage-limit',
+        retryable: false,
+      },
+    ),
+  )
+
+  const events: Array<{
+    captureId?: string
+    details?: string
+    errorCode?: string
+    safeDetails?: string
+    type: string
+  }> = []
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices: {
+      async list() {
+        return {
+          items: [
+            {
+              captureId: 'cap-usage-limit',
+              source: 'telegram',
+              accountId: 'bot',
+              externalId: 'update:usage-limit',
+              threadId: '123',
+              threadTitle: 'Direct',
+              actorId: '111',
+              actorName: 'Bob',
+              actorIsSelf: false,
+              occurredAt: '2026-03-18T09:00:00Z',
+              receivedAt: null,
+              text: 'hello there',
+              attachmentCount: 0,
+              envelopePath: 'raw/inbox/usage-limit.json',
+              eventId: 'evt-usage-limit',
+              promotions: [],
+            },
+          ],
+        }
+      },
+      async show() {
+        return {
+          capture: {
+            captureId: 'cap-usage-limit',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'update:usage-limit',
+            threadId: '123',
+            threadTitle: 'Direct',
+            threadIsDirect: true,
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: 'hello there',
+            attachmentCount: 0,
+            envelopePath: 'raw/inbox/usage-limit.json',
+            eventId: 'evt-usage-limit',
+            createdAt: '2026-03-18T09:00:00Z',
+            promotions: [],
+            attachments: [],
+          },
+        }
+      },
+    } as any,
+    onEvent(event) {
+      events.push(event)
+    },
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 1,
+    replied: 0,
+    skipped: 0,
+  })
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === 'capture.reply-failed' &&
+        event.captureId === 'cap-usage-limit' &&
+        event.errorCode === 'ASSISTANT_CODEX_FAILED' &&
+        event.safeDetails ===
+          'provider usage limit reached (ASSISTANT_CODEX_FAILED)' &&
+        event.details?.includes('usage limit'),
+    ),
+    true,
+  )
+
+  const errorArtifact = JSON.parse(
+    await readFile(
+      path.join(
+        vaultRoot,
+        'derived',
+        'inbox',
+        'cap-usage-limit',
+        'assistant',
+        'chat-error.json',
+      ),
+      'utf8',
+    ),
+  )
+
+  assert.equal(errorArtifact.schema, 'murph.assistant-chat-error.v1')
+  assert.equal(errorArtifact.code, 'ASSISTANT_CODEX_FAILED')
+  assert.equal(errorArtifact.kind, 'provider')
+  assert.equal(errorArtifact.retryable, false)
+  assert.equal(
+    errorArtifact.safeSummary,
+    'provider usage limit reached (ASSISTANT_CODEX_FAILED)',
+  )
+  assert.equal(errorArtifact.context.providerSessionId, 'thread-usage-limit')
 })
 
 test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant reply', async () => {

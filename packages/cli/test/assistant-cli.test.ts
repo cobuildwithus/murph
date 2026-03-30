@@ -170,6 +170,44 @@ test('formatAssistantRunEventForTerminal keeps long-running auto-reply heartbeat
   )
 })
 
+test('formatAssistantRunEventForTerminal shows safe auto-reply failure details by default', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details:
+      "Codex CLI failed. exit code 1. You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Apr 3rd, 2026 1:20 PM.",
+    errorCode: 'ASSISTANT_CODEX_FAILED',
+    safeDetails: 'provider usage limit reached (ASSISTANT_CODEX_FAILED)',
+    type: 'capture.reply-failed',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event)
+
+  assert.equal(
+    message,
+    'reply-failed cap_safe_123: provider usage limit reached (ASSISTANT_CODEX_FAILED)',
+  )
+  assert.doesNotMatch(message ?? '', /purchase more credits/u)
+})
+
+test('formatAssistantRunEventForTerminal shows raw auto-reply failure details when unsafe details are enabled', () => {
+  const event: AssistantRunEvent = {
+    captureId: 'cap_safe_123',
+    details: 'Temporary network interruption while delivering the reply.',
+    errorCode: 'ASSISTANT_DELIVERY_FAILED',
+    safeDetails: 'outbound delivery failed (ASSISTANT_DELIVERY_FAILED)',
+    type: 'capture.reply-failed',
+  }
+
+  const message = formatAssistantRunEventForTerminal(event, {
+    unsafeDetails: true,
+  })
+
+  assert.equal(
+    message,
+    'reply-failed cap_safe_123: Temporary network interruption while delivering the reply.',
+  )
+})
+
 test('formatStructuredErrorMessage expands structured validation details and redacts home paths', () => {
   const error = Object.assign(
     new Error('Vault metadata failed contract validation.'),

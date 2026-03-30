@@ -24,6 +24,10 @@ import {
   writeAssistantChatResultArtifacts,
 } from './artifacts.js'
 import {
+  describeAssistantAutoReplyFailure,
+  type AssistantAutoReplyFailureSnapshot,
+} from './failure-observability.js'
+import {
   collectAssistantAutoReplyGroup,
   type AssistantAutoReplyGroupItem,
 } from './grouping.js'
@@ -93,6 +97,8 @@ interface AssistantAutoReplyOutcomeSummary {
 type AssistantAutoReplyOutcomeEvent =
   | {
       details: string
+      errorCode?: string
+      safeDetails?: string
       type: 'capture.reply-failed' | 'capture.reply-skipped' | 'capture.replied'
     }
   | null
@@ -100,7 +106,11 @@ type AssistantAutoReplyOutcomeEvent =
 type AssistantAutoReplyOutcomeArtifact =
   | { kind: 'none' }
   | { kind: 'deferred'; result: AssistantAutoReplySendResult }
-  | { kind: 'error'; error: unknown }
+  | {
+      kind: 'error'
+      error: unknown
+      failure: AssistantAutoReplyFailureSnapshot
+    }
   | { kind: 'result'; result: AssistantAutoReplySendResult }
 
 interface AssistantAutoReplyGroupOutcome {
@@ -489,7 +499,7 @@ async function writeAssistantAutoReplyOutcomeArtifacts(input: {
     case 'error':
       await writeAssistantChatErrorArtifacts({
         captureIds: input.context.captureIds,
-        error: input.outcome.artifact.error,
+        failure: input.outcome.artifact.failure,
         vault: input.vault,
       })
       return
@@ -509,6 +519,8 @@ function emitAssistantAutoReplyOutcomeEvent(input: {
     type: input.outcome.event.type,
     captureId: input.context.firstCaptureId,
     details: input.outcome.event.details,
+    errorCode: input.outcome.event.errorCode,
+    safeDetails: input.outcome.event.safeDetails,
   })
 }
 
@@ -654,17 +666,21 @@ function createSuccessfulReplyGroupOutcome(
 
 function createFailedGroupOutcome(input: {
   advanceCursor: boolean
-  detail: string
   error: unknown
 }): AssistantAutoReplyGroupOutcome {
+  const failure = describeAssistantAutoReplyFailure(input.error)
+
   return {
     advanceCursor: input.advanceCursor,
     artifact: {
       kind: 'error',
       error: input.error,
+      failure,
     },
     event: {
-      details: input.detail,
+      details: failure.message,
+      errorCode: failure.code ?? undefined,
+      safeDetails: failure.safeSummary,
       type: 'capture.reply-failed',
     },
     kind: 'failed',
@@ -883,10 +899,19 @@ function resolveAssistantAutoReplySendResult(input: {
   }
 
   if (input.result.deliveryError || input.result.delivery === null) {
-    throw new Error(
+    const error = new Error(
       input.result.deliveryError?.message ??
         'assistant generated a response, but the outbound delivery channel did not confirm the send',
     )
+    if (input.result.deliveryIntentId) {
+      Object.defineProperty(error, 'outboxIntentId', {
+        configurable: true,
+        enumerable: false,
+        value: input.result.deliveryIntentId,
+        writable: true,
+      })
+    }
+    throw error
   }
 
   return input.result
@@ -915,7 +940,6 @@ function classifyAssistantAutoReplyFailure(input: {
 
   return createFailedGroupOutcome({
     advanceCursor: true,
-    detail,
     error: input.error,
   })
 }

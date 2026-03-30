@@ -82,7 +82,7 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function redactSensitivePathSegments(value: string): string {
+export function redactSensitivePathSegments(value: string): string {
   return value
     .replace(/\/Users\/[^/\s]+/gu, '<HOME_DIR>')
     .replace(/\/home\/[^/\s]+/gu, '<HOME_DIR>')

@@ -5,6 +5,7 @@ type ShutdownTimer = ReturnType<typeof setTimeout> | number
 export interface AssistantRunEvent {
   captureId?: string
   details?: string
+  errorCode?: string
   providerKind?:
     | 'command'
     | 'file'
@@ -15,6 +16,7 @@ export interface AssistantRunEvent {
     | 'status'
     | 'tool'
   providerState?: 'completed' | 'running'
+  safeDetails?: string
   tools?: string[]
   type:
     | 'capture.failed'
