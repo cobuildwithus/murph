@@ -55,6 +55,8 @@ readonly typecheck_package_dirs=(
 )
 
 readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-50%}"
+readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 
 readonly cli_verify_test_files=(
   "packages/cli/test/runtime.test.ts"
@@ -105,11 +107,13 @@ run_typecheck_packages() {
   done
 }
 
-run_repo_build_with_retry() {
+run_command_with_retry() {
+  local label="$1"
+  shift
   local attempt=1
 
   while true; do
-    if pnpm build; then
+    if "$@"; then
       return 0
     fi
 
@@ -118,29 +122,26 @@ run_repo_build_with_retry() {
     fi
 
     attempt=$((attempt + 1))
-    echo "Workspace build failed; retrying once..." >&2
+    echo "${label} failed; retrying once..." >&2
     sleep 1
   done
+}
+
+run_repo_build_with_retry() {
+  run_command_with_retry "Workspace build" pnpm build:workspace:incremental
+}
+
+run_test_runtime_artifact_build_with_retry() {
+  run_command_with_retry "build:test-runtime" pnpm build:test-runtime
 }
 
 run_package_command_with_retry() {
   local package_dir="$1"
   local command="$2"
-  local attempt=1
 
-  while true; do
-    if pnpm --dir "$package_dir" "$command"; then
-      return 0
-    fi
-
-    if [[ "$attempt" -ge 2 ]]; then
-      return 1
-    fi
-
-    attempt=$((attempt + 1))
-    echo "Package command failed for ${package_dir} (${command}); retrying once..." >&2
-    sleep 1
-  done
+  run_command_with_retry \
+    "Package command for ${package_dir} (${command})" \
+    pnpm --dir "$package_dir" "$command"
 }
 
 run_test_packages_common() {
@@ -149,13 +150,37 @@ run_test_packages_common() {
 }
 
 run_test_apps() {
-  pnpm --dir "packages/web" verify
-  pnpm --dir "apps/web" verify
-  pnpm --dir "apps/cloudflare" verify
+  if [[ "$app_verify_parallel" == "1" ]]; then
+    local pids=()
+    local failed=0
+
+    run_package_command_with_retry "packages/web" verify &
+    pids+=("$!")
+    run_package_command_with_retry "apps/web" verify &
+    pids+=("$!")
+    run_package_command_with_retry "apps/cloudflare" verify &
+    pids+=("$!")
+
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        failed=1
+      fi
+    done
+
+    if [[ "$failed" -ne 0 ]]; then
+      return 1
+    fi
+
+    return 0
+  fi
+
+  run_package_command_with_retry "packages/web" verify
+  run_package_command_with_retry "apps/web" verify
+  run_package_command_with_retry "apps/cloudflare" verify
 }
 
 prepare_repo_vitest_runtime_artifacts() {
-  run_repo_build_with_retry
+  run_test_runtime_artifact_build_with_retry
   pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
 }
 
@@ -203,9 +228,9 @@ run_test_coverage() {
 
 run_verify_cli() {
   pnpm --dir "packages/cli" typecheck
-  run_repo_build_with_retry
+  run_test_runtime_artifact_build_with_retry
   pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
-  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run "${cli_verify_test_files[@]}" --no-coverage --maxWorkers 1
+  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "${cli_verify_test_files[@]}" --no-coverage --maxWorkers 1
 }
 
 main() {

@@ -1,0 +1,35 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/contracts/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/hosted-execution"
+    },
+    {
+      "path": "./packages/runtime-state"
+    },
+    {
+      "path": "./packages/core/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/importers"
+    },
+    {
+      "path": "./packages/device-syncd"
+    },
+    {
+      "path": "./packages/query"
+    },
+    {
+      "path": "./packages/inboxd"
+    },
+    {
+      "path": "./packages/parsers"
+    },
+    {
+      "path": "./packages/cli"
+    }
+  ]
+}
