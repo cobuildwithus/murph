@@ -5,7 +5,7 @@ import {
   extractProfileSummary,
   extractProfileTopGoalIds,
   projectProfileSnapshotEntity,
-} from "../src/canonical-entities.ts";
+} from "../src/health/projectors/profile.ts";
 import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 
 test("profile snapshot query projections keep nested typed summary and goal fields", () => {

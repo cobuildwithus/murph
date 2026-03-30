@@ -1,12 +1,17 @@
 import {
   compareCanonicalEntities,
-  fallbackCurrentProfileEntity,
-  projectAssessmentEntity,
-  projectCurrentProfileEntity,
-  projectHistoryEntity,
-  projectProfileSnapshotEntity,
   type CanonicalEntity,
 } from "../canonical-entities.ts";
+import { projectAssessmentEntity } from "./projectors/assessment.ts";
+import {
+  collapseEventLedgerEntities,
+  projectHistoryEntity,
+} from "./projectors/history.ts";
+import {
+  fallbackCurrentProfileEntity,
+  projectCurrentProfileEntity,
+  projectProfileSnapshotEntity,
+} from "./projectors/profile.ts";
 import {
   resolveCurrentProfileDocument,
   resolveCurrentProfileSnapshot,
@@ -42,7 +47,9 @@ export async function readAssessmentEntitiesStrict(
 export async function readHistoryEntitiesStrict(
   vaultRoot: string,
 ): Promise<CanonicalEntity[]> {
-  return readJsonlEntitiesStrict(vaultRoot, "ledger/events", projectHistoryEntity);
+  return collapseEventLedgerEntities(
+    await readJsonlEntitiesStrict(vaultRoot, "ledger/events", projectHistoryEntity),
+  );
 }
 
 export async function readProfileSnapshotEntitiesStrict(

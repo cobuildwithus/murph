@@ -648,6 +648,96 @@ test("dedicated health readers stay aligned with the shared canonical collector 
   }
 });
 
+test("history readers and collectors collapse append-only event revisions to the latest active record", async () => {
+  const vaultRoot = await createHealthVault({
+    currentProfileSnapshotId: "psnap_health_01",
+  });
+
+  try {
+    await appendVaultFile(
+      vaultRoot,
+      "ledger/events/2026/2026-03.jsonl",
+      [
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_revision",
+          kind: "encounter",
+          occurredAt: "2026-03-12T13:30:00Z",
+          recordedAt: "2026-03-12T13:31:00Z",
+          source: "manual",
+          title: "Initial follow-up visit",
+          lifecycle: {
+            revision: 1,
+          },
+        }),
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_revision",
+          kind: "encounter",
+          occurredAt: "2026-03-12T13:30:00Z",
+          recordedAt: "2026-03-12T13:35:00Z",
+          source: "manual",
+          title: "Revised follow-up visit",
+          lifecycle: {
+            revision: 2,
+          },
+        }),
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_deleted",
+          kind: "encounter",
+          occurredAt: "2026-03-12T13:15:00Z",
+          recordedAt: "2026-03-12T13:16:00Z",
+          source: "manual",
+          title: "Deleted follow-up visit",
+          lifecycle: {
+            revision: 1,
+          },
+        }),
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_deleted",
+          kind: "encounter",
+          occurredAt: "2026-03-12T13:15:00Z",
+          recordedAt: "2026-03-12T13:20:00Z",
+          source: "manual",
+          title: "Deleted follow-up visit",
+          lifecycle: {
+            revision: 2,
+            state: "deleted",
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const collected = await collectCanonicalEntities(vaultRoot, {
+      mode: "strict-async",
+    });
+    const historyRecords = await listHistoryEvents(vaultRoot);
+
+    assert.deepEqual(
+      collected.history.map((entity) => entity.entityId),
+      ["evt_health_01", "evt_revision"],
+    );
+    assert.equal(
+      collected.history.find((entity) => entity.entityId === "evt_revision")?.title,
+      "Revised follow-up visit",
+    );
+    assert.equal(
+      collected.history.some((entity) => entity.entityId === "evt_deleted"),
+      false,
+    );
+    assert.deepEqual(
+      historyRecords.map((record) => record.id),
+      ["evt_revision", "evt_health_01"],
+    );
+    assert.equal(historyRecords[0]?.title, "Revised follow-up visit");
+    assert.deepEqual(historyRecords, selectHistoryRecords(collected.history));
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("strict narrow health readers ignore malformed unrelated registry markdown", async () => {
   const vaultRoot = await createHealthVault({
     currentProfileSnapshotId: "psnap_health_01",

@@ -42,7 +42,7 @@ import {
   workoutFormatRegistryDefinition,
 } from "../src/health/registries.ts";
 import { getHealthRegistryQueryMetadata } from "../src/health/health-registry-query-metadata.ts";
-import { projectRegistryEntity } from "../src/canonical-entities.ts";
+import { projectRegistryEntity } from "../src/health/projectors/registry.ts";
 import type { MarkdownDocumentRecord } from "../src/health/shared.ts";
 
 test("query registry definitions combine canonical registry metadata with query-owned projection metadata", () => {

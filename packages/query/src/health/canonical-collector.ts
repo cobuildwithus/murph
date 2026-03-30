@@ -2,13 +2,16 @@ import type { BankEntityKind } from "@murph/contracts";
 
 import {
   compareCanonicalEntities,
-  projectAssessmentEntity,
-  projectHistoryEntity,
-  projectProfileSnapshotEntity,
-  projectRegistryEntity,
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "../canonical-entities.ts";
+import { projectAssessmentEntity } from "./projectors/assessment.ts";
+import {
+  collapseEventLedgerEntities,
+  projectHistoryEntity,
+} from "./projectors/history.ts";
+import { projectProfileSnapshotEntity } from "./projectors/profile.ts";
+import { projectRegistryEntity } from "./projectors/registry.ts";
 import {
   readCurrentProfileCollectionAsync,
   readCurrentProfileCollectionSync,
@@ -389,7 +392,7 @@ function buildCanonicalHealthCollectionFromCollections(input: {
     assessments: input.assessments.entities,
     profileSnapshots: input.profileSnapshots.entities,
     currentProfile: input.currentProfile.entity,
-    history: input.history.entities,
+    history: collapseEventLedgerEntities(input.history.entities),
     ...input.registryCollections.collections,
     failures: [
       ...input.assessments.failures,
