@@ -3634,20 +3634,20 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
       PATH: pathValue,
     })
 
+    assert.match(result.stdout, /Detected: macos/u)
+    assert.match(result.stdout, /Install plan/u)
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /Murph macOS setup will install or reuse:/u)
-    assert.match(
-      result.stdout,
-      /Homebrew, Node >= 22\.16\.0, and pnpm@9\.15\.9 via corepack/u,
-    )
+    assert.match(result.stdout, /Node requirement: >= 22\.16\.0/u)
+    assert.match(result.stdout, /pnpm: 9\.15\.9 via corepack/u)
     assert.match(
       result.stdout,
       /ffmpeg, poppler\/pdftotext, whisper\.cpp, and a local Whisper model/u,
     )
     assert.match(
       result.stdout,
-      /the final Murph setup flow: vault bootstrap, default vault config, user-level murph\/vault-cli shims, onboarding channel selection, and assistant automation\/chat handoff/u,
+      /vault bootstrap, default config, user-level murph\/vault-cli shims, onboarding channel selection, wearables, and assistant automation\/chat handoff/u,
     )
+    assert.match(result.stdout, /Ensure Homebrew is available/u)
     assert.match(result.stdout, /Ensure Node >= 22\.16\.0/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(
@@ -4392,12 +4392,13 @@ exit 99
       PATH: pathValue,
     })
 
+    assert.match(result.stdout, /Detected: linux/u)
+    assert.match(result.stdout, /Install plan/u)
     assert.match(result.stdout, /Dry run requested/u)
-    assert.match(result.stdout, /Murph Linux setup will install or reuse:/u)
     assert.match(result.stdout, /download Node 22\.16\.0 under ~\/\.murph\/bootstrap/u)
     assert.match(result.stdout, /corepack pnpm install/u)
     assert.match(result.stdout, /node packages\/cli\/dist\/bin\.js onboard --dry-run --vault \.\/vault/u)
-    assert.match(result.stdout, /iMessage remains macOS-only/u)
+    assert.match(result.stdout, /iMessage stays macOS-only/u)
     assert.equal(result.stderr, '')
     assert.equal(await readOptionalText(callLog), '')
   } finally {

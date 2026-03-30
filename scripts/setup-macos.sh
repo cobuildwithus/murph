@@ -17,17 +17,100 @@ if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
   exit 1
 fi
 
-log() {
-  printf '[murph-setup] %s\n' "$*"
+BOLD='\033[1m'
+ACCENT='\033[38;5;111m'
+INFO='\033[38;5;110m'
+SUCCESS='\033[38;5;78m'
+WARN='\033[38;5;214m'
+ERROR='\033[38;5;203m'
+MUTED='\033[38;5;245m'
+NC='\033[0m'
+
+use_color() {
+  [[ -t 1 && -z "${NO_COLOR:-}" ]]
 }
 
-print_install_summary() {
-  log 'Murph macOS setup will install or reuse:'
+print_banner() {
+  if use_color; then
+    echo -e "${ACCENT}${BOLD}Murph setup${NC}"
+    echo -e "${MUTED}Repo-local bootstrap for the source checkout, with a cleaner handoff into onboarding.${NC}"
+  else
+    echo 'Murph setup'
+    echo 'Repo-local bootstrap for the source checkout, with a cleaner handoff into onboarding.'
+  fi
+  echo
+}
+
+ui_section() {
+  echo
+  if use_color; then
+    echo -e "${ACCENT}${BOLD}$*${NC}"
+  else
+    echo "$*"
+  fi
+}
+
+ui_stage() {
+  local index="$1"
+  local total="$2"
+  shift 2
+
+  echo
+  if use_color; then
+    echo -e "${ACCENT}${BOLD}[${index}/${total}] $*${NC}"
+  else
+    echo "[${index}/${total}] $*"
+  fi
+}
+
+ui_info() {
+  if use_color; then
+    echo -e "${INFO}·${NC} $*"
+  else
+    echo ". $*"
+  fi
+}
+
+ui_success() {
+  if use_color; then
+    echo -e "${SUCCESS}✓${NC} $*"
+  else
+    echo "✓ $*"
+  fi
+}
+
+ui_warn() {
+  if use_color; then
+    echo -e "${WARN}!${NC} $*"
+  else
+    echo "! $*"
+  fi
+}
+
+ui_error() {
+  if use_color; then
+    echo -e "${ERROR}✗${NC} $*" >&2
+  else
+    echo "✗ $*" >&2
+  fi
+}
+
+print_detected_os() {
+  ui_success 'Detected: macos'
+}
+
+print_install_plan() {
+  ui_section 'Install plan'
+  printf 'OS: macos\n'
+  printf 'Node requirement: >= %s\n' "$required_node"
+  printf 'pnpm: %s via corepack\n' "$pnpm_version"
+  printf '%s\n' 'Workspace flow: bootstrap tools -> install deps -> build workspace -> launch onboarding'
+  printf '%s\n' 'Bootstrap scope:'
   printf '  - Homebrew, Node >= %s, and pnpm@%s via corepack\n' "$required_node" "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model'
   printf '%s\n' '  - PaddleX OCR on Apple Silicon unless you pass --skip-ocr'
-  printf '%s\n' '  - the final Murph setup flow: vault bootstrap, default vault config, user-level murph/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
+  printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
 }
 
 has_dry_run_flag() {
@@ -57,10 +140,9 @@ print_dry_run_plan() {
 
   delegated_args="$(render_command_args "$@")"
 
-  log 'Dry run requested. This wrapper will not modify the machine or workspace.'
-  print_install_summary
+  ui_warn 'Dry run requested. This wrapper will not modify the machine or workspace.'
   printf '%s\n' 'Planned wrapper steps:'
-  printf '1. Ensure Homebrew is available.\n'
+  printf '%s\n' '1. Ensure Homebrew is available.'
   printf '2. Ensure Node >= %s is available.\n' "$required_node"
   printf '3. Activate pnpm@%s through corepack.\n' "$pnpm_version"
   printf '%s\n' '4. Install workspace dependencies with `corepack pnpm install`.'
@@ -73,43 +155,54 @@ print_dry_run_plan() {
   printf '%s\n' 'Run the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview.'
 }
 
-if has_dry_run_flag "$@"; then
-  print_dry_run_plan "$@"
-  exit 0
-fi
+active_node_version() {
+  node -p 'process.versions.node'
+}
 
-print_install_summary
+active_pnpm_version() {
+  pnpm --version 2>/dev/null || corepack pnpm --version 2>/dev/null || printf '%s\n' "$pnpm_version"
+}
 
 ensure_brew_shellenv() {
   if command -v brew >/dev/null 2>&1; then
     eval "$(brew shellenv)"
+    ui_success 'Homebrew already installed'
+    ui_info "Active brew: $(command -v brew)"
     return
   fi
 
   if [ -x /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
+    ui_success 'Homebrew already installed'
+    ui_info 'Active brew: /opt/homebrew/bin/brew'
     return
   fi
 
   if [ -x /usr/local/bin/brew ]; then
     eval "$(/usr/local/bin/brew shellenv)"
+    ui_success 'Homebrew already installed'
+    ui_info 'Active brew: /usr/local/bin/brew'
     return
   fi
 
-  log 'Installing Homebrew...'
+  ui_info 'Installing Homebrew...'
   NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
   if [ -x /opt/homebrew/bin/brew ]; then
     eval "$(/opt/homebrew/bin/brew shellenv)"
+    ui_success 'Homebrew installed'
+    ui_info 'Active brew: /opt/homebrew/bin/brew'
     return
   fi
 
   if [ -x /usr/local/bin/brew ]; then
     eval "$(/usr/local/bin/brew shellenv)"
+    ui_success 'Homebrew installed'
+    ui_info 'Active brew: /usr/local/bin/brew'
     return
   fi
 
-  printf 'Homebrew install finished, but brew is still unavailable.\n' >&2
+  ui_error 'Homebrew install finished, but brew is still unavailable.'
   exit 1
 }
 
@@ -139,32 +232,51 @@ NODE
 
 ensure_node() {
   if has_required_node; then
-    log "Using Node $(node -p 'process.versions.node')"
+    ui_success "Node.js v$(active_node_version) found"
+    ui_info "Active Node.js: $(command -v node)"
     return
   fi
 
   ensure_brew_shellenv
-  log "Installing node@22 so the repo can build Murph..."
+  ui_info 'Installing node@22 so the repo can build Murph...'
   brew install node@22
   export PATH="$(brew --prefix node@22)/bin:$PATH"
-  log "Using Node $(node -p 'process.versions.node')"
+  ui_success "Node.js v$(active_node_version) installed"
+  ui_info "Active Node.js: $(command -v node)"
 }
 
 ensure_pnpm() {
-  log "Activating pnpm@${pnpm_version} through corepack..."
+  ui_info "Activating pnpm@${pnpm_version} through corepack..."
   corepack enable
   corepack prepare "pnpm@${pnpm_version}" --activate
+  ui_success 'pnpm ready'
+  ui_info "Active pnpm: $(active_pnpm_version)"
 }
 
+print_banner
+print_detected_os
+print_install_plan
+
+if has_dry_run_flag "$@"; then
+  print_dry_run_plan "$@"
+  exit 0
+fi
+
+ui_stage 1 4 'Preparing environment'
 ensure_brew_shellenv
 ensure_node
 ensure_pnpm
 
-log 'Installing workspace dependencies...'
+ui_stage 2 4 'Installing workspace dependencies'
+ui_info 'Running corepack pnpm install'
 corepack pnpm install
+ui_success 'Workspace dependencies installed'
 
-log 'Building Murph packages...'
+ui_stage 3 4 'Building Murph'
+ui_info 'Running corepack pnpm build'
 corepack pnpm build
+ui_success 'Murph packages built'
 
-log 'Running Murph macOS setup...'
+ui_stage 4 4 'Starting onboarding'
+ui_info 'Handing off to Murph onboarding'
 node packages/cli/dist/bin.js onboard "$@"

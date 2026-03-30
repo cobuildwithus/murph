@@ -12,8 +12,82 @@ if [ -z "$required_node" ] || [ -z "$pnpm_version" ]; then
   exit 1
 fi
 
-log() {
-  printf '[murph-setup] %s\n' "$*"
+BOLD='\033[1m'
+ACCENT='\033[38;5;111m'
+INFO='\033[38;5;110m'
+SUCCESS='\033[38;5;78m'
+WARN='\033[38;5;214m'
+ERROR='\033[38;5;203m'
+MUTED='\033[38;5;245m'
+NC='\033[0m'
+
+use_color() {
+  [[ -t 1 && -z "${NO_COLOR:-}" ]]
+}
+
+print_banner() {
+  if use_color; then
+    echo -e "${ACCENT}${BOLD}Murph setup${NC}"
+    echo -e "${MUTED}Repo-local bootstrap for source installs on macOS or Linux, with a cleaner handoff into onboarding.${NC}"
+  else
+    echo 'Murph setup'
+    echo 'Repo-local bootstrap for source installs on macOS or Linux, with a cleaner handoff into onboarding.'
+  fi
+  echo
+}
+
+ui_section() {
+  echo
+  if use_color; then
+    echo -e "${ACCENT}${BOLD}$*${NC}"
+  else
+    echo "$*"
+  fi
+}
+
+ui_stage() {
+  local index="$1"
+  local total="$2"
+  shift 2
+
+  echo
+  if use_color; then
+    echo -e "${ACCENT}${BOLD}[${index}/${total}] $*${NC}"
+  else
+    echo "[${index}/${total}] $*"
+  fi
+}
+
+ui_info() {
+  if use_color; then
+    echo -e "${INFO}·${NC} $*"
+  else
+    echo ". $*"
+  fi
+}
+
+ui_success() {
+  if use_color; then
+    echo -e "${SUCCESS}✓${NC} $*"
+  else
+    echo "✓ $*"
+  fi
+}
+
+ui_warn() {
+  if use_color; then
+    echo -e "${WARN}!${NC} $*"
+  else
+    echo "! $*"
+  fi
+}
+
+ui_error() {
+  if use_color; then
+    echo -e "${ERROR}✗${NC} $*" >&2
+  else
+    echo "✗ $*" >&2
+  fi
 }
 
 host_os="$(uname -s)"
@@ -40,47 +114,34 @@ render_command_args() {
   printf '%s' "${rendered[*]}"
 }
 
-has_required_node() {
-  local node_bin="${1:-node}"
-
-  if ! command -v "$node_bin" >/dev/null 2>&1 && [ ! -x "$node_bin" ]; then
-    return 1
-  fi
-
-  REQUIRED_NODE_VERSION="$required_node" "$node_bin" - <<'NODE'
-const required = (process.env.REQUIRED_NODE_VERSION ?? '')
-  .split('.')
-  .map((value) => Number.parseInt(value, 10))
-const current = process.versions.node.split('.').map((value) => Number.parseInt(value, 10))
-for (let index = 0; index < required.length; index += 1) {
-  const left = current[index] ?? 0
-  const right = required[index] ?? 0
-  if (left > right) {
-    process.exit(0)
-  }
-  if (left < right) {
-    process.exit(1)
-  }
-}
-process.exit(0)
-NODE
+print_detected_os() {
+  case "$host_os" in
+    Darwin)
+      ui_success 'Detected: macos'
+      ;;
+    Linux)
+      ui_success 'Detected: linux'
+      ;;
+    *)
+      ui_warn "Detected: ${host_os}"
+      ;;
+  esac
 }
 
-ensure_pnpm() {
-  log "Activating pnpm@${pnpm_version} through corepack..."
-  corepack enable
-  corepack prepare "pnpm@${pnpm_version}" --activate
-}
-
-print_linux_install_summary() {
-  log 'Murph Linux setup will install or reuse:'
-  printf '  - Node >= %s (from PATH when available, otherwise an isolated download under ~/.murph/bootstrap)\n' "$required_node"
+print_linux_install_plan() {
+  ui_section 'Install plan'
+  printf 'OS: linux\n'
+  printf 'Node requirement: >= %s\n' "$required_node"
+  printf 'pnpm: %s via corepack\n' "$pnpm_version"
+  printf '%s\n' 'Workspace flow: bootstrap tools -> install deps -> build workspace -> launch onboarding'
+  printf '%s\n' 'Bootstrap scope:'
+  printf '  - Node >= %s from PATH when available, otherwise an isolated download under ~/.murph/bootstrap\n' "$required_node"
   printf '  - pnpm@%s via corepack\n' "$pnpm_version"
   printf '%s\n' '  - workspace dependencies and build output'
   printf '%s\n' '  - ffmpeg, poppler/pdftotext, whisper.cpp, and a local Whisper model through the Murph Linux toolchain setup'
   printf '%s\n' '  - PaddleX OCR on Linux x86_64 unless you pass --skip-ocr'
-  printf '%s\n' '  - the final Murph setup flow: vault bootstrap, default vault config, user-level murph/vault-cli shims, onboarding channel selection, and assistant automation/chat handoff'
-  printf '%s\n' '  - iMessage remains macOS-only; Linux setup keeps the rest of Murph available for server or VM deployments'
+  printf '%s\n' '  - vault bootstrap, default config, user-level murph/vault-cli shims, onboarding channel selection, wearables, and assistant automation/chat handoff'
+  printf '%s\n' '  - iMessage stays macOS-only; Linux keeps the rest of Murph available for server or VM deployments'
 }
 
 normalize_linux_arch() {
@@ -111,8 +172,38 @@ download_file() {
     return
   fi
 
-  printf 'Neither curl nor wget is available to download %s.\n' "$url" >&2
+  ui_error "Neither curl nor wget is available to download ${url}."
   exit 1
+}
+
+has_required_node() {
+  local node_bin="${1:-node}"
+
+  if ! command -v "$node_bin" >/dev/null 2>&1 && [ ! -x "$node_bin" ]; then
+    return 1
+  fi
+
+  REQUIRED_NODE_VERSION="$required_node" "$node_bin" - <<'NODE'
+const required = (process.env.REQUIRED_NODE_VERSION ?? '')
+  .split('.')
+  .map((value) => Number.parseInt(value, 10))
+const current = process.versions.node.split('.').map((value) => Number.parseInt(value, 10))
+for (let index = 0; index < required.length; index += 1) {
+  const left = current[index] ?? 0
+  const right = required[index] ?? 0
+  if (left > right) {
+    process.exit(0)
+  }
+  if (left < right) {
+    process.exit(1)
+  }
+}
+process.exit(0)
+NODE
+}
+
+active_pnpm_version() {
+  pnpm --version 2>/dev/null || corepack pnpm --version 2>/dev/null || printf '%s\n' "$pnpm_version"
 }
 
 bootstrap_linux_node() {
@@ -120,12 +211,13 @@ bootstrap_linux_node() {
   local bootstrap_root="${home_dir}/.murph/bootstrap"
   local linux_arch
   linux_arch="$(normalize_linux_arch)" || {
-    printf 'scripts/setup-host.sh currently supports Linux x64 and arm64 only.\n' >&2
+    ui_error 'scripts/setup-host.sh currently supports Linux x64 and arm64 only.'
     exit 1
   }
 
   if command -v node >/dev/null 2>&1 && has_required_node node; then
-    log "Using Node $(node -p 'process.versions.node')"
+    ui_success "Node.js v$(node -p 'process.versions.node') found"
+    ui_info "Active Node.js: $(command -v node)"
     return
   fi
 
@@ -133,7 +225,8 @@ bootstrap_linux_node() {
   local node_bin="${node_dir}/bin/node"
   if [ -x "$node_bin" ] && has_required_node "$node_bin"; then
     export PATH="${node_dir}/bin:${PATH}"
-    log "Using cached Node $("$node_bin" -p 'process.versions.node')"
+    ui_success "Using cached Node.js v$($node_bin -p 'process.versions.node')"
+    ui_info "Active Node.js: ${node_bin}"
     return
   fi
 
@@ -146,7 +239,7 @@ bootstrap_linux_node() {
   rm -rf "$extract_root"
   mkdir -p "$extract_root"
 
-  log "Downloading Node ${required_node} for Linux ${linux_arch} into ${bootstrap_root}..."
+  ui_info "Downloading Node ${required_node} for Linux ${linux_arch} into ${bootstrap_root}..."
   download_file "https://nodejs.org/dist/v${required_node}/${archive_name}" "$archive_path"
 
   tar -xJf "$archive_path" -C "$extract_root"
@@ -156,12 +249,21 @@ bootstrap_linux_node() {
   rm -rf "$extract_root"
 
   if [ ! -x "$node_bin" ]; then
-    printf 'Node bootstrap finished, but %s is missing.\n' "$node_bin" >&2
+    ui_error "Node bootstrap finished, but ${node_bin} is missing."
     exit 1
   fi
 
   export PATH="${node_dir}/bin:${PATH}"
-  log "Using Node $("$node_bin" -p 'process.versions.node')"
+  ui_success "Node.js v$($node_bin -p 'process.versions.node') installed"
+  ui_info "Active Node.js: ${node_bin}"
+}
+
+ensure_pnpm() {
+  ui_info "Activating pnpm@${pnpm_version} through corepack..."
+  corepack enable
+  corepack prepare "pnpm@${pnpm_version}" --activate
+  ui_success 'pnpm ready'
+  ui_info "Active pnpm: $(active_pnpm_version)"
 }
 
 print_linux_dry_run_plan() {
@@ -169,8 +271,7 @@ print_linux_dry_run_plan() {
 
   delegated_args="$(render_command_args "$@")"
 
-  log 'Dry run requested. This wrapper will not modify the machine or workspace.'
-  print_linux_install_summary
+  ui_warn 'Dry run requested. This wrapper will not modify the machine or workspace.'
   printf '%s\n' 'Planned wrapper steps:'
   printf '1. Reuse Node >= %s from PATH when available, or download Node %s under ~/.murph/bootstrap.\n' "$required_node" "$required_node"
   printf '2. Activate pnpm@%s through corepack.\n' "$pnpm_version"
@@ -181,7 +282,7 @@ print_linux_dry_run_plan() {
   else
     printf '%s\n' '5. Delegate to `node packages/cli/dist/bin.js onboard`.'
   fi
-  printf '%s\n' '6. Inside the CLI setup flow, provision or reuse Linux parser/runtime tools, skip unsupported iMessage setup, and complete vault bootstrap plus shims.'
+  printf '%s\n' '6. Inside the CLI setup flow, provision or reuse Linux parser/runtime tools, skip unsupported iMessage setup, and finish vault bootstrap plus shims.'
   printf '%s\n' 'Run the built setup entrypoint directly with `--dry-run` after bootstrap if you want the inner setup-step preview.'
 }
 
@@ -190,22 +291,31 @@ case "$host_os" in
     exec bash "$repo_root/scripts/setup-macos.sh" "$@"
     ;;
   Linux)
+    print_banner
+    print_detected_os
+    print_linux_install_plan
+
     if has_dry_run_flag "$@"; then
       print_linux_dry_run_plan "$@"
       exit 0
     fi
 
-    print_linux_install_summary
+    ui_stage 1 4 'Preparing environment'
     bootstrap_linux_node
     ensure_pnpm
 
-    log 'Installing workspace dependencies...'
+    ui_stage 2 4 'Installing workspace dependencies'
+    ui_info 'Running corepack pnpm install'
     corepack pnpm install
+    ui_success 'Workspace dependencies installed'
 
-    log 'Building Murph packages...'
+    ui_stage 3 4 'Building Murph'
+    ui_info 'Running corepack pnpm build'
     corepack pnpm build
+    ui_success 'Murph packages built'
 
-    log 'Running Murph host setup...'
+    ui_stage 4 4 'Starting onboarding'
+    ui_info 'Handing off to Murph onboarding'
     node packages/cli/dist/bin.js onboard "$@"
     ;;
   *)
