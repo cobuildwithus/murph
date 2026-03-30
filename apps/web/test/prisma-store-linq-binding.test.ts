@@ -12,28 +12,94 @@ type MutableBindingRecord = {
 };
 
 describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
-  it("canonicalizes legacy recipient-phone formatting for the same user", async () => {
-    const records = [
-      createBindingRecord({
-        id: "linqb_legacy",
-        recipientPhone: "15557654321",
+  it("lists stored canonical bindings for a user", async () => {
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          findMany: vi.fn().mockResolvedValue([
+            createBindingRecord({
+              id: "linqb_alpha",
+              label: "Alpha",
+              recipientPhone: "+15551230001",
+              userId: "user-123",
+            }),
+            createBindingRecord({
+              id: "linqb_beta",
+              label: "Beta",
+              recipientPhone: "+15551230002",
+              userId: "user-123",
+            }),
+          ]),
+        },
+      } as never,
+    });
+
+    await expect(store.listBindingsForUser("user-123")).resolves.toEqual([
+      expect.objectContaining({
+        id: "linqb_alpha",
+        label: "Alpha",
+        recipientPhone: "+15551230001",
         userId: "user-123",
       }),
-    ];
-    const findMany = vi.fn().mockResolvedValue(records.map(cloneBindingRecord));
+      expect.objectContaining({
+        id: "linqb_beta",
+        label: "Beta",
+        recipientPhone: "+15551230002",
+        userId: "user-123",
+      }),
+    ]);
+  });
+
+  it("looks up a binding by the canonical recipient phone", async () => {
+    const findUnique = vi.fn().mockResolvedValue(
+      createBindingRecord({
+        id: "linqb_found",
+        label: "Primary",
+        recipientPhone: "+15557654321",
+        userId: "user-123",
+      }),
+    );
+    const store = new PrismaLinqControlPlaneStore({
+      prisma: {
+        linqRecipientBinding: {
+          findUnique,
+        },
+      } as never,
+    });
+
+    await expect(store.getBindingByRecipientPhone("+1 (555) 765-4321")).resolves.toEqual(
+      expect.objectContaining({
+        id: "linqb_found",
+        label: "Primary",
+        recipientPhone: "+15557654321",
+        userId: "user-123",
+      }),
+    );
+    expect(findUnique).toHaveBeenCalledWith({
+      where: {
+        recipientPhone: "+15557654321",
+      },
+    });
+  });
+
+  it("updates the existing canonical row for the same user", async () => {
+    const existing = createBindingRecord({
+      id: "linqb_existing",
+      recipientPhone: "+15557654321",
+      userId: "user-123",
+    });
     const update = vi.fn().mockImplementation(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-      const current = records.find((record) => record.id === where.id)!;
-      current.recipientPhone = data.recipientPhone as string;
-      current.label = (data.label as string | null | undefined) ?? null;
-      current.updatedAt = new Date("2026-03-28T12:05:00.000Z");
-      return cloneBindingRecord(current);
+      expect(where).toEqual({ id: "linqb_existing" });
+      existing.label = (data.label as string | null | undefined) ?? null;
+      existing.recipientPhone = data.recipientPhone as string;
+      existing.updatedAt = new Date("2026-03-28T12:05:00.000Z");
+      return cloneBindingRecord(existing);
     });
 
     const store = new PrismaLinqControlPlaneStore({
       prisma: {
         linqRecipientBinding: {
-          create: vi.fn(),
-          findMany,
+          findUnique: vi.fn().mockResolvedValue(cloneBindingRecord(existing)),
           update,
         },
       } as never,
@@ -47,27 +113,12 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
 
     expect(update).toHaveBeenCalledWith({
       where: {
-        id: "linqb_legacy",
+        id: "linqb_existing",
       },
       data: {
         label: "Primary",
         recipientPhone: "+15557654321",
       },
-    });
-    expect(findMany).toHaveBeenCalledWith({
-      where: {
-        recipientPhone: {
-          in: ["+15557654321", "15557654321"],
-        },
-      },
-      orderBy: [
-        {
-          createdAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
     });
     expect(binding.recipientPhone).toBe("+15557654321");
   });
@@ -76,13 +127,13 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     const store = new PrismaLinqControlPlaneStore({
       prisma: {
         linqRecipientBinding: {
-          findMany: vi.fn().mockResolvedValue([
+          findUnique: vi.fn().mockResolvedValue(
             createBindingRecord({
               id: "linqb_conflict",
-              recipientPhone: "15557654321",
+              recipientPhone: "+15557654321",
               userId: "user-999",
             }),
-          ]),
+          ),
         },
       } as never,
     });
@@ -97,202 +148,64 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     });
   });
 
-  it("lists only the preferred row when the same user has legacy and canonical duplicates", async () => {
-    const store = new PrismaLinqControlPlaneStore({
-      prisma: {
-        linqRecipientBinding: {
-          findMany: vi.fn().mockResolvedValue([
-            createBindingRecord({
-              id: "linqb_legacy",
-              label: "Legacy",
-              recipientPhone: "15557654321",
-              userId: "user-123",
-            }),
-            createBindingRecord({
-              id: "linqb_canonical",
-              label: "Canonical",
-              recipientPhone: "+15557654321",
-              userId: "user-123",
-            }),
-          ]),
-        },
-      } as never,
+  it("retries a create race against the same user by updating the canonical row", async () => {
+    const existing = createBindingRecord({
+      id: "linqb_race",
+      recipientPhone: "+15557654321",
+      userId: "user-123",
     });
-
-    await expect(store.listBindingsForUser("user-123")).resolves.toEqual([
-      expect.objectContaining({
-        id: "linqb_canonical",
-        label: "Canonical",
-        recipientPhone: "+15557654321",
-        userId: "user-123",
-      }),
-    ]);
-  });
-
-  it("returns the preferred canonical row when the same user has legacy and canonical duplicates", async () => {
-    const store = new PrismaLinqControlPlaneStore({
-      prisma: {
-        linqRecipientBinding: {
-          findMany: vi.fn().mockResolvedValue([
-            createBindingRecord({
-              id: "linqb_legacy",
-              label: "Legacy",
-              recipientPhone: "15557654321",
-              userId: "user-123",
-            }),
-            createBindingRecord({
-              id: "linqb_canonical",
-              label: "Canonical",
-              recipientPhone: "+15557654321",
-              userId: "user-123",
-            }),
-          ]),
-        },
-      } as never,
-    });
-
-    await expect(store.getBindingByRecipientPhone("+1 (555) 765-4321")).resolves.toEqual(
-      expect.objectContaining({
-        id: "linqb_canonical",
-        label: "Canonical",
-        recipientPhone: "+15557654321",
-        userId: "user-123",
-      }),
-    );
-  });
-
-  it("falls back to a compatibility scan for punctuation-formatted legacy rows", async () => {
-    const findMany = vi.fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        createBindingRecord({
-          id: "linqb_punctuated",
-          label: "Legacy punctuation",
-          recipientPhone: "+1 (555) 765-4321",
-          userId: "user-123",
-        }),
-      ]);
-    const store = new PrismaLinqControlPlaneStore({
-      prisma: {
-        linqRecipientBinding: {
-          findMany,
-        },
-      } as never,
-    });
-
-    await expect(store.getBindingByRecipientPhone("+15557654321")).resolves.toEqual(
-      expect.objectContaining({
-        id: "linqb_punctuated",
-        label: "Legacy punctuation",
-        recipientPhone: "+15557654321",
-        userId: "user-123",
-      }),
-    );
-    expect(findMany).toHaveBeenNthCalledWith(1, {
-      where: {
-        recipientPhone: {
-          in: ["+15557654321", "15557654321"],
-        },
-      },
-      orderBy: [
-        {
-          createdAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
-    });
-    expect(findMany).toHaveBeenNthCalledWith(2, {
-      orderBy: [
-        {
-          createdAt: "asc",
-        },
-        {
-          id: "asc",
-        },
-      ],
-    });
-  });
-
-  it("updates the preferred canonical row when the same user already has legacy and canonical duplicates", async () => {
-    const records = [
-      createBindingRecord({
-        id: "linqb_legacy",
-        label: "Legacy",
-        recipientPhone: "15557654321",
-        userId: "user-123",
-      }),
-      createBindingRecord({
-        id: "linqb_canonical",
-        label: "Canonical",
-        recipientPhone: "+15557654321",
-        userId: "user-123",
-      }),
-    ];
+    const findUnique = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(cloneBindingRecord(existing));
+    const create = vi.fn().mockRejectedValue({ code: "P2002" });
     const update = vi.fn().mockImplementation(async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-      const current = records.find((record) => record.id === where.id)!;
-      current.recipientPhone = data.recipientPhone as string;
-      current.label = (data.label as string | null | undefined) ?? null;
-      current.updatedAt = new Date("2026-03-28T12:05:00.000Z");
-      return cloneBindingRecord(current);
+      expect(where).toEqual({ id: "linqb_race" });
+      existing.label = (data.label as string | null | undefined) ?? null;
+      existing.recipientPhone = data.recipientPhone as string;
+      existing.updatedAt = new Date("2026-03-28T12:05:00.000Z");
+      return cloneBindingRecord(existing);
     });
 
     const store = new PrismaLinqControlPlaneStore({
       prisma: {
         linqRecipientBinding: {
-          create: vi.fn(),
-          findMany: vi.fn().mockResolvedValue(records.map(cloneBindingRecord)),
+          create,
+          findUnique,
           update,
         },
       } as never,
     });
 
-    const binding = await store.upsertBinding({
+    await expect(store.upsertBinding({
       userId: "user-123",
+      recipientPhone: "+1 (555) 765-4321",
+      label: "Primary",
+    })).resolves.toEqual(expect.objectContaining({
+      id: "linqb_race",
+      label: "Primary",
       recipientPhone: "+15557654321",
-      label: "Updated canonical",
-    });
+      userId: "user-123",
+    }));
 
-    expect(update).toHaveBeenCalledWith({
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenNthCalledWith(1, {
       where: {
-        id: "linqb_canonical",
-      },
-      data: {
-        label: "Updated canonical",
         recipientPhone: "+15557654321",
       },
     });
-    expect(binding).toEqual(expect.objectContaining({
-      id: "linqb_canonical",
-      label: "Updated canonical",
-      recipientPhone: "+15557654321",
-    }));
-  });
-
-  it("rejects read-path conflicts when canonicalized duplicates belong to different users", async () => {
-    const store = new PrismaLinqControlPlaneStore({
-      prisma: {
-        linqRecipientBinding: {
-          findMany: vi.fn().mockResolvedValue([
-            createBindingRecord({
-              id: "linqb_legacy_user_a",
-              recipientPhone: "15557654321",
-              userId: "user-123",
-            }),
-            createBindingRecord({
-              id: "linqb_canonical_user_b",
-              recipientPhone: "+15557654321",
-              userId: "user-999",
-            }),
-          ]),
-        },
-      } as never,
+    expect(findUnique).toHaveBeenNthCalledWith(2, {
+      where: {
+        recipientPhone: "+15557654321",
+      },
     });
-
-    await expect(store.getBindingByRecipientPhone("+15557654321")).rejects.toMatchObject({
-      code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
-      httpStatus: 409,
+    expect(update).toHaveBeenCalledWith({
+      where: {
+        id: "linqb_race",
+      },
+      data: {
+        label: "Primary",
+        recipientPhone: "+15557654321",
+      },
     });
   });
 });

@@ -410,7 +410,7 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   })
 
   assert.equal(first.session.turnCount, 1)
-  assert.equal(first.session.providerSessionId, 'thread-123')
+  assert.equal(first.session.providerBinding?.providerSessionId, 'thread-123')
   assert.equal(first.session.alias, 'imessage:bob')
   assert.equal(first.delivery, null)
   assert.equal(first.deliveryError, null)
@@ -592,7 +592,10 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
     (error: any) => {
       assert.equal(isAssistantProviderInterruptedError(error), true)
       const recoveredSession = extractRecoveredAssistantSession(error)
-      assert.equal(recoveredSession?.providerSessionId, 'thread-pause-1')
+      assert.equal(
+        recoveredSession?.providerBinding?.providerSessionId,
+        'thread-pause-1',
+      )
       return true
     },
   )
@@ -613,7 +616,7 @@ test('sendAssistantMessage recovers provider sessions after user interruptions a
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerSessionId, null)
+  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
   assert.equal(resolved.session.turnCount, 0)
 })
 
@@ -734,7 +737,7 @@ test('sendAssistantMessage keeps provider success and session updates even when 
     code: 'ASSISTANT_CHANNEL_DELIVERY_FAILED',
     message: 'delivery exploded',
   })
-  assert.equal(result.session.providerSessionId, 'thread-500')
+  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-500')
   assert.equal('lastAssistantMessage' in result.session, false)
 })
 
@@ -4870,7 +4873,6 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
       schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
-      providerSessionId: 'thread-stall-1',
       providerOptions: {
         model: null,
         reasoningEffort: null,
@@ -4878,6 +4880,19 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
         approvalPolicy: 'never',
         profile: null,
         oss: false,
+      },
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-stall-1',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
       },
       alias: null,
       binding: {
@@ -5065,7 +5080,7 @@ test('scanAssistantAutoReplyOnce aborts stalled provider turns and retries the s
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerSessionId, 'thread-stall-1')
+  assert.equal(resolved.session.providerBinding?.providerSessionId, 'thread-stall-1')
 })
 
 test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the default stall window before retrying', async () => {
@@ -5387,7 +5402,7 @@ test('scanAssistantAutoReplyOnce defers reconnectable provider failures and pres
     maxSessionAgeMs: null,
   })
 
-  assert.equal(resolved.session.providerSessionId, null)
+  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
   assert.equal(resolved.session.turnCount, 0)
   assert.deepEqual(
     (await listAssistantTranscriptEntries(vaultRoot, resolved.session.sessionId)).map(

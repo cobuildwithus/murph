@@ -119,7 +119,6 @@ function createStubAssistantResult(vault: string): AssistantAskResult {
       schema: 'murph.assistant-session.v3',
       sessionId: 'asst_session_1',
       provider: 'codex-cli',
-      providerSessionId: null,
       providerOptions: {
         model: 'gpt-5.4',
         reasoningEffort: null,

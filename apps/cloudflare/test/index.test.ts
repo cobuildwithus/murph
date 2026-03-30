@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
@@ -601,24 +603,36 @@ describe("cloudflare worker routes", () => {
         v1: previousKey.toString("base64"),
       }),
     });
+    const record = {
+      delivery: createOutboxDelivery(),
+      effectId: "outbox_rotated",
+      fingerprint: "dedupe_rotated",
+      intentId: "outbox_rotated",
+      kind: "assistant.delivery" as const,
+      recordedAt: "2026-03-26T12:00:05.000Z",
+    };
+    const canonicalKey = fingerprintRecordKey("member_123", record.kind, record.fingerprint);
 
     await writeEncryptedR2Json({
       bucket: env.BUNDLES,
       cryptoKey: previousKey,
-      key: "transient/side-effects/by-effect/member_123/outbox_rotated.json",
+      key: canonicalKey,
+      keyId: "v1",
+      value: record,
+    });
+    await writeEncryptedR2Json({
+      bucket: env.BUNDLES,
+      cryptoKey: previousKey,
+      key: effectRecordKey("member_123", record.effectId),
       keyId: "v1",
       value: {
-        delivery: createOutboxDelivery(),
-        effectId: "outbox_rotated",
-        fingerprint: "dedupe_rotated",
-        intentId: "outbox_rotated",
-        kind: "assistant.delivery",
-        recordedAt: "2026-03-26T12:00:05.000Z",
+        recordKey: canonicalKey,
+        schema: "murph.hosted-side-effect-alias.v1",
       },
     });
 
     const response = await callRunnerOutbound(
-      new Request("http://side-effects.worker/intents/outbox_rotated?kind=assistant.delivery&fingerprint=dedupe_rotated", {
+      new Request(`http://side-effects.worker/intents/${record.effectId}?kind=${record.kind}&fingerprint=${record.fingerprint}`, {
         method: "GET",
       }),
       env,
@@ -1794,6 +1808,22 @@ function createOutboxDelivery() {
     target: "thread_123",
     targetKind: "thread" as const,
   };
+}
+
+function effectRecordKey(userId: string, effectId: string): string {
+  return `transient/side-effects/by-effect/${encodeURIComponent(userId)}/${encodeURIComponent(effectId)}.json`;
+}
+
+function fingerprintRecordKey(
+  userId: string,
+  kind: string,
+  fingerprint: string,
+): string {
+  return `transient/side-effects/by-fingerprint/${hashFingerprint(kind, fingerprint)}/${encodeURIComponent(userId)}.json`;
+}
+
+function hashFingerprint(kind: string, fingerprint: string): string {
+  return createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex");
 }
 
 async function createCommittedRunnerSuccessResponse(input: {

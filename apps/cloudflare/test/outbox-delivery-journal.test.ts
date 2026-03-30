@@ -36,7 +36,7 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
     })).resolves.toEqual(record);
   });
 
-  it("repairs legacy effect-only records into canonical and alias-backed journal state", async () => {
+  it("ignores legacy effect-path record payloads that do not have a canonical alias", async () => {
     const bucket = createMemoryBucket();
     const key = Buffer.alloc(32, 9);
     const record = createSideEffectRecord({
@@ -52,39 +52,60 @@ describe("createHostedExecutionSideEffectJournalStore", () => {
       value: record,
     });
 
-    const store = createHostedExecutionSideEffectJournalStore({
+    await expect(createHostedExecutionSideEffectJournalStore({
       bucket: bucket.api,
       key,
       keyId: "v1",
+    }).read({
+      effectId: record.effectId,
+      fingerprint: record.fingerprint,
+      kind: record.kind,
+      userId: "member_123",
+    })).resolves.toBeNull();
+  });
+
+  it("reads alias-backed canonical side-effect records encrypted with a previous key id after rotation", async () => {
+    const bucket = createMemoryBucket();
+    const previousKey = Buffer.alloc(32, 8);
+    const currentKey = Buffer.alloc(32, 9);
+    const record = createSideEffectRecord({
+      effectId: "outbox_rotated",
+      fingerprint: "dedupe_rotated",
+    });
+    const canonicalKey = fingerprintRecordKey("member_123", record.kind, record.fingerprint);
+
+    await writeEncryptedR2Json({
+      bucket: bucket.api,
+      cryptoKey: previousKey,
+      key: canonicalKey,
+      keyId: "v1",
+      value: record,
+    });
+    await writeEncryptedR2Json({
+      bucket: bucket.api,
+      cryptoKey: previousKey,
+      key: effectRecordKey("member_123", record.effectId),
+      keyId: "v1",
+      value: {
+        recordKey: canonicalKey,
+        schema: "murph.hosted-side-effect-alias.v1",
+      },
     });
 
-    await expect(store.write({
-      record,
+    await expect(createHostedExecutionSideEffectJournalStore({
+      bucket: bucket.api,
+      key: currentKey,
+      keyId: "v2",
+      keysById: {
+        v1: previousKey,
+        v2: currentKey,
+      },
+    }).read({
+      effectId: record.effectId,
+      fingerprint: record.fingerprint,
+      kind: record.kind,
       userId: "member_123",
     })).resolves.toEqual(record);
-
-    await expect(readEncryptedR2Json({
-      bucket: bucket.api,
-      cryptoKey: key,
-      expectedKeyId: "v1",
-      key: fingerprintRecordKey("member_123", record.kind, record.fingerprint),
-      parse(value) {
-        return value;
-      },
-    })).resolves.toEqual(record);
-
-    await expect(readEncryptedR2Json({
-      bucket: bucket.api,
-      cryptoKey: key,
-      expectedKeyId: "v1",
-      key: effectRecordKey("member_123", record.effectId),
-      parse(value) {
-        return value;
-      },
-    })).resolves.toMatchObject({
-      recordKey: fingerprintRecordKey("member_123", record.kind, record.fingerprint),
-      schema: "murph.hosted-side-effect-alias.v1",
-    });
   });
 
   it("keeps the first canonical side-effect record stable when the same fingerprint is written again", async () => {

@@ -781,7 +781,10 @@ test('sendAssistantMessage cold-starts Codex again when the requested working di
     secondCall?.workingDirectory,
     path.join(expectedWorkspaceRoot, 'notes', 'daily'),
   )
-  assert.equal(second.session.providerSessionId, 'thread-workspace-change-2')
+  assert.equal(
+    second.session.providerBinding?.providerSessionId,
+    'thread-workspace-change-2',
+  )
 })
 
 test('sendAssistantMessage keeps the requested working directory for non-shell providers', async () => {
@@ -1642,8 +1645,8 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
         content: 'first reply',
       },
     ])
-    assert.equal(first.session.providerSessionId, null)
-    assert.equal(second.session.providerSessionId, null)
+    assert.equal(first.session.providerBinding?.providerSessionId ?? null, null)
+    assert.equal(second.session.providerBinding?.providerSessionId ?? null, null)
     assert.equal(second.session.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(second.session.providerOptions.model, 'gpt-oss:20b')
 
@@ -1760,9 +1763,12 @@ test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-
     call?.continuityContext ?? '',
     /bootstrapping the fresh Codex provider session/u,
   )
-  assert.equal(result.session.providerSessionId, 'thread-fresh-codex')
   assert.equal(
-    result.session.providerState?.codexCli?.promptVersion,
+    result.session.providerBinding?.providerSessionId,
+    'thread-fresh-codex',
+  )
+  assert.equal(
+    result.session.providerBinding?.providerState?.codexCli?.promptVersion,
     CURRENT_CODEX_PROMPT_VERSION,
   )
   assert.equal(result.session.turnCount, 3)
@@ -1826,7 +1832,7 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
   const call = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   assert.equal(call?.resumeProviderSessionId, null)
   assert.equal(
-    result.session.providerSessionId,
+    result.session.providerBinding?.providerSessionId,
     'thread-fresh-after-legacy-binding',
   )
 })
@@ -1891,7 +1897,7 @@ test('sendAssistantMessage cold-starts when a saved provider binding is missing 
   assert.equal(call?.resumeProviderSessionId, null)
   assert.equal(call?.workingDirectory, expectedWorkingDirectory)
   assert.equal(
-    result.session.providerSessionId,
+    result.session.providerBinding?.providerSessionId,
     'thread-fresh-after-legacy-workspace-binding',
   )
 })
@@ -2111,7 +2117,7 @@ test('sendAssistantMessage clears stale provider session ids when switching prov
   })
 
   assert.equal(resolved.session.provider, 'openai-compatible')
-  assert.equal(resolved.session.providerSessionId, null)
+  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 function restoreEnvironmentVariable(
@@ -2581,7 +2587,7 @@ test('sendAssistantMessage recreates a missing local session from the live sessi
   })
 
   assert.equal(result.session.sessionId, hydrated.sessionId)
-  assert.equal(result.session.providerSessionId, 'thread-live-1')
+  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-live-1')
   assert.equal(result.session.turnCount, 2)
 
   const persisted = await resolveAssistantSession({
@@ -2651,7 +2657,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     (error: any) => {
       assert.equal(error.code, 'ASSISTANT_CODEX_CONNECTION_LOST')
       assert.equal(
-        error.context?.assistantSession?.providerSessionId,
+        error.context?.assistantSession?.providerBinding?.providerSessionId,
         'thread-resume-1',
       )
       return true
@@ -2663,7 +2669,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     alias: 'chat:recoverable-error',
   })
 
-  assert.equal(resolved.session.providerSessionId, null)
+  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
   assert.equal(resolved.session.turnCount, 0)
   const recovery = await readAssistantProviderRouteRecovery(
     vaultRoot,
@@ -2680,7 +2686,7 @@ test('sendAssistantMessage keeps a recovered provider session id out of the cano
     prompt: 'try again',
   })
 
-  assert.equal(retried.session.providerSessionId, 'thread-resume-1')
+  assert.equal(retried.session.providerBinding?.providerSessionId, 'thread-resume-1')
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
     'thread-resume-1',
@@ -2746,7 +2752,7 @@ test('sendAssistantMessage does not resume a recovered provider session after th
     workingDirectory: alternateWorkingDirectory,
   })
 
-  assert.equal(retried.session.providerSessionId, 'thread-fresh-workdir')
+  assert.equal(retried.session.providerBinding?.providerSessionId, 'thread-fresh-workdir')
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
     null,
@@ -2790,7 +2796,7 @@ test('sendAssistantMessage does not persist a recovered provider session id for 
     alias: 'chat:nonretryable-error',
   })
 
-  assert.equal(resolved.session.providerSessionId, null)
+  assert.equal(resolved.session.providerBinding?.providerSessionId ?? null, null)
   assert.equal(resolved.session.turnCount, 0)
 })
 
@@ -2843,7 +2849,7 @@ test('sendAssistantMessage rolls back unauthorized direct canonical vault edits 
     alias: 'chat:canonical-guard',
   })
   assert.equal(session.session.turnCount, 0)
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 test('sendAssistantMessage allows committed audited canonical writes from core mutation paths', async () => {
@@ -2880,7 +2886,7 @@ test('sendAssistantMessage allows committed audited canonical writes from core m
   assert.equal(metadata.title, 'Guarded Vault Title')
   assert.equal(result.response, 'assistant reply')
   assert.equal(result.session.turnCount, 1)
-  assert.equal(result.session.providerSessionId, 'thread-legit-write')
+  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-legit-write')
 })
 
 test('sendAssistantMessage allows concurrent inbox canonical writes that go through audited core write operations', async () => {
@@ -2941,7 +2947,7 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
 
   assert.equal(result.response, 'assistant reply')
   assert.equal(result.session.turnCount, 1)
-  assert.equal(result.session.providerSessionId, 'thread-inbox-guard')
+  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-inbox-guard')
   assert.ok(persistedCapture)
   if (!persistedCapture) {
     throw new Error('Expected persisted inbox capture result.')
@@ -3200,7 +3206,7 @@ test('sendAssistantMessage blocks on malformed write-operation metadata and stil
     alias: 'chat:canonical-bad-operation-metadata',
   })
   assert.equal(session.session.turnCount, 0)
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 test('sendAssistantMessage blocks on invalid write-operation action states and still rolls back later direct tampering', async () => {
@@ -3279,7 +3285,7 @@ test('sendAssistantMessage blocks on invalid write-operation action states and s
     alias: 'chat:canonical-bad-action-state',
   })
   assert.equal(session.session.turnCount, 0)
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 test('sendAssistantMessage blocks when committed payload receipt metadata is missing', async () => {
@@ -3358,7 +3364,7 @@ test('sendAssistantMessage blocks when committed payload receipt metadata is mis
     alias: 'chat:canonical-missing-committed-payload',
   })
   assert.equal(session.session.turnCount, 0)
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 test('sendAssistantMessage blocks when the trusted guard payload copy is missing', async () => {
@@ -3445,7 +3451,7 @@ test('sendAssistantMessage blocks when the trusted guard payload copy is missing
     alias: 'chat:canonical-missing-guard-receipt-payload',
   })
   assert.equal(session.session.turnCount, 0)
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 test('sendAssistantMessage blocks when the trusted guard payload copy no longer matches its receipt digest', async () => {
@@ -3535,7 +3541,7 @@ test('sendAssistantMessage blocks when the trusted guard payload copy no longer 
     alias: 'chat:canonical-mismatched-guard-receipt-payload',
   })
   assert.equal(session.session.turnCount, 0)
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
 })
 
 test('sendAssistantMessage blocks rogue guard receipts that have no matching operation metadata file', async () => {
@@ -3901,14 +3907,17 @@ test('sendAssistantMessage keeps recovered provider sessions out of the canonica
     paths: ['vault.json'],
     providerErrorCode: 'ASSISTANT_CODEX_CONNECTION_LOST',
   })
-  assert.equal(result.session.providerSessionId, 'thread-recover-blocked-1')
+  assert.equal(
+    result.session.providerBinding?.providerSessionId,
+    'thread-recover-blocked-1',
+  )
   assert.equal(await readFile(metadataPath, 'utf8'), beforeMetadata)
 
   const session = await resolveAssistantSession({
     vault: vaultRoot,
     alias: 'chat:canonical-recoverable-error',
   })
-  assert.equal(session.session.providerSessionId, null)
+  assert.equal(session.session.providerBinding?.providerSessionId ?? null, null)
   assert.equal(session.session.turnCount, 0)
   const recovery = await readAssistantProviderRouteRecovery(
     vaultRoot,
@@ -3934,7 +3943,10 @@ test('sendAssistantMessage keeps recovered provider sessions out of the canonica
     prompt: 'Inspect the vault safely.',
   })
 
-  assert.equal(retried.session.providerSessionId, 'thread-recover-blocked-1')
+  assert.equal(
+    retried.session.providerBinding?.providerSessionId,
+    'thread-recover-blocked-1',
+  )
   assert.equal(
     serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.resumeProviderSessionId,
     'thread-recover-blocked-1',
@@ -4002,7 +4014,7 @@ test('sendAssistantMessage does not resume a failed primary Codex session on a s
   assert.equal(secondCall?.profile, 'backup')
   assert.equal(secondCall?.sandbox, 'read-only')
   assert.equal(secondCall?.resumeProviderSessionId, null)
-  assert.equal(result.session.providerSessionId, 'thread-backup-route')
+  assert.equal(result.session.providerBinding?.providerSessionId, 'thread-backup-route')
 })
 
 test('sendAssistantMessage reconstructs audited ledger appends and rolls back later shard tampering', async () => {
@@ -4367,7 +4379,10 @@ test('sendAssistantMessage does not fail over on interrupted provider errors tha
     }),
     (error: any) => {
       assert.equal(error.code, 'ASSISTANT_CODEX_INTERRUPTED')
-      assert.equal(error.context?.assistantSession?.providerSessionId, 'thread-interrupted-1')
+      assert.equal(
+        error.context?.assistantSession?.providerBinding?.providerSessionId,
+        'thread-interrupted-1',
+      )
       return true
     },
   )

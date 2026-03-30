@@ -1303,7 +1303,6 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
         schema: 'murph.assistant-session.v3',
         sessionId: 'asst_existing',
         provider: 'codex-cli',
-        providerSessionId: null,
         providerOptions: {
           model: null,
           reasoningEffort: null,
@@ -1312,6 +1311,7 @@ test('resolveAssistantSession ignores legacy aliases.json fallback state', async
           profile: null,
           oss: false,
         },
+        providerBinding: null,
         alias: 'chat:bob',
         binding: {
           conversationKey: null,
@@ -1876,6 +1876,15 @@ test('assistant session schema rejects path-like session identifiers before pers
 
   assert.equal(assistantSessionSchema.parse(valid).sessionId, 'session_safe_123')
   assert.equal(parseAssistantSessionRecord(valid).sessionId, 'session_safe_123')
+  assert.throws(
+    () =>
+      parseAssistantSessionRecord({
+        ...valid,
+        providerBinding: undefined,
+        providerSessionId: 'thread-legacy',
+      }),
+    /Unrecognized key/u,
+  )
   assert.throws(
     () =>
       assistantSessionSchema.parse({
