@@ -60,6 +60,16 @@ describe("hosted public URL helpers", () => {
 
     expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe("https://api.example.test/device-sync");
   });
+
+  it("returns null for an invalid Vercel production-domain fallback", () => {
+    const source = createProcessEnv({
+      VERCEL_PROJECT_PRODUCTION_URL: "http://www.withmurph.ai",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBeNull();
+    expect(resolveHostedPublicOrigin(source)).toBeNull();
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBeNull();
+  });
 });
 
 function createProcessEnv(values: Record<string, string>): NodeJS.ProcessEnv {

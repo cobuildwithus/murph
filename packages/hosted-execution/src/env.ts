@@ -73,7 +73,9 @@ export function readHostedExecutionWebControlPlaneEnvironment(
   source: EnvSource = process.env,
   options?: HostedExecutionBaseUrlNormalizationOptions,
 ): HostedExecutionWebControlPlaneEnvironment {
-  const sharedBaseUrl = normalizeHostedExecutionBaseUrl(source.HOSTED_WEB_BASE_URL, options);
+  const sharedBaseUrl =
+    normalizeHostedExecutionBaseUrl(source.HOSTED_WEB_BASE_URL, options)
+    ?? readHostedExecutionVercelProductionBaseUrl(source, options);
 
   return {
     deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(
@@ -89,6 +91,23 @@ export function readHostedExecutionWebControlPlaneEnvironment(
     shareToken: normalizeHostedExecutionString(source.HOSTED_SHARE_INTERNAL_TOKEN),
     usageBaseUrl: normalizeHostedExecutionBaseUrl(source.HOSTED_AI_USAGE_BASE_URL, options) ?? sharedBaseUrl,
   };
+}
+
+export function readHostedExecutionVercelProductionBaseUrl(
+  source: EnvSource = process.env,
+  options?: HostedExecutionBaseUrlNormalizationOptions,
+): string | null {
+  const productionUrl = normalizeHostedExecutionString(source.VERCEL_PROJECT_PRODUCTION_URL);
+
+  if (!productionUrl) {
+    return null;
+  }
+
+  const normalizedInput = /^[a-z][a-z\d+.-]*:\/\//iu.test(productionUrl)
+    ? productionUrl
+    : `https://${productionUrl}`;
+
+  return normalizeHostedExecutionBaseUrl(normalizedInput, options);
 }
 
 export function readHostedExecutionWorkerEnvironment(

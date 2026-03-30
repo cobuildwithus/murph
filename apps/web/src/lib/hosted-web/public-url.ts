@@ -1,4 +1,7 @@
-import { normalizeHostedExecutionBaseUrl } from "@murph/hosted-execution";
+import {
+  normalizeHostedExecutionBaseUrl,
+  readHostedExecutionVercelProductionBaseUrl,
+} from "@murph/hosted-execution";
 
 import { normalizeNullableString } from "../device-sync/shared";
 
@@ -21,7 +24,9 @@ export function readHostedPublicBaseUrl(
     normalizeConfiguredBaseUrl(source.HOSTED_ONBOARDING_PUBLIC_BASE_URL)
     ?? normalizeConfiguredBaseUrl(source.NEXT_PUBLIC_SITE_URL)
     ?? normalizeConfiguredBaseUrl(source.HOSTED_WEB_BASE_URL)
-    ?? normalizeVercelProductionBaseUrl(source.VERCEL_PROJECT_PRODUCTION_URL)
+    ?? readHostedExecutionVercelProductionBaseUrl(source, {
+      allowHttpLocalhost: true,
+    })
   );
 }
 
@@ -80,16 +85,4 @@ function normalizeConfiguredBaseUrl(value: string | null | undefined): string | 
   return normalizeHostedExecutionBaseUrl(normalized, {
     allowHttpLocalhost: true,
   });
-}
-
-function normalizeVercelProductionBaseUrl(value: string | null | undefined): string | null {
-  const normalized = normalizeNullableString(value);
-
-  if (!normalized) {
-    return null;
-  }
-
-  return normalizeConfiguredBaseUrl(
-    /^[a-z]+:\/\//iu.test(normalized) ? normalized : `https://${normalized}`,
-  );
 }

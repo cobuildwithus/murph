@@ -74,6 +74,16 @@ describe("readHostedDeviceSyncEnvironment", () => {
     expect(environment.allowedReturnOrigins).toEqual(["https://www.withmurph.ai"]);
   });
 
+  it("rejects an invalid Vercel production-domain fallback", () => {
+    expect(() =>
+      readHostedDeviceSyncEnvironment({
+        NODE_ENV: "test",
+        DEVICE_SYNC_ENCRYPTION_KEY: TEST_KEY,
+        VERCEL_PROJECT_PRODUCTION_URL: "http://www.withmurph.ai",
+      }),
+    ).toThrow(/Hosted execution base URLs must use HTTPS/u);
+  });
+
   it("preserves explicit device-sync values when a lower-priority hosted public URL is invalid", () => {
     const environment = readHostedDeviceSyncEnvironment({
       NODE_ENV: "test",
