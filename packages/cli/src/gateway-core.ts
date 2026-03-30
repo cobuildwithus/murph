@@ -65,6 +65,7 @@ export {
   gatewayConversationRouteCanSend,
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
+  gatewayConversationRouteFromOutboxIntent,
   mergeGatewayConversationRoutes,
   normalizeGatewayConversationRoute,
   resolveGatewayConversationRouteKey,

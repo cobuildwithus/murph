@@ -35,6 +35,10 @@
       "types": "./dist/gateway-core.d.ts",
       "default": "./dist/gateway-core.js"
     },
+    "./gateway-core-local": {
+      "types": "./dist/gateway-core-local.d.ts",
+      "default": "./dist/gateway-core-local.js"
+    },
     "./assistant/automation": {
       "types": "./dist/assistant/automation.d.ts",
       "default": "./dist/assistant/automation.js"

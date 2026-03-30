@@ -29,6 +29,8 @@ import {
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
 } from 'murph/assistant-core'
+import { createLocalGatewayService } from 'murph/gateway-core-local'
+import type { GatewayService } from 'murph/gateway-core'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
 
@@ -52,6 +54,7 @@ export interface AssistantLocalOpenConversationResult {
 }
 
 export interface AssistantLocalService {
+  gateway: GatewayService
   drainOutbox(input?: {
     limit?: number
     now?: string | null
@@ -127,8 +130,10 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
 
   const inboxServices = createIntegratedInboxServices()
   const vaultServices = createIntegratedVaultServices()
+  const gateway = createLocalGatewayService(vaultRoot)
 
   return {
+    gateway,
     drainOutbox: async (input) =>
       runAssistantdLocalCall(() =>
         drainAssistantOutbox({

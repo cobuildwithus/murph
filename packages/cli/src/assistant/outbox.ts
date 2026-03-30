@@ -257,6 +257,12 @@ export async function listAssistantOutboxIntents(
     return remote
   }
 
+  return listAssistantOutboxIntentsLocal(vault)
+}
+
+export async function listAssistantOutboxIntentsLocal(
+  vault: string,
+): Promise<AssistantOutboxIntent[]> {
   const paths = resolveAssistantStatePaths(vault)
   await ensureAssistantState(paths)
   const entries = await readdir(paths.outboxDirectory, {

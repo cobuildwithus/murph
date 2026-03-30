@@ -1,60 +1,69 @@
-# Gateway core surface plan
+# 2026-03-30 Gateway Core Surface
 
 ## Goal
 
-Create the smallest durable foundation for a Murph-hosted or self-hosted conversation gateway that can later expose an OpenClaw-like MCP surface without forcing local, hosted, and CLI concerns to share one transport-specific implementation.
+- Land the smallest safe step-2 extension on top of the existing `murph/gateway-core` contract freeze: a local derived read projection plus read-only `assistantd` gateway routes.
 
-## Why this first
+## Scope
 
-Murph already has most of the runtime ingredients:
+- `agent-docs/exec-plans/active/2026-03-30-gateway-core-surface.md`
+- `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`
+- `ARCHITECTURE.md`
+- `packages/cli/src/{gateway-core.ts,gateway/**,assistant/outbox.ts}`
+- `packages/cli/test/{gateway-core.test.ts,gateway-local-service.test.ts}`
+- `packages/assistantd/src/{service.ts,http.ts}`
+- `packages/assistantd/test/{assistant-core-boundary.test.ts,http.test.ts}`
 
-- inbound capture identity in `@murph/inboxd`
-- route-aware assistant bindings and outbox intents in `assistant-state/**`
-- a local daemon boundary in `@murph/assistantd`
-- a hosted execution/control-plane split across `apps/web` and `apps/cloudflare`
+## Progress Snapshot
 
-What it lacks is a transport-neutral gateway contract that all of those layers can depend on.
+- Step 1 is already landed in the live tree: `murph/gateway-core` exists as a transport-neutral contract surface.
+- This plan tracks Step 2: a local derived read projection plus read-only `assistantd` routes over that surface.
+- Step 3 remains out of scope for this turn: send/events/permissions plus hosted Cloudflare and MCP adapters.
 
-Without that contract, any direct MCP or HTTP/SSE work would couple too tightly to today's assistant session model or to the current Cloudflare one-shot runner.
+## Why This Step
 
-## Target rollout
+- Vault truth remains canonical.
+- The gateway surface should be an explicitly derived operational read model over inbox captures, assistant sessions, and sent outbox intents, not a second source of truth.
+- `assistantd` is the right local trust boundary for serving transport-facing reads without moving canonical writes out of CLI/core ownership.
 
-### Step 1 - freeze the gateway-core boundary
+## Intended Landing
 
-Land a new `murph/gateway-core` headless surface that defines:
-
-- canonical route/conversation/message/attachment/event/permission contracts
-- a `GatewayService` interface for local, hosted, and MCP adapters
-- route normalization helpers that translate existing assistant bindings and inbox captures into the new gateway route model
-
-This step should stay behavior-neutral: no daemon routes, no hosted projection changes, and no MCP server yet.
-
-### Step 2 - add a local read projection and assistantd gateway API
-
-Build a read-first local implementation over the current Murph substrate:
-
-- derive conversations from inbox captures plus assistant session bindings
-- expose read-only conversation/message/attachment operations through `assistantd`
-- keep `sessionKey` opaque to transport clients even if the local implementation initially maps it to current runtime ids internally
-
-This is the first step that should make the new surface useful to external clients.
-
-### Step 3 - add send/events plus hosted/MCP adapters
-
-Finish parity with the intended OpenClaw-like surface:
-
-- route-bound `messages_send`
-- short-retained event cursor feed for `events_poll` / `events_wait`
-- permission queue plumbing
-- hosted projection/hot path in Cloudflare rather than rehydrating the full workspace on every read
-- local stdio plus remote HTTP/SSE MCP adapters on top of the same `GatewayService`
+- Add opaque transport-facing conversation, message, and attachment ids derived from stable route keys.
+- Add a local read model derived from inbox captures, assistant session bindings, and sent outbox intents.
+- Add read-only `assistantd` routes for conversation list/get, message read, and attachment fetch.
+- Keep events, permissions, and send behavior as explicit follow-up work rather than speculative partial implementations.
 
 ## Constraints
 
-- Keep canonical health truth in the vault and out of gateway contracts.
-- Treat the gateway plane as operational state, not canonical health memory.
-- Keep the new surface transport-neutral so local daemon, self-hosted server, and Murph-managed hosted deployments can share the same core.
-- Prefer additive scaffolding in this patch; larger storage moves can happen in later steps once the interface is stable.
+- Preserve unrelated dirty worktree edits and overlapping active lanes.
+- Treat the supplied patch as behavioral intent rather than blindly applying it to the live tree.
+- Keep the gateway plane derived and operational only; do not introduce new canonical persistence.
+
+## Plan
+
+1. Restore the missing step-2 plan file and update the coordination ledger row to reflect the real scope.
+2. Port the gateway local-service, opaque-id helpers, and route helpers onto the current `packages/cli` step-1 surface.
+3. Wire `assistantd` to the new local gateway service and expose only the read-only routes.
+4. Add focused regression coverage for the projection behavior and the daemon HTTP boundary.
+5. Run required verification, then the mandatory simplify and task-finish-review audit passes.
+
+## Verification
+
+- Passed: `pnpm --dir packages/cli build`
+- Passed: `pnpm --dir packages/assistantd build`
+- Passed: `pnpm --dir packages/cli exec vitest --run test/gateway-core.test.ts test/gateway-local-service.test.ts --coverage.enabled=false`
+- Passed: `pnpm --dir packages/assistantd exec vitest --run test/assistant-core-boundary.test.ts test/http.test.ts --coverage.enabled=false`
+- Passed: direct `tsx` scenario that created a temp vault, ingested one Telegram capture, and observed one derived gateway conversation with `title: "Scenario thread"`, `canSend: true`, and `channel: "telegram"`.
+- Failed outside this landing: `pnpm typecheck`
+  - Existing failure in `packages/cli/test/cli-expansion-inbox-attachments.test.ts` complaining that an `attachments` property is not allowed on the current helper input type.
+- Failed outside this landing: `pnpm test`
+  - Existing failures reached in `packages/cli/test/inbox-cli.test.ts` for parser queue control/requeue coverage.
+- `pnpm test:coverage` was already noisy on the same inbox-cli lane during repo-wide runs; no gateway- or assistantd-scoped failure surfaced before that unrelated break.
+
+## Outcome
+
+- Landed the step-2 local projection, opaque ids, and read-only assistantd routes while keeping `murph/gateway-core` contract-only and moving the local implementation to `murph/gateway-core-local`.
+- Required spawned simplify/task-finish-review audit passes could not be executed because the current environment does not expose the subagent tool required by repo policy.
 Status: completed
 Updated: 2026-03-30
 Completed: 2026-03-30

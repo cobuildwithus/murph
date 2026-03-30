@@ -10,6 +10,7 @@ import {
   gatewayConversationRouteCanSend,
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
+  gatewayConversationRouteFromOutboxIntent,
   gatewayReadMessagesInputSchema,
   mergeGatewayConversationRoutes,
   resolveGatewayConversationRouteKey,
@@ -28,6 +29,10 @@ test('murph publishes gateway-core for headless conversation gateway consumers',
     default: './dist/gateway-core.js',
     types: './dist/gateway-core.d.ts',
   })
+  assert.deepEqual(packageManifest.exports['./gateway-core-local'], {
+    default: './dist/gateway-core-local.js',
+    types: './dist/gateway-core-local.d.ts',
+  })
 })
 
 test('workspace source resolution knows about murph/gateway-core', async () => {
@@ -41,6 +46,9 @@ test('workspace source resolution knows about murph/gateway-core', async () => {
 
   assert.deepEqual(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], [
     'packages/cli/src/gateway-core.ts',
+  ])
+  assert.deepEqual(tsconfig.compilerOptions?.paths?.['murph/gateway-core-local'], [
+    'packages/cli/src/gateway-core-local.ts',
   ])
 })
 
@@ -73,6 +81,36 @@ test('gateway conversation routes normalize existing assistant bindings without 
     'channel:email|identity:murph%40example.com|thread:thread-123',
   )
   assert.equal(gatewayConversationRouteCanSend(route), true)
+})
+
+test('gateway conversation routes normalize sent outbox intents into the same stable route key', () => {
+  const route = gatewayConversationRouteFromOutboxIntent({
+    actorId: 'contact:alex',
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'thread-123',
+    },
+    channel: 'email',
+    identityId: 'murph@example.com',
+    threadId: 'thread-123',
+    threadIsDirect: false,
+  })
+
+  assert.deepEqual(route, {
+    channel: 'email',
+    directness: 'group',
+    identityId: 'murph@example.com',
+    participantId: 'contact:alex',
+    reply: {
+      kind: 'thread',
+      target: 'thread-123',
+    },
+    threadId: 'thread-123',
+  })
+  assert.equal(
+    resolveGatewayConversationRouteKey(route),
+    'channel:email|identity:murph%40example.com|thread:thread-123',
+  )
 })
 
 test('gateway conversation routes reuse inbox capture identity normalization rules', () => {
