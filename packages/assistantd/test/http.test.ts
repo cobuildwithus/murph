@@ -577,6 +577,192 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   }
 })
 
+test('assistantd http server preserves typed assistant error codes for invalid ids and missing cron jobs', async () => {
+  const getOutboxIntent = vi.fn(async () => TEST_OUTBOX_INTENT as any)
+  const service = {
+    drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
+    getCronJob: async () => {
+      throw Object.assign(new Error('Assistant cron job "missing-job" was not found.'), {
+        code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
+      })
+    },
+    getCronStatus: async () => ({
+      totalJobs: 0,
+      enabledJobs: 0,
+      dueJobs: 0,
+      runningJobs: 0,
+      nextRunAt: null,
+    } as any),
+    getOutboxIntent,
+    getSession: async () => TEST_SESSION as any,
+    health: async () => ({
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      ok: true,
+      pid: 1234,
+      vaultBound: true,
+    }),
+    getStatus: async () => ({
+      vault: '/tmp/vault',
+      stateRoot: '/tmp/assistant-state',
+      statusPath: '/tmp/assistant-state/status.json',
+      outboxRoot: '/tmp/assistant-state/outbox',
+      diagnosticsPath: '/tmp/assistant-state/diagnostics.snapshot.json',
+      failoverStatePath: '/tmp/assistant-state/failover.json',
+      turnsRoot: '/tmp/assistant-state/turns',
+      generatedAt: '2026-03-28T00:00:00.000Z',
+      runLock: {
+        state: 'unlocked',
+        pid: null,
+        startedAt: null,
+        mode: null,
+        command: null,
+        reason: null,
+      },
+      automation: {
+        inboxScanCursor: null,
+        autoReplyScanCursor: null,
+        autoReplyChannels: [],
+        preferredChannels: [],
+        autoReplyBacklogChannels: [],
+        autoReplyPrimed: false,
+        updatedAt: '2026-03-28T00:00:00.000Z',
+      },
+      outbox: {
+        total: 0,
+        pending: 0,
+        sending: 0,
+        retryable: 0,
+        sent: 0,
+        failed: 0,
+        abandoned: 0,
+        oldestPendingAt: null,
+        nextAttemptAt: null,
+      },
+      diagnostics: {
+        schema: 'murph.assistant-diagnostics.v1',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+        lastEventAt: null,
+        lastErrorAt: null,
+        counters: {
+          turnsStarted: 0,
+          turnsCompleted: 0,
+          turnsDeferred: 0,
+          turnsFailed: 0,
+          providerAttempts: 0,
+          providerFailures: 0,
+          providerFailovers: 0,
+          deliveriesQueued: 0,
+          deliveriesSent: 0,
+          deliveriesFailed: 0,
+          deliveriesRetryable: 0,
+          outboxDrains: 0,
+          outboxRetries: 0,
+          automationScans: 0,
+        },
+        recentWarnings: [],
+      },
+      failover: {
+        schema: 'murph.assistant-failover-state.v1',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+        routes: [],
+      },
+      quarantine: {
+        total: 0,
+        byKind: {},
+        recent: [],
+      },
+      runtimeBudget: {
+        schema: 'murph.assistant-runtime-budget.v1',
+        updatedAt: '2026-03-28T00:00:00.000Z',
+        caches: [],
+        maintenance: {
+          lastRunAt: null,
+          staleProviderRecoveryPruned: 0,
+          staleQuarantinePruned: 0,
+          staleLocksCleared: 0,
+          notes: [],
+        },
+      },
+      recentTurns: [],
+      warnings: [],
+    } as any),
+    listCronJobs: async () => [],
+    listCronRuns: async () => ({ jobId: TEST_CRON_JOB.jobId, runs: [] }),
+    listOutbox: async () => [],
+    listSessions: async () => [TEST_SESSION as any],
+    openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
+    processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    runAutomationOnce: async () => ({
+      vault: '/tmp/vault',
+      startedAt: '2026-03-28T00:00:00.000Z',
+      stoppedAt: '2026-03-28T00:00:00.000Z',
+      reason: 'completed',
+      daemonStarted: false,
+      scans: 0,
+      considered: 0,
+      routed: 0,
+      noAction: 0,
+      skipped: 0,
+      failed: 0,
+      replyConsidered: 0,
+      replied: 0,
+      replySkipped: 0,
+      replyFailed: 0,
+      lastError: null,
+    } as any),
+    sendMessage: async () => ({
+      vault: '/tmp/vault',
+      status: 'completed',
+      prompt: 'noop',
+      response: 'noop',
+      session: TEST_SESSION,
+      delivery: null,
+      deliveryDeferred: false,
+      deliveryIntentId: null,
+      deliveryError: null,
+      blocked: null,
+    } as any),
+    updateSessionOptions: async () => TEST_SESSION as any,
+    vault: '/tmp/vault',
+  } as AssistantLocalService
+
+  const handle = await startAssistantHttpServer({
+    controlToken: 'secret-token',
+    host: '127.0.0.1',
+    port: 0,
+    service,
+  })
+
+  try {
+    const invalidOutbox = await fetch(
+      `${handle.address.baseUrl}/outbox/${encodeURIComponent('../escape')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(invalidOutbox.status, 400)
+    const invalidOutboxPayload = await invalidOutbox.json() as { code?: string }
+    assert.equal(invalidOutboxPayload.code, 'ASSISTANT_INVALID_RUNTIME_ID')
+    assert.equal(getOutboxIntent.mock.calls.length, 0)
+
+    const missingCron = await fetch(
+      `${handle.address.baseUrl}/cron/jobs/${encodeURIComponent('missing-job')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(missingCron.status, 404)
+    const missingCronPayload = await missingCron.json() as { code?: string }
+    assert.equal(missingCronPayload.code, 'ASSISTANT_CRON_JOB_NOT_FOUND')
+  } finally {
+    await handle.close()
+  }
+})
+
 test('assistantd http server does not reflect raw internal errors back to the client', async () => {
   const service = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),

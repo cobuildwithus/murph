@@ -30,6 +30,8 @@ import {
   type RunAssistantAutomationInput,
 } from 'murph/assistant-core'
 
+const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
+
 export interface AssistantLocalAutomationRunInput {
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: RunAssistantAutomationInput['deliveryDispatchMode']
@@ -121,35 +123,47 @@ export interface AssistantLocalService {
 }
 
 export function createAssistantLocalService(vaultRoot: string): AssistantLocalService {
+  ensureAssistantDaemonClientDisabled()
+
   const inboxServices = createIntegratedInboxServices()
   const vaultServices = createIntegratedVaultServices()
 
   return {
     drainOutbox: async (input) =>
-      drainAssistantOutbox({
-        limit:
-          typeof input?.limit === 'number' && Number.isFinite(input.limit)
-            ? Math.trunc(input.limit)
-            : undefined,
-        now: input?.now ? new Date(input.now) : undefined,
-        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
-      }),
+      runAssistantdLocalCall(() =>
+        drainAssistantOutbox({
+          limit:
+            typeof input?.limit === 'number' && Number.isFinite(input.limit)
+              ? Math.trunc(input.limit)
+              : undefined,
+          now: input?.now ? new Date(input.now) : undefined,
+          vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+        }),
+      ),
     getCronJob: (input) =>
-      getAssistantCronJob(
-        resolveAssistantdRequestVault(input.vault, vaultRoot),
-        input.job,
+      runAssistantdLocalCall(() =>
+        getAssistantCronJob(
+          resolveAssistantdRequestVault(input.vault, vaultRoot),
+          input.job,
+        ),
       ),
     getCronStatus: (input) =>
-      getAssistantCronStatus(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      runAssistantdLocalCall(() =>
+        getAssistantCronStatus(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      ),
     getOutboxIntent: (input) =>
-      readAssistantOutboxIntent(
-        resolveAssistantdRequestVault(input.vault, vaultRoot),
-        input.intentId,
+      runAssistantdLocalCall(() =>
+        readAssistantOutboxIntent(
+          resolveAssistantdRequestVault(input.vault, vaultRoot),
+          input.intentId,
+        ),
       ),
     getSession: (input) =>
-      getAssistantSession(
-        resolveAssistantdRequestVault(input.vault, vaultRoot),
-        input.sessionId,
+      runAssistantdLocalCall(() =>
+        getAssistantSession(
+          resolveAssistantdRequestVault(input.vault, vaultRoot),
+          input.sessionId,
+        ),
       ),
     health: async () => ({
       generatedAt: new Date().toISOString(),
@@ -158,76 +172,106 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
       vaultBound: true,
     }),
     getStatus: (input) =>
-      getAssistantStatus({
-        limit:
-          typeof input?.limit === 'number' && Number.isFinite(input.limit)
-            ? Math.trunc(input.limit)
-            : undefined,
-        sessionId: input?.sessionId ?? null,
-        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
-      }),
+      runAssistantdLocalCall(() =>
+        getAssistantStatus({
+          limit:
+            typeof input?.limit === 'number' && Number.isFinite(input.limit)
+              ? Math.trunc(input.limit)
+              : undefined,
+          sessionId: input?.sessionId ?? null,
+          vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+        }),
+      ),
     listSessions: (input) =>
-      listAssistantSessions(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      runAssistantdLocalCall(() =>
+        listAssistantSessions(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      ),
     listCronJobs: (input) =>
-      listAssistantCronJobs(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      runAssistantdLocalCall(() =>
+        listAssistantCronJobs(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      ),
     listCronRuns: (input) =>
-      listAssistantCronRuns({
-        job: input.job,
-        limit:
-          typeof input.limit === 'number' && Number.isFinite(input.limit)
-            ? Math.trunc(input.limit)
-            : undefined,
-        vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-      }),
+      runAssistantdLocalCall(() =>
+        listAssistantCronRuns({
+          job: input.job,
+          limit:
+            typeof input.limit === 'number' && Number.isFinite(input.limit)
+              ? Math.trunc(input.limit)
+              : undefined,
+          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
+        }),
+      ),
     listOutbox: (input) =>
-      listAssistantOutboxIntents(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
-    openConversation: async (input) => {
-      const resolved = await openAssistantConversation({
-        ...input,
-        vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-      })
-      return {
-        created: resolved.created,
-        session: resolved.session,
-      }
-    },
+      runAssistantdLocalCall(() =>
+        listAssistantOutboxIntents(resolveAssistantdRequestVault(input?.vault, vaultRoot)),
+      ),
+    openConversation: async (input) =>
+      runAssistantdLocalCall(async () => {
+        const resolved = await openAssistantConversation({
+          ...input,
+          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
+        })
+        return {
+          created: resolved.created,
+          session: resolved.session,
+        }
+      }),
     processDueCron: (input) =>
-      processDueAssistantCronJobs({
-        deliveryDispatchMode: input?.deliveryDispatchMode,
-        limit:
-          typeof input?.limit === 'number' && Number.isFinite(input.limit)
-            ? Math.trunc(input.limit)
-            : undefined,
-        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
-      }),
+      runAssistantdLocalCall(() =>
+        processDueAssistantCronJobs({
+          deliveryDispatchMode: input?.deliveryDispatchMode,
+          limit:
+            typeof input?.limit === 'number' && Number.isFinite(input.limit)
+              ? Math.trunc(input.limit)
+              : undefined,
+          vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+        }),
+      ),
     runAutomationOnce: (input) =>
-      runAssistantAutomation({
-        allowSelfAuthored: input?.allowSelfAuthored,
-        deliveryDispatchMode: input?.deliveryDispatchMode,
-        drainOutbox: input?.drainOutbox,
-        inboxServices,
-        maxPerScan: input?.maxPerScan,
-        modelSpec: input?.modelSpec,
-        once: input?.once ?? true,
-        requestId: input?.requestId ?? null,
-        scanIntervalMs: input?.scanIntervalMs,
-        sessionMaxAgeMs: input?.sessionMaxAgeMs ?? null,
-        startDaemon: input?.startDaemon ?? false,
-        vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
-        vaultServices,
-      }),
+      runAssistantdLocalCall(() =>
+        runAssistantAutomation({
+          allowSelfAuthored: input?.allowSelfAuthored,
+          deliveryDispatchMode: input?.deliveryDispatchMode,
+          drainOutbox: input?.drainOutbox,
+          inboxServices,
+          maxPerScan: input?.maxPerScan,
+          modelSpec: input?.modelSpec,
+          once: input?.once ?? true,
+          requestId: input?.requestId ?? null,
+          scanIntervalMs: input?.scanIntervalMs,
+          sessionMaxAgeMs: input?.sessionMaxAgeMs ?? null,
+          startDaemon: input?.startDaemon ?? false,
+          vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+          vaultServices,
+        }),
+      ),
     sendMessage: (input) =>
-      sendAssistantMessage({
-        ...input,
-        vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-      }),
+      runAssistantdLocalCall(() =>
+        sendAssistantMessage({
+          ...input,
+          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
+        }),
+      ),
     updateSessionOptions: (input) =>
-      updateAssistantSessionOptions({
-        ...input,
-        vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
-      }),
+      runAssistantdLocalCall(() =>
+        updateAssistantSessionOptions({
+          ...input,
+          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
+        }),
+      ),
     vault: vaultRoot,
   }
+}
+
+function ensureAssistantDaemonClientDisabled(): void {
+  process.env[ASSISTANTD_DISABLE_CLIENT_ENV] = '1'
+}
+
+function runAssistantdLocalCall<T>(action: () => Promise<T>): Promise<T>
+function runAssistantdLocalCall<T>(action: () => T): T
+function runAssistantdLocalCall<T>(action: () => Promise<T> | T): Promise<T> | T {
+  ensureAssistantDaemonClientDisabled()
+  return action()
 }
 
 function resolveAssistantdRequestVault(
