@@ -111,7 +111,7 @@ export function ensureHostedEmailReplySubject(
 }
 
 export function normalizeHostedEmailAddress(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
+  const normalized = normalizeHostedEmailOptionalText(value);
   if (!normalized) {
     return null;
   }
@@ -226,16 +226,18 @@ function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined)
 }
 
 export function normalizeHostedEmailMessageId(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
+  return normalizeHostedEmailOptionalText(value);
 }
 
 export function normalizeHostedEmailRouteKey(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized : null;
+  return normalizeHostedEmailOptionalText(value);
 }
 
 export function normalizeHostedEmailSubject(value: string | null | undefined): string | null {
+  return normalizeHostedEmailOptionalText(value);
+}
+
+function normalizeHostedEmailOptionalText(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
 }
