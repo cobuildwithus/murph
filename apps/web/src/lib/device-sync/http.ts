@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 
 import {
   createJsonErrorResponse,
+  type JsonErrorMatcher,
 } from "../http";
 
 export { jsonOk, readJsonObject, readOptionalJsonObject, readRawBodyBuffer, resolveRouteParams } from "../http";
@@ -15,7 +16,7 @@ export function jsonError(error: unknown): NextResponse {
   return createJsonErrorResponse(error, {
     internalMessage: "Hosted device-sync route failed unexpectedly.",
     logMessage: "Hosted device-sync route failed.",
-    matchers: [mapDeviceSyncError],
+    matchers: [matchDeviceSyncError],
   });
 }
 
@@ -51,20 +52,29 @@ export function redirectTo(url: string): NextResponse {
   return NextResponse.redirect(url, { status: 302 });
 }
 
+function updateCallbackRedirect(
+  returnTo: string | null,
+  mutate: (destination: URL) => void,
+): NextResponse | null {
+  if (!returnTo) {
+    return null;
+  }
+
+  const destination = new URL(returnTo);
+  mutate(destination);
+  return redirectTo(destination.toString());
+}
+
 export function providerCallbackRedirect(input: {
   returnTo: string | null;
   provider: string;
   connectionId: string;
 }): NextResponse | null {
-  if (!input.returnTo) {
-    return null;
-  }
-
-  const destination = new URL(input.returnTo);
-  destination.searchParams.set("deviceSyncStatus", "connected");
-  destination.searchParams.set("deviceSyncProvider", input.provider);
-  destination.searchParams.set("deviceSyncConnectionId", input.connectionId);
-  return redirectTo(destination.toString());
+  return updateCallbackRedirect(input.returnTo, (destination) => {
+    destination.searchParams.set("deviceSyncStatus", "connected");
+    destination.searchParams.set("deviceSyncProvider", input.provider);
+    destination.searchParams.set("deviceSyncConnectionId", input.connectionId);
+  });
 }
 
 export function errorToCallbackRedirect(input: {
@@ -72,16 +82,12 @@ export function errorToCallbackRedirect(input: {
   provider: string;
   error: DeviceSyncError;
 }): NextResponse | null {
-  if (!input.returnTo) {
-    return null;
-  }
-
-  const destination = new URL(input.returnTo);
-  destination.searchParams.delete("deviceSyncErrorMessage");
-  destination.searchParams.set("deviceSyncStatus", "error");
-  destination.searchParams.set("deviceSyncProvider", input.provider);
-  destination.searchParams.set("deviceSyncError", input.error.code);
-  return redirectTo(destination.toString());
+  return updateCallbackRedirect(input.returnTo, (destination) => {
+    destination.searchParams.delete("deviceSyncErrorMessage");
+    destination.searchParams.set("deviceSyncStatus", "error");
+    destination.searchParams.set("deviceSyncProvider", input.provider);
+    destination.searchParams.set("deviceSyncError", input.error.code);
+  });
 }
 
 function escapeHtml(value: string): string {
@@ -93,7 +99,7 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function mapDeviceSyncError(error: unknown) {
+const matchDeviceSyncError: JsonErrorMatcher = (error) => {
   if (!isDeviceSyncError(error)) {
     return null;
   }
@@ -102,4 +108,4 @@ function mapDeviceSyncError(error: unknown) {
     error: buildPublicDeviceSyncErrorPayload(error).error,
     status: error.httpStatus,
   };
-}
+};

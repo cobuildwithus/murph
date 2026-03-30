@@ -216,6 +216,28 @@ describe("device sync callback redirect helpers", () => {
     expect(html).not.toContain("Connection details: &amp;lt;ok&amp;gt;");
   });
 
+  it("adds connected callback params while preserving existing query state", () => {
+    const response = httpModule.providerCallbackRedirect({
+      returnTo: "https://app.example.test/settings/devices?tab=wearables",
+      provider: "demo",
+      connectionId: "conn_123",
+    });
+
+    expect(response).not.toBeNull();
+
+    const location = response?.headers.get("location");
+
+    expect(location).toBeTruthy();
+
+    const destination = new URL(location!);
+    expect(destination.origin).toBe("https://app.example.test");
+    expect(destination.pathname).toBe("/settings/devices");
+    expect(destination.searchParams.get("tab")).toBe("wearables");
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
+    expect(destination.searchParams.get("deviceSyncProvider")).toBe("demo");
+    expect(destination.searchParams.get("deviceSyncConnectionId")).toBe("conn_123");
+  });
+
   it("keeps raw callback error text out of redirect query params", () => {
     const response = httpModule.errorToCallbackRedirect({
       returnTo: "https://app.example.test/settings/devices?tab=wearables",
