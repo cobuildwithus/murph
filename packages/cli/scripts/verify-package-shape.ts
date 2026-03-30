@@ -105,6 +105,14 @@ assert(
   'package.json must publish assistant-core types from dist/assistant-core.d.ts.',
 )
 assert(
+  packageJson.exports?.['./gateway-core']?.default === './dist/gateway-core.js',
+  'package.json must publish the gateway-core headless surface from dist/gateway-core.js.',
+)
+assert(
+  packageJson.exports?.['./gateway-core']?.types === './dist/gateway-core.d.ts',
+  'package.json must publish gateway-core types from dist/gateway-core.d.ts.',
+)
+assert(
   packageJson.exports?.['./vault-services']?.default === './dist/vault-services.js',
   'package.json must publish the neutral vault-services surface from dist/vault-services.js.',
 )
