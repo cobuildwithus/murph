@@ -59,6 +59,9 @@ importers:
       '@murph/runtime-state':
         specifier: workspace:*
         version: link:../../packages/runtime-state
+      murph:
+        specifier: workspace:*
+        version: link:../../packages/cli
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.13.4
