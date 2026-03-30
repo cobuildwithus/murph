@@ -1,5 +1,4 @@
 import {
-  deriveWorkoutFormatCompatibilityId,
   type ActivityStrengthExercise,
 } from "@murph/contracts";
 
@@ -178,19 +177,17 @@ function parseWorkoutFormatRecord(
     schemaVersion: WORKOUT_FORMAT_SCHEMA_VERSION,
     docType: WORKOUT_FORMAT_DOC_TYPE,
     slug,
-    workoutFormatId:
-      optionalString(attributes.workoutFormatId, "workoutFormatId", 64)
-      ?? deriveWorkoutFormatCompatibilityId(slug),
+    workoutFormatId: requireString(attributes.workoutFormatId, "workoutFormatId", 64),
     title: requireString(attributes.title, "title", 160),
     status: normalizeWorkoutFormatStatus(attributes.status),
     summary: optionalString(attributes.summary, "summary", 4000),
-    activityType: normalizeWorkoutActivityType(attributes.activityType ?? attributes.type),
+    activityType: normalizeWorkoutActivityType(attributes.activityType),
     durationMinutes: optionalInteger(attributes.durationMinutes, "durationMinutes", 1, 24 * 60),
     distanceKm: optionalFiniteNumber(attributes.distanceKm, "distanceKm", 0, 1_000),
     strengthExercises: normalizeStrengthExercises(attributes.strengthExercises),
     tags: normalizeDomainList(attributes.tags, "tags"),
     note: optionalString(attributes.note, "note", 4000),
-    templateText: optionalString(attributes.templateText ?? attributes.text, "templateText", 4000),
+    templateText: optionalString(attributes.templateText, "templateText", 4000),
     relativePath,
     markdown,
   });

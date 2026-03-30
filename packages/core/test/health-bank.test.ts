@@ -1059,7 +1059,7 @@ test("workout formats use first-class markdown registry reads for repeated sessi
   );
 });
 
-test("legacy workout formats without first-class ids stay readable by slug with a stable compatibility id", async () => {
+test("workout formats require first-class ids and fields", async () => {
   const vaultRoot = await makeTempDirectory("murph-legacy-workout-format");
   await initializeVault({ vaultRoot });
 
@@ -1071,31 +1071,34 @@ docType: workout_format
 slug: garage-day
 title: Garage Day
 status: active
-type: strength-training
+activityType: strength-training
 durationMinutes: 40
-text: Garage day template.
+templateText: Garage day template.
 ---
 # Garage Day
 `,
     "utf8",
   );
 
-  const firstRead = await readWorkoutFormat({
-    vaultRoot,
-    slug: "garage-day",
-  });
-  const secondRead = await readWorkoutFormat({
-    vaultRoot,
-    slug: "garage-day",
-  });
-  const listed = await listWorkoutFormats(vaultRoot);
+  await assert.rejects(
+    () =>
+      readWorkoutFormat({
+        vaultRoot,
+        slug: "garage-day",
+      }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "workoutFormatId is required.",
+  );
 
-  assert.equal(firstRead.slug, "garage-day");
-  assert.equal(firstRead.activityType, "strength-training");
-  assert.equal(firstRead.durationMinutes, 40);
-  assert.equal(firstRead.workoutFormatId, secondRead.workoutFormatId);
-  assert.equal(firstRead.workoutFormatId, listed[0]?.workoutFormatId);
-  assert.match(firstRead.workoutFormatId, /^wfmt_[0-9A-HJKMNP-TV-Z]{26}$/u);
+  await assert.rejects(
+    () => listWorkoutFormats(vaultRoot),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "workoutFormatId is required.",
+  );
 });
 
 test("conditions and allergies are stored as deterministic markdown registry pages", async () => {
