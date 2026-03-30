@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-03-30 (assistant headless-boundary docs remain aligned around direct `murph/assistant-core` consumers, completion prompts now request downloadable patch-file output, and the process docs now clarify index-exempt exec-plan churn plus the lighter ledger-first supplied-patch workflow)
+Last verified: 2026-03-30 (assistant headless-boundary docs remain aligned around direct `murph/assistant-core` consumers, completion prompts now request downloadable patch-file output, and the durable process docs now clarify index-exempt exec-plan churn plus the lighter ledger-first supplied-patch workflow)
 
 ## Purpose
 

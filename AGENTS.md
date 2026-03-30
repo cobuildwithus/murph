@@ -61,7 +61,8 @@ If instructions still conflict after applying this order, ask the user before ac
 - Keep files under roughly 500 lines when practical; only introduce or preserve larger files when there is a clear reason they need to stay that large.
 - Prefer narrow ledger rows and symbol claims. If you need temporary exclusive control of a file or symbol cluster, say so explicitly in the row notes and explain why overlap is unsafe.
 - If architecture-significant behavior changes, update matching docs in `agent-docs/` and `ARCHITECTURE.md`.
-- For multi-file or high-risk work, add an execution plan in `agent-docs/exec-plans/active/`.
+- For multi-file or high-risk work, add an execution plan in `agent-docs/exec-plans/active/`. Narrow user-supplied patch landings may stay ledger-only while the work remains bounded, low-design, and single-turn.
+- For user-supplied patches or externally prepared diffs, treat the patch as intent rather than as authority to overwrite the live tree. Read the current file state first, preserve overlapping edits, land the smallest behavioral delta that satisfies the patch, and open a dedicated plan before continuing if the work expands into broader design or refactor decisions.
 - When the first real app/service/tooling modules land, update the verification docs and package scripts in the same change so the harness stays truthful.
 
 ## Commit and Handoff
@@ -88,4 +89,4 @@ If instructions still conflict after applying this order, ask the user before ac
 
 ## Notes
 
-- `agent-docs/index.md` is the canonical docs map. Update it whenever docs move or change.
+- `agent-docs/index.md` is the canonical docs map for durable docs. Update it when durable docs move or change; execution-plan churn under `agent-docs/exec-plans/**` and coordination-ledger-only updates do not require index edits.
