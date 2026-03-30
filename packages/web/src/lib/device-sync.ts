@@ -219,6 +219,16 @@ export async function disconnectDeviceAccount(input: {
   );
 }
 
+const INVALID_RETURN_TO_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
+
+function isSafeRootRelativeReturnTo(candidate: string | null | undefined): candidate is string {
+  return typeof candidate === "string"
+    && candidate.startsWith("/")
+    && !candidate.startsWith("//")
+    && !candidate.includes("\\")
+    && !INVALID_RETURN_TO_CHARACTER_PATTERN.test(candidate);
+}
+
 function resolveDeviceSyncControlPlane(
   env: NodeJS.ProcessEnv = process.env,
 ): {
@@ -248,12 +258,13 @@ function resolveDeviceSyncControlPlane(
 
 export function buildWebReturnTo(requestUrl: URL, fallbackPath = "/"): string {
   const candidate = requestUrl.searchParams.get("returnTo");
+  const relativePath = isSafeRootRelativeReturnTo(candidate)
+    ? candidate
+    : isSafeRootRelativeReturnTo(fallbackPath)
+      ? fallbackPath
+      : "/";
 
-  if (candidate && candidate.startsWith("/")) {
-    return new URL(candidate, requestUrl.origin).toString();
-  }
-
-  return new URL(fallbackPath, requestUrl.origin).toString();
+  return new URL(relativePath, requestUrl.origin).toString();
 }
 
 function createDeviceSyncJsonRequester(

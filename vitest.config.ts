@@ -43,6 +43,7 @@ export default defineConfig({
       "packages/device-syncd/test/config.test.ts",
       "packages/device-syncd/test/http.test.ts",
       "packages/device-syncd/test/oura-provider.test.ts",
+      "packages/device-syncd/test/public-ingress.test.ts",
       "packages/device-syncd/test/oura-webhooks.test.ts",
       "packages/device-syncd/test/service.test.ts",
       "packages/device-syncd/test/shared-ids.test.ts",

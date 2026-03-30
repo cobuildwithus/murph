@@ -133,6 +133,19 @@ export function normalizeOriginList(values: readonly string[] | null | undefined
   return [...new Set(values.map((value) => normalizeOrigin(value)).filter(Boolean))];
 }
 
+const INVALID_URL_VALUE_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
+
+function isSafeRootRelativeUrlPath(value: string): boolean {
+  return value.startsWith("/")
+    && !value.startsWith("//")
+    && !value.includes("\\")
+    && !INVALID_URL_VALUE_CHARACTER_PATTERN.test(value);
+}
+
+function hasEmbeddedUrlCredentials(value: URL): boolean {
+  return value.username.length > 0 || value.password.length > 0;
+}
+
 export function resolveRelativeOrAllowedOriginUrl(
   candidate: string | null | undefined,
   publicBaseUrl: string,
@@ -140,13 +153,13 @@ export function resolveRelativeOrAllowedOriginUrl(
 ): string | null {
   const normalized = normalizeString(candidate);
 
-  if (!normalized) {
+  if (!normalized || INVALID_URL_VALUE_CHARACTER_PATTERN.test(normalized)) {
     return null;
   }
 
   const base = new URL(normalizePublicBaseUrl(publicBaseUrl));
 
-  if (normalized.startsWith("/")) {
+  if (isSafeRootRelativeUrlPath(normalized)) {
     return new URL(normalized, base).toString();
   }
 
@@ -154,7 +167,7 @@ export function resolveRelativeOrAllowedOriginUrl(
     const resolved = new URL(normalized);
     const allowed = new Set([base.origin, ...normalizeOriginList(allowedOrigins)]);
 
-    if (!allowed.has(resolved.origin)) {
+    if (!allowed.has(resolved.origin) || hasEmbeddedUrlCredentials(resolved)) {
       return null;
     }
 
