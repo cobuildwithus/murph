@@ -3,8 +3,6 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  HEALTH_HISTORY_KINDS,
-  collapseEventLedgerEntities,
   compareCanonicalEntities,
   linkTargetIds,
   normalizeCanonicalDate,
@@ -17,6 +15,10 @@ import {
   type CanonicalEntityFamily,
   type CanonicalRecordClass,
 } from "./canonical-entities.ts";
+import {
+  HEALTH_HISTORY_KINDS,
+  collapseEventLedgerEntities,
+} from "./health/projectors/history.ts";
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";

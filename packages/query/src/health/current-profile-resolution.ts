@@ -1,9 +1,9 @@
 import {
-  fallbackCurrentProfileEntity,
   normalizeCanonicalDate,
   resolveCanonicalRecordClass,
   type CanonicalEntity,
 } from "../canonical-entities.ts";
+import { fallbackCurrentProfileEntity } from "./projectors/profile.ts";
 
 export interface CurrentProfileSnapshotSortFields {
   snapshotId: string;

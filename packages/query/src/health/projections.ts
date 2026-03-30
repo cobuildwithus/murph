@@ -1,12 +1,19 @@
 import {
-  HEALTH_HISTORY_KINDS,
-  extractProfileSummary,
-  projectAssessmentEntity,
-  projectCurrentProfileEntity,
-  projectHistoryEntity,
-  projectProfileSnapshotEntity,
+  type HealthHistoryEventKind,
+} from "@murph/contracts";
+import {
   type CanonicalEntity,
 } from "../canonical-entities.ts";
+import { projectAssessmentEntity } from "./projectors/assessment.ts";
+import {
+  HEALTH_HISTORY_KINDS,
+  projectHistoryEntity,
+} from "./projectors/history.ts";
+import {
+  extractProfileSummary,
+  projectCurrentProfileEntity,
+  projectProfileSnapshotEntity,
+} from "./projectors/profile.ts";
 import { compareByOccurredAtDescThenId, compareByRecordedOrImportedAtDescThenId } from "./comparators.ts";
 import {
   compareCurrentProfileSnapshotRecency,
@@ -45,12 +52,7 @@ export interface AssessmentListOptions {
   limit?: number;
 }
 
-export type HealthHistoryKind =
-  | "encounter"
-  | "procedure"
-  | "test"
-  | "adverse_effect"
-  | "exposure";
+export type HealthHistoryKind = HealthHistoryEventKind;
 
 export interface HistoryQueryRecord {
   id: string;

@@ -1,4 +1,4 @@
-import { extractProfileTopGoalIds } from "./canonical-entities.ts";
+import { extractProfileTopGoalIds } from "./health/projectors/profile.ts";
 
 import type { VaultReadModel } from "./model.ts";
 

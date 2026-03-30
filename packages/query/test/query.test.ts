@@ -42,9 +42,9 @@ import {
 import {
   linkTargetIds,
   normalizeCanonicalLinks,
-  projectProfileSnapshotEntity,
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
+import { projectProfileSnapshotEntity } from "../src/health/projectors/profile.ts";
 import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
 import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";

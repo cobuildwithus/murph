@@ -22,10 +22,10 @@ import {
   type HealthRegistryProjectionKind,
 } from "./health-registry-query-metadata.ts";
 import {
-  projectRegistryEntity,
   type CanonicalEntity,
   type CanonicalEntityFamily,
 } from "../canonical-entities.ts";
+import { projectRegistryEntity } from "./projectors/registry.ts";
 import {
   readMarkdownDocument,
   walkRelativeFiles,
