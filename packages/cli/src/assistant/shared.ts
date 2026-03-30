@@ -1,5 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import {
+  appendTextFileWithMode as appendRuntimeTextFileWithMode,
+  auditAssistantStatePermissions as auditRuntimeAssistantStatePermissions,
+  ensureAssistantStateDirectory as ensureRuntimeAssistantStateDirectory,
+  type AssistantStatePermissionAudit,
   writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
   writeTextFileAtomic as writeRuntimeTextFileAtomic,
 } from '@murph/runtime-state'
@@ -15,6 +19,8 @@ export {
   formatStructuredErrorMessage,
   normalizeNullableString,
 } from '../text/shared.js'
+
+export type { AssistantStatePermissionAudit } from '@murph/runtime-state'
 
 export function readAssistantEnvString(
   env: NodeJS.ProcessEnv | null | undefined,
@@ -163,6 +169,26 @@ export function warnAssistantBestEffortFailure(input: {
       : 'Error'
   const suffix = code ? ` (${name}/${code})` : ` (${name})`
   console.warn(`Assistant best-effort ${input.operation} failed${suffix}.`)
+}
+
+export async function ensureAssistantStateDirectory(
+  directoryPath: string,
+): Promise<void> {
+  await ensureRuntimeAssistantStateDirectory(directoryPath)
+}
+
+export async function auditAssistantStatePermissions(input: {
+  repair?: boolean
+  rootPath: string
+}): Promise<AssistantStatePermissionAudit> {
+  return await auditRuntimeAssistantStatePermissions(input)
+}
+
+export async function appendTextFile(
+  filePath: string,
+  value: string,
+): Promise<void> {
+  await appendRuntimeTextFileWithMode(filePath, value)
 }
 
 export async function writeJsonFileAtomic(

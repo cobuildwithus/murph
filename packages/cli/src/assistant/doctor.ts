@@ -7,6 +7,7 @@ import {
   assistantDoctorResultSchema,
   assistantFailoverStateSchema,
   assistantOutboxIntentSchema,
+  assistantProviderRouteRecoverySchema,
   assistantRuntimeBudgetSnapshotSchema,
   assistantRuntimeEventSchema,
   assistantSessionSchema,
@@ -19,21 +20,49 @@ import {
   type AssistantOutboxIntent,
   type AssistantTurnReceipt,
 } from '../assistant-cli-contracts.js'
+import {
+  inspectAndRepairAssistantStateSecrecy,
+  type AssistantStateSecrecyAudit,
+} from './doctor-security.js'
 import { summarizeAssistantQuarantines } from './quarantine.js'
+import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
   isMissingFileError,
   parseAssistantJsonLinesWithTailSalvage,
 } from './shared.js'
 import { redactAssistantDisplayPath } from './store.js'
-import { resolveAssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 
-export async function runAssistantDoctor(vault: string): Promise<AssistantDoctorResult> {
-  const paths = resolveAssistantStatePaths(vault)
+export async function runAssistantDoctor(
+  vault: string,
+  input: {
+    repair?: boolean
+  } = {},
+): Promise<AssistantDoctorResult> {
+  if (input.repair) {
+    return withAssistantRuntimeWriteLock(vault, async (paths) =>
+      runAssistantDoctorAtPaths(vault, paths, { repair: true }),
+    )
+  }
+
+  return runAssistantDoctorAtPaths(vault, resolveAssistantStatePaths(vault), {
+    repair: false,
+  })
+}
+
+async function runAssistantDoctorAtPaths(
+  vault: string,
+  paths: AssistantStatePaths,
+  input: {
+    repair: boolean
+  },
+): Promise<AssistantDoctorResult> {
   const [
     quarantine,
     sessionScan,
+    providerRouteRecoveryScan,
     automationScan,
     transcriptScan,
     receiptScan,
@@ -44,9 +73,11 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
     failoverScan,
     statusScan,
     runtimeBudgetScan,
+    secrecyAudit,
   ] = await Promise.all([
     summarizeAssistantQuarantines({ paths }),
     scanSessionFiles(paths.sessionsDirectory),
+    scanJsonDirectory(paths.providerRouteRecoveryDirectory, assistantProviderRouteRecoverySchema),
     scanJsonFile(paths.automationPath, assistantAutomationStateSchema),
     scanTranscriptFiles(paths.transcriptsDirectory),
     scanTurnReceiptFiles(paths.turnsDirectory),
@@ -57,6 +88,9 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
     scanJsonFile(paths.failoverStatePath, assistantFailoverStateSchema),
     scanJsonFile(paths.statusPath, assistantStatusResultSchema),
     scanJsonFile(paths.resourceBudgetPath, assistantRuntimeBudgetSnapshotSchema),
+    inspectAndRepairAssistantStateSecrecy(paths, {
+      repair: input.repair,
+    }),
   ])
   const sessionIds = new Set(sessionScan.sessions.map((session) => session.sessionId))
   const outboxIntentIds = new Set(outboxScan.intents.map((intent) => intent.intentId))
@@ -87,6 +121,23 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
       name: 'session-files',
       status: sessionScan.parseErrors === 0 ? 'pass' : 'fail',
     }),
+    createDoctorCheck({
+      details: {
+        fileCount: providerRouteRecoveryScan.fileCount,
+        parseErrors: providerRouteRecoveryScan.parseErrors,
+      },
+      message:
+        providerRouteRecoveryScan.parseErrors > 0
+          ? `${providerRouteRecoveryScan.parseErrors} provider route recovery file(s) could not be parsed.`
+          : providerRouteRecoveryScan.fileCount === 0
+            ? 'assistant provider route recovery state has not been written yet.'
+            : `${providerRouteRecoveryScan.fileCount} provider route recovery file(s) parsed cleanly.`,
+      name: 'provider-route-recovery-files',
+      status: providerRouteRecoveryScan.parseErrors > 0 ? 'fail' : 'pass',
+    }),
+    buildAssistantStatePermissionCheck(secrecyAudit),
+    buildAssistantStateSessionSecretCheck(secrecyAudit, input.repair),
+    buildAssistantStateProviderRouteRecoverySecretCheck(secrecyAudit, input.repair),
     createDoctorCheck({
       details: {
         present: automationScan.present,
@@ -312,6 +363,118 @@ export async function runAssistantDoctor(vault: string): Promise<AssistantDoctor
   })
 }
 
+function buildAssistantStatePermissionCheck(
+  secrecyAudit: AssistantStateSecrecyAudit,
+): AssistantDoctorCheck {
+  const unresolvedIssues = secrecyAudit.permissionAudit.issues.filter(
+    (issue) => !issue.repaired,
+  ).length
+
+  return createDoctorCheck({
+    details: {
+      incorrectEntries: secrecyAudit.permissionAudit.incorrectEntries,
+      repairedEntries: secrecyAudit.permissionAudit.repairedEntries,
+      scannedDirectories: secrecyAudit.permissionAudit.scannedDirectories,
+      scannedFiles: secrecyAudit.permissionAudit.scannedFiles,
+      scannedOtherEntries: secrecyAudit.permissionAudit.scannedOtherEntries,
+      unresolvedIssues,
+    },
+    message:
+      unresolvedIssues > 0
+        ? `${unresolvedIssues} assistant-state path permission or entry-type issue(s) still need manual repair.`
+        : secrecyAudit.permissionAudit.repairedEntries > 0
+          ? `${secrecyAudit.permissionAudit.repairedEntries} assistant-state permission issue(s) were repaired.`
+          : 'assistant-state permissions are private and consistent.',
+    name: 'assistant-state-permissions',
+    status:
+      unresolvedIssues > 0
+        ? 'fail'
+        : secrecyAudit.permissionAudit.repairedEntries > 0
+          ? 'warn'
+          : 'pass',
+  })
+}
+
+function buildAssistantStateSessionSecretCheck(
+  secrecyAudit: AssistantStateSecrecyAudit,
+  repair: boolean,
+): AssistantDoctorCheck {
+  const blockingIssues =
+    secrecyAudit.sessionInlineSecretFiles +
+    secrecyAudit.malformedSessionSecretSidecars
+  const status: AssistantDoctorCheckStatus =
+    blockingIssues > 0
+      ? 'fail'
+      : secrecyAudit.orphanSessionSecretSidecars > 0 || secrecyAudit.repairedSessionFiles > 0
+        ? 'warn'
+        : 'pass'
+
+  return createDoctorCheck({
+    details: {
+      filesScanned: secrecyAudit.sessionFilesScanned,
+      inlineSecretFiles: secrecyAudit.sessionInlineSecretFiles,
+      inlineSecretHeaders: secrecyAudit.sessionInlineSecretHeaders,
+      malformedSecretSidecars: secrecyAudit.malformedSessionSecretSidecars,
+      orphanSecretSidecars: secrecyAudit.orphanSessionSecretSidecars,
+      repairedFiles: secrecyAudit.repairedSessionFiles,
+      sidecarFiles: secrecyAudit.sessionSecretSidecarFiles,
+    },
+    message:
+      secrecyAudit.sessionInlineSecretFiles > 0
+        ? `${secrecyAudit.sessionInlineSecretFiles} assistant session file(s) still embed secret headers inline.`
+        : secrecyAudit.malformedSessionSecretSidecars > 0
+          ? `${secrecyAudit.malformedSessionSecretSidecars} assistant session secret sidecar(s) are malformed.`
+          : secrecyAudit.orphanSessionSecretSidecars > 0
+            ? `${secrecyAudit.orphanSessionSecretSidecars} assistant session secret sidecar(s) are orphaned.`
+            : secrecyAudit.repairedSessionFiles > 0
+              ? `${secrecyAudit.repairedSessionFiles} assistant session file(s) were repaired and secrets were moved into private sidecars${repair ? '' : ' during this run'}.`
+              : 'assistant session secrets are stored only in private sidecars.',
+    name: 'assistant-session-secrets',
+    status,
+  })
+}
+
+function buildAssistantStateProviderRouteRecoverySecretCheck(
+  secrecyAudit: AssistantStateSecrecyAudit,
+  repair: boolean,
+): AssistantDoctorCheck {
+  const blockingIssues =
+    secrecyAudit.providerRouteRecoveryInlineSecretFiles +
+    secrecyAudit.malformedProviderRouteRecoverySecretSidecars
+  const status: AssistantDoctorCheckStatus =
+    blockingIssues > 0
+      ? 'fail'
+      : secrecyAudit.orphanProviderRouteRecoverySecretSidecars > 0 ||
+          secrecyAudit.repairedProviderRouteRecoveryFiles > 0
+        ? 'warn'
+        : 'pass'
+
+  return createDoctorCheck({
+    details: {
+      filesScanned: secrecyAudit.providerRouteRecoveryFilesScanned,
+      inlineSecretFiles: secrecyAudit.providerRouteRecoveryInlineSecretFiles,
+      inlineSecretHeaders: secrecyAudit.providerRouteRecoveryInlineSecretHeaders,
+      malformedSecretSidecars:
+        secrecyAudit.malformedProviderRouteRecoverySecretSidecars,
+      orphanSecretSidecars: secrecyAudit.orphanProviderRouteRecoverySecretSidecars,
+      repairedFiles: secrecyAudit.repairedProviderRouteRecoveryFiles,
+      sidecarFiles: secrecyAudit.providerRouteRecoverySecretSidecarFiles,
+    },
+    message:
+      secrecyAudit.providerRouteRecoveryInlineSecretFiles > 0
+        ? `${secrecyAudit.providerRouteRecoveryInlineSecretFiles} provider route recovery file(s) still embed secret headers inline.`
+        : secrecyAudit.malformedProviderRouteRecoverySecretSidecars > 0
+          ? `${secrecyAudit.malformedProviderRouteRecoverySecretSidecars} provider route recovery secret sidecar(s) are malformed.`
+          : secrecyAudit.orphanProviderRouteRecoverySecretSidecars > 0
+            ? `${secrecyAudit.orphanProviderRouteRecoverySecretSidecars} provider route recovery secret sidecar(s) are orphaned.`
+            : secrecyAudit.repairedProviderRouteRecoveryFiles > 0
+              ? `${secrecyAudit.repairedProviderRouteRecoveryFiles} provider route recovery file(s) were repaired and secrets were moved into private sidecars${repair ? '' : ' during this run'}.`
+              : 'provider route recovery secrets are stored only in private sidecars.',
+    name: 'provider-route-recovery-secrets',
+    status,
+  })
+}
+
 function createDoctorCheck(input: {
   details?: Record<string, unknown>
   message: string
@@ -352,6 +515,37 @@ async function scanJsonFile<T>(
       parseError: true,
       present: true,
     }
+  }
+}
+
+async function scanJsonDirectory<T>(
+  directory: string,
+  schema: { parse(input: unknown): T },
+): Promise<{
+  fileCount: number
+  parseErrors: number
+}> {
+  const files = await readDirectoryFiles(directory)
+  let fileCount = 0
+  let parseErrors = 0
+
+  for (const file of files) {
+    if (!file.endsWith('.json')) {
+      continue
+    }
+
+    fileCount += 1
+    try {
+      const raw = await readFile(path.join(directory, file), 'utf8')
+      schema.parse(JSON.parse(raw) as unknown)
+    } catch {
+      parseErrors += 1
+    }
+  }
+
+  return {
+    fileCount,
+    parseErrors,
   }
 }
 

@@ -37,6 +37,7 @@ import {
   mergeAssistantSessionSecrets,
   persistAssistantSessionSecrets,
   readAssistantSessionSecrets,
+  resolveAssistantSessionSecretsPath,
 } from '../state-secrets.js'
 import { quarantineAssistantStateFile } from '../quarantine.js'
 import { appendAssistantRuntimeEventAtPaths } from '../runtime-events.js'
@@ -103,17 +104,11 @@ export async function readAssistantSession(input: {
     throw error
   }
 
+  let persistedSession: AssistantSession
   try {
-    const persistedSession = normalizeAssistantSessionSnapshot(
+    persistedSession = normalizeAssistantSessionSnapshot(
       parseAssistantSessionRecord(JSON.parse(raw) as unknown),
     )
-    const secrets = await readAssistantSessionSecrets({
-      paths: input.paths,
-      sessionId: input.sessionId,
-    })
-    const session = mergeAssistantSessionSecrets(persistedSession, secrets)
-    assistantSessionCache.set(sessionPath, session)
-    return session
   } catch (error) {
     assistantSessionCache.delete(sessionPath)
     await quarantineAssistantStateFile({
@@ -131,6 +126,28 @@ export async function readAssistantSession(input: {
       sessionPath,
     })
   }
+
+  let secrets: Awaited<ReturnType<typeof readAssistantSessionSecrets>>
+  try {
+    secrets = await readAssistantSessionSecrets({
+      paths: input.paths,
+      sessionId: input.sessionId,
+    })
+  } catch (error) {
+    assistantSessionCache.delete(sessionPath)
+    if (input.treatCorruptedAsMissing) {
+      return null
+    }
+    throw createAssistantSessionCorruptedError({
+      error,
+      sessionId: input.sessionId,
+      sessionPath: resolveAssistantSessionSecretsPath(input.paths, input.sessionId),
+    })
+  }
+
+  const session = mergeAssistantSessionSecrets(persistedSession, secrets)
+  assistantSessionCache.set(sessionPath, session)
+  return session
 }
 
 export async function writeAssistantSession(

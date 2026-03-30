@@ -31,6 +31,7 @@ import {
   resolveAssistantSession,
   saveAssistantSession,
 } from './assistant/store.js'
+import { redactAssistantSessionForDisplay } from './assistant/redaction.js'
 import {
   normalizeRequiredText,
   warnAssistantBestEffortFailure,
@@ -134,7 +135,7 @@ export async function deliverAssistantMessage(
     return assistantDeliverResultSchema.parse({
       vault: redactAssistantDisplayPath(input.vault),
       message: normalizedMessage,
-      session: updatedSession,
+      session: redactAssistantSessionForDisplay(updatedSession),
       delivery,
     })
   } catch (error) {

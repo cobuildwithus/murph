@@ -55,6 +55,7 @@ import {
   redactAssistantDisplayPath,
 } from '../store.js'
 import { normalizeNullableString } from '../shared.js'
+import { redactAssistantSessionForDisplay } from '../redaction.js'
 import {
   CHAT_COMPOSER_HINT,
   CHAT_SLASH_COMMANDS,
@@ -3947,7 +3948,7 @@ export async function runAssistantChatWithInk(
               startedAt,
               stoppedAt: new Date().toISOString(),
               turns: controller.latestTurnsRef.current,
-              session: controller.latestSessionRef.current,
+              session: redactAssistantSessionForDisplay(controller.latestSessionRef.current),
             }),
           )
         },

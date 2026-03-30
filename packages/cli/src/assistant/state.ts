@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AssistantStatePaths,
@@ -9,6 +9,7 @@ import {
 } from './store.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
+  ensureAssistantStateDirectory,
   isMissingFileError,
   normalizeNullableString,
   writeJsonFileAtomic,
@@ -98,9 +99,7 @@ export async function putAssistantStateDocument(
 
   return withAssistantStateDocumentWriteLock(paths, async () => {
     const documentPath = resolveAssistantStateDocumentPath(paths, normalizedDocId)
-    await mkdir(path.dirname(documentPath), {
-      recursive: true,
-    })
+    await ensureAssistantStateDirectory(path.dirname(documentPath))
     await writeJsonFileAtomic(documentPath, input.value)
     return readAssistantStateDocument(paths, normalizedDocId)
   })
@@ -116,9 +115,7 @@ export async function patchAssistantStateDocument(
     const existing = await readAssistantStateDocument(paths, normalizedDocId)
     const merged = applyAssistantStateMergePatch(existing.value ?? {}, input.patch)
     const documentPath = resolveAssistantStateDocumentPath(paths, normalizedDocId)
-    await mkdir(path.dirname(documentPath), {
-      recursive: true,
-    })
+    await ensureAssistantStateDirectory(path.dirname(documentPath))
     await writeJsonFileAtomic(documentPath, merged)
     return readAssistantStateDocument(paths, normalizedDocId)
   })

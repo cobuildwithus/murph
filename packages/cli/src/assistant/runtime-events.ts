@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import {
   assistantRuntimeEventSchema,
   type AssistantRuntimeEvent,
@@ -6,11 +6,17 @@ import {
 } from '../assistant-cli-contracts.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import {
+  appendTextFile,
+  ensureAssistantStateDirectory,
   parseAssistantJsonLinesWithTailSalvage,
   isMissingFileError,
 } from './shared.js'
 import type { AssistantStatePaths } from './store/paths.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
+import {
+  redactAssistantStateString,
+  redactAssistantStateStructuredValue,
+} from './redaction.js'
 
 const ASSISTANT_RUNTIME_EVENT_SCHEMA = 'murph.assistant-runtime-event.v1'
 
@@ -43,9 +49,7 @@ export async function appendAssistantRuntimeEventAtPaths(
     message: string
   },
 ): Promise<AssistantRuntimeEvent> {
-  await mkdir(paths.journalsDirectory, {
-    recursive: true,
-  })
+  await ensureAssistantStateDirectory(paths.journalsDirectory)
   const event = assistantRuntimeEventSchema.parse({
     schema: ASSISTANT_RUNTIME_EVENT_SCHEMA,
     at: input.at ?? new Date().toISOString(),
@@ -54,11 +58,12 @@ export async function appendAssistantRuntimeEventAtPaths(
     component: input.component,
     entityId: input.entityId ?? null,
     entityType: input.entityType ?? null,
-    message: input.message,
-    dataJson: input.data ? JSON.stringify(input.data) : null,
+    message: redactAssistantStateString(input.message),
+    dataJson:
+      input.data ? JSON.stringify(redactAssistantStateStructuredValue(input.data)) : null,
   })
 
-  await appendFile(paths.runtimeEventsPath, `${JSON.stringify(event)}\n`, 'utf8')
+  await appendTextFile(paths.runtimeEventsPath, `${JSON.stringify(event)}\n`)
   return event
 }
 
