@@ -31,6 +31,18 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "murph": "workspace:*"
+    "@ai-sdk/openai-compatible": "^2.0.35",
+    "@murph/contracts": "workspace:*",
+    "@murph/core": "workspace:*",
+    "@murph/device-syncd": "workspace:*",
+    "@murph/importers": "workspace:*",
+    "@murph/inboxd": "workspace:*",
+    "@murph/parsers": "workspace:*",
+    "@murph/query": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
+    "@photon-ai/imessage-kit": "2.1.2",
+    "ai": "^6.0.116",
+    "incur": "0.3.4",
+    "zod": "^4.1.8"
   }
 }
