@@ -64,5 +64,5 @@ Updated: 2026-04-01
   - `pnpm test:coverage` passed.
   - Focused proof reached `apps/cloudflare/scripts/validate-deploy-env.ts` and failed on missing `CF_WORKER_NAME`, `CF_BUNDLES_BUCKET`, and `CF_BUNDLES_PREVIEW_BUCKET`, confirming the prior `tsx not found` bootstrap failure is gone.
 - Required final review pass completed with no findings.
-- Remaining task before closure: finish the scoped commit and remove the ledger row.
+- Task closed and scoped commit created.
 Completed: 2026-04-01
