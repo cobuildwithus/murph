@@ -35,9 +35,6 @@ Output requirements:
 - Include an `Open questions / assumptions` section when uncertainty remains.
 - If no findings exist, state that explicitly and list any residual risk areas.
 
-Patch-file output:
-- Please return your final response as a single `.patch` file attachment with a `.patch` filename rather than as a normal prose review.
-- Put all actionable fixes into one unified diff that we can download and apply directly.
-- Limit the patch to concrete changes that fit this review scope, and keep the diff self-contained.
-- If there are important residual concerns that you did not change, list them briefly outside the patch.
-- If you find no actionable issues, say so explicitly instead of inventing a patch.
+Response format:
+- Return a normal text review, not patch attachments and not follow-on prompts for more agents.
+- Keep the focus on user-visible issues, why they matter, and the clearest concrete fix.
