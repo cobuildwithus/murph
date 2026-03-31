@@ -3,6 +3,7 @@ import {
   createIntegratedVaultServices,
   drainAssistantOutbox,
   getAssistantCronJob,
+  getAssistantCronJobTarget,
   getAssistantCronStatus,
   getAssistantSession,
   getAssistantStatus,
@@ -15,9 +16,12 @@ import {
   readAssistantOutboxIntent,
   runAssistantAutomation,
   sendAssistantMessage,
+  setAssistantCronJobTarget,
   updateAssistantSessionOptions,
   type AssistantAskResult,
   type AssistantCronJob,
+  type AssistantCronTargetMutationResult,
+  type AssistantCronTargetSnapshot,
   type AssistantCronProcessDueResult,
   type AssistantCronRunRecord,
   type AssistantCronStatusSnapshot,
@@ -28,9 +32,9 @@ import {
   type AssistantSession,
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
-} from 'murph/assistant-core'
-import { createLocalGatewayService } from 'murph/gateway-core-local'
-import type { GatewayService } from 'murph/gateway-core'
+} from '@murph/assistant-core'
+import { createLocalGatewayService } from '@murph/gateway-core/local'
+import type { GatewayService } from '@murph/gateway-core'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
 
@@ -64,6 +68,10 @@ export interface AssistantLocalService {
     job: string
     vault?: string | null
   }): Promise<AssistantCronJob>
+  getCronTarget(input: {
+    job: string
+    vault?: string | null
+  }): Promise<AssistantCronTargetSnapshot>
   getCronStatus(input?: {
     vault?: string | null
   }): Promise<AssistantCronStatusSnapshot>
@@ -111,6 +119,16 @@ export interface AssistantLocalService {
     limit?: number
     vault?: string | null
   }): Promise<AssistantCronProcessDueResult>
+  setCronTarget(input: {
+    channel?: string | null
+    deliveryTarget?: string | null
+    dryRun?: boolean
+    identityId?: string | null
+    job: string
+    participantId?: string | null
+    sourceThreadId?: string | null
+    vault?: string | null
+  }): Promise<AssistantCronTargetMutationResult>
   runAutomationOnce(
     input?: AssistantLocalAutomationRunInput,
   ): Promise<AssistantRunResult>
@@ -148,6 +166,13 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
     getCronJob: (input) =>
       runAssistantdLocalCall(() =>
         getAssistantCronJob(
+          resolveAssistantdRequestVault(input.vault, vaultRoot),
+          input.job,
+        ),
+      ),
+    getCronTarget: (input) =>
+      runAssistantdLocalCall(() =>
+        getAssistantCronJobTarget(
           resolveAssistantdRequestVault(input.vault, vaultRoot),
           input.job,
         ),
@@ -230,6 +255,19 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
               ? Math.trunc(input.limit)
               : undefined,
           vault: resolveAssistantdRequestVault(input?.vault, vaultRoot),
+        }),
+      ),
+    setCronTarget: (input) =>
+      runAssistantdLocalCall(() =>
+        setAssistantCronJobTarget({
+          channel: input.channel ?? undefined,
+          deliveryTarget: input.deliveryTarget ?? undefined,
+          dryRun: input.dryRun,
+          identityId: input.identityId ?? undefined,
+          job: input.job,
+          participantId: input.participantId ?? undefined,
+          sourceThreadId: input.sourceThreadId ?? undefined,
+          vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
         }),
       ),
     runAutomationOnce: (input) =>

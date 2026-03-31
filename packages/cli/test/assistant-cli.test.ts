@@ -13,6 +13,7 @@ import {
   applyDefaultVaultToArgs,
   readOperatorConfig,
   resolveOperatorConfigPath,
+  saveAssistantSelfDeliveryTarget,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
 } from '../src/operator-config.js'
@@ -557,6 +558,194 @@ test.sequential(
       }>(['assistant', 'cron', 'remove', 'stretch-reminder', '--vault', vaultRoot]),
     )
     assert.equal(removed.removed.jobId, added.job.jobId)
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'assistant cron target show/set expose readable target inspection and in-place retargeting',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-target-cli-'))
+    const homeRoot = path.join(parent, 'home')
+    const vaultRoot = path.join(parent, 'vault')
+    await mkdir(homeRoot, { recursive: true })
+    await mkdir(vaultRoot, { recursive: true })
+    cleanupPaths.push(parent)
+
+    const originalHome = process.env.HOME
+    process.env.HOME = homeRoot
+
+    try {
+      await saveAssistantSelfDeliveryTarget(
+        {
+          channel: 'email',
+          identityId: 'sender@example.com',
+          participantId: null,
+          sourceThreadId: null,
+          deliveryTarget: 'me@example.com',
+        },
+        homeRoot,
+      )
+
+      const added = requireData(
+        await runCli<{
+          job: {
+            jobId: string
+          }
+        }>([
+          'assistant',
+          'cron',
+          'add',
+          'Send my weekly health snapshot.',
+          '--vault',
+          vaultRoot,
+          '--name',
+          'weekly-health-snapshot',
+          '--every',
+          '1d',
+          '--channel',
+          'telegram',
+          '--sourceThread',
+          '123456789',
+          '--session',
+          'session_target_cli',
+          '--alias',
+          'routine:weekly-health-snapshot',
+        ]),
+      )
+
+      const shown = requireData(
+        await runCli<{
+          cronTarget: {
+            jobId: string
+            jobName: string
+            target: {
+              channel: string | null
+              sourceThreadId: string | null
+            }
+            bindingDelivery: {
+              kind: string
+              target: string
+            } | null
+          }
+        }>([
+          'assistant',
+          'cron',
+          'target',
+          'show',
+          'weekly-health-snapshot',
+          '--vault',
+          vaultRoot,
+        ]),
+      )
+      assert.equal(shown.cronTarget.jobId, added.job.jobId)
+      assert.equal(shown.cronTarget.jobName, 'weekly-health-snapshot')
+      assert.equal(shown.cronTarget.target.channel, 'telegram')
+      assert.equal(shown.cronTarget.target.sourceThreadId, '123456789')
+      assert.equal(shown.cronTarget.bindingDelivery?.kind, 'thread')
+
+      const dryRun = requireData(
+        await runCli<{
+          changed: boolean
+          continuityReset: boolean
+          dryRun: boolean
+          beforeTarget: {
+            target: {
+              channel: string | null
+            }
+          }
+          afterTarget: {
+            target: {
+              channel: string | null
+              identityId: string | null
+              deliveryTarget: string | null
+              sessionId: string | null
+              alias: string | null
+            }
+          }
+        }>([
+          'assistant',
+          'cron',
+          'target',
+          'set',
+          'weekly-health-snapshot',
+          '--vault',
+          vaultRoot,
+          '--toSelf',
+          'email',
+          '--dryRun',
+        ]),
+      )
+      assert.equal(dryRun.changed, true)
+      assert.equal(dryRun.continuityReset, true)
+      assert.equal(dryRun.dryRun, true)
+      assert.equal(dryRun.beforeTarget.target.channel, 'telegram')
+      assert.equal(dryRun.afterTarget.target.channel, 'email')
+      assert.equal(dryRun.afterTarget.target.identityId, 'sender@example.com')
+      assert.equal(dryRun.afterTarget.target.deliveryTarget, 'me@example.com')
+      assert.equal(dryRun.afterTarget.target.sessionId, null)
+      assert.equal(dryRun.afterTarget.target.alias, null)
+
+      const updated = requireData(
+        await runCli<{
+          changed: boolean
+          continuityReset: boolean
+          dryRun: boolean
+          job: {
+            target: {
+              channel: string | null
+              identityId: string | null
+              deliveryTarget: string | null
+              sessionId: string | null
+              alias: string | null
+            }
+          }
+        }>([
+          'assistant',
+          'cron',
+          'target',
+          'set',
+          'weekly-health-snapshot',
+          '--vault',
+          vaultRoot,
+          '--toSelf',
+          'email',
+        ]),
+      )
+      assert.equal(updated.changed, true)
+      assert.equal(updated.continuityReset, true)
+      assert.equal(updated.dryRun, false)
+      assert.equal(updated.job.target.channel, 'email')
+      assert.equal(updated.job.target.identityId, 'sender@example.com')
+      assert.equal(updated.job.target.deliveryTarget, 'me@example.com')
+      assert.equal(updated.job.target.sessionId, null)
+      assert.equal(updated.job.target.alias, null)
+
+      const shownAfter = requireData(
+        await runCli<{
+          cronTarget: {
+            target: {
+              channel: string | null
+              identityId: string | null
+              deliveryTarget: string | null
+            }
+          }
+        }>([
+          'assistant',
+          'cron',
+          'target',
+          'show',
+          'weekly-health-snapshot',
+          '--vault',
+          vaultRoot,
+        ]),
+      )
+      assert.equal(shownAfter.cronTarget.target.channel, 'email')
+      assert.equal(shownAfter.cronTarget.target.identityId, 'sender@example.com')
+      assert.equal(shownAfter.cronTarget.target.deliveryTarget, 'me@example.com')
+    } finally {
+      restoreEnvironmentVariable('HOME', originalHome)
+    }
   },
   ASSISTANT_CLI_TIMEOUT_MS,
 )

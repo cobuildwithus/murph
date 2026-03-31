@@ -19,6 +19,14 @@
       "path": "packages/runtime-state"
     },
     {
+      "name": "@murph/assistant-core",
+      "path": "packages/assistant-core"
+    },
+    {
+      "name": "@murph/gateway-core",
+      "path": "packages/gateway-core"
+    },
+    {
       "name": "@murph/core",
       "path": "packages/core"
     },

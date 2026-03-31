@@ -28,6 +28,7 @@ export {
   type AssistantCronJob,
   type AssistantCronRunRecord,
   assistantOutboxIntentSchema,
+  type AssistantCronTargetSnapshot,
   assistantSelfDeliveryTargetSchema,
   type AssistantAskResult,
   type AssistantAutomationState,
@@ -45,11 +46,14 @@ export {
 } from './assistant/automation.js'
 
 export {
+  getAssistantCronJobTarget,
   getAssistantCronJob,
   getAssistantCronStatus,
   listAssistantCronJobs,
   listAssistantCronRuns,
   processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
+  setAssistantCronJobTarget,
+  type AssistantCronTargetMutationResult,
   type AssistantCronStatusSnapshot,
   type AssistantCronProcessDueResult,
 } from './assistant/cron.js'

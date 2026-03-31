@@ -4,6 +4,7 @@ import {
   canUseAssistantDaemonForMessage,
   maybeDrainAssistantOutboxViaDaemon,
   maybeGetAssistantCronJobViaDaemon,
+  maybeGetAssistantCronTargetViaDaemon,
   maybeGetAssistantCronStatusViaDaemon,
   maybeGetAssistantOutboxIntentViaDaemon,
   maybeGetAssistantSessionViaDaemon,
@@ -16,6 +17,7 @@ import {
   maybeProcessDueAssistantCronViaDaemon,
   maybeRunAssistantAutomationViaDaemon,
   maybeSendAssistantMessageViaDaemon,
+  maybeSetAssistantCronTargetViaDaemon,
   maybeUpdateAssistantSessionOptionsViaDaemon,
   resolveAssistantDaemonClientConfig,
 } from '../src/assistant-daemon-client.js'
@@ -455,6 +457,79 @@ test('assistant daemon client routes serializable assistant operations through t
       return new Response(JSON.stringify(TEST_CRON_JOB), { status: 200 })
     }
 
+    if (url.pathname === `/cron/jobs/${encodeURIComponent(TEST_CRON_JOB.jobId)}/target`) {
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body ?? '{}')) as {
+          channel?: string | null
+          deliveryTarget?: string | null
+          dryRun?: boolean
+          identityId?: string | null
+          vault?: string | null
+        }
+        assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+        assert.equal(body.vault, '/tmp/vault')
+        return new Response(
+          JSON.stringify({
+            job: {
+              ...TEST_CRON_JOB,
+              target: {
+                ...TEST_CRON_JOB.target,
+                sessionId: null,
+                alias: null,
+                channel: body.channel ?? TEST_CRON_JOB.target.channel,
+                identityId: body.identityId ?? null,
+                participantId: null,
+                sourceThreadId: null,
+                deliveryTarget: body.deliveryTarget ?? null,
+              },
+            },
+            beforeTarget: {
+              jobId: TEST_CRON_JOB.jobId,
+              jobName: TEST_CRON_JOB.name,
+              target: TEST_CRON_JOB.target,
+              bindingDelivery: {
+                kind: 'thread',
+                target: 'chat-123',
+              },
+            },
+            afterTarget: {
+              jobId: TEST_CRON_JOB.jobId,
+              jobName: TEST_CRON_JOB.name,
+              target: {
+                ...TEST_CRON_JOB.target,
+                sessionId: null,
+                alias: null,
+                channel: body.channel ?? TEST_CRON_JOB.target.channel,
+                identityId: body.identityId ?? null,
+                participantId: null,
+                sourceThreadId: null,
+                deliveryTarget: body.deliveryTarget ?? null,
+              },
+              bindingDelivery: null,
+            },
+            changed: true,
+            continuityReset: true,
+            dryRun: body.dryRun ?? false,
+          }),
+          { status: 200 },
+        )
+      }
+
+      assert.equal(url.searchParams.get('vault'), '/tmp/vault')
+      return new Response(
+        JSON.stringify({
+          jobId: TEST_CRON_JOB.jobId,
+          jobName: TEST_CRON_JOB.name,
+          target: TEST_CRON_JOB.target,
+          bindingDelivery: {
+            kind: 'thread',
+            target: 'chat-123',
+          },
+        }),
+        { status: 200 },
+      )
+    }
+
     if (url.pathname === '/cron/runs') {
       assert.equal(url.searchParams.get('vault'), '/tmp/vault')
       assert.equal(url.searchParams.get('job'), TEST_CRON_JOB.jobId)
@@ -624,6 +699,32 @@ test('assistant daemon client routes serializable assistant operations through t
   )
   assert.equal(cronJob?.jobId, TEST_CRON_JOB.jobId)
 
+  const cronTarget = await maybeGetAssistantCronTargetViaDaemon(
+    {
+      vault: '/tmp/vault',
+      job: TEST_CRON_JOB.jobId,
+    },
+    env,
+  )
+  assert.equal(cronTarget?.jobId, TEST_CRON_JOB.jobId)
+  assert.equal(cronTarget?.bindingDelivery?.kind, 'thread')
+
+  const retargeted = await maybeSetAssistantCronTargetViaDaemon(
+    {
+      vault: '/tmp/vault',
+      job: TEST_CRON_JOB.jobId,
+      channel: 'email',
+      identityId: 'sender@example.com',
+      deliveryTarget: 'me@example.com',
+      dryRun: true,
+    },
+    env,
+  )
+  assert.equal(retargeted?.changed, true)
+  assert.equal(retargeted?.continuityReset, true)
+  assert.equal(retargeted?.dryRun, true)
+  assert.equal(retargeted?.afterTarget.target.channel, 'email')
+
   const cronRuns = await maybeListAssistantCronRunsViaDaemon(
     {
       vault: '/tmp/vault',
@@ -674,7 +775,7 @@ test('assistant daemon client routes serializable assistant operations through t
   )
   assert.equal(automation?.scans, 1)
 
-  assert.equal(fetchMock.mock.calls.length, 15)
+  assert.equal(fetchMock.mock.calls.length, 17)
 })
 
 test('assistant daemon client refuses daemon routes that require local hooks or bespoke dependencies', async () => {

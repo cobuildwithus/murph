@@ -1,10 +1,12 @@
 import { resolveSystemTimeZone } from '@murph/contracts'
 import {
   maybeGetAssistantCronJobViaDaemon,
+  maybeGetAssistantCronTargetViaDaemon,
   maybeGetAssistantCronStatusViaDaemon,
   maybeListAssistantCronJobsViaDaemon,
   maybeListAssistantCronRunsViaDaemon,
   maybeProcessDueAssistantCronViaDaemon,
+  maybeSetAssistantCronTargetViaDaemon,
 } from '../assistant-daemon-client.js'
 import { loadVault } from '@murph/core'
 import {
@@ -16,7 +18,10 @@ import {
   type AssistantCronRunRecord,
   type AssistantCronSchedule,
   type AssistantCronScheduleInput,
+  type AssistantCronTarget,
+  type AssistantCronTargetSnapshot,
   type AssistantCronTrigger,
+  type AssistantBindingDelivery,
 } from '../assistant-cli-contracts.ts'
 import { loadRuntimeModule } from '../runtime-import.ts'
 import { renderAutoLoggedFoodMealNote } from '../usecases/food-autolog.ts'
@@ -65,6 +70,8 @@ import {
   assertAssistantStateDocumentId,
   buildDefaultAssistantCronStateDocId,
 } from './state.ts'
+
+export type { AssistantCronTargetSnapshot } from '../assistant-cli-contracts.ts'
 
 const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
 const ASSISTANT_CRON_RUN_SCHEMA = 'murph.assistant-cron-run.v1'
@@ -116,6 +123,15 @@ export interface AssistantCronRunExecutionResult {
   run: AssistantCronRunRecord
 }
 
+export interface AssistantCronTargetMutationResult {
+  afterTarget: AssistantCronTargetSnapshot
+  beforeTarget: AssistantCronTargetSnapshot
+  changed: boolean
+  continuityReset: boolean
+  dryRun: boolean
+  job: AssistantCronJob
+}
+
 export interface AssistantCronProcessDueResult {
   failed: number
   processed: number
@@ -133,6 +149,13 @@ export interface ProcessDueAssistantCronJobsInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   limit?: number
   signal?: AbortSignal
+  vault: string
+}
+
+export interface SetAssistantCronJobTargetInput extends AssistantCronTargetInput {
+  dryRun?: boolean
+  job: string
+  now?: Date
   vault: string
 }
 
@@ -331,6 +354,22 @@ export async function getAssistantCronJob(
   return resolveAssistantCronJobFromStore(store, job)
 }
 
+export async function getAssistantCronJobTarget(
+  vault: string,
+  job: string,
+): Promise<AssistantCronTargetSnapshot> {
+  const remote = await maybeGetAssistantCronTargetViaDaemon({
+    job,
+    vault,
+  })
+  if (remote) {
+    return remote
+  }
+
+  const cronJob = await getAssistantCronJob(vault, job)
+  return buildAssistantCronTargetSnapshot(cronJob)
+}
+
 export async function removeAssistantCronJob(
   vault: string,
   job: string,
@@ -385,6 +424,94 @@ export async function setAssistantCronJobEnabled(
     store.jobs[index] = updated
     await writeAssistantCronStore(paths, store)
     return updated
+  })
+}
+
+export async function setAssistantCronJobTarget(
+  input: SetAssistantCronJobTargetInput,
+): Promise<AssistantCronTargetMutationResult> {
+  const remote = await maybeSetAssistantCronTargetViaDaemon(input)
+  if (remote) {
+    return remote
+  }
+
+  const paths = resolveAssistantStatePaths(input.vault)
+  await ensureAssistantCronState(paths)
+  const nextTarget = validateAssistantCronDeliveryTarget(input)
+
+  return withAssistantCronWriteLock(paths, async () => {
+    const store = await readAssistantCronStore(paths)
+    const index = resolveAssistantCronJobIndex(store, input.job)
+    const existing = store.jobs[index] as AssistantCronJob
+
+    if (existing.state.runningAt !== null) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_JOB_RUNNING',
+        `Assistant cron job "${existing.name}" is already running.`,
+      )
+    }
+
+    const beforeTarget = buildAssistantCronTargetSnapshot(existing)
+    const audienceChanged = !assistantCronTargetAudienceEquals(
+      existing.target,
+      nextTarget,
+    )
+    const continuityReset =
+      audienceChanged &&
+      (existing.target.sessionId !== null || existing.target.alias !== null)
+    const afterTarget = buildAssistantCronTargetSnapshot({
+      ...existing,
+      target: {
+        ...nextTarget,
+        sessionId: audienceChanged ? null : existing.target.sessionId,
+        alias: audienceChanged ? null : existing.target.alias,
+      },
+    })
+    const changed = !assistantCronTargetAudienceEquals(
+      beforeTarget.target,
+      afterTarget.target,
+    )
+
+    if (input.dryRun) {
+      return {
+        job: existing,
+        beforeTarget,
+        afterTarget,
+        changed,
+        continuityReset,
+        dryRun: true,
+      }
+    }
+
+    if (!changed && !continuityReset) {
+      return {
+        job: existing,
+        beforeTarget,
+        afterTarget,
+        changed: false,
+        continuityReset: false,
+        dryRun: false,
+      }
+    }
+
+    const now = (input.now ?? new Date()).toISOString()
+    const updated = assistantCronJobSchema.parse({
+      ...existing,
+      updatedAt: now,
+      target: afterTarget.target,
+    })
+
+    store.jobs[index] = updated
+    await writeAssistantCronStore(paths, store)
+
+    return {
+      job: updated,
+      beforeTarget,
+      afterTarget: buildAssistantCronTargetSnapshot(updated),
+      changed,
+      continuityReset,
+      dryRun: false,
+    }
   })
 }
 
@@ -548,6 +675,12 @@ function buildValidatedAssistantCronTarget(
     return buildAssistantCronTarget(input)
   }
 
+  return validateAssistantCronDeliveryTarget(input)
+}
+
+function validateAssistantCronDeliveryTarget(
+  input: AssistantCronTargetInput,
+): AssistantCronTarget {
   const channel = normalizeNullableString(input.channel)
   if (!channel) {
     throw new VaultCliError(
@@ -951,6 +1084,42 @@ function assistantCronJobHasStableSessionLocator(job: AssistantCronJob): boolean
       job.target.alias ||
       (job.target.channel &&
         (job.target.participantId || job.target.sourceThreadId)),
+  )
+}
+
+function buildAssistantCronTargetSnapshot(
+  job: Pick<AssistantCronJob, 'jobId' | 'name' | 'target'>,
+): AssistantCronTargetSnapshot {
+  return {
+    jobId: job.jobId,
+    jobName: job.name,
+    target: job.target,
+    bindingDelivery: resolveAssistantBindingDelivery({
+      channel: job.target.channel,
+      actorId: job.target.participantId,
+      threadId: job.target.sourceThreadId,
+      deliveryTarget: job.target.deliveryTarget,
+    }) as AssistantBindingDelivery | null,
+  }
+}
+
+function assistantCronTargetAudienceEquals(
+  left: Pick<
+    AssistantCronTarget,
+    'channel' | 'deliverResponse' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
+  >,
+  right: Pick<
+    AssistantCronTarget,
+    'channel' | 'deliverResponse' | 'deliveryTarget' | 'identityId' | 'participantId' | 'sourceThreadId'
+  >,
+): boolean {
+  return (
+    left.channel === right.channel &&
+    left.identityId === right.identityId &&
+    left.participantId === right.participantId &&
+    left.sourceThreadId === right.sourceThreadId &&
+    left.deliveryTarget === right.deliveryTarget &&
+    left.deliverResponse === right.deliverResponse
   )
 }
 

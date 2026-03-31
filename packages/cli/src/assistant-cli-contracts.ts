@@ -415,6 +415,8 @@ export const assistantChannelDeliverySchema = z.object({
   targetKind: z.enum(assistantChannelDeliveryTargetKindValues),
   sentAt: isoTimestampSchema,
   messageLength: z.number().int().nonnegative(),
+  providerMessageId: z.string().min(1).nullable().default(null),
+  providerThreadId: z.string().min(1).nullable().default(null),
 })
 
 export const assistantDeliveryErrorSchema = z.object({
@@ -1106,6 +1108,34 @@ export const assistantCronRunsResultSchema = z.object({
   runs: z.array(assistantCronRunRecordSchema),
 })
 
+export const assistantCronTargetSnapshotSchema = z.object({
+  jobId: z.string().min(1),
+  jobName: z.string().min(1),
+  target: assistantCronTargetSchema,
+  bindingDelivery: assistantBindingDeliverySchema.nullable(),
+})
+
+export const assistantCronTargetShowResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  cronTarget: assistantCronTargetSnapshotSchema,
+})
+
+export const assistantCronTargetSetResultSchema = z.object({
+  vault: pathSchema,
+  stateRoot: pathSchema,
+  jobsPath: pathSchema,
+  runsRoot: pathSchema,
+  job: assistantCronJobSchema,
+  beforeTarget: assistantCronTargetSnapshotSchema,
+  afterTarget: assistantCronTargetSnapshotSchema,
+  changed: z.boolean(),
+  continuityReset: z.boolean(),
+  dryRun: z.boolean(),
+})
+
 export const assistantCronPresetListResultSchema = z.object({
   vault: pathSchema,
   presets: z.array(assistantCronPresetSchema),
@@ -1373,6 +1403,15 @@ export type AssistantCronRemoveResult = z.infer<
 export type AssistantCronRunResult = z.infer<typeof assistantCronRunResultSchema>
 export type AssistantCronRunsResult = z.infer<
   typeof assistantCronRunsResultSchema
+>
+export type AssistantCronTargetSnapshot = z.infer<
+  typeof assistantCronTargetSnapshotSchema
+>
+export type AssistantCronTargetShowResult = z.infer<
+  typeof assistantCronTargetShowResultSchema
+>
+export type AssistantCronTargetSetResult = z.infer<
+  typeof assistantCronTargetSetResultSchema
 >
 export type AssistantCronPresetListResult = z.infer<
   typeof assistantCronPresetListResultSchema

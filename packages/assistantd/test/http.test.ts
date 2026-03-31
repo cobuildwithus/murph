@@ -221,6 +221,64 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     ...TEST_CRON_JOB,
     jobId: input.job,
   }))
+  const getCronTarget = vi.fn(async (input: { job: string }) => ({
+    jobId: input.job,
+    jobName: TEST_CRON_JOB.name,
+    target: TEST_CRON_JOB.target,
+    bindingDelivery: {
+      kind: 'thread',
+      target: 'chat-123',
+    },
+  }))
+  const setCronTarget = vi.fn(async (input: {
+    channel?: string | null
+    deliveryTarget?: string | null
+    dryRun?: boolean
+    identityId?: string | null
+    job: string
+  }) => ({
+    job: {
+      ...TEST_CRON_JOB,
+      jobId: input.job,
+      target: {
+        ...TEST_CRON_JOB.target,
+        sessionId: null,
+        alias: null,
+        channel: input.channel ?? TEST_CRON_JOB.target.channel,
+        identityId: input.identityId ?? null,
+        participantId: null,
+        sourceThreadId: null,
+        deliveryTarget: input.deliveryTarget ?? null,
+      },
+    },
+    beforeTarget: {
+      jobId: input.job,
+      jobName: TEST_CRON_JOB.name,
+      target: TEST_CRON_JOB.target,
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-123',
+      },
+    },
+    afterTarget: {
+      jobId: input.job,
+      jobName: TEST_CRON_JOB.name,
+      target: {
+        ...TEST_CRON_JOB.target,
+        sessionId: null,
+        alias: null,
+        channel: input.channel ?? TEST_CRON_JOB.target.channel,
+        identityId: input.identityId ?? null,
+        participantId: null,
+        sourceThreadId: null,
+        deliveryTarget: input.deliveryTarget ?? null,
+      },
+      bindingDelivery: null,
+    },
+    changed: true,
+    continuityReset: true,
+    dryRun: input.dryRun ?? false,
+  }))
   const getOutboxIntent = vi.fn(async (input: { intentId: string }) => ({
     ...TEST_OUTBOX_INTENT,
     intentId: input.intentId,
@@ -352,6 +410,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
   const service = {
     drainOutbox: async () => ({ attempted: 0, sent: 0, failed: 0, queued: 0 }),
     getCronJob,
+    getCronTarget,
     getCronStatus: async () => ({
       totalJobs: 1,
       enabledJobs: 1,
@@ -381,6 +440,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       session: TEST_SESSION as any,
     }),
     processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    setCronTarget,
     runAutomationOnce: async () => ({
       vault: '/tmp/vault',
       startedAt: '2026-03-28T00:00:00.000Z',
@@ -750,6 +810,62 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.equal(cronJobPayload.jobId, 'cron_http_route')
     assert.equal(getCronJob.mock.calls[0]?.[0]?.job, 'cron_http_route')
 
+    const cronTarget = await fetch(
+      `${handle.address.baseUrl}/cron/jobs/${encodeURIComponent('cron_http_route')}/target?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      },
+    )
+    assert.equal(cronTarget.status, 200)
+    const cronTargetPayload = await cronTarget.json() as {
+      jobId: string
+      bindingDelivery: {
+        kind: string
+      } | null
+    }
+    assert.equal(cronTargetPayload.jobId, 'cron_http_route')
+    assert.equal(cronTargetPayload.bindingDelivery?.kind, 'thread')
+    assert.equal(getCronTarget.mock.calls[0]?.[0]?.job, 'cron_http_route')
+
+    const cronTargetUpdate = await fetch(
+      `${handle.address.baseUrl}/cron/jobs/${encodeURIComponent('cron_http_route')}/target?vault=${encodeURIComponent('/tmp/vault')}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer secret-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          channel: 'email',
+          identityId: 'sender@example.com',
+          deliveryTarget: 'me@example.com',
+          dryRun: true,
+          vault: '/tmp/vault',
+        }),
+      },
+    )
+    assert.equal(cronTargetUpdate.status, 200)
+    const cronTargetUpdatePayload = await cronTargetUpdate.json() as {
+      changed: boolean
+      dryRun: boolean
+      afterTarget: {
+        target: {
+          channel: string | null
+          identityId: string | null
+        }
+      }
+    }
+    assert.equal(cronTargetUpdatePayload.changed, true)
+    assert.equal(cronTargetUpdatePayload.dryRun, true)
+    assert.equal(cronTargetUpdatePayload.afterTarget.target.channel, 'email')
+    assert.equal(
+      cronTargetUpdatePayload.afterTarget.target.identityId,
+      'sender@example.com',
+    )
+    assert.equal(setCronTarget.mock.calls[0]?.[0]?.job, 'cron_http_route')
+
     const cronRuns = await fetch(
       `${handle.address.baseUrl}/cron/runs?job=${encodeURIComponent(TEST_CRON_JOB.jobId)}&limit=3&vault=${encodeURIComponent('/tmp/vault')}`,
       {
@@ -905,6 +1021,15 @@ test('assistantd http server preserves typed assistant error codes for invalid i
         code: 'ASSISTANT_CRON_JOB_NOT_FOUND',
       })
     },
+    getCronTarget: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      jobName: TEST_CRON_JOB.name,
+      target: TEST_CRON_JOB.target,
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-123',
+      },
+    }),
     getCronStatus: async () => ({
       totalJobs: 0,
       enabledJobs: 0,
@@ -1011,6 +1136,24 @@ test('assistantd http server preserves typed assistant error codes for invalid i
     listSessions: async () => [TEST_SESSION as any],
     openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
     processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    setCronTarget: async () => ({
+      job: TEST_CRON_JOB as any,
+      beforeTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      afterTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      changed: false,
+      continuityReset: false,
+      dryRun: false,
+    }),
     runAutomationOnce: async () => ({
       vault: '/tmp/vault',
       startedAt: '2026-03-28T00:00:00.000Z',
@@ -1105,6 +1248,12 @@ test('assistantd http server does not reflect raw internal errors back to the cl
     listOutbox: async () => [],
     getOutboxIntent: async () => null,
     getCronJob: async () => TEST_CRON_JOB as any,
+    getCronTarget: async () => ({
+      jobId: TEST_CRON_JOB.jobId,
+      jobName: TEST_CRON_JOB.name,
+      target: TEST_CRON_JOB.target,
+      bindingDelivery: null,
+    }),
     getCronStatus: async () => ({
       totalJobs: 0,
       enabledJobs: 0,
@@ -1114,6 +1263,24 @@ test('assistantd http server does not reflect raw internal errors back to the cl
     }),
     openConversation: async () => ({ created: true, session: TEST_SESSION as any }),
     processDueCron: async () => ({ failed: 0, processed: 0, succeeded: 0 } as any),
+    setCronTarget: async () => ({
+      job: TEST_CRON_JOB as any,
+      beforeTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      afterTarget: {
+        jobId: TEST_CRON_JOB.jobId,
+        jobName: TEST_CRON_JOB.name,
+        target: TEST_CRON_JOB.target,
+        bindingDelivery: null,
+      },
+      changed: false,
+      continuityReset: false,
+      dryRun: false,
+    }),
     runAutomationOnce: async () => ({
       vault: '/tmp/vault',
       startedAt: '2026-03-28T00:00:00.000Z',
