@@ -23,22 +23,21 @@ import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import { sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
 
 const HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS = new Set([
-  "access_token",
-  "accessToken",
-  "api_key",
-  "apiKey",
+  "accesstoken",
+  "apikey",
   "authorization",
-  "bearer_token",
-  "bearerToken",
+  "bearertoken",
+  "clientsecret",
   "cookie",
-  "id_token",
-  "idToken",
-  "oauth_access_token",
-  "oauth_refresh_token",
-  "oauthAccessToken",
-  "oauthRefreshToken",
-  "refresh_token",
-  "refreshToken",
+  "idtoken",
+  "oauthaccesstoken",
+  "oauthrefreshtoken",
+  "refreshtoken",
+  "secret",
+  "sessionkey",
+  "sessionsecret",
+  "sessiontoken",
+  "verificationtoken",
 ]);
 
 export async function disconnectHostedDeviceSyncConnection(input: {
@@ -399,7 +398,7 @@ function sanitizeHostedSignalPayloadValue(value: unknown): unknown {
   const sanitized: Record<string, unknown> = {};
 
   for (const [key, entry] of Object.entries(record)) {
-    if (HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS.has(key)) {
+    if (isHostedSignalSensitivePayloadKey(key)) {
       continue;
     }
 
@@ -407,4 +406,19 @@ function sanitizeHostedSignalPayloadValue(value: unknown): unknown {
   }
 
   return sanitized;
+}
+
+function isHostedSignalSensitivePayloadKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[^a-z0-9]/gu, "");
+
+  if (!normalized) {
+    return false;
+  }
+
+  return HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS.has(normalized)
+    || normalized === "setcookie"
+    || normalized.endsWith("token")
+    || normalized.endsWith("secret")
+    || normalized.endsWith("apikey")
+    || normalized.endsWith("sessionid");
 }

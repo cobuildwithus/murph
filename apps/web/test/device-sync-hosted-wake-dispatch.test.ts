@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getConnectionOwnerId: vi.fn(),
   listConnectionsForUser: vi.fn(),
   markConnectionDisconnected: vi.fn(),
+  readHostedDeviceSyncEnvironment: vi.fn(),
   registryGet: vi.fn(),
   registryList: vi.fn(),
   prismaTx: {
@@ -58,10 +59,11 @@ vi.mock("@/src/lib/device-sync/crypto", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/env", () => ({
-  readHostedDeviceSyncEnvironment: vi.fn(() => ({
+  readHostedDeviceSyncEnvironment: mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => ({
     allowedReturnOrigins: [],
     encryptionKey: "01234567890123456789012345678901",
     encryptionKeyVersion: "v1",
+    isProduction: false,
     ouraWebhookVerificationToken: "verify-token-for-tests",
     publicBaseUrl: "https://control.example.test/api/device-sync",
     providers: {
@@ -73,6 +75,39 @@ vi.mock("@/src/lib/device-sync/env", () => ({
     },
   })),
 }));
+
+function createHostedEnv(overrides: Partial<{
+  allowedReturnOrigins: string[];
+  encryptionKey: string;
+  encryptionKeyVersion: string;
+  isProduction: boolean;
+  ouraWebhookVerificationToken: string | null;
+  publicBaseUrl: string | null;
+  providers: {
+    whoop: null;
+    oura: {
+      clientId: string;
+      clientSecret: string;
+    } | null;
+  };
+}> = {}) {
+  return {
+    allowedReturnOrigins: [],
+    encryptionKey: "01234567890123456789012345678901",
+    encryptionKeyVersion: "v1",
+    isProduction: false,
+    ouraWebhookVerificationToken: "verify-token-for-tests",
+    publicBaseUrl: "https://control.example.test/api/device-sync",
+    providers: {
+      whoop: null,
+      oura: {
+        clientId: "oura-client-id",
+        clientSecret: "oura-client-secret",
+      },
+    },
+    ...overrides,
+  };
+}
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
   createHostedDeviceSyncRegistry: vi.fn(() => ({
@@ -114,6 +149,7 @@ import {
 describe("dispatchHostedDeviceSyncWake", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
     mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
       callback(mocks.prismaTx),
@@ -206,6 +242,48 @@ describe("dispatchHostedDeviceSyncWake", () => {
     });
     mocks.registryGet.mockReturnValue(undefined);
     mocks.registryList.mockReturnValue([]);
+  });
+
+  it("requires an explicit hosted public base URL in production instead of trusting the request host", () => {
+    mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv({
+      isProduction: true,
+      publicBaseUrl: null,
+    }));
+
+    expect(() => new HostedDeviceSyncControlPlane(
+      new Request("https://attacker.example/api/device-sync/connections"),
+    )).toThrow(
+      "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
+    );
+  });
+
+  it("does not implicitly allow callback redirects back to the request host when a canonical public base URL is configured", () => {
+    mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv({
+      allowedReturnOrigins: ["https://app.example.test"],
+      publicBaseUrl: "https://control.example.test/api/device-sync",
+    }));
+
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://preview.example.test/api/device-sync/connections"),
+    );
+
+    expect(controlPlane.allowedReturnOrigins).toEqual([
+      "https://control.example.test",
+      "https://app.example.test",
+    ]);
+  });
+
+  it("keeps localhost-style development fallbacks bound to the active request origin", () => {
+    mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv({
+      publicBaseUrl: null,
+    }));
+
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("http://localhost:3000/api/device-sync/connections"),
+    );
+
+    expect(controlPlane.publicIngressBaseUrl).toBe("http://localhost:3000/api/device-sync");
+    expect(controlPlane.allowedReturnOrigins).toEqual(["http://localhost:3000"]);
   });
 
   it("wakes hosted execution with a dedicated device-sync wake event for connection events", async () => {
@@ -552,6 +630,104 @@ describe("dispatchHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
+  });
+
+  it("redacts credential-like webhook and job keys even when providers vary the key casing or separators", async () => {
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+        onWebhookAccepted?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(),
+      handleWebhook: vi.fn(async () => {
+        await input.hooks?.onWebhookAccepted?.({
+          account: {
+            id: "dsc_123",
+            provider: "oura",
+            scopes: ["heartrate"],
+          },
+          now: "2026-03-26T12:00:00.000Z",
+          provider: {},
+          webhook: {
+            eventType: "sleep.updated",
+            jobs: [
+              {
+                kind: "reconcile",
+                payload: {
+                  Authorization: "Bearer job-auth-secret",
+                  clientSecret: "job-client-secret",
+                  objectId: "daily-sleep-1",
+                  pageToken: "job-next-page-token",
+                  windowStart: "2026-03-19T00:00:00.000Z",
+                },
+              },
+            ],
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            payload: {
+              Authorization: "Bearer provider-secret-token",
+              nested: [
+                {
+                  "Bearer-Token": "array-secret-token",
+                  keep: "ok",
+                },
+              ],
+              objectId: "daily-sleep-1",
+              sessionToken: "session-secret-token",
+              "X-Api-Key": "provider-api-key",
+              verification_token: "provider-verification-token",
+            },
+            traceId: "trace_case_123",
+          },
+        });
+        return {
+          accepted: true,
+        };
+      }),
+      startConnection: vi.fn(),
+    }));
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await controlPlane.handleWebhook("oura");
+
+    const signalInput = mocks.createSignal.mock.calls[0]?.[0];
+    const signalJson = JSON.stringify(signalInput?.payload ?? {});
+
+    expect(signalJson).not.toContain("provider-secret-token");
+    expect(signalJson).not.toContain("job-auth-secret");
+    expect(signalJson).not.toContain("job-client-secret");
+    expect(signalJson).not.toContain("provider-api-key");
+    expect(signalJson).not.toContain("session-secret-token");
+    expect(signalJson).not.toContain("provider-verification-token");
+    expect(signalJson).not.toContain("job-next-page-token");
+    expect(signalJson).not.toContain("array-secret-token");
+    expect(signalInput?.payload).toEqual({
+      eventType: "sleep.updated",
+      jobs: [
+        {
+          dedupeKey: expect.any(String),
+          kind: "reconcile",
+          payload: {
+            objectId: "daily-sleep-1",
+            windowStart: "2026-03-19T00:00:00.000Z",
+          },
+        },
+      ],
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      resourceCategory: null,
+      traceId: "trace_case_123",
+    });
   });
 
   it("skips signal creation and wake dispatch when ingress hooks cannot resolve an owner", async () => {

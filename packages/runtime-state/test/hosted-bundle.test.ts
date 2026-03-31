@@ -103,6 +103,8 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(assistantStateRoot, { recursive: true });
     await mkdir(path.join(operatorHomeRoot, ".murph", "hosted"), { recursive: true });
     await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"), "sqlite-control-state\n");
+    await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "launcher.json"), "{\"pid\":1234}\n");
     await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "control-token"), "control-token\n");
     await writeFile(path.join(vaultRoot, ".runtime", "device-syncd", "stdout.log"), "skip-log\n");
     await writeFile(path.join(vaultRoot, ".env.local"), "secret=true\n");
@@ -138,10 +140,28 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       readHostedBundleTextFile({
         bytes: bundles.vaultBundle,
         expectedKind: "vault",
+        path: ".runtime/device-syncd.sqlite",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
+        path: ".runtime/device-syncd/launcher.json",
+        root: "vault",
+      }),
+      null,
+    );
+    assert.equal(
+      readHostedBundleTextFile({
+        bytes: bundles.vaultBundle,
+        expectedKind: "vault",
         path: ".runtime/device-syncd/control-token",
         root: "vault",
       }),
-      "control-token\n",
+      null,
     );
     assert.equal(
       readHostedBundleTextFile({
@@ -209,10 +229,6 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       "{\"schema\":\"vault\"}\n",
     );
     assert.equal(
-      await readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "control-token"), "utf8"),
-      "control-token\n",
-    );
-    assert.equal(
       await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
       "{\"autoReplyChannels\":[\"linq\"]}\n",
     );
@@ -229,6 +245,9 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await assert.rejects(
       readFile(path.join(restored.operatorHomeRoot, ".murph", "hosted", "user-env.json"), "utf8"),
     );
+    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd.sqlite"), "utf8"));
+    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "launcher.json"), "utf8"));
+    await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "control-token"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".runtime", "device-syncd", "stdout.log"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, ".env.local"), "utf8"));
     await assert.rejects(readFile(path.join(restored.vaultRoot, "exports", "packs", "bundle.zip"), "utf8"));

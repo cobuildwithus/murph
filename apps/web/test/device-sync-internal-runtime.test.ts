@@ -159,6 +159,68 @@ describe("device-sync hosted runtime helpers", () => {
     );
   });
 
+  it("normalizes runtime timestamp fields and rejects malformed timestamp input", async () => {
+    const { parseHostedDeviceSyncRuntimeApplyRequest } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+
+    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+      occurredAt: "2026-03-26T12:00:00Z",
+      updates: [
+        {
+          accessTokenExpiresAt: "2026-03-30T00:00:00+00:00",
+          connectionId: "dsc_123",
+          lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
+          nextReconcileAt: "2026-03-27T00:00:00-05:00",
+          observedUpdatedAt: "2026-03-26T12:00:00+00:00",
+          tokenBundle: {
+            accessToken: "new-access-token",
+            accessTokenExpiresAt: "2026-03-30T01:30:00+01:30",
+            keyVersion: "local-runtime",
+            refreshToken: "new-refresh-token",
+            tokenVersion: 0,
+          },
+        },
+      ],
+      userId: "user-123",
+    })).toEqual({
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      updates: [
+        {
+          accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+          connectionId: "dsc_123",
+          lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
+          nextReconcileAt: "2026-03-27T05:00:00.000Z",
+          observedUpdatedAt: "2026-03-26T12:00:00.000Z",
+          tokenBundle: {
+            accessToken: "new-access-token",
+            accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+            keyVersion: "local-runtime",
+            refreshToken: "new-refresh-token",
+            tokenVersion: 0,
+          },
+        },
+      ],
+      userId: "user-123",
+    });
+
+    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
+      occurredAt: "not-a-timestamp",
+      updates: [],
+      userId: "user-123",
+    })).toThrow("occurredAt must be an ISO-8601 timestamp.");
+
+    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_123",
+          observedUpdatedAt: "soon",
+        },
+      ],
+      userId: "user-123",
+    })).toThrow("updates[0].observedUpdatedAt must be an ISO-8601 timestamp.");
+  });
+
   it("skips stale token writes, fences expiry metadata, and emits a reauthorization signal when runtime state requires reconnect", async () => {
     const { applyHostedDeviceSyncRuntimeUpdates } = await import(
       "@/src/lib/device-sync/internal-runtime"
