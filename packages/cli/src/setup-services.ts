@@ -886,7 +886,7 @@ export function isSetupInvocation(
   programName = 'vault-cli',
 ): boolean {
   const commandToken = resolveEffectiveTopLevelToken(args)
-  if (commandToken === 'setup' || commandToken === 'onboard') {
+  if (commandToken === 'onboard') {
     return true
   }
 

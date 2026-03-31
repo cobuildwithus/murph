@@ -81,7 +81,7 @@ assert(
 )
 assert(
   packageJson.bin?.murph === 'dist/bin.js',
-  'package.json must expose murph from dist/bin.js as the setup alias.',
+  'package.json must expose murph from dist/bin.js as the onboarding entrypoint.',
 )
 assert(
   JSON.stringify(Object.keys(packageJson.bin ?? {}).sort()) ===

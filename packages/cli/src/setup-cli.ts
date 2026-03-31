@@ -105,7 +105,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   }
   const getPlatform = options.platform ?? (() => process.platform)
   const cli = Cli.create(commandName, {
-    description: 'Murph local machine setup helpers.',
+    description: 'Murph local machine onboarding helpers.',
   })
 
   const runSetupCommand = async (context: any) => {
@@ -246,14 +246,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     })
   }
 
-  registerSetupCommand(cli, 'setup', {
-    description:
-      'Provision the local parser/runtime toolchain for macOS or Linux, initialize the vault, and run inbox bootstrap in one command.',
-    run: runSetupCommand,
-  })
   registerSetupCommand(cli, 'onboard', {
     description:
-      'Alias for setup that opens the interactive onboarding flow before provisioning the local host toolchain and vault runtime.',
+      'Provision the local parser/runtime toolchain for macOS or Linux, initialize the vault, and open the interactive onboarding flow when the terminal supports it.',
     run: runSetupCommand,
   })
 
@@ -535,7 +530,7 @@ function readSetupEnvValue(
 
 function registerSetupCommand(
   cli: Cli.Cli,
-  name: 'onboard' | 'setup',
+  name: 'onboard',
   input: {
     description: string
     run: (context: any) => Promise<any>
