@@ -26,6 +26,10 @@ review_gpt_register_dir_preset "data-model-composability" "data-model-composabil
   "data-model-review" \
   "composable-data-model" \
   "scalable-data-model"
+review_gpt_register_dir_preset "simplify" "complexity-simplification.md" \
+  "Behavior-preserving simplification pass for Murph." \
+  "complexity" \
+  "complexity-simplification"
 review_gpt_register_dir_preset "bad-code" "bad-code-quality.md" \
   "Code quality and anti-pattern review for Murph." \
   "anti-patterns" \
