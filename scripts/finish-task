@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $(basename "$0") <active-plan-path> \"commit message\" <file> [file ...]" >&2
+  echo "Usage: $(basename "$0") <active-plan-path> \"commit message\" <path> [path ...]" >&2
   exit 2
 }
 
@@ -33,6 +33,86 @@ fi
 
 completed_plan_path="agent-docs/exec-plans/completed/$(basename "$plan_path")"
 
+resolved_commit_paths=()
+
+append_unique_path() {
+  local candidate="$1"
+  local existing
+  if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
+    resolved_commit_paths+=("$candidate")
+    return
+  fi
+  for existing in "${resolved_commit_paths[@]}"; do
+    if [[ "$existing" == "$candidate" ]]; then
+      return
+    fi
+  done
+  resolved_commit_paths+=("$candidate")
+}
+
+path_is_tracked() {
+  git ls-files --error-unmatch -- "$1" >/dev/null 2>&1
+}
+
+expand_commit_target() {
+  local target="$1"
+  local found=0
+  local candidate
+
+  if [[ -d "$target" ]]; then
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      append_unique_path "$candidate"
+      found=1
+    done < <(git diff --name-only -- "$target")
+
+    while IFS= read -r candidate; do
+      [[ -n "$candidate" ]] || continue
+      append_unique_path "$candidate"
+      found=1
+    done < <(git ls-files --others --exclude-standard -- "$target")
+
+    if [[ "$found" -eq 0 ]]; then
+      echo "Directory expands to no changed files: $target" >&2
+      exit 1
+    fi
+    return
+  fi
+
+  if [[ -e "$target" ]]; then
+    if ! path_is_tracked "$target" && git check-ignore -q -- "$target"; then
+      echo "Path is ignored by gitignore: $target" >&2
+      exit 1
+    fi
+    append_unique_path "$target"
+    return
+  fi
+
+  while IFS= read -r candidate; do
+    if [[ "$candidate" == "$target" ]]; then
+      append_unique_path "$target"
+      return
+    fi
+  done < <(git diff --name-only -- "$target")
+
+  if path_is_tracked "$target"; then
+    append_unique_path "$target"
+    return
+  fi
+
+  echo "Commit path not found: $target" >&2
+  exit 1
+}
+
+for target in "$@"; do
+  expand_commit_target "$target"
+done
+
+if [[ "${#resolved_commit_paths[@]}" -eq 0 ]]; then
+  echo "No commit paths were resolved." >&2
+  exit 1
+fi
+
 bash scripts/close-exec-plan.sh "$plan_path"
 
 commit_paths=("$completed_plan_path")
@@ -40,4 +120,4 @@ if git ls-files --error-unmatch -- "$plan_path" >/dev/null 2>&1; then
   commit_paths=("$plan_path" "$completed_plan_path")
 fi
 
-bash scripts/committer "$commit_message" "${commit_paths[@]}" "$@"
+bash scripts/committer "$commit_message" "${commit_paths[@]}" "${resolved_commit_paths[@]}"

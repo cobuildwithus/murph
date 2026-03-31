@@ -61,7 +61,7 @@ Always read these before repo code/docs/test/config work:
 - Do not skip that commit because the worktree is dirty; commit only the exact touched paths with `scripts/finish-task` or `scripts/committer`.
 - If a touched file already had edits, that is still not a reason to skip the scoped commit; note it explicitly in handoff.
 - If required checks fail for a credibly unrelated pre-existing reason, commit the exact touched paths anyway and hand off with the failing command, failing target, and why your diff did not cause it.
-- `scripts/finish-task` is the higher-level helper for plan-bearing tasks: it requires the active plan path, closes that plan, then shells out to `scripts/committer` with the completed-plan artifact plus the exact paths you pass.
+- `scripts/finish-task` is the higher-level helper for plan-bearing tasks: it requires the active plan path, resolves the file/directory paths you pass into exact changed file paths, closes that plan, then shells out to `scripts/committer` with the completed-plan artifact plus those resolved paths.
 - Use `scripts/finish-task` only while the plan still exists under `agent-docs/exec-plans/active/`; if the plan was already closed/moved, or the task was ledger-only, use `scripts/committer` directly.
 - `scripts/committer` is the path-scoped dirty-tree-safe commit tool; prefer it over hand-rolled `git commit` flows when unrelated staged or unstaged work is present.
 - Update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
