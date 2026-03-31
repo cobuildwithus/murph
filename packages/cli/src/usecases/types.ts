@@ -8,7 +8,7 @@ import type {
   DeviceDaemonStatusResult,
   DeviceDaemonStopResult,
   DeviceProviderListResult,
-} from "../device-cli-contracts.js"
+} from "@murph/assistant-core/device-cli-contracts"
 import type {
   DocumentImportResult,
   ExperimentCreateResult,
@@ -22,7 +22,7 @@ import type {
   ShowResult,
   VaultInitResult,
   VaultValidateResult,
-} from "../vault-cli-contracts.js"
+} from "@murph/assistant-core/vault-cli-contracts"
 import type { RawImportManifestResult } from "./document-meal-read.js"
 import type {
   CommandContext,
@@ -34,14 +34,14 @@ import type {
   HealthQueryServiceMethods,
   JsonObject,
   UpsertRecordResult,
-} from "../health-cli-method-types.js"
+} from "@murph/assistant-core/health-cli-method-types"
 import type {
   QueryCanonicalEntity,
   QueryRuntimeModule as SharedQueryRuntimeModule,
   QueryVaultRecord,
-} from "../query-runtime.js"
+} from "@murph/assistant-core/query-runtime"
 
-export type { CommandContext } from "../health-cli-method-types.js"
+export type { CommandContext } from "@murph/assistant-core/health-cli-method-types"
 
 export interface ProjectAssessmentInput extends CommandContext {
   assessmentId: string

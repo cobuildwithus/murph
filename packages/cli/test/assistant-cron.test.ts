@@ -43,8 +43,8 @@ import {
   setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.ts'
-import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
-import { saveAssistantSelfDeliveryTarget } from '../src/operator-config.ts'
+import { computeAssistantCronNextRunAt } from '@murph/assistant-core/assistant/cron/schedule'
+import { saveAssistantSelfDeliveryTarget } from '@murph/assistant-core/operator-config'
 import { resolveAssistantStatePaths } from '../src/assistant/store.ts'
 
 const cleanupPaths: string[] = []

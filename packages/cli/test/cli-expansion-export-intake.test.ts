@@ -18,7 +18,7 @@ import { materializeExportPack } from '../src/usecases/shared.js'
 import {
   createIntegratedVaultServices,
   createUnwiredVaultServices,
-} from '../src/vault-services.js'
+} from '@murph/assistant-core/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 

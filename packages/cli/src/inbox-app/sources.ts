@@ -1,5 +1,5 @@
-import type { InboxConnectorConfig } from '../inbox-cli-contracts.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import type { InboxConnectorConfig } from '@murph/assistant-core/inbox-cli-contracts'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import type {
   InboxAppEnvironment,
   InboxServices,
@@ -10,14 +10,14 @@ import {
   normalizeConnectorAccountId,
   normalizeNullableString,
   relativeToVault,
-} from '../inbox-services/shared.js'
+} from '@murph/assistant-core/inbox-services/shared'
 import {
   ensureConnectorNamespaceAvailable,
   ensureInitialized,
   readConfig,
   sortConnectors,
   writeConfig,
-} from '../inbox-services/state.js'
+} from '@murph/assistant-core/inbox-services/state'
 
 function normalizeOptionalLinqWebhookPath(
   value: string | null | undefined,

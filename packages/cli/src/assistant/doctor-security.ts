@@ -10,17 +10,17 @@ import {
   type AssistantProviderRouteRecoverySecrets,
   type AssistantSession,
   type AssistantSessionSecrets,
-} from '../assistant-cli-contracts.js'
-import { serializeAssistantProviderSessionOptions } from './provider-config.js'
-import { normalizeAssistantSessionSnapshot } from './provider-state.js'
-import { mergeAssistantHeaders } from './redaction.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
+import { serializeAssistantProviderSessionOptions } from '@murph/assistant-core/assistant/provider-config'
+import { normalizeAssistantSessionSnapshot } from '@murph/assistant-core/assistant/provider-state'
+import { mergeAssistantHeaders } from '@murph/assistant-core/assistant/redaction'
 import {
   auditAssistantStatePermissions,
   isMissingFileError,
   writeJsonFileAtomic,
   type AssistantStatePermissionAudit,
-} from './shared.js'
-import { assertAssistantSessionId } from './state-ids.js'
+} from '@murph/assistant-core/assistant/shared'
+import { assertAssistantSessionId } from '@murph/assistant-core/assistant/state-ids'
 import {
   extractAssistantProviderRouteRecoverySecretsForPersistence,
   extractAssistantSessionSecretsForPersistence,
@@ -28,9 +28,9 @@ import {
   persistAssistantSessionSecrets,
   readAssistantProviderRouteRecoverySecrets,
   readAssistantSessionSecrets,
-} from './state-secrets.js'
-import { resolveAssistantSessionPath } from './store/persistence.js'
-import type { AssistantStatePaths } from './store/paths.js'
+} from '@murph/assistant-core/assistant/state-secrets'
+import { resolveAssistantSessionPath } from '@murph/assistant-core/assistant/store/persistence'
+import type { AssistantStatePaths } from '@murph/assistant-core/assistant/store/paths'
 
 export interface AssistantStateSecrecyAudit {
   malformedProviderRouteRecoverySecretSidecars: number

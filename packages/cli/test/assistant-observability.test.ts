@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, test } from 'vitest'
 import { runAssistantDoctor } from '../src/assistant/doctor.js'
-import { recordAssistantDiagnosticEvent } from '../src/assistant/diagnostics.js'
-import { clearAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
-import { appendAssistantRuntimeEvent } from '../src/assistant/runtime-events.js'
+import { recordAssistantDiagnosticEvent } from '@murph/assistant-core/assistant/diagnostics'
+import { clearAssistantProviderRouteRecovery } from '@murph/assistant-core/assistant/provider-turn-recovery'
+import { appendAssistantRuntimeEvent } from '@murph/assistant-core/assistant/runtime-events'
 import {
   createAssistantOutboxIntent,
   drainAssistantOutbox,
@@ -14,8 +14,8 @@ import {
 } from '../src/assistant/outbox.js'
 import { getAssistantStatus } from '../src/assistant/status.js'
 import { readAssistantStatusSnapshot } from '../src/assistant-runtime.js'
-import { resolveAssistantStatePaths } from '../src/assistant-state.js'
-import { deliverAssistantMessage } from '../src/outbound-channel.js'
+import { resolveAssistantStatePaths } from '@murph/assistant-core/assistant-state'
+import { deliverAssistantMessage } from '@murph/assistant-core/outbound-channel'
 
 const cleanupPaths: string[] = []
 

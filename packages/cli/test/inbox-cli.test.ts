@@ -10,15 +10,15 @@ import {
 import {
   createIntegratedInboxServices,
   type InboxRunEvent,
-} from '../src/inbox-services.js'
+} from '@murph/assistant-core/inbox-services'
 import {
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '../src/run-terminal-logging.js'
-import { VaultCliError } from '../src/vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '../src/vault-services.js'
+import { createUnwiredVaultServices } from '@murph/assistant-core/vault-services'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

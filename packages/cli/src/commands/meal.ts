@@ -5,7 +5,7 @@ import {
   mealAddResultSchema,
   pathSchema,
   showResultSchema,
-} from '../vault-cli-contracts.js'
+} from '@murph/assistant-core/vault-cli-contracts'
 import {
   deleteMealRecord,
   editMealRecord,
@@ -16,7 +16,7 @@ import {
   showMealRecord,
 } from '../usecases/document-meal-read.js'
 import { loadImportersRuntimeModule } from '../usecases/runtime.js'
-import type { VaultServices } from '../vault-services.js'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

@@ -1,5 +1,5 @@
-import { loadJsonInputObject } from '../json-input.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { loadJsonInputObject } from '@murph/assistant-core/json-input'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 type JsonPrimitive = string | number | boolean | null
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]

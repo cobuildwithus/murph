@@ -1,8 +1,8 @@
 import { RECIPE_STATUSES, ID_PREFIXES, isContractId } from '@murph/contracts'
 import { z } from 'incur'
 
-import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   asListEnvelope,
   buildEntityLinks,

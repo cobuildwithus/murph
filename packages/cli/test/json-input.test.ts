@@ -3,8 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import { loadJsonInputObject } from '../src/json-input.js'
-import { VaultCliError } from '../src/vault-cli-errors.js'
+import { loadJsonInputObject } from '@murph/assistant-core/json-input'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 test('loadJsonInputObject surfaces the stdin hint when stdin is interactive', async () => {
   const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY')

@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   applyLimit,
   arrayOfStrings,

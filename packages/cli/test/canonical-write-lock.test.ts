@@ -78,12 +78,12 @@ async function withCliUsecaseMocks<TResult>(options: {
   run: () => Promise<TResult>;
 }): Promise<TResult> {
   vi.resetModules();
-  vi.doMock("../src/runtime-import.js", () => ({
+  vi.doMock("@murph/assistant-core/runtime-import", () => ({
     loadRuntimeModule: async () => options.coreRuntime,
   }));
 
   if (options.queryRuntime) {
-    vi.doMock("../src/query-runtime.js", () => ({
+    vi.doMock("@murph/assistant-core/query-runtime", () => ({
       loadQueryRuntime: async () => options.queryRuntime,
     }));
   }
@@ -91,8 +91,8 @@ async function withCliUsecaseMocks<TResult>(options: {
   try {
     return await options.run();
   } finally {
-    vi.doUnmock("../src/runtime-import.js");
-    vi.doUnmock("../src/query-runtime.js");
+    vi.doUnmock("@murph/assistant-core/runtime-import");
+    vi.doUnmock("@murph/assistant-core/query-runtime");
     vi.resetModules();
   }
 }

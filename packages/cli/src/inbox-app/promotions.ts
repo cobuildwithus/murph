@@ -1,4 +1,4 @@
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { toVaultCliError } from '../usecases/vault-usecase-helpers.js'
 import type {
   InboxAppEnvironment,
@@ -17,13 +17,13 @@ import {
   resolveExperimentPromotionTarget,
   resolvePromotionAttachmentFilePath,
   withPromotionScope,
-} from '../inbox-services/promotions.js'
+} from '@murph/assistant-core/inbox-services/promotions'
 import {
   isStoredAudioAttachment,
   isStoredDocumentAttachment,
   isStoredImageAttachment,
-} from '../inbox-services/query.js'
-import { occurredDayFromCapture } from '../inbox-services/shared.js'
+} from '@murph/assistant-core/inbox-services/query'
+import { occurredDayFromCapture } from '@murph/assistant-core/inbox-services/shared'
 
 function unsupportedPromotion(target: 'journal' | 'experiment-note'): VaultCliError {
   return new VaultCliError(

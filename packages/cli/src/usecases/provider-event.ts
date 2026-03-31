@@ -1,13 +1,13 @@
 import { EVENT_KINDS } from '@murph/contracts'
 import { z } from 'incur'
-import { normalizeRepeatableFlagOption } from '../option-utils.js'
+import { normalizeRepeatableFlagOption } from '@murph/assistant-core/option-utils'
 import {
   loadQueryRuntime,
   type QueryRuntimeModule,
   type QueryVaultRecord as QueryRecord,
-} from '../query-runtime.js'
-import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murph/assistant-core/query-runtime'
+import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   asListEnvelope,
   loadJsonInputFile,

@@ -1,11 +1,11 @@
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from '../assistant-state.js'
-import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
-import { getAssistantChannelAdapter } from '../assistant/channel-adapters.js'
+} from '@murph/assistant-core/assistant-state'
+import { resolveAgentmailApiKey } from '@murph/assistant-core/agentmail-runtime'
+import { getAssistantChannelAdapter } from '@murph/assistant-core/assistant/channel-adapters'
 import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '../inbox-app/linq-endpoint.js'
-import type { InboxServices } from '../inbox-services.js'
+import type { InboxServices } from '@murph/assistant-core/inbox-services'
 import type {
   SetupAgentmailInboxSelection,
   SetupAgentmailSelectionResolver,
@@ -20,8 +20,8 @@ import {
   type SetupStepResult,
   setupChannelValues,
 } from '../setup-cli-contracts.js'
-import { resolveTelegramBotToken } from '../telegram-runtime.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { resolveTelegramBotToken } from '@murph/assistant-core/telegram-runtime'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { createStep } from './steps.js'
 
 const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'

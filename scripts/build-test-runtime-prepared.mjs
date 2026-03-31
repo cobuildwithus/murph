@@ -20,9 +20,6 @@ const baseSmokeImportPaths = [
   "packages/parsers/dist/index.js",
   "packages/cli/dist/index.js",
   "packages/cli/dist/cli-entry.js",
-  "packages/cli/dist/vault-cli-contracts.js",
-  "packages/cli/dist/inbox-cli-contracts.js",
-  "packages/cli/dist/operator-config.js",
   "packages/cli/dist/setup-cli.js",
   "packages/cli/dist/setup-runtime-env.js",
 ].map((relativePath) => path.join(repoRoot, relativePath));

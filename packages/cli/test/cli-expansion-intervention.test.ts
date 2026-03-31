@@ -6,7 +6,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerInterventionCommands } from '../src/commands/intervention.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
-import { createIntegratedVaultServices } from '../src/vault-services.js'
+import { createIntegratedVaultServices } from '@murph/assistant-core/vault-services'
 import { requireData, runCli } from './cli-test-helpers.js'
 
 interface SchemaEnvelope {

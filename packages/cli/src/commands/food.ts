@@ -1,14 +1,14 @@
 import { FOOD_STATUSES } from '@murph/contracts'
 import { Cli, z } from 'incur'
 
-import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '@murph/assistant-core/command-helpers'
 import {
   isoTimestampSchema,
   listItemSchema,
   pathSchema,
   showResultSchema,
-} from '../vault-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import { dailyFoodTimeSchema } from '../usecases/food-autolog.js'
 import {
   deleteFoodRecord,

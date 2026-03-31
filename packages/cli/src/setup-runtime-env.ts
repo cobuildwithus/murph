@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline'
 import { prepareSetupPromptInput } from './setup-prompt-io.js'
-import { VaultCliError } from './vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   type SetupChannel,
   type SetupConfiguredWearable,

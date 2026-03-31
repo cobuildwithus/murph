@@ -5,13 +5,13 @@ import {
   pathSchema,
   showResultSchema,
   slugSchema,
-} from '../vault-cli-contracts.js'
+} from '@murph/assistant-core/vault-cli-contracts'
 import {
   deleteEventRecord,
   editEventRecord,
 } from '../usecases/event-record-mutations.js'
 import { showEventRecord } from '../usecases/provider-event.js'
-import type { VaultServices } from '../vault-services.js'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import {
   eventScaffoldKindSchema,
 } from './event-command-helpers.js'

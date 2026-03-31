@@ -17,8 +17,8 @@ import {
 import {
   assistantChatResultSchema,
   type AssistantSession,
-} from '../../assistant-cli-contracts.js'
-import type { AssistantProviderProgressEvent } from '../../chat-provider.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
+import type { AssistantProviderProgressEvent } from '@murph/assistant-core/chat-provider'
 import {
   discoverAssistantProviderModels,
   resolveAssistantCatalogReasoningOptions,
@@ -29,14 +29,14 @@ import {
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
-} from '../provider-traces.js'
-import { resolveCodexDisplayOptions } from '../../assistant-codex.js'
+} from '@murph/assistant-core/assistant/provider-traces'
+import { resolveCodexDisplayOptions } from '@murph/assistant-core/assistant-codex'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
-} from '../../operator-config.js'
+} from '@murph/assistant-core/operator-config'
 import {
   openAssistantConversation,
   sendAssistantMessage,
@@ -47,15 +47,15 @@ import {
   extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
-} from '../provider-turn-recovery.js'
+} from '@murph/assistant-core/assistant/provider-turn-recovery'
 import {
   appendAssistantTranscriptEntries,
   isAssistantSessionNotFoundError,
   listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
 } from '../store.js'
-import { normalizeNullableString } from '../shared.js'
-import { redactAssistantSessionForDisplay } from '../redaction.js'
+import { normalizeNullableString } from '@murph/assistant-core/assistant/shared'
+import { redactAssistantSessionForDisplay } from '@murph/assistant-core/assistant/redaction'
 import {
   CHAT_COMPOSER_HINT,
   CHAT_SLASH_COMMANDS,

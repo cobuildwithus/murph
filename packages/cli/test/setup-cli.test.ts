@@ -27,14 +27,14 @@ import {
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from '../src/assistant-state.js'
+} from '@murph/assistant-core/assistant-state'
 import { listAssistantCronJobs } from '../src/assistant/cron.js'
 import {
   readOperatorConfig,
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
-} from '../src/operator-config.js'
+} from '@murph/assistant-core/operator-config'
 import {
   createSetupAssistantAccountResolver,
   detectCodexAccountFromAuthJson,
@@ -47,7 +47,7 @@ import {
   resolveSetupWearableMissingEnv,
 } from '../src/setup-runtime-env.js'
 import type { InboxSourceSetEnabledResult } from '../src/inbox-app/types.js'
-import type { InboxConnectorConfig } from '../src/inbox-cli-contracts.js'
+import type { InboxConnectorConfig } from '@murph/assistant-core/inbox-cli-contracts'
 import type { SetupResult } from '../src/setup-cli-contracts.js'
 import {
   buildSetupWizardPublicUrlReview,
@@ -526,8 +526,6 @@ function buildExpectedCliShimScript(
   const cliRequiredDistPaths = [
     cliBinPath,
     path.join(cliPackageRoot, 'dist', 'index.js'),
-    path.join(cliPackageRoot, 'dist', 'vault-cli-contracts.js'),
-    path.join(cliPackageRoot, 'dist', 'inbox-cli-contracts.js'),
   ]
   const workspacePackageNames = [
     'contracts',
@@ -3201,15 +3199,7 @@ test.sequential('CLI shim rebuilds missing cli dist artifacts before launching t
       await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
     }
 
-    await writeFile(
-      path.join(cliDistRoot, 'index.js'),
-      `import './vault-cli-contracts.js'
-console.log('built-ok')
-`,
-      'utf8',
-    )
     await writeFile(cliBinPath, `import './index.js'\n`, 'utf8')
-    await writeFile(path.join(cliDistRoot, 'inbox-cli-contracts.js'), 'export {}\n', 'utf8')
 
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
@@ -3218,7 +3208,7 @@ set -euo pipefail
 if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
   mkdir -p "$2/dist"
   if [ "$2" = ${JSON.stringify(cliPackageRoot)} ]; then
-    printf '%s\\n' 'export {}' > "$2/dist/vault-cli-contracts.js"
+    printf '%s\\n' "console.log('built-ok')" > "$2/dist/index.js"
     printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   else
     printf '%s\\n' 'export {}' > "$2/dist/index.js"
@@ -3239,7 +3229,6 @@ exit 1
 
     assert.equal(result.stdout.trim(), 'built-ok')
     assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
-    await readFile(path.join(cliDistRoot, 'vault-cli-contracts.js'), 'utf8')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

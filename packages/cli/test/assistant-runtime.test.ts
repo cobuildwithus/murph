@@ -11,27 +11,27 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
-} from '../src/assistant-state.js'
+} from '@murph/assistant-core/assistant-state'
 import { listPendingAssistantUsageRecords } from '@murph/runtime-state'
-import { VaultCliError } from '../src/vault-cli-errors.js'
-import { listAssistantTurnReceipts } from '../src/assistant/receipts.js'
-import { readAssistantSession } from '../src/assistant/store/persistence.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { listAssistantTurnReceipts } from '@murph/assistant-core/assistant/receipts'
+import { readAssistantSession } from '@murph/assistant-core/assistant/store/persistence'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveOperatorConfigPath,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
-} from '../src/operator-config.js'
+} from '@murph/assistant-core/operator-config'
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderInterruptedError,
-} from '../src/assistant/provider-turn-recovery.js'
-import * as assistantAutomationArtifacts from '../src/assistant/automation/artifacts.js'
+} from '@murph/assistant-core/assistant/provider-turn-recovery'
+import * as assistantAutomationArtifacts from '@murph/assistant-core/assistant/automation/artifacts'
 import {
   buildAssistantAutoReplyPrompt,
-} from '../src/assistant/automation/prompt-builder.js'
-import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
+} from '@murph/assistant-core/assistant/automation/prompt-builder'
+import { sanitizeAssistantOutboundReply } from '@murph/assistant-core/assistant/reply-sanitizer'
 import {
   assertAssistantCronJobId,
   assertAssistantCronRunId,
@@ -39,8 +39,8 @@ import {
   assertAssistantSessionId,
   assertAssistantTranscriptDistillationId,
   assertAssistantTurnId,
-} from '../src/assistant/state-ids.js'
-import { buildAssistantTranscriptDistillationContinuityText } from '../src/assistant/transcript-distillation.js'
+} from '@murph/assistant-core/assistant/state-ids'
+import { buildAssistantTranscriptDistillationContinuityText } from '@murph/assistant-core/assistant/transcript-distillation'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -73,9 +73,9 @@ vi.mock('../src/assistant-chat-ink.js', () => ({
   runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
 }))
 
-vi.mock('../src/outbound-channel.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/outbound-channel.js')>(
-    '../src/outbound-channel.js',
+vi.mock('@murph/assistant-core/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/outbound-channel')>(
+    '@murph/assistant-core/outbound-channel',
   )
 
   return {
@@ -85,9 +85,9 @@ vi.mock('../src/outbound-channel.js', async () => {
   }
 })
 
-vi.mock('../src/assistant-provider.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant-provider.js')>(
-    '../src/assistant-provider.js',
+vi.mock('@murph/assistant-core/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/assistant-provider')>(
+    '@murph/assistant-core/assistant-provider',
   )
 
   return {
@@ -99,7 +99,7 @@ vi.mock('../src/assistant-provider.js', async () => {
   }
 })
 
-vi.mock('../src/inbox-model-harness.js', () => ({
+vi.mock('@murph/assistant-core/inbox-model-harness', () => ({
   routeInboxCaptureWithModel: runtimeMocks.routeInboxCaptureWithModel,
 }))
 
@@ -113,7 +113,7 @@ import {
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
-import { bridgeAbortSignals } from '../src/assistant/automation/shared.js'
+import { bridgeAbortSignals } from '@murph/assistant-core/assistant/automation/shared'
 import {
   CHAT_BANNER,
   CHAT_COMPOSER_HINT,

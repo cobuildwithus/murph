@@ -2,8 +2,8 @@ import {
   getAssistantCronPresetDefinition,
   listAssistantCronPresets,
   toAssistantCronPreset,
-} from '../assistant/cron/presets.js'
-import type { AssistantCronPreset } from '../assistant-cli-contracts.js'
+} from '@murph/assistant-core/assistant/cron/presets'
+import type { AssistantCronPreset } from '@murph/assistant-core/assistant-cli-contracts'
 import type {
   SetupScheduledUpdate,
   SetupStepResult,

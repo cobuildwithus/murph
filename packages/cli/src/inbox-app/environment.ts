@@ -2,25 +2,25 @@ import os from 'node:os'
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from '../assistant-state.js'
+} from '@murph/assistant-core/assistant-state'
 import {
   createAgentmailApiClient,
   listAllAgentmailInboxes,
   matchesAgentmailHttpError,
   resolveAgentmailApiKey,
   resolveAgentmailBaseUrl,
-} from '../agentmail-runtime.js'
-import { ensureImessageMessagesDbReadable } from '../imessage-readiness.js'
-import { loadQueryRuntime } from '../query-runtime.js'
-import { loadRuntimeModule } from '../runtime-import.js'
+} from '@murph/assistant-core/agentmail-runtime'
+import { ensureImessageMessagesDbReadable } from '@murph/assistant-core/imessage-readiness'
+import { loadQueryRuntime } from '@murph/assistant-core/query-runtime'
+import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
 import { SETUP_RUNTIME_ENV_NOTICE } from '../setup-runtime-env.js'
 import {
   resolveTelegramApiBaseUrl,
   resolveTelegramBotToken,
   resolveTelegramFileBaseUrl,
-} from '../telegram-runtime.js'
-import type { InboxConnectorConfig } from '../inbox-cli-contracts.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murph/assistant-core/telegram-runtime'
+import type { InboxConnectorConfig } from '@murph/assistant-core/inbox-cli-contracts'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import type {
   CoreRuntimeModule,
   EmailDriver,
@@ -35,7 +35,7 @@ import type {
 } from './types.js'
 import type { ImportersFactoryRuntimeModule } from '../usecases/types.js'
 
-import { normalizeNullableString } from '../inbox-services/shared.js'
+import { normalizeNullableString } from '@murph/assistant-core/inbox-services/shared'
 
 const IMESSAGE_MESSAGES_DB_RELATIVE_PATH = ['Library', 'Messages', 'chat.db'].join('/')
 

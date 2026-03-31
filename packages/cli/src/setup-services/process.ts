@@ -5,7 +5,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { sanitizeChildProcessEnv } from '../child-process-env.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 export interface CommandRunInput {
   file: string

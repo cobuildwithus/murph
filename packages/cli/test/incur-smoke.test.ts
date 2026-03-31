@@ -10,8 +10,8 @@ import {
   collectVaultCliDirectServiceBindings,
   vaultCliCommandDescriptors,
 } from '../src/vault-cli-command-manifest.js'
-import { createIntegratedInboxServices } from '../src/inbox-services.js'
-import { createUnwiredVaultServices } from '../src/vault-services.js'
+import { createIntegratedInboxServices } from '@murph/assistant-core/inbox-services'
+import { createUnwiredVaultServices } from '@murph/assistant-core/vault-services'
 import { createVaultCli } from '../src/vault-cli.js'
 import { requireData, runCli, runRawCli } from './cli-test-helpers.js'
 

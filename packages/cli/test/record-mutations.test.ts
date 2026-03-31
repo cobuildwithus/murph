@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import { VaultCliError } from '../src/vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { applyRecordPatch } from '../src/usecases/record-mutations.js'
 
 test('applyRecordPatch requires at least one mutation source', async () => {

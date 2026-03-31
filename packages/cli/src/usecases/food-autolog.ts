@@ -1,4 +1,4 @@
-import type { AssistantCronSchedule } from '../assistant-cli-contracts.js'
+import type { AssistantCronSchedule } from '@murph/assistant-core/assistant-cli-contracts'
 import { z } from 'incur'
 
 export const dailyFoodTimeSchema = z

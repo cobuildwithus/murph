@@ -2,14 +2,14 @@ import {
   probeLinqApi,
   resolveLinqApiToken,
   resolveLinqWebhookSecret,
-} from '../linq-runtime.js'
+} from '@murph/assistant-core/linq-runtime'
 import { SETUP_RUNTIME_ENV_NOTICE } from '../setup-runtime-env.js'
-import { resolveTelegramBotToken } from '../telegram-runtime.js'
-import { resolveAgentmailApiKey } from '../agentmail-runtime.js'
+import { resolveTelegramBotToken } from '@murph/assistant-core/telegram-runtime'
+import { resolveAgentmailApiKey } from '@murph/assistant-core/agentmail-runtime'
 import type {
   InboxConnectorConfig,
   InboxDoctorCheck,
-} from '../inbox-cli-contracts.js'
+} from '@murph/assistant-core/inbox-cli-contracts'
 import type {
   DoctorContext,
   InboxAppEnvironment,
@@ -20,7 +20,7 @@ import {
   failCheck,
   passCheck,
   warnCheck,
-} from '../inbox-services/shared.js'
+} from '@murph/assistant-core/inbox-services/shared'
 import { IMESSAGE_MESSAGES_DB_RELATIVE_PATH } from './environment.js'
 
 type DoctorCheckResult = InboxDoctorCheck | InboxDoctorCheck[]

@@ -1,16 +1,16 @@
 import { Cli, z } from "incur"
-import { requestIdFromOptions, withBaseOptions } from "../command-helpers.js"
+import { requestIdFromOptions, withBaseOptions } from "@murph/assistant-core/command-helpers"
 import {
   createHealthScaffoldResultSchema,
   healthListResultSchema,
   healthShowResultSchema,
-} from "../health-cli-descriptors.js"
+} from "@murph/assistant-core/health-cli-descriptors"
 import {
   createRegistryDocEntityGroup,
   suggestedCommandsCta,
 } from "./health-command-factory.js"
-import { localDateSchema, pathSchema } from "../vault-cli-contracts.js"
-import type { VaultServices } from "../vault-services.js"
+import { localDateSchema, pathSchema } from "@murph/assistant-core/vault-cli-contracts"
+import type { VaultServices } from "@murph/assistant-core/vault-services"
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const supplementSlugSchema = z

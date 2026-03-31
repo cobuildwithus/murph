@@ -12,8 +12,8 @@ import {
   pathSchema,
   showResultSchema,
   slugSchema,
-} from '../vault-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import { registerLifecycleEntityGroup } from './health-command-factory.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)

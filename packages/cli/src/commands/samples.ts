@@ -1,17 +1,17 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
+import { emptyArgsSchema, requestIdFromOptions, withBaseOptions } from '@murph/assistant-core/command-helpers'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '../json-input.js'
+} from '@murph/assistant-core/json-input'
 import {
   listItemSchema,
   localDateSchema,
   pathSchema,
   showResultSchema,
   samplesImportCsvResultSchema,
-} from '../vault-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import {
   importCsvSamples as importCsvSamplesWithArtifacts,
 } from './sample-import-command-helpers.js'
@@ -23,7 +23,7 @@ import {
   listSamples as listSamplesWithArtifacts,
   showSample as showSampleWithArtifacts,
 } from './sample-query-command-helpers.js'
-import { normalizeRepeatableFlagOption } from '../option-utils.js'
+import { normalizeRepeatableFlagOption } from '@murph/assistant-core/option-utils'
 
 const sampleIdSchema = z
   .string()

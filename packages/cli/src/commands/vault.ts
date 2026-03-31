@@ -3,7 +3,7 @@ import {
   emptyArgsSchema,
   requestIdFromOptions,
   withBaseOptions,
-} from '../command-helpers.js'
+} from '@murph/assistant-core/command-helpers'
 import {
   isoTimestampSchema,
   localDateSchema,
@@ -11,8 +11,8 @@ import {
   timeZoneSchema,
   vaultInitResultSchema,
   vaultValidateResultSchema,
-} from '../vault-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 
 const unknownRecordSchema = z.record(z.string(), z.unknown())
 

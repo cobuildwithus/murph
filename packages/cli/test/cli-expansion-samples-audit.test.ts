@@ -7,7 +7,7 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerAuditCommands } from '../src/commands/audit.js'
 import { registerSamplesCommands } from '../src/commands/samples.js'
-import { createUnwiredVaultServices } from '../src/vault-services.js'
+import { createUnwiredVaultServices } from '@murph/assistant-core/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 

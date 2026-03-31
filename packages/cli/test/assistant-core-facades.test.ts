@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { test } from 'vitest'
 
@@ -15,7 +17,7 @@ type TsConfigShape = {
   references?: Array<{ path?: string }>
 }
 
-test('cli headless facades resolve through assistant-core', async () => {
+test('cli imports assistant-core directly and removes facade-only package subpaths', async () => {
   const cliManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as PackageManifest
@@ -48,16 +50,79 @@ test('cli headless facades resolve through assistant-core', async () => {
   assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murph/assistant-core/*'], [
     'packages/assistant-core/src/*.ts',
   ])
+  assert.deepEqual(Object.keys(cliManifest.exports ?? {}).sort(), [
+    '.',
+    './assistant/automation',
+    './assistant/cron',
+    './assistant/outbox',
+    './assistant/service',
+    './assistant/status',
+    './assistant/store',
+  ])
+
+  for (const removedSubpath of [
+    './assistant-cli-contracts',
+    './assistant/state-ids',
+    './inbox-services',
+    './operator-config',
+    './vault-cli-services',
+    './vault-services',
+  ]) {
+    assert.equal(cliManifest.exports?.[removedSubpath], undefined)
+  }
+})
+
+test('cli source no longer keeps export-only assistant-core facade files', async () => {
+  const srcRoot = new URL('../src/', import.meta.url)
+  const packageRoot = fileURLToPath(new URL('../', import.meta.url))
+  const facadeFiles: string[] = []
+
+  async function walk(directory: URL) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const entryUrl = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, directory)
+      if (entry.isDirectory()) {
+        await walk(entryUrl)
+        continue
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.ts')) {
+        continue
+      }
+
+      const source = await readFile(entryUrl, 'utf8')
+      if (/assistant-daemon-client/u.test(source)) {
+        continue
+      }
+      if (/\b(?:const|function|class|let|var)\b/u.test(source)) {
+        continue
+      }
+      const lines = source
+        .replace(/^\/\*\*[\s\S]*?\*\/\s*/u, '')
+        .split('\n')
+        .map((line) => line.replace(/\/\/.*$/u, '').trim())
+        .filter(Boolean)
+      const isPassthroughOnly = lines.every((line) =>
+        /^(import|export)(\s+type)?\b[\s\S]*from ['"][^'"]+['"];?$/u.test(line),
+      )
+      if (!isPassthroughOnly) {
+        continue
+      }
+      if (lines.some((line) => /from ['"]@murph\/assistant-core\/[^'"]+['"]/u.test(line))) {
+        facadeFiles.push(path.relative(packageRoot, fileURLToPath(entryUrl)))
+      }
+    }
+  }
+
+  await walk(srcRoot)
+  assert.deepEqual(facadeFiles, [])
+})
+
+test('cli package root no longer re-exports assistant-core compatibility shims', async () => {
+  const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /@murph\/assistant-core\//u)
+  assert.doesNotMatch(source, /vault-cli-services/u)
 })
 
 test('cli keeps daemon-aware wrappers only where transport routing still belongs in the shell', async () => {
-  const pureFacadeFiles = [
-    '../src/assistant-cli-contracts.ts',
-    '../src/assistant-codex.ts',
-    '../src/agentmail-runtime.ts',
-    '../src/operator-config.ts',
-    '../src/vault-services.ts',
-  ] as const
   const daemonWrapperFiles = [
     '../src/assistant/service.ts',
     '../src/assistant/status.ts',
@@ -66,12 +131,6 @@ test('cli keeps daemon-aware wrappers only where transport routing still belongs
     '../src/assistant/cron.ts',
     '../src/assistant/automation/run-loop.ts',
   ] as const
-
-  for (const relativePath of pureFacadeFiles) {
-    const source = await readFile(new URL(relativePath, import.meta.url), 'utf8')
-    assert.match(source, /@murph\/assistant-core\//u)
-    assert.doesNotMatch(source, /assistant-daemon-client/u)
-  }
 
   for (const relativePath of daemonWrapperFiles) {
     const source = await readFile(new URL(relativePath, import.meta.url), 'utf8')

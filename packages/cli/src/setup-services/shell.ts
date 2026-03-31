@@ -274,8 +274,6 @@ function buildCliShimScript(cliBinPath: string, shimName: string): string {
   const cliRequiredDistPaths = [
     cliBinPath,
     path.join(cliPackageRoot, 'dist', 'index.js'),
-    path.join(cliPackageRoot, 'dist', 'vault-cli-contracts.js'),
-    path.join(cliPackageRoot, 'dist', 'inbox-cli-contracts.js'),
   ]
   const workspacePackageNames = [
     'contracts',

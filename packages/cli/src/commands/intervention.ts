@@ -1,10 +1,10 @@
 import { Cli, z } from 'incur'
-import { withBaseOptions } from '../command-helpers.js'
+import { withBaseOptions } from '@murph/assistant-core/command-helpers'
 import {
   interventionAddResultSchema,
   isoTimestampSchema,
-} from '../vault-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import {
   addInterventionRecord,
   deleteInterventionRecord,

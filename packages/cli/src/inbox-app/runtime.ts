@@ -1,7 +1,7 @@
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   resolveLinqWebhookSecret,
-} from '../linq-runtime.js'
+} from '@murph/assistant-core/linq-runtime'
 import type {
   InboxAppEnvironment,
   InboxServices,
@@ -10,29 +10,29 @@ import type {
   PollConnector,
   RuntimeCaptureRecordInput,
 } from './types.js'
-import { instantiateConnector } from '../inbox-services/connectors.js'
+import { instantiateConnector } from '@murph/assistant-core/inbox-services/connectors'
 import {
   buildDaemonState,
   createProcessSignalBridge,
   normalizeDaemonState,
   writeDaemonState,
-} from '../inbox-services/daemon.js'
+} from '@murph/assistant-core/inbox-services/daemon'
 import {
   createParserServiceContext,
   summarizeParserDrain,
-} from '../inbox-services/parser.js'
-import { buildCaptureCursor } from '../inbox-services/query.js'
+} from '@murph/assistant-core/inbox-services/parser'
+import { buildCaptureCursor } from '@murph/assistant-core/inbox-services/query'
 import {
   ensureInitialized,
   readConfig,
   requireConnector,
-} from '../inbox-services/state.js'
+} from '@murph/assistant-core/inbox-services/state'
 import {
   errorMessage,
   normalizeOptionalCommandLimit,
   relativeToVault,
   runtimeNamespaceAccountId,
-} from '../inbox-services/shared.js'
+} from '@murph/assistant-core/inbox-services/shared'
 import { tryKillProcess } from '../process-kill.js'
 
 const FOREGROUND_CONNECTOR_RESTART_POLICY = {
