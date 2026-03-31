@@ -632,7 +632,7 @@ describe("dispatchHostedDeviceSyncWake", () => {
     );
   });
 
-  it("redacts credential-like webhook and job keys even when providers vary the key casing or separators", async () => {
+  it("shapes hosted webhook hints by provider and job allowlists instead of key redaction", async () => {
     mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -719,7 +719,6 @@ describe("dispatchHostedDeviceSyncWake", () => {
           dedupeKey: expect.any(String),
           kind: "reconcile",
           payload: {
-            objectId: "daily-sleep-1",
             windowStart: "2026-03-19T00:00:00.000Z",
           },
         },
@@ -727,6 +726,114 @@ describe("dispatchHostedDeviceSyncWake", () => {
       occurredAt: "2026-03-26T11:59:00.000Z",
       resourceCategory: null,
       traceId: "trace_case_123",
+    });
+  });
+
+  it("shapes Whoop hosted webhook hints through the provider-owned allowlists", async () => {
+    mocks.createDeviceSyncPublicIngress.mockImplementationOnce((input: {
+      hooks?: {
+        onConnectionEstablished?: (value: unknown) => Promise<void> | void;
+        onWebhookAccepted?: (value: unknown) => Promise<void> | void;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(),
+      handleWebhook: vi.fn(async () => {
+        await input.hooks?.onWebhookAccepted?.({
+          account: {
+            id: "dsc_123",
+            provider: "whoop",
+            scopes: ["offline"],
+          },
+          now: "2026-03-26T12:00:00.000Z",
+          provider: {},
+          webhook: {
+            eventType: "workout.updated",
+            jobs: [
+              {
+                kind: "resource",
+                payload: {
+                  eventType: "workout.updated",
+                  occurredAt: "2026-03-26T11:58:00.000Z",
+                  resourceId: "workout-7",
+                  resourceType: "workout",
+                  sessionToken: "whoop-session-secret",
+                  webhookPayload: {
+                    extra: "drop-me",
+                  },
+                },
+              },
+              {
+                kind: "delete",
+                payload: {
+                  eventType: "workout.deleted",
+                  occurredAt: "2026-03-26T11:59:00.000Z",
+                  resourceId: "workout-8",
+                  resourceType: "workout",
+                  traceId: "drop-trace",
+                },
+              },
+            ],
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            payload: {
+              resourceType: "workout",
+            },
+            traceId: "trace_whoop_123",
+          },
+        });
+        return {
+          accepted: true,
+        };
+      }),
+      startConnection: vi.fn(),
+    }));
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/webhooks/whoop", {
+        body: JSON.stringify({
+          event: "workout.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await controlPlane.handleWebhook("whoop");
+
+    const signalInput = mocks.createSignal.mock.calls[0]?.[0];
+    const signalJson = JSON.stringify(signalInput?.payload ?? {});
+
+    expect(signalJson).not.toContain("whoop-session-secret");
+    expect(signalJson).not.toContain("drop-me");
+    expect(signalJson).not.toContain("drop-trace");
+    expect(signalInput?.payload).toEqual({
+      eventType: "workout.updated",
+      jobs: [
+        {
+          dedupeKey: expect.any(String),
+          kind: "resource",
+          payload: {
+            eventType: "workout.updated",
+            occurredAt: "2026-03-26T11:58:00.000Z",
+            resourceId: "workout-7",
+            resourceType: "workout",
+          },
+        },
+        {
+          dedupeKey: expect.any(String),
+          kind: "delete",
+          payload: {
+            eventType: "workout.deleted",
+            occurredAt: "2026-03-26T11:59:00.000Z",
+            resourceId: "workout-8",
+            resourceType: "workout",
+          },
+        },
+      ],
+      occurredAt: "2026-03-26T11:59:00.000Z",
+      resourceCategory: "workout",
+      traceId: "trace_whoop_123",
     });
   });
 

@@ -666,6 +666,64 @@ test("Oura provider accepts documented numeric-second timestamps, uses event_tim
   assert.equal(deletionEvent?.fields?.sourceEventType, "session.deleted");
 });
 
+test("Oura provider imports hosted-narrowed delete wake payloads as deletion snapshots", async () => {
+  const importedSnapshots: unknown[] = [];
+  const provider = createOuraDeviceSyncProvider({
+    clientId: "oura-client-id",
+    clientSecret: "oura-client-secret",
+  });
+  const context: ProviderJobContext = {
+    account: createAccount(["session"]),
+    now: "2026-03-27T08:05:00.000Z",
+    logger: {},
+    async importSnapshot(snapshot) {
+      importedSnapshots.push(snapshot);
+      return { ok: true };
+    },
+    async refreshAccountTokens() {
+      throw new Error("refreshAccountTokens should not be called");
+    },
+  };
+
+  await provider.executeJob(context, createJob("delete", {
+    dataType: "session",
+    objectId: "session-42",
+    occurredAt: "2026-03-27T08:03:00.000Z",
+    sourceEventType: "session.deleted",
+    webhookPayload: {
+      data_type: "session",
+      event_time: "2026-03-27T08:03:00.000Z",
+      event_type: "delete",
+      object_id: "session-42",
+      trace_id: "trace_delete_123",
+      user_id: "oura-user-1",
+    },
+  }));
+
+  assert.deepEqual(importedSnapshots, [
+    {
+      accountId: "oura-user-1",
+      importedAt: "2026-03-27T08:05:00.000Z",
+      deletions: [
+        {
+          resource_type: "session",
+          resource_id: "session-42",
+          occurred_at: "2026-03-27T08:03:00.000Z",
+          source_event_type: "session.deleted",
+          payload: {
+            data_type: "session",
+            event_time: "2026-03-27T08:03:00.000Z",
+            event_type: "delete",
+            object_id: "session-42",
+            trace_id: "trace_delete_123",
+            user_id: "oura-user-1",
+          },
+        },
+      ],
+    },
+  ]);
+});
+
 test("Oura provider fallback trace ids ignore transport timestamps when the webhook body is unchanged", async () => {
   const provider = createOuraDeviceSyncProvider({
     clientId: "oura-client-id",

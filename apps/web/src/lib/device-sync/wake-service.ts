@@ -7,6 +7,7 @@ import {
   type ProviderConnectionResult,
   type PublicDeviceSyncAccount,
 } from "@murph/device-syncd";
+import { shapeHostedDeviceSyncJobHintPayload } from "@murph/device-syncd/hosted-hints";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDeviceSyncJobHint,
@@ -21,24 +22,6 @@ import {
 } from "./hosted-dispatch";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
 import { sha256Hex, toIsoTimestamp, toJsonRecord } from "./shared";
-
-const HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS = new Set([
-  "accesstoken",
-  "apikey",
-  "authorization",
-  "bearertoken",
-  "clientsecret",
-  "cookie",
-  "idtoken",
-  "oauthaccesstoken",
-  "oauthrefreshtoken",
-  "refreshtoken",
-  "secret",
-  "sessionkey",
-  "sessionsecret",
-  "sessiontoken",
-  "verificationtoken",
-]);
 
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
@@ -144,6 +127,7 @@ export async function handleHostedDeviceSyncConnectionEstablished(input: {
       connectionId: input.account.id,
       jobs: input.connection.initialJobs ?? [],
       occurredAt: input.now,
+      provider: input.account.provider,
       reason: "connected",
     }),
     nextReconcileAt: input.connection.nextReconcileAt ?? null,
@@ -214,6 +198,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     jobs: input.webhook.jobs,
     occurredAt: input.webhook.occurredAt ?? null,
     payload: input.webhook.payload,
+    provider: input.account.provider,
     traceId: input.webhook.traceId ?? null,
   });
   const dispatch = buildHostedDeviceSyncWakeDispatch({
@@ -333,6 +318,7 @@ function buildHostedWebhookHintSignal(input: {
   traceId?: string | null;
   occurredAt?: string | null;
   payload?: Record<string, unknown>;
+  provider: string;
 }): HostedExecutionDeviceSyncWakeEvent["hint"] {
   const resourceCategory =
     typeof input.payload?.dataType === "string"
@@ -347,6 +333,7 @@ function buildHostedWebhookHintSignal(input: {
       connectionId: input.connectionId,
       jobs: input.jobs ?? [],
       occurredAt: input.occurredAt,
+      provider: input.provider,
       reason: "webhook_hint",
       traceId: input.traceId,
     }),
@@ -360,11 +347,12 @@ function normalizeHostedDeviceSyncJobHints(input: {
   connectionId: string;
   jobs: readonly DeviceSyncJobInput[];
   occurredAt?: string | null;
+  provider: string;
   reason: HostedExecutionDeviceSyncWakeEvent["reason"];
   traceId?: string | null;
 }): HostedExecutionDeviceSyncJobHint[] {
   return input.jobs.map((job, index) => {
-    const payload = sanitizeHostedSignalPayloadValue(job.payload ?? {}) as Record<string, unknown>;
+    const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
     const stableSeed = JSON.stringify({
       connectionId: input.connectionId,
       index,
@@ -385,40 +373,3 @@ function normalizeHostedDeviceSyncJobHints(input: {
   });
 }
 
-function sanitizeHostedSignalPayloadValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => sanitizeHostedSignalPayloadValue(entry));
-  }
-
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  const record = value as Record<string, unknown>;
-  const sanitized: Record<string, unknown> = {};
-
-  for (const [key, entry] of Object.entries(record)) {
-    if (isHostedSignalSensitivePayloadKey(key)) {
-      continue;
-    }
-
-    sanitized[key] = sanitizeHostedSignalPayloadValue(entry);
-  }
-
-  return sanitized;
-}
-
-function isHostedSignalSensitivePayloadKey(key: string): boolean {
-  const normalized = key.toLowerCase().replace(/[^a-z0-9]/gu, "");
-
-  if (!normalized) {
-    return false;
-  }
-
-  return HOSTED_DEVICE_SYNC_REDACTED_PAYLOAD_KEYS.has(normalized)
-    || normalized === "setcookie"
-    || normalized.endsWith("token")
-    || normalized.endsWith("secret")
-    || normalized.endsWith("apikey")
-    || normalized.endsWith("sessionid");
-}
