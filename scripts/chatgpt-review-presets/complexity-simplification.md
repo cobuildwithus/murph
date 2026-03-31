@@ -11,12 +11,8 @@ Constraints:
 - do not invent new architecture without a concrete payoff
 - report any risky simplification instead of applying it
 
-Output requirements:
-- return findings ordered by severity: `high`, `medium`, `low`
-- for each finding include: `severity`, `file:line`, `issue`, `impact`, `recommended fix`
-- include `Open questions / assumptions` when uncertainty remains
-- if no findings exist, say so explicitly and list any residual risk areas
-
-Response format:
-- return a normal text review, not a patch attachment and not follow-on prompts for more agents
-- keep the focus on actionable simplification findings and the clearest concrete fixes
+Final response contract:
+- Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
+- Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
+- Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
+- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.
