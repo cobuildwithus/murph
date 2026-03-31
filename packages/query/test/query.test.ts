@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { test, vi } from "vitest";
 import {
   INBOX_DB_RELATIVE_PATH,
@@ -53,6 +54,8 @@ import {
   scoreSearchDocuments,
   type SearchableDocument,
 } from "../src/search.ts";
+
+const require = createRequire(import.meta.url);
 
 test("parseMarkdownDocument keeps tolerant parsing explicit", () => {
   const parsed = parseMarkdownDocument(`---
@@ -2693,7 +2696,7 @@ test("getSqliteSearchStatus stays false against a pre-existing inbox runtime db 
   const runtimeDatabasePath = path.join(runtimeRoot, "inboxd.sqlite");
 
   await mkdir(runtimeRoot, { recursive: true });
-  const database = new DatabaseSync(runtimeDatabasePath);
+  const database = openDatabaseSync(runtimeDatabasePath);
   database.exec("CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);");
   database.close();
 
@@ -2702,7 +2705,7 @@ test("getSqliteSearchStatus stays false against a pre-existing inbox runtime db 
     assert.equal(status.exists, false);
     assert.equal(status.dbPath, SEARCH_DB_RELATIVE_PATH);
 
-    const schemaDatabase = new DatabaseSync(runtimeDatabasePath, { readOnly: true });
+    const schemaDatabase = openDatabaseSync(runtimeDatabasePath, { readOnly: true });
     const tableNames = schemaDatabase
       .prepare(`
         SELECT name
@@ -2738,7 +2741,7 @@ test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched 
   const searchDatabasePath = path.join(vaultRoot, SEARCH_DB_RELATIVE_PATH);
 
   await mkdir(runtimeRoot, { recursive: true });
-  const inboxDatabase = new DatabaseSync(runtimeDatabasePath);
+  const inboxDatabase = openDatabaseSync(runtimeDatabasePath);
   inboxDatabase.exec("CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);");
   inboxDatabase
     .prepare("INSERT INTO inbox_state (id, value) VALUES (?, ?)")
@@ -2750,7 +2753,7 @@ test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched 
     assert.equal(rebuilt.dbPath, SEARCH_DB_RELATIVE_PATH);
     assert.equal(existsSync(searchDatabasePath), true);
 
-    const searchDatabase = new DatabaseSync(searchDatabasePath, { readOnly: true });
+    const searchDatabase = openDatabaseSync(searchDatabasePath, { readOnly: true });
     const searchTables = searchDatabase
       .prepare(`
         SELECT name
@@ -2766,7 +2769,7 @@ test("rebuildSqliteSearchIndex leaves a pre-existing inbox runtime db untouched 
     assert.equal(searchTables.some((table) => table.name === "murph_search_meta"), true);
     assert.equal(searchTables.some((table) => table.name === "murph_search_fts"), true);
 
-    const inboxStateDatabase = new DatabaseSync(runtimeDatabasePath, { readOnly: true });
+    const inboxStateDatabase = openDatabaseSync(runtimeDatabasePath, { readOnly: true });
     const inboxState = inboxStateDatabase
       .prepare("SELECT value FROM inbox_state WHERE id = ?")
       .get("cursor") as { value: string } | undefined;
@@ -2877,3 +2880,11 @@ Steady energy after saffron tea.
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
+
+function openDatabaseSync(
+  databasePath: string,
+  options?: ConstructorParameters<typeof import("node:sqlite").DatabaseSync>[1],
+): DatabaseSync {
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  return new DatabaseSync(databasePath, options ?? {});
+}

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { extractIsoDatePrefix } from "@murph/contracts";
 import {
   SEARCH_DB_RELATIVE_PATH,

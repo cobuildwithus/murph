@@ -1,7 +1,7 @@
 import type { ChatMessage } from "../chat/message.ts";
 import { createInboundCaptureFromChatMessage } from "../chat/message.ts";
 import type { InboundAttachment, InboundCapture } from "../../contracts/capture.ts";
-import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared.ts";
+import { normalizeTextValue, sanitizeRawMetadata, toIsoTimestamp } from "../../shared-runtime.ts";
 import type {
   TelegramChat,
   TelegramContact,

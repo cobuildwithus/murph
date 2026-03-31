@@ -19,6 +19,14 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./linq": {
+      "types": "./dist/linq.d.ts",
+      "default": "./dist/linq.js"
+    },
+    "./telegram": {
+      "types": "./dist/telegram.d.ts",
+      "default": "./dist/telegram.js"
+    },
     "./connectors/email/normalize-parsed": {
       "types": "./dist/connectors/email/normalize-parsed.d.ts",
       "default": "./dist/connectors/email/normalize-parsed.js"

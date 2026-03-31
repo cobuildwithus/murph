@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Api, type ApiClientOptions, type RawApi } from "grammy";
-import { relayAbort } from "../../shared.ts";
+import { relayAbort } from "../../shared-runtime.ts";
 import {
   createNormalizedChatPollConnector,
   type ChatPollDriver,

@@ -7,7 +7,7 @@ import {
   relayAbort,
   sanitizeRawMetadata,
   toIsoTimestamp,
-} from '../../shared.ts'
+} from '../../shared-runtime.ts'
 import type {
   LinqMediaPart,
   LinqMessagePart,

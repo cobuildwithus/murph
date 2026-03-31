@@ -2,7 +2,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { rememberLaunchCwd } from "../src/lib/vault";
+import { rememberLaunchCwd } from "../src/lib/vault-launch";
 
 const require = createRequire(import.meta.url);
 const fs = require("node:fs") as typeof import("node:fs");

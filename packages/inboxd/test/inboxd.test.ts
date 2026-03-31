@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { resolveRuntimePaths } from "@murph/runtime-state";
 
@@ -21,6 +22,8 @@ import {
   sanitizeRawMetadata,
   toIsoTimestamp,
 } from "../src/shared.ts";
+
+const require = createRequire(import.meta.url);
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -145,7 +148,7 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
     session: "<REDACTED_SECRET>",
   });
 
-  const captureDatabase = new DatabaseSync(runtime.databasePath);
+  const captureDatabase = openDatabaseSync(runtime.databasePath);
   const captureRow = captureDatabase
     .prepare("select raw_json from capture where capture_id = ?")
     .get(first.captureId) as { raw_json: string } | undefined;
@@ -849,7 +852,7 @@ test("runtime decoding rejects malformed sqlite rows with clear column errors", 
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const runtime = await openInboxRuntime({ vaultRoot });
-  const database = new DatabaseSync(runtime.databasePath);
+  const database = openDatabaseSync(runtime.databasePath);
 
   database
     .prepare(
@@ -1113,3 +1116,8 @@ test("normalizeImessageMessage treats non-string text payloads as null", () => {
 
   assert.equal(capture.text, null);
 });
+
+function openDatabaseSync(databasePath: string): DatabaseSync {
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  return new DatabaseSync(databasePath);
+}

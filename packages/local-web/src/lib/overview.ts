@@ -23,10 +23,7 @@ import {
 } from "@murph/query";
 
 import {
-  buildExampleVaultPath,
-  buildSuggestedCommand,
   VAULT_ENV,
-  resolveConfiguredVaultRoot,
 } from "./vault";
 
 type TimelineItem = ReturnType<typeof buildTimeline>[number];
@@ -130,6 +127,8 @@ export function overviewResultToHttpStatus(result: OverviewResult): number {
 export async function loadVaultOverviewFromEnv(
   options: Omit<LoadVaultOverviewOptions, "vaultRoot"> = {},
 ): Promise<OverviewResult> {
+  const { resolveConfiguredVaultRoot } = await import("./vault-config");
+
   return loadVaultOverview({
     ...options,
     vaultRoot: await resolveConfiguredVaultRoot(),
@@ -142,11 +141,12 @@ export async function loadVaultOverview(
   const vaultRoot = options.vaultRoot ?? null;
 
   if (!vaultRoot) {
+    const guidance = await loadOverviewGuidance();
     return {
       envVar: VAULT_ENV,
-      exampleVaultPath: buildExampleVaultPath(),
+      exampleVaultPath: guidance.exampleVaultPath,
       status: "missing-config",
-      suggestedCommand: buildSuggestedCommand(),
+      suggestedCommand: guidance.suggestedCommand,
     };
   }
 
@@ -199,14 +199,27 @@ export async function loadVaultOverview(
       }).map((entry) => toOverviewTimelineEntry(entry, timeZone)),
     };
   } catch {
+    const guidance = await loadOverviewGuidance();
     return {
       envVar: VAULT_ENV,
       hint: "Confirm the configured vault path points at a Murph vault root, then restart the local app.",
       message: "The configured vault could not be read.",
-      recoveryCommand: buildSuggestedCommand(),
+      recoveryCommand: guidance.suggestedCommand,
       status: "error",
     };
   }
+}
+
+async function loadOverviewGuidance(): Promise<{
+  exampleVaultPath: string;
+  suggestedCommand: string;
+}> {
+  const { buildExampleVaultPath, buildSuggestedCommand } = await import("./vault-launch");
+
+  return {
+    exampleVaultPath: buildExampleVaultPath(),
+    suggestedCommand: buildSuggestedCommand(),
+  };
 }
 
 function mapSafeSearchResult(result: SafeSearchResult): OverviewSearchResult {
