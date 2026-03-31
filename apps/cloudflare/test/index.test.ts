@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { ContainerProxy as PackageContainerProxy } from "@cloudflare/containers";
 import { createHostedExecutionSignature } from "../src/auth.ts";
@@ -16,6 +16,8 @@ import worker, { ContainerProxy as ExportedContainerProxy, UserRunnerDurableObje
 import { encodeHostedUserEnvPayload } from "../src/user-env.ts";
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
 import { createTestSqlStorage } from "./sql-storage.ts";
+
+const describe = baseDescribe.sequential;
 
 const RUNNER_PROXY_TOKEN = "runner-proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";

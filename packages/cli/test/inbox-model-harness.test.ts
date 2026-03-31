@@ -2,21 +2,23 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { test, vi } from 'vitest'
+import { test as baseTest, vi } from 'vitest'
 import {
   initializeVault,
   upsertFood,
   upsertProtocolItem,
 } from '@murph/core'
-import type { AssistantAskResult } from '../src/assistant-cli-contracts.js'
-import { writeAssistantChatResultArtifacts } from '../src/assistant/automation/artifacts.js'
+import type { AssistantAskResult } from '@murph/assistant-core/assistant-cli-contracts'
+import { writeAssistantChatResultArtifacts } from '@murph/assistant-core/assistant/automation/artifacts'
 import {
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '../src/assistant-cli-tools.js'
-import { materializeInboxModelBundle } from '../src/inbox-model-harness.js'
-import type { InboxServices } from '../src/inbox-services.js'
-import type { VaultServices } from '../src/vault-services.js'
+} from '@murph/assistant-core/assistant-cli-tools'
+import { materializeInboxModelBundle } from '@murph/assistant-core/inbox-model-harness'
+import type { InboxServices } from '@murph/assistant-core/inbox-services'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
+
+const test = baseTest.sequential
 
 function createStubVaultServices(overrides: Partial<VaultServices> = {}): VaultServices {
   return {

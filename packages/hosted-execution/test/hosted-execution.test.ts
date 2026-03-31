@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
@@ -53,6 +53,8 @@ import {
   resolveHostedExecutionSharePackClient,
   verifyHostedExecutionSignature,
 } from "@murph/hosted-execution";
+
+const describe = baseDescribe.sequential;
 
 describe("@murph/hosted-execution", () => {
   afterEach(() => {

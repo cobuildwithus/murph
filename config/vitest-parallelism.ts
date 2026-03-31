@@ -53,7 +53,10 @@ export function resolveMurphVitestSuiteConcurrency(
     return override;
   }
 
-  return !env.CI;
+  // File-level parallelism delivers most of the local speedup. Keeping
+  // in-file suite concurrency opt-in avoids shared-process collisions around
+  // fetch stubs, process.env mutations, fake timers, and other global mocks.
+  return false;
 }
 
 export function resolveMurphVitestMaxWorkers(

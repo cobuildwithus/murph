@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { z } from 'zod'
-import { afterEach, beforeEach, expectTypeOf, test, vi } from 'vitest'
+import { afterEach, beforeEach, expectTypeOf, test as baseTest, vi } from 'vitest'
+
+const test = baseTest.sequential
 
 const harnessMocks = vi.hoisted(() => {
   const gateway = vi.fn((model: string) => ({
@@ -57,7 +59,7 @@ import {
   createAssistantToolCatalog,
   defineAssistantTool,
   resolveAssistantLanguageModel,
-} from '../src/model-harness.js'
+} from '@murph/assistant-core/model-harness'
 
 const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 

@@ -1,6 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { handleRunnerOutboundRequest } from "../src/runner-outbound.ts";
+
+const describe = baseDescribe.sequential;
 
 const RUNNER_PROXY_TOKEN = "proxy-token";
 const RUNNER_PROXY_TOKEN_HEADER = "x-hosted-execution-runner-proxy-token";
