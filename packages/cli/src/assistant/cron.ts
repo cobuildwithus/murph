@@ -295,10 +295,12 @@ export async function addAssistantCronJob(
   })
 }
 
-async function resolveAssistantCronTargetDefaults(
-  input: AddAssistantCronJobInput,
-): Promise<AddAssistantCronJobInput> {
-  if (input.foodAutoLog) {
+async function resolveAssistantCronTargetDefaults<
+  TInput extends AssistantCronTargetInput,
+>(
+  input: TInput,
+): Promise<TInput> {
+  if ('foodAutoLog' in input && input.foodAutoLog) {
     return input
   }
 
@@ -322,7 +324,7 @@ async function resolveAssistantCronTargetDefaults(
     participantId: resolvedTarget.participantId ?? undefined,
     sourceThreadId: resolvedTarget.sourceThreadId ?? undefined,
     deliveryTarget: resolvedTarget.deliveryTarget ?? undefined,
-  }
+  } as TInput
 }
 
 export async function listAssistantCronJobs(
@@ -436,13 +438,14 @@ export async function setAssistantCronJobTarget(
     return remote
   }
 
+  const resolvedInput = await resolveAssistantCronTargetDefaults(input)
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
-  const nextTarget = validateAssistantCronDeliveryTarget(input)
+  const nextTarget = validateAssistantCronDeliveryTarget(resolvedInput)
 
   return withAssistantCronWriteLock(paths, async () => {
     const store = await readAssistantCronStore(paths)
-    const index = resolveAssistantCronJobIndex(store, input.job)
+    const index = resolveAssistantCronJobIndex(store, resolvedInput.job)
     const existing = store.jobs[index] as AssistantCronJob
 
     if (existing.state.runningAt !== null) {
@@ -454,7 +457,7 @@ export async function setAssistantCronJobTarget(
 
     const beforeTarget = buildAssistantCronTargetSnapshot(existing)
     const continuityReset =
-      input.resetContinuity === true &&
+      resolvedInput.resetContinuity === true &&
       (existing.target.sessionId !== null || existing.target.alias !== null)
     const afterTarget = buildAssistantCronTargetSnapshot({
       ...existing,
@@ -469,7 +472,7 @@ export async function setAssistantCronJobTarget(
       afterTarget.target,
     )
 
-    if (input.dryRun) {
+    if (resolvedInput.dryRun) {
       return {
         job: existing,
         beforeTarget,
@@ -491,7 +494,7 @@ export async function setAssistantCronJobTarget(
       }
     }
 
-    const now = (input.now ?? new Date()).toISOString()
+    const now = (resolvedInput.now ?? new Date()).toISOString()
     const updated = assistantCronJobSchema.parse({
       ...existing,
       updatedAt: now,

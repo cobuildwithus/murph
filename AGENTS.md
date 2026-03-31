@@ -43,6 +43,9 @@ Always read these before repo code/docs/test/config work:
 - Never print or commit secrets, raw credentials, or full `Authorization` headers.
 - Do not introduce new `HB_`, `HEALTHYBOB_`, or similar branded prefixes unless the user explicitly asks for them.
 - Import sibling workspace packages by package name through declared public entrypoints only. Do not reach into another package's `src/` or `dist/`.
+- Workspace package dependencies must remain one-way and acyclic. Do not make package `A` depend on package `B` while `B` depends on `A`, whether directly, through public subpaths, or through compatibility shims.
+- Compatibility shims must be temporary and legacy-facing only. Keep the shim on the old path pointing at the new owner; never make the owning package depend on the legacy package to provide the same surface.
+- Shared runtime or domain logic must live below CLI/app packages in one owning package. If multiple siblings need the same code, move it to a shared owner instead of cross-importing sibling internals, building helper grab-bags across layers, or using sibling-to-sibling re-exports.
 - Do not reintroduce custom Turbopack loader-based rewriting for repo-local workspace sources.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.

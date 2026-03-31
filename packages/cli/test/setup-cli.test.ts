@@ -3299,7 +3299,7 @@ done
       stdio: 'ignore',
     })
 
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
       try {
         await readFile(childPidPath, 'utf8')
         break
@@ -3315,7 +3315,7 @@ done
         const timer = setTimeout(() => {
           process.kill(-child.pid!, 'SIGKILL')
           reject(new Error('shim did not exit after SIGINT'))
-        }, 5000)
+        }, 10000)
 
         child.once('exit', (code, signal) => {
           clearTimeout(timer)

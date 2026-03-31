@@ -11,11 +11,15 @@ import {
   buildAssistantStateMcpConfig,
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
+import { createDefaultAssistantToolCatalog } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurn,
   resolveAssistantProviderTraits,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
+import {
+  didOpenAiCompatibleProviderExecuteTool,
+} from './providers/openai-compatible.js'
 import {
   executeWithCanonicalWriteGuard,
 } from './canonical-write-guard.js'
@@ -65,6 +69,7 @@ import {
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
+import { createIntegratedVaultServices } from '../vault-services.js'
 import type { AssistantMessageInput } from './service.js'
 
 interface AssistantTurnSharedPlan {
@@ -503,6 +508,19 @@ async function executeAssistantProviderAttempt(input: {
       message: 'Injected assistant provider failure.',
     })
     const routeTraits = resolveAssistantProviderTraits(attemptPlan.route.provider)
+    const toolRuntime = {
+      allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
+      requestId: executionPlan.turnId,
+      sessionId: attemptPlan.session.sessionId,
+      toolCatalog: createDefaultAssistantToolCatalog({
+        allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
+        requestId: executionPlan.turnId,
+        sessionId: attemptPlan.session.sessionId,
+        vault: executionPlan.input.vault,
+        vaultServices: createIntegratedVaultServices(),
+      }),
+      vault: executionPlan.input.vault,
+    }
     const result = await executeWithCanonicalWriteGuard({
       enabled: routeTraits.workspaceMode === 'direct-cli',
       vaultRoot: executionPlan.input.vault,
@@ -519,10 +537,7 @@ async function executeAssistantProviderAttempt(input: {
           userPrompt: executionPlan.input.prompt,
           continuityContext: attemptPlan.routePlan.continuityContext,
           systemPrompt: attemptPlan.routePlan.systemPrompt,
-          toolRuntime: {
-            requestId: executionPlan.turnId,
-            vault: executionPlan.input.vault,
-          },
+          toolRuntime,
           sessionContext: attemptPlan.routePlan.sessionContext
             ? {
                 binding: attemptPlan.session.binding,
@@ -643,7 +658,7 @@ async function executeAssistantProviderAttempt(input: {
     const outcomeKind = classifyAssistantProviderAttemptFailure({
       abortSignal: executionPlan.input.abortSignal,
       error,
-      hasBoundAssistantTools: attemptPlan.route.provider === 'openai-compatible',
+      executedBoundAssistantTool: didOpenAiCompatibleProviderExecuteTool(error),
       nextRoute,
     })
 
@@ -679,14 +694,14 @@ async function executeAssistantProviderAttempt(input: {
 function classifyAssistantProviderAttemptFailure(input: {
   abortSignal?: AbortSignal
   error: unknown
-  hasBoundAssistantTools: boolean
+  executedBoundAssistantTool: boolean
   nextRoute: ResolvedAssistantFailoverRoute | null
 }): 'blocked' | 'failed_terminal' | 'retry_next_route' {
   if (readAssistantErrorCode(input.error) === 'ASSISTANT_CANONICAL_DIRECT_WRITE_BLOCKED') {
     return 'blocked'
   }
 
-  if (input.hasBoundAssistantTools) {
+  if (input.executedBoundAssistantTool) {
     return 'failed_terminal'
   }
 

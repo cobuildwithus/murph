@@ -1,6 +1,6 @@
 import { z } from 'incur'
 
-import { isoTimestampSchema } from '../vault-cli-contracts.js'
+import { isoTimestampSchema } from './shared.js'
 
 export const gatewayConversationDirectnessValues = [
   'direct',
@@ -136,7 +136,6 @@ export const gatewayPermissionRequestSchema = z
     note: gatewayOptionalStringSchema,
   })
   .strict()
-
 
 export const gatewayProjectionSnapshotSchema = z
   .object({

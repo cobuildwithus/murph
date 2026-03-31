@@ -11,6 +11,7 @@ import {
   buildHostedExecutionOutboxPayload,
   buildHostedExecutionAssistantCronTickDispatch,
   buildHostedExecutionEmailMessageReceivedDispatch,
+  buildHostedExecutionGatewayMessageSendDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
   buildHostedExecutionSharePayloadPath,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
@@ -25,6 +26,7 @@ import {
   createHostedExecutionSignature,
   createHostedExecutionSignatureHeaders,
   buildHostedExecutionStructuredLogRecord,
+  emitHostedExecutionStructuredLog,
   deriveHostedExecutionErrorCode,
   summarizeHostedExecutionError,
   HOSTED_EXECUTION_DISPATCH_PATH,
@@ -427,6 +429,50 @@ describe("@murph/hosted-execution", () => {
     expect(JSON.stringify(record)).not.toContain("sk-live-secret");
   });
 
+  it("suppresses hosted structured stdio logs during Vitest unless explicitly overridden", () => {
+    const originalVitest = process.env.VITEST;
+    const originalStdIoLogs = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    try {
+      process.env.VITEST = "true";
+      delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+
+      const quietRecord = emitHostedExecutionStructuredLog({
+        component: "worker",
+        message: "Hosted worker route started.",
+        phase: "started",
+        time: "2026-03-26T12:00:01.000Z",
+      });
+
+      expect(infoSpy).not.toHaveBeenCalled();
+      expect(quietRecord.message).toBe("Hosted worker route started.");
+
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
+
+      emitHostedExecutionStructuredLog({
+        component: "worker",
+        message: "Hosted worker route started.",
+        phase: "started",
+        time: "2026-03-26T12:00:02.000Z",
+      });
+
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalVitest === undefined) {
+        delete process.env.VITEST;
+      } else {
+        process.env.VITEST = originalVitest;
+      }
+
+      if (originalStdIoLogs === undefined) {
+        delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+      } else {
+        process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = originalStdIoLogs;
+      }
+    }
+  });
+
   it("sends the bound hosted execution user header when recording hosted AI usage", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({
@@ -746,6 +792,31 @@ describe("@murph/hosted-execution", () => {
       },
       eventId: "telegram:update:123",
       occurredAt: "2026-03-28T09:05:00.000Z",
+    });
+  });
+
+  it("round-trips hosted gateway sends through the shared builder and parser", () => {
+    expect(parseHostedExecutionDispatchRequest(
+      buildHostedExecutionGatewayMessageSendDispatch({
+        clientRequestId: "req-123",
+        eventId: "gateway-send:abc123",
+        occurredAt: "2026-03-31T09:15:00.000Z",
+        replyToMessageId: "5001",
+        sessionKey: "gwcs_example",
+        text: "Please follow up.",
+        userId: "member_123",
+      }),
+    )).toEqual({
+      event: {
+        clientRequestId: "req-123",
+        kind: "gateway.message.send",
+        replyToMessageId: "5001",
+        sessionKey: "gwcs_example",
+        text: "Please follow up.",
+        userId: "member_123",
+      },
+      eventId: "gateway-send:abc123",
+      occurredAt: "2026-03-31T09:15:00.000Z",
     });
   });
 

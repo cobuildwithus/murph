@@ -65,15 +65,29 @@ const assistantMemoryQueryScopeSchema = z.enum(assistantMemoryQueryScopeValues)
 const assistantMemoryWriteScopeSchema = z.enum(assistantMemoryWriteScopeValues)
 const assistantMemoryLongTermSectionSchema = z.enum(assistantMemoryLongTermSectionValues)
 const assistantMemoryVisibleSectionSchema = z.enum(assistantMemoryVisibleSectionValues)
+const assistantCronDeliveryTargetSchema = z.object({
+  channel: z.string().min(1).optional(),
+  deliveryTarget: z.string().min(1).optional(),
+  identityId: z.string().min(1).optional(),
+  participantId: z.string().min(1).optional(),
+  sourceThreadId: z.string().min(1).optional(),
+})
+const assistantCronTargetMutationSchema = assistantCronDeliveryTargetSchema.extend({
+  dryRun: z.boolean().optional(),
+  job: z.string().min(1),
+  resetContinuity: z.boolean().optional(),
+})
 const assistantToolTextReadDefaultMaxChars = 8_000
 const assistantToolTextReadMaxChars = 20_000
 const assistantToolTextReadChunkBytes = 4_096
 
 
 interface AssistantToolContext {
+  allowSensitiveHealthContext?: boolean
   captureId?: string
   inboxServices?: InboxServices
   requestId?: string | null
+  sessionId?: string | null
   vault: string
   vaultServices?: VaultServices
 }
@@ -110,6 +124,23 @@ export function createInboxRoutingAssistantToolCatalog(
 
 async function loadAssistantCronTools() {
   return await import('./assistant/cron.js')
+}
+
+function allowSensitiveHealthContextForAssistantTools(
+  input: AssistantToolContext,
+): boolean {
+  return input.allowSensitiveHealthContext === true
+}
+
+async function requireAssistantMemoryToolRecord(
+  input: AssistantToolContext,
+  id: string,
+) {
+  return await getAssistantMemory({
+    id,
+    vault: input.vault,
+    includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
+  })
 }
 
 function createAssistantRuntimeToolDefinitions(
@@ -186,7 +217,7 @@ function createAssistantRuntimeToolDefinitions(
           scope,
           section: section ?? null,
           limit,
-          includeSensitiveHealthContext: true,
+          includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
         }),
     }),
     defineAssistantTool({
@@ -203,7 +234,7 @@ function createAssistantRuntimeToolDefinitions(
         getAssistantMemory({
           id,
           vault: input.vault,
-          includeSensitiveHealthContext: true,
+          includeSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
         }),
     }),
     defineAssistantTool({
@@ -233,6 +264,41 @@ function createAssistantRuntimeToolDefinitions(
         job: 'weekly-digest',
       },
       execute: async ({ job }) => (await loadAssistantCronTools()).getAssistantCronJob(input.vault, job),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.target.show',
+      description:
+        'Show the outbound target currently configured for one assistant cron job.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+      },
+      execute: async ({ job }) =>
+        (await loadAssistantCronTools()).getAssistantCronJobTarget(input.vault, job),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.target.set',
+      description:
+        'Retarget one existing assistant cron job in place using an explicit outbound route or a saved self-target for the selected channel.',
+      inputSchema: assistantCronTargetMutationSchema,
+      inputExample: {
+        job: 'weekly-digest',
+        channel: 'telegram',
+      },
+      execute: async ({ channel, deliveryTarget, dryRun, identityId, job, participantId, resetContinuity, sourceThreadId }) =>
+        (await loadAssistantCronTools()).setAssistantCronJobTarget({
+          vault: input.vault,
+          job,
+          channel,
+          deliveryTarget,
+          dryRun,
+          identityId,
+          participantId,
+          resetContinuity,
+          sourceThreadId,
+        }),
     }),
     defineAssistantTool({
       name: 'assistant.cron.runs',
@@ -376,23 +442,22 @@ function createAssistantRuntimeToolDefinitions(
         text: z.string().min(1),
         scope: assistantMemoryWriteScopeSchema.optional(),
         section: assistantMemoryLongTermSectionSchema.optional(),
-        allowSensitiveHealthContext: z.boolean().optional(),
       }),
       inputExample: {
         text: 'User prefers concise replies.',
         scope: 'long-term',
         section: 'Preferences',
       },
-      execute: ({ allowSensitiveHealthContext, scope, section, text }) =>
+      execute: ({ scope, section, text }) =>
         upsertAssistantMemory({
           vault: input.vault,
           text,
           scope,
           section: section ?? null,
-          allowSensitiveHealthContext: allowSensitiveHealthContext ?? false,
+          allowSensitiveHealthContext: allowSensitiveHealthContextForAssistantTools(input),
           provenance: {
             writtenBy: 'assistant',
-            sessionId: null,
+            sessionId: input.sessionId ?? null,
             turnId: input.requestId ?? null,
           },
         }),
@@ -407,17 +472,19 @@ function createAssistantRuntimeToolDefinitions(
       inputExample: {
         id: 'long-term:preferences%7Cslot%3Aassistant-style%3Atone',
       },
-      execute: ({ id }) =>
-        forgetAssistantMemory({
+      execute: async ({ id }) => {
+        await requireAssistantMemoryToolRecord(input, id)
+        return forgetAssistantMemory({
           id,
           vault: input.vault,
-        }),
+        })
+      },
     }),
     defineAssistantTool({
       name: 'assistant.cron.add',
       description:
-        'Create one assistant cron job with an explicit prompt and schedule.',
-      inputSchema: z.object({
+        'Create one assistant cron job with an explicit prompt, schedule, and outbound delivery target.',
+      inputSchema: assistantCronDeliveryTargetSchema.extend({
         name: z.string().min(1),
         prompt: z.string().min(1),
         schedule: assistantCronScheduleInputSchema,
@@ -434,24 +501,30 @@ function createAssistantRuntimeToolDefinitions(
           localTime: '09:00',
           timeZone: 'America/Los_Angeles',
         },
+        channel: 'telegram',
       },
-      execute: async ({ bindState, enabled, keepAfterRun, name, prompt, schedule, stateDocId }) =>
+      execute: async ({ bindState, channel, deliveryTarget, enabled, identityId, keepAfterRun, name, participantId, prompt, schedule, sourceThreadId, stateDocId }) =>
         (await loadAssistantCronTools()).addAssistantCronJob({
           vault: input.vault,
           name,
           prompt,
           schedule,
+          channel,
+          deliveryTarget,
           enabled,
+          identityId,
           keepAfterRun,
           bindState,
+          participantId,
+          sourceThreadId,
           stateDocId: stateDocId ?? null,
         }),
     }),
     defineAssistantTool({
       name: 'assistant.cron.preset.install',
       description:
-        'Install one built-in assistant cron preset into the active vault with optional overrides.',
-      inputSchema: z.object({
+        'Install one built-in assistant cron preset into the active vault with optional schedule, routing, and variable overrides.',
+      inputSchema: assistantCronDeliveryTargetSchema.extend({
         presetId: z.string().min(1),
         name: z.string().min(1).optional(),
         schedule: assistantCronScheduleInputSchema.optional(),
@@ -463,14 +536,20 @@ function createAssistantRuntimeToolDefinitions(
       }),
       inputExample: {
         presetId: 'weekly-summary',
+        channel: 'telegram',
       },
       execute: async ({
         additionalInstructions,
         bindState,
+        channel,
+        deliveryTarget,
         enabled,
+        identityId,
         name,
+        participantId,
         presetId,
         schedule,
+        sourceThreadId,
         stateDocId,
         variables,
       }) =>
@@ -479,8 +558,13 @@ function createAssistantRuntimeToolDefinitions(
           presetId,
           name: name ?? null,
           schedule: schedule ?? null,
+          channel,
+          deliveryTarget,
           enabled,
+          identityId,
           bindState,
+          participantId,
+          sourceThreadId,
           stateDocId: stateDocId ?? null,
           additionalInstructions: additionalInstructions ?? null,
           variables: variables ?? null,

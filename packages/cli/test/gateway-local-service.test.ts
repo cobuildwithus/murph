@@ -5,6 +5,7 @@ import path from 'node:path'
 
 import { initializeVault } from '@murph/core'
 import { createInboxPipeline, openInboxRuntime } from '@murph/inboxd'
+import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murph/runtime-state'
 import { test } from 'vitest'
 
 import { assistantSessionSchema } from '../src/assistant-cli-contracts.js'
@@ -12,7 +13,6 @@ import { createAssistantBinding } from '../src/assistant/bindings.js'
 import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { saveAssistantSession } from '../src/assistant/store.js'
 import {
-  createLocalGatewayService,
   fetchGatewayAttachmentsLocal,
   getGatewayConversationLocal,
   listGatewayConversationsLocal,
@@ -27,6 +27,7 @@ test('local gateway projection derives route-backed conversations and transcript
 
   try {
     await initializeVault({ vaultRoot })
+    let firstCaptureCursorCreatedAt: string | null = null
 
     const runtime = await openInboxRuntime({ vaultRoot })
     const pipeline = await createInboxPipeline({ vaultRoot, runtime })
@@ -355,6 +356,359 @@ test('local gateway hides actor-derived titles unless includeDerivedTitles is en
   }
 })
 
+test('local gateway persists serving tables and advances an incremental capture cursor', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-serving-store-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+    let firstCaptureCursorCreatedAt: string | null = null
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8101',
+      thread: {
+        id: 'chat-serving-store',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'First capture',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const initial = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(initial.conversations.length, 1)
+
+    const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
+    try {
+      const conversationCount = gatewayDb
+        .prepare('SELECT COUNT(*) AS count FROM gateway_conversations')
+        .get() as { count: number }
+      const messageCount = gatewayDb
+        .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
+        .get() as { count: number }
+      const snapshotJson = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.json') as { value?: string } | undefined
+      const captureCursorCreatedAt = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.cursor.createdAt') as { value?: string } | undefined
+      const captureCursorId = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.cursor.captureId') as { value?: string } | undefined
+
+      assert.equal(conversationCount.count, 1)
+      assert.equal(messageCount.count, 1)
+      assert.equal(snapshotJson, undefined)
+      assert.ok(captureCursorCreatedAt?.value)
+      assert.ok(captureCursorId?.value)
+      firstCaptureCursorCreatedAt = captureCursorCreatedAt?.value ?? null
+    } finally {
+      gatewayDb.close()
+    }
+
+    const runtimeAfterInitial = await openInboxRuntime({ vaultRoot })
+    const pipelineAfterInitial = await createInboxPipeline({
+      vaultRoot,
+      runtime: runtimeAfterInitial,
+    })
+    await pipelineAfterInitial.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8102',
+      thread: {
+        id: 'chat-serving-store',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:05:00.000Z',
+      receivedAt: '2026-03-30T10:05:01.000Z',
+      text: 'Second capture',
+      attachments: [],
+      raw: {},
+    })
+    runtimeAfterInitial.close()
+
+    const messages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: initial.conversations[0]!.sessionKey,
+    })
+    assert.equal(messages.messages.length, 2)
+    assert.equal(messages.messages[1]?.text, 'Second capture')
+
+    const gatewayDbAfterIncrement = openSqliteRuntimeDatabase(
+      resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath,
+    )
+    try {
+      const captureSourceCount = gatewayDbAfterIncrement
+        .prepare('SELECT COUNT(*) AS count FROM gateway_capture_sources')
+        .get() as { count: number }
+      const messageCount = gatewayDbAfterIncrement
+        .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
+        .get() as { count: number }
+      const captureCursorCreatedAt = gatewayDbAfterIncrement
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.cursor.createdAt') as { value?: string } | undefined
+
+      assert.equal(captureSourceCount.count, 2)
+      assert.equal(messageCount.count, 2)
+      assert.ok(captureCursorCreatedAt?.value)
+      assert.ok(firstCaptureCursorCreatedAt)
+      assert.ok(captureCursorCreatedAt!.value >= firstCaptureCursorCreatedAt)
+    } finally {
+      gatewayDbAfterIncrement.close()
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway refreshes attachment parse metadata when only capture_attachment changes', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-attachment-refresh-'))
+  const attachmentSourceRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-gateway-attachment-refresh-source-'),
+  )
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const attachmentPath = path.join(attachmentSourceRoot, 'labs.pdf')
+    await writeFile(attachmentPath, 'pdf', 'utf8')
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8201',
+      thread: {
+        id: 'chat-attachment-refresh',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'See attachment',
+      attachments: [
+        {
+          externalId: 'att-linq-8201',
+          kind: 'document',
+          mime: 'application/pdf',
+          originalPath: attachmentPath,
+          fileName: 'labs.pdf',
+          byteSize: 3,
+        },
+      ],
+      raw: {},
+    })
+
+    const conversation = (
+      await listGatewayConversationsLocal(vaultRoot, {
+        channel: null,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+        limit: 10,
+        search: null,
+      })
+    ).conversations[0]
+    assert.ok(conversation)
+
+    const messages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation!.sessionKey,
+    })
+    const initialAttachment = await fetchGatewayAttachmentsLocal(vaultRoot, {
+      attachmentIds: [],
+      messageId: messages.messages[0]?.messageId ?? null,
+      sessionKey: conversation!.sessionKey,
+    })
+    assert.equal(initialAttachment[0]?.parseState, 'pending')
+    assert.equal(initialAttachment[0]?.extractedText, null)
+
+    const job = runtime.claimNextAttachmentParseJob()
+    assert.ok(job)
+    const completed = runtime.completeAttachmentParseJob({
+      attempt: job!.attempts,
+      extractedText: 'parsed labs',
+      jobId: job!.jobId,
+      providerId: 'test-parser',
+      resultPath: 'derived/inbox/test-parser.json',
+      transcriptText: null,
+    })
+    assert.equal(completed.applied, true)
+    runtime.close()
+
+    const refreshedAttachment = await fetchGatewayAttachmentsLocal(vaultRoot, {
+      attachmentIds: [],
+      messageId: messages.messages[0]?.messageId ?? null,
+      sessionKey: conversation!.sessionKey,
+    })
+    assert.equal(refreshedAttachment[0]?.parseState, 'succeeded')
+    assert.equal(refreshedAttachment[0]?.extractedText, 'parsed labs')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+    await rm(attachmentSourceRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway refreshes older attachment parses when new captures arrive in the same sync window', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-attachment-mixed-refresh-'))
+  const attachmentSourceRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-gateway-attachment-mixed-refresh-source-'),
+  )
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const attachmentPath = path.join(attachmentSourceRoot, 'labs.pdf')
+    await writeFile(attachmentPath, 'pdf', 'utf8')
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8301',
+      thread: {
+        id: 'chat-attachment-mixed-refresh',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'First attachment',
+      attachments: [
+        {
+          externalId: 'att-linq-8301',
+          kind: 'document',
+          mime: 'application/pdf',
+          originalPath: attachmentPath,
+          fileName: 'labs.pdf',
+          byteSize: 3,
+        },
+      ],
+      raw: {},
+    })
+
+    const conversation = (
+      await listGatewayConversationsLocal(vaultRoot, {
+        channel: null,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+        limit: 10,
+        search: null,
+      })
+    ).conversations[0]
+    assert.ok(conversation)
+
+    const initialMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation!.sessionKey,
+    })
+    const firstMessageId = initialMessages.messages[0]?.messageId ?? null
+    assert.ok(firstMessageId)
+
+    const initialAttachment = await fetchGatewayAttachmentsLocal(vaultRoot, {
+      attachmentIds: [],
+      messageId: firstMessageId,
+      sessionKey: conversation!.sessionKey,
+    })
+    assert.equal(initialAttachment[0]?.parseState, 'pending')
+
+    const job = runtime.claimNextAttachmentParseJob()
+    assert.ok(job)
+    const completed = runtime.completeAttachmentParseJob({
+      attempt: job!.attempts,
+      extractedText: 'parsed labs',
+      jobId: job!.jobId,
+      providerId: 'test-parser',
+      resultPath: 'derived/inbox/test-parser.json',
+      transcriptText: null,
+    })
+    assert.equal(completed.applied, true)
+
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8302',
+      thread: {
+        id: 'chat-attachment-mixed-refresh',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:05:00.000Z',
+      receivedAt: '2026-03-30T10:05:01.000Z',
+      text: 'Second capture',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const refreshedAttachment = await fetchGatewayAttachmentsLocal(vaultRoot, {
+      attachmentIds: [],
+      messageId: firstMessageId,
+      sessionKey: conversation!.sessionKey,
+    })
+    assert.equal(refreshedAttachment[0]?.parseState, 'succeeded')
+    assert.equal(refreshedAttachment[0]?.extractedText, 'parsed labs')
+
+    const refreshedMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation!.sessionKey,
+    })
+    assert.equal(refreshedMessages.messages.length, 2)
+    assert.equal(refreshedMessages.messages[1]?.text, 'Second capture')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+    await rm(attachmentSourceRoot, { force: true, recursive: true })
+  }
+})
+
 test('local gateway send uses route-bound assistant delivery and Linq reply targets diff the derived projection', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-send-'))
 
@@ -468,6 +822,69 @@ test('local gateway send uses route-bound assistant delivery and Linq reply targ
     })
     assert.equal(messages.messages.length, 2)
     assert.equal(messages.messages[1]?.text, 'Sounds good, thank you!')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway send reuses an existing intent when clientRequestId is retried', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-send-client-request-id-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:client-request-id',
+      thread: {
+        id: 'chat-client-request-id',
+        title: 'Lab thread',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:alex',
+        displayName: 'Alex',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-31T09:00:00.000Z',
+      receivedAt: '2026-03-31T09:00:01.000Z',
+      text: 'Please send the latest results.',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const conversation = (await listGatewayConversationsLocal(vaultRoot, {
+      channel: 'linq',
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })).conversations[0]
+    assert.ok(conversation)
+
+    const first = await sendGatewayMessageLocal({
+      clientRequestId: 'req-123',
+      dispatchMode: 'queue-only',
+      sessionKey: conversation.sessionKey,
+      text: 'Queued retry-safe follow-up.',
+      vault: vaultRoot,
+    })
+    const second = await sendGatewayMessageLocal({
+      clientRequestId: 'req-123',
+      dispatchMode: 'queue-only',
+      sessionKey: conversation.sessionKey,
+      text: 'Queued retry-safe follow-up.',
+      vault: vaultRoot,
+    })
+
+    assert.equal(first.messageId, second.messageId)
+    const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    assert.equal(intents.length, 1)
+    assert.equal(intents[0]?.deliveryIdempotencyKey?.startsWith('gateway-send:'), true)
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }

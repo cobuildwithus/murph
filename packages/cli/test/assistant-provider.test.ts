@@ -681,7 +681,7 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
   })
 })
 
-test('executeAssistantProviderTurn enables the canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
+test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
   const languageModel = { provider: 'mock-model' }
   const aiSdkTools = {
     'assistant.cron.list': { description: 'cron' },
@@ -690,18 +690,16 @@ test('executeAssistantProviderTurn enables the canonical assistant tool catalog 
     'assistant.state.show': { description: 'state' },
     'vault.fs.readText': { description: 'read-text' },
     'vault.show': { description: 'show' },
-  }
-  const createAiSdkTools = vi.fn((mode?: string) => {
-    void mode
+  } as any
+  const createAiSdkTools = vi.fn((mode?: string, options?: { onToolEvent?: Function }) => {
+    assert.equal(mode, 'apply')
+    assert.equal(typeof options?.onToolEvent, 'function')
     return aiSdkTools
   })
 
   providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
   providerMocks.generateText.mockResolvedValue({
     text: 'assistant reply',
-  })
-  toolMocks.createDefaultAssistantToolCatalog.mockReturnValue({
-    createAiSdkTools,
   })
 
   await executeAssistantProviderTurn({
@@ -714,15 +712,17 @@ test('executeAssistantProviderTurn enables the canonical assistant tool catalog 
     toolRuntime: {
       requestId: 'turn_123',
       vault: '/tmp/vault',
+      toolCatalog: {
+        createAiSdkTools,
+        executeCalls: vi.fn(),
+        hasTool: vi.fn(() => true),
+        listTools: vi.fn(() => []),
+      } as any,
     },
   })
 
-  assert.equal(toolMocks.createDefaultAssistantToolCatalog.mock.calls.length, 1)
-  const catalogCall = toolMocks.createDefaultAssistantToolCatalog.mock.calls[0]?.[0]
-  assert.equal(catalogCall?.requestId, 'turn_123')
-  assert.equal(catalogCall?.vault, '/tmp/vault')
-  assert.equal(typeof catalogCall?.vaultServices, 'object')
-  assert.equal(createAiSdkTools.mock.calls[0]?.[0], 'apply')
+  assert.equal(toolMocks.createDefaultAssistantToolCatalog.mock.calls.length, 0)
+  assert.equal(createAiSdkTools.mock.calls.length, 1)
   assert.deepEqual(providerMocks.stepCountIs.mock.calls[0], [8])
 
   const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
@@ -732,6 +732,74 @@ test('executeAssistantProviderTurn enables the canonical assistant tool catalog 
     kind: 'stepCountIs',
   })
   assert.deepEqual(generateCall?.tools, aiSdkTools)
+})
+
+test('executeAssistantProviderTurn records tool raw-events and trace updates for OpenAI-compatible tool turns', async () => {
+  const languageModel = { provider: 'mock-model' }
+  const onTraceEvent = vi.fn()
+  const createAiSdkTools = vi.fn((mode?: string, options?: { onToolEvent?: Function }) => {
+    assert.equal(mode, 'apply')
+    options?.onToolEvent?.({
+      kind: 'started',
+      mode: 'apply',
+      tool: 'assistant.memory.search',
+      input: { text: 'tone' },
+    })
+    options?.onToolEvent?.({
+      kind: 'succeeded',
+      mode: 'apply',
+      tool: 'assistant.memory.search',
+      input: { text: 'tone' },
+      result: { results: [] },
+    })
+
+    return {
+      'assistant.memory.search': { description: 'memory' },
+    } as any
+  })
+
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'gpt-oss:20b',
+    userPrompt: 'hello',
+    onTraceEvent,
+    toolRuntime: {
+      requestId: 'turn_456',
+      vault: '/tmp/vault',
+      toolCatalog: {
+        createAiSdkTools,
+        executeCalls: vi.fn(),
+        hasTool: vi.fn(() => true),
+        listTools: vi.fn(() => []),
+      } as any,
+    },
+  })
+
+  assert.deepEqual(result.rawEvents, [
+    {
+      type: 'assistant.tool.started',
+      sequence: 1,
+      mode: 'apply',
+      tool: 'assistant.memory.search',
+      input: { text: 'tone' },
+    },
+    {
+      type: 'assistant.tool.succeeded',
+      sequence: 2,
+      mode: 'apply',
+      tool: 'assistant.memory.search',
+    },
+  ])
+  assert.equal(onTraceEvent.mock.calls.length, 2)
+  assert.equal(onTraceEvent.mock.calls[0]?.[0]?.updates[0]?.text, 'Running assistant.memory.search…')
+  assert.equal(onTraceEvent.mock.calls[1]?.[0]?.updates[0]?.text, 'Finished assistant.memory.search.')
 })
 
 test('executeAssistantProviderTurn keeps explicit OpenAI-compatible prompts as the final user message', async () => {

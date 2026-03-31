@@ -58,3 +58,19 @@ All routes are loopback control-plane routes and require `Authorization: Bearer 
 - `GET /cron/runs`
 - `POST /automation/run-once` (defaults to `once: true` and `startDaemon: false`)
 - `POST /cron/process-due`
+
+## Gateway routes
+
+assistantd now also serves the local derived gateway plane over loopback-only authenticated HTTP:
+
+- `POST /gateway/conversations/list`
+- `POST /gateway/conversations/get`
+- `POST /gateway/messages/read`
+- `POST /gateway/messages/send`
+- `POST /gateway/attachments/fetch`
+- `POST /gateway/events/poll`
+- `POST /gateway/events/wait`
+- `POST /gateway/permissions/list-open`
+- `POST /gateway/permissions/respond`
+
+These routes serve the operational conversation/message gateway surface for local MCP or other transport adapters without turning assistantd into a second canonical write owner.

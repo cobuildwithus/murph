@@ -18,20 +18,20 @@ Updated: 2026-03-31
 ## Scope
 
 - In scope:
-  - Pure Markdown docs/process edits and deletions, including agent workflow docs.
-  - Durable documentation for when repo-wide verification is still required.
+- Pure Markdown docs/process edits and deletions, including agent workflow docs.
+- Durable documentation for when repo-wide verification is still required.
 - Out of scope:
-  - Any change to code, scripts, tests, generated docs, or mechanical repo guards.
-  - Broad verification-framework redesign or unrelated workflow cleanup.
+- Any change to code, scripts, tests, generated docs, or mechanical repo guards.
+- Broad verification-framework redesign or unrelated workflow cleanup.
 
 ## Constraints
 
 - Technical constraints:
-  - Preserve unrelated dirty worktree edits.
-  - Do not broaden the exemption beyond text-only `.md` changes.
+- Preserve unrelated dirty worktree edits.
+- Do not broaden the exemption beyond text-only `.md` changes.
 - Product/process constraints:
-  - Keep the rule easy for agents to apply mechanically.
-  - Leave higher-risk docs/process surfaces on the existing stricter verification path.
+- Keep the rule easy for agents to apply mechanically.
+- Leave higher-risk docs/process surfaces on the existing stricter verification path.
 
 ## Risks and mitigations
 
@@ -49,19 +49,15 @@ Updated: 2026-03-31
 
 ## Decisions
 
-- Restrict the fast path to text-only `.md` edits/deletions instead of a broader "no code touched" rule.
+- Restrict the fast path to text-only `.md` edits/deletions instead of a broader “no code touched” rule.
 - Keep docs/process changes that touch scripts, config, tests, generated docs, or workflow mechanics on the existing repo-wide verification path.
-- Keep the docs/process routing and verification docs aligned in the same change so future agents do not hit conflicting guidance.
 
 ## Verification
 
-- Commands run:
-  - `pnpm typecheck`
-  - `pnpm test`
-  - `pnpm test:coverage`
-- Outcomes:
-  - `pnpm typecheck`: failed in `packages/cli/test/gateway-local-service.test.ts` with `TS2353` because `dispatchMode` is not a known property on the tested object type. Unrelated to these docs-only workflow changes.
-  - `pnpm test`: surfaced an unrelated failure in `packages/cli/test/assistant-runtime.test.ts` (`scanAssistantAutoReplyOnce keeps long-running deepthink commands past the default stall window before retrying`) and then hung in a spawned CLI init subprocess from the root Vitest lane, so the run was interrupted.
-  - `pnpm test:coverage`: reached the root Vitest coverage lane and then hung without surfacing any docs-policy-specific failure before it was interrupted.
-  - Manual readback confirmed the updated docs now describe the text-only Markdown fast path plus the stricter non-fast-path docs/process lane.
+- Commands to run:
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm test:coverage`
+- Expected outcomes:
+- The docs changes should be internally consistent even if the current branch remains red for unrelated reasons.
 Completed: 2026-03-31

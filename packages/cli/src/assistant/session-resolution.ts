@@ -87,6 +87,16 @@ export function buildResolveAssistantSessionInput(
           ? false
           : undefined
 
+  const resolvedSandbox = clampVaultBoundAssistantSandbox(providerConfig.sandbox)
+  const defaultSandbox =
+    providerConfig.provider === 'openai-compatible'
+      ? resolvedSandbox ?? null
+      : resolvedSandbox ?? 'workspace-write'
+  const defaultApprovalPolicy =
+    providerConfig.provider === 'openai-compatible'
+      ? providerConfig.approvalPolicy ?? null
+      : providerConfig.approvalPolicy ?? 'on-request'
+
   return {
     vault: input.vault,
     ...(sessionId !== undefined ? { sessionId } : {}),
@@ -99,8 +109,8 @@ export function buildResolveAssistantSessionInput(
     ...(threadIsDirect !== undefined ? { threadIsDirect } : {}),
     provider: providerConfig.provider,
     model: providerConfig.model,
-    sandbox: clampVaultBoundAssistantSandbox(providerConfig.sandbox) ?? 'workspace-write',
-    approvalPolicy: providerConfig.approvalPolicy ?? 'on-request',
+    sandbox: defaultSandbox,
+    approvalPolicy: defaultApprovalPolicy,
     oss: providerConfig.oss ?? false,
     profile: providerConfig.profile,
     baseUrl: providerConfig.baseUrl,

@@ -80,8 +80,10 @@ export {
 
 export {
   applyGatewayProjectionSnapshotToEventLog,
+  DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
   DEFAULT_GATEWAY_EVENT_RETENTION,
   pollGatewayEventLogState,
+  waitForGatewayEventsByPolling,
   type GatewayEventLogState,
 } from './gateway/event-log.js'
 

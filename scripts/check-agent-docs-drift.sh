@@ -42,6 +42,13 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
 fi
 
+if [[ "$compare_source" == "working-tree" ]] && [[ -z "${COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD:-}" ]]; then
+  # Parallel local agents can leave a broad dirty tree; keep the large-change-set
+  # plan guard strict for staged/CI comparisons, but do not block plain local runs
+  # solely because unrelated working-tree files exceed the threshold.
+  export COBUILD_DRIFT_LARGE_CHANGE_THRESHOLD="${MURPH_WORKTREE_DRIFT_LARGE_CHANGE_THRESHOLD:-999999}"
+fi
+
 package_jsons_version_only() {
   local path=''
   while IFS= read -r path; do

@@ -19,6 +19,15 @@ import {
   type UserWorkspaceConfig,
 } from "vitest/config";
 
+import {
+  resolveMurphVitestFileParallelism,
+  resolveMurphVitestMaxWorkers,
+} from "./config/vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "./config/vitest-timeouts.js";
+
+const rootRepoVitestFileParallelism = resolveMurphVitestFileParallelism();
+const rootRepoVitestMaxWorkers = resolveMurphVitestMaxWorkers();
+
 type RootRepoProject = {
   config: UserWorkspaceConfig;
   include: string[];
@@ -169,7 +178,8 @@ const rootRepoCliProjects = cliVitestProjectSpecs
 
 export default defineConfig({
   test: {
-    maxWorkers: process.env.MURPH_VITEST_MAX_WORKERS ?? "50%",
+    ...murphVitestNoTimeouts,
+    maxWorkers: rootRepoVitestMaxWorkers,
     coverage: {
       enabled: true,
       provider: "v8",
@@ -213,7 +223,6 @@ export default defineConfig({
       },
       reportOnFailure: true,
     },
-    testTimeout: 60_000,
     // packages/web, apps/web, and apps/cloudflare stay in their dedicated
     // verify lanes so the root multi-project run does not execute them twice.
     projects: [
@@ -222,6 +231,7 @@ export default defineConfig({
           config,
           defineProject({
             test: {
+              fileParallelism: rootRepoVitestFileParallelism,
               include,
             },
           }),

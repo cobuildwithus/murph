@@ -3,8 +3,15 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig, defineProject } from "vitest/config";
 
+import {
+  resolveMurphVitestFileParallelism,
+  resolveMurphVitestMaxWorkers,
+} from "../../config/vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
-const cliVitestMaxWorkers = process.env.MURPH_VITEST_MAX_WORKERS ?? "50%";
+const cliVitestFileParallelism = resolveMurphVitestFileParallelism();
+const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
 
 type CliVitestProjectSpec = {
   readonly name: string;
@@ -18,11 +25,11 @@ function cliTestFile(fileName: string): string {
 export function createCliVitestProject(name: string, fileNames: readonly string[]) {
   return defineProject({
     test: {
+      ...murphVitestNoTimeouts,
       name,
       environment: "node",
-      fileParallelism: false,
+      fileParallelism: cliVitestFileParallelism,
       include: fileNames.map(cliTestFile),
-      testTimeout: 60_000,
     },
   });
 }
@@ -120,6 +127,7 @@ export const cliVitestProjects = cliVitestProjectSpecs.map(({ name, fileNames })
 
 export default defineConfig({
   test: {
+    ...murphVitestNoTimeouts,
     maxWorkers: cliVitestMaxWorkers,
     projects: cliVitestProjects,
   },

@@ -1,4 +1,5 @@
 import { inferAssistantBindingDelivery } from '../assistant/channel-adapters.js'
+import { recordAssistantDiagnosticEvent } from '../assistant/diagnostics.js'
 import type { AssistantOutboxDispatchMode } from '../assistant/outbox.js'
 import { deliverAssistantOutboxMessage } from '../assistant/outbox.js'
 import { createAssistantTurnId } from '../assistant/turns.js'
@@ -75,10 +76,16 @@ export async function sendGatewayMessageLocal(input: {
       )
     }
 
+    const clientRequestToken = buildGatewayClientRequestToken(
+      routeToken,
+      parsed.clientRequestId,
+    )
     const delivered = await deliverAssistantOutboxMessage({
       actorId: conversation.route.participantId,
       bindingDelivery,
       channel: conversation.route.channel,
+      dedupeToken: clientRequestToken,
+      deliveryIdempotencyKey: clientRequestToken,
       dispatchMode: dispatchMode ?? 'immediate',
       identityId: conversation.route.identityId,
       message: parsed.text,
@@ -94,6 +101,24 @@ export async function sendGatewayMessageLocal(input: {
       const detail = delivered.deliveryError?.message ?? 'Gateway delivery failed.'
       throw createGatewayUnsupportedOperationError(detail)
     }
+
+    await store.sync().catch(async (error) => {
+      await recordAssistantDiagnosticEvent({
+        code: 'GATEWAY_PROJECTION_REFRESH_FAILED',
+        component: 'delivery',
+        data: {
+          error:
+            error instanceof Error ? error.message : 'Unknown gateway refresh failure.',
+          sessionKey: parsed.sessionKey,
+        },
+        kind: 'gateway.projection.refresh_failed',
+        level: 'warn',
+        message:
+          'Gateway projection refresh failed after a successful send; the send result was preserved.',
+        sessionId: resolveGatewayDeliverySessionId(parsed.sessionKey),
+        vault,
+      }).catch(() => undefined)
+    })
 
     return gatewaySendMessageResultSchema.parse({
       sessionKey: parsed.sessionKey,
@@ -144,6 +169,18 @@ async function resolveGatewayReplyToMessageIdLocal(input: {
 
 function resolveGatewayDeliverySessionId(sessionKey: string): string {
   return `gwds_${sessionKey}`
+}
+
+function buildGatewayClientRequestToken(
+  routeToken: string,
+  clientRequestId: string | null,
+): string | null {
+  const normalized = clientRequestId?.trim() ?? ''
+  if (normalized.length === 0) {
+    return null
+  }
+
+  return `gateway-send:${routeToken}:${normalized}`
 }
 
 function threadIsDirectFromRoute(route: GatewayConversationRoute): boolean | null {

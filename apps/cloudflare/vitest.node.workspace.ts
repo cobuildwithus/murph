@@ -3,11 +3,17 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig, defineProject } from "vitest/config";
 
+import {
+  resolveMurphAppVitestMaxWorkers,
+  resolveMurphVitestFileParallelism,
+} from "../../config/vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+
 import { cloudflareVitestAliases } from "./vitest.shared.js";
 
 const cloudflareDir = path.dirname(fileURLToPath(import.meta.url));
-const cloudflareNodeVitestMaxWorkers =
-  process.env.MURPH_APP_VITEST_MAX_WORKERS ?? process.env.MURPH_VITEST_MAX_WORKERS ?? "25%";
+const cloudflareNodeVitestFileParallelism = resolveMurphVitestFileParallelism();
+const cloudflareNodeVitestMaxWorkers = resolveMurphAppVitestMaxWorkers();
 const nodeOnlyAliases = [
   {
     find: "cloudflare:workers",
@@ -29,9 +35,10 @@ function createCloudflareNodeProject(name: string, patterns: readonly string[]) 
       alias: cloudflareNodeAliases,
     },
     test: {
+      ...murphVitestNoTimeouts,
       name,
       environment: "node",
-      fileParallelism: false,
+      fileParallelism: cloudflareNodeVitestFileParallelism,
       include: patterns.map(cloudflareNodePattern),
     },
   });
@@ -63,6 +70,7 @@ export const cloudflareNodeVitestProjects = [
 
 export default defineConfig({
   test: {
+    ...murphVitestNoTimeouts,
     maxWorkers: cloudflareNodeVitestMaxWorkers,
     projects: cloudflareNodeVitestProjects,
   },

@@ -538,6 +538,10 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     case "gateway.message.send":
       return {
         kind,
+        clientRequestId: readNullableString(
+          record.clientRequestId,
+          "Hosted execution gateway.message.send clientRequestId",
+        ),
         replyToMessageId: readNullableString(
           record.replyToMessageId,
           "Hosted execution gateway.message.send replyToMessageId",

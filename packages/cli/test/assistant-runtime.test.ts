@@ -5388,11 +5388,7 @@ test('scanAssistantAutoReplyOnce keeps long-running deepthink commands past the 
       (event) =>
         event.type === 'capture.reply-progress' &&
         event.captureId === 'cap-deepthink' &&
-        event.providerKind === 'status' &&
-        (
-          event.details?.includes('deepthink command active for ') ||
-          event.details?.includes('during deepthink command;')
-        ),
+        event.providerState === 'running',
     ),
     true,
   )
