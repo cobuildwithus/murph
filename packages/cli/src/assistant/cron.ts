@@ -156,6 +156,7 @@ export interface SetAssistantCronJobTargetInput extends AssistantCronTargetInput
   dryRun?: boolean
   job: string
   now?: Date
+  resetContinuity?: boolean
   vault: string
 }
 
@@ -452,19 +453,15 @@ export async function setAssistantCronJobTarget(
     }
 
     const beforeTarget = buildAssistantCronTargetSnapshot(existing)
-    const audienceChanged = !assistantCronTargetAudienceEquals(
-      existing.target,
-      nextTarget,
-    )
     const continuityReset =
-      audienceChanged &&
+      input.resetContinuity === true &&
       (existing.target.sessionId !== null || existing.target.alias !== null)
     const afterTarget = buildAssistantCronTargetSnapshot({
       ...existing,
       target: {
         ...nextTarget,
-        sessionId: audienceChanged ? null : existing.target.sessionId,
-        alias: audienceChanged ? null : existing.target.alias,
+        sessionId: continuityReset ? null : existing.target.sessionId,
+        alias: continuityReset ? null : existing.target.alias,
       },
     })
     const changed = !assistantCronTargetAudienceEquals(
@@ -804,15 +801,16 @@ async function executeClaimedAssistantCronJob(input: {
       const result = await sendAssistantMessageLocal({
         vault: input.vault,
         prompt: buildAssistantCronExecutionPrompt(input.job),
-        sessionId: input.job.target.sessionId ?? undefined,
-        alias: input.job.target.alias ?? undefined,
-        channel: input.job.target.channel ?? undefined,
-        identityId: input.job.target.identityId ?? undefined,
-        participantId: input.job.target.participantId ?? undefined,
-        sourceThreadId: input.job.target.sourceThreadId ?? undefined,
+        sessionId: input.job.target.sessionId,
+        alias: input.job.target.alias,
+        allowBindingRebind: input.job.target.sessionId !== null,
+        channel: input.job.target.channel,
+        identityId: input.job.target.identityId,
+        participantId: input.job.target.participantId,
+        sourceThreadId: input.job.target.sourceThreadId,
         deliverResponse: input.job.target.deliverResponse,
         deliveryDispatchMode: input.deliveryDispatchMode,
-        deliveryTarget: input.job.target.deliveryTarget ?? undefined,
+        deliveryTarget: input.job.target.deliveryTarget,
         turnTrigger: 'automation-cron',
         workingDirectory: input.vault,
       })

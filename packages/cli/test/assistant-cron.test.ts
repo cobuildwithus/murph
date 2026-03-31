@@ -413,22 +413,36 @@ test('assistant cron targets can be inspected and updated in place', async () =>
   })
 
   assert.equal(updated.changed, true)
-  assert.equal(updated.continuityReset, true)
+  assert.equal(updated.continuityReset, false)
   assert.equal(updated.dryRun, false)
   assert.equal(updated.beforeTarget.target.channel, 'telegram')
   assert.equal(updated.afterTarget.target.channel, 'email')
   assert.equal(updated.afterTarget.target.identityId, 'sender@example.com')
   assert.equal(updated.afterTarget.target.deliveryTarget, 'me@example.com')
-  assert.equal(updated.job.target.sessionId, null)
-  assert.equal(updated.job.target.alias, null)
+  assert.equal(updated.job.target.sessionId, 'session-target-test')
+  assert.equal(updated.job.target.alias, 'routine:weekly-health-snapshot')
 
   const reloaded = await getAssistantCronJob(vaultRoot, 'weekly-health-snapshot')
   assert.equal(reloaded.jobId, job.jobId)
   assert.equal(reloaded.target.channel, 'email')
   assert.equal(reloaded.target.identityId, 'sender@example.com')
   assert.equal(reloaded.target.deliveryTarget, 'me@example.com')
-  assert.equal(reloaded.target.sessionId, null)
-  assert.equal(reloaded.target.alias, null)
+  assert.equal(reloaded.target.sessionId, 'session-target-test')
+  assert.equal(reloaded.target.alias, 'routine:weekly-health-snapshot')
+
+  const reset = await setAssistantCronJobTarget({
+    vault: vaultRoot,
+    job: 'weekly-health-snapshot',
+    channel: 'email',
+    identityId: 'sender@example.com',
+    deliveryTarget: 'me@example.com',
+    resetContinuity: true,
+  })
+
+  assert.equal(reset.changed, false)
+  assert.equal(reset.continuityReset, true)
+  assert.equal(reset.job.target.sessionId, null)
+  assert.equal(reset.job.target.alias, null)
 })
 
 test('assistant cron jobs only bind assistant state when configured', async () => {

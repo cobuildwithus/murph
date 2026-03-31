@@ -422,6 +422,7 @@ test('assistant cron target set schema exposes the retargeting sources and deliv
   assert.equal('toSelf' in schema.options.properties, true)
   assert.equal('copyFrom' in schema.options.properties, true)
   assert.equal('dryRun' in schema.options.properties, true)
+  assert.equal('resetContinuity' in schema.options.properties, true)
   assert.equal('channel' in schema.options.properties, true)
   assert.equal('identity' in schema.options.properties, true)
   assert.equal('participant' in schema.options.properties, true)

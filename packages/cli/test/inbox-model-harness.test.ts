@@ -682,7 +682,7 @@ test('materializeInboxModelBundle ignores derived parser paths that escape the v
   }
 })
 
-test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and rejects file paths outside the vault', async () => {
+test('createInboxRoutingAssistantToolCatalog excludes assistant runtime tools and rejects file paths outside the vault', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-routing-tools-'))
   const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-routing-outside-'))
   const importDocument = vi.fn(async () => ({
@@ -714,6 +714,11 @@ test('createInboxRoutingAssistantToolCatalog excludes stateful write tools and r
       vaultServices,
     })
 
+    assert.equal(catalog.hasTool('assistant.state.show'), false)
+    assert.equal(catalog.hasTool('assistant.memory.search'), false)
+    assert.equal(catalog.hasTool('assistant.cron.list'), false)
+    assert.equal(catalog.hasTool('assistant.selfTarget.list'), false)
+    assert.equal(catalog.hasTool('vault.fs.readText'), false)
     assert.equal(catalog.hasTool('vault.protocol.stop'), false)
 
     const results = await catalog.executeCalls({
@@ -1042,18 +1047,106 @@ test('materializeInboxModelBundle ignores derived manifests from another capture
   }
 })
 
-test('createDefaultAssistantToolCatalog exposes recipe and food query and write tools', () => {
+test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and food tools', () => {
   const catalog = createDefaultAssistantToolCatalog({
     vault: '/tmp/murph-vault',
     vaultServices: createStubVaultServices(),
   })
 
+  assert.equal(catalog.hasTool('assistant.state.show'), true)
+  assert.equal(catalog.hasTool('assistant.memory.search'), true)
+  assert.equal(catalog.hasTool('assistant.cron.list'), true)
+  assert.equal(catalog.hasTool('assistant.selfTarget.list'), true)
+  assert.equal(catalog.hasTool('vault.fs.readText'), true)
   assert.equal(catalog.hasTool('vault.recipe.show'), true)
   assert.equal(catalog.hasTool('vault.recipe.list'), true)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), true)
   assert.equal(catalog.hasTool('vault.food.show'), true)
   assert.equal(catalog.hasTool('vault.food.list'), true)
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
+})
+
+test('createDefaultAssistantToolCatalog vault.fs.readText bounds text reads and rejects paths outside the vault', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-read-text-'))
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-read-text-outside-'))
+
+  try {
+    await mkdir(path.join(vaultRoot, 'notes'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'notes', 'sample.md'),
+      `${'A'.repeat(40)}\n${'B'.repeat(40)}`,
+      'utf8',
+    )
+    await writeFile(path.join(outsideRoot, 'outside.txt'), 'outside vault text', 'utf8')
+    await symlink(
+      path.join(outsideRoot, 'outside.txt'),
+      path.join(vaultRoot, 'notes', 'linked.txt'),
+    )
+
+    const catalog = createDefaultAssistantToolCatalog({
+      requestId: 'req_text_read',
+      vault: vaultRoot,
+      vaultServices: createStubVaultServices(),
+    })
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.fs.readText',
+          input: {
+            path: 'notes/sample.md',
+            maxChars: 32,
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'succeeded')
+    const readResult = results[0]?.result as {
+      path: string
+      text: string
+      totalChars: number
+      truncated: boolean
+    }
+    assert.equal(readResult.path, 'notes/sample.md')
+    assert.equal(readResult.totalChars, 81)
+    assert.equal(readResult.truncated, true)
+    assert.match(readResult.text, /^A{32}\n\n\[truncated 49 characters\]$/u)
+
+    const outsideResults = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.fs.readText',
+          input: {
+            path: '../outside.txt',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(outsideResults[0]?.status, 'failed')
+    assert.equal(outsideResults[0]?.errorCode, 'ASSISTANT_PATH_OUTSIDE_VAULT')
+
+    const symlinkResults = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.fs.readText',
+          input: {
+            path: 'notes/linked.txt',
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(symlinkResults[0]?.status, 'failed')
+    assert.equal(symlinkResults[0]?.errorCode, 'ASSISTANT_PATH_OUTSIDE_VAULT')
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+    await rm(outsideRoot, { recursive: true, force: true })
+  }
 })
 
 test('createDefaultAssistantToolCatalog recipe upsert writes payload files and calls the recipe service with inputFile', async () => {

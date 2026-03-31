@@ -92,6 +92,7 @@ export async function resolveAssistantSession(
     const manualAlias = normalizeNullableString(conversation.alias)
     const bindingPatch = bindingPatchFromLocator(input)
     const persistenceInput = {
+      allowBindingRebind: input.allowBindingRebind === true,
       alias: manualAlias,
       bindingPatch,
       lookupSource: 'session-id' as const,

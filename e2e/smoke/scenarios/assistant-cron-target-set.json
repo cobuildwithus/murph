@@ -1,6 +1,6 @@
 {
   "name": "assistant-cron-target-set",
-  "command": "vault-cli assistant cron target set <job> --vault <path> [--toSelf <channel>] [--copyFrom <job>] [--dryRun] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]",
+  "command": "vault-cli assistant cron target set <job> --vault <path> [--toSelf <channel>] [--copyFrom <job>] [--dryRun] [--resetContinuity] [--channel <channel>] [--identity <id>] [--participant <id>] [--sourceThread <id>] [--deliveryTarget <target>] [--request-id <id>]",
   "category": "assistant",
   "purpose": "Documents replacing the outbound delivery target for one assistant cron job without recreating the job.",
   "source": "docs/contracts/03-command-surface.md"

@@ -354,6 +354,43 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       reasoningEffort: 'high',
     },
   )
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+        sessionId: 'asst_rebind',
+        allowBindingRebind: true,
+        channel: 'email',
+        identityId: 'sender@example.com',
+        participantId: null,
+        sourceThreadId: null,
+        threadIsDirect: null,
+      },
+      defaults,
+    ),
+    {
+      vault: '/tmp/vault',
+      sessionId: 'asst_rebind',
+      allowBindingRebind: true,
+      channel: 'email',
+      identityId: 'sender@example.com',
+      actorId: null,
+      threadId: null,
+      provider: 'codex-cli',
+      model: 'gpt-5.4-mini',
+      maxSessionAgeMs: null,
+      sandbox: 'workspace-write',
+      approvalPolicy: 'on-request',
+      oss: true,
+      profile: 'ops',
+      baseUrl: null,
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+      reasoningEffort: 'high',
+    },
+  )
 })
 
 test('sendAssistantMessage treats null provider-option inputs as fallbacks to saved operator defaults', async () => {
@@ -600,31 +637,31 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
   if (stateMcpExposed) {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Assistant state MCP tools are exposed in this session/u,
+      /Assistant state tools are exposed in this session/u,
     )
   } else {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Assistant state MCP tools are not exposed in this session, but direct Murph CLI execution is available/u,
+      /Assistant state tools are not exposed in this session, but direct Murph CLI execution is available/u,
     )
   }
   if (memoryMcpExposed) {
-    assert.match(firstCall?.systemPrompt ?? '', /Assistant memory MCP tools are exposed in this session/u)
+    assert.match(firstCall?.systemPrompt ?? '', /Assistant memory tools are exposed in this session/u)
   } else {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Assistant memory MCP tools are not exposed in this session, but direct Murph CLI execution is available/u,
+      /Assistant memory tools are not exposed in this session, but direct Murph CLI execution is available/u,
     )
   }
   if (cronMcpExposed) {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Scheduled assistant automation MCP tools are exposed in this session/u,
+      /Scheduled assistant automation tools are exposed in this session/u,
     )
   } else {
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /Scheduled assistant automation MCP tools are not exposed in this session, but direct Murph CLI execution is available/u,
+      /Scheduled assistant automation tools are not exposed in this session, but direct Murph CLI execution is available/u,
     )
   }
   assert.equal(
@@ -1622,26 +1659,28 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.equal(secondCall?.provider, 'openai-compatible')
     assert.match(firstCall?.systemPrompt ?? '', /You are Murph/u)
     assert.match(secondCall?.systemPrompt ?? '', /You are Murph/u)
+    assert.match(firstCall?.systemPrompt ?? '', /Assistant state tools are exposed in this session/u)
+    assert.match(firstCall?.systemPrompt ?? '', /Assistant memory tools are exposed in this session/u)
     assert.match(
       firstCall?.systemPrompt ?? '',
-      /does not expose Murph assistant-memory tools or direct shell access/u,
-    )
-    assert.match(
-      firstCall?.systemPrompt ?? '',
-      /does not expose Murph cron tools or direct shell access/u,
+      /Scheduled assistant automation tools are exposed in this session/u,
     )
     assert.match(
       firstCall?.systemPrompt ?? '',
       /does not expose direct CLI execution/u,
     )
-    assert.match(
+    assert.doesNotMatch(
       firstCall?.systemPrompt ?? '',
-      /give them the exact `vault-cli \.\.\.` command to run or switch to a Codex-backed Murph chat session/u,
+      /does not expose Murph assistant-memory tools or direct shell access/u,
     )
     assert.doesNotMatch(
       firstCall?.systemPrompt ?? '',
-      /Assistant memory MCP tools are exposed in this session/u,
+      /does not expose Murph cron tools or direct shell access/u,
     )
+    assert.equal(firstCall?.toolRuntime?.vault, vaultRoot)
+    assert.equal(typeof firstCall?.toolRuntime?.requestId, 'string')
+    assert.equal(secondCall?.toolRuntime?.vault, vaultRoot)
+    assert.equal(typeof secondCall?.toolRuntime?.requestId, 'string')
     assert.match(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
     assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
     assert.match(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)

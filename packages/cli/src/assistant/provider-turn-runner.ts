@@ -423,12 +423,13 @@ async function resolveAssistantRouteTurnPlan(input: {
   const cronMcpConfig = buildAssistantCronMcpConfig(
     workingDirectory,
   )
-  const assistantStateMcpAvailable =
-    supportsDirectCliExecution && stateMcpConfig !== null
-  const assistantMemoryMcpAvailable =
-    supportsDirectCliExecution && memoryMcpConfig !== null
-  const assistantCronMcpAvailable =
-    supportsDirectCliExecution && cronMcpConfig !== null
+  const exposesBoundAssistantTools = input.route.provider === 'openai-compatible'
+  const assistantStateToolsAvailable =
+    exposesBoundAssistantTools || (supportsDirectCliExecution && stateMcpConfig !== null)
+  const assistantMemoryToolsAvailable =
+    exposesBoundAssistantTools || (supportsDirectCliExecution && memoryMcpConfig !== null)
+  const assistantCronToolsAvailable =
+    exposesBoundAssistantTools || (supportsDirectCliExecution && cronMcpConfig !== null)
   const configOverrides = supportsDirectCliExecution
     ? [
         ...(stateMcpConfig?.configOverrides ?? []),
@@ -451,10 +452,10 @@ async function resolveAssistantRouteTurnPlan(input: {
     workingDirectory,
     systemPrompt: shouldInjectBootstrapContext
       ? buildAssistantSystemPrompt({
-          assistantStateMcpAvailable,
-          assistantCronMcpAvailable,
+          assistantStateToolsAvailable,
+          assistantCronToolsAvailable,
           cliAccess: input.sharedPlan.cliAccess,
-          assistantMemoryMcpAvailable,
+          assistantMemoryToolsAvailable,
           assistantMemoryPrompt,
           channel: input.input.channel ?? input.session.binding.channel,
           onboardingSummary:
@@ -518,6 +519,10 @@ async function executeAssistantProviderAttempt(input: {
           userPrompt: executionPlan.input.prompt,
           continuityContext: attemptPlan.routePlan.continuityContext,
           systemPrompt: attemptPlan.routePlan.systemPrompt,
+          toolRuntime: {
+            requestId: executionPlan.turnId,
+            vault: executionPlan.input.vault,
+          },
           sessionContext: attemptPlan.routePlan.sessionContext
             ? {
                 binding: attemptPlan.session.binding,
@@ -1061,9 +1066,9 @@ function isAssistantConversationTranscriptEntry(entry: {
 }
 
 function buildAssistantSystemPrompt(input: {
-  assistantStateMcpAvailable: boolean
-  assistantCronMcpAvailable: boolean
-  assistantMemoryMcpAvailable: boolean
+  assistantStateToolsAvailable: boolean
+  assistantCronToolsAvailable: boolean
+  assistantMemoryToolsAvailable: boolean
   cliAccess: {
     rawCommand: 'vault-cli'
     setupCommand: 'murph'
@@ -1104,24 +1109,24 @@ function buildAssistantSystemPrompt(input: {
       '- Do not run repo tests, typechecks, coverage, coordination-ledger updates, or auto-commit workflows just because a vault CLI command changed data. Only use repo coding workflows when you edit repo code/docs or the user explicitly asks for software changes.',
     ].join('\n'),
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
-    'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI lacks the view you need or the user explicitly asks for file-level inspection.',
+    'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI or bound Murph tools lack the view you need or the user explicitly asks for targeted file-level inspection. Prefer narrow vault text-file reads over broad scans when file inspection is necessary.',
     buildAssistantVaultEvidenceFormattingGuidance(input.channel),
     buildOutboundReplyFormattingGuidance(input.channel),
     buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
     buildAssistantStateGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
-      assistantStateMcpAvailable: input.assistantStateMcpAvailable,
+      assistantStateToolsAvailable: input.assistantStateToolsAvailable,
       supportsDirectCliExecution: input.supportsDirectCliExecution,
     }),
     buildAssistantMemoryGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
-      assistantMemoryMcpAvailable: input.assistantMemoryMcpAvailable,
+      assistantMemoryToolsAvailable: input.assistantMemoryToolsAvailable,
       supportsDirectCliExecution: input.supportsDirectCliExecution,
     }),
     buildAssistantCronGuidanceText({
       rawCommand: input.cliAccess.rawCommand,
-      assistantCronMcpAvailable: input.assistantCronMcpAvailable,
+      assistantCronToolsAvailable: input.assistantCronToolsAvailable,
       supportsDirectCliExecution: input.supportsDirectCliExecution,
     }),
     buildAssistantCliGuidanceText(input.cliAccess, {
@@ -1134,24 +1139,24 @@ function buildAssistantSystemPrompt(input: {
 
 function buildAssistantStateGuidanceText(
   input: {
-    assistantStateMcpAvailable: boolean
+    assistantStateToolsAvailable: boolean
     rawCommand: 'vault-cli'
     supportsDirectCliExecution: boolean
   },
 ): string {
-  if (input.assistantStateMcpAvailable) {
+  if (input.assistantStateToolsAvailable) {
     return [
-      'Assistant state MCP tools are exposed in this session. Prefer `assistant state ...` tools over shelling out, and do not edit `assistant-state/state/` files directly.',
+      'Assistant state tools are exposed in this session. Prefer the bound assistant-state tools over shelling out, and do not edit `assistant-state/state/` files directly.',
       'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
       'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
       'Use `assistant state show` and `assistant state list` to inspect scratch state before repeating a question or suggestion, and use `assistant state patch` for incremental updates.',
-      `Use \`${input.rawCommand} assistant state ...\` only as a fallback when the MCP tools are unavailable in this session.`,
+      `Use \`${input.rawCommand} assistant state ...\` only as a fallback when the bound assistant-state tools are unavailable in this session.`,
     ].join('\n\n')
   }
 
   if (input.supportsDirectCliExecution) {
     return [
-      'Assistant state MCP tools are not exposed in this session, but direct Murph CLI execution is available.',
+      'Assistant state tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
       'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
       'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
@@ -1236,17 +1241,17 @@ function isAssistantOutboundReplyChannel(channel: string | null): boolean {
 
 function buildAssistantMemoryGuidanceText(
   input: {
-    assistantMemoryMcpAvailable: boolean
+    assistantMemoryToolsAvailable: boolean
     rawCommand: 'vault-cli'
     supportsDirectCliExecution: boolean
   },
 ): string {
-  if (input.assistantMemoryMcpAvailable) {
+  if (input.assistantMemoryToolsAvailable) {
     return [
-      'Assistant memory MCP tools are exposed in this session. Prefer `assistant memory ...` tools over shelling out, and do not edit `assistant-state/` files directly.',
+      'Assistant memory tools are exposed in this session. Prefer the bound assistant-memory tools over shelling out, and do not edit `assistant-state/` files directly.',
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
-      'When a Murph memory tool asks for `vault`, pass the bound vault from the `VAULT` environment variable unless the user explicitly targets a different vault.',
-      `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the MCP tools are unavailable in this session.`,
+      'The active vault is already bound in this session. Do not switch vaults unless the user explicitly targets a different vault.',
+      `Use \`${input.rawCommand} assistant memory ...\` only as a fallback when the bound assistant-memory tools are unavailable in this session.`,
       'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
       'After a substantive conversation that surfaces a stable identity, preference, standing instruction, or durable health baseline, consider offering one short remember suggestion and only upsert after explicit user intent or acceptance.',
       'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
@@ -1257,7 +1262,7 @@ function buildAssistantMemoryGuidanceText(
 
   if (input.supportsDirectCliExecution) {
     return [
-      'Assistant memory MCP tools are not exposed in this session, but direct Murph CLI execution is available.',
+      'Assistant memory tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory, and do not edit \`assistant-state/\` files directly.`,
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
       'Use memory upserts only when the user wants something remembered or when a stable identity, preference, or standing instruction clearly should persist.',
@@ -1279,14 +1284,14 @@ function buildAssistantMemoryGuidanceText(
 
 function buildAssistantCronGuidanceText(
   input: {
-    assistantCronMcpAvailable: boolean
+    assistantCronToolsAvailable: boolean
     rawCommand: 'vault-cli'
     supportsDirectCliExecution: boolean
   },
 ): string {
-  if (input.assistantCronMcpAvailable) {
+  if (input.assistantCronToolsAvailable) {
     return [
-      'Scheduled assistant automation MCP tools are exposed in this session. Prefer `assistant cron ...` tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
+      'Scheduled assistant automation tools are exposed in this session. Prefer the bound assistant-cron tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
       'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
@@ -1300,13 +1305,13 @@ function buildAssistantCronGuidanceText(
       '`--timeout` is the normal control. `--wait-timeout` is only for the uncommon case where you want the assistant-response wait cap different from the overall timeout.',
       'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
       'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
-      `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the MCP tools are unavailable in this session.`,
+      `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the bound assistant-cron tools are unavailable in this session.`,
     ].join('\n\n')
   }
 
   if (input.supportsDirectCliExecution) {
     return [
-      'Scheduled assistant automation MCP tools are not exposed in this session, but direct Murph CLI execution is available.',
+      'Scheduled assistant automation tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation, and do not edit \`assistant-state/cron/\` files directly.`,
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
