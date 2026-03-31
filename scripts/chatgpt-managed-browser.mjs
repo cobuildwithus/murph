@@ -1,6 +1,7 @@
 export const DEFAULT_BROWSER_ENDPOINT = 'http://127.0.0.1:9222'
 const TARGET_READY_TIMEOUT_MS = 30_000
 const TARGET_READY_POLL_MS = 750
+const PATCH_BUTTON_TEXT_PATTERN = /\b(?:patch|diff)\b/i
 
 export function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -136,12 +137,27 @@ export async function waitForTargetContent(client, chatUrl) {
       readyState: document.readyState,
       title: document.title,
       bodyLength: document.body?.innerText?.length ?? 0,
+      mainLength: document.querySelector('main')?.innerText?.length ?? 0,
+      articleCount: document.querySelectorAll('main article').length,
+      messageCount: document.querySelectorAll('main [data-message-author-role]').length,
+      attachmentButtonCount: Array.from(document.querySelectorAll('main button, main a'))
+        .filter((element) => /\\.(patch|diff|zip|txt|json|md|patched)\\b/i.test((element.innerText || element.getAttribute('aria-label') || '').trim()) || Boolean(element.getAttribute('download')))
+        .length,
+      patchButtonCount: Array.from(document.querySelectorAll('main button'))
+        .filter((element) => element.classList?.contains('behavior-btn') && ${PATCH_BUTTON_TEXT_PATTERN}.test((element.innerText || element.getAttribute('aria-label') || '').trim()))
+        .length,
     }))()`)
     if (
       state &&
       state.href === chatUrl &&
       state.readyState === 'complete' &&
-      state.bodyLength > 0
+      (
+        state.mainLength > 500 ||
+        state.articleCount > 0 ||
+        state.messageCount > 0 ||
+        state.attachmentButtonCount > 0 ||
+        state.patchButtonCount > 0
+      )
     ) {
       return state
     }

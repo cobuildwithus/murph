@@ -60,15 +60,19 @@ function parseArgs(argv) {
 
 async function captureThread(client) {
   return client.evaluate(`(() => {
-    const bodyText = document.body?.innerText ?? ''
-    const attachments = Array.from(document.querySelectorAll('button, a'))
+    const root = document.querySelector('main') ?? document.body
+    const bodyText = root?.innerText ?? ''
+    const attachments = Array.from(root.querySelectorAll('button, a'))
       .map((element) => ({
         tag: element.tagName,
         text: (element.innerText || element.getAttribute('aria-label') || '').trim(),
         href: element.href || null,
+        download: element.hasAttribute('download'),
+        behaviorButton: element.classList?.contains('behavior-btn') ?? false,
+        insideAssistantMessage: Boolean(element.closest('[data-message-author-role="assistant"]')),
       }))
 
-    const codeBlocks = Array.from(document.querySelectorAll('pre'))
+    const codeBlocks = Array.from(root.querySelectorAll('pre'))
       .map((element) => element.innerText)
       .filter(Boolean)
 
