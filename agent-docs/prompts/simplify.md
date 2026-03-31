@@ -15,6 +15,11 @@ Runtime expectation:
 Goal:
 Simplify and harden modified code without changing externally visible behavior.
 
+Mode:
+- Review only. Do not edit files.
+- Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
+- Do not claim to have implemented, landed, or committed changes. Report findings only.
+
 Preflight (required):
 - Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.
 - Honor any explicit exclusive/refactor notes from the ledger; otherwise work carefully on top of active rows without reverting adjacent edits.
@@ -32,6 +37,7 @@ Constraints:
 - Preserve behavior unless explicitly instructed otherwise.
 - Keep comments minimal and intent-focused.
 - If a simplification may alter behavior, do not apply it; report it as a recommendation.
+- Stay within read-only audit scope even if you identify a clear fix.
 
 
 Parallel-agent output:
