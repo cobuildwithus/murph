@@ -103,9 +103,6 @@
       "murph": [
         "packages/cli/src/index.ts"
       ],
-      "murph/vault-cli-services": [
-        "packages/cli/src/vault-cli-services.ts"
-      ],
       "murph/assistant/automation": [
         "packages/cli/src/assistant/automation.ts"
       ],

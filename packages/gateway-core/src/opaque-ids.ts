@@ -2,9 +2,8 @@ import { createHash } from 'node:crypto'
 
 interface GatewayOpaqueEnvelope {
   kind: string
-  routeKey?: string
   routeToken?: string
-  version: 1 | 2
+  version: 2
 }
 
 interface GatewayConversationEnvelope extends GatewayOpaqueEnvelope {
@@ -26,9 +25,8 @@ const GATEWAY_MESSAGE_PREFIX = 'gwcm_'
 const GATEWAY_ATTACHMENT_PREFIX = 'gwca_'
 
 /**
- * Gateway ids should behave like opaque transport identifiers. New ids therefore
- * embed stable hashed route/source tokens instead of raw route keys or provider ids.
- * Readers still accept legacy v1 envelopes so rollouts can validate or compare older ids.
+ * Gateway ids behave like opaque transport identifiers and only accept the current
+ * route-token envelope shape.
  */
 export function createGatewayConversationSessionKey(routeKeyOrToken: string): string {
   const envelope: GatewayConversationEnvelope = {
@@ -190,7 +188,7 @@ function decodeGatewayOpaqueId(
   }
 
   const envelope = parsed as Record<string, unknown> & GatewayOpaqueEnvelope
-  if (envelope.version !== 1 && envelope.version !== 2) {
+  if (envelope.version !== 2) {
     throw new Error('Gateway opaque id version is unsupported.')
   }
   if (typeof envelope.kind !== 'string' || envelope.kind.length === 0) {
@@ -224,9 +222,6 @@ function readGatewayRouteTokenField(
 ): string {
   if (typeof envelope.routeToken === 'string' && envelope.routeToken.length > 0) {
     return envelope.routeToken
-  }
-  if (typeof envelope.routeKey === 'string' && envelope.routeKey.length > 0) {
-    return createGatewayRouteToken(envelope.routeKey)
   }
   throw new Error('Gateway opaque id was missing the route token.')
 }

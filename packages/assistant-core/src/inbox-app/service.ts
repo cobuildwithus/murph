@@ -23,5 +23,3 @@ export function createIntegratedInboxServices(
     ...createInboxPromotionOps(env),
   }
 }
-
-export const createIntegratedInboxCliServices = createIntegratedInboxServices

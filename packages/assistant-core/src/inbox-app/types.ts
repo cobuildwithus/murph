@@ -726,8 +726,6 @@ export interface InboxServices {
   ): Promise<InboxPromoteExperimentNoteResult>
 }
 
-export type InboxCliServices = InboxServices
-
 export interface RecoveredProvisionedMailbox {
   accountId: string
   emailAddress: string | null

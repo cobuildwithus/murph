@@ -762,8 +762,6 @@ export interface VaultServices {
   devices: DeviceSyncServices
 }
 
-export type VaultCliServices = VaultServices
-
 export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
   REQUIRED_DIRECTORIES: readonly string[]
   applyCanonicalWriteBatch(input: {
