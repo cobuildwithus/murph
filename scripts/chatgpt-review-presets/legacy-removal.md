@@ -22,15 +22,8 @@ Keep:
 - code that still protects real trust boundaries, current runtime contracts, or active operator workflows
 - anything you cannot justify removing from current code evidence
 
-Output:
-- group findings into `remove now`, `remove after a small follow-up`, and `keep for now`
-- within each group, order findings by impact on complexity reduction
-- be explicit when a branch looks legacy but still appears required
-
-
-Patch-file output:
-- Please return your final response as a single `.patch` file attachment with a `.patch` filename rather than as a normal prose review.
-- Put all actionable fixes into one unified diff that we can download and apply directly.
-- Limit the patch to concrete changes that fit this review scope, and keep the diff self-contained.
-- If there are important residual concerns that you did not change, list them briefly outside the patch.
-- If you find no actionable issues, say so explicitly instead of inventing a patch.
+Final response contract:
+- Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
+- Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
+- Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
+- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.

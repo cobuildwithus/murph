@@ -32,12 +32,8 @@ Execution mode:
 - choose the smallest high-leverage set of concrete file changes that fit this review scope
 - prefer localized model simplifications over broad rewrites
 
-Patched-file output:
-- Return downloadable `.patched` code-file attachments instead of a prose review document.
-- For each changed repo file, attach one full replacement file with a flat download-safe filename: replace each `/` in the repo-relative path with `__SLASH__`, keep the original basename and extension, then append `.patched`.
-- Example filename: `packages__SLASH__cli__SLASH__src__SLASH__research-runtime.ts.patched`.
-- Each `.patched` attachment must contain the complete post-change file contents for that file, not a diff.
-- Do not attach a `.md` review, `.patch` file, or unified diff unless the user explicitly asks for one.
-- Keep the changed file set small and self-contained within this data-model pass.
-- If there are important residual concerns you did not change, list them briefly outside the file attachments.
-- If you find no safe actionable changes, say so explicitly in a short plain-text reply and attach nothing.
+Final response contract:
+- Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
+- Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
+- Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
+- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.

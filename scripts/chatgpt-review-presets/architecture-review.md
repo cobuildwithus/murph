@@ -23,15 +23,8 @@ Constraints:
 - do not recommend framework churn or speculative platform rewrites unless the current code clearly justifies it
 - respect Murph's file-native architecture and trust boundaries unless you can show a simpler design that preserves those invariants
 
-Output:
-- group findings into `high leverage now`, `worth planning`, and `keep as-is`
-- within each group, order findings by expected payoff in long-term simplicity and composability
-- be explicit when a messy-looking seam is actually carrying an important boundary and should stay
-
-
-Patch-file output:
-- Please return your final response as a single `.patch` file attachment with a `.patch` filename rather than as a normal prose review.
-- Put all actionable fixes into one unified diff that we can download and apply directly.
-- Limit the patch to concrete changes that fit this review scope, and keep the diff self-contained.
-- If there are important residual concerns that you did not change, list them briefly outside the patch.
-- If you find no actionable issues, say so explicitly instead of inventing a patch.
+Final response contract:
+- Return one downloadable `.patch` attachment containing a single unified diff for every change you chose to make in this pass.
+- Also return a short plain-text summary that says what you changed, what those changes fix or improve, and any important residual concerns you left untouched.
+- Keep the summary concise and factual; do not return a long prose review or any alternate structured findings template.
+- If you find no safe actionable changes, return a short plain-text summary saying so and attach no patch.
