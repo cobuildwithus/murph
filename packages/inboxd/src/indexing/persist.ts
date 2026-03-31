@@ -5,9 +5,7 @@ import { mkdir, readFile, rename, stat } from "node:fs/promises";
 import {
   assertContract,
   auditRecordSchema,
-  eventRecordSchema,
   inboxCaptureRecordSchema,
-  toLocalDayKey,
   type AuditRecord,
   type EventRecord,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
@@ -19,7 +17,6 @@ import {
   type CanonicalRawCopyInput,
   loadVault,
   readJsonlRecords,
-  toMonthlyShardRelativePath,
   VAULT_LAYOUT,
   walkVaultFiles,
 } from "@murph/core";
@@ -42,11 +39,21 @@ import {
   walkNamedFiles,
 } from "../shared.ts";
 import type { InboxRuntimeStore } from "../kernel/sqlite.ts";
+import {
+  INBOX_CAPTURE_LEDGER_DIRECTORY,
+  buildInboxCaptureAuditPath,
+  buildInboxCaptureAuditPathForStoredAt,
+  buildInboxCaptureAuditRecord,
+  buildInboxCaptureEventPath,
+  buildInboxCaptureEventPathForOccurredAt,
+  buildInboxCaptureEventRecord,
+  buildInboxCaptureLedgerPath,
+  buildInboxCaptureLedgerPathForOccurredAt,
+  buildInboxCaptureRecord,
+} from "./persist/canonical-records.ts";
 
 const STORED_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const QUARANTINED_INVALID_CAPTURE_ID_SUFFIX = "quarantined-invalid-capture-id";
-const INBOX_CAPTURE_LEDGER_DIRECTORY = "ledger/inbox-captures";
-
 export interface PersistRawCaptureInput {
   vaultRoot: string;
   captureId: string;
@@ -533,11 +540,7 @@ export async function appendInboxCaptureEvent(input: {
   stored: StoredCapture;
 }): Promise<{ relativePath: string; record: EventRecord }> {
   const vault = await loadVault({ vaultRoot: input.vaultRoot });
-  const relativePath = toMonthlyShardRelativePath(
-    VAULT_LAYOUT.eventLedgerDirectory,
-    input.occurredAt,
-    "occurredAt",
-  );
+  const relativePath = buildInboxCaptureEventPathForOccurredAt(input.occurredAt);
   const record = buildInboxCaptureEventRecord({
     eventId: input.eventId,
     inbound: input.inbound,
@@ -670,119 +673,6 @@ export async function rebuildRuntimeFromVault(input: {
       // keep return value consumed for deterministic repair flows
     }
   }
-}
-
-function buildEventNote(capture: InboundCapture): string {
-  const text = capture.text?.trim();
-  if (text) {
-    return text.length > 4000 ? `${text.slice(0, 3997)}...` : text;
-  }
-
-  const attachmentCount = capture.attachments.length;
-  if (attachmentCount > 0) {
-    return `Attachment-only inbox capture from ${capture.source} (${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}).`;
-  }
-
-  return `Inbox capture from ${capture.source}.`;
-}
-
-function buildInboxCaptureEventRecord(input: {
-  eventId: string;
-  inbound: InboundCapture;
-  stored: StoredCapture;
-  timeZone?: string;
-}): EventRecord {
-  const timeZone = input.timeZone ?? "UTC";
-
-  return assertContract<EventRecord>(eventRecordSchema, {
-    schemaVersion: "murph.event.v1",
-    id: input.eventId,
-    occurredAt: input.inbound.occurredAt,
-    recordedAt: input.stored.storedAt,
-    dayKey: toLocalDayKey(input.inbound.occurredAt, timeZone),
-    timeZone,
-    source: "import",
-    kind: "note",
-    title: `Inbox capture from ${input.inbound.source}`,
-    note: buildEventNote(input.inbound),
-    tags: ["inbox", `source-${sanitizeSegment(input.inbound.source, "source")}`],
-    rawRefs: [
-      input.stored.envelopePath,
-      ...input.stored.attachments
-        .map((attachment) => attachment.storedPath)
-        .filter((value): value is string => typeof value === "string" && value.length > 0),
-    ],
-  }, "inbox capture event");
-}
-
-function buildInboxCaptureAuditRecord(input: {
-  auditId: string;
-  eventId: string;
-  inbound: InboundCapture;
-  stored: StoredCapture;
-  capturePath?: string;
-  eventPath: string;
-}): AuditRecord {
-  const relativePath = buildInboxCaptureAuditPathForStoredAt(input.stored.storedAt);
-  const captureChange = input.capturePath ? [{ path: input.capturePath, op: "append" as const }] : [];
-
-  return assertContract<AuditRecord>(auditRecordSchema, {
-    schemaVersion: "murph.audit.v1",
-    id: input.auditId,
-    action: "intake_import",
-    status: "success",
-    occurredAt: input.stored.storedAt,
-    actor: "importer",
-    commandName: `inboxd.processCapture:${sanitizeSegment(input.inbound.source, "source")}`,
-    summary: `Imported inbox capture from ${input.inbound.source}.`,
-    targetIds: [input.eventId],
-    changes: [
-      { path: input.stored.envelopePath, op: "create" },
-      ...input.stored.attachments
-        .map((attachment) => attachment.storedPath)
-        .filter((value): value is string => typeof value === "string" && value.length > 0)
-        .map((storedPath) => ({ path: storedPath, op: "copy" as const })),
-      ...captureChange,
-      { path: input.eventPath, op: "append" },
-      { path: relativePath, op: "append" },
-    ],
-  }, "inbox capture audit");
-}
-
-function buildInboxCaptureLedgerPath(envelope: StoredCaptureEnvelope): string {
-  return buildInboxCaptureLedgerPathForOccurredAt(envelope.input.occurredAt);
-}
-
-function buildInboxCaptureLedgerPathForOccurredAt(occurredAt: string): string {
-  return toMonthlyShardRelativePath(
-    INBOX_CAPTURE_LEDGER_DIRECTORY,
-    occurredAt,
-    "occurredAt",
-  );
-}
-
-function buildInboxCaptureEventPath(envelope: StoredCaptureEnvelope): string {
-  return buildInboxCaptureEventPathForOccurredAt(envelope.input.occurredAt);
-}
-
-function buildInboxCaptureEventPathForOccurredAt(occurredAt: string): string {
-  return toMonthlyShardRelativePath(
-    VAULT_LAYOUT.eventLedgerDirectory,
-    occurredAt,
-    "occurredAt",
-  );
-}
-
-function buildInboxCaptureAuditPath(envelope: StoredCaptureEnvelope): string {
-  return buildInboxCaptureAuditPathForStoredAt(envelope.stored.storedAt);
-}
-
-function buildInboxCaptureAuditPathForStoredAt(storedAt: string): string {
-  return toMonthlyShardRelativePath(
-    VAULT_LAYOUT.auditDirectory,
-    storedAt,
-    "occurredAt",
-  );
 }
 
 function buildInboxAccountDirectory(input: InboundCapture): string {
@@ -934,67 +824,6 @@ function compareEnvelopeEntries(left: EnvelopeEntry, right: EnvelopeEntry): numb
 function comparePreferenceScore(entry: EnvelopeEntry): number {
   const canonicalCaptureId = createDeterministicInboxCaptureId(entry.envelope.input);
   return path.basename(path.dirname(entry.absolutePath)) === canonicalCaptureId ? 0 : 1;
-}
-
-function buildInboxCaptureRawRefs(stored: StoredCapture): string[] {
-  return [
-    stored.envelopePath,
-    ...stored.attachments
-      .map((attachment) => attachment.storedPath)
-      .filter((value): value is string => typeof value === "string" && value.length > 0),
-  ];
-}
-
-function buildInboxCaptureRecord(input: {
-  auditId: string;
-  eventId: string;
-  inbound: InboundCapture;
-  stored: StoredCapture;
-}): CanonicalInboxCaptureRecord {
-  return assertContract<CanonicalInboxCaptureRecord>(inboxCaptureRecordSchema, {
-    schemaVersion: "murph.inbox-capture.v1",
-    captureId: input.stored.captureId,
-    identityKey: createInboxCaptureIdentityKey(input.inbound),
-    eventId: input.eventId,
-    auditId: input.auditId,
-    source: input.inbound.source,
-    accountId: input.inbound.accountId ?? null,
-    externalId: input.inbound.externalId,
-    thread: {
-      id: input.inbound.thread.id,
-      title: input.inbound.thread.title ?? null,
-      isDirect: input.inbound.thread.isDirect ?? null,
-    },
-    actor: {
-      id: input.inbound.actor.id ?? null,
-      displayName: input.inbound.actor.displayName ?? null,
-      isSelf: input.inbound.actor.isSelf,
-    },
-    occurredAt: input.inbound.occurredAt,
-    recordedAt: input.stored.storedAt,
-    receivedAt: input.inbound.receivedAt ?? null,
-    text: input.inbound.text ?? null,
-    raw: input.inbound.raw,
-    sourceDirectory: input.stored.sourceDirectory,
-    envelopePath: input.stored.envelopePath,
-    rawRefs: buildInboxCaptureRawRefs(input.stored),
-    attachments: normalizeStoredAttachments(
-      input.stored.captureId,
-      input.stored.attachments,
-      `canonical inbox capture ${input.stored.captureId}`,
-    ).map((attachment) => ({
-      attachmentId: attachment.attachmentId,
-      ordinal: attachment.ordinal,
-      externalId: attachment.externalId ?? null,
-      kind: attachment.kind,
-      mime: attachment.mime ?? null,
-      originalPath: null,
-      fileName: attachment.fileName ?? null,
-      byteSize: attachment.byteSize ?? null,
-      storedPath: attachment.storedPath ?? null,
-      sha256: attachment.sha256 ?? null,
-    })),
-  }, "inbox capture record");
 }
 
 function inboxCaptureRecordToStoredCaptureEnvelope(record: CanonicalInboxCaptureRecord): StoredCaptureEnvelope {
