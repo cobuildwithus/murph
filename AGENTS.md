@@ -57,6 +57,10 @@ Always read these before repo code/docs/test/config work:
 - Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
 - If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
 - Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
+- If repo files changed and the user did not say `review first` or `do not commit`, create a scoped commit before final handoff.
+- Do not skip that commit because the worktree is dirty; commit only the exact touched paths with `scripts/finish-task` or `scripts/committer`.
+- If a touched file already had edits, that is still not a reason to skip the scoped commit; note it explicitly in handoff.
+- If required checks fail for a credibly unrelated pre-existing reason, commit the exact touched paths anyway and hand off with the failing command, failing target, and why your diff did not cause it.
 - Use `scripts/finish-task` for plan-bearing commits and `scripts/committer` otherwise.
 - Update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
 
