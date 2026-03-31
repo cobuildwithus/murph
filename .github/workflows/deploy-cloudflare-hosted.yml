@@ -134,13 +134,13 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Validate required deploy environment
         env:
           HOSTED_EXECUTION_DEPLOY_WORKER: ${{ inputs.deploy_worker }}
         run: pnpm --dir apps/cloudflare deploy:preflight
-
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Run focused Cloudflare checks
         run: pnpm --dir apps/cloudflare verify
