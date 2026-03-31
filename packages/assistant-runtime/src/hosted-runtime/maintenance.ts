@@ -15,7 +15,7 @@ import {
   createIntegratedInboxServices,
   getAssistantCronStatus,
   runAssistantAutomation,
-} from "murph/assistant-core";
+} from "@murph/assistant-core";
 
 import type {
   HostedMaintenanceMetrics,

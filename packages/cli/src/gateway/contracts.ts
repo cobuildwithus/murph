@@ -36,6 +36,14 @@ export const gatewayPermissionStatusValues = [
 ] as const
 
 export const gatewayPermissionDecisionValues = ['approve', 'deny'] as const
+export const gatewayConversationTitleSourceValues = [
+  'alias',
+  'thread-title',
+  'participant-display-name',
+  'participant-id',
+  'thread-id',
+  'channel',
+] as const
 
 const gatewayOptionalStringSchema = z.string().min(1).nullable().default(null)
 
@@ -65,6 +73,7 @@ export const gatewayConversationSchema = z
     schema: z.literal('murph.gateway-conversation.v1'),
     sessionKey: z.string().min(1),
     title: gatewayOptionalStringSchema,
+    titleSource: z.enum(gatewayConversationTitleSourceValues).nullable().default(null),
     lastMessagePreview: gatewayOptionalStringSchema,
     lastActivityAt: isoTimestampSchema.nullable().default(null),
     messageCount: z.number().int().nonnegative().nullable().default(null),
@@ -277,6 +286,8 @@ export interface GatewayService {
 
 export type GatewayAttachment = z.infer<typeof gatewayAttachmentSchema>
 export type GatewayConversation = z.infer<typeof gatewayConversationSchema>
+export type GatewayConversationTitleSource =
+  (typeof gatewayConversationTitleSourceValues)[number]
 export type GatewayChannelDelivery = z.infer<typeof gatewaySendMessageResultSchema>['delivery']
 export type GatewayConversationDirectness =
   (typeof gatewayConversationDirectnessValues)[number]

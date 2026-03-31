@@ -1,7 +1,7 @@
 import {
   gatewayProjectionSnapshotSchema,
   type GatewayProjectionSnapshot,
-} from "murph/gateway-core";
+} from "@murph/gateway-core";
 import {
   decodeHostedBundleBase64,
   sha256HostedBundleHex,

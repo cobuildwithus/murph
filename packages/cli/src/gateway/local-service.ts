@@ -19,19 +19,18 @@ import {
   type GatewayWaitForEventsInput,
 } from './contracts.js'
 import {
-  exportGatewayProjectionSnapshotLocal,
   fetchGatewayAttachmentsFromSnapshot,
   getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
   readGatewayMessagesFromSnapshot,
 } from './projection.js'
 import {
+  exportGatewayProjectionSnapshotLocal,
   listGatewayOpenPermissionsLocal,
   pollGatewayEventsLocal,
-  refreshLocalGatewayLiveState,
   respondToGatewayPermissionLocal,
   waitForGatewayEventsLocal,
-} from './live-state.js'
+} from './store.js'
 import { sendGatewayMessageLocal } from './send.js'
 
 export function createLocalGatewayService(vault: string): GatewayService {
@@ -51,7 +50,7 @@ export function createLocalGatewayService(vault: string): GatewayService {
         snapshot,
         vault,
       })
-      await refreshLocalGatewayLiveState(vault)
+      await exportGatewayProjectionSnapshotLocal(vault)
       return result
     },
     waitForEvents: (input) => waitGatewayEventsLocal(vault, input),

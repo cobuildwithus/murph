@@ -42,6 +42,8 @@ export function createAssistantChannelAdapter(
         targetKind: candidate.kind,
         sentAt: new Date().toISOString(),
         messageLength: input.message.length,
+        providerMessageId: readDeliveredProviderMessageId(delivered),
+        providerThreadId: readDeliveredProviderThreadId(delivered),
       })
     },
   }
@@ -186,5 +188,29 @@ export function readDeliveredTarget(
 ): string | null {
   return delivered && typeof delivered === 'object'
     ? normalizeOptionalText(delivered.target)
+    : null
+}
+
+export function readDeliveredProviderMessageId(
+  delivered:
+    | {
+        providerMessageId?: string | null
+      }
+    | void,
+): string | null {
+  return delivered && typeof delivered === 'object'
+    ? normalizeOptionalText(delivered.providerMessageId)
+    : null
+}
+
+export function readDeliveredProviderThreadId(
+  delivered:
+    | {
+        providerThreadId?: string | null
+      }
+    | void,
+): string | null {
+  return delivered && typeof delivered === 'object'
+    ? normalizeOptionalText(delivered.providerThreadId)
     : null
 }

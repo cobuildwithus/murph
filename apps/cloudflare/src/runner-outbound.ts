@@ -18,7 +18,7 @@ import {
   type HostedEmailSendRequest,
   type HostedExecutionSideEffectRecord,
 } from "@murph/assistant-runtime";
-import { gatewayProjectionSnapshotSchema } from "murph/gateway-core";
+import { gatewayProjectionSnapshotSchema } from "@murph/gateway-core";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";

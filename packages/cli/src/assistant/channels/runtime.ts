@@ -53,6 +53,7 @@ type TelegramSendAttemptResult =
 type TelegramSendAttemptOutcome =
   | {
       kind: 'delivered'
+      providerMessageId: string | null
     }
   | {
       failure: VaultCliError
@@ -108,11 +109,12 @@ export async function sendTelegramMessage(
   input: {
     idempotencyKey?: string | null
     message: string
+    replyToMessageId?: string | null
     target: string
   },
   dependencies: TelegramRuntimeDependencies = {},
-): Promise<void> {
-  await sendTelegramMessageDetailed(input, dependencies)
+): Promise<{ providerMessageId: string | null; target: string }> {
+  return sendTelegramMessageDetailed(input, dependencies)
 }
 
 export async function sendLinqMessage(
@@ -123,7 +125,7 @@ export async function sendLinqMessage(
     target: string
   },
   dependencies: LinqRuntimeDependencies = {},
-): Promise<void> {
+): Promise<{ providerMessageId: string | null }> {
   const env = dependencies.env ?? process.env
   const token = resolveLinqApiToken(env)
   if (!token) {
@@ -133,7 +135,7 @@ export async function sendLinqMessage(
     )
   }
 
-  await sendLinqChatMessage(
+  const delivered = await sendLinqChatMessage(
     {
       chatId: input.target,
       message: input.message,
@@ -144,6 +146,9 @@ export async function sendLinqMessage(
       fetchImplementation: dependencies.fetchImplementation,
     },
   )
+  return {
+    providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+  }
 }
 
 export async function sendEmailMessage(
@@ -151,12 +156,13 @@ export async function sendEmailMessage(
     idempotencyKey?: string | null
     identityId: string
     message: string
+    replyToMessageId?: string | null
     target: string
     targetKind: AssistantDeliveryCandidate['kind']
     subject?: string | null
   },
   dependencies: EmailRuntimeDependencies = {},
-): Promise<void> {
+): Promise<{ providerMessageId: string | null; providerThreadId: string | null }> {
   const identityId = input.identityId.trim()
   if (identityId.length === 0) {
     throw new VaultCliError(
@@ -198,33 +204,40 @@ export async function sendEmailMessage(
       )
     }
 
-    await client.replyToMessage({
+    const delivered = await client.replyToMessage({
       inboxId: identityId,
-      messageId,
+      messageId: normalizeOptionalText(input.replyToMessageId) ?? messageId,
       text: input.message,
       replyAll: true,
     })
-    return
+    return {
+      providerMessageId: normalizeOptionalText(delivered.message_id),
+      providerThreadId: normalizeOptionalText(delivered.thread_id),
+    }
   }
 
-  await client.sendMessage({
+  const delivered = await client.sendMessage({
     inboxId: identityId,
     to: target,
     subject: input.subject?.trim() ? input.subject.trim() : 'Murph update',
     text: input.message,
   })
+
+  return {
+    providerMessageId: normalizeOptionalText(delivered.message_id),
+    providerThreadId: normalizeOptionalText(delivered.thread_id),
+  }
 }
 
 async function sendTelegramMessageDetailed(
   input: {
     idempotencyKey?: string | null
     message: string
+    replyToMessageId?: string | null
     target: string
   },
   dependencies: TelegramRuntimeDependencies = {},
-): Promise<{
-  target: string
-}> {
+): Promise<{ providerMessageId: string | null; target: string }> {
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -249,12 +262,15 @@ async function sendTelegramMessageDetailed(
   )
   let target = parseTelegramTargetOrThrow(input.target)
   let targetLabel = serializeTelegramThreadTarget(target)
+  let lastProviderMessageId: string | null = null
+  let replyToMessageId = normalizeTelegramReplyToMessageId(input.replyToMessageId)
 
   const chunks = splitTelegramMessageText(input.message)
   for (const chunk of chunks) {
     const delivered = await sendTelegramTextChunk({
       baseUrl,
       fetchImplementation,
+      replyToMessageId,
       target,
       targetLabel,
       text: chunk,
@@ -262,9 +278,12 @@ async function sendTelegramMessageDetailed(
     })
     target = delivered.target
     targetLabel = delivered.targetLabel
+    lastProviderMessageId = delivered.providerMessageId
+    replyToMessageId = null
   }
 
   return {
+    providerMessageId: lastProviderMessageId,
     target: targetLabel,
   }
 }
@@ -334,11 +353,13 @@ function mapImessageRuntimeError(error: unknown): VaultCliError {
 async function sendTelegramTextChunk(input: {
   baseUrl: string
   fetchImplementation: FetchLike
+  replyToMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
   text: string
   token: string
 }): Promise<{
+  providerMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
 }> {
@@ -351,6 +372,7 @@ async function sendTelegramTextChunk(input: {
       result: await sendTelegramTextChunkOnce({
         baseUrl: input.baseUrl,
         fetchImplementation: input.fetchImplementation,
+        replyToMessageId: input.replyToMessageId,
         target,
         targetLabel,
         text: input.text,
@@ -362,6 +384,7 @@ async function sendTelegramTextChunk(input: {
 
     if (outcome.kind === 'delivered') {
       return {
+        providerMessageId: outcome.providerMessageId,
         target,
         targetLabel,
       }
@@ -579,6 +602,7 @@ function parseTelegramTargetOrThrow(target: string): TelegramParsedTarget {
 async function sendTelegramTextChunkOnce(input: {
   baseUrl: string
   fetchImplementation: FetchLike
+  replyToMessageId: string | null
   target: TelegramParsedTarget
   targetLabel: string
   text: string
@@ -593,6 +617,7 @@ async function sendTelegramTextChunkOnce(input: {
         chat_id: input.target.chatId,
         direct_messages_topic_id: input.target.directMessagesTopicId ?? undefined,
         message_thread_id: input.target.messageThreadId ?? undefined,
+        reply_to_message_id: input.replyToMessageId ? Number.parseInt(input.replyToMessageId, 10) : undefined,
         text: input.text,
       },
       token: input.token,
@@ -637,6 +662,7 @@ function resolveTelegramSendAttemptOutcome(input: {
   ) {
     return {
       kind: 'delivered',
+      providerMessageId: extractTelegramProviderMessageId(input.result.payload),
     }
   }
 
@@ -688,10 +714,37 @@ function resolveTelegramSendAttemptOutcome(input: {
   }
 }
 
+function normalizeTelegramReplyToMessageId(value: string | null | undefined): string | null {
+  const normalized = normalizeOptionalText(value)
+  if (!normalized) {
+    return null
+  }
+
+  return /^\d+$/u.test(normalized) ? normalized : null
+}
+
 function describeUnknownError(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message
   }
 
   return String(error)
+}
+
+function extractTelegramProviderMessageId(value: unknown): string | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const result = 'result' in value ? (value as { result?: unknown }).result : null
+  if (!result || typeof result !== 'object') {
+    return null
+  }
+
+  const messageId = (result as { message_id?: unknown }).message_id
+  if (typeof messageId === 'number' || typeof messageId === 'string') {
+    return String(messageId)
+  }
+
+  return null
 }

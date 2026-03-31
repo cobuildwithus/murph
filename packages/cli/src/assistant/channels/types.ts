@@ -63,10 +63,13 @@ export interface AssistantChannelDependencies {
   sendTelegram?: (input: {
     idempotencyKey?: string | null
     message: string
+    replyToMessageId?: string | null
     target: string
   }) => Promise<
     | {
-        target: string
+        providerMessageId?: string | null
+        providerThreadId?: string | null
+        target?: string | null
       }
     | void
   >
@@ -75,15 +78,23 @@ export interface AssistantChannelDependencies {
     message: string
     replyToMessageId?: string | null
     target: string
-  }) => Promise<void>
+  }) => Promise<
+    | {
+        providerMessageId?: string | null
+      }
+    | void
+  >
   sendEmail?: (input: {
     idempotencyKey?: string | null
     identityId: string | null
     message: string
+    replyToMessageId?: string | null
     target: string
     targetKind: AssistantDeliveryCandidate['kind']
   }) => Promise<
     | {
+        providerMessageId?: string | null
+        providerThreadId?: string | null
         target: string
       }
     | void
@@ -135,6 +146,8 @@ export interface AssistantChannelAdapterSpec {
     replyToMessageId?: string | null
   }) => Promise<
     | {
+        providerMessageId?: string | null
+        providerThreadId?: string | null
         target?: string | null
       }
     | void

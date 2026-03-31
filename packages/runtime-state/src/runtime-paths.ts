@@ -9,6 +9,7 @@ export const INBOX_STATE_RELATIVE_PATH = `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PAT
 export const INBOX_PROMOTIONS_RELATIVE_PATH =
   `${INBOX_RUNTIME_DIRECTORY_RELATIVE_PATH}/promotions.json`;
 export const DEVICE_SYNC_DB_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/device-syncd.sqlite`;
+export const GATEWAY_DB_RELATIVE_PATH = `${RUNTIME_ROOT_RELATIVE_PATH}/gateway.sqlite`;
 export const DEVICE_SYNC_RUNTIME_DIRECTORY_RELATIVE_PATH =
   `${RUNTIME_ROOT_RELATIVE_PATH}/device-syncd`;
 export const DEVICE_SYNC_LAUNCHER_STATE_RELATIVE_PATH =
@@ -28,6 +29,7 @@ export interface RuntimePaths {
   inboxStatePath: string;
   inboxPromotionsPath: string;
   deviceSyncDbPath: string;
+  gatewayDbPath: string;
   deviceSyncRuntimeRoot: string;
   deviceSyncLauncherStatePath: string;
   deviceSyncStdoutLogPath: string;
@@ -56,6 +58,13 @@ export type DeviceSyncRuntimePaths = Pick<
   | "deviceSyncStderrLogPath"
 >;
 
+export type GatewayRuntimePaths = Pick<
+  RuntimePaths,
+  | "absoluteVaultRoot"
+  | "runtimeRoot"
+  | "gatewayDbPath"
+>;
+
 export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
   const absoluteVaultRoot = path.resolve(vaultRoot);
   const runtimeRoot = path.join(absoluteVaultRoot, RUNTIME_ROOT_RELATIVE_PATH);
@@ -75,6 +84,7 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
     inboxStatePath: path.join(absoluteVaultRoot, INBOX_STATE_RELATIVE_PATH),
     inboxPromotionsPath: path.join(absoluteVaultRoot, INBOX_PROMOTIONS_RELATIVE_PATH),
     deviceSyncDbPath: path.join(absoluteVaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+    gatewayDbPath: path.join(absoluteVaultRoot, GATEWAY_DB_RELATIVE_PATH),
     deviceSyncRuntimeRoot,
     deviceSyncLauncherStatePath: path.join(
       absoluteVaultRoot,
@@ -88,6 +98,16 @@ export function resolveRuntimePaths(vaultRoot: string): RuntimePaths {
       absoluteVaultRoot,
       DEVICE_SYNC_STDERR_LOG_RELATIVE_PATH,
     ),
+  };
+}
+
+export function resolveGatewayRuntimePaths(vaultRoot: string): GatewayRuntimePaths {
+  const runtimePaths = resolveRuntimePaths(vaultRoot);
+
+  return {
+    absoluteVaultRoot: runtimePaths.absoluteVaultRoot,
+    runtimeRoot: runtimePaths.runtimeRoot,
+    gatewayDbPath: runtimePaths.gatewayDbPath,
   };
 }
 

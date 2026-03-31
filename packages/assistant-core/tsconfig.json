@@ -1,28 +1,18 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": false,
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": [
-    "src/**/*.ts"
-  ],
   "references": [
-    {
-      "path": "../assistant-core"
-    },
-    {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../runtime-state"
-    },
     {
       "path": "../cli"
     }
+  ],
+  "include": [
+    "src/**/*.ts"
   ],
   "exclude": [
     "dist"

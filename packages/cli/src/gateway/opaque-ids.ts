@@ -43,6 +43,11 @@ export function readGatewayConversationSessionToken(sessionKey: string): string 
   return readGatewayConversationEnvelope(sessionKey).routeToken
 }
 
+export function assertGatewayConversationSessionKey(sessionKey: string): string {
+  readGatewayConversationEnvelope(sessionKey)
+  return sessionKey
+}
+
 export function sameGatewayConversationSession(
   leftSessionKey: string,
   rightSessionKey: string,
@@ -87,6 +92,17 @@ export function readGatewayMessageRouteToken(messageId: string): string {
   return readGatewayMessageEnvelope(messageId).routeToken
 }
 
+export function readGatewayMessageKind(
+  messageId: string,
+): GatewayMessageEnvelope['kind'] {
+  return readGatewayMessageEnvelope(messageId).kind
+}
+
+export function assertGatewayMessageId(messageId: string): string {
+  readGatewayMessageEnvelope(messageId)
+  return messageId
+}
+
 export function createGatewayAttachmentId(
   routeKeyOrToken: string,
   captureId: string,
@@ -111,6 +127,11 @@ export function readGatewayAttachmentId(
     throw new Error('Gateway attachment id is invalid.')
   }
   return envelope
+}
+
+export function assertGatewayAttachmentId(attachmentId: string): string {
+  readGatewayAttachmentId(attachmentId)
+  return attachmentId
 }
 
 function readGatewayConversationEnvelope(

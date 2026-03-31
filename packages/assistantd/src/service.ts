@@ -126,6 +126,7 @@ export interface AssistantLocalService {
     identityId?: string | null
     job: string
     participantId?: string | null
+    resetContinuity?: boolean
     sourceThreadId?: string | null
     vault?: string | null
   }): Promise<AssistantCronTargetMutationResult>
@@ -266,6 +267,7 @@ export function createAssistantLocalService(vaultRoot: string): AssistantLocalSe
           identityId: input.identityId ?? undefined,
           job: input.job,
           participantId: input.participantId ?? undefined,
+          resetContinuity: input.resetContinuity,
           sourceThreadId: input.sourceThreadId ?? undefined,
           vault: resolveAssistantdRequestVault(input.vault, vaultRoot),
         }),

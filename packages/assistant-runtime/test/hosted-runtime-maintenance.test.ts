@@ -49,7 +49,7 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("murph/assistant-core", () => ({
+vi.mock("@murph/assistant-core", () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
   getAssistantCronStatus: mocks.getAssistantCronStatus,

@@ -3,7 +3,7 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
   saveAssistantSelfDeliveryTarget,
-} from "murph/assistant-core";
+} from "@murph/assistant-core";
 import {
   readHostedVerifiedEmailFromEnv,
 } from "@murph/runtime-state";

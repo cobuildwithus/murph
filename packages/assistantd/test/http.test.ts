@@ -236,14 +236,15 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     dryRun?: boolean
     identityId?: string | null
     job: string
+    resetContinuity?: boolean
   }) => ({
     job: {
       ...TEST_CRON_JOB,
       jobId: input.job,
       target: {
         ...TEST_CRON_JOB.target,
-        sessionId: null,
-        alias: null,
+        sessionId: input.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
+        alias: input.resetContinuity ? null : TEST_CRON_JOB.target.alias,
         channel: input.channel ?? TEST_CRON_JOB.target.channel,
         identityId: input.identityId ?? null,
         participantId: null,
@@ -265,8 +266,8 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       jobName: TEST_CRON_JOB.name,
       target: {
         ...TEST_CRON_JOB.target,
-        sessionId: null,
-        alias: null,
+        sessionId: input.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
+        alias: input.resetContinuity ? null : TEST_CRON_JOB.target.alias,
         channel: input.channel ?? TEST_CRON_JOB.target.channel,
         identityId: input.identityId ?? null,
         participantId: null,
@@ -276,7 +277,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       bindingDelivery: null,
     },
     changed: true,
-    continuityReset: true,
+    continuityReset: input.resetContinuity ?? false,
     dryRun: input.dryRun ?? false,
   }))
   const getOutboxIntent = vi.fn(async (input: { intentId: string }) => ({
@@ -865,6 +866,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
       'sender@example.com',
     )
     assert.equal(setCronTarget.mock.calls[0]?.[0]?.job, 'cron_http_route')
+    assert.equal(setCronTarget.mock.calls[0]?.[0]?.resetContinuity, undefined)
 
     const cronRuns = await fetch(
       `${handle.address.baseUrl}/cron/runs?job=${encodeURIComponent(TEST_CRON_JOB.jobId)}&limit=3&vault=${encodeURIComponent('/tmp/vault')}`,

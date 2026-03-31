@@ -14,7 +14,7 @@ import {
   resolveAssistantSelfDeliveryTarget,
   saveAssistantAutomationState,
   saveAssistantSelfDeliveryTarget,
-} from "murph/assistant-core";
+} from "@murph/assistant-core";
 import {
   readOperatorConfig,
   resolveAssistantSelfDeliveryTarget as resolveCliAssistantSelfDeliveryTarget,
@@ -27,7 +27,7 @@ import {
   saveAssistantAutomationState as saveCliAssistantAutomationState,
 } from "murph/assistant/store";
 
-test("assistant-runtime uses murph/assistant-core as its only assistant boundary", async () => {
+test("assistant-runtime uses @murph/assistant-core as its source boundary while preserving murph compatibility exports", async () => {
   const runtimeManifest = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
@@ -43,13 +43,14 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
     new URL("../../../apps/cloudflare/test/node-runner.test.ts", import.meta.url),
     "utf8",
   );
-  const assistantCoreModule = await import("murph/assistant-core");
+  const assistantCoreModule = await import("@murph/assistant-core");
+  const cliAssistantCoreModule = await import("murph/assistant-core");
   const inboxServicesModule = await import("murph/inbox-services");
   const vaultServicesModule = await import("murph/vault-services");
   const vaultCliServicesModule = await import("murph/vault-cli-services");
   let sawAssistantCoreImport = false;
 
-  assert.equal(runtimeManifest.dependencies?.murph, "workspace:*");
+  assert.equal(runtimeManifest.dependencies?.["@murph/assistant-core"], "workspace:*");
   assert.equal(existsSync(new URL("../../assistant-services/package.json", import.meta.url)), false);
   assert.equal(runtimeManifest.dependencies?.["@murph/assistant-services"], undefined);
   assert.deepEqual(cliManifest.exports["./assistant-core"], {
@@ -64,19 +65,20 @@ test("assistant-runtime uses murph/assistant-core as its only assistant boundary
     default: "./dist/vault-cli-services.js",
     types: "./dist/vault-cli-services.d.ts",
   });
-  assert.match(cloudflareNodeRunnerSource, /from ["']murph\/assistant-core["']/u);
+  assert.match(cloudflareNodeRunnerSource, /from ["']@murph\/assistant-core["']/u);
   assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph["']/u);
 
   for (const fileUrl of sourceFiles) {
     const source = await readFile(fileUrl, "utf8");
     assert.doesNotMatch(source, /@murph\/assistant-services/u);
-    if (/from ["']murph\/assistant-core["']/u.test(source)) {
+    if (/from ["']@murph\/assistant-core["']/u.test(source)) {
       sawAssistantCoreImport = true;
     }
   }
 
   assert.equal(sawAssistantCoreImport, true);
   assert.equal(assistantCoreModule.createIntegratedInboxServices, createIntegratedInboxServices);
+  assert.equal(cliAssistantCoreModule.createIntegratedInboxServices, createIntegratedInboxServices);
   assert.equal(assistantCoreModule.createIntegratedVaultServices, createIntegratedVaultServices);
   assert.equal(
     Object.hasOwn(assistantCoreModule, "createIntegratedInboxCliServices"),

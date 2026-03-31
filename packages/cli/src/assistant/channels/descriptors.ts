@@ -13,6 +13,8 @@ import {
   createAssistantChannelAdapter,
   inferFallbackBindingDelivery,
   inferThreadFirstBindingDelivery,
+  readDeliveredProviderMessageId,
+  readDeliveredProviderThreadId,
   readDeliveredTarget,
 } from './helpers.js'
 import {
@@ -68,15 +70,17 @@ const TELEGRAM_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Telegram delivery requires an explicit target or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, idempotencyKey, message }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendTelegram ?? sendTelegramMessage
     const delivered = await send({
       idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       message,
+      replyToMessageId: replyToMessageId ?? null,
     })
     return {
       target: readDeliveredTarget(delivered) ?? candidate.target,
+      providerMessageId: readDeliveredProviderMessageId(delivered),
     }
   },
 })
@@ -101,12 +105,16 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
     'Linq delivery requires an explicit chat id or a stored thread binding.',
   async sendMessage({ candidate, dependencies, idempotencyKey, message, replyToMessageId }) {
     const send = dependencies.sendLinq ?? sendLinqMessage
-    await send({
+    const delivered = await send({
       idempotencyKey: idempotencyKey ?? null,
       target: candidate.target,
       message,
       replyToMessageId: replyToMessageId ?? null,
     })
+
+    return {
+      providerMessageId: readDeliveredProviderMessageId(delivered),
+    }
   },
 })
 
@@ -128,7 +136,7 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   supportsIdempotencyKey: false,
   targetRequiredMessage:
     'Email delivery requires an explicit recipient or a stored delivery binding.',
-  async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message }) {
+  async sendMessage({ candidate, dependencies, idempotencyKey, identityId, message, replyToMessageId }) {
     const send = dependencies.sendEmail ?? sendEmailMessage
     if (!identityId && !dependencies.sendEmail) {
       throw new VaultCliError(
@@ -141,10 +149,17 @@ const EMAIL_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       identityId: identityId!,
       target: candidate.target,
       targetKind: candidate.kind,
+      replyToMessageId: replyToMessageId ?? null,
       message,
     })
+    const deliveredTarget =
+      delivered && typeof delivered === 'object' && 'target' in delivered
+        ? readDeliveredTarget(delivered)
+        : null
     return {
-      target: readDeliveredTarget(delivered) ?? candidate.target,
+      target: deliveredTarget ?? candidate.target,
+      providerMessageId: readDeliveredProviderMessageId(delivered),
+      providerThreadId: readDeliveredProviderThreadId(delivered),
     }
   },
 })

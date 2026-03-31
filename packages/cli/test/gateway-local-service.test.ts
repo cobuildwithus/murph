@@ -9,7 +9,7 @@ import { test } from 'vitest'
 
 import { assistantSessionSchema } from '../src/assistant-cli-contracts.js'
 import { createAssistantBinding } from '../src/assistant/bindings.js'
-import { saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
+import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { saveAssistantSession } from '../src/assistant/store.js'
 import {
   fetchGatewayAttachmentsLocal,
@@ -82,6 +82,9 @@ test('local gateway projection derives route-backed conversations and transcript
       text: 'How are you feeling today?',
       attachments: [],
       raw: {
+        message: {
+          message_id: 4321,
+        },
         provider: 'telegram',
       },
     })
@@ -148,6 +151,8 @@ test('local gateway projection derives route-backed conversations and transcript
       delivery: {
         channel: 'email',
         idempotencyKey: 'idem-thread-labs',
+        providerMessageId: 'provider-out-1',
+        providerThreadId: 'thread-labs',
         target: 'thread-labs',
         targetKind: 'thread',
         sentAt: '2026-03-30T09:07:00.000Z',
@@ -158,6 +163,32 @@ test('local gateway projection derives route-backed conversations and transcript
       deliveryTransportIdempotent: true,
       lastError: null,
     })
+
+    const runtimeAfterSend = await openInboxRuntime({ vaultRoot })
+    const pipelineAfterSend = await createInboxPipeline({ vaultRoot, runtime: runtimeAfterSend })
+    await pipelineAfterSend.processCapture({
+      source: 'email',
+      externalId: 'email:provider-out-1',
+      accountId: 'murph@example.com',
+      thread: {
+        id: 'thread-labs',
+        title: 'Lab updates',
+        isDirect: false,
+      },
+      actor: {
+        id: 'murph@example.com',
+        displayName: 'Murph',
+        isSelf: true,
+      },
+      occurredAt: '2026-03-30T09:07:30.000Z',
+      receivedAt: '2026-03-30T09:07:31.000Z',
+      text: 'Please send the latest PDF.',
+      attachments: [],
+      raw: {
+        provider: 'agentmail',
+      },
+    })
+    runtimeAfterSend.close()
 
     const listed = await listGatewayConversationsLocal(vaultRoot, {
       channel: null,
@@ -175,6 +206,7 @@ test('local gateway projection derives route-backed conversations and transcript
     )
     assert.ok(emailConversation)
     assert.equal(emailConversation.title, 'Lab thread')
+    assert.equal(emailConversation.titleSource, 'alias')
     assert.equal(emailConversation.canSend, true)
     assert.equal(emailConversation.lastMessagePreview, 'Please send the latest PDF.')
     assert.equal(emailConversation.messageCount, 2)
@@ -322,7 +354,7 @@ test('local gateway hides actor-derived titles unless includeDerivedTitles is en
   }
 })
 
-test('local gateway send uses route-bound assistant delivery and live events diff the derived projection', async () => {
+test('local gateway send uses route-bound assistant delivery and Linq reply targets diff the derived projection', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-send-'))
 
   try {
@@ -331,8 +363,9 @@ test('local gateway send uses route-bound assistant delivery and live events dif
     const runtime = await openInboxRuntime({ vaultRoot })
     const pipeline = await createInboxPipeline({ vaultRoot, runtime })
     await pipeline.processCapture({
-      source: 'telegram',
-      externalId: 'telegram-send-1',
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:4321',
       thread: {
         id: 'chat-send-1',
         title: 'Check-ins',
@@ -347,42 +380,9 @@ test('local gateway send uses route-bound assistant delivery and live events dif
       receivedAt: '2026-03-30T10:00:01.000Z',
       text: 'Can you check in later today?',
       attachments: [],
-      raw: {
-        provider: 'telegram',
-      },
+      raw: {},
     })
     runtime.close()
-
-    await saveAssistantSession(
-      vaultRoot,
-      assistantSessionSchema.parse({
-        schema: 'murph.assistant-session.v3',
-        sessionId: 'asst_gateway_send',
-        provider: 'codex-cli',
-        providerOptions: {
-          model: null,
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-        },
-        providerBinding: null,
-        alias: 'Taylor check-ins',
-        binding: createAssistantBinding({
-          actorId: 'contact:taylor',
-          channel: 'telegram',
-          deliveryKind: 'participant',
-          identityId: null,
-          threadId: 'chat-send-1',
-          threadIsDirect: true,
-        }),
-        createdAt: '2026-03-30T09:55:00.000Z',
-        updatedAt: '2026-03-30T10:00:00.000Z',
-        lastTurnAt: null,
-        turnCount: 1,
-      }),
-    )
 
     const listed = await listGatewayConversationsLocal(vaultRoot, {
       channel: null,
@@ -395,17 +395,22 @@ test('local gateway send uses route-bound assistant delivery and live events dif
     assert.ok(conversation)
     assert.equal(conversation.canSend, true)
 
+    const initialMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation.sessionKey,
+    })
     const baseline = await pollGatewayEventsLocalWrapper(vaultRoot, {
       cursor: 0,
       kinds: [],
       limit: 20,
       sessionKey: conversation.sessionKey,
     })
-    assert.equal(baseline.events.length, 0)
 
     const sent = await sendGatewayMessageLocal({
       dispatchMode: 'queue-only',
-      replyToMessageId: null,
+      replyToMessageId: initialMessages.messages[0]?.messageId ?? null,
       sessionKey: conversation.sessionKey,
       text: 'I will check in later today.',
       vault: vaultRoot,
@@ -414,14 +419,20 @@ test('local gateway send uses route-bound assistant delivery and live events dif
     assert.equal(sent.queued, true)
     assert.match(sent.messageId ?? '', /^gwcm_/u)
 
+    const queuedIntents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    assert.equal(queuedIntents.length, 1)
+    assert.match(queuedIntents[0]?.sessionId ?? '', /^gwds_gwcs_/u)
+    assert.equal(queuedIntents[0]?.replyToMessageId, '4321')
+
     const runtimeAfterBaseline = await openInboxRuntime({ vaultRoot })
     const pipelineAfterBaseline = await createInboxPipeline({
       vaultRoot,
       runtime: runtimeAfterBaseline,
     })
     await pipelineAfterBaseline.processCapture({
-      source: 'telegram',
-      externalId: 'telegram-send-2',
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:4322',
       thread: {
         id: 'chat-send-1',
         title: 'Check-ins',
@@ -436,9 +447,7 @@ test('local gateway send uses route-bound assistant delivery and live events dif
       receivedAt: '2026-03-30T10:05:01.000Z',
       text: 'Sounds good, thank you!',
       attachments: [],
-      raw: {
-        provider: 'telegram',
-      },
+      raw: {},
     })
     runtimeAfterBaseline.close()
 

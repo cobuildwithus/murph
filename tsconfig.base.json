@@ -85,6 +85,15 @@
       "@murph/assistantd/*": [
         "packages/assistantd/src/*"
       ],
+      "@murph/assistant-core": [
+        "packages/assistant-core/src/index.ts"
+      ],
+      "@murph/gateway-core": [
+        "packages/gateway-core/src/index.ts"
+      ],
+      "@murph/gateway-core/local": [
+        "packages/gateway-core/src/local.ts"
+      ],
       "murph": [
         "packages/cli/src/index.ts"
       ],

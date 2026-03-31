@@ -17,4 +17,4 @@ Current non-goals:
 - Ink/UI surfaces
 - replacing the canonical vault or hosted bundle model
 
-The current implementation imports its assistant, inbox, vault, and operator-config seams directly through `murph/assistant-core`, so hosted runtimes use the same single headless boundary as the local daemon instead of a separate wrapper package.
+The current implementation imports its assistant, inbox, vault, and operator-config seams directly through `@murph/assistant-core`, so hosted runtimes use the same single headless boundary as the local daemon instead of a separate wrapper package.

@@ -10,9 +10,11 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murph/assistant-core": "../assistant-core/src/index.ts",
   "@murph/contracts": "../contracts/src/index.ts",
   "@murph/core": "../core/src/index.ts",
   "@murph/device-syncd": "../device-syncd/src/index.ts",
+  "@murph/gateway-core": "../gateway-core/src/index.ts",
   "@murph/hosted-execution": "../hosted-execution/src/index.ts",
   "@murph/importers": "../importers/src/index.ts",
   "@murph/inboxd": "../inboxd/src/index.ts",
