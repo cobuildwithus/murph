@@ -1,6 +1,10 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import { deviceSyncError, toRedactedPublicDeviceSyncAccount } from "@murph/device-syncd";
+import {
+  deviceSyncError,
+  sanitizeStoredDeviceSyncMetadata,
+  toRedactedPublicDeviceSyncAccount,
+} from "@murph/device-syncd";
 
 import type {
   DeviceSyncAccountStatus,
@@ -35,6 +39,7 @@ export class PrismaHostedConnectionStore {
     const accessTokenEncrypted = this.codec.encrypt(input.tokens.accessToken);
     const refreshTokenEncrypted = input.tokens.refreshToken ? this.codec.encrypt(input.tokens.refreshToken) : null;
     const accessTokenExpiresAt = input.tokens.accessTokenExpiresAt ? new Date(input.tokens.accessTokenExpiresAt) : null;
+    const metadata = sanitizeStoredDeviceSyncMetadata(input.metadata ?? {});
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.deviceConnection.findUnique({
@@ -66,7 +71,7 @@ export class PrismaHostedConnectionStore {
             status: input.status ?? "active",
             scopes: input.scopes ?? [],
             accessTokenExpiresAt,
-            metadataJson: toPrismaJsonObject(input.metadata ?? {}),
+            metadataJson: toPrismaJsonObject(metadata),
             connectedAt: new Date(input.connectedAt),
             nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
             lastSyncErrorAt: null,
@@ -125,7 +130,7 @@ export class PrismaHostedConnectionStore {
           status: input.status ?? "active",
           scopes: input.scopes ?? [],
           accessTokenExpiresAt,
-          metadataJson: toPrismaJsonObject(input.metadata ?? {}),
+          metadataJson: toPrismaJsonObject(metadata),
           connectedAt: new Date(input.connectedAt),
           nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
         },
@@ -311,7 +316,7 @@ export function mapHostedInternalAccountRecord(record: HostedPublicAccountPrisma
     status: record.status,
     scopes: Array.isArray(record.scopes) ? record.scopes.filter((scope: unknown) => typeof scope === "string") : [],
     accessTokenExpiresAt: maybeIsoTimestamp(record.accessTokenExpiresAt),
-    metadata: toJsonRecord(record.metadataJson),
+    metadata: sanitizeStoredDeviceSyncMetadata(toJsonRecord(record.metadataJson)),
     connectedAt: record.connectedAt.toISOString(),
     lastWebhookAt: maybeIsoTimestamp(record.lastWebhookAt),
     lastSyncStartedAt: maybeIsoTimestamp(record.lastSyncStartedAt),

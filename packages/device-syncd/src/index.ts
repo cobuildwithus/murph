@@ -4,7 +4,7 @@ export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts
 export { createDeviceSyncRegistry } from "./registry.ts";
 export { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 export type { CreateDeviceSyncPublicIngressInput } from "./public-ingress.ts";
-export { toIsoTimestamp } from "./shared.ts";
+export { sanitizeStoredDeviceSyncMetadata, toIsoTimestamp } from "./shared.ts";
 export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
 export type { DeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
 export { createDeviceSyncService, createDefaultImporterPort, DeviceSyncService } from "./service.ts";

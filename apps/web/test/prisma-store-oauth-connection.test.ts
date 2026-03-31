@@ -225,6 +225,11 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
         accessTokenExpiresAt: "2026-03-25T04:00:00.000Z",
       },
       metadata: {
+        allowed: true,
+        ignored: {
+          nested: "value",
+        },
+        longText: "x".repeat(300),
         region: "us",
       },
       connectedAt: "2026-03-25T00:00:00.000Z",
@@ -247,17 +252,19 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
     expect(created.metadata).toEqual({});
     expect(createdArtifacts.connection?.metadataJson).toEqual({
+      allowed: true,
       region: "us",
     });
   });
 
-  it("redacts connection metadata from public reads while preserving internal bundle metadata", async () => {
+  it("redacts connection metadata from public reads while sanitizing internal bundle metadata", async () => {
     const connection = createConnectionRecord();
     connection.metadataJson = {
       personalInfo: {
         email: "sensitive@example.com",
       },
       providerHint: "local-browser",
+      retryCount: 2,
     };
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
@@ -282,10 +289,8 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       account: expect.objectContaining({
         id: "dsc_123",
         metadata: {
-          personalInfo: {
-            email: "sensitive@example.com",
-          },
           providerHint: "local-browser",
+          retryCount: 2,
         },
         accessToken: "access-token",
         refreshToken: "refresh-token",

@@ -5,6 +5,7 @@ import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murph/runt
 import {
   generatePrefixedId,
   maybeParseJsonObject,
+  sanitizeStoredDeviceSyncMetadata,
   stringifyJson,
   toIsoTimestamp,
 } from "./shared.ts";
@@ -153,7 +154,7 @@ function mapAccountRow(row: StoredAccountRow | undefined): StoredDeviceSyncAccou
     hostedObservedUpdatedAt: row.hosted_observed_updated_at,
     refreshTokenEncrypted: row.refresh_token_encrypted,
     accessTokenExpiresAt: row.access_token_expires_at,
-    metadata: maybeParseJsonObject(row.metadata_json),
+    metadata: sanitizeStoredDeviceSyncMetadata(maybeParseJsonObject(row.metadata_json)),
     connectedAt: row.connected_at,
     lastWebhookAt: row.last_webhook_at,
     lastSyncStartedAt: row.last_sync_started_at,
@@ -474,7 +475,7 @@ export class SqliteDeviceSyncStore {
       const now = input.connectedAt;
       const status = input.status ?? "active";
       const scopesJson = stringifyJson(input.scopes ?? []);
-      const metadataJson = stringifyJson(input.metadata ?? {});
+      const metadataJson = stringifyJson(sanitizeStoredDeviceSyncMetadata(input.metadata ?? {}));
 
       if (existing) {
         this.database.prepare(`
@@ -558,7 +559,9 @@ export class SqliteDeviceSyncStore {
       }
 
       const now = toIsoTimestamp(new Date());
-      const metadata = patch.metadata ? { ...existing.metadata, ...patch.metadata } : existing.metadata;
+      const metadata = sanitizeStoredDeviceSyncMetadata(
+        patch.metadata ? { ...existing.metadata, ...patch.metadata } : existing.metadata,
+      );
       const nextReconcileAt = Object.prototype.hasOwnProperty.call(patch, "nextReconcileAt")
         ? patch.nextReconcileAt ?? null
         : existing.nextReconcileAt;
@@ -645,6 +648,7 @@ export class SqliteDeviceSyncStore {
       });
       const hostedObservedUpdatedAt = input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null;
       const hostedObservedTokenVersion = input.hostedObservedTokenVersion ?? existing?.hostedObservedTokenVersion ?? null;
+      const metadata = sanitizeStoredDeviceSyncMetadata(input.metadata);
       const disconnectGeneration = existing
         ? input.status === "disconnected" && existing.status !== "disconnected"
           ? existing.disconnectGeneration + 1
@@ -686,7 +690,7 @@ export class SqliteDeviceSyncStore {
           accessTokenExpiresAt,
           hostedObservedUpdatedAt,
           hostedObservedTokenVersion,
-          stringifyJson(input.metadata),
+          stringifyJson(metadata),
           input.connectedAt,
           input.lastWebhookAt,
           input.lastSyncStartedAt,
@@ -742,7 +746,7 @@ export class SqliteDeviceSyncStore {
         accessTokenExpiresAt,
         hostedObservedUpdatedAt,
         hostedObservedTokenVersion,
-        stringifyJson(input.metadata),
+        stringifyJson(metadata),
         input.connectedAt,
         input.lastWebhookAt,
         input.lastSyncStartedAt,
@@ -806,7 +810,9 @@ export class SqliteDeviceSyncStore {
       return false;
     }
 
-    const metadata = options.metadataPatch ? { ...existing.metadata, ...options.metadataPatch } : existing.metadata;
+    const metadata = sanitizeStoredDeviceSyncMetadata(
+      options.metadataPatch ? { ...existing.metadata, ...options.metadataPatch } : existing.metadata,
+    );
     const nextReconcileAt = Object.prototype.hasOwnProperty.call(options, "nextReconcileAt")
       ? options.nextReconcileAt ?? null
       : existing.nextReconcileAt;
