@@ -182,9 +182,20 @@ export async function materializeHostedExecutionArtifacts(input: {
 function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): boolean {
   return (
     !isDotGitRelativePath(relativePath)
+    && !isDeviceSyncLocalRuntimeRelativePath(relativePath)
     && !isEnvironmentRelativePath(relativePath)
     && !isExportPackRelativePath(relativePath)
     && !isEphemeralVaultRuntimeRelativePath(relativePath)
+  );
+}
+
+function isDeviceSyncLocalRuntimeRelativePath(relativePath: string): boolean {
+  return (
+    relativePath === ".runtime/device-syncd.sqlite"
+    || relativePath === ".runtime/device-syncd.sqlite-shm"
+    || relativePath === ".runtime/device-syncd.sqlite-wal"
+    || relativePath === ".runtime/device-syncd"
+    || relativePath.startsWith(`.runtime/device-syncd${path.posix.sep}`)
   );
 }
 

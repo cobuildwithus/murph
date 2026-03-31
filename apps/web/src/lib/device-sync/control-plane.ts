@@ -61,13 +61,14 @@ export class HostedDeviceSyncControlPlane {
 
   constructor(request: Request) {
     this.request = request;
-    const publicBaseUrl = resolveHostedPublicBaseUrl(request, this.env.publicBaseUrl);
+    const publicBaseUrl = resolveHostedPublicBaseUrl(request, this.env.publicBaseUrl, this.env.isProduction);
     this.publicIngressBaseUrl = publicBaseUrl.baseUrl;
     this.webhookAdminCallbackBaseUrl = publicBaseUrl.baseUrl;
     this.webhookAdminCallbackBaseUrlSource = publicBaseUrl.source;
     this.allowedReturnOrigins = resolveAllowedReturnOrigins(
       request,
       this.publicIngressBaseUrl,
+      this.webhookAdminCallbackBaseUrlSource,
       this.env.allowedReturnOrigins,
     );
     this.agentSessions = new HostedDeviceSyncAgentSessionService({
@@ -369,6 +370,7 @@ export async function dispatchHostedDeviceSyncWake(input: {
 function resolveHostedPublicBaseUrl(
   request: Request,
   configuredBaseUrl: string | null,
+  isProduction: boolean,
 ): { baseUrl: string; source: "configured" | "request" } {
   if (configuredBaseUrl) {
     return {
@@ -377,16 +379,36 @@ function resolveHostedPublicBaseUrl(
     };
   }
 
+  if (isProduction) {
+    throw deviceSyncError({
+      code: "DEVICE_SYNC_PUBLIC_BASE_URL_REQUIRED",
+      message:
+        "Hosted device-sync public callback and webhook routes require DEVICE_SYNC_PUBLIC_BASE_URL or a canonical hosted public URL in production.",
+      retryable: false,
+      httpStatus: 500,
+    });
+  }
+
   return {
     baseUrl: `${new URL(request.url).origin}/api/device-sync`,
     source: "request",
   };
 }
 
-function resolveAllowedReturnOrigins(request: Request, publicBaseUrl: string, configuredOrigins: readonly string[]): string[] {
-  const requestOrigin = new URL(request.url).origin;
+function resolveAllowedReturnOrigins(
+  request: Request,
+  publicBaseUrl: string,
+  publicBaseUrlSource: "configured" | "request",
+  configuredOrigins: readonly string[],
+): string[] {
   const publicOrigin = new URL(publicBaseUrl).origin;
-  return [...new Set([requestOrigin, publicOrigin, ...configuredOrigins])];
+  const requestOrigin = new URL(request.url).origin;
+
+  return [...new Set([
+    ...(publicBaseUrlSource === "request" ? [requestOrigin] : []),
+    publicOrigin,
+    ...configuredOrigins,
+  ])];
 }
 
 function selectHostedWebhookAdminProviderNames(input: {

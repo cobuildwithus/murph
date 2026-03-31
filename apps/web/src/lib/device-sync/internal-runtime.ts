@@ -338,7 +338,7 @@ export function parseHostedDeviceSyncRuntimeApplyRequest(
   return {
     ...(value.occurredAt === undefined
       ? {}
-      : { occurredAt: readNullableString(value.occurredAt, "occurredAt") }),
+      : { occurredAt: readNullableIsoTimestamp(value.occurredAt, "occurredAt") }),
     updates: requireArray(value.updates, "updates").map((entry, index) =>
       parseHostedDeviceSyncRuntimeConnectionUpdate(entry, index)
     ),
@@ -371,7 +371,7 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
     ...(record.accessTokenExpiresAt === undefined
       ? {}
       : {
-          accessTokenExpiresAt: readNullableString(
+          accessTokenExpiresAt: readNullableIsoTimestamp(
             record.accessTokenExpiresAt,
             `updates[${index}].accessTokenExpiresAt`,
           ),
@@ -392,35 +392,35 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
     ...(record.lastSyncCompletedAt === undefined
       ? {}
       : {
-          lastSyncCompletedAt: readNullableString(
+          lastSyncCompletedAt: readNullableIsoTimestamp(
             record.lastSyncCompletedAt,
             `updates[${index}].lastSyncCompletedAt`,
           ),
         }),
     ...(record.lastSyncErrorAt === undefined
       ? {}
-      : { lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `updates[${index}].lastSyncErrorAt`) }),
+      : { lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `updates[${index}].lastSyncErrorAt`) }),
     ...(record.lastSyncStartedAt === undefined
       ? {}
       : {
-          lastSyncStartedAt: readNullableString(
+          lastSyncStartedAt: readNullableIsoTimestamp(
             record.lastSyncStartedAt,
             `updates[${index}].lastSyncStartedAt`,
           ),
         }),
     ...(record.lastWebhookAt === undefined
       ? {}
-      : { lastWebhookAt: readNullableString(record.lastWebhookAt, `updates[${index}].lastWebhookAt`) }),
+      : { lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `updates[${index}].lastWebhookAt`) }),
     ...(record.metadata === undefined
       ? {}
       : { metadata: requireObject(record.metadata, `updates[${index}].metadata`) }),
     ...(record.nextReconcileAt === undefined
       ? {}
-      : { nextReconcileAt: readNullableString(record.nextReconcileAt, `updates[${index}].nextReconcileAt`) }),
+      : { nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `updates[${index}].nextReconcileAt`) }),
     ...(record.observedUpdatedAt === undefined
       ? {}
       : {
-          observedUpdatedAt: readNullableString(
+          observedUpdatedAt: readNullableIsoTimestamp(
             record.observedUpdatedAt,
             `updates[${index}].observedUpdatedAt`,
           ),
@@ -462,7 +462,7 @@ function parseHostedDeviceSyncRuntimeTokenBundle(
 
   return {
     accessToken: requireString(record.accessToken, `${label}.accessToken`),
-    accessTokenExpiresAt: readNullableString(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
+    accessTokenExpiresAt: readNullableIsoTimestamp(record.accessTokenExpiresAt, `${label}.accessTokenExpiresAt`),
     keyVersion: requireString(record.keyVersion, `${label}.keyVersion`),
     refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
     tokenVersion: requireNumber(record.tokenVersion, `${label}.tokenVersion`),
@@ -559,6 +559,14 @@ function readNullableString(value: unknown, label: string): string | null {
   return requireString(value, label);
 }
 
+function readNullableIsoTimestamp(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return requireIsoTimestamp(value, label);
+}
+
 function readNullableNumber(value: unknown, label: string): number | null {
   if (value === null || value === undefined) {
     return null;
@@ -585,4 +593,15 @@ function requireBoolean(value: unknown, label: string): boolean {
 
 function requireStringArray(value: unknown, label: string): string[] {
   return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));
+}
+
+function requireIsoTimestamp(value: unknown, label: string): string {
+  const candidate = requireString(value, label);
+  const parsed = Date.parse(candidate);
+
+  if (!Number.isFinite(parsed)) {
+    throw new TypeError(`${label} must be an ISO-8601 timestamp.`);
+  }
+
+  return new Date(parsed).toISOString();
 }
