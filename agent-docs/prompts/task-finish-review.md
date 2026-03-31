@@ -45,10 +45,6 @@ Output requirements:
 - Include `Open questions / assumptions` when uncertainty remains.
 - If no findings exist, state that explicitly and list residual risk areas, including any direct-scenario verification still left to human checking.
 
-
-Parallel-agent output:
-- Please return your final response as a set of copy/paste-ready prompts for parallel agents rather than as a normal prose review.
-- Create one prompt per distinct issue or tightly related issue cluster.
-- In each prompt, describe the issue in detail, explain why it matters, point to the relevant files, symbols, or tests, and include your best guess at a concrete fix.
-- Make each prompt self-contained and specific enough that we can hand it directly to an agent with minimal extra context.
-- If you find no actionable issues, say so explicitly instead of inventing prompts.
+Response format:
+- Return a normal text review, not patch attachments and not follow-on prompts for more agents.
+- Keep the focus on concrete findings, missing proof, and the smallest fixes that would close the risk.

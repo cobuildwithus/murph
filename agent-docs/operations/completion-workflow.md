@@ -44,6 +44,7 @@ If any of those conditions stops being true while the task evolves, fall back to
 - The default audit path is two mandatory subagent passes, `simplify` and `task-finish-review`; tiny low-risk non-doc changes may skip `simplify` but still require `task-finish-review`.
 - Use explicitly spawned subagents for every required audit pass.
 - Treat those audit subagents as review-only unless the user explicitly asks for an audit worker that can patch code.
+- The default audit response contract is plain-text findings with recommended fixes, not patch attachments and not prompts for additional agents.
 - Audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
 - Prefer a fresh non-forked review handoff packet over inheriting the full implementation thread. Only widen context when a specific review question cannot be answered from the narrowed packet.
 - The final completion review owns remaining coverage/proof-gap review; there is no separate required `test-coverage-audit` pass.
