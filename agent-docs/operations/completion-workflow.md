@@ -22,6 +22,8 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 10. Treat the final completion review as the audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating a separate coverage-audit pass.
 11. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
 12. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <file> [file ...]` when the task is ready to commit.
+    `scripts/finish-task` is the plan-aware wrapper: it only accepts a plan that still lives under `agent-docs/exec-plans/active/`, closes that plan, then calls `scripts/committer` with the completed-plan artifact plus the exact file paths you provide.
+    If the task is ledger-only, or the plan was already moved out of `active/`, use `scripts/committer` directly instead of trying to force `finish-task`.
 13. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
 14. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
 
