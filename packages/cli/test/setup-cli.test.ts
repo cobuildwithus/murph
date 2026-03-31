@@ -942,7 +942,7 @@ async function readOptionalText(absolutePath: string): Promise<string> {
   }
 }
 
-test.sequential('setup CLI dry-run returns a macOS plan without mutating services', async () => {
+test.sequential('onboard CLI dry-run returns a macOS plan without mutating services', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-home-'))
   const vaultRoot = path.join(homeRoot, 'vault')
   let coreInitCalls = 0
@@ -996,7 +996,7 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
 
   try {
     const result = await runSetupCli<SetupResult>(
-      ['setup', '--dryRun', '--vault', vaultRoot],
+      ['onboard', '--dryRun', '--vault', vaultRoot],
       services,
     )
     const data = requireData(result)
@@ -1030,7 +1030,7 @@ test.sequential('setup CLI dry-run returns a macOS plan without mutating service
   }
 })
 
-test.sequential('setup CLI dry-run reuses an existing vault without mutating services', async () => {
+test.sequential('onboard CLI dry-run reuses an existing vault without mutating services', async () => {
   const homeRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-existing-dryrun-home-'))
   const vaultRoot = path.join(homeRoot, 'vault')
   let coreInitCalls = 0
@@ -1087,7 +1087,7 @@ test.sequential('setup CLI dry-run reuses an existing vault without mutating ser
 
   try {
     const result = await runSetupCli<SetupResult>(
-      ['setup', '--dryRun', '--vault', vaultRoot],
+      ['onboard', '--dryRun', '--vault', vaultRoot],
       services,
     )
     const data = requireData(result)
@@ -1105,11 +1105,11 @@ test.sequential('setup CLI dry-run reuses an existing vault without mutating ser
   }
 })
 
-test.sequential('setup CLI defaults the vault to ./vault when omitted', async () => {
+test.sequential('onboard CLI defaults the vault to ./vault when omitted', async () => {
   let receivedVault: string | null = null
 
   const result = await runSetupCli<SetupResult>(
-    ['setup'],
+    ['onboard'],
     {
       async setupMacos(input: { vault: string }) {
         receivedVault = input.vault
@@ -1122,9 +1122,9 @@ test.sequential('setup CLI defaults the vault to ./vault when omitted', async ()
   assert.equal(receivedVault, './vault')
 })
 
-test.sequential('setup CLI keeps post-setup CTAs usable when invoked as murph', async () => {
+test.sequential('onboard CLI keeps post-setup CTAs usable when invoked as murph', async () => {
   const result = await runSetupCli<SetupResult>(
-    ['setup', '--vault', './vault'],
+    ['onboard', '--vault', './vault'],
     {
       async setupMacos() {
         return makeSetupResult('./vault')
@@ -1147,7 +1147,7 @@ test.sequential('setup CLI keeps post-setup CTAs usable when invoked as murph', 
   )
 })
 
-test.sequential('setup CLI reports successful setup metadata for post-setup chat handoff', async () => {
+test.sequential('onboard CLI reports successful setup metadata for post-setup chat handoff', async () => {
   const handoffContext = {
     current: null as SuccessfulSetupContext | null,
   }
@@ -1164,7 +1164,7 @@ test.sequential('setup CLI reports successful setup metadata for post-setup chat
     } as ReturnType<typeof createSetupServices>,
   })
 
-  await cli.serve(['setup', '--format', 'json', '--verbose'], {
+  await cli.serve(['onboard', '--format', 'json', '--verbose'], {
     env: process.env,
     exit: () => {},
     stdout() {},
@@ -1181,7 +1181,7 @@ test.sequential('setup CLI reports successful setup metadata for post-setup chat
   assert.equal(reportedContext.formatExplicit, true)
 })
 
-test.sequential('setup CLI does not report a handoff for dry-run setup', async () => {
+test.sequential('onboard CLI does not report a handoff for dry-run setup', async () => {
   let handoffCalls = 0
 
   const cli = createSetupCli({
@@ -1199,7 +1199,7 @@ test.sequential('setup CLI does not report a handoff for dry-run setup', async (
     } as ReturnType<typeof createSetupServices>,
   })
 
-  await cli.serve(['setup', '--dryRun', '--format', 'json', '--verbose'], {
+  await cli.serve(['onboard', '--dryRun', '--format', 'json', '--verbose'], {
     env: process.env,
     exit: () => {},
     stdout() {},
@@ -1925,7 +1925,7 @@ test('setup wearable helpers split ready and pending selections', () => {
   assert.deepEqual(listSetupPendingWearables(result), [result.wearables[1]])
 })
 
-test('setup resolves assistant defaults from explicit assistant options when the wizard is skipped', async () => {
+test('onboard resolves assistant defaults from explicit assistant options when the wizard is skipped', async () => {
   const resolvedAssistants: any[] = []
   const receivedAssistants: any[] = []
   const cli = createSetupCli({
@@ -1969,7 +1969,7 @@ test('setup resolves assistant defaults from explicit assistant options when the
 
   await cli.serve(
     [
-      'setup',
+      'onboard',
       '--assistantPreset',
       'openai-compatible',
       '--assistantBaseUrl',
@@ -3603,15 +3603,15 @@ test.sequential('setup service redacts nested bootstrap toolchain paths under th
   }
 })
 
-test('setup routing helpers keep the setup alias stable', () => {
-  assert.equal(isSetupInvocation(['setup', '--dryRun']), true)
+test('setup routing helpers only recognize onboard as the root onboarding command', () => {
+  assert.equal(isSetupInvocation(['setup', '--dryRun']), false)
   assert.equal(isSetupInvocation(['inbox', 'doctor']), false)
   assert.equal(isSetupInvocation([], 'murph'), true)
   assert.equal(isSetupInvocation(['--help'], 'murph'), true)
   assert.equal(isSetupInvocation(['--verbose', '--format', 'json'], 'murph'), true)
   assert.equal(
     isSetupInvocation(['--format', 'json', 'setup', '--dry-run'], 'murph'),
-    true,
+    false,
   )
   assert.equal(
     isSetupInvocation(['--filter-output', 'steps[0].title', '--help'], 'murph'),
@@ -3623,7 +3623,7 @@ test('setup routing helpers keep the setup alias stable', () => {
   )
   assert.equal(
     isSetupInvocation(['--token-offset', '5', 'setup', '--dry-run'], 'murph'),
-    true,
+    false,
   )
   assert.equal(isSetupInvocation(['inbox', 'doctor'], 'murph'), false)
   assert.equal(
@@ -3651,18 +3651,25 @@ test('setup routing helpers keep the setup alias stable', () => {
   assert.ok(cli)
 })
 
-test.sequential('murph alias routes empty and help invocations to setup help', async () => {
+test.sequential('murph alias routes empty and help invocations to onboarding help', async () => {
   const help = await runSetupAliasRaw('murph', ['--help'])
   const onboardHelp = await runSetupAliasRaw('murph', ['onboard', '--help'])
   const emptyInvocation = await runSetupAliasRaw('murph', [])
   const inboxHelp = await runSetupAliasRaw('murph', ['inbox', 'doctor', '--help'])
 
-  assert.match(help, /Murph local machine setup helpers\./u)
-  assert.match(help, /setup\s+Provision the local parser\/runtime toolchain for macOS or Linux/u)
-  assert.match(onboardHelp, /onboard\s+[—-]\s+Alias for setup/u)
+  assert.match(help, /Murph local machine onboarding helpers\./u)
+  assert.match(
+    help,
+    /onboard\s+Provision the local parser\/runtime toolchain for macOS or Linux/u,
+  )
+  assert.doesNotMatch(help, /setup\s+Provision the local parser\/runtime toolchain for macOS or Linux/u)
+  assert.match(
+    onboardHelp,
+    /onboard\s+[-—]\s+Provision the local parser\/runtime toolchain for macOS or Linux/u,
+  )
   assert.doesNotMatch(help, /search\s+Search commands for the local read model/u)
-  assert.match(emptyInvocation, /Murph local machine setup helpers\./u)
-  assert.doesNotMatch(inboxHelp, /Murph local machine setup helpers\./u)
+  assert.match(emptyInvocation, /Murph local machine onboarding helpers\./u)
+  assert.doesNotMatch(inboxHelp, /Murph local machine onboarding helpers\./u)
   assert.match(inboxHelp, /vault-cli inbox doctor/u)
 }, SETUP_ALIAS_TIMEOUT_MS)
 
