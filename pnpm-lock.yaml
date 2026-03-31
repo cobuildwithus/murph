@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.15
         version: 0.1.15
       '@cobuild/review-gpt':
-        specifier: ^0.5.12
-        version: 0.5.12(openapi-types@12.1.3)
+        specifier: ^0.5.13
+        version: 0.5.13(openapi-types@12.1.3)
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
@@ -623,8 +623,8 @@ packages:
     resolution: {integrity: sha512-CjzP5OHu6RhOOjmPl/1djZNVEbjttt62rBSzvuPK7u9NrZ37F2lkHT+QmZ4Lb+ZDmMhPTqlwdyqnzwD0Gkhm1Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.12':
-    resolution: {integrity: sha512-d6pxSwC4AlnXam8KHnrVGKu88/YqAtyc28ibz7KJCcX2WnzrB44Mhl6sxdtSJT+IYYXh4m3NRZP+K2AVrUuAcg==}
+  '@cobuild/review-gpt@0.5.13':
+    resolution: {integrity: sha512-2MTONWaWNYsyZNzg+17W2QmwVLOK93NCEPt+5xswwcIfE5bTxDePIO7CHi0Ub2k+7akO3Q/maczUkJ3rYUIs+w==}
     hasBin: true
 
   '@cobuild/wire@0.3.6':
@@ -5842,8 +5842,8 @@ packages:
       typescript:
         optional: true
 
-  web-tree-sitter@0.26.7:
-    resolution: {integrity: sha512-KiZhelTvBA/ziUHEO7Emb75cGVAq8iGZNabYaZm53Zpy50NsXyOW+xSHlwHt5CVg/TRPZBfeVLTTobF0LjFJ1w==}
+  web-tree-sitter@0.26.8:
+    resolution: {integrity: sha512-4sUwi7ZyOrIk5KLgYLkc2A/F0LFMQnBhfb+2Cdl7ik4ePJ6JD+fk4ofI2sA5eGawBKBaK4Vntt7Ww5KcEsay4A==}
 
   webextension-polyfill@0.10.0:
     resolution: {integrity: sha512-c5s35LgVa5tFaHhrZDnr3FpQpjj1BB+RXhLTYUxGqBVN460HkbM8TBtEqdXWbpTKfzwCcjAZVF7zXCYSKtcp9g==}
@@ -6261,7 +6261,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.15': {}
 
-  '@cobuild/review-gpt@0.5.12(openapi-types@12.1.3)':
+  '@cobuild/review-gpt@0.5.13(openapi-types@12.1.3)':
     dependencies:
       '@cobuild/repo-tools': 0.1.15
       incur: 0.3.13(openapi-types@12.1.3)
@@ -12210,7 +12210,7 @@ snapshots:
       tiktoken: 1.0.22
       tinyclip: 0.1.12
       tinypool: 2.1.0
-      web-tree-sitter: 0.26.7
+      web-tree-sitter: 0.26.8
       zod: 4.3.6
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -13006,7 +13006,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  web-tree-sitter@0.26.7: {}
+  web-tree-sitter@0.26.8: {}
 
   webextension-polyfill@0.10.0: {}
 
