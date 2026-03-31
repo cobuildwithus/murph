@@ -14,7 +14,7 @@
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && prisma generate && tsc -p tsconfig.json --pretty false",
     "typecheck:prepared": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && tsc -p tsconfig.json --pretty false",
-    "test": "pnpm --dir ../.. exec vitest run --config apps/web/vitest.config.ts --project hosted-web --no-coverage",
+    "test": "pnpm --dir ../.. exec vitest run --config apps/web/vitest.workspace.ts --no-coverage",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",

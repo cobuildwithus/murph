@@ -57,6 +57,8 @@ readonly typecheck_package_dirs=(
 readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-50%}"
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
+readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
+readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
 
 readonly cli_verify_test_files=(
   "packages/cli/test/runtime.test.ts"
@@ -144,6 +146,23 @@ run_package_command_with_retry() {
     pnpm --dir "$package_dir" "$command"
 }
 
+wait_for_background_jobs() {
+  local failed=0
+  local pid
+
+  for pid in "$@"; do
+    if ! wait "$pid"; then
+      failed=1
+    fi
+  done
+
+  if [[ "$failed" -ne 0 ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
 run_test_packages_common() {
   pnpm no-js
   pnpm --dir "packages/contracts" test
@@ -152,7 +171,6 @@ run_test_packages_common() {
 run_test_apps() {
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
-    local failed=0
 
     run_package_command_with_retry "packages/web" verify &
     pids+=("$!")
@@ -161,13 +179,7 @@ run_test_apps() {
     run_package_command_with_retry "apps/cloudflare" verify &
     pids+=("$!")
 
-    for pid in "${pids[@]}"; do
-      if ! wait "$pid"; then
-        failed=1
-      fi
-    done
-
-    if [[ "$failed" -ne 0 ]]; then
+    if ! wait_for_background_jobs "${pids[@]}"; then
       return 1
     fi
 
@@ -201,8 +213,24 @@ run_typecheck() {
 run_test() {
   bash "scripts/check-agent-docs-drift.sh"
   run_workspace_boundary_check
-  run_test_packages
-  run_test_apps
+  run_test_packages_common
+  prepare_repo_vitest_runtime_artifacts
+
+  if [[ "$test_lane_parallel" == "1" ]]; then
+    local test_packages_pid
+    local test_apps_pid
+
+    run_repo_vitest --no-coverage &
+    test_packages_pid="$!"
+    run_test_apps &
+    test_apps_pid="$!"
+
+    wait_for_background_jobs "$test_packages_pid" "$test_apps_pid"
+  else
+    run_repo_vitest --no-coverage
+    run_test_apps
+  fi
+
   pnpm exec tsx "e2e/smoke/verify-fixtures.ts"
 }
 
@@ -230,7 +258,7 @@ run_verify_cli() {
   pnpm --dir "packages/cli" typecheck
   run_test_runtime_artifact_build_with_retry
   pnpm exec tsx "packages/cli/scripts/verify-package-shape.ts"
-  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "vitest.config.ts" "${cli_verify_test_files[@]}" --no-coverage --maxWorkers 1
+  MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" "${cli_verify_test_files[@]}" --no-coverage --maxWorkers "$repo_vitest_max_workers"
 }
 
 main() {

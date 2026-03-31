@@ -1,0 +1,126 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { defineConfig, defineProject } from "vitest/config";
+
+const packageDir = path.dirname(fileURLToPath(import.meta.url));
+const cliVitestMaxWorkers = process.env.MURPH_VITEST_MAX_WORKERS ?? "50%";
+
+type CliVitestProjectSpec = {
+  readonly name: string;
+  readonly fileNames: readonly string[];
+};
+
+function cliTestFile(fileName: string): string {
+  return path.join(packageDir, "test", fileName);
+}
+
+export function createCliVitestProject(name: string, fileNames: readonly string[]) {
+  return defineProject({
+    test: {
+      name,
+      environment: "node",
+      fileParallelism: false,
+      include: fileNames.map(cliTestFile),
+      testTimeout: 60_000,
+    },
+  });
+}
+
+export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
+  {
+    name: "cli-health-tail",
+    fileNames: [
+      "health-tail.test.ts",
+      "health-descriptors.test.ts",
+    ],
+  },
+  {
+    name: "cli-read-model",
+    fileNames: [
+      "search-runtime.test.ts",
+      "list-cursor-compat.test.ts",
+      "runtime.test.ts",
+      "selector-filter-normalization.test.ts",
+      "stdin-input.test.ts",
+      "canonical-mutation-boundary.test.ts",
+      "canonical-write-lock.test.ts",
+      "canonical-write-source-audit.test.ts",
+      "json-input.test.ts",
+      "record-mutations.test.ts",
+      "vault-usecase-helpers.test.ts",
+    ],
+  },
+  {
+    name: "cli-schemas-smoke",
+    fileNames: [
+      "incur-smoke.test.ts",
+      "inbox-incur-smoke.test.ts",
+      "release-script-coverage-audit.test.ts",
+      "release-workflow-guards.test.ts",
+      "assistant-cli-access.test.ts",
+      "assistant-chat-theme.test.ts",
+      "device-cli.test.ts",
+    ],
+  },
+  {
+    name: "cli-assistant",
+    fileNames: [
+      "assistant-cli.test.ts",
+      "assistant-runtime.test.ts",
+      "assistant-service.test.ts",
+      "assistant-channel.test.ts",
+      "assistant-cron.test.ts",
+      "assistant-state.test.ts",
+      "assistant-observability.test.ts",
+      "assistant-robustness.test.ts",
+      "assistant-provider.test.ts",
+      "assistant-daemon-client.test.ts",
+      "assistant-codex.test.ts",
+      "assistant-harness.test.ts",
+      "assistant-memory-boundaries.test.ts",
+      "assistant-runtime-state-service.test.ts",
+      "research-runtime.test.ts",
+    ],
+  },
+  {
+    name: "cli-expansions",
+    fileNames: [
+      "cli-expansion-workout.test.ts",
+      "cli-expansion-intervention.test.ts",
+      "cli-expansion-provider-event-samples.test.ts",
+      "cli-expansion-samples-audit.test.ts",
+      "cli-expansion-document-meal.test.ts",
+      "cli-expansion-experiment-journal-vault.test.ts",
+      "cli-expansion-experiment-journal-vault-phase2.test.ts",
+      "cli-expansion-export-intake.test.ts",
+    ],
+  },
+  {
+    name: "cli-inbox-setup",
+    fileNames: [
+      "setup-cli.test.ts",
+      "setup-channels.test.ts",
+      "inbox-cli.test.ts",
+      "inbox-model-harness.test.ts",
+      "inbox-model-route.test.ts",
+      "inbox-service-boundaries.test.ts",
+      "cli-expansion-inbox-attachments.test.ts",
+      "gateway-core.test.ts",
+      "gateway-local-service.test.ts",
+      "device-daemon.test.ts",
+      "device-sync-client.test.ts",
+    ],
+  },
+];
+
+export const cliVitestProjects = cliVitestProjectSpecs.map(({ name, fileNames }) =>
+  createCliVitestProject(name, fileNames),
+);
+
+export default defineConfig({
+  test: {
+    maxWorkers: cliVitestMaxWorkers,
+    projects: cliVitestProjects,
+  },
+});

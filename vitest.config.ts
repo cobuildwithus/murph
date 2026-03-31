@@ -1,11 +1,14 @@
 import assistantRuntimeProject from "./packages/assistant-runtime/vitest.config.ts";
 import assistantdProject from "./packages/assistantd/vitest.config.ts";
-import cliProject from "./packages/cli/vitest.config.ts";
 import coreProject from "./packages/core/vitest.config.ts";
 import deviceSyncdProject from "./packages/device-syncd/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
+import {
+  cliVitestProjectSpecs,
+  createCliVitestProject,
+} from "./packages/cli/vitest.workspace.ts";
 import parsersProject from "./packages/parsers/vitest.config.ts";
 import queryProject from "./packages/query/vitest.config.ts";
 import runtimeStateProject from "./packages/runtime-state/vitest.config.ts";
@@ -21,6 +24,47 @@ type RootRepoProject = {
   include: string[];
 };
 
+const ROOT_REPO_CLI_INCLUDE = new Set([
+  "packages/cli/test/health-descriptors.test.ts",
+  "packages/cli/test/health-tail.test.ts",
+  "packages/cli/test/canonical-write-lock.test.ts",
+  "packages/cli/test/canonical-write-source-audit.test.ts",
+  "packages/cli/test/assistant-harness.test.ts",
+  "packages/cli/test/assistant-state.test.ts",
+  "packages/cli/test/assistant-provider.test.ts",
+  "packages/cli/test/assistant-codex.test.ts",
+  "packages/cli/test/assistant-daemon-client.test.ts",
+  "packages/cli/test/assistant-cli-access.test.ts",
+  "packages/cli/test/assistant-channel.test.ts",
+  "packages/cli/test/assistant-chat-theme.test.ts",
+  "packages/cli/test/assistant-runtime.test.ts",
+  "packages/cli/test/assistant-cli.test.ts",
+  "packages/cli/test/assistant-observability.test.ts",
+  "packages/cli/test/assistant-robustness.test.ts",
+  "packages/cli/test/assistant-service.test.ts",
+  "packages/cli/test/device-daemon.test.ts",
+  "packages/cli/test/device-sync-client.test.ts",
+  "packages/cli/test/json-input.test.ts",
+  "packages/cli/test/incur-smoke.test.ts",
+  "packages/cli/test/canonical-mutation-boundary.test.ts",
+  "packages/cli/test/inbox-incur-smoke.test.ts",
+  "packages/cli/test/inbox-cli.test.ts",
+  "packages/cli/test/inbox-model-harness.test.ts",
+  "packages/cli/test/inbox-model-route.test.ts",
+  "packages/cli/test/list-cursor-compat.test.ts",
+  "packages/cli/test/cli-expansion-export-intake.test.ts",
+  "packages/cli/test/cli-expansion-workout.test.ts",
+  "packages/cli/test/runtime.test.ts",
+  "packages/cli/test/search-runtime.test.ts",
+  "packages/cli/test/setup-channels.test.ts",
+  "packages/cli/test/setup-cli.test.ts",
+  "packages/cli/test/selector-filter-normalization.test.ts",
+  "packages/cli/test/stdin-input.test.ts",
+  "packages/cli/test/vault-usecase-helpers.test.ts",
+  "packages/cli/test/release-script-coverage-audit.test.ts",
+  "packages/cli/test/release-workflow-guards.test.ts",
+]);
+
 const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: assistantRuntimeProject,
@@ -35,49 +79,6 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
     include: [
       "packages/assistantd/test/assistant-core-boundary.test.ts",
       "packages/assistantd/test/http.test.ts",
-    ],
-  },
-  {
-    config: cliProject,
-    include: [
-      "packages/cli/test/health-descriptors.test.ts",
-      "packages/cli/test/health-tail.test.ts",
-      "packages/cli/test/canonical-write-lock.test.ts",
-      "packages/cli/test/canonical-write-source-audit.test.ts",
-      "packages/cli/test/assistant-harness.test.ts",
-      "packages/cli/test/assistant-state.test.ts",
-      "packages/cli/test/assistant-provider.test.ts",
-      "packages/cli/test/assistant-codex.test.ts",
-      "packages/cli/test/assistant-daemon-client.test.ts",
-      "packages/cli/test/assistant-cli-access.test.ts",
-      "packages/cli/test/assistant-channel.test.ts",
-      "packages/cli/test/assistant-chat-theme.test.ts",
-      "packages/cli/test/assistant-runtime.test.ts",
-      "packages/cli/test/assistant-cli.test.ts",
-      "packages/cli/test/assistant-observability.test.ts",
-      "packages/cli/test/assistant-robustness.test.ts",
-      "packages/cli/test/assistant-service.test.ts",
-      "packages/cli/test/device-daemon.test.ts",
-      "packages/cli/test/device-sync-client.test.ts",
-      "packages/cli/test/json-input.test.ts",
-      "packages/cli/test/incur-smoke.test.ts",
-      "packages/cli/test/canonical-mutation-boundary.test.ts",
-      "packages/cli/test/inbox-incur-smoke.test.ts",
-      "packages/cli/test/inbox-cli.test.ts",
-      "packages/cli/test/inbox-model-harness.test.ts",
-      "packages/cli/test/inbox-model-route.test.ts",
-      "packages/cli/test/list-cursor-compat.test.ts",
-      "packages/cli/test/cli-expansion-export-intake.test.ts",
-      "packages/cli/test/cli-expansion-workout.test.ts",
-      "packages/cli/test/runtime.test.ts",
-      "packages/cli/test/search-runtime.test.ts",
-      "packages/cli/test/setup-channels.test.ts",
-      "packages/cli/test/setup-cli.test.ts",
-      "packages/cli/test/selector-filter-normalization.test.ts",
-      "packages/cli/test/stdin-input.test.ts",
-      "packages/cli/test/vault-usecase-helpers.test.ts",
-      "packages/cli/test/release-script-coverage-audit.test.ts",
-      "packages/cli/test/release-workflow-guards.test.ts",
     ],
   },
   {
@@ -152,8 +153,23 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   },
 ];
 
+const rootRepoCliProjects = cliVitestProjectSpecs
+  .map(({ fileNames, name }) => {
+    const filteredFileNames = fileNames.filter((fileName) =>
+      ROOT_REPO_CLI_INCLUDE.has(`packages/cli/test/${fileName}`),
+    );
+
+    if (filteredFileNames.length === 0) {
+      return null;
+    }
+
+    return createCliVitestProject(name, filteredFileNames);
+  })
+  .filter((project): project is UserWorkspaceConfig => project !== null);
+
 export default defineConfig({
   test: {
+    maxWorkers: process.env.MURPH_VITEST_MAX_WORKERS ?? "50%",
     coverage: {
       enabled: true,
       provider: "v8",
@@ -200,15 +216,18 @@ export default defineConfig({
     testTimeout: 60_000,
     // packages/web, apps/web, and apps/cloudflare stay in their dedicated
     // verify lanes so the root multi-project run does not execute them twice.
-    projects: ROOT_REPO_PROJECTS.map(({ config, include }) =>
-      mergeConfig(
-        config,
-        defineProject({
-          test: {
-            include,
-          },
-        }),
+    projects: [
+      ...ROOT_REPO_PROJECTS.map(({ config, include }) =>
+        mergeConfig(
+          config,
+          defineProject({
+            test: {
+              include,
+            },
+          }),
+        ),
       ),
-    ),
+      ...rootRepoCliProjects,
+    ],
   },
 });
