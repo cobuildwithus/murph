@@ -28,6 +28,12 @@ const gatewayCoreSourceDir = path.resolve(
   'gateway-core',
   'src',
 )
+const gatewayLocalSourceDir = path.resolve(
+  fileURLToPath(new URL('..', import.meta.url)),
+  '..',
+  'gateway-local',
+  'src',
+)
 
 test('murph no longer publishes legacy gateway-core compatibility exports', async () => {
   const packageManifest = JSON.parse(
@@ -40,28 +46,39 @@ test('murph no longer publishes legacy gateway-core compatibility exports', asyn
   assert.equal(packageManifest.exports['./gateway-core-local'], undefined)
 })
 
-test('gateway-core is fully hard-cut over: the owner package owns ./local and murph no longer ships gateway compatibility shims', async () => {
-  const packageManifest = JSON.parse(
+test('gateway-core stays transport-neutral and gateway-local owns the vault-backed local surface', async () => {
+  const gatewayCoreManifest = JSON.parse(
     await readFile(path.resolve(gatewayCoreSourceDir, '..', 'package.json'), 'utf8'),
   ) as {
     dependencies?: Record<string, string | undefined>
   }
-  const cliPackageManifest = JSON.parse(
-    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  const gatewayLocalManifest = JSON.parse(
+    await readFile(path.resolve(gatewayLocalSourceDir, '..', 'package.json'), 'utf8'),
   ) as {
     dependencies?: Record<string, string | undefined>
   }
   const packageIndex = await readFile(path.join(gatewayCoreSourceDir, 'index.ts'), 'utf8')
-  const packageLocal = await readFile(path.join(gatewayCoreSourceDir, 'local.ts'), 'utf8')
+  const packageLocal = await readFile(path.join(gatewayLocalSourceDir, 'index.ts'), 'utf8')
 
   assert.doesNotMatch(packageIndex, /from ['"]murph\/gateway-core['"]/u)
-  assert.equal(packageManifest.dependencies?.murph, undefined)
-  assert.doesNotMatch(packageLocal, /murph\/gateway-core-local/u)
+  assert.equal(gatewayCoreManifest.dependencies?.['@murph/assistant-core'], undefined)
+  assert.equal(gatewayCoreManifest.dependencies?.['@murph/inboxd'], undefined)
+  assert.equal(gatewayCoreManifest.dependencies?.['@murph/runtime-state'], undefined)
+  assert.equal(gatewayLocalManifest.dependencies?.['@murph/gateway-core'], 'workspace:*')
+  assert.equal(gatewayLocalManifest.dependencies?.['@murph/assistant-core'], 'workspace:*')
+  assert.doesNotMatch(packageLocal, /@murph\/gateway-core\/local/u)
   assert.match(packageLocal, /\.\/local-service\.js/u)
-  assert.match(packageLocal, /\.\/projection\.js/u)
+  assert.match(packageLocal, /\.\/store\.js/u)
   assert.match(packageLocal, /\.\/send\.js/u)
-  assert.equal(cliPackageManifest.dependencies?.['@murph/gateway-core'], undefined)
 
+  await assert.rejects(
+    access(path.join(gatewayCoreSourceDir, 'local.ts'), constants.F_OK),
+  )
+  await assert.rejects(
+    access(path.join(gatewayCoreSourceDir, 'local-service.ts'), constants.F_OK),
+  )
+  await access(path.join(gatewayLocalSourceDir, 'index.ts'), constants.F_OK)
+  await access(path.join(gatewayLocalSourceDir, 'local-service.ts'), constants.F_OK)
   await assert.rejects(
     access(new URL('../src/gateway-core.ts', import.meta.url), constants.F_OK),
   )
@@ -73,7 +90,7 @@ test('gateway-core is fully hard-cut over: the owner package owns ./local and mu
   )
 })
 
-test('workspace source resolution points directly at the dedicated @murph/gateway-core packages with no murph compatibility alias left behind', async () => {
+test('workspace source resolution points directly at dedicated gateway-core and gateway-local packages with no legacy local alias left behind', async () => {
   const tsconfig = JSON.parse(
     await readFile(new URL('../../../tsconfig.base.json', import.meta.url), 'utf8'),
   ) as {
@@ -85,9 +102,10 @@ test('workspace source resolution points directly at the dedicated @murph/gatewa
   assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-core'], [
     'packages/gateway-core/src/index.ts',
   ])
-  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-core/local'], [
-    'packages/gateway-core/src/local.ts',
+  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-local'], [
+    'packages/gateway-local/src/index.ts',
   ])
+  assert.equal(tsconfig.compilerOptions?.paths?.['@murph/gateway-core/local'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core-local'], undefined)
 })

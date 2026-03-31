@@ -16,7 +16,7 @@ import {
 import {
   refreshAssistantStatusSnapshot,
 } from "@murph/assistant-core";
-import { exportGatewayProjectionSnapshotLocal } from "@murph/gateway-core/local";
+import { exportGatewayProjectionSnapshotLocal } from "@murph/gateway-local";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";

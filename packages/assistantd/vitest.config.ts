@@ -18,6 +18,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murph/core": "../core/src/index.ts",
   "@murph/device-syncd": "../device-syncd/src/index.ts",
   "@murph/gateway-core": "../gateway-core/src/index.ts",
+  "@murph/gateway-local": "../gateway-local/src/index.ts",
   "@murph/hosted-execution": "../hosted-execution/src/index.ts",
   "@murph/importers": "../importers/src/index.ts",
   "@murph/inboxd": "../inboxd/src/index.ts",

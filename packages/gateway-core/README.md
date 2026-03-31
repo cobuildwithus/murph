@@ -1,3 +1,7 @@
 # @murph/gateway-core
 
-Dedicated headless gateway boundary package that owns Murph's transport-neutral route, projection, opaque-id, and event-log helpers plus the local vault-backed `./local` gateway service surface used by assistantd, hosted adapters, and future MCP-compatible transports. The local store now consumes inboxd's durable capture mutation cursor for incremental capture sync, persists explicit snapshot bootstrap metadata so empty projections stay incremental, and still keeps full projection rebuilds as the bootstrap/recovery path.
+Dedicated transport-neutral gateway boundary package for Murph.
+
+This package owns Murph's gateway contracts, route helpers, projection/snapshot helpers, opaque ids, and event-log utilities. It intentionally does not depend on the assistant, inbox, or local runtime-state stacks.
+
+Consumers that need the local vault-backed gateway adapter should depend on `@murph/gateway-local` explicitly. That package owns the rebuildable `.runtime/gateway.sqlite` serving store plus the local send/read wrapper surface.

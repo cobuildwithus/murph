@@ -1,5 +1,5 @@
 {
-  "name": "@murph/assistant-runtime",
+  "name": "@murph/gateway-local",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -16,7 +16,6 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
       "default": "./dist/index.js"
     }
   },
@@ -25,22 +24,16 @@
     "README.md"
   ],
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.json --force",
-    "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
-    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
-  },
-  "dependencies": {
-    "@murph/assistant-core": "workspace:*",
-    "@murph/core": "workspace:*",
-    "@murph/device-syncd": "workspace:*",
-    "@murph/gateway-core": "workspace:*",
-    "@murph/gateway-local": "workspace:*",
-    "@murph/hosted-execution": "workspace:*",
-    "@murph/inboxd": "workspace:*",
-    "@murph/parsers": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "build": "rimraf dist && tsc -b tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "engines": {
     "node": ">=22.16.0"
+  },
+  "dependencies": {
+    "@murph/assistant-core": "workspace:*",
+    "@murph/gateway-core": "workspace:*",
+    "@murph/inboxd": "workspace:*",
+    "@murph/runtime-state": "workspace:*"
   }
 }

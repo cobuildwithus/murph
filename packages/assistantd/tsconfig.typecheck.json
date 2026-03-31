@@ -8,10 +8,16 @@
   },
   "references": [
     {
-      "path": "../runtime-state"
+      "path": "../assistant-core"
     },
     {
-      "path": "../cli"
+      "path": "../gateway-core"
+    },
+    {
+      "path": "../gateway-local"
+    },
+    {
+      "path": "../runtime-state"
     }
   ],
   "include": [

@@ -26,7 +26,7 @@ import {
   readGatewayMessagesLocal,
   respondToGatewayPermissionLocalWrapper,
   sendGatewayMessageLocal,
-} from '@murph/gateway-core/local'
+} from '@murph/gateway-local'
 
 async function rewriteInboxCaptureRuntimeRecord(input: {
   accountId?: string | null

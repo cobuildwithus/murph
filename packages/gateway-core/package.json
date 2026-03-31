@@ -17,10 +17,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./local": {
-      "types": "./dist/local.d.ts",
-      "default": "./dist/local.js"
     }
   },
   "files": [
@@ -35,9 +31,6 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "@murph/assistant-core": "workspace:*",
-    "@murph/inboxd": "workspace:*",
-    "@murph/runtime-state": "workspace:*",
     "incur": "0.3.4"
   }
 }

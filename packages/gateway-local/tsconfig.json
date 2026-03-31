@@ -6,6 +6,20 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
+  "references": [
+    {
+      "path": "../assistant-core"
+    },
+    {
+      "path": "../gateway-core"
+    },
+    {
+      "path": "../inboxd"
+    },
+    {
+      "path": "../runtime-state"
+    }
+  ],
   "include": [
     "src/**/*.ts"
   ],
