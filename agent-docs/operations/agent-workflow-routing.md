@@ -47,4 +47,5 @@ Then load only the task-relevant docs listed below.
 
 - Mechanical/enforced rules live in scripts, tests, lint-like guards, or CI wherever possible.
 - `AGENTS.md` and this doc should point to those guards or to the durable policy doc, not duplicate large policy blobs.
+- Keep `AGENTS.md` intentionally small. Treat roughly 100 lines as the soft ceiling and preserve the same stable shape: purpose, precedence, always-read set, task router, non-negotiable invariants, workflow defaults, and notes.
 - If a rule matters and keeps drifting, prefer encoding it into tooling over expanding `AGENTS.md`.
