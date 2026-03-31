@@ -18,7 +18,6 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
 
   try {
     const firstResult = await reconcileHostedAssistantChannelCapabilities(vaultRoot, {
-      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
@@ -39,7 +38,6 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
     );
 
     const secondResult = await reconcileHostedAssistantChannelCapabilities(vaultRoot, {
-      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
       HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
       HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
@@ -52,6 +50,34 @@ test("hosted channel capability reconciliation enables email and telegram auto-r
       emailAutoReplyEnabled: false,
       telegramAutoReplyEnabled: false,
     });
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted channel capability reconciliation can still disable automation explicitly", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-context-"));
+  const vaultRoot = path.join(workspaceRoot, "vault");
+
+  try {
+    const result = await reconcileHostedAssistantChannelCapabilities(vaultRoot, {
+      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "disabled",
+      HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
+      HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
+      HOSTED_EMAIL_DOMAIN: "mail.example.test",
+      HOSTED_EMAIL_LOCAL_PART: "assistant",
+      HOSTED_EMAIL_SIGNING_SECRET: "email-secret",
+      TELEGRAM_BOT_TOKEN: "telegram-token",
+    });
+
+    assert.deepEqual(result, {
+      emailAutoReplyEnabled: false,
+      telegramAutoReplyEnabled: false,
+    });
+    await assert.rejects(
+      readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
+      /ENOENT/u,
+    );
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
@@ -133,7 +159,6 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
         occurredAt: "2026-03-28T09:10:00.000Z",
       },
       {
-        HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
         HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID: "acct_123",
         HOSTED_EMAIL_CLOUDFLARE_API_TOKEN: "cf-token",
         HOSTED_EMAIL_DOMAIN: "mail.example.test",
@@ -143,10 +168,11 @@ test("hosted dispatch context does not enable new auto-reply channels on non-act
       },
     );
 
-    await assert.rejects(
-      readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
-      /ENOENT/u,
-    );
+    const automationState = JSON.parse(
+      await readFile(resolveAssistantStatePaths(vaultRoot).automationPath, "utf8"),
+    ) as { autoReplyChannels: string[] };
+
+    assert.deepEqual(automationState.autoReplyChannels, []);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

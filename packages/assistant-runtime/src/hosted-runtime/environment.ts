@@ -142,7 +142,15 @@ export function hostedAssistantAutomationEnabledFromEnv(
 ): boolean {
   const normalized = normalizeHostedExecutionString(env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION)?.toLowerCase();
 
-  return normalized === "1" || normalized === "true" || normalized === "yes";
+  if (!normalized) {
+    return true;
+  }
+
+  return normalized !== "0"
+    && normalized !== "false"
+    && normalized !== "no"
+    && normalized !== "off"
+    && normalized !== "disabled";
 }
 
 export async function withHostedProcessEnvironment<T>(input: {

@@ -149,5 +149,13 @@ function hostedAssistantAutomationEnabled(source: Readonly<Record<string, unknow
     ? source.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION.trim().toLowerCase()
     : "";
 
-  return value === "1" || value === "true" || value === "yes";
+  if (value.length === 0) {
+    return true;
+  }
+
+  return value !== "0"
+    && value !== "false"
+    && value !== "no"
+    && value !== "off"
+    && value !== "disabled";
 }

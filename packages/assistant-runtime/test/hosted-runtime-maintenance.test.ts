@@ -131,6 +131,44 @@ test("hosted maintenance loop preserves the empty-vault no-op baseline after act
       nextWakeAt: null,
       parserProcessed: 0,
     });
+    assert.equal(mocks.runAssistantAutomation.mock.calls.length, 1);
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted maintenance loop can still skip assistant automation when explicitly disabled", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runtime-maintenance-"));
+  const vaultRoot = path.join(workspaceRoot, "vault");
+
+  try {
+    const { runHostedMaintenanceLoop } = await import("../src/hosted-runtime/maintenance.ts");
+
+    const metrics = await runHostedMaintenanceLoop({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_123",
+        },
+        eventId: "evt_activation_disabled",
+        occurredAt: "2026-03-28T09:00:00.000Z",
+      },
+      requestId: "evt_activation_disabled",
+      timeoutMs: null,
+      runtimeEnv: {
+        HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "false",
+      },
+      webControlPlane: hostedWebControlPlane,
+      vaultRoot,
+    });
+
+    assert.deepEqual(metrics, {
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: null,
+      parserProcessed: 0,
+    });
+    assert.equal(mocks.runAssistantAutomation.mock.calls.length, 0);
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }

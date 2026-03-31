@@ -39,6 +39,8 @@ Current worker env/config names read directly by `src/env.ts`:
 - required secret: `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY`
 - required secret: `HOSTED_EXECUTION_CONTROL_TOKEN` gates the operator control routes; missing values now fail those routes closed instead of leaving them open
 - required secret: `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` gates the private container HTTP server and native container invoke path; missing values now fail closed instead of silently skipping auth
+- optional secret: `HOSTED_EXECUTION_INTERNAL_TOKEN` lets the worker proxy runner callbacks into hosted web internal routes such as device-sync snapshot/apply and hosted AI usage recording
+- optional secret: `HOSTED_SHARE_INTERNAL_TOKEN` lets the worker proxy hosted share payload fetches into the hosted web control plane
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` extends the per-user encrypted env key allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` extends the per-user encrypted env prefix allowlist in both the worker and container
 - optional non-secret: `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` extends the host allowlist for runner-to-web control-plane base URLs when they do not share the `HOSTED_WEB_BASE_URL` host
@@ -49,8 +51,10 @@ Current worker env/config names read directly by `src/env.ts`:
 - optional non-secret: `HOSTED_EXECUTION_RETRY_DELAY_MS` defaults to `30000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_TIMEOUT_MS` defaults to `60000`
 - optional non-secret: `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS` defaults to `30000` and is forwarded into the container runtime
-- optional non-secret: `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` defaults to disabled; when unset the hosted runner still handles deterministic inbox/parser/device-sync/share-import work but does not forward automation-only provider/channel secrets, does not auto-enable assistant reply channels, and does not run the general assistant automation loop
-- optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container through `src/runner-env.ts`
+- optional non-secret: `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` defaults to enabled; set it to `false`, `0`, `no`, `off`, or `disabled` to keep the hosted runner on deterministic inbox/parser/device-sync/share-import work only, strip automation-only provider/channel secrets, skip auto-enabling assistant reply channels, and skip the general assistant automation loop
+- optional non-secret: `HOSTED_WEB_BASE_URL` gives the worker a shared hosted-web base URL for runner proxy calls back into `apps/web` and is also available to the runtime when `src/runner-env.ts` allows it
+- optional non-secret: `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`, `HOSTED_AI_USAGE_BASE_URL`, and `HOSTED_SHARE_API_BASE_URL` are worker-side runner proxy overrides for hosted web control-plane routes that intentionally live on separate hosts
+- optional provider/toolchain vars and secrets configured on the Worker are forwarded into the container only when `src/runner-env.ts` explicitly allowlists them; the worker-side hosted web proxy inputs above stay on the Worker side unless that file names them
 
 Current worker routes:
 
@@ -102,7 +106,7 @@ Current expectations for the container image:
 - the baked `/app` tree remains root-owned while the runtime executes as a dedicated non-root user, so any job that needs scratch space must use temp/vault paths rather than mutating shipped source
 - `PORT` for the internal bridge listen port, defaulting to `8080`
 - provider/runtime env such as WHOOP, Oura, Linq, AgentMail, Telegram, and model-provider keys when the one-shot runner should execute those surfaces instead of skipping them
-- automation-only provider/channel secrets are forwarded only when `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` is explicitly enabled
+- automation-only provider/channel secrets are forwarded by default and stripped only when `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION` is set to an explicit opt-out value such as `false`
 - optional allowlist extension vars `HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS` and `HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES` when separately encrypted per-user env overrides need to cover additional key names
 - optional `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` when hosted device-sync/share/usage control routes intentionally live on a different host than `HOSTED_WEB_BASE_URL`
 - encrypted per-user overrides are read from a dedicated per-user hosted object, injected into the one-shot runtime request, and the default hosted execution path runs each job in an isolated child process launched from a temp cwd rather than `/app` while resolving its `tsx` preload by absolute file URL, so per-user env overrides no longer force container-wide request serialization, the job does not inherit the shipped repo root as its ambient working directory, the child does not inherit supervisor-only container env or proxy credentials, writable cache/temp roots stay per-run, and the launch-time `HOME` no longer reuses the container supervisor account
