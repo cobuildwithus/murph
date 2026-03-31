@@ -1,7 +1,8 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
 export interface CliSuccessEnvelope<TData = Record<string, unknown>> {
@@ -95,6 +96,7 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/parsers/dist/index.d.ts'),
   binPath,
   cliIndexPath,
+  path.join(repoRoot, 'packages/cli/dist/cli-entry.js'),
   path.join(repoRoot, 'packages/cli/dist/vault-cli-contracts.js'),
   path.join(repoRoot, 'packages/cli/dist/inbox-cli-contracts.js'),
 ]
@@ -115,6 +117,96 @@ const PREPARED_CLI_RUNTIME_ARTIFACTS_ENV = 'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS
 let cliRuntimeArtifactsVerified = false
 const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
 const strippedTestRunnerEnvPrefixes = ['VITEST_', 'C8_', 'NYC_'] as const
+const CLI_PERSISTENT_HARNESS_ENV = 'MURPH_CLI_TEST_PERSISTENT_HARNESS' as const
+const CLI_PERSISTENT_HARNESS_DEFAULT_POOL_SIZE = 2
+const cliCommandHarnessPath = path.join(repoRoot, 'scripts', 'cli-command-harness.mjs')
+const cliCommandHarnessCleanupCallbacks = new Set<() => void>()
+let cliCommandHarnessPoolPromise: Promise<CliCommandHarnessPool> | null = null
+let cliCommandHarnessProcessExitCleanupInstalled = false
+
+interface PersistentCliHarnessRequest {
+  args: string[]
+  env: NodeJS.ProcessEnv
+}
+
+interface PersistentCliHarnessSuccess {
+  id: number
+  ok: true
+  stdout: string
+  stderr: string
+}
+
+interface PersistentCliHarnessFailure {
+  id: number
+  ok: false
+  stdout: string
+  stderr: string
+  errorMessage: string
+}
+
+type PersistentCliHarnessResponse =
+  | PersistentCliHarnessSuccess
+  | PersistentCliHarnessFailure
+
+type PendingCliHarnessRequest = {
+  reject: (error: Error) => void
+  resolve: (response: PersistentCliHarnessResponse) => void
+}
+
+interface CliCommandHarness {
+  readonly isClosed: boolean
+  readonly pendingRequests: number
+  run(input: PersistentCliHarnessRequest): Promise<PersistentCliHarnessResponse>
+}
+
+interface CliCommandHarnessPool {
+  run(input: PersistentCliHarnessRequest): Promise<PersistentCliHarnessResponse>
+}
+
+export type CliProcessExecutionMode = 'harness' | 'isolated'
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case '1':
+    case 'true':
+    case 'yes':
+    case 'on':
+      return true
+    case '0':
+    case 'false':
+    case 'no':
+    case 'off':
+      return false
+    default:
+      return undefined
+  }
+}
+
+function shouldUsePersistentCliHarness(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return parseBooleanEnv(env[CLI_PERSISTENT_HARNESS_ENV]) ?? true
+}
+
+export function resolveCliProcessExecutionMode(options?: {
+  env?: NodeJS.ProcessEnv
+  stdin?: string
+}): CliProcessExecutionMode {
+  if (options?.stdin !== undefined) {
+    return 'isolated'
+  }
+
+  const harnessControlEnv = {
+    ...process.env,
+    ...options?.env,
+  }
+
+  return shouldUsePersistentCliHarness(harnessControlEnv) ? 'harness' : 'isolated'
+}
 
 function withoutVitestRuntimeEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -374,6 +466,59 @@ async function execCliProcess(
     stdin?: string
   },
 ) {
+  const commandEnv = buildCliExecutionEnv(options?.env)
+
+  if (resolveCliProcessExecutionMode(options) === 'harness') {
+    return execCliProcessThroughHarness(args, commandEnv)
+  }
+
+  return execCliProcessIsolated(args, {
+    env: commandEnv,
+    stdin: options?.stdin,
+  })
+}
+
+function buildCliExecutionEnv(
+  env: NodeJS.ProcessEnv | undefined,
+): NodeJS.ProcessEnv {
+  return withoutNodeV8Coverage({
+    ...selectCliBaseEnv(),
+    ...env,
+  })
+}
+
+async function execCliProcessThroughHarness(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<{ stdout: string; stderr: string }> {
+  const harnessPool = await getCliCommandHarnessPool()
+  const response = await harnessPool.run({
+    args: [...args],
+    env,
+  })
+
+  if (response.ok) {
+    return {
+      stdout: response.stdout,
+      stderr: response.stderr,
+    }
+  }
+
+  const error = new Error(response.errorMessage)
+  Object.assign(error, {
+    stderr: response.stderr,
+    stdout: response.stdout,
+  })
+  throw error
+}
+
+async function execCliProcessIsolated(
+  args: string[],
+  options: {
+    env: NodeJS.ProcessEnv
+    stdin?: string
+  },
+): Promise<{ stdout: string; stderr: string }> {
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     const child = execFile(
       process.execPath,
@@ -381,10 +526,7 @@ async function execCliProcess(
       {
         cwd: repoRoot,
         encoding: 'utf8',
-        env: withoutNodeV8Coverage({
-          ...selectCliBaseEnv(),
-          ...options?.env,
-        }),
+        env: options.env,
         maxBuffer: CLI_MAX_OUTPUT_BUFFER_BYTES,
       },
       (error, stdout, stderr) => {
@@ -398,8 +540,246 @@ async function execCliProcess(
       },
     )
 
-    child.stdin?.end(options?.stdin)
+    child.stdin?.end(options.stdin)
   })
+}
+
+async function getCliCommandHarnessPool(
+): Promise<CliCommandHarnessPool> {
+  if (!cliCommandHarnessPoolPromise) {
+    cliCommandHarnessPoolPromise = createCliCommandHarnessPool().catch((error) => {
+      cliCommandHarnessPoolPromise = null
+      throw error
+    })
+  }
+
+  return cliCommandHarnessPoolPromise
+}
+
+async function createCliCommandHarnessPool(
+): Promise<CliCommandHarnessPool> {
+  const harnessCount = CLI_PERSISTENT_HARNESS_DEFAULT_POOL_SIZE
+  const harnesses = await Promise.all(
+    Array.from({ length: harnessCount }, () => createCliCommandHarness()),
+  )
+
+  return {
+    async run(input) {
+      const availableHarnesses = harnesses.filter((harness) => !harness.isClosed)
+      const harness =
+        availableHarnesses.length > 0
+          ? availableHarnesses.reduce((best, candidate) =>
+              candidate.pendingRequests < best.pendingRequests ? candidate : best,
+            )
+          : await createCliCommandHarness()
+
+      if (availableHarnesses.length === 0) {
+        harnesses.push(harness)
+      }
+
+      return harness.run(input)
+    },
+  }
+}
+
+async function createCliCommandHarness(): Promise<CliCommandHarness> {
+  installCliCommandHarnessProcessExitCleanup()
+
+  const child = spawn(process.execPath, [cliCommandHarnessPath], {
+    cwd: repoRoot,
+    env: withoutNodeV8Coverage(selectCliBaseEnv()),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+
+  if (!child.stdin || !child.stdout || !child.stderr) {
+    throw createCliCommandHarnessError(
+      'Persistent CLI harness did not expose all stdio pipes.',
+    )
+  }
+
+  const childStdin = child.stdin
+  const childStdout = child.stdout
+  const childStderr = child.stderr
+  let nextRequestId = 1
+  let pendingRequests = 0
+  let stderrOutput = ''
+  let isClosed = false
+  const pending = new Map<number, PendingCliHarnessRequest>()
+
+  const unregisterChildCleanup = registerCliCommandHarnessChild(child)
+
+  childStderr.setEncoding('utf8')
+  childStderr.on('data', (chunk: string) => {
+    stderrOutput += chunk
+    if (stderrOutput.length > 24_000) {
+      stderrOutput = stderrOutput.slice(-24_000)
+    }
+  })
+
+  const lines = createInterface({
+    input: childStdout,
+    crlfDelay: Infinity,
+  })
+
+  const rejectPending = (error: Error) => {
+    for (const [requestId, callbacks] of pending) {
+      pending.delete(requestId)
+      pendingRequests -= 1
+      callbacks.reject(error)
+    }
+  }
+
+  lines.on('line', (line) => {
+    if (line.trim().length === 0) {
+      return
+    }
+
+    let response: PersistentCliHarnessResponse
+
+    try {
+      response = JSON.parse(line) as PersistentCliHarnessResponse
+    } catch (error) {
+      const protocolError = createCliCommandHarnessError(
+        `Persistent CLI harness emitted invalid JSON: ${formatHarnessError(error)}${formatHarnessStderr(stderrOutput)}`,
+      )
+      rejectPending(protocolError)
+      child.kill()
+      return
+    }
+
+    const callbacks = pending.get(response.id)
+    if (!callbacks) {
+      return
+    }
+
+    pending.delete(response.id)
+    pendingRequests -= 1
+    callbacks.resolve(response)
+  })
+
+  child.once('error', (error) => {
+    isClosed = true
+    unregisterChildCleanup()
+    rejectPending(
+      createCliCommandHarnessError(
+        `Persistent CLI harness failed to start: ${formatHarnessError(error)}${formatHarnessStderr(stderrOutput)}`,
+      ),
+    )
+  })
+
+  child.once('exit', (code, signal) => {
+    isClosed = true
+    unregisterChildCleanup()
+    const suffix =
+      code !== null
+        ? `exited with code ${code}`
+        : `terminated by signal ${signal ?? 'unknown'}`
+    rejectPending(
+      createCliCommandHarnessError(
+        `Persistent CLI harness ${suffix}.${formatHarnessStderr(stderrOutput)}`,
+      ),
+    )
+  })
+
+  return {
+    get isClosed() {
+      return isClosed
+    },
+    get pendingRequests() {
+      return pendingRequests
+    },
+    async run(input) {
+      if (isClosed) {
+        throw createCliCommandHarnessError(
+          `Persistent CLI harness is unavailable.${formatHarnessStderr(stderrOutput)}`,
+        )
+      }
+
+      return await new Promise<PersistentCliHarnessResponse>((resolve, reject) => {
+        const requestId = nextRequestId
+        nextRequestId += 1
+        pendingRequests += 1
+        pending.set(requestId, { reject, resolve })
+
+        const payload = JSON.stringify({
+          id: requestId,
+          args: input.args,
+          env: input.env,
+        })
+
+        childStdin.write(`${payload}\n`, 'utf8', (error) => {
+          if (!error) {
+            return
+          }
+
+          pending.delete(requestId)
+          pendingRequests -= 1
+          reject(
+            createCliCommandHarnessError(
+              `Persistent CLI harness request write failed: ${formatHarnessError(error)}${formatHarnessStderr(stderrOutput)}`,
+            ),
+          )
+        })
+      })
+    },
+  }
+}
+
+function installCliCommandHarnessProcessExitCleanup(): void {
+  if (cliCommandHarnessProcessExitCleanupInstalled) {
+    return
+  }
+
+  cliCommandHarnessProcessExitCleanupInstalled = true
+
+  const cleanup = () => {
+    for (const callback of cliCommandHarnessCleanupCallbacks) {
+      callback()
+    }
+
+    cliCommandHarnessCleanupCallbacks.clear()
+  }
+
+  process.once('exit', cleanup)
+}
+
+function registerCliCommandHarnessChild(
+  child: ReturnType<typeof spawn>,
+): () => void {
+  const cleanup = () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill()
+    }
+  }
+
+  cliCommandHarnessCleanupCallbacks.add(cleanup)
+
+  child.unref()
+  ;(child.stdin as (typeof child.stdin & { unref?: () => void }) | null)?.unref?.()
+  ;(child.stdout as (typeof child.stdout & { unref?: () => void }) | null)?.unref?.()
+  ;(child.stderr as (typeof child.stderr & { unref?: () => void }) | null)?.unref?.()
+
+  return () => {
+    cliCommandHarnessCleanupCallbacks.delete(cleanup)
+  }
+}
+
+function createCliCommandHarnessError(message: string): Error {
+  const error = new Error(message)
+  error.name = 'CliCommandHarnessError'
+  return error
+}
+
+function formatHarnessError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack ?? error.message
+  }
+
+  return typeof error === 'string' ? error : String(error)
+}
+
+function formatHarnessStderr(stderrOutput: string): string {
+  return stderrOutput.trim().length > 0 ? `\n${stderrOutput.trim()}` : ''
 }
 
 async function verifyCliRuntimeArtifacts(): Promise<boolean> {

@@ -17,6 +17,7 @@ const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murph/assistantd": "../assistantd/src/index.ts",
   "@murph/assistant-core": "../assistant-core/src/index.ts",
   "@murph/contracts": "../contracts/src/index.ts",
   "@murph/core": "../core/src/index.ts",
@@ -35,6 +36,7 @@ const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
 );
 
 type CliVitestProjectSpec = {
+  readonly env?: Record<string, string>;
   readonly name: string;
   readonly fileNames: readonly string[];
 };
@@ -44,6 +46,8 @@ function cliTestFile(fileName: string): string {
 }
 
 export function createCliVitestProject(name: string, fileNames: readonly string[]) {
+  const spec = cliVitestProjectSpecs.find((projectSpec) => projectSpec.name === name)
+
   return defineProject({
     resolve: {
       alias: cliVitestRuntimeAliases,
@@ -53,6 +57,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
       name,
       environment: "node",
       ...cliVitestConcurrency,
+      env: spec?.env,
       include: fileNames.map(cliTestFile),
     },
   });
@@ -87,6 +92,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
     fileNames: [
       "incur-smoke.test.ts",
       "inbox-incur-smoke.test.ts",
+      "cli-test-helpers.test.ts",
       "release-script-coverage-audit.test.ts",
       "release-workflow-guards.test.ts",
       "assistant-cli-access.test.ts",
@@ -96,6 +102,9 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
   },
   {
     name: "cli-assistant",
+    env: {
+      MURPH_CLI_TEST_PERSISTENT_HARNESS: "0",
+    },
     fileNames: [
       "assistant-cli.test.ts",
       "assistant-runtime.test.ts",

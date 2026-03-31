@@ -19,6 +19,7 @@ const smokeImportPaths = [
   "packages/inboxd/dist/index.js",
   "packages/parsers/dist/index.js",
   "packages/cli/dist/index.js",
+  "packages/cli/dist/cli-entry.js",
   "packages/cli/dist/vault-cli-contracts.js",
   "packages/cli/dist/inbox-cli-contracts.js",
   "packages/cli/dist/operator-config.js",
@@ -35,7 +36,7 @@ function runCommand(command, args) {
   return result.status ?? 1;
 }
 
-async function hasPreparedArtifacts() {
+async function hasPreparedArtifacts(importAttempt = 0) {
   for (const artifactPath of smokeImportPaths) {
     if (!existsSync(artifactPath)) {
       return false;
@@ -44,7 +45,9 @@ async function hasPreparedArtifacts() {
 
   for (const artifactPath of smokeImportPaths) {
     try {
-      await import(pathToFileURL(artifactPath).href);
+      const artifactUrl = pathToFileURL(artifactPath);
+      artifactUrl.searchParams.set("murph-prepared-check", String(importAttempt));
+      await import(artifactUrl.href);
     } catch {
       return false;
     }
@@ -53,22 +56,52 @@ async function hasPreparedArtifacts() {
   return true;
 }
 
-const preparedStatus = runCommand("pnpm", [
-  "exec",
-  "tsc",
-  "-b",
-  "tsconfig.test-runtime.json",
-  "--force",
-  "--pretty",
-  "false",
-]);
+function runPreparedBuild(force = false) {
+  const args = [
+    "exec",
+    "tsc",
+    "-b",
+    "tsconfig.test-runtime.json",
+  ];
+
+  if (force) {
+    args.push("--force");
+  }
+
+  args.push("--pretty", "false");
+  return runCommand("pnpm", args);
+}
+
+async function sleep(delayMs) {
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+const preparedStatus = runPreparedBuild();
 
 if (preparedStatus !== 0) {
   process.exit(preparedStatus);
 }
 
-if (await hasPreparedArtifacts()) {
+if (await hasPreparedArtifacts(0)) {
   process.exit(0);
+}
+
+const forcedRetryCount = 3;
+
+for (let attempt = 0; attempt < forcedRetryCount; attempt += 1) {
+  const forcedStatus = runPreparedBuild(true);
+
+  if (forcedStatus !== 0) {
+    process.exit(forcedStatus);
+  }
+
+  if (await hasPreparedArtifacts(attempt + 1)) {
+    process.exit(0);
+  }
+
+  if (attempt < forcedRetryCount - 1) {
+    await sleep(250);
+  }
 }
 
 console.error(

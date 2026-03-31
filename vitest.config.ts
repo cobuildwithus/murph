@@ -55,6 +55,7 @@ const ROOT_REPO_CLI_INCLUDE = new Set([
   "packages/cli/test/device-sync-client.test.ts",
   "packages/cli/test/json-input.test.ts",
   "packages/cli/test/incur-smoke.test.ts",
+  "packages/cli/test/cli-test-helpers.test.ts",
   "packages/cli/test/canonical-mutation-boundary.test.ts",
   "packages/cli/test/inbox-incur-smoke.test.ts",
   "packages/cli/test/inbox-cli.test.ts",

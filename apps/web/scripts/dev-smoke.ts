@@ -8,6 +8,7 @@ import { HOSTED_WEB_SMOKE_DIST_DIR, createHostedWebSmokeEnvironment } from "../n
 
 const requestTimeoutMs = 30_000;
 const serverReadyTimeoutMs = 90_000;
+const serverReadyPollIntervalMs = 250;
 
 async function main(): Promise<void> {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -80,7 +81,7 @@ async function waitForHealthyServer(
       // Wait for the server to finish booting.
     }
 
-    await sleep(1_000);
+    await sleep(serverReadyPollIntervalMs);
   }
 
   throw new Error(`Timed out waiting for apps/web dev to boot.\n${readOutput()}`);
