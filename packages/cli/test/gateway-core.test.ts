@@ -356,3 +356,21 @@ test('built gateway-core import stays free of assistant runtime warnings', async
   assert.equal(result.stdout.trim(), '')
   assert.doesNotMatch(result.stderr, /SQLite is an experimental feature/u)
 })
+
+test('gateway event polling never moves cursors backwards when callers pass a future cursor', () => {
+  const state = {
+    events: [],
+    nextCursor: 4,
+    snapshot: null,
+  }
+
+  const result = pollGatewayEventLogState(state, {
+    cursor: 9,
+    kinds: [],
+    limit: 10,
+    sessionKey: null,
+  })
+
+  assert.equal(result.events.length, 0)
+  assert.equal(result.nextCursor, 9)
+})
