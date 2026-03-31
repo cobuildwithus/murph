@@ -7,7 +7,8 @@ Last verified: 2026-03-31
 | Change scope | Required commands | Notes |
 | --- | --- | --- |
 | Vault-only data changes under `vault/**` | No repo-wide commands by default. | Read back the touched vault records plus any audit or ledger entries written by the mutation path. Do not touch the coordination ledger unless the task expands into repo code/docs/process work. |
-| Docs/process-only | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Includes package-runtime checks, built CLI verification, the tracked-artifact hygiene guard, and fixture/scenario scaffolding because those are part of repo truth now. When those repo-wide commands are already known red for unrelated reasons, the scoped verification mode below may be used instead. |
+| Text-only docs/process-only (`*.md` edits or deletions only) | No repo-wide commands by default. | Allowed only when the diff is limited to Markdown text changes or deletions in repo docs/process files and does not touch scripts, config, tests, generated docs, tracked artifacts, or workflow-enforcement files. Read back the touched docs, confirm any intended deletions directly, and check for obvious broken references when the removed or renamed doc might be linked elsewhere. |
+| Docs/process-only with mechanics beyond text-only Markdown | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Applies when docs/process work touches anything beyond text-only `.md` edits/deletions, including scripts, config, tests, generated docs, tracked artifact inventories, or workflow-enforcement files. Includes package-runtime checks, built CLI verification, the tracked-artifact hygiene guard, and fixture/scenario scaffolding because those are part of repo truth now. When those repo-wide commands are already known red for unrelated reasons, the scoped verification mode below may be used instead. |
 | Fixture/e2e/package-doc changes | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Verifies fixture corpus integrity, smoke-manifest wiring, package-runtime health, built CLI checks, command-surface coverage, and the source-artifact guard for handwritten JS-like files plus tracked `.env` / `.env.*` private files and generated residue such as `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, and `*.tsbuildinfo`. |
 | Changes under `packages/contracts`, `packages/hosted-execution`, `packages/runtime-state`, `packages/core`, `packages/importers`, `packages/inboxd`, `packages/parsers`, or `packages/query` | `pnpm typecheck`, `pnpm test:packages`, `pnpm test:smoke` | `pnpm test` remains required for full repo acceptance, but `pnpm test:packages` is the clean runtime signal when the doc-drift wrapper is blocked by an in-progress dirty worktree and now keeps the dedicated web/app verify lane out of the default package loop. The root Vitest leg still uses the curated repo acceptance surface, just expressed through project-mode `vitest.config.ts`, and `pnpm test:packages:coverage` keeps the same targeted V8 coverage gates without the heavier web/app smoke/build path. |
 | Changes under `packages/device-syncd` | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Repo checks typecheck/build the daemon in the workspace graph, execute its service/runtime tests plus Oura and WHOOP provider/config coverage through the root multi-project Vitest suite, and keep the local OAuth/token boundary documented alongside the CLI and web callers. |
@@ -21,6 +22,8 @@ Last verified: 2026-03-31
 
 ## Scoped Verification Mode
 
+The text-only docs/process fast path above is not a scoped-verification exception. It is the default verification rule for eligible Markdown-only docs work.
+
 Scoped verification may replace the repo-wide baseline only when all of the following are true:
 
 1. The change is narrow and bounded to one subsystem or one docs/process lane rather than a broad refactor.
@@ -30,7 +33,7 @@ Scoped verification may replace the repo-wide baseline only when all of the foll
 
 Scoped verification is allowed for narrow changes such as:
 
-- docs/process-only updates when repo-wide checks are already known red and manual readback confirms the touched docs are internally consistent
+- docs/process-only updates outside the text-only Markdown fast path when repo-wide checks are already known red and manual readback confirms the touched docs are internally consistent
 - package-local or app-local fixes with a focused test, typecheck, verify, or scenario command that exercises the changed surface directly
 - small config changes with a direct validation command or targeted test covering the changed contract
 
