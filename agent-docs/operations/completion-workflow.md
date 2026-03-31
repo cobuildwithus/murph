@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-03-29
+Last verified: 2026-03-31
 
 This workflow applies to repo code/docs/test/config changes.
 Vault-only data tasks under `vault/**` skip this workflow unless the user explicitly asks for repo/process work.
@@ -25,12 +25,16 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 
 - The two named audit passes are mandatory subagent work, not optional self-review.
 - Use explicitly spawned subagents for `simplify` and `task-finish-review`.
+- Treat those audit subagents as review-only unless the user explicitly asks for an audit worker that can patch code.
+- Audit subagents must not edit files, run `scripts/committer`, run `scripts/finish-task`, invoke `git commit`, or otherwise create commits.
+- Prefer a fresh non-forked review handoff packet over inheriting the full implementation thread. Only widen context when a specific review question cannot be answered from the narrowed packet.
 - The final completion review owns remaining coverage/proof-gap review; there is no separate required `test-coverage-audit` pass.
 - Treat the main implementation agent as the integrator of audit findings, not the auditor of record.
 - Within this repo, those two mandatory audit passes are standing-authorized by repo policy. When the current environment supports spawned agents, run them without stopping only to ask for separate delegation permission.
 - Use a fresh subagent per pass unless the user explicitly instructs otherwise.
 - When waiting on these audit subagents, prefer a patient wait window over repeated short polling. A realistic default is 5 to 10 minutes for each pass on medium or large diffs.
 - Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless you have concrete evidence that it is stuck or operating on the wrong scope.
+- Close audit subagents promptly after they return, time out, or are judged stuck so they cannot continue operating in the background.
 - If subagent tooling is unavailable in the current environment, stop and escalate instead of silently downgrading the audit requirement to local review.
 
 ## Coordination Ledger (Repo Code Only)
@@ -68,6 +72,7 @@ For each required audit subagent, provide:
 - Verification evidence already run (commands + outcomes).
 - Any direct scenario proof already run, or the gap if it still needs human verification.
 - Current worktree context and explicit review boundaries.
+- An explicit `review only` instruction covering no file edits, no commit helpers, and no commits.
 - Instruction to read `COORDINATION_LEDGER.md`, honor any explicit exclusive/refactor notes, and otherwise work carefully on top of overlapping rows.
 
 ## Safety Rules
