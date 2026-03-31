@@ -47,9 +47,11 @@ import {
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
+  const initialHostedAssistantAutomation = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
 
   beforeEach(async () => {
     vi.restoreAllMocks();
+    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
     const actualAssistantCore = await vi.importActual<typeof import("@murph/assistant-core")>(
@@ -62,6 +64,7 @@ describe("runHostedExecutionJob", () => {
   });
 
   afterEach(async () => {
+    restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", initialHostedAssistantAutomation);
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
@@ -267,7 +270,7 @@ describe("runHostedExecutionJob", () => {
     const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
     const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
 
-    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "true";
+    delete process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
     process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
     process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
     process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
@@ -2099,6 +2102,59 @@ describe("runHostedExecutionJob", () => {
       expect(statusSnapshot.recentTurns).toEqual([]);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
+    }
+  });
+
+  it("keeps hosted assistant automation disabled when the worker env opts out explicitly", async () => {
+    const previousAutomationEnabled = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
+    const previousHostedEmailAccountId = process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID;
+    const previousHostedEmailApiToken = process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN;
+    const previousHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+    const previousHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+
+    process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
+    process.env.HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID = "acct_123";
+    process.env.HOSTED_EMAIL_CLOUDFLARE_API_TOKEN = "cf-token";
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "email-secret";
+
+    try {
+      const result = await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_email_disabled",
+          },
+          eventId: "evt_activation_email_disabled",
+          occurredAt: "2026-03-26T12:00:00.000Z",
+        },
+      });
+      const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-email-disabled-"));
+      cleanupPaths.push(workspaceRoot);
+      const restored = await restoreHostedExecutionContext({
+        agentStateBundle: decodeHostedBundleBase64(result.bundles.agentState),
+        vaultBundle: Buffer.from(result.bundles.vault!, "base64"),
+        workspaceRoot,
+      });
+      const automationState = JSON.parse(
+        await readFile(path.join(restored.assistantStateRoot, "automation.json"), "utf8"),
+      ) as { autoReplyChannels: string[] };
+
+      expect(result.result.summary).toContain("kept hosted email auto-reply unchanged");
+      expect(automationState.autoReplyChannels).toEqual([]);
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", previousAutomationEnabled);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_ACCOUNT_ID", previousHostedEmailAccountId);
+      restoreEnvVar("HOSTED_EMAIL_CLOUDFLARE_API_TOKEN", previousHostedEmailApiToken);
+      restoreEnvVar("HOSTED_EMAIL_DOMAIN", previousHostedEmailDomain);
+      restoreEnvVar("HOSTED_EMAIL_LOCAL_PART", previousHostedEmailLocalPart);
+      restoreEnvVar("HOSTED_EMAIL_SIGNING_SECRET", previousHostedEmailSigningSecret);
     }
   });
 
