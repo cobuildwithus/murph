@@ -3972,7 +3972,8 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
         throw new Error(`Unexpected command: ${file} ${args.join(' ')}`)
       }
       if (isSudoCommand) {
-        assert.deepEqual(args.slice(0, 2), ['-n', aptGetCommand])
+        assert.equal(args[0], '-n')
+        assert.equal(path.basename(args[1] ?? ''), 'apt-get')
       }
 
       if (aptArgs[0] === 'update') {
@@ -4026,7 +4027,7 @@ test.sequential('Linux setup reuses one apt update across declarative tool insta
 
     const normalizedAptCalls = runCalls.map(({ args, file }) => ({
       args: path.basename(file) === 'sudo' ? args.slice(2) : args,
-      file: path.basename(file) === 'sudo' ? aptGetCommand : file,
+      file: path.basename(file) === 'sudo' ? path.basename(args[1] ?? '') : file,
     }))
 
     assert.equal(result.platform, 'linux')

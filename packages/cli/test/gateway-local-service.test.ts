@@ -408,13 +408,12 @@ test('local gateway send uses route-bound assistant delivery and Linq reply targ
       limit: 20,
       sessionKey: conversation.sessionKey,
     })
-    const service = createLocalGatewayService(vaultRoot)
-
-    const sent = await service.sendMessage({
+    const sent = await sendGatewayMessageLocal({
       dispatchMode: 'queue-only',
       replyToMessageId: initialMessages.messages[0]?.messageId ?? null,
       sessionKey: conversation.sessionKey,
       text: 'I will check in later today.',
+      vault: vaultRoot,
     })
     assert.equal(sent.sessionKey, conversation.sessionKey)
     assert.equal(sent.queued, true)

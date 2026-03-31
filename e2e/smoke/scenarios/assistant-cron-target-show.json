@@ -1,7 +1,11 @@
 {
-  "name": "assistant-cron-target-show",
+  "id": "assistant-cron-target-show",
   "command": "vault-cli assistant cron target show <job> --vault <path> [--request-id <id>]",
-  "category": "assistant",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/assistant",
   "purpose": "Documents inspecting the current outbound delivery target for one assistant cron job.",
   "source": "docs/contracts/03-command-surface.md"
 }
