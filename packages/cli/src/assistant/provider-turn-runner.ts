@@ -11,9 +11,14 @@ import {
   buildAssistantStateMcpConfig,
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
-import { createDefaultAssistantToolCatalog } from '../assistant-cli-tools.js'
+import { VaultCliError } from '../vault-cli-errors.js'
+import {
+  createDefaultAssistantToolCatalog,
+  type AssistantToolCatalogOptions,
+} from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurn,
+  resolveAssistantProviderCapabilities,
   resolveAssistantProviderTraits,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
@@ -70,7 +75,7 @@ import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
 import { createIntegratedVaultServices } from '../vault-services.js'
-import type { AssistantMessageInput } from './service.js'
+import type { AssistantMessageInput } from './service-contracts.js'
 
 interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
@@ -118,6 +123,7 @@ interface AssistantProviderTurnExecutionPlan {
   primaryRoute: ResolvedAssistantFailoverRoute | null
   routes: readonly ResolvedAssistantFailoverRoute[]
   sharedPlan: AssistantTurnSharedPlan
+  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
   turnId: string
 }
 
@@ -269,6 +275,21 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   turnCreatedAt: string
   turnId: string
 }): AssistantProviderTurnExecutionPlan {
+  const toolCatalog = createDefaultAssistantToolCatalog(
+    {
+      allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+      requestId: input.turnId,
+      sessionId: input.resolvedSession.sessionId,
+      vault: input.input.vault,
+      vaultServices: createIntegratedVaultServices(),
+    },
+    resolveAssistantToolCatalogOptions(input.input.turnTrigger),
+  )
+  const routes = resolveAssistantExecutionRoutes(
+    input.routes,
+    input.input.turnTrigger,
+  )
+
   return {
     currentCodexPromptVersion: input.currentCodexPromptVersion,
     input: input.input,
@@ -279,11 +300,53 @@ function buildAssistantProviderTurnExecutionPlan(input: {
       turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
       vault: input.input.vault,
     }),
-    primaryRoute: input.routes[0] ?? null,
-    routes: input.routes,
+    primaryRoute: routes[0] ?? null,
+    routes,
     sharedPlan: input.plan,
+    toolCatalog,
     turnId: input.turnId,
   }
+}
+
+function resolveAssistantToolCatalogOptions(
+  turnTrigger: AssistantMessageInput['turnTrigger'],
+): AssistantToolCatalogOptions {
+  if (turnTrigger === 'automation-auto-reply') {
+    return {
+      includeAssistantRuntimeTools: false,
+      includeQueryTools: false,
+      includeStatefulWriteTools: false,
+      includeVaultTextReadTool: true,
+      includeVaultWriteTools: false,
+    }
+  }
+
+  return {}
+}
+
+function shouldExposeBoundAssistantTools(provider: AssistantChatProvider): boolean {
+  return resolveAssistantProviderCapabilities(provider).supportsBoundTools
+}
+
+function resolveAssistantExecutionRoutes(
+  routes: readonly ResolvedAssistantFailoverRoute[],
+  turnTrigger: AssistantMessageInput['turnTrigger'],
+): readonly ResolvedAssistantFailoverRoute[] {
+  if (turnTrigger !== 'automation-auto-reply') {
+    return routes
+  }
+
+  const safeRoutes = routes.filter((route) =>
+    shouldExposeBoundAssistantTools(route.provider),
+  )
+  if (safeRoutes.length > 0) {
+    return safeRoutes
+  }
+
+  throw new VaultCliError(
+    'ASSISTANT_PROVIDER_UNSUPPORTED',
+    'Assistant auto-reply requires a provider route that supports the bound read-only tool profile; Codex direct-CLI routes are not allowed for auto-reply.',
+  )
 }
 
 async function resolveAssistantProviderAttemptPlan(input: {
@@ -320,6 +383,7 @@ async function resolveAssistantProviderAttemptPlan(input: {
       route,
       session: input.session,
       sharedPlan: input.executionPlan.sharedPlan,
+      toolCatalog: input.executionPlan.toolCatalog,
     }),
     session: input.session,
   }
@@ -332,6 +396,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   route: ResolvedAssistantFailoverRoute
   session: AssistantSession
   sharedPlan: AssistantTurnSharedPlan
+  toolCatalog: ReturnType<typeof createDefaultAssistantToolCatalog>
 }): Promise<AssistantRouteTurnPlan> {
   const routeTraits = resolveAssistantProviderTraits(input.route.provider)
   const supportsDirectCliExecution = routeTraits.workspaceMode === 'direct-cli'
@@ -428,13 +493,16 @@ async function resolveAssistantRouteTurnPlan(input: {
   const cronMcpConfig = buildAssistantCronMcpConfig(
     workingDirectory,
   )
-  const exposesBoundAssistantTools = input.route.provider === 'openai-compatible'
+  const exposesBoundAssistantTools = shouldExposeBoundAssistantTools(input.route.provider)
   const assistantStateToolsAvailable =
-    exposesBoundAssistantTools || (supportsDirectCliExecution && stateMcpConfig !== null)
+    (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.state.show')) ||
+    (supportsDirectCliExecution && stateMcpConfig !== null)
   const assistantMemoryToolsAvailable =
-    exposesBoundAssistantTools || (supportsDirectCliExecution && memoryMcpConfig !== null)
+    (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.memory.search')) ||
+    (supportsDirectCliExecution && memoryMcpConfig !== null)
   const assistantCronToolsAvailable =
-    exposesBoundAssistantTools || (supportsDirectCliExecution && cronMcpConfig !== null)
+    (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.cron.status')) ||
+    (supportsDirectCliExecution && cronMcpConfig !== null)
   const configOverrides = supportsDirectCliExecution
     ? [
         ...(stateMcpConfig?.configOverrides ?? []),
@@ -508,19 +576,17 @@ async function executeAssistantProviderAttempt(input: {
       message: 'Injected assistant provider failure.',
     })
     const routeTraits = resolveAssistantProviderTraits(attemptPlan.route.provider)
-    const toolRuntime = {
-      allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
-      requestId: executionPlan.turnId,
-      sessionId: attemptPlan.session.sessionId,
-      toolCatalog: createDefaultAssistantToolCatalog({
-        allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
-        requestId: executionPlan.turnId,
-        sessionId: attemptPlan.session.sessionId,
-        vault: executionPlan.input.vault,
-        vaultServices: createIntegratedVaultServices(),
-      }),
-      vault: executionPlan.input.vault,
-    }
+    const toolCatalog = executionPlan.toolCatalog
+    const toolRuntime =
+      shouldExposeBoundAssistantTools(attemptPlan.route.provider)
+        ? {
+            allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
+            requestId: executionPlan.turnId,
+            sessionId: attemptPlan.session.sessionId,
+            toolCatalog,
+            vault: executionPlan.input.vault,
+          }
+        : null
     const result = await executeWithCanonicalWriteGuard({
       enabled: routeTraits.workspaceMode === 'direct-cli',
       vaultRoot: executionPlan.input.vault,
@@ -537,7 +603,7 @@ async function executeAssistantProviderAttempt(input: {
           userPrompt: executionPlan.input.prompt,
           continuityContext: attemptPlan.routePlan.continuityContext,
           systemPrompt: attemptPlan.routePlan.systemPrompt,
-          toolRuntime,
+          toolRuntime: toolRuntime ?? undefined,
           sessionContext: attemptPlan.routePlan.sessionContext
             ? {
                 binding: attemptPlan.session.binding,

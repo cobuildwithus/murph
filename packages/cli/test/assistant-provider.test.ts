@@ -247,11 +247,13 @@ test('resolveAssistantProviderDefaults can read inactive saved provider entries'
 
 test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
+    supportsBoundTools: false,
     supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
     supportsReasoningEffort: true,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
+    supportsBoundTools: true,
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
     supportsReasoningEffort: false,
@@ -303,7 +305,7 @@ test('resolveAssistantModelCatalog uses discovered OpenAI-compatible models and 
     catalog.modelOptions.map((option) => option.value),
     ['gpt-oss:20b', 'llama3.3:70b'],
   )
-  assert.equal(catalog.providerLabel, 'ollama')
+  assert.equal(catalog.providerLabel, 'Ollama')
   assert.deepEqual(catalog.reasoningOptions, [])
 })
 
@@ -1158,11 +1160,46 @@ test('createSetupAssistantResolver requires a non-empty OpenAI-compatible model 
   assert.equal(resolved.model, 'custom-model')
   assert.match(outputChunks.join(''), /A model id is required\./u)
   assert.deepEqual(promptMocks.prompts, [
-    'Model endpoint URL [http://127.0.0.1:11434/v1]: ',
-    'API key env var name (leave blank if this endpoint does not need one): ',
+    'Ollama endpoint URL [http://127.0.0.1:11434/v1]: ',
+    'API key env var name (leave blank if this local endpoint does not need one): ',
     'Default model to use: ',
     'Default model to use: ',
   ])
+})
+
+test('createSetupAssistantResolver applies named provider preset defaults before discovery', async () => {
+  const discoverModels = vi
+    .fn()
+    .mockResolvedValue(createDiscoveryResult(['openai/gpt-4.1-mini']))
+  const resolver = createSetupAssistantResolver({
+    assistantAccount: {
+      resolve: async () => null,
+    },
+    discoverModels,
+    input: new PassThrough(),
+    output: new PassThrough(),
+  })
+
+  const resolved = await resolver.resolve({
+    allowPrompt: false,
+    commandName: 'setup',
+    preset: 'openai-compatible',
+    options: {
+      assistantProviderPreset: 'openrouter',
+    } as any,
+  })
+
+  assert.equal(discoverModels.mock.calls.length, 1)
+  assert.deepEqual(discoverModels.mock.calls[0]?.[0], {
+    apiKeyEnv: 'OPENROUTER_API_KEY',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    providerName: 'openrouter',
+  })
+  assert.equal(resolved.baseUrl, 'https://openrouter.ai/api/v1')
+  assert.equal(resolved.apiKeyEnv, 'OPENROUTER_API_KEY')
+  assert.equal(resolved.providerName, 'openrouter')
+  assert.equal(resolved.model, 'openai/gpt-4.1-mini')
+  assert.match(resolved.detail, /OpenRouter/u)
 })
 
 test('createSetupAssistantResolver rejects unsupported OpenAI-compatible reasoning effort overrides', async () => {
