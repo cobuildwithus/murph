@@ -1,28 +1,5 @@
-export type {
-  AssistantCatalogModel,
-  AssistantModelCapabilities,
-  AssistantModelDiscoveryResult,
-  AssistantProviderCapabilities,
-  AssistantProviderDefinition,
-  AssistantProviderProgressEvent,
-  AssistantProviderTraits,
-  AssistantProviderTurnExecutionInput,
-  AssistantProviderTurnExecutionResult,
-  AssistantProviderTurnInput,
-  AssistantProviderUsage,
-} from './providers/types.js'
-export {
-  ASSISTANT_PROVIDER_DEFINITIONS,
-  createCatalogModel,
-  discoverAssistantProviderModels,
-  executeAssistantProviderTurn,
-  executeAssistantProviderTurnWithDefinition,
-  getAssistantProviderDefinition,
-  listAssistantProviderDefinitions,
-  listAssistantProviders,
-  resolveAssistantProviderCapabilities,
-  resolveAssistantProviderLabel,
-  resolveAssistantProviderStaticModels,
-  resolveAssistantProviderTraits,
-  shouldUseAssistantLocalTranscriptContext,
-} from './providers/registry.js'
+/**
+ * Compatibility facade for the published murph package.
+ * The canonical headless implementation now lives in @murph/assistant-core/assistant/provider-registry.
+ */
+export * from '@murph/assistant-core/assistant/provider-registry'

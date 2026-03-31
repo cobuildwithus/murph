@@ -1,32 +1,19 @@
-// Thin daemon-aware wrapper around the local assistant orchestration.
+// Thin daemon-aware wrapper around the assistant-core local assistant orchestration.
 import {
   maybeOpenAssistantConversationViaDaemon,
   maybeSendAssistantMessageViaDaemon,
   maybeUpdateAssistantSessionOptionsViaDaemon,
 } from '../assistant-daemon-client.js'
-import type { AssistantSession } from '../assistant-cli-contracts.js'
-import type {
-  AssistantMessageInput,
-  AssistantSessionResolutionFields,
-} from './service-contracts.js'
+import type { AssistantSession } from '@murph/assistant-core/assistant-cli-contracts'
 import {
   openAssistantConversationLocal,
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
-} from './local-service.js'
+  type AssistantMessageInput,
+  type AssistantSessionResolutionFields,
+} from '@murph/assistant-core/assistant/service'
 
-export { CURRENT_CODEX_PROMPT_VERSION } from './local-service.js'
-export { buildResolveAssistantSessionInput } from './session-resolution.js'
-export {
-  openAssistantConversationLocal,
-  sendAssistantMessageLocal,
-  updateAssistantSessionOptionsLocal,
-} from './local-service.js'
-export type {
-  AssistantChatInput,
-  AssistantMessageInput,
-  AssistantSessionResolutionFields,
-} from './service-contracts.js'
+export * from '@murph/assistant-core/assistant/service'
 
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,

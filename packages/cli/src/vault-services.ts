@@ -1,15 +1,5 @@
 /**
- * Neutral vault service surface shared by the CLI shell and headless assistant consumers.
+ * Compatibility facade for the published murph package.
+ * The canonical headless implementation now lives in @murph/assistant-core/vault-services.
  */
-export type { CommandContext } from "./usecases/types.js"
-export type {
-  CoreWriteServices,
-  DeviceSyncServices,
-  ImporterServices,
-  QueryServices,
-  VaultServices,
-} from "./usecases/types.js"
-export {
-  createIntegratedVaultServices,
-  createUnwiredVaultServices,
-} from "./usecases/integrated-services.js"
+export * from '@murph/assistant-core/vault-services'

@@ -82,11 +82,17 @@
       "@murph/assistantd": [
         "packages/assistantd/src/index.ts"
       ],
+      "@murph/assistantd/client": [
+        "packages/assistantd/src/client.ts"
+      ],
       "@murph/assistantd/*": [
         "packages/assistantd/src/*"
       ],
       "@murph/assistant-core": [
         "packages/assistant-core/src/index.ts"
+      ],
+      "@murph/assistant-core/*": [
+        "packages/assistant-core/src/*.ts"
       ],
       "@murph/gateway-core": [
         "packages/gateway-core/src/index.ts"

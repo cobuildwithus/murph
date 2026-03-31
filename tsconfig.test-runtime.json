@@ -11,6 +11,9 @@
       "path": "./packages/runtime-state"
     },
     {
+      "path": "./packages/assistant-core"
+    },
+    {
       "path": "./packages/core/tsconfig.build.json"
     },
     {

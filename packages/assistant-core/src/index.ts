@@ -65,6 +65,7 @@ export {
 } from './assistant/cron.js'
 
 export {
+  deliverAssistantOutboxMessage,
   dispatchAssistantOutboxIntent,
   drainAssistantOutbox,
   listAssistantOutboxIntents,

@@ -1,4 +1,7 @@
-import { isLoopbackHttpBaseUrl } from '@murph/runtime-state'
+import {
+  resolveAssistantDaemonClientConfig,
+  type AssistantDaemonClientConfig,
+} from '@murph/assistantd/client'
 import {
   assistantAskResultSchema,
   assistantCronJobSchema,
@@ -31,20 +34,10 @@ import type {
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
 import { normalizeNullableString } from './assistant/shared.js'
 
-const ASSISTANTD_BASE_URL_ENV_KEYS = [
-  'MURPH_ASSISTANTD_BASE_URL',
-  'ASSISTANTD_BASE_URL',
-] as const
-const ASSISTANTD_CONTROL_TOKEN_ENV_KEYS = [
-  'MURPH_ASSISTANTD_CONTROL_TOKEN',
-  'ASSISTANTD_CONTROL_TOKEN',
-] as const
-const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'
-
-export interface AssistantDaemonClientConfig {
-  baseUrl: string
-  token: string
-}
+export {
+  resolveAssistantDaemonClientConfig,
+  type AssistantDaemonClientConfig,
+} from '@murph/assistantd/client'
 
 export interface AssistantDaemonOpenConversationResult {
   created: boolean
@@ -55,25 +48,6 @@ export type AssistantDaemonAutomationInput = Omit<
   RunAssistantAutomationInput,
   'inboxServices' | 'onEvent' | 'onInboxEvent' | 'signal' | 'vaultServices'
 >
-
-export function resolveAssistantDaemonClientConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): AssistantDaemonClientConfig | null {
-  if (env[ASSISTANTD_DISABLE_CLIENT_ENV] === '1') {
-    return null
-  }
-
-  const baseUrl = firstAssistantDaemonEnvValue(env, ASSISTANTD_BASE_URL_ENV_KEYS)
-  const token = firstAssistantDaemonEnvValue(env, ASSISTANTD_CONTROL_TOKEN_ENV_KEYS)
-  if (!baseUrl || !token) {
-    return null
-  }
-
-  return {
-    baseUrl: normalizeAssistantDaemonBaseUrl(baseUrl),
-    token,
-  }
-}
 
 export function canUseAssistantDaemonForMessage(
   input: AssistantMessageInput,
@@ -831,32 +805,4 @@ function buildAssistantDaemonRoutePath(
   }
   const search = searchParams.toString()
   return search ? `${routePath}?${search}` : routePath
-}
-
-function firstAssistantDaemonEnvValue(
-  env: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = normalizeNullableString(env[key])
-    if (value) {
-      return value
-    }
-  }
-  return null
-}
-
-function normalizeAssistantDaemonBaseUrl(baseUrl: string): string {
-  const normalized = baseUrl.replace(/\/+$/u, '')
-  try {
-    if (!isLoopbackHttpBaseUrl(normalized)) {
-      throw new Error('Assistant daemon base URL must use loopback-only http:// addressing.')
-    }
-  } catch (error) {
-    throw new Error(
-      `Assistant daemon base URL must be a valid loopback-only http:// URL: ${baseUrl}`,
-      { cause: error },
-    )
-  }
-  return normalized
 }

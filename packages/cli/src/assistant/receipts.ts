@@ -1,11 +1,5 @@
-export {
-  appendAssistantTurnReceiptEvent,
-  createAssistantTurnId,
-  createAssistantTurnReceipt,
-  finalizeAssistantTurnReceipt,
-  listRecentAssistantTurnReceipts as listAssistantTurnReceipts,
-  readAssistantTurnReceipt,
-  resolveAssistantTurnReceiptPath,
-  saveAssistantTurnReceipt,
-  updateAssistantTurnReceipt,
-} from './turns.js'
+/**
+ * Compatibility facade for the published murph package.
+ * The canonical headless implementation now lives in @murph/assistant-core/assistant/receipts.
+ */
+export * from '@murph/assistant-core/assistant/receipts'

@@ -34,6 +34,9 @@ interface TsConfigShape {
     rootDir?: string
   }
   include?: string[]
+  references?: Array<{
+    path?: string
+  }>
 }
 
 const packageDir = fileURLToPath(new URL('../', import.meta.url))
@@ -62,6 +65,10 @@ assert(
 assert(
   packageJson.dependencies?.['@murph/device-syncd'] === 'workspace:*',
   'package.json must depend on @murph/device-syncd so the published murph package installs the managed device daemon.',
+)
+assert(
+  packageJson.dependencies?.['@murph/assistant-core'] === 'workspace:*',
+  'package.json must depend on @murph/assistant-core so headless assistant runtime/state facades resolve through the dedicated owner package.',
 )
 assert(
   packageJson.main === './dist/index.js',
@@ -204,6 +211,14 @@ assert(
 assert(
   tsconfigBuild.extends === './tsconfig.json',
   'tsconfig.build.json must extend ./tsconfig.json.',
+)
+assert(
+  tsconfig.references?.some((reference) => reference.path === '../assistant-core') === true,
+  'tsconfig.json must reference ../assistant-core so build outputs include the headless owner package.',
+)
+assert(
+  tsconfigTypecheck.references?.some((reference) => reference.path === '../assistant-core') === true,
+  'tsconfig.typecheck.json must reference ../assistant-core so package-local typecheck follows the headless facade dependency.',
 )
 assert(
   tsconfigTypecheck.extends === '../../tsconfig.base.json',

@@ -120,6 +120,7 @@ export const cliVitestProjectSpecs: readonly CliVitestProjectSpec[] = [
       "assistant-harness.test.ts",
       "assistant-memory-boundaries.test.ts",
       "assistant-runtime-state-service.test.ts",
+      "assistant-core-facades.test.ts",
       "research-runtime.test.ts",
     ],
   },

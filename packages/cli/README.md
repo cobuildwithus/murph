@@ -17,6 +17,7 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - The inbox CLI runtime now resolves `.runtime` paths through `@murph/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
 - The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion via `src/inbox-services.ts`.
 - The CLI now also owns an `assistant` command group for provider-backed local chat turns, Ink-backed local chat UI fallback, assistant-session metadata plus local transcripts outside the vault, outbound channel delivery, and an always-on inbox triage loop via `src/assistant-runtime.ts`.
+- The dedicated `@murph/assistant-core` package now owns the duplicated headless assistant/inbox/vault/operator-config modules; matching files in `packages/cli/src/**` are compatibility facades or daemon-aware wrappers so command/UI/client code stays in the CLI shell without re-owning the runtime state machine.
 - iMessage-backed inbox and assistant delivery flows now depend directly on `@photon-ai/imessage-kit` instead of late-loading that package at call time, while Telegram delivery and ingestion share the same assistant channel binding abstraction.
 - The built CLI package shape exposes both `vault-cli` and a setup-focused `murph` alias from the same entrypoint; `murph`, `murph --help`, and `murph setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
 

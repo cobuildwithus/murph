@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-const smokeImportPaths = [
+const baseSmokeImportPaths = [
   "packages/contracts/dist/index.js",
   "packages/hosted-execution/dist/index.js",
   "packages/runtime-state/dist/index.js",
+  "packages/assistant-core/dist/index.js",
   "packages/core/dist/index.js",
   "packages/importers/dist/index.js",
   "packages/importers/dist/core-port.js",
@@ -26,6 +26,11 @@ const smokeImportPaths = [
   "packages/cli/dist/setup-cli.js",
   "packages/cli/dist/setup-runtime-env.js",
 ].map((relativePath) => path.join(repoRoot, relativePath));
+const assistantCoreFacadeSmokeImportPaths = collectAssistantCoreFacadeSmokeImportPaths();
+const smokeImportPaths = [
+  ...baseSmokeImportPaths,
+  ...assistantCoreFacadeSmokeImportPaths,
+];
 
 function runCommand(command, args) {
   const result = spawnSync(command, args, {
@@ -54,6 +59,47 @@ async function hasPreparedArtifacts(importAttempt = 0) {
   }
 
   return true;
+}
+
+function collectAssistantCoreFacadeSmokeImportPaths() {
+  const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
+  const distRoot = path.join(repoRoot, "packages/assistant-core/dist");
+  const subpaths = new Set();
+
+  for (const filePath of walkTypeScriptFiles(cliSourceRoot)) {
+    const source = readFileSync(filePath, "utf8");
+    for (const match of source.matchAll(/["'`]@murph\/assistant-core\/([^"'`\s]+)["'`]/g)) {
+      const subpath = match[1];
+      if (!subpath) {
+        continue;
+      }
+      subpaths.add(subpath);
+    }
+  }
+
+  return [...subpaths]
+    .sort()
+    .map((subpath) => path.join(distRoot, `${subpath}.js`));
+}
+
+function walkTypeScriptFiles(directoryPath) {
+  const entries = readdirSync(directoryPath, {
+    withFileTypes: true,
+  });
+  const filePaths = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(directoryPath, entry.name);
+    if (entry.isDirectory()) {
+      filePaths.push(...walkTypeScriptFiles(entryPath));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith(".ts")) {
+      filePaths.push(entryPath);
+    }
+  }
+
+  return filePaths;
 }
 
 function runPreparedBuild(force = false) {

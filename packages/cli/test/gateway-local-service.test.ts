@@ -20,8 +20,10 @@ import {
   fetchGatewayAttachmentsLocal,
   getGatewayConversationLocal,
   listGatewayConversationsLocal,
+  listGatewayOpenPermissionsLocalWrapper,
   pollGatewayEventsLocalWrapper,
   readGatewayMessagesLocal,
+  respondToGatewayPermissionLocalWrapper,
   sendGatewayMessageLocal,
 } from '../src/gateway-core-local.js'
 
@@ -1022,6 +1024,69 @@ test('local gateway send uses route-bound assistant delivery and Linq reply targ
     })
     assert.equal(messages.messages.length, 2)
     assert.equal(messages.messages[1]?.text, 'Sounds good, thank you!')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway permission responses rebuild the projection and emit permission.resolved', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-permission-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+    await listGatewayOpenPermissionsLocalWrapper(vaultRoot)
+
+    const database = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
+    try {
+      database.prepare(`
+        INSERT INTO gateway_permissions (
+          request_id,
+          session_key,
+          action,
+          description,
+          status,
+          requested_at,
+          resolved_at,
+          note
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        'perm_local_123',
+        'gwcs_channel%3Aemail%7Cidentity%3Amurph%2540example.com%7Cthread%3Athread-labs',
+        'send-message',
+        'Need operator approval',
+        'open',
+        '2026-03-30T21:00:00.000Z',
+        null,
+        null,
+      )
+    } finally {
+      database.close()
+    }
+
+    const openPermissions = await listGatewayOpenPermissionsLocalWrapper(vaultRoot)
+    assert.equal(openPermissions.length, 1)
+    assert.equal(openPermissions[0]?.requestId, 'perm_local_123')
+
+    const resolved = await respondToGatewayPermissionLocalWrapper(vaultRoot, {
+      decision: 'approve',
+      note: 'Approved by operator',
+      requestId: 'perm_local_123',
+    })
+    assert.ok(resolved)
+    assert.equal(resolved.status, 'approved')
+    assert.equal(resolved.note, 'Approved by operator')
+
+    const remainingPermissions = await listGatewayOpenPermissionsLocalWrapper(vaultRoot)
+    assert.equal(remainingPermissions.length, 0)
+
+    const events = await pollGatewayEventsLocalWrapper(vaultRoot, {
+      cursor: 0,
+      kinds: ['permission.resolved'],
+      limit: 20,
+    })
+    assert.equal(events.events.length, 1)
+    assert.equal(events.events[0]?.kind, 'permission.resolved')
+    assert.equal(events.events[0]?.permissionRequestId, 'perm_local_123')
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }

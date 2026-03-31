@@ -1,19 +1,5 @@
-import { normalizeNullableString } from './text/shared.js'
-
-export function resolveTelegramBotToken(
-  env: NodeJS.ProcessEnv,
-): string | null {
-  return normalizeNullableString(env.TELEGRAM_BOT_TOKEN)
-}
-
-export function resolveTelegramApiBaseUrl(
-  env: NodeJS.ProcessEnv,
-): string | null {
-  return normalizeNullableString(env.TELEGRAM_API_BASE_URL)
-}
-
-export function resolveTelegramFileBaseUrl(
-  env: NodeJS.ProcessEnv,
-): string | null {
-  return normalizeNullableString(env.TELEGRAM_FILE_BASE_URL)
-}
+/**
+ * Compatibility facade for the published murph package.
+ * The canonical headless implementation now lives in @murph/assistant-core/telegram-runtime.
+ */
+export * from '@murph/assistant-core/telegram-runtime'
