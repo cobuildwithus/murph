@@ -20,7 +20,7 @@ import type {
   GatewayReadMessagesInput,
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
-} from "murph/gateway-core";
+} from "@murph/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
   resolveHostedExecutionDispatchOutcomeState,

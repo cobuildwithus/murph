@@ -815,6 +815,85 @@ describe("cloudflare worker routes", () => {
     });
   });
 
+  it("rejects gateway reply-to sends for channels without stable reply-to support", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+        body: JSON.stringify({
+          replyToMessageId: "gwcm_worker_test",
+          sessionKey: "gwcs_worker_test",
+          text: "Please follow up.",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Gateway reply-to is not supported for this channel.",
+    });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
+  it("rejects gateway reply-to sends that point at same-session outbox ids", async () => {
+    const stub = createUserRunnerStub();
+    const routeToken = "route_worker_test";
+    stub.gatewayGetConversation.mockResolvedValueOnce({
+      canSend: true,
+      lastActivityAt: "2026-03-26T12:00:00.000Z",
+      lastMessagePreview: "Please send the latest PDF.",
+      messageCount: 2,
+      route: {
+        channel: "linq",
+        directness: "direct",
+        identityId: "default",
+        participantId: "contact:alex",
+        reply: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        threadId: "chat_123",
+      },
+      schema: "murph.gateway-conversation.v1",
+      sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+      title: "Lab thread",
+    });
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+        body: JSON.stringify({
+          replyToMessageId: createGatewayOutboxMessageIdForTests(routeToken, "outbox_test"),
+          sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+          text: "Please follow up.",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Gateway reply-to must reference a captured message.",
+    });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
   it("returns a stable invalid JSON error for malformed worker control payloads", async () => {
     const env = createWorkerEnv(createUserRunnerStub(), {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -2182,6 +2261,23 @@ function createUserRunnerStub() {
       userId: "member_123",
     })),
   };
+}
+
+function createGatewayConversationSessionKeyForTests(routeToken: string): string {
+  return `gwcs_${Buffer.from(JSON.stringify({
+    kind: "conversation",
+    routeToken,
+    version: 2,
+  }), "utf8").toString("base64url")}`;
+}
+
+function createGatewayOutboxMessageIdForTests(routeToken: string, sourceToken: string): string {
+  return `gwcm_${Buffer.from(JSON.stringify({
+    kind: "outbox-message",
+    routeToken,
+    sourceToken,
+    version: 2,
+  }), "utf8").toString("base64url")}`;
 }
 
 function buildDispatchResultFixture(userId: string, eventId: string) {

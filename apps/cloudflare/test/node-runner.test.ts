@@ -18,16 +18,16 @@ import {
   snapshotHostedExecutionContext,
   writePendingAssistantUsageRecord,
 } from "@murph/runtime-state";
-import { assistantOutboxIntentSchema } from "murph/assistant-core";
+import { assistantOutboxIntentSchema } from "@murph/assistant-core";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("murph/assistant-core", async () => {
-  const actual = await vi.importActual<typeof import("murph/assistant-core")>(
-    "murph/assistant-core",
+vi.mock("@murph/assistant-core", async () => {
+  const actual = await vi.importActual<typeof import("@murph/assistant-core")>(
+    "@murph/assistant-core",
   );
   return {
     ...actual,
@@ -52,8 +52,8 @@ describe("runHostedExecutionJob", () => {
     vi.restoreAllMocks();
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actualAssistantCore = await vi.importActual<typeof import("murph/assistant-core")>(
-      "murph/assistant-core",
+    const actualAssistantCore = await vi.importActual<typeof import("@murph/assistant-core")>(
+      "@murph/assistant-core",
     );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
       actualAssistantCore.dispatchAssistantOutboxIntent(input));
@@ -1897,6 +1897,8 @@ describe("runHostedExecutionJob", () => {
       target: "chat_123",
       targetKind: "thread" as const,
       messageLength: "Queued the Linq reply.".length,
+      providerMessageId: null,
+      providerThreadId: null,
     };
     const writePendingIntent = async (vaultRoot: string) => {
       const statePaths = resolveAssistantStatePaths(vaultRoot);
@@ -2120,6 +2122,8 @@ describe("runHostedExecutionJob", () => {
       target: "chat_123",
       targetKind: "thread" as const,
       messageLength: "Queued the Linq reply.".length,
+      providerMessageId: null,
+      providerThreadId: null,
     };
     await writeFile(
       path.join(statePaths.outboxDirectory, `${intentId}.json`),

@@ -151,6 +151,8 @@ function createSideEffectRecord(input: {
       channel: "telegram" as const,
       idempotencyKey: `assistant-outbox:${input.effectId}`,
       messageLength: 12,
+      providerMessageId: null,
+      providerThreadId: null,
       sentAt: "2026-03-29T10:00:00.000Z",
       target: "thread_123",
       targetKind: "thread" as const,

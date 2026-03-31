@@ -18,6 +18,8 @@ export interface HostedExecutionAssistantDelivery {
   channel: string;
   idempotencyKey: string;
   messageLength: number;
+  providerMessageId: string | null;
+  providerThreadId: string | null;
   sentAt: string;
   target: string;
   targetKind: "explicit" | "participant" | "thread";
@@ -175,6 +177,14 @@ function parseHostedExecutionAssistantDelivery(
       record.messageLength,
       `${label}.messageLength`,
     ),
+    providerMessageId: requireNullableString(
+      record.providerMessageId ?? null,
+      `${label}.providerMessageId`,
+    ),
+    providerThreadId: requireNullableString(
+      record.providerThreadId ?? null,
+      `${label}.providerThreadId`,
+    ),
     sentAt: requireString(record.sentAt, `${label}.sentAt`),
     target: requireString(record.target, `${label}.target`),
     targetKind: requireHostedExecutionAssistantDeliveryTargetKind(
@@ -182,6 +192,14 @@ function parseHostedExecutionAssistantDelivery(
       `${label}.targetKind`,
     ),
   };
+}
+
+function requireNullableString(value: unknown, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireString(value, label);
 }
 
 function requireHostedExecutionAssistantDeliveryTargetKind(

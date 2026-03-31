@@ -2,19 +2,19 @@ import {
   applyGatewayProjectionSnapshotToEventLog,
   DEFAULT_GATEWAY_EVENT_RETENTION,
   fetchGatewayAttachmentsFromSnapshot,
+  gatewayListOpenPermissionsInputSchema,
+  gatewayPermissionRequestSchema,
+  gatewayPollEventsInputSchema,
+  gatewayProjectionSnapshotSchema,
+  gatewayRespondToPermissionInputSchema,
   getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
   listGatewayOpenPermissionsFromSnapshot,
-  readGatewayMessagesFromSnapshot,
-  gatewayListOpenPermissionsInputSchema,
-  gatewayPollEventsInputSchema,
   pollGatewayEventLogState,
-  gatewayProjectionSnapshotSchema,
-  gatewayPermissionRequestSchema,
-  gatewayRespondToPermissionInputSchema,
-  type GatewayFetchAttachmentsInput,
+  readGatewayMessagesFromSnapshot,
   type GatewayEvent,
   type GatewayEventLogState,
+  type GatewayFetchAttachmentsInput,
   type GatewayGetConversationInput,
   type GatewayListConversationsInput,
   type GatewayListConversationsResult,
@@ -25,7 +25,7 @@ import {
   type GatewayReadMessagesInput,
   type GatewayReadMessagesResult,
   type GatewayRespondToPermissionInput,
-} from "murph/gateway-core";
+} from "@murph/gateway-core";
 
 import type { DurableObjectStateLike } from "./user-runner/types.js";
 
@@ -49,13 +49,15 @@ export class HostedGatewayProjectionStore {
     ) {
       return;
     }
-    await this.writeState(
-      applyGatewayProjectionSnapshotToEventLog(
-        current,
-        parsed,
-        DEFAULT_GATEWAY_EVENT_RETENTION,
-      ),
+    const nextState = applyGatewayProjectionSnapshotToEventLog(
+      current,
+      parsed,
+      DEFAULT_GATEWAY_EVENT_RETENTION,
     );
+    if (nextState === current) {
+      return;
+    }
+    await this.writeState(nextState);
   }
 
   async listConversations(
@@ -141,12 +143,14 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readState(): Promise<GatewayEventLogState> {
-    const snapshot = await this.state.storage.get<GatewayProjectionSnapshot>(GATEWAY_SNAPSHOT_KEY);
-    const events = (await this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY)) ?? [];
-    const nextCursor = (await this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY)) ?? 0;
+    const [snapshot, events, nextCursor] = await Promise.all([
+      this.state.storage.get<GatewayProjectionSnapshot>(GATEWAY_SNAPSHOT_KEY),
+      this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY),
+      this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY),
+    ]);
 
     return {
-      events,
+      events: events ?? [],
       nextCursor: typeof nextCursor === "number" && Number.isFinite(nextCursor) && nextCursor >= 0
         ? nextCursor
         : 0,

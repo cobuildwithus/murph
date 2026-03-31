@@ -30,8 +30,10 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
+    "@murph/assistant-core": "workspace:*",
     "@murph/core": "workspace:*",
     "@murph/device-syncd": "workspace:*",
+    "@murph/gateway-core": "workspace:*",
     "@murph/hosted-execution": "workspace:*",
     "@murph/inboxd": "workspace:*",
     "@murph/parsers": "workspace:*",

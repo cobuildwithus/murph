@@ -688,6 +688,7 @@ function parseAssistantCronTargetSetRequestBody(
   assertOptionalNullableStringField(record, 'sourceThreadId', 'cron target')
   assertOptionalNullableStringField(record, 'deliveryTarget', 'cron target')
   assertOptionalBooleanField(record, 'dryRun', 'cron target')
+  assertOptionalBooleanField(record, 'resetContinuity', 'cron target')
 
   return {
     job: parseAssistantCronTargetJobIdFromPath(url.pathname),
@@ -710,6 +711,11 @@ function parseAssistantCronTargetSetRequestBody(
       'cron target',
     ),
     dryRun: readOptionalBooleanField(record, 'dryRun', 'cron target'),
+    resetContinuity: readOptionalBooleanField(
+      record,
+      'resetContinuity',
+      'cron target',
+    ),
   }
 }
 

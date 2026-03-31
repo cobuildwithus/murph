@@ -7,6 +7,20 @@ import { afterEach, beforeEach, test, vi } from 'vitest'
 const robustnessMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
+  resolveAssistantProviderTraits: vi.fn((provider: string) =>
+    provider === 'openai-compatible'
+      ? {
+          resumeKeyMode: 'none' as const,
+          sessionMode: 'stateless' as const,
+          transcriptContextMode: 'local-transcript' as const,
+          workspaceMode: 'none' as const,
+        }
+      : {
+          resumeKeyMode: 'provider-session-id' as const,
+          sessionMode: 'stateful' as const,
+          transcriptContextMode: 'provider-session' as const,
+          workspaceMode: 'direct-cli' as const,
+        }),
 }))
 
 vi.mock('../src/outbound-channel.js', async () => {
@@ -29,6 +43,7 @@ vi.mock('../src/assistant-provider.js', async () => {
   return {
     ...actual,
     executeAssistantProviderTurn: robustnessMocks.executeAssistantProviderTurn,
+    resolveAssistantProviderTraits: robustnessMocks.resolveAssistantProviderTraits,
   }
 })
 
@@ -59,6 +74,21 @@ const cleanupPaths: string[] = []
 beforeEach(() => {
   robustnessMocks.deliverAssistantMessageOverBinding.mockReset()
   robustnessMocks.executeAssistantProviderTurn.mockReset()
+  robustnessMocks.resolveAssistantProviderTraits.mockReset()
+  robustnessMocks.resolveAssistantProviderTraits.mockImplementation((provider: string) =>
+    provider === 'openai-compatible'
+      ? {
+          resumeKeyMode: 'none',
+          sessionMode: 'stateless',
+          transcriptContextMode: 'local-transcript',
+          workspaceMode: 'none',
+        }
+      : {
+          resumeKeyMode: 'provider-session-id',
+          sessionMode: 'stateful',
+          transcriptContextMode: 'provider-session',
+          workspaceMode: 'direct-cli',
+        })
   resetInjectedAssistantFaults()
 })
 
@@ -266,6 +296,8 @@ test('drainAssistantOutbox reconciles a journaled delivery without re-sending it
           return {
             channel: 'telegram',
             idempotencyKey: null,
+            providerMessageId: null,
+            providerThreadId: null,
             sentAt: new Date().toISOString(),
             target: 'chat-1',
             targetKind: 'thread',
@@ -482,6 +514,8 @@ test('drainAssistantOutbox keeps post-send hosted journal persistence failures r
           return {
             channel: 'telegram',
             idempotencyKey: intent.deliveryIdempotencyKey,
+            providerMessageId: null,
+            providerThreadId: null,
             sentAt: new Date().toISOString(),
             target: 'chat-1',
             targetKind: 'thread',

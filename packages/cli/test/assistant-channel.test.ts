@@ -330,7 +330,12 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ idempotencyKey?: string | null; message: string; target: string }> = []
+  const sent: Array<{
+    idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -341,7 +346,7 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
       message: 'Telegram thread reply.',
     },
     {
-      sendTelegram: async (input: { message: string; target: string }) => {
+      sendTelegram: async (input: { message: string; replyToMessageId?: string | null; target: string }) => {
         sent.push(input)
       },
     },
@@ -351,6 +356,7 @@ test('deliverAssistantMessage uses stored Telegram thread bindings so one assist
   assertAssistantOutboxDispatch(sent[0], {
     target: '-1001234567890:topic:42',
     message: 'Telegram thread reply.',
+    replyToMessageId: null,
   })
   assert.equal(result.delivery.channel, 'telegram')
   assert.equal(result.delivery.target, '-1001234567890:topic:42')
@@ -369,7 +375,12 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
 
-  const sent: Array<{ idempotencyKey?: string | null; message: string; target: string }> = []
+  const sent: Array<{
+    idempotencyKey?: string | null
+    message: string
+    replyToMessageId?: string | null
+    target: string
+  }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -380,7 +391,7 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
       message: 'Telegram thread reply.',
     },
     {
-      sendTelegram: async (input: { message: string; target: string }) => {
+      sendTelegram: async (input: { message: string; replyToMessageId?: string | null; target: string }) => {
         sent.push(input)
         return {
           target: '-1009876543210:topic:42',
@@ -393,6 +404,7 @@ test('deliverAssistantMessage persists canonical Telegram thread targets returne
   assertAssistantOutboxDispatch(sent[0], {
     target: '-1001234567890:topic:42',
     message: 'Telegram thread reply.',
+    replyToMessageId: null,
   })
   assert.equal(result.delivery.target, '-1009876543210:topic:42')
   assert.equal(result.session.binding.threadId, '-1009876543210:topic:42')
@@ -480,7 +492,7 @@ test('deliverAssistantMessage ignores lookup-only nested conversation metadata w
     threadIsDirect: true,
   })
 
-  const sent: Array<{ message: string; target: string }> = []
+  const sent: Array<{ message: string; replyToMessageId?: string | null; target: string }> = []
   const result = await deliverAssistantMessage(
     {
       vault: vaultRoot,
@@ -491,7 +503,7 @@ test('deliverAssistantMessage ignores lookup-only nested conversation metadata w
       message: 'Reuse the stored thread.',
     },
     {
-      sendTelegram: async (input: { message: string; target: string }) => {
+      sendTelegram: async (input: { message: string; replyToMessageId?: string | null; target: string }) => {
         sent.push(input)
       },
     },
@@ -501,6 +513,7 @@ test('deliverAssistantMessage ignores lookup-only nested conversation metadata w
   assertAssistantOutboxDispatch(sent[0], {
     target: 'chat-1',
     message: 'Reuse the stored thread.',
+    replyToMessageId: null,
   })
   assert.equal(result.session.binding.channel, 'telegram')
   assert.equal(result.session.binding.identityId, 'assistant:primary')
@@ -611,6 +624,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
     idempotencyKey?: string | null
     identityId: string | null
     message: string
+    replyToMessageId?: string | null
     target: string
     targetKind: 'explicit' | 'participant' | 'thread'
   }> = []
@@ -637,6 +651,7 @@ test('deliverAssistantMessage uses stored email thread bindings so one assistant
     target: 'thread_123',
     targetKind: 'thread',
     message: 'Email thread reply.',
+    replyToMessageId: null,
   })
   assert.equal(result.delivery.channel, 'email')
   assert.equal(result.delivery.target, 'thread_123')
@@ -668,6 +683,7 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
     idempotencyKey?: string | null
     identityId: string | null
     message: string
+    replyToMessageId?: string | null
     target: string
     targetKind: 'explicit' | 'participant' | 'thread'
   }> = []
@@ -698,6 +714,7 @@ test('deliverAssistantMessage persists canonical email thread targets returned b
     message: 'Canonical email thread reply.',
     target: 'thread_123',
     targetKind: 'thread',
+    replyToMessageId: null,
   })
   assert.equal(result.delivery.target, canonicalTarget)
   assert.equal(result.delivery.targetKind, 'thread')

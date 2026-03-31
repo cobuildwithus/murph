@@ -6,7 +6,7 @@ import {
   type HostedExecutionSideEffect,
   type HostedExecutionSideEffectRecord,
 } from "@murph/hosted-execution";
-import type { GatewayProjectionSnapshot } from "murph/gateway-core";
+import type { GatewayProjectionSnapshot } from "@murph/gateway-core";
 import {
   createHostedEmailChannelDependencies,
 } from "../hosted-email.ts";
@@ -16,7 +16,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "murph/assistant-core";
+} from "@murph/assistant-core";
 
 import type {
   HostedCommittedExecutionState,
@@ -291,6 +291,8 @@ function createHostedAssistantDeliveryDispatchHooks(input: {
         channel: record.delivery.channel,
         idempotencyKey: record.delivery.idempotencyKey,
         messageLength: record.delivery.messageLength,
+        providerMessageId: record.delivery.providerMessageId ?? null,
+        providerThreadId: record.delivery.providerThreadId ?? null,
         sentAt: record.delivery.sentAt,
         target: record.delivery.target,
         targetKind: record.delivery.targetKind,

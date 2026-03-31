@@ -175,6 +175,12 @@ export function gatewayConversationRouteCanSend(
   return true
 }
 
+export function gatewayChannelSupportsReplyToMessage(
+  channel: string | null | undefined,
+): boolean {
+  return normalizeNullableString(channel) === 'linq'
+}
+
 function inferGatewayBindingDelivery(input: {
   channel?: string | null
   conversation?: GatewayConversationRef | null
@@ -355,11 +361,22 @@ function resolveGatewayConversationKey(input: {
     return null
   }
 
-  const scope: [string, string] | null = threadId
-    ? ['thread', threadId]
-    : actorId && input.threadIsDirect !== false
-      ? ['actor', actorId]
-      : null
+  const scope: [string, string] | null =
+    input.threadIsDirect === true
+      ? actorId
+        ? ['actor', actorId]
+        : threadId
+          ? ['thread', threadId]
+          : null
+      : input.threadIsDirect === false
+        ? threadId
+          ? ['thread', threadId]
+          : null
+        : actorId
+          ? ['actor', actorId]
+          : threadId
+            ? ['thread', threadId]
+            : null
 
   if (!scope) {
     return null

@@ -16,11 +16,15 @@ import { parseRawEmailMessage, readRawEmailHeaderValue } from "@murph/inboxd";
 
 import {
   gatewayFetchAttachmentsInputSchema,
+  gatewayChannelSupportsReplyToMessage,
   gatewayGetConversationInputSchema,
   gatewayListConversationsInputSchema,
   gatewayListOpenPermissionsInputSchema,
   gatewayPollEventsInputSchema,
   gatewayReadMessagesInputSchema,
+  readGatewayConversationSessionToken,
+  readGatewayMessageKind,
+  readGatewayMessageRouteToken,
   gatewayRespondToPermissionInputSchema,
   gatewaySendMessageResultSchema,
   gatewaySendMessageInputSchema,
@@ -35,7 +39,7 @@ import {
   type GatewayRespondToPermissionInput,
   type GatewaySendMessageInput,
   type GatewayWaitForEventsInput,
-} from "murph/gateway-core";
+} from "@murph/gateway-core";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
 import { createHostedUserEnvStore } from "./bundle-store.ts";
@@ -544,6 +548,15 @@ async function handleGatewaySendRoute(
     return json({ error: "Gateway session does not have a routable reply target." }, 409);
   }
 
+  const replyToValidation = validateHostedGatewayReplyTo({
+    channel: conversation.route.channel,
+    replyToMessageId: input.replyToMessageId,
+    sessionKey: input.sessionKey,
+  });
+  if (replyToValidation) {
+    return replyToValidation;
+  }
+
   const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
     eventId: createGatewayDispatchEventId(),
     occurredAt: new Date().toISOString(),
@@ -570,6 +583,36 @@ async function handleGatewaySendRoute(
       sessionKey: input.sessionKey,
     }),
   );
+}
+
+function validateHostedGatewayReplyTo(input: {
+  channel: string | null;
+  replyToMessageId: string | null;
+  sessionKey: string;
+}): Response | null {
+  if (!input.replyToMessageId) {
+    return null;
+  }
+  if (!gatewayChannelSupportsReplyToMessage(input.channel)) {
+    return json({ error: "Gateway reply-to is not supported for this channel." }, 409);
+  }
+  try {
+    const sessionToken = readGatewayConversationSessionToken(input.sessionKey);
+    const messageKind = readGatewayMessageKind(input.replyToMessageId);
+    const messageRouteToken = readGatewayMessageRouteToken(input.replyToMessageId);
+    if (sessionToken !== messageRouteToken) {
+      return json({ error: "Gateway reply-to did not belong to the requested session." }, 400);
+    }
+    if (messageKind !== "capture-message") {
+      return json({ error: "Gateway reply-to must reference a captured message." }, 400);
+    }
+  } catch (error) {
+    return json(
+      { error: error instanceof Error ? error.message : "Gateway reply-to is invalid." },
+      400,
+    );
+  }
+  return null;
 }
 
 async function waitForHostedGatewayEvents(

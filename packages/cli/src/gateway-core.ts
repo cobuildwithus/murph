@@ -11,6 +11,7 @@ export {
   gatewayAttachmentSchema,
   gatewayConversationDirectnessValues,
   gatewayConversationRouteSchema,
+  gatewayConversationTitleSourceValues,
   gatewayConversationSchema,
   gatewayEventKindValues,
   gatewayEventSchema,
@@ -38,6 +39,7 @@ export {
   type GatewayConversation,
   type GatewayConversationDirectness,
   type GatewayConversationRoute,
+  type GatewayConversationTitleSource,
   type GatewayEvent,
   type GatewayEventKind,
   type GatewayFetchAttachmentsInput,
@@ -64,6 +66,7 @@ export {
 } from './gateway/contracts.js'
 
 export {
+  gatewayChannelSupportsReplyToMessage,
   gatewayConversationRouteCanSend,
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
@@ -78,18 +81,23 @@ export {
 export {
   applyGatewayProjectionSnapshotToEventLog,
   DEFAULT_GATEWAY_EVENT_RETENTION,
+  pollGatewayEventLogState,
+  type GatewayEventLogState,
+} from './gateway/event-log.js'
+
+export {
   diffGatewayProjectionSnapshots,
   fetchGatewayAttachmentsFromSnapshot,
   getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
   listGatewayOpenPermissionsFromSnapshot,
-  pollGatewayEventLogState,
   readGatewayMessagesFromSnapshot,
-  type GatewayEventLogState,
   type GatewayEventEmission,
 } from './gateway/snapshot.js'
 
 export {
   readGatewayConversationSessionToken,
+  readGatewayMessageKind,
+  readGatewayMessageRouteToken,
   sameGatewayConversationSession,
 } from './gateway/opaque-ids.js'

@@ -38,7 +38,7 @@ test('murph publishes gateway-core for headless conversation gateway consumers',
   })
 })
 
-test('workspace source resolution knows about murph/gateway-core', async () => {
+test('workspace source resolution knows about the dedicated @murph/gateway-core packages while preserving murph compatibility exports', async () => {
   const tsconfig = JSON.parse(
     await readFile(new URL('../../../tsconfig.base.json', import.meta.url), 'utf8'),
   ) as {
@@ -47,6 +47,12 @@ test('workspace source resolution knows about murph/gateway-core', async () => {
     }
   }
 
+  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-core'], [
+    'packages/gateway-core/src/index.ts',
+  ])
+  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-core/local'], [
+    'packages/gateway-core/src/local.ts',
+  ])
   assert.deepEqual(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], [
     'packages/cli/src/gateway-core.ts',
   ])
@@ -141,6 +147,25 @@ test('gateway conversation routes reuse inbox capture identity normalization rul
     threadId: 'thread-456',
   })
   assert.equal(gatewayConversationRouteCanSend(route), true)
+})
+
+test('gateway direct conversations keep actor-first route identity even when thread metadata arrives later', () => {
+  const directRoute = gatewayConversationRouteFromCapture({
+    accountId: null,
+    actor: {
+      id: 'contact:taylor',
+    },
+    source: 'telegram',
+    thread: {
+      id: 'chat-99',
+      isDirect: true,
+    },
+  })
+
+  assert.equal(
+    resolveGatewayConversationRouteKey(directRoute),
+    'channel:telegram|actor:contact%3Ataylor',
+  )
 })
 
 test('gateway route merging preserves existing reply routes while allowing projection layers to enrich metadata', () => {

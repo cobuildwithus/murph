@@ -299,7 +299,8 @@ export function applyGatewayProjectionSnapshotToEventLog(
 
   if (
     state.snapshot &&
-    stableStringify(state.snapshot) === stableStringify(parsedSnapshot)
+    stableGatewayProjectionContentString(state.snapshot) ===
+      stableGatewayProjectionContentString(parsedSnapshot)
   ) {
     return state
   }
@@ -390,13 +391,25 @@ function conversationPresentationForRequest(
   conversation: GatewayConversation,
   input: GatewayListConversationsInput,
 ): GatewayConversation {
+  const derivedSources = new Set([
+    'participant-display-name',
+    'participant-id',
+    'thread-id',
+    'channel',
+  ])
+
   return gatewayConversationSchema.parse({
     ...conversation,
-    title: deriveGatewayConversationDisplayTitle(
-      snapshot,
-      conversation,
-      input.includeDerivedTitles,
-    ),
+    title:
+      input.includeDerivedTitles === false &&
+      conversation.titleSource !== null &&
+      derivedSources.has(conversation.titleSource)
+        ? null
+        : deriveGatewayConversationDisplayTitle(
+            snapshot,
+            conversation,
+            input.includeDerivedTitles,
+          ),
     lastMessagePreview:
       input.includeLastMessage === false ? null : conversation.lastMessagePreview,
   })
@@ -588,4 +601,15 @@ function normalizeNullableString(value: string | null | undefined): string | nul
 
 function stableStringify(value: unknown): string {
   return JSON.stringify(value)
+}
+
+function stableGatewayProjectionContentString(
+  snapshot: GatewayProjectionSnapshot,
+): string {
+  return stableStringify({
+    conversations: snapshot.conversations,
+    messages: snapshot.messages,
+    permissions: snapshot.permissions,
+    schema: snapshot.schema,
+  })
 }

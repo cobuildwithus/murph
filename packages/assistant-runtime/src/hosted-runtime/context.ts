@@ -10,7 +10,7 @@ import {
   createIntegratedVaultServices,
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "murph/assistant-core";
+} from "@murph/assistant-core";
 
 import type { HostedBootstrapResult } from "./models.ts";
 import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";
