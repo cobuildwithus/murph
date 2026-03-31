@@ -1,7 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite'
 
 import {
+  listInboxCaptureMutations,
   openInboxRuntime,
+  readInboxCaptureMutationHead,
   type InboxCaptureRecord,
   type IndexedAttachment,
 } from '@murph/inboxd'
@@ -64,9 +66,10 @@ import {
   deriveLastMessagePreview,
 } from './snapshot.js'
 
-const CAPTURE_SIGNATURE_META_KEY = 'captures.signature'
+const CAPTURE_CURSOR_META_KEY = 'captures.cursor'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
+const CAPTURE_SYNC_BATCH_SIZE = 500
 
 interface CaptureSourceRow {
   accountId: string | null
@@ -166,6 +169,16 @@ interface GatewaySnapshotState {
   snapshot: GatewayProjectionSnapshot | null
 }
 
+type CaptureSyncState =
+  | { kind: 'noop'; headCursor: number }
+  | { kind: 'rebuild'; headCursor: number; captures: InboxCaptureRecord[] }
+  | {
+    kind: 'incremental'
+    changedCaptureIds: string[]
+    captures: InboxCaptureRecord[]
+    headCursor: number
+  }
+
 export async function exportGatewayProjectionSnapshotLocal(
   vault: string,
 ): Promise<GatewayProjectionSnapshot> {
@@ -246,25 +259,34 @@ export class LocalGatewayProjectionStore {
   }
 
   async sync(): Promise<void> {
-    // Keep capture sync conservative until inboxd exposes a durable update cursor for
-    // attachment reparse and capture rewrites. A full signature avoids serving stale
-    // gateway messages or attachment metadata after inbox-side mutations.
-    const [captures, sessions, outboxIntents] = await Promise.all([
-      listAllInboxCapturesByCreatedOrder(this.vault),
+    const captureSyncState = await loadCaptureSyncState(
+      this.vault,
+      readGatewayTableCount(this.database, 'gateway_capture_sources') > 0
+        ? readNumericMeta(this.database, CAPTURE_CURSOR_META_KEY)
+        : null,
+    )
+    const [sessions, outboxIntents] = await Promise.all([
       listAssistantSessions(this.vault),
       listAssistantOutboxIntents(this.vault),
     ])
-    const captureSignature = computeCaptureSyncSignature(captures)
     const sessionSignature = computeSessionSyncSignature(sessions)
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)
 
     await withGatewayImmediateTransaction(this.database, async () => {
       let changed = false
 
-      if (readMeta(this.database, CAPTURE_SIGNATURE_META_KEY) !== captureSignature) {
+      if (captureSyncState.kind === 'rebuild') {
         clearCaptureSources(this.database)
-        upsertCaptureSources(this.database, captures)
-        writeMeta(this.database, CAPTURE_SIGNATURE_META_KEY, captureSignature)
+        upsertCaptureSources(this.database, captureSyncState.captures)
+        writeMeta(this.database, CAPTURE_CURSOR_META_KEY, String(captureSyncState.headCursor))
+        changed = true
+      } else if (captureSyncState.kind === 'incremental') {
+        replaceCaptureSourcesForCaptureIds(
+          this.database,
+          captureSyncState.changedCaptureIds,
+          captureSyncState.captures,
+        )
+        writeMeta(this.database, CAPTURE_CURSOR_META_KEY, String(captureSyncState.headCursor))
         changed = true
       }
 
@@ -347,6 +369,75 @@ async function listAllInboxCapturesByCreatedOrder(
     return captures
   } finally {
     database.close()
+    runtime.close()
+  }
+}
+
+
+async function loadCaptureSyncState(
+  vault: string,
+  currentCursor: number | null,
+): Promise<CaptureSyncState> {
+  const headCursor = await readInboxCaptureMutationHead(vault)
+  if (currentCursor === null || headCursor < currentCursor) {
+    return {
+      kind: 'rebuild',
+      headCursor,
+      captures: await listAllInboxCapturesByCreatedOrder(vault),
+    }
+  }
+
+  if (headCursor === currentCursor) {
+    return {
+      kind: 'noop',
+      headCursor,
+    }
+  }
+
+  const changedCaptureIds = new Map<string, number>()
+  let afterCursor = currentCursor
+
+  while (afterCursor < headCursor) {
+    const batch = await listInboxCaptureMutations({
+      afterCursor,
+      limit: CAPTURE_SYNC_BATCH_SIZE,
+      vaultRoot: vault,
+    })
+    if (batch.length === 0) {
+      break
+    }
+
+    for (const mutation of batch) {
+      changedCaptureIds.set(mutation.captureId, mutation.cursor)
+    }
+    afterCursor = batch[batch.length - 1]!.cursor
+  }
+
+  return {
+    kind: 'incremental',
+    changedCaptureIds: [...changedCaptureIds.entries()]
+      .sort((left, right) => left[1] - right[1] || left[0].localeCompare(right[0]))
+      .map(([captureId]) => captureId),
+    captures: await readInboxCapturesById(vault, [...changedCaptureIds.keys()]),
+    headCursor,
+  }
+}
+
+async function readInboxCapturesById(
+  vault: string,
+  captureIds: readonly string[],
+): Promise<InboxCaptureRecord[]> {
+  const runtime = await openInboxRuntime({ vaultRoot: vault })
+  try {
+    const captures: InboxCaptureRecord[] = []
+    for (const captureId of captureIds) {
+      const capture = runtime.getCapture(captureId)
+      if (capture) {
+        captures.push(capture)
+      }
+    }
+    return captures
+  } finally {
     runtime.close()
   }
 }
@@ -509,6 +600,24 @@ function ensureGatewayStoreSchema(database: DatabaseSync): void {
 function clearCaptureSources(database: DatabaseSync): void {
   database.prepare('DELETE FROM gateway_capture_attachments').run()
   database.prepare('DELETE FROM gateway_capture_sources').run()
+}
+
+function replaceCaptureSourcesForCaptureIds(
+  database: DatabaseSync,
+  captureIds: readonly string[],
+  captures: readonly InboxCaptureRecord[],
+): void {
+  const deleteAttachments = database.prepare(
+    'DELETE FROM gateway_capture_attachments WHERE capture_id = ?',
+  )
+  const deleteCapture = database.prepare('DELETE FROM gateway_capture_sources WHERE capture_id = ?')
+
+  for (const captureId of new Set(captureIds)) {
+    deleteAttachments.run(captureId)
+    deleteCapture.run(captureId)
+  }
+
+  upsertCaptureSources(database, captures)
 }
 
 function upsertCaptureSources(database: DatabaseSync, captures: readonly InboxCaptureRecord[]): void {
@@ -1493,10 +1602,6 @@ function computeSessionSyncSignature(sessions: readonly AssistantSession[]): str
   )
 }
 
-function computeCaptureSyncSignature(captures: readonly InboxCaptureRecord[]): string {
-  return JSON.stringify(captures)
-}
-
 function computeOutboxSyncSignature(intents: readonly AssistantOutboxIntent[]): string {
   return JSON.stringify(
     [...intents]
@@ -1518,6 +1623,16 @@ function readMeta(database: DatabaseSync, key: string): string | null {
     .prepare('SELECT value FROM gateway_meta WHERE key = ?')
     .get(key) as { value: string } | undefined
   return row?.value ?? null
+}
+
+function readNumericMeta(database: DatabaseSync, key: string): number | null {
+  const value = readMeta(database, key)
+  if (value === null) {
+    return null
+  }
+
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function writeMeta(database: DatabaseSync, key: string, value: string | null): void {

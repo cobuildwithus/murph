@@ -23,9 +23,17 @@
       "types": "./dist/linq.d.ts",
       "default": "./dist/linq.js"
     },
+    "./linq-webhook": {
+      "types": "./dist/linq-webhook.d.ts",
+      "default": "./dist/linq-webhook.js"
+    },
     "./telegram": {
       "types": "./dist/telegram.d.ts",
       "default": "./dist/telegram.js"
+    },
+    "./telegram-webhook": {
+      "types": "./dist/telegram-webhook.d.ts",
+      "default": "./dist/telegram-webhook.js"
     },
     "./connectors/email/normalize-parsed": {
       "types": "./dist/connectors/email/normalize-parsed.d.ts",

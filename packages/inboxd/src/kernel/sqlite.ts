@@ -38,6 +38,11 @@ const PARSEABLE_ATTACHMENT_KINDS = new Set<StoredAttachment["kind"]>([
   "video",
 ]);
 
+export interface InboxCaptureMutationRecord {
+  captureId: string;
+  cursor: number;
+}
+
 export interface InboxRuntimeStore {
   readonly databasePath: string;
   close(): void;
@@ -103,11 +108,16 @@ export async function openInboxRuntime({
       vault_event_id text not null,
       envelope_path text not null,
       created_at text not null,
+      mutation_cursor integer not null default 0,
       unique (source, account_id, external_id)
     );
 
     create index if not exists capture_occurred_at_idx on capture (occurred_at desc, capture_id desc);
     create index if not exists capture_source_idx on capture (source, account_id, occurred_at desc);
+    create table if not exists capture_mutation_counter (
+      singleton integer primary key check (singleton = 1),
+      next_cursor integer not null
+    );
 
     create table if not exists capture_attachment (
       id integer primary key autoincrement,
@@ -153,6 +163,7 @@ export async function openInboxRuntime({
     );
   `);
 
+  ensureColumn(database, "capture", "mutation_cursor", "integer not null default 0");
   ensureColumn(database, "capture_attachment", "attachment_id", "text");
   ensureColumn(database, "capture_attachment", "derived_path", "text");
   ensureColumn(database, "capture_attachment", "parser_provider_id", "text");
@@ -160,8 +171,103 @@ export async function openInboxRuntime({
   ensureColumn(database, "capture_attachment", "parse_updated_at", "text");
 
   database.exec(`
+    insert into capture_mutation_counter (singleton, next_cursor)
+    values (1, 0)
+    on conflict (singleton) do nothing;
+
     create unique index if not exists capture_attachment_attachment_id_idx
     on capture_attachment (attachment_id);
+
+    create index if not exists capture_mutation_cursor_idx
+    on capture (mutation_cursor asc, capture_id asc);
+
+    create trigger if not exists capture_mutation_on_insert
+    after insert on capture
+    begin
+      update capture_mutation_counter
+         set next_cursor = next_cursor + 1
+       where singleton = 1;
+      update capture
+         set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
+       where capture_id = new.capture_id;
+    end;
+
+    create trigger if not exists capture_mutation_on_update
+    after update of
+      source,
+      account_id,
+      external_id,
+      thread_id,
+      thread_title,
+      thread_is_direct,
+      actor_id,
+      actor_name,
+      actor_is_self,
+      occurred_at,
+      received_at,
+      text_content,
+      raw_json,
+      vault_event_id,
+      envelope_path,
+      created_at
+    on capture
+    begin
+      update capture_mutation_counter
+         set next_cursor = next_cursor + 1
+       where singleton = 1;
+      update capture
+         set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
+       where capture_id = new.capture_id;
+    end;
+
+    create trigger if not exists capture_attachment_mutation_on_insert
+    after insert on capture_attachment
+    begin
+      update capture_mutation_counter
+         set next_cursor = next_cursor + 1
+       where singleton = 1;
+      update capture
+         set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
+       where capture_id = new.capture_id;
+    end;
+
+    create trigger if not exists capture_attachment_mutation_on_update
+    after update of
+      ordinal,
+      external_id,
+      kind,
+      mime,
+      original_path,
+      stored_path,
+      file_name,
+      sha256,
+      size_bytes,
+      extracted_text,
+      transcript_text,
+      derived_path,
+      parser_provider_id,
+      parser_state,
+      parse_updated_at
+    on capture_attachment
+    begin
+      update capture_mutation_counter
+         set next_cursor = next_cursor + 1
+       where singleton = 1;
+      update capture
+         set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
+       where capture_id = new.capture_id;
+    end;
+
+    create trigger if not exists capture_attachment_mutation_on_delete
+    after delete on capture_attachment
+    begin
+      update capture_mutation_counter
+         set next_cursor = next_cursor + 1
+       where singleton = 1;
+      update capture
+         set mutation_cursor = (select next_cursor from capture_mutation_counter where singleton = 1)
+       where capture_id = old.capture_id;
+    end;
   `);
   assertCanonicalAttachmentRows(database);
   database.exec(`
@@ -190,6 +296,58 @@ export async function openInboxRuntime({
   `);
 
   return createInboxRuntimeStore(database, databasePath);
+}
+
+
+export async function listInboxCaptureMutations(input: {
+  afterCursor?: number | null;
+  limit?: number;
+  vaultRoot: string;
+}): Promise<InboxCaptureMutationRecord[]> {
+  const runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
+  runtime.close();
+  const runtimePaths = resolveRuntimePaths(input.vaultRoot);
+  const database = openSqliteRuntimeDatabase(runtimePaths.inboxDbPath);
+  try {
+    const rows = database
+      .prepare(
+        `
+          select
+            capture_id as captureId,
+            mutation_cursor as cursor
+          from capture
+          where mutation_cursor > ?
+          order by mutation_cursor asc, capture_id asc
+          limit ?
+        `,
+      )
+      .all(Math.max(0, input.afterCursor ?? 0), normalizeLimit(input.limit, 500)) as Array<{
+        captureId: string;
+        cursor: number;
+      }>;
+
+    return rows.map((row) => ({
+      captureId: row.captureId,
+      cursor: row.cursor,
+    }));
+  } finally {
+    database.close();
+  }
+}
+
+export async function readInboxCaptureMutationHead(vaultRoot: string): Promise<number> {
+  const runtime = await openInboxRuntime({ vaultRoot });
+  runtime.close();
+  const runtimePaths = resolveRuntimePaths(vaultRoot);
+  const database = openSqliteRuntimeDatabase(runtimePaths.inboxDbPath);
+  try {
+    const row = database
+      .prepare("select max(mutation_cursor) as cursor from capture")
+      .get() as { cursor: number | null } | undefined;
+    return row?.cursor ?? 0;
+  } finally {
+    database.close();
+  }
 }
 
 function createInboxRuntimeStore(database: DatabaseSync, databasePath: string): InboxRuntimeStore {

@@ -3,7 +3,7 @@
 Source-agnostic inbox ingestion for Murph.
 
 This package keeps canonical inbox evidence in the vault and uses a local SQLite
-runtime database for cursors, transient dedupe caches, capture-local search
+runtime database for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search
 tables, and attachment job state.
 
 ## Runtime expectations
@@ -33,7 +33,7 @@ tables, and attachment job state.
 - a generic normalized chat-poll connector factory for source-specific transports
 - iMessage and Telegram poll connectors over injected driver boundaries
 - source-specific checkpoints for connectors whose cursors are not derivable from `occurredAt`/`externalId`
-- capture pipeline with atomic raw persistence, inbox-capture ledger append, compatibility event/audit append, dedupe, and FTS
+- capture pipeline with atomic raw persistence, inbox-capture ledger append, compatibility event/audit append, dedupe, FTS, and a durable local capture mutation cursor for downstream projections like the gateway store
 - runtime list, show, and search helpers for future CLI/agent surfaces
 - `vault-cli inbox ...` is the intended human/operator surface layered on top of this package
 
