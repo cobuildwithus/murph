@@ -1,10 +1,14 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { resolveAssistantStatePaths } from '@murph/assistant-core/assistant-state'
+import {
+  detectWorkspacePackageCycles,
+  formatWorkspacePackageCycles,
+} from '../../../scripts/check-workspace-package-cycles.mjs'
 import { withoutNodeV8Coverage } from './cli-test-helpers.js'
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -33,6 +37,43 @@ function runNodeScript(...args: string[]) {
   })
 }
 
+function createAuditZip(scriptName: string, prefix: string) {
+  const outDir = mkdtempSync(path.join(os.tmpdir(), `${prefix}-`))
+  const result = spawnSync(
+    'bash',
+    [path.join(repoRoot, 'scripts', scriptName), '--zip', '--out-dir', outDir, '--name', prefix],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: withoutNodeV8Coverage(),
+    },
+  )
+
+  if (result.status !== 0) {
+    throw new Error(
+      `Failed to create audit zip via ${scriptName}:\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`,
+    )
+  }
+
+  const zipName = readdirSync(outDir).find((entry) => entry.endsWith('.zip'))
+  expect(zipName, `missing zip output in ${outDir}`).toBeTruthy()
+  return {
+    outDir,
+    zipPath: path.join(outDir, zipName!),
+  }
+}
+
+function listZipEntries(zipPath: string) {
+  return execFileSync('unzip', ['-Z1', zipPath], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: withoutNodeV8Coverage(),
+  })
+    .split(/\r?\n/u)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
 describe('monorepo release flow coverage audit', () => {
   it('exposes root-owned release scripts', () => {
     expect(rootPackageJson.name).toBe('murph-workspace')
@@ -42,7 +83,83 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['release:patch']).toBe('bash scripts/release.sh patch')
     expect(rootPackageJson.scripts?.['release:minor']).toBe('bash scripts/release.sh minor')
     expect(rootPackageJson.scripts?.['release:major']).toBe('bash scripts/release.sh major')
+    expect(rootPackageJson.scripts?.['review:gpt:full']).toBe(
+      'cobuild-review-gpt --config scripts/review-gpt-full.config.sh',
+    )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
+    expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
+      'node scripts/check-workspace-package-cycles.mjs',
+    )
+    expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
+  })
+
+  it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
+    const leanReviewConfig = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
+      'utf8',
+    )
+    const fullReviewConfig = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt-full.config.sh'),
+      'utf8',
+    )
+    const repoToolsConfig = readFileSync(
+      path.join(repoRoot, 'scripts', 'repo-tools.config.sh'),
+      'utf8',
+    )
+    const fullPackageScript = readFileSync(
+      path.join(repoRoot, 'scripts', 'package-audit-context-full.sh'),
+      'utf8',
+    )
+
+    expect(leanReviewConfig).toContain('include_tests=0')
+    expect(leanReviewConfig).toContain('include_docs=0')
+    expect(leanReviewConfig).toContain('package_script="scripts/package-audit-context.sh"')
+    expect(fullReviewConfig).toContain('source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/review-gpt.config.sh"')
+    expect(fullReviewConfig).toContain('include_tests=1')
+    expect(fullReviewConfig).toContain('include_docs=1')
+    expect(fullReviewConfig).toContain('package_script="scripts/package-audit-context-full.sh"')
+    expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'")
+    expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'")
+    expect(repoToolsConfig).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'")
+    expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
+    expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
+    expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
+    expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'")
+    expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS=''")
+  })
+
+  it('keeps the lean audit bundle smaller than the full one while preserving durable agent docs', () => {
+    const leanBundle = createAuditZip('package-audit-context.sh', 'murph-lean-audit')
+    const fullBundle = createAuditZip('package-audit-context-full.sh', 'murph-full-audit')
+
+    try {
+      const leanEntries = listZipEntries(leanBundle.zipPath)
+      const fullEntries = listZipEntries(fullBundle.zipPath)
+
+      expect(leanEntries).toContain('agent-docs/operations/verification-and-runtime.md')
+      expect(leanEntries).toContain('agent-docs/FRONTEND.md')
+      expect(leanEntries).toContain('agent-docs/product-specs/repo-bootstrap.md')
+      expect(leanEntries).toContain('docs/architecture.md')
+      expect(leanEntries).not.toContain('agent-docs/generated/doc-inventory.md')
+      expect(leanEntries).not.toContain('agent-docs/exec-plans/completed/README.md')
+      expect(leanEntries).not.toContain('agent-docs/prompts/task-finish-review.md')
+      expect(leanEntries).not.toContain('packages/cli/test/release-script-coverage-audit.test.ts')
+      expect(leanEntries).not.toContain('apps/web/test/device-sync-http.test.ts')
+      expect(leanEntries).not.toContain('docs/legacy-removal-audit-2026-03-31.md')
+      expect(leanEntries).not.toContain('.github/workflows/release.yml')
+
+      expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
+      expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
+      expect(fullEntries).toContain('docs/legacy-removal-audit-2026-03-31.md')
+      expect(fullEntries).toContain('.github/workflows/release.yml')
+      expect(fullEntries).toContain('agent-docs/generated/doc-inventory.md')
+      expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
+      expect(fullEntries).toContain('agent-docs/prompts/task-finish-review.md')
+      expect(leanEntries.length).toBeLessThan(fullEntries.length)
+    } finally {
+      rmSync(leanBundle.outDir, { force: true, recursive: true })
+      rmSync(fullBundle.outDir, { force: true, recursive: true })
+    }
   })
 
   it('keeps release:check ordered around install, build, repo verification, target validation, and pnpm pack', () => {
@@ -219,6 +336,58 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootDocsDrift).toContain('scripts/release-manifest.json')
     expect(rootDocsDrift).toContain('packages/cli/CHANGELOG.md')
     expect(rootDocsDrift).toContain('package_jsons_version_only')
+  })
+
+  it('wires the workspace package cycle guard into repo verification and keeps the live graph acyclic', () => {
+    const workspaceVerify = readFileSync(
+      path.join(repoRoot, 'scripts', 'workspace-verify.sh'),
+      'utf8',
+    )
+    const result = runNodeScript('scripts/check-workspace-package-cycles.mjs')
+
+    expect(workspaceVerify).toContain('node "scripts/check-workspace-package-cycles.mjs"')
+    expect(result.status).toBe(0)
+    expect(result.stderr).toBe('')
+    expect(result.stdout.trim()).toBe('Workspace package dependency cycle check passed.')
+  })
+
+  it('detects and formats workspace package dependency cycles without duplicate reports', () => {
+    const cycles = detectWorkspacePackageCycles([
+      {
+        name: '@murph/a',
+        packageJsonPath: path.join(repoRoot, 'packages', 'a', 'package.json'),
+        internalDependencies: [{ name: '@murph/b', fields: ['dependencies'] }],
+      },
+      {
+        name: '@murph/b',
+        packageJsonPath: path.join(repoRoot, 'packages', 'b', 'package.json'),
+        internalDependencies: [{ name: '@murph/c', fields: ['devDependencies'] }],
+      },
+      {
+        name: '@murph/c',
+        packageJsonPath: path.join(repoRoot, 'packages', 'c', 'package.json'),
+        internalDependencies: [{ name: '@murph/a', fields: ['peerDependencies'] }],
+      },
+      {
+        name: '@murph/d',
+        packageJsonPath: path.join(repoRoot, 'packages', 'd', 'package.json'),
+        internalDependencies: [{ name: '@murph/a', fields: ['optionalDependencies'] }],
+      },
+    ])
+
+    expect(cycles).toHaveLength(1)
+    expect(cycles[0]?.packageNames).toEqual([
+      '@murph/a',
+      '@murph/b',
+      '@murph/c',
+      '@murph/a',
+    ])
+    expect(formatWorkspacePackageCycles(cycles, repoRoot)).toBe(
+      '@murph/a -> @murph/b -> @murph/c -> @murph/a '
+        + '[packages/a/package.json (dependencies) -> @murph/b | '
+        + 'packages/b/package.json (devDependencies) -> @murph/c | '
+        + 'packages/c/package.json (peerDependencies) -> @murph/a]',
+    )
   })
 
   it('packages the selected vault and matching assistant-state without runtime or export-pack residue', () => {

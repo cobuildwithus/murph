@@ -61,12 +61,40 @@ export COBUILD_DOC_GARDENING_EXTRA_TRACKED_PATHS=ARCHITECTURE.md$'\n'
 export COBUILD_AUDIT_CONTEXT_PREFIX='murph-audit'
 export COBUILD_AUDIT_CONTEXT_TITLE='Murph Audit Bundle'
 export COBUILD_AUDIT_CONTEXT_REPO_LABEL='murph'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='0'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='0'
+export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='0'
+repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS \
+  "agent-docs/generated/**" \
+  "agent-docs/exec-plans/completed/**" \
+  "agent-docs/prompts/**" \
+  "packages/*/test/**" \
+  "packages/*/tests/**" \
+  "packages/*/**/__tests__/**" \
+  "packages/*/**/*.test.*" \
+  "packages/*/**/*.spec.*" \
+  "apps/*/test/**" \
+  "apps/*/tests/**" \
+  "apps/*/**/__tests__/**" \
+  "apps/*/**/*.test.*" \
+  "apps/*/**/*.spec.*"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   ".dockerignore" \
   "AGENTS.md" \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
   "README.md" \
+  "docs/architecture.md" \
+  "agent-docs/index.md" \
+  "agent-docs/PLANS.md" \
+  "agent-docs/RELIABILITY.md" \
+  "agent-docs/SECURITY.md" \
+  "agent-docs/references/repo-scope.md" \
+  "agent-docs/references/testing-ci-map.md" \
+  "agent-docs/operations/agent-workflow-routing.md" \
+  "agent-docs/operations/verification-and-runtime.md" \
+  "agent-docs/operations/completion-workflow.md" \
+  "agent-docs/exec-plans/active/COORDINATION_LEDGER.md" \
   "package.json" \
   "pnpm-workspace.yaml" \
   "tsconfig.test-runtime.json" \
@@ -76,14 +104,14 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "vitest.config.ts" \
   ".gitignore"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_SCAN_SPECS \
+  "agent-docs" \
   "config" \
   "packages" \
   "src" \
   "app" \
   "apps" \
   "contracts" \
-  "scripts" \
-  "docs"
+  "scripts"
 repo_tools_join_lines COBUILD_AUDIT_CONTEXT_TEST_SCAN_SPECS \
   "e2e" \
   "fixtures" \

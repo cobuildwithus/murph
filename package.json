@@ -38,6 +38,7 @@
     "plan:close": "bash scripts/close-exec-plan.sh",
     "task:finish": "bash scripts/finish-task",
     "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
+    "review:gpt:full": "cobuild-review-gpt --config scripts/review-gpt-full.config.sh",
     "review:gpt:delay": "bash scripts/review-gpt-delay.sh",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
     "chatgpt:thread:export": "node scripts/chatgpt-thread-export.mjs",
@@ -49,6 +50,7 @@
     "setup:inbox": "bash scripts/setup-inbox-local.sh",
     "doctor:inbox": "node packages/cli/dist/bin.js inbox doctor",
     "zip:src": "bash scripts/package-audit-context.sh --zip",
+    "zip:src:full": "bash scripts/package-audit-context-full.sh --zip",
     "verify:repo": "pnpm typecheck && pnpm test && pnpm test:coverage",
     "setup:macos": "bash scripts/setup-macos.sh",
     "local-web:dev": "pnpm --dir packages/local-web dev",
@@ -57,6 +59,7 @@
     "setup:host": "bash scripts/setup-host.sh",
     "setup:linux": "bash scripts/setup-linux.sh",
     "verify:workspace-boundaries": "node scripts/verify-workspace-boundaries.mjs",
+    "verify:workspace-package-cycles": "node scripts/check-workspace-package-cycles.mjs",
     "build:test-runtime:prepared": "node scripts/build-test-runtime-prepared.mjs"
   },
   "devDependencies": {

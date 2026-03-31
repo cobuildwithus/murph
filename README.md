@@ -180,11 +180,14 @@ pnpm test:coverage
 The repo also carries local review and ChatGPT-thread tooling for maintainers:
 
 - `pnpm review:gpt`
+- `pnpm review:gpt:full`
 - `pnpm review:gpt:delay --delay 50m --chat-url <url>`
 - `pnpm chatgpt:thread:export --chat-url <url> --output <path>`
 - `pnpm chatgpt:thread:download --chat-url <url> --attachment-text <filename> --output-dir <dir>`
 - `pnpm chatgpt:thread:watch --delay 70m --chat-url <url> [--session-id <uuid>]`
 - `pnpm review:gpt:data --vault ./vault --chat-url <url>`
+
+`pnpm review:gpt` now stages the lean default bundle: repo source plus the durable `agent-docs` context, while leaving out broad test trees, CI workflows, generated `agent-docs`, historical completed plans, prompt boilerplate, and the wider `docs/**` set beyond `docs/architecture.md`. Use `pnpm review:gpt:full` when you explicitly want the larger audit context.
 
 Those are contributor workflows, not the main product entrypoint, which is why they belong down here instead of near the top of the README.
 
