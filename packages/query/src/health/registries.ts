@@ -1,8 +1,6 @@
 import {
   requireBankEntityRegistryDefinition,
   type BankEntityKind,
-  type BankEntityRegistryProjectionHelpers,
-  type BankEntitySortBehavior,
 } from "@murph/contracts";
 import {
   applyLimit,
@@ -18,9 +16,10 @@ import {
   pathSlug,
 } from "./shared.ts";
 import {
-  getHealthRegistryQueryMetadata,
-  type HealthRegistryProjectionKind,
-} from "./health-registry-query-metadata.ts";
+  getBankRegistryQueryMetadata,
+  type BankEntityRegistryProjectionHelpers,
+  type BankEntitySortBehavior,
+} from "./bank-registry-query-metadata.ts";
 import {
   type CanonicalEntity,
   type CanonicalEntityFamily,
@@ -88,21 +87,6 @@ const registryProjectionHelpers: BankEntityRegistryProjectionHelpers = {
   firstStringArray,
 };
 
-const PROJECTED_HEALTH_REGISTRY_KINDS = new Set<HealthRegistryProjectionKind>([
-  "goal",
-  "condition",
-  "allergy",
-  "protocol",
-  "family",
-  "genetics",
-]);
-
-function isProjectedHealthRegistryKind(
-  kind: BankEntityKind,
-): kind is HealthRegistryProjectionKind {
-  return PROJECTED_HEALTH_REGISTRY_KINDS.has(kind as HealthRegistryProjectionKind);
-}
-
 export function buildPriorityTitleComparator<
   TEntity extends RegistryQueryEntity & { priority: number | null },
 >(
@@ -152,11 +136,8 @@ function compareRegistryRecords<TEntity extends RegistryQueryEntity>(
 function createBankEntityRegistryDefinition<TEntity extends RegistryQueryEntity>(
   kind: BankEntityKind,
 ): RegistryDefinition<TEntity> {
-  const definition = requireBankEntityRegistryDefinition(kind);
-  const { registry } = definition;
-  const projection = isProjectedHealthRegistryKind(kind)
-    ? getHealthRegistryQueryMetadata(kind)
-    : registry;
+  const { registry } = requireBankEntityRegistryDefinition(kind);
+  const projection = getBankRegistryQueryMetadata(kind);
 
   return {
     directory: registry.directory,
@@ -167,11 +148,11 @@ function createBankEntityRegistryDefinition<TEntity extends RegistryQueryEntity>
     transform(base, attributes, relativePath) {
       return {
         ...base,
-        ...(projection.transform?.({
+        ...projection.transform({
           attributes,
           helpers: registryProjectionHelpers,
           relativePath,
-        }) ?? {}),
+        }),
       } as TEntity;
     },
   };

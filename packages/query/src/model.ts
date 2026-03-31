@@ -53,32 +53,18 @@ export interface VaultRecord {
   relatedIds?: string[];
 }
 
-export interface VaultReadModel {
+type VaultReadModelFamilyViews = {
+  [K in VaultManyViewKey]: VaultRecord[];
+} & {
+  [K in VaultSingleViewKey]: VaultRecord | null;
+};
+
+export interface VaultReadModel extends VaultReadModelFamilyViews {
   format: "murph.query.v1";
   vaultRoot: string;
   metadata: QueryRecordData | null;
   entities: CanonicalEntity[];
   byFamily: VaultRecordsByFamily;
-  coreDocument: VaultRecord | null;
-  experiments: VaultRecord[];
-  journalEntries: VaultRecord[];
-  events: VaultRecord[];
-  samples: VaultRecord[];
-  audits: VaultRecord[];
-  assessments: VaultRecord[];
-  profileSnapshots: VaultRecord[];
-  currentProfile: VaultRecord | null;
-  goals: VaultRecord[];
-  conditions: VaultRecord[];
-  allergies: VaultRecord[];
-  protocols: VaultRecord[];
-  history: VaultRecord[];
-  familyMembers: VaultRecord[];
-  geneticVariants: VaultRecord[];
-  foods: VaultRecord[];
-  recipes: VaultRecord[];
-  providers: VaultRecord[];
-  workoutFormats: VaultRecord[];
   records: VaultRecord[];
 }
 
@@ -88,30 +74,10 @@ export interface CreateVaultReadModelInput {
   vaultRoot: string;
 }
 
-interface VaultReadModelDerivedViews {
+type VaultReadModelDerivedViews = {
   entities: CanonicalEntity[];
   byFamily: VaultRecordsByFamily;
-  coreDocument: VaultRecord | null;
-  experiments: VaultRecord[];
-  journalEntries: VaultRecord[];
-  events: VaultRecord[];
-  samples: VaultRecord[];
-  audits: VaultRecord[];
-  assessments: VaultRecord[];
-  profileSnapshots: VaultRecord[];
-  currentProfile: VaultRecord | null;
-  goals: VaultRecord[];
-  conditions: VaultRecord[];
-  allergies: VaultRecord[];
-  protocols: VaultRecord[];
-  history: VaultRecord[];
-  familyMembers: VaultRecord[];
-  geneticVariants: VaultRecord[];
-  foods: VaultRecord[];
-  recipes: VaultRecord[];
-  providers: VaultRecord[];
-  workoutFormats: VaultRecord[];
-}
+} & VaultReadModelFamilyViews;
 
 export interface EntityFilter {
   ids?: string[];
@@ -224,6 +190,50 @@ export const ALL_VAULT_RECORD_TYPES = [
 ] as const satisfies readonly VaultRecordType[];
 
 
+// Legacy convenience views stay derived from the authoritative records array.
+const VAULT_FAMILY_VIEW_SPECS = {
+  coreDocument: { recordType: "core", mode: "single" },
+  experiments: { recordType: "experiment", mode: "many" },
+  journalEntries: { recordType: "journal", mode: "many" },
+  events: { recordType: "event", mode: "many" },
+  samples: { recordType: "sample", mode: "many" },
+  audits: { recordType: "audit", mode: "many" },
+  assessments: { recordType: "assessment", mode: "many" },
+  profileSnapshots: { recordType: "profile_snapshot", mode: "many" },
+  currentProfile: { recordType: "current_profile", mode: "single" },
+  goals: { recordType: "goal", mode: "many" },
+  conditions: { recordType: "condition", mode: "many" },
+  allergies: { recordType: "allergy", mode: "many" },
+  protocols: { recordType: "protocol", mode: "many" },
+  history: { recordType: "history", mode: "many" },
+  familyMembers: { recordType: "family", mode: "many" },
+  geneticVariants: { recordType: "genetics", mode: "many" },
+  foods: { recordType: "food", mode: "many" },
+  recipes: { recordType: "recipe", mode: "many" },
+  providers: { recordType: "provider", mode: "many" },
+  workoutFormats: { recordType: "workout_format", mode: "many" },
+} as const satisfies Record<
+  string,
+  {
+    readonly mode: "many" | "single";
+    readonly recordType: VaultRecordType;
+  }
+>;
+
+type VaultFamilyViewKey = keyof typeof VAULT_FAMILY_VIEW_SPECS;
+type VaultFamilyViewSpec = (typeof VAULT_FAMILY_VIEW_SPECS)[VaultFamilyViewKey];
+type VaultSingleViewKey = {
+  [K in VaultFamilyViewKey]: (typeof VAULT_FAMILY_VIEW_SPECS)[K]["mode"] extends "single"
+    ? K
+    : never;
+}[VaultFamilyViewKey];
+type VaultManyViewKey = Exclude<VaultFamilyViewKey, VaultSingleViewKey>;
+
+const VAULT_FAMILY_VIEW_ENTRIES = Object.entries(
+  VAULT_FAMILY_VIEW_SPECS,
+) as ReadonlyArray<[VaultFamilyViewKey, VaultFamilyViewSpec]>;
+
+
 function toCanonicalEntity(record: VaultRecord): CanonicalEntity {
   return {
     entityId: record.displayId,
@@ -248,6 +258,24 @@ function toCanonicalEntity(record: VaultRecord): CanonicalEntity {
   };
 }
 
+function deriveVaultFamilyViews(
+  byFamily: VaultRecordsByFamily,
+): VaultReadModelFamilyViews {
+  const views = {} as VaultReadModelFamilyViews;
+
+  for (const [propertyName, spec] of VAULT_FAMILY_VIEW_ENTRIES) {
+    (views as Record<
+      VaultFamilyViewKey,
+      VaultReadModelFamilyViews[VaultFamilyViewKey]
+    >)[propertyName] =
+      spec.mode === "single"
+        ? firstRecordOfType(byFamily, spec.recordType)
+        : recordsOfType(byFamily, spec.recordType);
+  }
+
+  return views;
+}
+
 function deriveVaultReadModelViews(
   records: readonly VaultRecord[],
 ): VaultReadModelDerivedViews {
@@ -256,26 +284,7 @@ function deriveVaultReadModelViews(
   return {
     entities: records.map((record) => toCanonicalEntity(record)),
     byFamily,
-    coreDocument: firstRecordOfType(byFamily, "core"),
-    experiments: recordsOfType(byFamily, "experiment"),
-    journalEntries: recordsOfType(byFamily, "journal"),
-    events: recordsOfType(byFamily, "event"),
-    samples: recordsOfType(byFamily, "sample"),
-    audits: recordsOfType(byFamily, "audit"),
-    assessments: recordsOfType(byFamily, "assessment"),
-    profileSnapshots: recordsOfType(byFamily, "profile_snapshot"),
-    currentProfile: firstRecordOfType(byFamily, "current_profile"),
-    goals: recordsOfType(byFamily, "goal"),
-    conditions: recordsOfType(byFamily, "condition"),
-    allergies: recordsOfType(byFamily, "allergy"),
-    protocols: recordsOfType(byFamily, "protocol"),
-    history: recordsOfType(byFamily, "history"),
-    familyMembers: recordsOfType(byFamily, "family"),
-    geneticVariants: recordsOfType(byFamily, "genetics"),
-    foods: recordsOfType(byFamily, "food"),
-    recipes: recordsOfType(byFamily, "recipe"),
-    providers: recordsOfType(byFamily, "provider"),
-    workoutFormats: recordsOfType(byFamily, "workout_format"),
+    ...deriveVaultFamilyViews(byFamily),
   };
 }
 
@@ -299,6 +308,17 @@ function replaceVaultRecordFamily(
   }
 
   return flattenVaultRecordsByFamily(byFamily);
+}
+
+function normalizeVaultFamilyViewRecords(
+  spec: VaultFamilyViewSpec,
+  value: VaultReadModelFamilyViews[VaultFamilyViewKey],
+): VaultRecord[] {
+  if (spec.mode === "single") {
+    return value ? [value as VaultRecord] : [];
+  }
+
+  return (value as VaultRecord[]).slice();
 }
 
 export function createVaultReadModel(
@@ -333,7 +353,7 @@ export function createVaultReadModel(
     vaultRoot: input.vaultRoot,
   } as VaultReadModel;
 
-  Object.defineProperties(model, {
+  const descriptors: PropertyDescriptorMap = {
     records: {
       enumerable: true,
       get() {
@@ -361,187 +381,24 @@ export function createVaultReadModel(
         updateRecords(flattenVaultRecordsByFamily(value));
       },
     },
-    coreDocument: {
+  };
+
+  for (const [propertyName, spec] of VAULT_FAMILY_VIEW_ENTRIES) {
+    descriptors[propertyName] = {
       enumerable: true,
       get() {
-        return readViews().coreDocument;
+        return readViews()[propertyName];
       },
-      set(value: VaultRecord | null) {
-        updateRecordFamily("core", value ? [value] : []);
+      set(value: VaultReadModelFamilyViews[typeof propertyName]) {
+        updateRecordFamily(
+          spec.recordType,
+          normalizeVaultFamilyViewRecords(spec, value),
+        );
       },
-    },
-    experiments: {
-      enumerable: true,
-      get() {
-        return readViews().experiments;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("experiment", value);
-      },
-    },
-    journalEntries: {
-      enumerable: true,
-      get() {
-        return readViews().journalEntries;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("journal", value);
-      },
-    },
-    events: {
-      enumerable: true,
-      get() {
-        return readViews().events;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("event", value);
-      },
-    },
-    samples: {
-      enumerable: true,
-      get() {
-        return readViews().samples;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("sample", value);
-      },
-    },
-    audits: {
-      enumerable: true,
-      get() {
-        return readViews().audits;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("audit", value);
-      },
-    },
-    assessments: {
-      enumerable: true,
-      get() {
-        return readViews().assessments;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("assessment", value);
-      },
-    },
-    profileSnapshots: {
-      enumerable: true,
-      get() {
-        return readViews().profileSnapshots;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("profile_snapshot", value);
-      },
-    },
-    currentProfile: {
-      enumerable: true,
-      get() {
-        return readViews().currentProfile;
-      },
-      set(value: VaultRecord | null) {
-        updateRecordFamily("current_profile", value ? [value] : []);
-      },
-    },
-    goals: {
-      enumerable: true,
-      get() {
-        return readViews().goals;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("goal", value);
-      },
-    },
-    conditions: {
-      enumerable: true,
-      get() {
-        return readViews().conditions;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("condition", value);
-      },
-    },
-    allergies: {
-      enumerable: true,
-      get() {
-        return readViews().allergies;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("allergy", value);
-      },
-    },
-    protocols: {
-      enumerable: true,
-      get() {
-        return readViews().protocols;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("protocol", value);
-      },
-    },
-    history: {
-      enumerable: true,
-      get() {
-        return readViews().history;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("history", value);
-      },
-    },
-    familyMembers: {
-      enumerable: true,
-      get() {
-        return readViews().familyMembers;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("family", value);
-      },
-    },
-    geneticVariants: {
-      enumerable: true,
-      get() {
-        return readViews().geneticVariants;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("genetics", value);
-      },
-    },
-    foods: {
-      enumerable: true,
-      get() {
-        return readViews().foods;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("food", value);
-      },
-    },
-    recipes: {
-      enumerable: true,
-      get() {
-        return readViews().recipes;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("recipe", value);
-      },
-    },
-    providers: {
-      enumerable: true,
-      get() {
-        return readViews().providers;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("provider", value);
-      },
-    },
-    workoutFormats: {
-      enumerable: true,
-      get() {
-        return readViews().workoutFormats;
-      },
-      set(value: VaultRecord[]) {
-        updateRecordFamily("workout_format", value);
-      },
-    },
-  });
+    };
+  }
+
+  Object.defineProperties(model, descriptors);
 
   return model;
 }
