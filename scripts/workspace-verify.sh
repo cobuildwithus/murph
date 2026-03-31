@@ -33,6 +33,7 @@ readonly shell_syntax_check_scripts=(
 
 readonly node_syntax_check_scripts=(
   "scripts/build-test-runtime-prepared.mjs"
+  "scripts/check-workspace-package-cycles.mjs"
   "scripts/release-helpers.mjs"
   "scripts/verify-release-target.mjs"
   "scripts/pack-publishables.mjs"
@@ -105,6 +106,7 @@ check_node_syntax() {
 
 run_workspace_boundary_check() {
   node "scripts/verify-workspace-boundaries.mjs"
+  node "scripts/check-workspace-package-cycles.mjs"
 }
 
 run_typecheck_packages() {
