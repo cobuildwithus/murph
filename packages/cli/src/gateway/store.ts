@@ -30,7 +30,6 @@ import {
   gatewayMessageSchema,
   gatewayPermissionRequestSchema,
   gatewayProjectionSnapshotSchema,
-  gatewayWaitForEventsInputSchema,
   type GatewayAttachment,
   type GatewayConversation,
   type GatewayConversationRoute,
@@ -65,13 +64,9 @@ import {
   deriveLastMessagePreview,
 } from './snapshot.js'
 
-const CAPTURE_CURSOR_CREATED_AT_META_KEY = 'captures.cursor.createdAt'
-const CAPTURE_CURSOR_ID_META_KEY = 'captures.cursor.captureId'
-const ATTACHMENT_CURSOR_UPDATED_AT_META_KEY = 'attachments.cursor.updatedAt'
-const ATTACHMENT_CURSOR_ID_META_KEY = 'attachments.cursor.attachmentId'
+const CAPTURE_SIGNATURE_META_KEY = 'captures.signature'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
-const INBOX_SYNC_PAGE_SIZE = 500
 
 interface CaptureSourceRow {
   accountId: string | null
@@ -171,16 +166,6 @@ interface GatewaySnapshotState {
   snapshot: GatewayProjectionSnapshot | null
 }
 
-interface GatewayCaptureSyncCursor {
-  captureId: string
-  createdAt: string
-}
-
-interface GatewayAttachmentSyncCursor {
-  attachmentId: string
-  updatedAt: string
-}
-
 export async function exportGatewayProjectionSnapshotLocal(
   vault: string,
 ): Promise<GatewayProjectionSnapshot> {
@@ -261,82 +246,27 @@ export class LocalGatewayProjectionStore {
   }
 
   async sync(): Promise<void> {
-    const [sessions, outboxIntents] = await Promise.all([
+    // Keep capture sync conservative until inboxd exposes a durable update cursor for
+    // attachment reparse and capture rewrites. A full signature avoids serving stale
+    // gateway messages or attachment metadata after inbox-side mutations.
+    const [captures, sessions, outboxIntents] = await Promise.all([
+      listAllInboxCapturesByCreatedOrder(this.vault),
       listAssistantSessionsLocal(this.vault),
       listAssistantOutboxIntentsLocal(this.vault),
     ])
+    const captureSignature = computeCaptureSyncSignature(captures)
     const sessionSignature = computeSessionSyncSignature(sessions)
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)
-    const captureCursor = readGatewayCaptureSyncCursor(this.database)
-    const attachmentCursor = readGatewayAttachmentSyncCursor(this.database)
-    const captureSourceCount = readGatewayTableCount(this.database, 'gateway_capture_sources')
-    const rebuildCaptures = captureSourceCount === 0 || captureCursor === null
 
     await withGatewayImmediateTransaction(this.database, async () => {
       let changed = false
-      const hadServingSnapshot = hasGatewayServingSnapshot(this.database)
-      let nextAttachmentCursor: GatewayAttachmentSyncCursor | null =
-        rebuildCaptures ? null : attachmentCursor
 
-      if (rebuildCaptures) {
+      if (readMeta(this.database, CAPTURE_SIGNATURE_META_KEY) !== captureSignature) {
         clearCaptureSources(this.database)
-        let nextCaptureCursor: GatewayCaptureSyncCursor | null = null
-
-        while (true) {
-          const page = await listInboxCapturesCreatedSince(
-            this.vault,
-            nextCaptureCursor,
-            INBOX_SYNC_PAGE_SIZE,
-          )
-          if (page.captures.length > 0) {
-            upsertCaptureSources(this.database, page.captures)
-            changed = true
-          }
-          nextCaptureCursor = page.cursor
-          if (!page.hasMore) {
-            break
-          }
-        }
-
-        writeGatewayCaptureSyncCursor(this.database, nextCaptureCursor)
-        changed = changed || !hadServingSnapshot
-      } else {
-        let nextCaptureCursor = captureCursor
-
-        while (true) {
-          const page = await listInboxCapturesCreatedSince(
-            this.vault,
-            nextCaptureCursor,
-            INBOX_SYNC_PAGE_SIZE,
-          )
-          if (page.captures.length > 0) {
-            upsertCaptureSources(this.database, page.captures)
-            changed = true
-          }
-          nextCaptureCursor = page.cursor ?? nextCaptureCursor
-          if (!page.hasMore) {
-            break
-          }
-        }
-        writeGatewayCaptureSyncCursor(this.database, nextCaptureCursor)
+        upsertCaptureSources(this.database, captures)
+        writeMeta(this.database, CAPTURE_SIGNATURE_META_KEY, captureSignature)
+        changed = true
       }
-
-      while (true) {
-        const page = await listAttachmentCaptureUpdatesSince(
-          this.vault,
-          nextAttachmentCursor,
-          INBOX_SYNC_PAGE_SIZE,
-        )
-        if (page.captures.length > 0) {
-          upsertCaptureSources(this.database, page.captures)
-          changed = true
-        }
-        nextAttachmentCursor = page.cursor
-        if (!page.hasMore) {
-          break
-        }
-      }
-      writeGatewayAttachmentSyncCursor(this.database, nextAttachmentCursor)
 
       if (readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature) {
         replaceSessionSources(this.database, sessions)
@@ -391,15 +321,9 @@ export class LocalGatewayProjectionStore {
   }
 }
 
-async function listInboxCapturesCreatedSince(
+async function listAllInboxCapturesByCreatedOrder(
   vault: string,
-  cursor: GatewayCaptureSyncCursor | null,
-  limit: number,
-): Promise<{
-  captures: InboxCaptureRecord[]
-  cursor: GatewayCaptureSyncCursor | null
-  hasMore: boolean
-}> {
+): Promise<InboxCaptureRecord[]> {
   const runtime = await openInboxRuntime({ vaultRoot: vault })
   const database = openSqliteRuntimeDatabase(resolveInboxRuntimePaths(vault).inboxDbPath)
   try {
@@ -407,17 +331,10 @@ async function listInboxCapturesCreatedSince(
       .prepare(
         `SELECT capture_id AS captureId, created_at AS createdAt
            FROM capture
-          WHERE (? IS NULL OR created_at > ? OR (created_at = ? AND capture_id > ?))
           ORDER BY created_at ASC, capture_id ASC
-          LIMIT ?`,
+        `,
       )
-      .all(
-        cursor?.createdAt ?? null,
-        cursor?.createdAt ?? null,
-        cursor?.createdAt ?? null,
-        cursor?.captureId ?? null,
-        limit,
-      ) as Array<{ captureId: string; createdAt: string }>
+      .all() as Array<{ captureId: string; createdAt: string }>
 
     const captures: InboxCaptureRecord[] = []
     for (const row of rows) {
@@ -427,84 +344,7 @@ async function listInboxCapturesCreatedSince(
       }
     }
 
-    const last = rows[rows.length - 1] ?? null
-    return {
-      captures,
-      cursor: last
-        ? {
-            captureId: last.captureId,
-            createdAt: last.createdAt,
-          }
-        : cursor,
-      hasMore: rows.length === limit,
-    }
-  } finally {
-    database.close()
-    runtime.close()
-  }
-}
-
-async function listAttachmentCaptureUpdatesSince(
-  vault: string,
-  cursor: GatewayAttachmentSyncCursor | null,
-  limit: number,
-): Promise<{
-  captures: InboxCaptureRecord[]
-  cursor: GatewayAttachmentSyncCursor | null
-  hasMore: boolean
-}> {
-  const runtime = await openInboxRuntime({ vaultRoot: vault })
-  const database = openSqliteRuntimeDatabase(resolveInboxRuntimePaths(vault).inboxDbPath)
-  try {
-    const rows = database
-      .prepare(
-        `SELECT attachment_id AS attachmentId,
-                capture_id AS captureId,
-                coalesce(parse_updated_at, created_at) AS updatedAt
-           FROM capture_attachment
-          WHERE (
-            ? IS NULL OR
-            coalesce(parse_updated_at, created_at) > ? OR
-            (
-              coalesce(parse_updated_at, created_at) = ? AND
-              attachment_id > ?
-            )
-          )
-          ORDER BY coalesce(parse_updated_at, created_at) ASC, attachment_id ASC
-          LIMIT ?`,
-      )
-      .all(
-        cursor?.updatedAt ?? null,
-        cursor?.updatedAt ?? null,
-        cursor?.updatedAt ?? null,
-        cursor?.attachmentId ?? null,
-        limit,
-      ) as Array<{ attachmentId: string; captureId: string; updatedAt: string }>
-
-    const captures: InboxCaptureRecord[] = []
-    const seenCaptureIds = new Set<string>()
-    for (const row of rows) {
-      if (seenCaptureIds.has(row.captureId)) {
-        continue
-      }
-      const capture = runtime.getCapture(row.captureId)
-      if (capture) {
-        captures.push(capture)
-        seenCaptureIds.add(row.captureId)
-      }
-    }
-
-    const last = rows[rows.length - 1] ?? null
-    return {
-      captures,
-      cursor: last
-        ? {
-            attachmentId: last.attachmentId,
-            updatedAt: last.updatedAt,
-          }
-        : cursor,
-      hasMore: rows.length === limit,
-    }
+    return captures
   } finally {
     database.close()
     runtime.close()
@@ -970,48 +810,6 @@ function readGatewayTableCount(database: DatabaseSync, tableName: string): numbe
     .prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
     .get() as { count: number | null }
   return row.count ?? 0
-}
-
-function readGatewayCaptureSyncCursor(
-  database: DatabaseSync,
-): GatewayCaptureSyncCursor | null {
-  const createdAt = readMeta(database, CAPTURE_CURSOR_CREATED_AT_META_KEY)
-  const captureId = readMeta(database, CAPTURE_CURSOR_ID_META_KEY)
-  return createdAt && captureId
-    ? {
-        captureId,
-        createdAt,
-      }
-    : null
-}
-
-function writeGatewayCaptureSyncCursor(
-  database: DatabaseSync,
-  cursor: GatewayCaptureSyncCursor | null,
-): void {
-  writeMeta(database, CAPTURE_CURSOR_CREATED_AT_META_KEY, cursor?.createdAt ?? null)
-  writeMeta(database, CAPTURE_CURSOR_ID_META_KEY, cursor?.captureId ?? null)
-}
-
-function readGatewayAttachmentSyncCursor(
-  database: DatabaseSync,
-): GatewayAttachmentSyncCursor | null {
-  const updatedAt = readMeta(database, ATTACHMENT_CURSOR_UPDATED_AT_META_KEY)
-  const attachmentId = readMeta(database, ATTACHMENT_CURSOR_ID_META_KEY)
-  return updatedAt && attachmentId
-    ? {
-        attachmentId,
-        updatedAt,
-      }
-    : null
-}
-
-function writeGatewayAttachmentSyncCursor(
-  database: DatabaseSync,
-  cursor: GatewayAttachmentSyncCursor | null,
-): void {
-  writeMeta(database, ATTACHMENT_CURSOR_UPDATED_AT_META_KEY, cursor?.updatedAt ?? null)
-  writeMeta(database, ATTACHMENT_CURSOR_ID_META_KEY, cursor?.attachmentId ?? null)
 }
 
 function buildSnapshotFromDatabase(database: DatabaseSync): GatewayProjectionSnapshot {
@@ -1693,6 +1491,10 @@ function computeSessionSyncSignature(sessions: readonly AssistantSession[]): str
       }))
       .sort((left, right) => left.sessionId.localeCompare(right.sessionId)),
   )
+}
+
+function computeCaptureSyncSignature(captures: readonly InboxCaptureRecord[]): string {
+  return JSON.stringify(captures)
 }
 
 function computeOutboxSyncSignature(intents: readonly AssistantOutboxIntent[]): string {

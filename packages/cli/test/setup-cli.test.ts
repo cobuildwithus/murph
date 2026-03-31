@@ -1853,7 +1853,7 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
   }
 })
 
-test('wizard keeps a custom compatible endpoint even when it reuses OPENAI_API_KEY', () => {
+test('wizard infers Ollama from the default local endpoint even when it reuses OPENAI_API_KEY', () => {
   assert.equal(
     inferSetupWizardAssistantProvider({
       apiKeyEnv: 'OPENAI_API_KEY',
@@ -1861,29 +1861,41 @@ test('wizard keeps a custom compatible endpoint even when it reuses OPENAI_API_K
       preset: 'openai-compatible',
       providerName: null,
     }),
-    'compatible',
+    'ollama',
   )
 })
 
-test('wizard preserves existing compatible endpoint metadata when that method stays selected', () => {
+test('wizard still falls back to a custom endpoint when a non-OpenAI base URL reuses OPENAI_API_KEY', () => {
+  assert.equal(
+    inferSetupWizardAssistantProvider({
+      apiKeyEnv: 'OPENAI_API_KEY',
+      baseUrl: 'https://models.example.test/v1',
+      preset: 'openai-compatible',
+      providerName: null,
+    }),
+    'custom',
+  )
+})
+
+test('wizard preserves existing named provider metadata when that provider stays selected', () => {
   assert.deepEqual(
     resolveSetupWizardAssistantSelection({
       initialApiKeyEnv: 'OPENROUTER_API_KEY',
       initialBaseUrl: 'https://openrouter.ai/api/v1',
-      initialProvider: 'compatible',
+      initialProvider: 'openrouter',
       initialProviderName: 'OpenRouter',
-      method: 'compatible-endpoint',
-      provider: 'compatible',
+      method: 'compatible-provider',
+      provider: 'openrouter',
     }),
     {
       apiKeyEnv: 'OPENROUTER_API_KEY',
       baseUrl: 'https://openrouter.ai/api/v1',
-      detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
-      methodLabel: 'Compatible endpoint',
+      detail: 'Murph will use OpenRouter and read the key from OPENROUTER_API_KEY. It will ask which model to save next.',
+      methodLabel: null,
       preset: 'openai-compatible',
-      providerLabel: 'Local or compatible endpoint',
+      providerLabel: 'OpenRouter',
       providerName: 'OpenRouter',
-      summary: 'Local or compatible endpoint · Compatible endpoint',
+      summary: 'OpenRouter',
     },
   )
 })

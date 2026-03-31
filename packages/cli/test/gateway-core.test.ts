@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { access, readFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { execFile } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import { test } from 'vitest'
@@ -16,10 +18,16 @@ import {
   gatewayReadMessagesInputSchema,
   mergeGatewayConversationRoutes,
   resolveGatewayConversationRouteKey,
+  createGatewayConversationSessionKey,
 } from '../src/gateway-core.js'
-import { createGatewayConversationSessionKey } from '../src/gateway/opaque-ids.js'
 
 const execFileAsync = promisify(execFile)
+const gatewayCoreSourceDir = path.resolve(
+  fileURLToPath(new URL('..', import.meta.url)),
+  '..',
+  'gateway-core',
+  'src',
+)
 
 test('murph publishes gateway-core for headless conversation gateway consumers', async () => {
   const packageManifest = JSON.parse(
@@ -36,6 +44,14 @@ test('murph publishes gateway-core for headless conversation gateway consumers',
     default: './dist/gateway-core-local.js',
     types: './dist/gateway-core-local.d.ts',
   })
+})
+
+test('dedicated @murph/gateway-core package owns the transport-neutral exports while keeping the local subpath transitional', async () => {
+  const packageIndex = await readFile(path.join(gatewayCoreSourceDir, 'index.ts'), 'utf8')
+  const packageLocal = await readFile(path.join(gatewayCoreSourceDir, 'local.ts'), 'utf8')
+
+  assert.doesNotMatch(packageIndex, /from ['"]murph\/gateway-core['"]/u)
+  assert.match(packageLocal, /murph\/gateway-core-local/u)
 })
 
 test('workspace source resolution knows about the dedicated @murph/gateway-core packages while preserving murph compatibility exports', async () => {

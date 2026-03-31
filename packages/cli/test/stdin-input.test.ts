@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 
-test.sequential('payload-based commands accept stdin via --input -', async () => {
+test('payload-based commands accept stdin via --input -', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {
@@ -269,7 +269,7 @@ test.sequential('payload-based commands accept stdin via --input -', async () =>
   }
 })
 
-test.sequential('payload-based commands reject empty stdin with an actionable message', async () => {
+test('payload-based commands reject empty stdin with an actionable message', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {
@@ -288,7 +288,7 @@ test.sequential('payload-based commands reject empty stdin with an actionable me
   }
 })
 
-test.sequential('payload-based commands reject non-object stdin JSON', async () => {
+test('payload-based commands reject non-object stdin JSON', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-stdin-'))
 
   try {

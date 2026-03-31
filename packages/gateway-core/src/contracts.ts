@@ -319,6 +319,6 @@ export type GatewayReplyRoute = z.infer<typeof gatewayReplyRouteSchema>
 export type GatewayRespondToPermissionInput = z.infer<
   typeof gatewayRespondToPermissionInputSchema
 >
-export type GatewaySendMessageInput = z.infer<typeof gatewaySendMessageInputSchema>
+export type GatewaySendMessageInput = z.input<typeof gatewaySendMessageInputSchema>
 export type GatewaySendMessageResult = z.infer<typeof gatewaySendMessageResultSchema>
 export type GatewayWaitForEventsInput = z.infer<typeof gatewayWaitForEventsInputSchema>

@@ -97,12 +97,32 @@ assert(
   'package.json exports must target dist/index.d.ts for types.',
 )
 assert(
-  packageJson.exports?.['./assistant-core']?.default === './dist/assistant-core.js',
-  'package.json must publish the assistant-core headless surface from dist/assistant-core.js.',
+  packageJson.exports?.['./assistant-core'] === undefined,
+  'package.json must not publish the removed assistant-core compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./assistant-core']?.types === './dist/assistant-core.d.ts',
-  'package.json must publish assistant-core types from dist/assistant-core.d.ts.',
+  packageJson.exports?.['./assistant/service']?.default === './dist/assistant/service.js',
+  'package.json must publish assistant/service from dist/assistant/service.js.',
+)
+assert(
+  packageJson.exports?.['./assistant/service']?.types === './dist/assistant/service.d.ts',
+  'package.json must publish assistant/service types from dist/assistant/service.d.ts.',
+)
+assert(
+  packageJson.exports?.['./assistant/state-ids']?.default === './dist/assistant/state-ids.js',
+  'package.json must publish assistant/state-ids from dist/assistant/state-ids.js.',
+)
+assert(
+  packageJson.exports?.['./assistant/state-ids']?.types === './dist/assistant/state-ids.d.ts',
+  'package.json must publish assistant/state-ids types from dist/assistant/state-ids.d.ts.',
+)
+assert(
+  packageJson.exports?.['./assistant-cli-contracts']?.default === './dist/assistant-cli-contracts.js',
+  'package.json must publish assistant-cli-contracts from dist/assistant-cli-contracts.js.',
+)
+assert(
+  packageJson.exports?.['./assistant-cli-contracts']?.types === './dist/assistant-cli-contracts.d.ts',
+  'package.json must publish assistant-cli-contracts types from dist/assistant-cli-contracts.d.ts.',
 )
 assert(
   packageJson.exports?.['./gateway-core']?.default === './dist/gateway-core.js',

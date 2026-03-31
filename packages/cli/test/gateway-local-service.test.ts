@@ -5,7 +5,11 @@ import path from 'node:path'
 
 import { initializeVault } from '@murph/core'
 import { createInboxPipeline, openInboxRuntime } from '@murph/inboxd'
-import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murph/runtime-state'
+import {
+  openSqliteRuntimeDatabase,
+  resolveGatewayRuntimePaths,
+  resolveInboxRuntimePaths,
+} from '@murph/runtime-state'
 import { test } from 'vitest'
 
 import { assistantSessionSchema } from '../src/assistant-cli-contracts.js'
@@ -20,6 +24,40 @@ import {
   readGatewayMessagesLocal,
   sendGatewayMessageLocal,
 } from '../src/gateway-core-local.js'
+
+async function rewriteInboxCaptureRuntimeRecord(input: {
+  accountId?: string | null
+  externalId: string
+  source: string
+  textContent: string
+  threadTitle?: string | null
+  vaultRoot: string
+}): Promise<void> {
+  const database = openSqliteRuntimeDatabase(resolveInboxRuntimePaths(input.vaultRoot).inboxDbPath)
+  try {
+    const result = database
+      .prepare(
+        `
+          update capture
+             set text_content = ?,
+                 thread_title = coalesce(?, thread_title)
+           where source = ?
+             and account_id = ?
+             and external_id = ?
+        `,
+      )
+      .run(
+        input.textContent,
+        input.threadTitle ?? null,
+        input.source,
+        input.accountId ?? '',
+        input.externalId,
+      )
+    assert.equal(result.changes, 1)
+  } finally {
+    database.close()
+  }
+}
 
 test('local gateway projection derives route-backed conversations and transcripts from inbox captures plus assistant state', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-local-'))
@@ -356,12 +394,12 @@ test('local gateway hides actor-derived titles unless includeDerivedTitles is en
   }
 })
 
-test('local gateway persists serving tables and advances an incremental capture cursor', async () => {
+test('local gateway persists serving tables and tracks a conservative capture signature', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-serving-store-'))
 
   try {
     await initializeVault({ vaultRoot })
-    let firstCaptureCursorCreatedAt: string | null = null
+    let firstCaptureSignature: string | null = null
 
     const runtime = await openInboxRuntime({ vaultRoot })
     const pipeline = await createInboxPipeline({ vaultRoot, runtime })
@@ -407,19 +445,15 @@ test('local gateway persists serving tables and advances an incremental capture 
       const snapshotJson = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
         .get('snapshot.json') as { value?: string } | undefined
-      const captureCursorCreatedAt = gatewayDb
+      const captureSignature = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('captures.cursor.createdAt') as { value?: string } | undefined
-      const captureCursorId = gatewayDb
-        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('captures.cursor.captureId') as { value?: string } | undefined
+        .get('captures.signature') as { value?: string } | undefined
 
       assert.equal(conversationCount.count, 1)
       assert.equal(messageCount.count, 1)
       assert.equal(snapshotJson, undefined)
-      assert.ok(captureCursorCreatedAt?.value)
-      assert.ok(captureCursorId?.value)
-      firstCaptureCursorCreatedAt = captureCursorCreatedAt?.value ?? null
+      assert.ok(captureSignature?.value)
+      firstCaptureSignature = captureSignature?.value ?? null
     } finally {
       gatewayDb.close()
     }
@@ -470,15 +504,15 @@ test('local gateway persists serving tables and advances an incremental capture 
       const messageCount = gatewayDbAfterIncrement
         .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
         .get() as { count: number }
-      const captureCursorCreatedAt = gatewayDbAfterIncrement
+      const captureSignature = gatewayDbAfterIncrement
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('captures.cursor.createdAt') as { value?: string } | undefined
+        .get('captures.signature') as { value?: string } | undefined
 
       assert.equal(captureSourceCount.count, 2)
       assert.equal(messageCount.count, 2)
-      assert.ok(captureCursorCreatedAt?.value)
-      assert.ok(firstCaptureCursorCreatedAt)
-      assert.ok(captureCursorCreatedAt!.value >= firstCaptureCursorCreatedAt)
+      assert.ok(captureSignature?.value)
+      assert.ok(firstCaptureSignature)
+      assert.notEqual(captureSignature?.value, firstCaptureSignature)
     } finally {
       gatewayDbAfterIncrement.close()
     }
@@ -579,6 +613,90 @@ test('local gateway refreshes attachment parse metadata when only capture_attach
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
     await rm(attachmentSourceRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway refreshes message projection when an existing capture is rewritten', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-capture-rewrite-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8251',
+      thread: {
+        id: 'chat-capture-rewrite',
+        title: 'Old title',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'Original capture text',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const initialConversation = (
+      await listGatewayConversationsLocal(vaultRoot, {
+        channel: null,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+        limit: 10,
+        search: null,
+      })
+    ).conversations[0]
+    assert.ok(initialConversation)
+    assert.equal(initialConversation?.title, 'Old title')
+
+    const initialMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: initialConversation!.sessionKey,
+    })
+    assert.equal(initialMessages.messages[0]?.text, 'Original capture text')
+
+    await rewriteInboxCaptureRuntimeRecord({
+      accountId: 'default',
+      externalId: 'linq:8251',
+      source: 'linq',
+      textContent: 'Rewritten capture text',
+      threadTitle: 'Rewritten title',
+      vaultRoot,
+    })
+
+    const refreshedConversation = (
+      await listGatewayConversationsLocal(vaultRoot, {
+        channel: null,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+        limit: 10,
+        search: null,
+      })
+    ).conversations[0]
+    assert.ok(refreshedConversation)
+    assert.equal(refreshedConversation?.title, 'Rewritten title')
+    assert.equal(refreshedConversation?.lastMessagePreview, 'Rewritten capture text')
+
+    const refreshedMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: refreshedConversation!.sessionKey,
+    })
+    assert.equal(refreshedMessages.messages[0]?.text, 'Rewritten capture text')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
   }
 })
 
@@ -865,6 +983,12 @@ test('local gateway send reuses an existing intent when clientRequestId is retri
       search: null,
     })).conversations[0]
     assert.ok(conversation)
+    const initialMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation.sessionKey,
+    })
 
     const first = await sendGatewayMessageLocal({
       clientRequestId: 'req-123',
@@ -876,14 +1000,17 @@ test('local gateway send reuses an existing intent when clientRequestId is retri
     const second = await sendGatewayMessageLocal({
       clientRequestId: 'req-123',
       dispatchMode: 'queue-only',
+      replyToMessageId: initialMessages.messages[0]?.messageId ?? null,
       sessionKey: conversation.sessionKey,
-      text: 'Queued retry-safe follow-up.',
+      text: 'Queued retry-safe follow-up with drift.',
       vault: vaultRoot,
     })
 
     assert.equal(first.messageId, second.messageId)
     const intents = await listAssistantOutboxIntentsLocal(vaultRoot)
     assert.equal(intents.length, 1)
+    assert.equal(intents[0]?.message, 'Queued retry-safe follow-up.')
+    assert.equal(intents[0]?.replyToMessageId, null)
     assert.equal(intents[0]?.deliveryIdempotencyKey?.startsWith('gateway-send:'), true)
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })

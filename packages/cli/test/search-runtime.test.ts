@@ -4,7 +4,7 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   repoRoot,
   requireData,
@@ -284,7 +284,7 @@ async function writeVaultFile(
   await writeFile(path.join(vaultRoot, relativePath), contents, 'utf8')
 }
 
-test.sequential('search returns lexical hits and excludes raw sample rows by default', async () => {
+test('search returns lexical hits and excludes raw sample rows by default', async () => {
   const fixture = await makeRetrievalFixture()
 
   try {
@@ -325,7 +325,7 @@ test.sequential('search returns lexical hits and excludes raw sample rows by def
   }
 })
 
-test.sequential('search applies date bounds and echoes renamed filter keys', async () => {
+test('search applies date bounds and echoes renamed filter keys', async () => {
   const fixture = await makeSourceRetrievalFixture()
 
   try {
@@ -408,7 +408,7 @@ Afternoon crash after pasta lunch returned.
   }
 })
 
-test.sequential('search includes sample rows when the caller scopes by stream', async () => {
+test('search includes sample rows when the caller scopes by stream', async () => {
   const fixture = await makeRetrievalFixture()
 
   try {
@@ -441,7 +441,7 @@ test.sequential('search includes sample rows when the caller scopes by stream', 
   }
 })
 
-test.sequential('timeline merges journals, events, and sample summaries into one descending feed', async () => {
+test('timeline merges journals, events, and sample summaries into one descending feed', async () => {
   const fixture = await makeRetrievalFixture()
 
   try {
@@ -477,7 +477,7 @@ test.sequential('timeline merges journals, events, and sample summaries into one
   }
 })
 
-test.sequential('search index status and rebuild expose the shared sqlite runtime state without creating it early', async () => {
+test('search index status and rebuild expose the shared sqlite runtime state without creating it early', async () => {
   const fixture = await makeRetrievalFixture()
   const runtimeDatabasePath = path.join(fixture.vaultRoot, '.runtime/search.sqlite')
 
@@ -554,7 +554,7 @@ test.sequential('search index status and rebuild expose the shared sqlite runtim
   }
 })
 
-test.sequential('search index status ignores a copied inbox search db until index rebuild restores the canonical search db', async () => {
+test('search index status ignores a copied inbox search db until index rebuild restores the canonical search db', async () => {
   const fixture = await makeRetrievalFixture()
   const searchDatabasePath = path.join(fixture.vaultRoot, '.runtime/search.sqlite')
   const legacyDatabasePath = path.join(fixture.vaultRoot, '.runtime/inboxd.sqlite')
@@ -641,7 +641,7 @@ test.sequential('search index status ignores a copied inbox search db until inde
   }
 })
 
-test.sequential('search index status treats a pre-existing inbox runtime db as unindexed and sqlite backend returns operator guidance', async () => {
+test('search index status treats a pre-existing inbox runtime db as unindexed and sqlite backend returns operator guidance', async () => {
   const fixture = await makeRetrievalFixture()
   const runtimeRoot = path.join(fixture.vaultRoot, '.runtime')
   const runtimeDatabasePath = path.join(runtimeRoot, 'inboxd.sqlite')
@@ -690,7 +690,7 @@ test.sequential('search index status treats a pre-existing inbox runtime db as u
   }
 })
 
-test.sequential('search backend auto switches from scan results to sqlite-backed stale state after rebuild', async () => {
+test('search backend auto switches from scan results to sqlite-backed stale state after rebuild', async () => {
   const fixture = await makeRetrievalFixture()
   const journalFilePath = path.join(fixture.vaultRoot, fixture.journalPath)
 
@@ -795,7 +795,7 @@ Steady energy after saffron tea.
   }
 })
 
-test.sequential('search accepts projected health record families', async () => {
+test('search accepts projected health record families', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {
@@ -839,7 +839,7 @@ test.sequential('search accepts projected health record families', async () => {
   }
 })
 
-test.sequential('timeline exposes projected health entry types', async () => {
+test('timeline exposes projected health entry types', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {
@@ -881,7 +881,7 @@ test.sequential('timeline exposes projected health entry types', async () => {
   }
 })
 
-test.sequential('search rejects unsupported record-type values', async () => {
+test('search rejects unsupported record-type values', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {
@@ -906,7 +906,7 @@ test.sequential('search rejects unsupported record-type values', async () => {
   }
 })
 
-test.sequential('search rejects comma-delimited record-type tokens', async () => {
+test('search rejects comma-delimited record-type tokens', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {
@@ -931,7 +931,7 @@ test.sequential('search rejects comma-delimited record-type tokens', async () =>
   }
 })
 
-test.sequential('timeline rejects unsupported entry-type values', async () => {
+test('timeline rejects unsupported entry-type values', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {
@@ -957,7 +957,7 @@ test.sequential('timeline rejects unsupported entry-type values', async () => {
   }
 })
 
-test.sequential('timeline rejects comma-delimited entry-type tokens', async () => {
+test('timeline rejects comma-delimited entry-type tokens', async () => {
   const vaultRoot = await makeCanonicalHealthFixture()
 
   try {

@@ -14,6 +14,12 @@ review_gpt_register_dir_preset "architecture" "architecture-review.md" \
   "architecture-review" \
   "data-model" \
   "refactor-architecture"
+review_gpt_register_dir_preset "giant-file-composability" "giant-file-composability.md" \
+  "Review giant files for multi-responsibility seams that should be split into smaller composable units." \
+  "large-files" \
+  "split-files" \
+  "file-composability" \
+  "large-file-composability"
 review_gpt_register_dir_preset "data-model-composability" "data-model-composability-review.md" \
   "Review Murph's data structures and data model for simpler, more composable, and more scalable shapes." \
   "data-structures" \

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   collectVaultCliDescriptorRootCommandNames,
   collectVaultCliDirectServiceBindings,
@@ -663,7 +663,7 @@ test('health command schema remains JSON-Schema-safe', async () => {
   assert.deepEqual(schema.options.required, ['vault', 'input'])
 }, INCUR_HELP_TIMEOUT_MS)
 
-test.sequential('verbose json exposes the native Incur success envelope', async () => {
+test('verbose json exposes the native Incur success envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
@@ -677,7 +677,7 @@ test.sequential('verbose json exposes the native Incur success envelope', async 
   }
 })
 
-test.sequential('health command metadata exposes Incur-native CTA suggestions', async () => {
+test('health command metadata exposes Incur-native CTA suggestions', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-'))
 
   try {
@@ -776,7 +776,7 @@ test('goal scaffold help surfaces factory-provided example and hint text', async
   )
 })
 
-test.sequential('profile scaffold exposes a success CTA in the verbose json envelope', async () => {
+test('profile scaffold exposes a success CTA in the verbose json envelope', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-incur-cta-'))
 
   try {

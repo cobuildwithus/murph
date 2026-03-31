@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
@@ -170,7 +170,7 @@ test('workout format save help uses positional name and text arguments', async (
   )
 })
 
-test.sequential(
+test(
   'workout format save, show, list, and log stay thin while feeding the same canonical event path',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -343,7 +343,7 @@ test.sequential(
   },
 )
 
-test.sequential(
+test(
   'workout format save preserves first-class metadata and canonical workout-format ids',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -425,7 +425,7 @@ templateText: Garage day template.
   },
 )
 
-test.sequential(
+test(
   'workout format save validates future loggability up front',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -461,7 +461,7 @@ test.sequential(
   },
 )
 
-test.sequential(
+test(
   'workout format save updates an existing saved format through the audited write path',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -532,7 +532,7 @@ test.sequential(
   },
 )
 
-test.sequential(
+test(
   'first-class workout format docs keep explicit bank frontmatter authoritative and stable',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -654,7 +654,7 @@ templateText: Garage day template.
   },
 )
 
-test.sequential(
+test(
   'workout format show tolerates first-class docs without templateText and log fails with a targeted error',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -715,7 +715,7 @@ durationMinutes: 30
   },
 )
 
-test.sequential(
+test(
   'workout format commands reject legacy docs without first-class workout ids',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -764,7 +764,7 @@ text: Legacy gym day template.
   },
 )
 
-test.sequential(
+test(
   'workout format scans skip stale legacy docs while direct legacy lookups still fail',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
@@ -865,7 +865,7 @@ text: Legacy gym day template.
   },
 )
 
-test.sequential(
+test(
   'workout add captures activity_session events and fails fast on ambiguous durations',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
@@ -1023,7 +1023,7 @@ test.sequential(
   },
 )
 
-test.sequential(
+test(
   'workout add surfaces invalid timestamps without needing a custom workout read surface',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
@@ -1056,7 +1056,7 @@ test.sequential(
   },
 )
 
-test.sequential(
+test(
   'workout edit/delete mutate and remove the saved activity_session event',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-edit-'))

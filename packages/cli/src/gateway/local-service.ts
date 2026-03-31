@@ -32,17 +32,28 @@ import {
   waitForGatewayEventsLocal,
 } from './store.js'
 import { sendGatewayMessageLocal } from './send.js'
+import {
+  maybeFetchGatewayAttachmentsViaDaemon,
+  maybeGetGatewayConversationViaDaemon,
+  maybeListGatewayConversationsViaDaemon,
+  maybeListGatewayOpenPermissionsViaDaemon,
+  maybePollGatewayEventsViaDaemon,
+  maybeReadGatewayMessagesViaDaemon,
+  maybeRespondToGatewayPermissionViaDaemon,
+  maybeSendGatewayMessageViaDaemon,
+  maybeWaitForGatewayEventsViaDaemon,
+} from '../gateway-daemon-client.js'
 
 export function createLocalGatewayService(vault: string): GatewayService {
   return {
     fetchAttachments: (input) => fetchGatewayAttachmentsLocal(vault, input),
     getConversation: (input) => getGatewayConversationLocal(vault, input),
     listConversations: (input) => listGatewayConversationsLocal(vault, input),
-    listOpenPermissions: (input) => listGatewayOpenPermissionsLocal(vault, input),
-    pollEvents: (input) => pollGatewayEventsLocal(vault, input),
+    listOpenPermissions: (input) => listGatewayOpenPermissionsLocalWrapper(vault, input),
+    pollEvents: (input) => pollGatewayEventsLocalWrapper(vault, input),
     readMessages: (input) => readGatewayMessagesLocal(vault, input),
-    respondToPermission: (input) => respondToGatewayPermissionLocal(vault, input),
-    sendMessage: (input) => sendGatewayMessageLocal({ ...input, vault }),
+    respondToPermission: (input) => respondToGatewayPermissionLocalWrapper(vault, input),
+    sendMessage: (input) => sendGatewayMessage(vault, input),
     waitForEvents: (input) => waitGatewayEventsLocal(vault, input),
   }
 }
@@ -52,6 +63,13 @@ export async function listGatewayConversationsLocal(
   input?: GatewayListConversationsInput,
 ): Promise<GatewayListConversationsResult> {
   const parsed = gatewayListConversationsInputSchema.parse(input ?? {})
+  const viaDaemon = await maybeListGatewayConversationsViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
   const snapshot = await exportGatewayProjectionSnapshotLocal(vault)
   return listGatewayConversationsFromSnapshot(snapshot, parsed)
 }
@@ -61,6 +79,13 @@ export async function getGatewayConversationLocal(
   input: GatewayGetConversationInput,
 ) {
   const parsed = gatewayGetConversationInputSchema.parse(input)
+  const viaDaemon = await maybeGetGatewayConversationViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon !== undefined) {
+    return viaDaemon
+  }
   const snapshot = await exportGatewayProjectionSnapshotLocal(vault)
   return getGatewayConversationFromSnapshot(snapshot, parsed)
 }
@@ -70,6 +95,13 @@ export async function readGatewayMessagesLocal(
   input: GatewayReadMessagesInput,
 ): Promise<GatewayReadMessagesResult> {
   const parsed = gatewayReadMessagesInputSchema.parse(input)
+  const viaDaemon = await maybeReadGatewayMessagesViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
   const snapshot = await exportGatewayProjectionSnapshotLocal(vault)
   return readGatewayMessagesFromSnapshot(snapshot, parsed)
 }
@@ -79,6 +111,13 @@ export async function fetchGatewayAttachmentsLocal(
   input: GatewayFetchAttachmentsInput,
 ) {
   const parsed = gatewayFetchAttachmentsInputSchema.parse(input)
+  const viaDaemon = await maybeFetchGatewayAttachmentsViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
   const snapshot = await exportGatewayProjectionSnapshotLocal(vault)
   return fetchGatewayAttachmentsFromSnapshot(snapshot, parsed)
 }
@@ -88,7 +127,32 @@ export async function pollGatewayEventsLocalWrapper(
   input?: GatewayPollEventsInput,
 ): Promise<GatewayPollEventsResult> {
   const parsed = gatewayPollEventsInputSchema.parse(input ?? {})
+  const viaDaemon = await maybePollGatewayEventsViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
   return pollGatewayEventsLocal(vault, parsed)
+}
+
+export async function sendGatewayMessage(
+  vault: string,
+  input: Parameters<GatewayService['sendMessage']>[0],
+) {
+  const parsed = gatewaySendMessageInputSchema.parse(input)
+  const viaDaemon = await maybeSendGatewayMessageViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
+  return sendGatewayMessageLocal({
+    ...parsed,
+    vault,
+  })
 }
 
 export async function waitGatewayEventsLocal(
@@ -96,6 +160,13 @@ export async function waitGatewayEventsLocal(
   input?: GatewayWaitForEventsInput,
 ): Promise<GatewayPollEventsResult> {
   const parsed = gatewayWaitForEventsInputSchema.parse(input ?? {})
+  const viaDaemon = await maybeWaitForGatewayEventsViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
   return waitForGatewayEventsLocal(vault, parsed)
 }
 
@@ -104,6 +175,13 @@ export async function listGatewayOpenPermissionsLocalWrapper(
   input?: Parameters<GatewayService['listOpenPermissions']>[0],
 ) {
   const parsed = gatewayListOpenPermissionsInputSchema.parse(input ?? {})
+  const viaDaemon = await maybeListGatewayOpenPermissionsViaDaemon({
+    ...parsed,
+    vault,
+  })
+  if (viaDaemon) {
+    return viaDaemon
+  }
   return listGatewayOpenPermissionsLocal(vault, parsed)
 }
 
@@ -111,5 +189,12 @@ export async function respondToGatewayPermissionLocalWrapper(
   vault: string,
   input: Parameters<GatewayService['respondToPermission']>[0],
 ) {
+  const viaDaemon = await maybeRespondToGatewayPermissionViaDaemon({
+    ...input,
+    vault,
+  })
+  if (viaDaemon !== undefined) {
+    return viaDaemon
+  }
   return respondToGatewayPermissionLocal(vault, input)
 }

@@ -4,6 +4,12 @@ import {
   discoverAssistantProviderModels,
   type AssistantModelDiscoveryResult,
 } from './assistant/provider-catalog.js'
+import {
+  getOpenAICompatibleProviderPreset,
+  resolveOpenAICompatibleProviderPreset,
+  resolveOpenAICompatibleProviderPresetFromId,
+  type OpenAICompatibleProviderPreset,
+} from './assistant/openai-compatible-provider-presets.js'
 import { normalizeNullableString } from './assistant/shared.js'
 import {
   createSetupAssistantAccountResolver,
@@ -55,6 +61,7 @@ export function hasExplicitSetupAssistantOptions(
   options: Pick<
     SetupCommandOptions,
     | 'assistantPreset'
+    | 'assistantProviderPreset'
     | 'assistantModel'
     | 'assistantBaseUrl'
     | 'assistantApiKeyEnv'
@@ -66,6 +73,7 @@ export function hasExplicitSetupAssistantOptions(
 ): boolean {
   return Boolean(
     options.assistantPreset ||
+      options.assistantProviderPreset ||
       options.assistantModel ||
       options.assistantBaseUrl ||
       options.assistantApiKeyEnv ||
@@ -80,6 +88,7 @@ export function inferSetupAssistantPresetFromOptions(
   options: Pick<
     SetupCommandOptions,
     | 'assistantPreset'
+    | 'assistantProviderPreset'
     | 'assistantModel'
     | 'assistantBaseUrl'
     | 'assistantApiKeyEnv'
@@ -94,6 +103,7 @@ export function inferSetupAssistantPresetFromOptions(
   }
 
   if (
+    options.assistantProviderPreset ||
     options.assistantBaseUrl ||
     options.assistantApiKeyEnv ||
     options.assistantProviderName
@@ -111,6 +121,29 @@ export function inferSetupAssistantPresetFromOptions(
   }
 
   return null
+}
+
+export function resolveSetupAssistantProviderPreset(
+  options: Pick<
+    SetupCommandOptions,
+    | 'assistantProviderPreset'
+    | 'assistantBaseUrl'
+    | 'assistantApiKeyEnv'
+    | 'assistantProviderName'
+  >,
+): OpenAICompatibleProviderPreset | null {
+  const explicitPreset = resolveOpenAICompatibleProviderPresetFromId(
+    normalizeNullableString(options.assistantProviderPreset),
+  )
+  if (explicitPreset) {
+    return explicitPreset
+  }
+
+  return resolveOpenAICompatibleProviderPreset({
+    apiKeyEnv: normalizeNullableString(options.assistantApiKeyEnv),
+    baseUrl: normalizeNullableString(options.assistantBaseUrl),
+    providerName: normalizeNullableString(options.assistantProviderName),
+  })
 }
 
 export function createSetupAssistantResolver(
@@ -255,15 +288,21 @@ export function createSetupAssistantResolver(
             )
           }
 
+          const providerPreset =
+            resolveSetupAssistantProviderPreset(resolutionInput.options) ??
+            resolveOpenAICompatibleProviderPreset({
+              baseUrl: DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
+            }) ??
+            getOpenAICompatibleProviderPreset('custom')
           const baseUrl = await resolvePromptedValue({
             allowPrompt: resolutionInput.allowPrompt,
             defaultValue:
               normalizeNullableString(resolutionInput.options.assistantBaseUrl) ??
+              providerPreset.baseUrl ??
               DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
             input,
             output,
-            prompt:
-              'Model endpoint URL',
+            prompt: buildSetupAssistantBaseUrlPrompt(providerPreset),
           })
 
           const apiKeyEnv = await resolveOptionalPromptedValue({
@@ -271,16 +310,17 @@ export function createSetupAssistantResolver(
             defaultValue:
               normalizeNullableString(
                 resolutionInput.options.assistantApiKeyEnv,
-              ) ?? null,
+              ) ??
+              providerPreset.apiKeyEnv ??
+              null,
             input,
             output,
-            prompt:
-              'API key env var name (leave blank if this endpoint does not need one)',
+            prompt: buildSetupAssistantApiKeyEnvPrompt(providerPreset),
           })
           const providerName =
             normalizeNullableString(
               resolutionInput.options.assistantProviderName,
-            ) ?? null
+            ) ?? providerPreset.providerName
           const discovery =
             normalizeNullableString(resolutionInput.options.assistantModel) === null
               ? await discoverModels({
@@ -319,6 +359,7 @@ export function createSetupAssistantResolver(
               apiKeyEnv,
               baseUrl,
               model,
+              providerTitle: providerPreset.title,
             }),
           }
           break
@@ -501,12 +542,16 @@ function buildOpenAICompatibleAssistantDetail(input: {
   apiKeyEnv: string | null
   baseUrl: string
   model: string
+  providerTitle?: string | null
 }): string {
+  const providerLabel =
+    normalizeNullableString(input.providerTitle) ?? input.baseUrl
+
   if (input.apiKeyEnv) {
-    return `Use ${input.model} from ${input.baseUrl}. Murph will read the key from ${input.apiKeyEnv}.`
+    return `Use ${input.model} from ${providerLabel}. Murph will read the key from ${input.apiKeyEnv}.`
   }
 
-  return `Use ${input.model} from ${input.baseUrl}.`
+  return `Use ${input.model} from ${providerLabel}.`
 }
 
 function buildCodexAssistantDetail(input: {
@@ -528,4 +573,28 @@ function appendDetectedAssistantAccountDetail(
   }
 
   return `${detail} Detected ${label} from local Codex credentials.`
+}
+
+function buildSetupAssistantBaseUrlPrompt(
+  providerPreset: OpenAICompatibleProviderPreset,
+): string {
+  if (providerPreset.id === 'custom') {
+    return 'Model endpoint URL'
+  }
+
+  return `${providerPreset.title} endpoint URL`
+}
+
+function buildSetupAssistantApiKeyEnvPrompt(
+  providerPreset: OpenAICompatibleProviderPreset,
+): string {
+  if (providerPreset.kind === 'local') {
+    return 'API key env var name (leave blank if this local endpoint does not need one)'
+  }
+
+  if (providerPreset.id === 'custom') {
+    return 'API key env var name (leave blank if this endpoint does not need one)'
+  }
+
+  return `${providerPreset.title} API key env var name (leave blank if this endpoint does not need one)`
 }
