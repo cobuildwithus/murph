@@ -23,15 +23,17 @@ Constraints:
 - avoid replacing one giant file with a web of vague helpers or pass-through re-exports
 - respect existing package and trust boundaries unless the current file shape clearly violates them
 
-Output:
-- group findings into `split now`, `worth planning`, and `keep together`
-- within each group, order findings by expected payoff in composability and maintainability
-- be explicit about the main seam or responsibility boundary driving each recommendation
+Execution mode:
+- do not stop at prose recommendations if you can safely land the change in code
+- choose the smallest high-leverage set of concrete file changes that fit this review scope
+- prefer self-contained extractions or seam cleanups over broad speculative rewrites
 
-
-Patch-file output:
-- Please return your final response as a single `.patch` file attachment with a `.patch` filename rather than as a normal prose review.
-- Put all actionable fixes into one unified diff that we can download and apply directly.
-- Limit the patch to concrete changes that fit this review scope, and keep the diff self-contained.
-- If there are important residual concerns that you did not change, list them briefly outside the patch.
-- If you find no actionable issues, say so explicitly instead of inventing a patch.
+Patched-file output:
+- Return downloadable `.patched` code-file attachments instead of a prose review document.
+- For each changed repo file, attach one full replacement file with a flat download-safe filename: replace each `/` in the repo-relative path with `__SLASH__`, keep the original basename and extension, then append `.patched`.
+- Example filename: `packages__SLASH__cli__SLASH__src__SLASH__research-runtime.ts.patched`.
+- Each `.patched` attachment must contain the complete post-change file contents for that file, not a diff.
+- Do not attach a `.md` review, `.patch` file, or unified diff unless the user explicitly asks for one.
+- Keep the changed file set small and self-contained within this composability pass.
+- If there are important residual concerns you did not change, list them briefly outside the file attachments.
+- If you find no safe actionable changes, say so explicitly in a short plain-text reply and attach nothing.

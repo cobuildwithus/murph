@@ -4,6 +4,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { spawn } from 'node:child_process'
+import { collectPatchArtifactLabels } from './chatgpt-attachment-files.mjs'
 
 function parseDurationMs(raw) {
   const normalized = raw.trim()
@@ -141,8 +142,8 @@ function buildResumePrompt(input) {
     'Wake-up task:',
     `- Read the exported ChatGPT thread JSON at ${input.exportPath}.`,
     input.downloadedPatches.length > 0
-      ? `- Inspect and apply the downloaded patch files: ${input.downloadedPatches.join(', ')}.`
-      : '- No patch files were downloaded; inspect the thread export and attachment labels to determine why.',
+      ? `- Inspect and apply the downloaded patch artifacts (including any \`.patched\` code files): ${input.downloadedPatches.join(', ')}.`
+      : '- No patch or `.patched` code files were downloaded; inspect the thread export and attachment labels to determine why.',
     '- Implement the patch contents in this repository if they are applicable.',
     '- Run the repo-required verification commands and report any unrelated blockers separately.',
     '- Keep changes scoped to what the downloaded patch actually requires.',
@@ -177,13 +178,7 @@ async function main() {
   ])
 
   const exportJson = JSON.parse(await readFile(exportPath, 'utf8'))
-  const patchLabels = [
-    ...new Set(
-      (exportJson.attachmentButtons ?? [])
-        .map((attachment) => attachment.text)
-        .filter((label) => /\.(patch|diff)\b/iu.test(label)),
-    ),
-  ]
+  const patchLabels = collectPatchArtifactLabels(exportJson.attachmentButtons ?? [])
 
   const downloadedPatches = []
   for (const label of patchLabels) {

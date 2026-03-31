@@ -27,14 +27,17 @@ Constraints:
 - do not recommend speculative platform rewrites or broad framework churn unless the current model clearly justifies it
 - respect Murph's file-native architecture, canonical write boundaries, and trust boundaries unless you can show a simpler design that preserves them
 
-Output:
-- group findings into `simplify now`, `plan next`, and `keep as-is`
-- within each group, order findings by expected payoff in simplicity, composability, and scaling headroom
-- be explicit about which recommendations are about true data-model shape versus surrounding orchestration or API ergonomics
+Execution mode:
+- do not stop at prose recommendations if you can safely land the change in code
+- choose the smallest high-leverage set of concrete file changes that fit this review scope
+- prefer localized model simplifications over broad rewrites
 
-Patch-file output:
-- Please return your final response as a single `.patch` file attachment with a `.patch` filename rather than as a normal prose review.
-- Put all actionable fixes into one unified diff that we can download and apply directly.
-- Limit the patch to concrete changes that fit this review scope, and keep the diff self-contained.
-- If there are important residual concerns that you did not change, list them briefly outside the patch.
-- If you find no actionable issues, say so explicitly instead of inventing a patch.
+Patched-file output:
+- Return downloadable `.patched` code-file attachments instead of a prose review document.
+- For each changed repo file, attach one full replacement file with a flat download-safe filename: replace each `/` in the repo-relative path with `__SLASH__`, keep the original basename and extension, then append `.patched`.
+- Example filename: `packages__SLASH__cli__SLASH__src__SLASH__research-runtime.ts.patched`.
+- Each `.patched` attachment must contain the complete post-change file contents for that file, not a diff.
+- Do not attach a `.md` review, `.patch` file, or unified diff unless the user explicitly asks for one.
+- Keep the changed file set small and self-contained within this data-model pass.
+- If there are important residual concerns you did not change, list them briefly outside the file attachments.
+- If you find no safe actionable changes, say so explicitly in a short plain-text reply and attach nothing.
