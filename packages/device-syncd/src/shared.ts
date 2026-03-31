@@ -67,6 +67,65 @@ export function normalizeStringList(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === "string");
 }
 
+const DEVICE_SYNC_METADATA_MAX_ENTRIES = 16;
+const DEVICE_SYNC_METADATA_MAX_KEY_LENGTH = 64;
+const DEVICE_SYNC_METADATA_MAX_STRING_LENGTH = 256;
+const DEVICE_SYNC_METADATA_BLOCKED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+type DeviceSyncMetadataScalar = string | number | boolean | null;
+
+function sanitizeStoredDeviceSyncMetadataValue(value: unknown): DeviceSyncMetadataScalar | undefined {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value.length <= DEVICE_SYNC_METADATA_MAX_STRING_LENGTH ? value : undefined;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return undefined;
+}
+
+export function sanitizeStoredDeviceSyncMetadata(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, DeviceSyncMetadataScalar> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const sanitized: Record<string, DeviceSyncMetadataScalar> = {};
+
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    if (Object.keys(sanitized).length >= DEVICE_SYNC_METADATA_MAX_ENTRIES) {
+      break;
+    }
+
+    const key = rawKey.trim();
+
+    if (!key || key.length > DEVICE_SYNC_METADATA_MAX_KEY_LENGTH || DEVICE_SYNC_METADATA_BLOCKED_KEYS.has(key)) {
+      continue;
+    }
+
+    const normalizedValue = sanitizeStoredDeviceSyncMetadataValue(rawValue);
+
+    if (normalizedValue === undefined) {
+      continue;
+    }
+
+    sanitized[key] = normalizedValue;
+  }
+
+  return sanitized;
+}
+
 export function parseJsonObject(value: string, label: string): Record<string, unknown> {
   let parsed: unknown;
 

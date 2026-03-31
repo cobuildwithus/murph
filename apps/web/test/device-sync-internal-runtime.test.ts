@@ -435,6 +435,91 @@ describe("device-sync hosted runtime helpers", () => {
     });
   });
 
+  it("sanitizes hosted runtime metadata updates before persistence", async () => {
+    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+    const existing = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-03-20T10:00:00.000Z",
+      createdAt: "2026-03-20T10:00:00.000Z",
+      displayName: "Hosted Metadata",
+      externalAccountId: "oura_metadata",
+      id: "dsc_metadata",
+      metadataJson: { source: "browser" },
+      provider: "oura",
+      scopes: ["heartrate"],
+      secret: null,
+      status: "active",
+      updatedAt: "2026-03-26T12:05:00.000Z",
+      userId: "user-123",
+    };
+    const updated = {
+      ...existing,
+      metadataJson: {
+        flag: true,
+      },
+      updatedAt: "2026-03-26T12:10:00.000Z",
+    };
+    const tx = {
+      deviceConnection: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn().mockResolvedValue(updated),
+      },
+      deviceConnectionSecret: {
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    const store = {
+      codec: {
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+        encrypt: (value: string) => `enc:${value}`,
+        keyVersion: "v1",
+      },
+      createSignal: vi.fn(),
+      markConnectionDisconnected: vi.fn(),
+      prisma: {},
+      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    };
+
+    await applyHostedDeviceSyncRuntimeUpdates(
+      store as never,
+      {
+        occurredAt: "2026-03-26T12:10:00.000Z",
+        updates: [
+          {
+            connectionId: "dsc_metadata",
+            metadata: {
+              flag: true,
+              longText: "x".repeat(300),
+              nested: {
+                secret: "drop-me",
+              },
+              source: {
+                nested: "drop-me-too",
+              },
+            },
+          },
+        ],
+        userId: "user-123",
+      },
+    );
+
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
+      where: {
+        id: "dsc_metadata",
+      },
+      data: expect.objectContaining({
+        metadataJson: {
+          flag: true,
+        },
+      }),
+    });
+  });
+
   it("does not let a stale baseline disconnect an already-advanced hosted row", async () => {
     const { applyHostedDeviceSyncRuntimeUpdates } = await import(
       "@/src/lib/device-sync/internal-runtime"

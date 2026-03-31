@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-03-30
+Last verified: 2026-04-01
 
 ## Non-Negotiable Rules
 
@@ -21,4 +21,5 @@ Last verified: 2026-03-30
 - AgentMail-backed email polling and delivery must keep API keys in environment variables only, must not write raw Authorization headers to vault/runtime artifacts, and must limit assistant auto-reply to direct email threads.
 - Assistant-state is high-sensitivity local runtime data: directories under `assistant-state/**` must be `0700`, files under `assistant-state/**` must be `0600`, secret-bearing provider headers must never remain inline in persisted session or provider-route-recovery JSON, and operator-facing repair flows should use `assistant doctor --repair` so legacy inline headers are migrated into private sidecars under `assistant-state/secrets/**` before wider diagnostics continue.
 - Runtime observability writes under `assistant-state/diagnostics/**`, `assistant-state/journals/**`, quarantine metadata, and persisted delivery errors must redact inline bearer tokens, cookies, API keys, and similar secret material before the artifact is committed.
+- Device-sync account metadata is internal diagnostic state only. Hosted and local storage writes must sanitize it down to a compact shallow scalar record instead of persisting provider profile payloads, nested JSON blobs, or oversized string fields.
 - Tool-enabled OpenAI-compatible assistant turns may execute the same canonical local assistant/vault tool catalog shape as Codex-backed turns, but only against the active vault and only through the per-turn profile Murph binds; assistant auto-reply must stay on the narrow bounded-file-read profile rather than the full memory/state/cron/write surface, and fail closed when only Codex direct-CLI routes are available. That parity does not grant arbitrary host shell access or host-wide filesystem reads.

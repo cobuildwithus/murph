@@ -2,6 +2,7 @@ import type {
   DeviceSyncAccountStatus,
   PublicDeviceSyncAccount,
 } from "@murph/device-syncd";
+import { sanitizeStoredDeviceSyncMetadata } from "@murph/device-syncd";
 import {
   type HostedExecutionDeviceSyncRuntimeApplyEntry as HostedDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyRequest as HostedDeviceSyncRuntimeApplyRequest,
@@ -19,7 +20,7 @@ import {
   PrismaDeviceSyncControlPlaneStore,
   requireHostedConnectionBundleRecord,
 } from "./prisma-store";
-import { toIsoTimestamp, toJsonRecord } from "./shared";
+import { toIsoTimestamp } from "./shared";
 
 export async function buildHostedDeviceSyncRuntimeSnapshot(
   store: PrismaDeviceSyncControlPlaneStore,
@@ -163,7 +164,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
           ? { scopes: update.scopes ?? [] }
           : {}),
         ...(Object.prototype.hasOwnProperty.call(update, "metadata")
-          ? { metadataJson: toJsonRecord(update.metadata ?? {}) }
+          ? { metadataJson: sanitizeStoredDeviceSyncMetadata(update.metadata ?? {}) }
           : {}),
         ...(requestedAccessTokenExpiresAt !== undefined && !tokenVersionMismatch && !tokenBlockedByDisconnectedStatus
           ? {
@@ -413,7 +414,7 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
       : { lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `updates[${index}].lastWebhookAt`) }),
     ...(record.metadata === undefined
       ? {}
-      : { metadata: requireObject(record.metadata, `updates[${index}].metadata`) }),
+      : { metadata: sanitizeStoredDeviceSyncMetadata(requireObject(record.metadata, `updates[${index}].metadata`)) }),
     ...(record.nextReconcileAt === undefined
       ? {}
       : { nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `updates[${index}].nextReconcileAt`) }),

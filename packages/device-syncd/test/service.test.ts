@@ -882,6 +882,10 @@ test("sqlite store hosted hydration replaces mirrored metadata and clears local 
     lastWebhookAt: "2026-03-27T07:50:00.000Z",
     metadata: {
       fresh: true,
+      nested: {
+        drop: "me",
+      },
+      oversized: "x".repeat(300),
     },
     nextReconcileAt: null,
     provider: "demo",
@@ -909,6 +913,61 @@ test("sqlite store hosted hydration replaces mirrored metadata and clears local 
   assert.equal(hydrated?.accessTokenEncrypted, "");
   assert.equal(hydrated?.refreshTokenEncrypted, null);
   assert.equal(hydrated?.accessTokenExpiresAt, null);
+
+  store.close();
+});
+
+test("sqlite store sanitizes connection metadata writes and metadataPatch merges", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-metadata-sanitize");
+  const store = new SqliteDeviceSyncStore(path.join(vaultRoot, ".runtime", "device-syncd.sqlite"));
+  const created = store.upsertAccount({
+    connectedAt: "2026-03-20T10:00:00.000Z",
+    displayName: "Seeded Account",
+    externalAccountId: "demo-sanitize",
+    metadata: {
+      enabled: true,
+      longText: "x".repeat(300),
+      nested: {
+        secret: "drop-me",
+      },
+      source: "browser",
+      values: ["drop-me"],
+    },
+    nextReconcileAt: null,
+    provider: "demo",
+    scopes: ["offline"],
+    status: "active",
+    tokens: {
+      accessToken: "seed-access",
+      accessTokenEncrypted: "enc:seed-access",
+      accessTokenExpiresAt: "2026-03-28T00:00:00.000Z",
+      refreshToken: "seed-refresh",
+      refreshTokenEncrypted: "enc:seed-refresh",
+    },
+  });
+
+  assert.deepEqual(created.metadata, {
+    enabled: true,
+    source: "browser",
+  });
+  assert.equal(
+    store.markSyncSucceeded(created.id, "2026-03-20T12:00:00.000Z", null, {
+      metadataPatch: {
+        count: 3,
+        enabled: false,
+        nested: {
+          secret: "still-drop-me",
+        },
+        tags: ["drop-me-too"],
+      },
+    }),
+    true,
+  );
+  assert.deepEqual(store.getAccountById(created.id)?.metadata, {
+    count: 3,
+    enabled: false,
+    source: "browser",
+  });
 
   store.close();
 });
