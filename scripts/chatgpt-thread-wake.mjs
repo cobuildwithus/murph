@@ -118,13 +118,32 @@ function runCommand(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd ?? process.cwd(),
       env: options.env ?? process.env,
-      stdio: options.stdio ?? 'inherit',
+      stdio: options.captureOutput ? ['ignore', 'pipe', 'pipe'] : (options.stdio ?? 'inherit'),
     })
 
+    let stdout = ''
+    let stderr = ''
+
+    if (options.captureOutput) {
+      child.stdout?.on('data', (chunk) => {
+        const text = String(chunk)
+        stdout += text
+        process.stdout.write(text)
+      })
+      child.stderr?.on('data', (chunk) => {
+        const text = String(chunk)
+        stderr += text
+        process.stderr.write(text)
+      })
+    }
+
     child.on('error', reject)
-    child.on('exit', (code) => {
+    child.on('close', (code) => {
       if (code === 0) {
-        resolve()
+        resolve({
+          stderr,
+          stdout,
+        })
         return
       }
       reject(new Error(`${command} exited with code ${code ?? 'null'}`))
@@ -182,7 +201,7 @@ async function main() {
 
   const downloadedPatches = []
   for (const label of patchLabels) {
-    await runCommand('node', [
+    const downloadResult = await runCommand('node', [
       'scripts/chatgpt-thread-download.mjs',
       '--chat-url',
       args.chatUrl,
@@ -190,8 +209,14 @@ async function main() {
       label,
       '--output-dir',
       downloadDir,
-    ])
-    downloadedPatches.push(path.join(downloadDir, label))
+    ], { captureOutput: true })
+    const downloadedPath =
+      downloadResult.stdout
+        .split(/\r?\n/gu)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .at(-1) ?? path.join(downloadDir, label)
+    downloadedPatches.push(downloadedPath)
   }
 
   if (args.skipResume) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, mkdir, rm } from 'node:fs/promises'
+import { access, mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   CdpClient,
@@ -11,6 +11,8 @@ import {
 } from './chatgpt-managed-browser.mjs'
 
 const DEFAULT_TIMEOUT_MS = 30_000
+const NATIVE_DOWNLOAD_GRACE_MS = 1_500
+const LATE_NATIVE_DOWNLOAD_GRACE_MS = 1_000
 
 function parseArgs(argv) {
   const args = {
@@ -102,8 +104,47 @@ async function removeIfPresent(filePath) {
   }
 }
 
-async function clickAttachment(client, attachmentText) {
+function parseContentDispositionFilename(value) {
+  const raw = String(value ?? '').trim()
+  if (raw.length === 0) {
+    return null
+  }
+
+  const utf8Match = raw.match(/filename\*\s*=\s*UTF-8''([^;]+)/iu)
+  if (utf8Match) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const quotedMatch = raw.match(/filename\s*=\s*"([^"]+)"/iu)
+  if (quotedMatch) {
+    return quotedMatch[1]
+  }
+
+  const bareMatch = raw.match(/filename\s*=\s*([^;]+)/iu)
+  if (bareMatch) {
+    return bareMatch[1].trim()
+  }
+
+  return null
+}
+
+function sanitizeDownloadFilename(value, fallback = 'downloaded-artifact') {
+  const raw = String(value ?? '').trim()
+  const normalized = raw.replaceAll('\\', '/')
+  const basename = path.posix.basename(normalized).trim()
+  if (
+    basename.length === 0 ||
+    basename === '.' ||
+    basename === '..'
+  ) {
+    return fallback
+  }
+  return basename
+}
+
+async function findAttachmentClickTarget(client, attachmentText) {
   return client.evaluate(`(() => {
+    const root = document.querySelector('main') ?? document.body
     const deriveHrefLabel = (href) => {
       if (!href) {
         return ''
@@ -114,23 +155,73 @@ async function clickAttachment(client, attachmentText) {
         return decodeURIComponent(href.split('/').filter(Boolean).at(-1) || '')
       }
     }
-    const target = Array.from(document.querySelectorAll('button, a')).find((element) => {
+
+    const target = Array.from(root.querySelectorAll('button, a')).find((element) => {
       const text = (element.innerText || element.getAttribute('aria-label') || '').trim()
-      return text === ${JSON.stringify(attachmentText)} || deriveHrefLabel(element.href || '') === ${JSON.stringify(attachmentText)}
+      return (
+        text === ${JSON.stringify(attachmentText)} ||
+        deriveHrefLabel(element.href || '') === ${JSON.stringify(attachmentText)}
+      )
     })
     if (!target) {
-      return { found: false, availableButtons: Array.from(document.querySelectorAll('button')).map((element) => (element.innerText || element.getAttribute('aria-label') || '').trim()).filter(Boolean).slice(-80) }
+      return {
+        found: false,
+        availableButtons: Array.from(root.querySelectorAll('button, a'))
+          .map((element) => (element.innerText || element.getAttribute('aria-label') || '').trim())
+          .filter(Boolean)
+          .slice(-80),
+      }
     }
-    const hrefLabel = deriveHrefLabel(target.href || '')
+
     target.scrollIntoView({ block: 'center' })
-    target.click()
+    const rect = target.getBoundingClientRect()
     return {
       found: true,
-      text: (target.innerText || target.getAttribute('aria-label') || '').trim(),
+      centerX: rect.left + rect.width / 2,
+      centerY: rect.top + rect.height / 2,
       href: target.href || null,
-      hrefLabel,
+      hrefLabel: deriveHrefLabel(target.href || ''),
+      text: (target.innerText || target.getAttribute('aria-label') || '').trim(),
     }
   })()`)
+}
+
+async function clickAttachment(client, attachmentText, timeoutMs) {
+  const startedAt = Date.now()
+  let target = await findAttachmentClickTarget(client, attachmentText)
+  while (!target?.found && Date.now() - startedAt <= timeoutMs) {
+    await sleep(250)
+    target = await findAttachmentClickTarget(client, attachmentText)
+  }
+  if (!target?.found) {
+    return target
+  }
+
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseMoved',
+    x: target.centerX,
+    y: target.centerY,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  })
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x: target.centerX,
+    y: target.centerY,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+  })
+  await client.send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x: target.centerX,
+    y: target.centerY,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+  })
+  return target
 }
 
 async function waitForDownloadedFile(filePath, timeoutMs) {
@@ -146,6 +237,28 @@ async function waitForDownloadedFile(filePath, timeoutMs) {
   }
 }
 
+async function fetchArtifactThroughPage(client, requestUrl) {
+  return client.evaluate(`(async () => {
+    const response = await fetch(${JSON.stringify(requestUrl)}, {
+      credentials: 'include',
+    })
+    const buffer = await response.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+    let binary = ''
+    const chunkSize = 0x8000
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+    }
+    return {
+      base64: btoa(binary),
+      contentDisposition: response.headers.get('content-disposition'),
+      contentType: response.headers.get('content-type'),
+      ok: response.ok,
+      status: response.status,
+    }
+  })()`, { awaitPromise: true })
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   await mkdir(args.outputDir, { recursive: true })
@@ -156,44 +269,146 @@ async function main() {
   try {
     await client.send('Runtime.enable')
     await client.send('Page.enable')
+    await client.send('Network.enable')
     await waitForTargetContent(client, args.chatUrl)
     await client.send('Page.setDownloadBehavior', {
       behavior: 'allow',
       downloadPath: path.resolve(args.outputDir),
     })
 
-    const clicked = await clickAttachment(client, args.attachmentText)
+    const downloadStartPromise = client.waitForEvent(
+      (event) =>
+        event.method === 'Page.downloadWillBegin' &&
+        String(event.params?.suggestedFilename ?? '').length > 0,
+      args.timeoutMs,
+    ).then((event) => ({ event, kind: 'native-download' }))
+
+    const estuaryResponsePromise = client.waitForEvent(
+      (event) =>
+        event.method === 'Network.responseReceived' &&
+        String(event.params?.response?.url ?? '').includes('/backend-api/estuary/content') &&
+        Number(event.params?.response?.status ?? 0) >= 200 &&
+        Number(event.params?.response?.status ?? 0) < 300,
+      args.timeoutMs,
+    ).then((event) => ({ event, kind: 'estuary-response' }))
+
+    const clicked = await clickAttachment(
+      client,
+      args.attachmentText,
+      args.timeoutMs,
+    )
     if (!clicked?.found) {
       throw new Error(
         `Attachment button not found for ${args.attachmentText}. Available buttons: ${(clicked?.availableButtons ?? []).join(' | ')}`,
       )
     }
 
-    const expectedFilenames = new Set(
-      [args.attachmentText, clicked.text, clicked.hrefLabel]
-        .map((value) => String(value ?? '').trim())
-        .filter((value) => value.length > 0),
-    )
-    const downloadStart = await client.waitForEvent(
-      (event) =>
-        event.method === 'Page.downloadWillBegin' &&
-        expectedFilenames.has(String(event.params?.suggestedFilename ?? '')),
-      args.timeoutMs,
-    )
-    const downloadedFile = path.join(
-      path.resolve(args.outputDir),
-      downloadStart.params.suggestedFilename,
-    )
-    await removeIfPresent(`${downloadedFile}.crdownload`)
+    const nativeDownloadWindow = await Promise.race([
+      downloadStartPromise,
+      sleep(Math.min(args.timeoutMs, NATIVE_DOWNLOAD_GRACE_MS)).then(() => ({
+        kind: 'native-download-timeout',
+      })),
+    ])
 
-    await client.waitForEvent(
-      (event) =>
-        event.method === 'Page.downloadProgress' &&
-        event.params?.guid === downloadStart.params.guid &&
-        event.params?.state === 'completed',
-      args.timeoutMs,
+    if (nativeDownloadWindow.kind === 'native-download') {
+      const downloadStart = nativeDownloadWindow.event
+      const downloadedFile = path.join(
+        path.resolve(args.outputDir),
+        downloadStart.params.suggestedFilename,
+      )
+      await removeIfPresent(`${downloadedFile}.crdownload`)
+
+      await client.waitForEvent(
+        (event) =>
+          event.method === 'Page.downloadProgress' &&
+          event.params?.guid === downloadStart.params.guid &&
+          event.params?.state === 'completed',
+        args.timeoutMs,
+      )
+      await waitForDownloadedFile(downloadedFile, args.timeoutMs)
+      process.stdout.write(`${downloadedFile}\n`)
+      return
+    }
+
+    const fallbackSignal = await Promise.race([
+      downloadStartPromise,
+      estuaryResponsePromise,
+      sleep(Math.min(args.timeoutMs, LATE_NATIVE_DOWNLOAD_GRACE_MS)).then(() => ({
+        kind: 'late-native-timeout',
+      })),
+    ])
+
+    if (fallbackSignal.kind === 'native-download') {
+      const downloadStart = fallbackSignal.event
+      const downloadedFile = path.join(
+        path.resolve(args.outputDir),
+        downloadStart.params.suggestedFilename,
+      )
+      await removeIfPresent(`${downloadedFile}.crdownload`)
+
+      await client.waitForEvent(
+        (event) =>
+          event.method === 'Page.downloadProgress' &&
+          event.params?.guid === downloadStart.params.guid &&
+          event.params?.state === 'completed',
+        args.timeoutMs,
+      )
+      await waitForDownloadedFile(downloadedFile, args.timeoutMs)
+      process.stdout.write(`${downloadedFile}\n`)
+      return
+    }
+
+    const artifactSignal =
+      fallbackSignal.kind === 'estuary-response'
+        ? fallbackSignal
+        : await estuaryResponsePromise
+    if (artifactSignal.kind === 'native-download') {
+      const downloadStart = artifactSignal.event
+      const downloadedFile = path.join(
+        path.resolve(args.outputDir),
+        downloadStart.params.suggestedFilename,
+      )
+      await removeIfPresent(`${downloadedFile}.crdownload`)
+
+      await client.waitForEvent(
+        (event) =>
+          event.method === 'Page.downloadProgress' &&
+          event.params?.guid === downloadStart.params.guid &&
+          event.params?.state === 'completed',
+        args.timeoutMs,
+      )
+      await waitForDownloadedFile(downloadedFile, args.timeoutMs)
+      process.stdout.write(`${downloadedFile}\n`)
+      return
+    }
+
+    const response = artifactSignal.event.params?.response ?? {}
+    const fetchedArtifact = await fetchArtifactThroughPage(
+      client,
+      String(response.url ?? ''),
     )
-    await waitForDownloadedFile(downloadedFile, args.timeoutMs)
+    if (!fetchedArtifact?.ok) {
+      throw new Error(
+        `Attachment fetch failed for ${args.attachmentText} with status ${fetchedArtifact?.status ?? 'unknown'}.`,
+      )
+    }
+
+    const filename =
+      sanitizeDownloadFilename(
+        parseContentDispositionFilename(
+          fetchedArtifact.contentDisposition ??
+            response.headers?.['content-disposition'] ??
+            response.headers?.['Content-Disposition'],
+        ) ??
+        args.attachmentText,
+        'downloaded-artifact',
+      )
+    const downloadedFile = path.join(path.resolve(args.outputDir), filename)
+    await removeIfPresent(downloadedFile)
+    await writeFile(
+      downloadedFile,
+      Buffer.from(fetchedArtifact.base64, 'base64'),
+    )
     process.stdout.write(`${downloadedFile}\n`)
   } finally {
     client.close()
