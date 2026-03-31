@@ -16,18 +16,22 @@ If instructions still conflict after applying this order, ask the user before ac
 
 ## Read Order
 
+Always read before repo code/docs/test/config work:
+
 1. `agent-docs/index.md`
 2. `ARCHITECTURE.md`
-3. `agent-docs/PRODUCT_SENSE.md`
-4. `agent-docs/PRODUCT_CONSTITUTION.md`
-5. `agent-docs/FRONTEND.md`
-6. `agent-docs/RELIABILITY.md`
-7. `agent-docs/SECURITY.md`
-8. `agent-docs/references/repo-scope.md`
-9. `agent-docs/references/testing-ci-map.md`
-10. `agent-docs/operations/verification-and-runtime.md`
-11. `agent-docs/operations/completion-workflow.md`
-12. `packages/web/AGENTS.md`
+3. `agent-docs/references/repo-scope.md`
+4. `agent-docs/operations/verification-and-runtime.md`
+
+Read when relevant to the task:
+
+1. `agent-docs/PRODUCT_SENSE.md` for user-facing product behavior or feature tradeoffs
+2. `agent-docs/PRODUCT_CONSTITUTION.md` for product direction or UX-principle decisions
+3. `agent-docs/FRONTEND.md` and `packages/web/AGENTS.md` for `packages/web` or UI-facing work
+4. `agent-docs/RELIABILITY.md` for retry, queueing, failure-mode, cron, or concurrency changes
+5. `agent-docs/SECURITY.md` for auth, secrets, trust-boundary, or externally exposed runtime changes
+6. `agent-docs/references/testing-ci-map.md` when choosing, adding, or debugging verification coverage
+7. `agent-docs/operations/completion-workflow.md` when the change will use completion audits, direct-scenario proof, or plan-bearing handoff
 
 ## Hard Rules (Non-Negotiable)
 
@@ -45,7 +49,7 @@ If instructions still conflict after applying this order, ask the user before ac
 - An empty table in `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` means no active work is currently registered.
 - Any spawned subagent that may review or edit code must read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`, follow the same hard gate before making code changes, and honor any explicit exclusive/refactor notes on overlapping rows.
 - Spawned subagents should default to a non-mini frontier model with `high` reasoning effort. Do not use mini variants unless the user explicitly asks for one or the task is purely trivial and the user has not asked for deeper thinking.
-- For non-doc repo changes that touch production code or tests, run completion workflow audit passes in order: `simplify` -> `task-finish-review`.
+- For non-doc repo changes that touch production code or tests, run completion workflow audits per `agent-docs/operations/completion-workflow.md`. The default path is `simplify` -> `task-finish-review`, but tiny low-risk changes may skip `simplify` and still require `task-finish-review`.
 - Those required audit passes must be executed explicitly via spawned subagents using the matching docs in `agent-docs/prompts/`; do not treat local self-review by the main implementation agent as satisfying the requirement.
 - Required completion-workflow audit subagents are review-only by default: do not let them edit files, run commit helpers, or create commits unless the user explicitly asks for audit agents that can patch code.
 - When spawning required audit passes, prefer fresh read-only review agents with narrow handoff context instead of forking the full implementation thread unless a specific blocked review question requires that broader context.
@@ -71,7 +75,7 @@ If instructions still conflict after applying this order, ask the user before ac
 ## Commit and Handoff
 
 - Same-turn task completion = acceptance, unless the user explicitly says `review first` or `do not commit`.
-- If you changed files, run the required checks defined below before handoff. If the task used an execution plan, close it and commit with `scripts/finish-task agent-docs/exec-plans/active/<plan>.md "type(scope): summary" path/to/file1 path/to/file2`. Otherwise run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
+- If you changed files, run the required checks defined below before handoff. If the task used an execution plan, close it and commit with `scripts/finish-task agent-docs/exec-plans/active/<plan>.md "type(scope): summary" path/to/file1 path/to/file2`. `scripts/finish-task` closes the active plan, moves it under `agent-docs/exec-plans/completed/`, and then creates a scoped commit containing that closed-plan artifact plus only the file paths you pass. Otherwise run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
 - If a required check fails for a credibly unrelated pre-existing reason, do not leave your scoped work uncommitted solely because the repo is red. Commit your exact touched files after recording the failing command, the failing target, and why your diff did not cause it. If you cannot defend that causal separation, treat the failure as blocking.
 - Use `scripts/finish-task` for plan-bearing tasks and `scripts/committer` otherwise (no manual `git commit`).
 - Agent-authored commit messages should use Conventional Commits (`feat|fix|refactor|build|ci|chore|docs|style|perf|test`).
@@ -86,6 +90,7 @@ If instructions still conflict after applying this order, ask the user before ac
   - `pnpm typecheck`
   - `pnpm test`
   - `pnpm test:coverage`
+- When those baseline commands are already credibly known red for unrelated reasons, narrow changes may use the documented scoped verification mode in `agent-docs/operations/verification-and-runtime.md` instead of re-running the same repo-wide failures.
 - Vault-only data tasks under `vault/**` do not run repo-wide verification by default. Verify them by reading back the touched records plus any audit or ledger entries written by the mutation path.
 - These bootstrap commands currently validate shell-wrapper syntax plus docs drift/gardening integrity.
 - When repo-specific code/tooling is introduced, replace or extend these commands rather than bypassing them.
