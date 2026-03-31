@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { test, vi } from "vitest";
+import { test as baseTest, vi } from "vitest";
 
 import { loadVaultOverview } from "../src/lib/overview";
 import {
@@ -17,6 +17,8 @@ import {
   resolveConfiguredVaultRoot,
 } from "../src/lib/vault";
 import { createWebFixtureVault, destroyWebFixtureVault } from "./web-fixture";
+
+const test = baseTest.sequential;
 
 async function writeFixtureFile(
   vaultRoot: string,

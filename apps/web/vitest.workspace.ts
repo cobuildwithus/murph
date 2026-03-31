@@ -5,7 +5,7 @@ import { defineConfig, defineProject } from "vitest/config";
 
 import {
   resolveMurphAppVitestMaxWorkers,
-  resolveMurphVitestFileParallelism,
+  resolveMurphVitestConcurrency,
 } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
@@ -16,7 +16,7 @@ import {
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
-const hostedWebVitestFileParallelism = resolveMurphVitestFileParallelism();
+const hostedWebVitestConcurrency = resolveMurphVitestConcurrency();
 const hostedWebVitestMaxWorkers = resolveMurphAppVitestMaxWorkers();
 const hostedWebAliases = [
   {
@@ -39,7 +39,7 @@ function createHostedWebProject(name: string, patterns: readonly string[]) {
       ...murphVitestNoTimeouts,
       name,
       environment: "node",
-      fileParallelism: hostedWebVitestFileParallelism,
+      ...hostedWebVitestConcurrency,
       include: patterns.map(hostedWebPattern),
     },
   });

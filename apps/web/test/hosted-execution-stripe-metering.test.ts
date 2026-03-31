@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   markHostedAiUsageStripeFailed: vi.fn(),
@@ -20,6 +20,8 @@ import {
   drainHostedAiUsageStripeMetering,
   readHostedAiUsageStripeMeterEnvironment,
 } from "@/src/lib/hosted-execution/stripe-metering";
+
+const describe = baseDescribe.sequential;
 
 describe("drainHostedAiUsageStripeMetering", () => {
   const originalFetch = global.fetch;

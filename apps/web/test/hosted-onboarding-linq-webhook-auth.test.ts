@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
@@ -21,6 +21,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+
+const describe = baseDescribe.sequential;
 
 describe("handleHostedOnboardingLinqWebhook auth", () => {
   beforeEach(() => {

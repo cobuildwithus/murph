@@ -1,7 +1,7 @@
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import { defineProject } from "vitest/config";
 
-import { resolveMurphVitestFileParallelism } from "../../config/vitest-parallelism.js";
+import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
@@ -21,7 +21,7 @@ export default defineProject({
   test: {
     ...murphVitestNoTimeouts,
     name: "cloudflare-workers",
-    fileParallelism: resolveMurphVitestFileParallelism(),
+    ...resolveMurphVitestConcurrency(),
     include: ["apps/cloudflare/test/workers/**/*.test.ts"],
   },
 });

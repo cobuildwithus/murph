@@ -19,6 +19,15 @@ function parseMurphBooleanEnv(value: string | undefined): boolean | undefined {
   }
 }
 
+function parseMurphPositiveIntegerEnv(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 export function resolveMurphVitestFileParallelism(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
@@ -33,10 +42,54 @@ export function resolveMurphVitestFileParallelism(
   return !env.CI;
 }
 
+export function resolveMurphVitestSuiteConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const override = parseMurphBooleanEnv(
+    env.MURPH_VITEST_SUITE_CONCURRENCY ?? env.MURPH_TEST_SUITE_CONCURRENCY,
+  );
+
+  if (override !== undefined) {
+    return override;
+  }
+
+  return !env.CI;
+}
+
 export function resolveMurphVitestMaxWorkers(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   return env.MURPH_VITEST_MAX_WORKERS ?? (env.CI ? "50%" : "75%");
+}
+
+export function resolveMurphVitestMaxConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return (
+    parseMurphPositiveIntegerEnv(
+      env.MURPH_VITEST_MAX_CONCURRENCY ??
+        env.MURPH_TEST_MAX_CONCURRENCY ??
+        env.MURPH_CLI_VITEST_MAX_CONCURRENCY,
+    ) ?? (env.CI ? 1 : 2)
+  );
+}
+
+export function resolveMurphVitestConcurrency(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  fileParallelism: boolean;
+  maxConcurrency: number;
+  sequence: {
+    concurrent: boolean;
+  };
+} {
+  return {
+    fileParallelism: resolveMurphVitestFileParallelism(env),
+    maxConcurrency: resolveMurphVitestMaxConcurrency(env),
+    sequence: {
+      concurrent: resolveMurphVitestSuiteConcurrency(env),
+    },
+  };
 }
 
 export function resolveMurphAppVitestMaxWorkers(

@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe as baseDescribe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murph/hosted-execution";
 
@@ -18,6 +26,7 @@ let applyRoute: ApplyRouteModule;
 let snapshotRoute: SnapshotRouteModule;
 
 const originalInternalToken = process.env.HOSTED_EXECUTION_INTERNAL_TOKEN;
+const describe = baseDescribe.sequential;
 
 describe("hosted device-sync internal routes", () => {
   beforeAll(async () => {

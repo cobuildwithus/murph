@@ -20,12 +20,12 @@ import {
 } from "vitest/config";
 
 import {
-  resolveMurphVitestFileParallelism,
+  resolveMurphVitestConcurrency,
   resolveMurphVitestMaxWorkers,
 } from "./config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "./config/vitest-timeouts.js";
 
-const rootRepoVitestFileParallelism = resolveMurphVitestFileParallelism();
+const rootRepoVitestConcurrency = resolveMurphVitestConcurrency();
 const rootRepoVitestMaxWorkers = resolveMurphVitestMaxWorkers();
 
 type RootRepoProject = {
@@ -231,7 +231,7 @@ export default defineConfig({
           config,
           defineProject({
             test: {
-              fileParallelism: rootRepoVitestFileParallelism,
+              ...rootRepoVitestConcurrency,
               include,
             },
           }),
