@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-03-31 (verification docs still cover the incremental test-runtime build lane, bucketed CLI/hosted-web/Cloudflare Node Vitest lanes, local-parallel app verification defaults, overlapped local package-plus-app test execution, and the prepared hosted-web Prisma generate flow, and the index now also reflects the refreshed architecture/reliability/security docs for bound assistant tool-runtime parity plus explicit read-only/non-committing audit-subagent workflow rules)
+Last verified: 2026-03-31 (verification docs still cover the incremental test-runtime build lane, bucketed CLI/hosted-web/Cloudflare Node Vitest lanes, local-parallel app verification defaults, overlapped local package-plus-app test execution, and the prepared hosted-web Prisma generate flow, and the index now also reflects the refreshed architecture/reliability/security docs for bound assistant tool-runtime parity, bounded vault text inspection, no-replay tool-turn failover rules, plus explicit read-only/non-committing audit-subagent workflow rules)
 
 ## Purpose
 
@@ -22,7 +22,7 @@ This index is the table of contents for durable, repository-local context that a
 | `agent-docs/PRODUCT_CONSTITUTION.md` | Internal product constitution for behavioral direction, UX tone, and feature-tradeoff review. | Murph product principles | Murph Maintainer | Per product-direction change | High | 2026-03-28 |
 | `agent-docs/FRONTEND.md` | Frontend rules for the current local operator-facing web surface and future UI work. | `packages/web/**`, theme/layout decisions | Murph Maintainer | Per web UI change | High | 2026-03-23 |
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Docs, checks, audits, test posture | Murph Maintainer | Bi-weekly | Medium | 2026-03-12 |
-| `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations, including restartable foreground connector policy, bounded network timeout/retry expectations, and the no-implicit-retry rule for tool-enabled assistant turns. | Runtime behavior + recovery strategy | Murph Maintainer | Per reliability-affecting change | High | 2026-03-30 |
+| `agent-docs/RELIABILITY.md` | Reliability guardrails and failure-mode expectations, including restartable foreground connector policy, bounded network timeout/retry expectations, and the no-implicit-retry or cross-route replay rule for tool-enabled assistant turns. | Runtime behavior + recovery strategy | Murph Maintainer | Per reliability-affecting change | High | 2026-03-31 |
 | `agent-docs/SECURITY.md` | Security constraints, trust boundaries, and escalation rules, including how CLI-loaded local `.env` files remain sensitive and how OpenAI-compatible tool-enabled assistant turns stay bound to the active vault without gaining arbitrary host access. | Auth/secrets/data boundaries/process | Murph Maintainer | Per security-affecting change | High | 2026-03-30 |
 | `agent-docs/product-specs/index.md` | Index for product-spec documents. | `agent-docs/product-specs/**` | Murph Maintainer | Per behavior change | High | 2026-03-12 |
 | `agent-docs/product-specs/repo-bootstrap.md` | Current repository state and bootstrap success criteria. | Repository bootstrap decisions | Murph Maintainer | Until first product feature lands | High | 2026-03-12 |

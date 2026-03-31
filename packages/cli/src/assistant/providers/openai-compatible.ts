@@ -1,6 +1,7 @@
-import { generateText } from 'ai'
-import { VaultCliError } from '../../vault-cli-errors.js'
+import { generateText, stepCountIs } from 'ai'
 import { resolveAssistantLanguageModel } from '../../model-harness.js'
+import { createIntegratedVaultServices } from '../../vault-services.js'
+import { VaultCliError } from '../../vault-cli-errors.js'
 import {
   createCatalogModel,
   DEFAULT_OPENAI_COMPATIBLE_MODEL_CAPABILITIES,
@@ -19,6 +20,7 @@ import type { AssistantProviderDefinition } from './types.js'
 
 const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
+const OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS = 8
 const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
@@ -143,11 +145,27 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
+    const toolCatalog =
+      input.toolRuntime
+        ? (await import('../../assistant-cli-tools.js')).createDefaultAssistantToolCatalog({
+            requestId: input.toolRuntime.requestId ?? null,
+            vault: input.toolRuntime.vault,
+            vaultServices: createIntegratedVaultServices(),
+          })
+        : null
+    const tools = toolCatalog?.createAiSdkTools('apply')
+
     const result = await generateText({
       abortSignal: input.abortSignal,
-      maxRetries: OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
+      maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
       messages: buildAssistantProviderMessages(input),
       model: resolveAssistantLanguageModel(languageModelSpec),
+      ...(tools
+        ? {
+            stopWhen: stepCountIs(OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS),
+            tools,
+          }
+        : {}),
       system: normalizeNullableString(input.systemPrompt) ?? undefined,
       timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
     })

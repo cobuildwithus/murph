@@ -121,6 +121,7 @@ export async function executeAssistantProviderTurn(
     sessionContext: input.sessionContext,
     showThinkingTraces: input.showThinkingTraces,
     systemPrompt: input.systemPrompt,
+    toolRuntime: input.toolRuntime,
     userPrompt: input.userPrompt,
     workingDirectory: input.workingDirectory,
   })

@@ -1,19 +1,47 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, open, writeFile } from 'node:fs/promises'
 import { FOOD_STATUSES, RECIPE_STATUSES } from '@murph/contracts'
 import { buildSharePackFromVault } from '@murph/core'
 import path from 'node:path'
 import { z } from 'zod'
 import {
+  assistantCronScheduleInputSchema,
+  assistantMemoryLongTermSectionValues,
+  assistantMemoryQueryScopeValues,
+  assistantMemoryVisibleSectionValues,
+  assistantMemoryWriteScopeValues,
+} from './assistant-cli-contracts.js'
+import {
+  forgetAssistantMemory,
+  getAssistantMemory,
+  searchAssistantMemory,
+  upsertAssistantMemory,
+} from './assistant/memory.js'
+import {
+  deleteAssistantStateDocument,
+  getAssistantStateDocument,
+  listAssistantStateDocuments,
+  patchAssistantStateDocument,
+  putAssistantStateDocument,
+  redactAssistantStateDocumentListEntry,
+  redactAssistantStateDocumentSnapshot,
+} from './assistant/state.js'
+import { redactAssistantDisplayPath } from './assistant/store.js'
+import {
   healthEntityDescriptors,
   hasHealthCommandDescriptor,
 } from './health-cli-descriptors.js'
 import { resolveAssistantVaultPath } from './assistant-vault-paths.js'
+import type { InboxServices } from './inbox-services.js'
 import {
   createAssistantToolCatalog,
   type AssistantToolCatalog,
   defineAssistantTool,
 } from './model-harness.js'
-import type { InboxServices } from './inbox-services.js'
+import {
+  listAssistantSelfDeliveryTargets,
+  resolveAssistantSelfDeliveryTarget,
+} from './operator-config.js'
+import { VaultCliError } from './vault-cli-errors.js'
 import type { VaultServices } from './vault-services.js'
 
 const localDateSchema = z
@@ -33,6 +61,13 @@ const shareEntitySelectorSchema = z
   .refine((value) => Boolean(value.id || value.slug), {
     message: 'Provide either an id or slug.',
   })
+const assistantMemoryQueryScopeSchema = z.enum(assistantMemoryQueryScopeValues)
+const assistantMemoryWriteScopeSchema = z.enum(assistantMemoryWriteScopeValues)
+const assistantMemoryLongTermSectionSchema = z.enum(assistantMemoryLongTermSectionValues)
+const assistantMemoryVisibleSectionSchema = z.enum(assistantMemoryVisibleSectionValues)
+const assistantToolTextReadDefaultMaxChars = 8_000
+const assistantToolTextReadMaxChars = 20_000
+const assistantToolTextReadChunkBytes = 4_096
 
 
 interface AssistantToolContext {
@@ -44,6 +79,7 @@ interface AssistantToolContext {
 }
 
 export interface AssistantToolCatalogOptions {
+  includeAssistantRuntimeTools?: boolean
   includeQueryTools?: boolean
   includeStatefulWriteTools?: boolean
 }
@@ -53,6 +89,9 @@ export function createDefaultAssistantToolCatalog(
   options: AssistantToolCatalogOptions = {},
 ): AssistantToolCatalog {
   return createAssistantToolCatalog([
+    ...(options.includeAssistantRuntimeTools ?? true
+      ? createAssistantRuntimeToolDefinitions(input, options)
+      : []),
     ...createInboxPromotionToolDefinitions(input),
     ...(options.includeQueryTools ?? true ? createVaultQueryToolDefinitions(input) : []),
     ...createVaultWriteToolDefinitions(input, options),
@@ -63,9 +102,443 @@ export function createInboxRoutingAssistantToolCatalog(
   input: AssistantToolContext,
 ): AssistantToolCatalog {
   return createDefaultAssistantToolCatalog(input, {
+    includeAssistantRuntimeTools: false,
     includeQueryTools: false,
     includeStatefulWriteTools: false,
   })
+}
+
+async function loadAssistantCronTools() {
+  return await import('./assistant/cron.js')
+}
+
+function createAssistantRuntimeToolDefinitions(
+  input: AssistantToolContext,
+  options: AssistantToolCatalogOptions = {},
+) {
+  const readOnlyTools = [
+    defineAssistantTool({
+      name: 'vault.fs.readText',
+      description:
+        'Read one UTF-8 text file inside the active vault with bounded truncation. Use this for targeted inspection of parser outputs, markdown notes, or attachment-derived text artifacts when canonical query tools are not enough.',
+      inputSchema: z.object({
+        path: vaultFilePathSchema,
+        maxChars: z.number().int().positive().max(assistantToolTextReadMaxChars).optional(),
+      }),
+      inputExample: {
+        path: 'raw/inbox/captures/cap_123/attachments/1/parser/plain-text.txt',
+      },
+      execute: ({ path: candidatePath, maxChars }) =>
+        readAssistantTextFile(input.vault, candidatePath, maxChars),
+    }),
+    defineAssistantTool({
+      name: 'assistant.state.list',
+      description:
+        'List small non-canonical assistant scratch-state documents, optionally filtered by prefix.',
+      inputSchema: z.object({
+        prefix: z.string().min(1).optional(),
+      }),
+      inputExample: {
+        prefix: 'cron/',
+      },
+      execute: async ({ prefix }) =>
+        (await listAssistantStateDocuments({
+          vault: input.vault,
+          prefix,
+        })).map((entry) => redactAssistantStateDocumentListEntry(entry)),
+    }),
+    defineAssistantTool({
+      name: 'assistant.state.show',
+      description:
+        'Show one assistant scratch-state document by doc id.',
+      inputSchema: z.object({
+        docId: z.string().min(1),
+      }),
+      inputExample: {
+        docId: 'cron/my-reminder',
+      },
+      execute: async ({ docId }) =>
+        redactAssistantStateDocumentSnapshot(
+          await getAssistantStateDocument({
+            docId,
+            vault: input.vault,
+          }),
+        ),
+    }),
+    defineAssistantTool({
+      name: 'assistant.memory.search',
+      description:
+        'Search assistant memory for prior preferences, naming, standing instructions, or durable health context.',
+      inputSchema: z.object({
+        text: z.string().min(1).optional(),
+        scope: assistantMemoryQueryScopeSchema.optional(),
+        section: assistantMemoryVisibleSectionSchema.optional(),
+        limit: z.number().int().positive().max(50).optional(),
+      }),
+      inputExample: {
+        text: 'tone',
+        limit: 5,
+      },
+      execute: ({ text, scope, section, limit }) =>
+        searchAssistantMemory({
+          vault: input.vault,
+          text,
+          scope,
+          section: section ?? null,
+          limit,
+          includeSensitiveHealthContext: true,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.memory.get',
+      description:
+        'Show one assistant memory record by id.',
+      inputSchema: z.object({
+        id: z.string().min(1),
+      }),
+      inputExample: {
+        id: 'long-term:preferences%7Cslot%3Aassistant-style%3Atone',
+      },
+      execute: ({ id }) =>
+        getAssistantMemory({
+          id,
+          vault: input.vault,
+          includeSensitiveHealthContext: true,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.status',
+      description:
+        'Show the current assistant cron scheduler snapshot for the active vault.',
+      inputSchema: z.object({}),
+      inputExample: {},
+      execute: async () => (await loadAssistantCronTools()).getAssistantCronStatus(input.vault),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.list',
+      description:
+        'List configured assistant cron jobs for the active vault.',
+      inputSchema: z.object({}),
+      inputExample: {},
+      execute: async () => (await loadAssistantCronTools()).listAssistantCronJobs(input.vault),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.show',
+      description:
+        'Show one assistant cron job by job id or job name.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+      },
+      execute: async ({ job }) => (await loadAssistantCronTools()).getAssistantCronJob(input.vault, job),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.runs',
+      description:
+        'List recent runs for one assistant cron job.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+        limit: z.number().int().positive().max(100).optional(),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+        limit: 10,
+      },
+      execute: async ({ job, limit }) =>
+        (await loadAssistantCronTools()).listAssistantCronRuns({
+          vault: input.vault,
+          job,
+          limit,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.preset.list',
+      description:
+        'List built-in assistant cron presets.',
+      inputSchema: z.object({}),
+      inputExample: {},
+      execute: async () => (await loadAssistantCronTools()).listAssistantCronPresets(),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.preset.show',
+      description:
+        'Show one built-in assistant cron preset definition.',
+      inputSchema: z.object({
+        presetId: z.string().min(1),
+      }),
+      inputExample: {
+        presetId: 'weekly-summary',
+      },
+      execute: async ({ presetId }) => (await loadAssistantCronTools()).getAssistantCronPreset(presetId),
+    }),
+    defineAssistantTool({
+      name: 'assistant.selfTarget.list',
+      description:
+        'List saved outbound self-target routes such as email, Telegram, or phone delivery settings.',
+      inputSchema: z.object({}),
+      inputExample: {},
+      execute: () => listAssistantSelfDeliveryTargets(),
+    }),
+    defineAssistantTool({
+      name: 'assistant.selfTarget.show',
+      description:
+        'Show the saved outbound self-target route for one channel.',
+      inputSchema: z.object({
+        channel: z.string().min(1),
+      }),
+      inputExample: {
+        channel: 'telegram',
+      },
+      execute: ({ channel }) => resolveAssistantSelfDeliveryTarget(channel),
+    }),
+  ]
+
+  if (!(options.includeStatefulWriteTools ?? true)) {
+    return readOnlyTools
+  }
+
+  return [
+    ...readOnlyTools,
+    defineAssistantTool({
+      name: 'assistant.state.put',
+      description:
+        'Replace one assistant scratch-state document with the provided JSON object.',
+      inputSchema: z.object({
+        docId: z.string().min(1),
+        value: jsonObjectSchema,
+      }),
+      inputExample: {
+        docId: 'cron/my-reminder',
+        value: {
+          snoozedUntil: '2026-03-31',
+        },
+      },
+      execute: async ({ docId, value }) =>
+        redactAssistantStateDocumentSnapshot(
+          await putAssistantStateDocument({
+            docId,
+            value,
+            vault: input.vault,
+          }),
+        ),
+    }),
+    defineAssistantTool({
+      name: 'assistant.state.patch',
+      description:
+        'Merge one JSON object patch into an existing assistant scratch-state document.',
+      inputSchema: z.object({
+        docId: z.string().min(1),
+        patch: jsonObjectSchema,
+      }),
+      inputExample: {
+        docId: 'cron/my-reminder',
+        patch: {
+          snoozedUntil: '2026-03-31',
+        },
+      },
+      execute: async ({ docId, patch }) =>
+        redactAssistantStateDocumentSnapshot(
+          await patchAssistantStateDocument({
+            docId,
+            patch,
+            vault: input.vault,
+          }),
+        ),
+    }),
+    defineAssistantTool({
+      name: 'assistant.state.delete',
+      description:
+        'Delete one assistant scratch-state document by doc id.',
+      inputSchema: z.object({
+        docId: z.string().min(1),
+      }),
+      inputExample: {
+        docId: 'cron/my-reminder',
+      },
+      execute: async ({ docId }) => {
+        const deleted = await deleteAssistantStateDocument({
+          docId,
+          vault: input.vault,
+        })
+        return {
+          ...deleted,
+          documentPath: redactAssistantDisplayPath(deleted.documentPath),
+        }
+      },
+    }),
+    defineAssistantTool({
+      name: 'assistant.memory.upsert',
+      description:
+        'Upsert one assistant memory sentence into long-term or daily memory. Use this only when the user wants something remembered or a durable instruction clearly should persist.',
+      inputSchema: z.object({
+        text: z.string().min(1),
+        scope: assistantMemoryWriteScopeSchema.optional(),
+        section: assistantMemoryLongTermSectionSchema.optional(),
+        allowSensitiveHealthContext: z.boolean().optional(),
+      }),
+      inputExample: {
+        text: 'User prefers concise replies.',
+        scope: 'long-term',
+        section: 'Preferences',
+      },
+      execute: ({ allowSensitiveHealthContext, scope, section, text }) =>
+        upsertAssistantMemory({
+          vault: input.vault,
+          text,
+          scope,
+          section: section ?? null,
+          allowSensitiveHealthContext: allowSensitiveHealthContext ?? false,
+          provenance: {
+            writtenBy: 'assistant',
+            sessionId: null,
+            turnId: input.requestId ?? null,
+          },
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.memory.forget',
+      description:
+        'Remove one assistant memory record by id when it is mistaken or obsolete.',
+      inputSchema: z.object({
+        id: z.string().min(1),
+      }),
+      inputExample: {
+        id: 'long-term:preferences%7Cslot%3Aassistant-style%3Atone',
+      },
+      execute: ({ id }) =>
+        forgetAssistantMemory({
+          id,
+          vault: input.vault,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.add',
+      description:
+        'Create one assistant cron job with an explicit prompt and schedule.',
+      inputSchema: z.object({
+        name: z.string().min(1),
+        prompt: z.string().min(1),
+        schedule: assistantCronScheduleInputSchema,
+        enabled: z.boolean().optional(),
+        keepAfterRun: z.boolean().optional(),
+        bindState: z.boolean().optional(),
+        stateDocId: z.string().min(1).nullable().optional(),
+      }),
+      inputExample: {
+        name: 'weekly-digest',
+        prompt: 'Summarize the past week and propose one small next step.',
+        schedule: {
+          kind: 'dailyLocal',
+          localTime: '09:00',
+          timeZone: 'America/Los_Angeles',
+        },
+      },
+      execute: async ({ bindState, enabled, keepAfterRun, name, prompt, schedule, stateDocId }) =>
+        (await loadAssistantCronTools()).addAssistantCronJob({
+          vault: input.vault,
+          name,
+          prompt,
+          schedule,
+          enabled,
+          keepAfterRun,
+          bindState,
+          stateDocId: stateDocId ?? null,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.preset.install',
+      description:
+        'Install one built-in assistant cron preset into the active vault with optional overrides.',
+      inputSchema: z.object({
+        presetId: z.string().min(1),
+        name: z.string().min(1).optional(),
+        schedule: assistantCronScheduleInputSchema.optional(),
+        enabled: z.boolean().optional(),
+        bindState: z.boolean().optional(),
+        stateDocId: z.string().min(1).nullable().optional(),
+        additionalInstructions: z.string().min(1).optional(),
+        variables: z.record(z.string(), z.string().nullable()).optional(),
+      }),
+      inputExample: {
+        presetId: 'weekly-summary',
+      },
+      execute: async ({
+        additionalInstructions,
+        bindState,
+        enabled,
+        name,
+        presetId,
+        schedule,
+        stateDocId,
+        variables,
+      }) =>
+        (await loadAssistantCronTools()).installAssistantCronPreset({
+          vault: input.vault,
+          presetId,
+          name: name ?? null,
+          schedule: schedule ?? null,
+          enabled,
+          bindState,
+          stateDocId: stateDocId ?? null,
+          additionalInstructions: additionalInstructions ?? null,
+          variables: variables ?? null,
+        }),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.enable',
+      description:
+        'Enable one assistant cron job by job id or job name.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+      },
+      execute: async ({ job }) => (await loadAssistantCronTools()).setAssistantCronJobEnabled(input.vault, job, true),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.disable',
+      description:
+        'Disable one assistant cron job by job id or job name.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+      },
+      execute: async ({ job }) => (await loadAssistantCronTools()).setAssistantCronJobEnabled(input.vault, job, false),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.remove',
+      description:
+        'Remove one assistant cron job by job id or job name.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+      },
+      execute: async ({ job }) => (await loadAssistantCronTools()).removeAssistantCronJob(input.vault, job),
+    }),
+    defineAssistantTool({
+      name: 'assistant.cron.runNow',
+      description:
+        'Run one assistant cron job immediately.',
+      inputSchema: z.object({
+        job: z.string().min(1),
+      }),
+      inputExample: {
+        job: 'weekly-digest',
+      },
+      execute: async ({ job }) =>
+        (await loadAssistantCronTools()).runAssistantCronJobNow({
+          vault: input.vault,
+          job,
+        }),
+    }),
+  ]
 }
 
 function createInboxPromotionToolDefinitions(
@@ -685,6 +1158,89 @@ function createHealthUpsertToolDefinitions(
         },
       }),
     )
+}
+
+async function readAssistantTextFile(
+  vaultRoot: string,
+  candidatePath: string,
+  maxChars?: number,
+): Promise<{
+  path: string
+  text: string
+  totalChars: number
+  truncated: boolean
+}> {
+  const resolvedPath = await resolveAssistantVaultPath(vaultRoot, candidatePath, 'file path')
+  const limit = maxChars ?? assistantToolTextReadDefaultMaxChars
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const fileHandle = await open(resolvedPath, 'r')
+  const buffer = Buffer.allocUnsafe(assistantToolTextReadChunkBytes)
+  let text = ''
+  let totalChars = 0
+
+  try {
+    while (true) {
+      const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, null)
+      if (bytesRead === 0) {
+        break
+      }
+
+      const chunk = buffer.subarray(0, bytesRead)
+      if (chunk.includes(0)) {
+        throw createAssistantToolFileNotTextError(candidatePath)
+      }
+
+      const chunkText = decodeAssistantTextChunk(decoder, chunk, candidatePath)
+      totalChars += chunkText.length
+      if (text.length < limit) {
+        text += chunkText.slice(0, limit - text.length)
+      }
+    }
+
+    const trailingText = decodeAssistantTextChunk(decoder, undefined, candidatePath)
+    totalChars += trailingText.length
+    if (text.length < limit) {
+      text += trailingText.slice(0, limit - text.length)
+    }
+  } finally {
+    await fileHandle.close()
+  }
+
+  const truncated = totalChars > limit
+  const relativePath = path.relative(vaultRoot, resolvedPath).split(path.sep).join('/')
+
+  return {
+    path: relativePath,
+    text:
+      truncated
+        ? `${text.slice(0, limit)}
+
+[truncated ${totalChars - limit} characters]`
+        : text,
+    totalChars,
+    truncated,
+  }
+}
+
+function createAssistantToolFileNotTextError(candidatePath: string) {
+  return new VaultCliError(
+    'ASSISTANT_TOOL_FILE_NOT_TEXT',
+    `Assistant file path "${candidatePath}" must reference a UTF-8 text file inside the vault.`,
+  )
+}
+
+function decodeAssistantTextChunk(
+  decoder: TextDecoder,
+  chunk: Buffer | undefined,
+  candidatePath: string,
+): string {
+  try {
+    return chunk
+      ? decoder.decode(chunk, { stream: true })
+      : decoder.decode()
+  } catch {
+    throw createAssistantToolFileNotTextError(candidatePath)
+  }
 }
 
 async function issueHostedShareLink(input: {

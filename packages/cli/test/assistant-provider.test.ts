@@ -6,6 +6,14 @@ const providerMocks = vi.hoisted(() => ({
   executeCodexPrompt: vi.fn(),
   generateText: vi.fn(),
   resolveAssistantLanguageModel: vi.fn(),
+  stepCountIs: vi.fn((count: number) => ({
+    count,
+    kind: 'stepCountIs',
+  })),
+}))
+
+const toolMocks = vi.hoisted(() => ({
+  createDefaultAssistantToolCatalog: vi.fn(),
 }))
 
 const promptMocks = vi.hoisted(() => ({
@@ -15,6 +23,7 @@ const promptMocks = vi.hoisted(() => ({
 
 vi.mock('ai', () => ({
   generateText: providerMocks.generateText,
+  stepCountIs: providerMocks.stepCountIs,
 }))
 
 vi.mock('../src/assistant-codex.js', () => ({
@@ -23,6 +32,10 @@ vi.mock('../src/assistant-codex.js', () => ({
 
 vi.mock('../src/model-harness.js', () => ({
   resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
+}))
+
+vi.mock('../src/assistant-cli-tools.js', () => ({
+  createDefaultAssistantToolCatalog: toolMocks.createDefaultAssistantToolCatalog,
 }))
 
 vi.mock('node:readline/promises', () => ({
@@ -58,6 +71,12 @@ beforeEach(() => {
   providerMocks.executeCodexPrompt.mockReset()
   providerMocks.generateText.mockReset()
   providerMocks.resolveAssistantLanguageModel.mockReset()
+  providerMocks.stepCountIs.mockReset()
+  providerMocks.stepCountIs.mockImplementation((count: number) => ({
+    count,
+    kind: 'stepCountIs',
+  }))
+  toolMocks.createDefaultAssistantToolCatalog.mockReset()
   promptMocks.answers.length = 0
   promptMocks.prompts.length = 0
   vi.unstubAllGlobals()
@@ -660,6 +679,59 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
       totalTokens: null,
     },
   })
+})
+
+test('executeAssistantProviderTurn enables the canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
+  const languageModel = { provider: 'mock-model' }
+  const aiSdkTools = {
+    'assistant.cron.list': { description: 'cron' },
+    'assistant.memory.search': { description: 'memory' },
+    'assistant.selfTarget.list': { description: 'self-target' },
+    'assistant.state.show': { description: 'state' },
+    'vault.fs.readText': { description: 'read-text' },
+    'vault.show': { description: 'show' },
+  }
+  const createAiSdkTools = vi.fn((mode?: string) => {
+    void mode
+    return aiSdkTools
+  })
+
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+  toolMocks.createDefaultAssistantToolCatalog.mockReturnValue({
+    createAiSdkTools,
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'gpt-oss:20b',
+    systemPrompt: 'system prompt',
+    userPrompt: 'hello',
+    toolRuntime: {
+      requestId: 'turn_123',
+      vault: '/tmp/vault',
+    },
+  })
+
+  assert.equal(toolMocks.createDefaultAssistantToolCatalog.mock.calls.length, 1)
+  const catalogCall = toolMocks.createDefaultAssistantToolCatalog.mock.calls[0]?.[0]
+  assert.equal(catalogCall?.requestId, 'turn_123')
+  assert.equal(catalogCall?.vault, '/tmp/vault')
+  assert.equal(typeof catalogCall?.vaultServices, 'object')
+  assert.equal(createAiSdkTools.mock.calls[0]?.[0], 'apply')
+  assert.deepEqual(providerMocks.stepCountIs.mock.calls[0], [8])
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  assert.equal(generateCall?.maxRetries, 0)
+  assert.deepEqual(generateCall?.stopWhen, {
+    count: 8,
+    kind: 'stepCountIs',
+  })
+  assert.deepEqual(generateCall?.tools, aiSdkTools)
 })
 
 test('executeAssistantProviderTurn keeps explicit OpenAI-compatible prompts as the final user message', async () => {
