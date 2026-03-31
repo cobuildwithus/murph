@@ -25,8 +25,13 @@ describe("hosted deploy automation helpers", () => {
       CF_CONTAINER_MAX_INSTANCES: "250",
       CF_RUNNER_COMMIT_TIMEOUT_MS: "45000",
       CF_WORKER_NAME: "hosted-worker",
+      HOSTED_AI_USAGE_BASE_URL: "https://web.example.test",
       HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS: "api.example.test",
+      HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION: "true",
       HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER: "7m",
+      HOSTED_DEVICE_SYNC_CONTROL_BASE_URL: "https://web.example.test",
+      HOSTED_SHARE_API_BASE_URL: "https://web.example.test",
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
       INSTALL_PADDLEOCR: "1",
       TELEGRAM_BOT_USERNAME: "hosted_bot",
     });
@@ -111,7 +116,12 @@ describe("hosted deploy automation helpers", () => {
     });
     expect(config.vars.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS).toBe("45000");
     expect(config.vars.HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS).toBe("api.example.test");
+    expect(config.vars.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION).toBe("true");
     expect(config.vars.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER).toBe("7m");
+    expect(config.vars.HOSTED_AI_USAGE_BASE_URL).toBe("https://web.example.test");
+    expect(config.vars.HOSTED_DEVICE_SYNC_CONTROL_BASE_URL).toBe("https://web.example.test");
+    expect(config.vars.HOSTED_SHARE_API_BASE_URL).toBe("https://web.example.test");
+    expect(config.vars.HOSTED_WEB_BASE_URL).toBe("https://web.example.test");
     expect(config.vars.AGENTMAIL_BASE_URL).toBe("https://mail.example.test/v0");
     expect(config.vars.TELEGRAM_BOT_USERNAME).toBe("hosted_bot");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_BASE_URL).toBeUndefined();
@@ -162,15 +172,19 @@ describe("hosted deploy automation helpers", () => {
     expect(buildHostedWorkerSecretsPayload({
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
       HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
+      HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     })).toEqual({
       HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY: "bundle-key",
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+      HOSTED_EXECUTION_INTERNAL_TOKEN: "internal-token",
       HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
       HOSTED_EXECUTION_SIGNING_SECRET: "signing-secret",
+      HOSTED_SHARE_INTERNAL_TOKEN: "share-token",
       OPENAI_API_KEY: "sk-user",
       TELEGRAM_BOT_TOKEN: "bot-token",
     });
