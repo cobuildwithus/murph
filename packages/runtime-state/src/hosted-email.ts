@@ -149,23 +149,15 @@ export function resolveHostedEmailInboundSenderAddress(input: {
     return null;
   }
 
-  const headerSender = resolveHostedEmailHeaderSenderAddress(input.headerFrom);
   const envelopeSender = normalizeHostedEmailAddress(input.envelopeFrom);
-  const hasHeaderSender = typeof input.headerFrom === "string" && input.headerFrom.trim().length > 0;
-
-  if (hasHeaderSender) {
-    if (!headerSender) {
-      return null;
-    }
-
-    if (envelopeSender && headerSender !== envelopeSender) {
-      return null;
-    }
-
-    return headerSender;
+  if (!normalizeHostedEmailOptionalText(input.headerFrom)) {
+    return envelopeSender;
   }
 
-  return envelopeSender;
+  const headerSender = resolveHostedEmailHeaderSenderAddress(input.headerFrom);
+  return headerSender && (!envelopeSender || headerSender === envelopeSender)
+    ? headerSender
+    : null;
 }
 
 export function resolveHostedEmailAuthorizedSenderAddresses(input: {
@@ -200,29 +192,18 @@ function resolveHostedEmailHeaderSenderAddress(value: string | null | undefined)
     return null;
   }
 
-  const candidates = new Set<string>();
-  const angleMatches = [...value.matchAll(/<([^>]+)>/gu)];
-
-  for (const match of angleMatches) {
-    const normalized = normalizeHostedEmailAddress(match[1]);
-    if (normalized) {
-      candidates.add(normalized);
-    }
+  const angleBracketCandidates = collectHostedEmailHeaderSenderCandidates(
+    [...value.matchAll(/<([^>]+)>/gu)].map((match) => match[1] ?? ""),
+  );
+  if (angleBracketCandidates.size > 0) {
+    return readSingleHostedEmailHeaderSenderCandidate(angleBracketCandidates);
   }
 
-  if (candidates.size === 0) {
-    const bareMatches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu) ?? [];
-    for (const match of bareMatches) {
-      const normalized = normalizeHostedEmailAddress(match);
-      if (normalized) {
-        candidates.add(normalized);
-      }
-    }
-  }
-
-  return candidates.size === 1
-    ? [...candidates][0] ?? null
-    : null;
+  return readSingleHostedEmailHeaderSenderCandidate(
+    collectHostedEmailHeaderSenderCandidates(
+      value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/giu) ?? [],
+    ),
+  );
 }
 
 export function normalizeHostedEmailMessageId(value: string | null | undefined): string | null {
@@ -240,6 +221,35 @@ export function normalizeHostedEmailSubject(value: string | null | undefined): s
 function normalizeHostedEmailOptionalText(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function collectHostedEmailHeaderSenderCandidates(
+  values: Iterable<string>,
+): Set<string> {
+  const candidates = new Set<string>();
+
+  for (const value of values) {
+    const normalized = normalizeHostedEmailAddress(value);
+    if (normalized) {
+      candidates.add(normalized);
+    }
+  }
+
+  return candidates;
+}
+
+function readSingleHostedEmailHeaderSenderCandidate(
+  candidates: ReadonlySet<string>,
+): string | null {
+  if (candidates.size !== 1) {
+    return null;
+  }
+
+  for (const candidate of candidates) {
+    return candidate;
+  }
+
+  return null;
 }
 
 function encodeHostedEmailTargetPayload(value: string): string {

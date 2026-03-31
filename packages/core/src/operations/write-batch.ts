@@ -242,7 +242,9 @@ function normalizeStoredRelativePath(candidate: unknown): string | null {
   }
 }
 
-function parseStoredBackupRelativePath(record: Record<string, unknown>): string | undefined | null {
+function parseStoredOptionalBackupRelativePath(
+  record: Record<string, unknown>,
+): string | undefined | null {
   if (!("backupRelativePath" in record) || record.backupRelativePath === undefined) {
     return undefined;
   }
@@ -250,8 +252,32 @@ function parseStoredBackupRelativePath(record: Record<string, unknown>): string 
   return normalizeStoredRelativePath(record.backupRelativePath);
 }
 
-function parseStoredStageRelativePath(record: Record<string, unknown>): string | null {
+function parseStoredRequiredStageRelativePath(record: Record<string, unknown>): string | null {
   return normalizeStoredRelativePath(record.stageRelativePath);
+}
+
+interface ParsedStoredActionBase {
+  appliedAt?: string;
+  existedBefore?: boolean;
+  rolledBackAt?: string;
+  state: WriteOperationActionState;
+  targetRelativePath: string;
+}
+
+function parseStoredActionBase(record: Record<string, unknown>): ParsedStoredActionBase | null {
+  const state = parseWriteOperationActionState(record.state);
+  const targetRelativePath = normalizeStoredRelativePath(record.targetRelativePath);
+  if (!state || !targetRelativePath) {
+    return null;
+  }
+
+  return {
+    appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
+    existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
+    rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+    state,
+    targetRelativePath,
+  };
 }
 
 function parseCommittedPayloadReceipt(value: unknown): CommittedPayloadReceipt | undefined | null {
@@ -356,58 +382,49 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
   }
 
   const record = value as Record<string, unknown>;
-  const state = parseWriteOperationActionState(record.state);
-  const targetRelativePath = normalizeStoredRelativePath(record.targetRelativePath);
-  if (!state || !targetRelativePath) {
+  const base = parseStoredActionBase(record);
+  if (!base) {
     return null;
   }
 
   switch (record.kind) {
     case "delete": {
-      const backupRelativePath = parseStoredBackupRelativePath(record);
-      if ("backupRelativePath" in record && record.backupRelativePath !== undefined && !backupRelativePath) {
+      const backupRelativePath = parseStoredOptionalBackupRelativePath(record);
+      if (backupRelativePath === null) {
         return null;
       }
 
       return {
         kind: "delete",
-        state,
-        targetRelativePath,
+        ...base,
+        backupRelativePath,
         effect: record.effect === "delete" ? record.effect : undefined,
-        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
-        backupRelativePath: backupRelativePath ?? undefined,
-        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
-        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
       };
     }
     case "raw_copy": {
-      const stageRelativePath = parseStoredStageRelativePath(record);
+      const stageRelativePath = parseStoredRequiredStageRelativePath(record);
       if (!stageRelativePath) {
         return null;
       }
 
       return {
         kind: "raw_copy",
-        state,
-        targetRelativePath,
-        stageRelativePath,
+        ...base,
         allowExistingMatch: record.allowExistingMatch === true,
-        originalFileName: typeof record.originalFileName === "string" ? record.originalFileName : "",
-        mediaType: typeof record.mediaType === "string" ? record.mediaType : "",
         effect: record.effect === "copy" || record.effect === "reuse" ? record.effect : undefined,
-        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
-        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
-        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+        mediaType: typeof record.mediaType === "string" ? record.mediaType : "",
+        originalFileName: typeof record.originalFileName === "string" ? record.originalFileName : "",
+        stageRelativePath,
       };
     }
     case "text_write": {
-      const stageRelativePath = parseStoredStageRelativePath(record);
+      const stageRelativePath = parseStoredRequiredStageRelativePath(record);
       if (!stageRelativePath) {
         return null;
       }
 
-      const backupRelativePath = parseStoredBackupRelativePath(record);
-      if ("backupRelativePath" in record && record.backupRelativePath !== undefined && !backupRelativePath) {
+      const backupRelativePath = parseStoredOptionalBackupRelativePath(record);
+      if (backupRelativePath === null) {
         return null;
       }
 
@@ -418,25 +435,21 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
 
       return {
         kind: "text_write",
-        state,
-        targetRelativePath,
-        stageRelativePath,
-        overwrite: record.overwrite !== false,
+        ...base,
         allowExistingMatch: record.allowExistingMatch === true,
         allowRaw: record.allowRaw === true,
+        backupRelativePath,
+        committedPayloadReceipt,
         effect:
           record.effect === "create" || record.effect === "update" || record.effect === "reuse"
             ? record.effect
             : undefined,
-        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
-        backupRelativePath: backupRelativePath ?? undefined,
-        committedPayloadReceipt,
-        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
-        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+        overwrite: record.overwrite !== false,
+        stageRelativePath,
       };
     }
     case "jsonl_append": {
-      const stageRelativePath = parseStoredStageRelativePath(record);
+      const stageRelativePath = parseStoredRequiredStageRelativePath(record);
       if (!stageRelativePath) {
         return null;
       }
@@ -448,18 +461,14 @@ function parseStoredAction(value: unknown): StoredWriteAction | null {
 
       return {
         kind: "jsonl_append",
-        state,
-        targetRelativePath,
-        stageRelativePath,
+        ...base,
+        committedPayloadReceipt,
         effect: record.effect === "append" ? record.effect : undefined,
-        existedBefore: typeof record.existedBefore === "boolean" ? record.existedBefore : undefined,
         originalSize:
           typeof record.originalSize === "number" && Number.isFinite(record.originalSize)
             ? record.originalSize
             : undefined,
-        committedPayloadReceipt,
-        appliedAt: typeof record.appliedAt === "string" ? record.appliedAt : undefined,
-        rolledBackAt: typeof record.rolledBackAt === "string" ? record.rolledBackAt : undefined,
+        stageRelativePath,
       };
     }
     default:
