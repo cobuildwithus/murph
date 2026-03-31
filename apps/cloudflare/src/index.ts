@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
@@ -553,7 +551,7 @@ async function handleGatewaySendRoute(
 
   const replyToValidation = validateHostedGatewayReplyTo({
     channel: conversation.route.channel,
-    replyToMessageId: input.replyToMessageId,
+    replyToMessageId: input.replyToMessageId ?? null,
     sessionKey: input.sessionKey,
   });
   if (replyToValidation) {
@@ -562,10 +560,7 @@ async function handleGatewaySendRoute(
 
   const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
     clientRequestId: input.clientRequestId,
-    eventId: createGatewayDispatchEventId({
-      clientRequestId: input.clientRequestId,
-      sessionKey: input.sessionKey,
-    }),
+    eventId: createGatewayDispatchEventId(),
     occurredAt: new Date().toISOString(),
     replyToMessageId: input.replyToMessageId,
     sessionKey: input.sessionKey,
@@ -610,8 +605,8 @@ function validateHostedGatewayReplyTo(input: {
     if (sessionToken !== messageRouteToken) {
       return json({ error: "Gateway reply-to did not belong to the requested session." }, 400);
     }
-    if (messageKind !== "capture-message") {
-      return json({ error: "Gateway reply-to must reference a captured message." }, 400);
+    if (messageKind !== "capture-message" && messageKind !== "outbox-message") {
+      return json({ error: "Gateway reply-to must reference a channel message." }, 400);
     }
   } catch (error) {
     return json(
@@ -641,19 +636,8 @@ function requireGatewayStubMethod<TKey extends keyof UserRunnerDurableObjectStub
   return method as Exclude<UserRunnerDurableObjectStubLike[TKey], undefined>;
 }
 
-function createGatewayDispatchEventId(input?: {
-  clientRequestId?: string | null;
-  sessionKey?: string | null;
-}): string {
-  if (typeof input?.clientRequestId === "string" && input.clientRequestId.trim().length > 0) {
-    const hash = createHash("sha1")
-      .update(`${input.sessionKey ?? "gateway"}\n${input.clientRequestId.trim()}`)
-      .digest("hex")
-      .slice(0, 32);
-    return `gateway-send:${hash}`;
-  }
-
-  return `gateway-send:${Date.now()}:${Math.random().toString(16).slice(2, 10)}`;
+function createGatewayDispatchEventId(): string {
+  return `gateway-send:${crypto.randomUUID()}`;
 }
 
 async function handleHostedEmailIngress(

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   repoRoot,
   requireData,
@@ -39,7 +39,7 @@ test('show help uses id selectors except for journal date keys', async () => {
   assert.match(journalShowHelp, /Usage: vault-cli journal show <date> \[options\]/u)
 })
 
-test.sequential('generic list applies date bounds and echoes renamed filter keys', async () => {
+test('generic list applies date bounds and echoes renamed filter keys', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-normalization-'))
 
   try {
@@ -113,7 +113,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
   }
 })
 
-test.sequential('intake list applies date bounds and echoes renamed filter keys', async () => {
+test('intake list applies date bounds and echoes renamed filter keys', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-normalization-'))
 
   try {
@@ -196,7 +196,7 @@ test.sequential('intake list applies date bounds and echoes renamed filter keys'
   }
 })
 
-test.sequential('search applies date bounds and echoes renamed filter keys', async () => {
+test('search applies date bounds and echoes renamed filter keys', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-normalization-'))
 
   try {

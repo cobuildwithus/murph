@@ -7,6 +7,7 @@ export {
   listGatewayConversationsLocal,
   readGatewayMessagesLocal,
   respondToGatewayPermissionLocalWrapper,
+  sendGatewayMessage,
   waitGatewayEventsLocal,
 } from './gateway/local-service.js'
 

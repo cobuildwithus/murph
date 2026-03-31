@@ -816,7 +816,7 @@ describe("cloudflare worker routes", () => {
     });
   });
 
-  it("threads clientRequestId through hosted gateway sends and makes the dispatch id stable", async () => {
+  it("threads clientRequestId through hosted gateway sends", async () => {
     const stub = createUserRunnerStub();
     const env = createWorkerEnv(stub, {
       HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
@@ -847,7 +847,7 @@ describe("cloudflare worker routes", () => {
         text: "Please follow up.",
         userId: "member_123",
       }),
-      eventId: expect.stringMatching(/^gateway-send:[0-9a-f]{32}$/u),
+      eventId: expect.stringMatching(/^gateway-send:[0-9a-f-]{36}$/u),
     }));
   });
 
@@ -880,7 +880,7 @@ describe("cloudflare worker routes", () => {
     expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
 
-  it("rejects gateway reply-to sends that point at same-session outbox ids", async () => {
+  it("accepts gateway reply-to sends that point at same-session outbox ids", async () => {
     const stub = createUserRunnerStub();
     const routeToken = "route_worker_test";
     stub.gatewayGetConversation.mockResolvedValueOnce({
@@ -923,9 +923,122 @@ describe("cloudflare worker routes", () => {
       env,
     );
 
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      delivery: null,
+      messageId: null,
+      queued: true,
+      sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+    });
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        kind: "gateway.message.send",
+        replyToMessageId: createGatewayOutboxMessageIdForTests(routeToken, "outbox_test"),
+        sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+        text: "Please follow up.",
+        userId: "member_123",
+      }),
+      eventId: expect.stringMatching(/^gateway-send:/u),
+    }));
+  });
+
+  it("rejects gateway reply-to sends that point at a foreign-session outbox id", async () => {
+    const stub = createUserRunnerStub();
+    const routeToken = "route_worker_test";
+    const otherRouteToken = "route_other_test";
+    stub.gatewayGetConversation.mockResolvedValueOnce({
+      canSend: true,
+      lastActivityAt: "2026-03-26T12:00:00.000Z",
+      lastMessagePreview: "Please send the latest PDF.",
+      messageCount: 2,
+      route: {
+        channel: "linq",
+        directness: "direct",
+        identityId: "default",
+        participantId: "contact:alex",
+        reply: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        threadId: "chat_123",
+      },
+      schema: "murph.gateway-conversation.v1",
+      sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+      title: "Lab thread",
+    });
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+        body: JSON.stringify({
+          replyToMessageId: createGatewayOutboxMessageIdForTests(otherRouteToken, "outbox_other"),
+          sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+          text: "Please follow up.",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "Gateway reply-to must reference a captured message.",
+      error: "Gateway reply-to did not belong to the requested session.",
+    });
+    expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
+  });
+
+  it("rejects gateway reply-to sends that point at same-session non-message ids", async () => {
+    const stub = createUserRunnerStub();
+    const routeToken = "route_worker_test";
+    stub.gatewayGetConversation.mockResolvedValueOnce({
+      canSend: true,
+      lastActivityAt: "2026-03-26T12:00:00.000Z",
+      lastMessagePreview: "Please send the latest PDF.",
+      messageCount: 2,
+      route: {
+        channel: "linq",
+        directness: "direct",
+        identityId: "default",
+        participantId: "contact:alex",
+        reply: {
+          kind: "thread",
+          target: "chat_123",
+        },
+        threadId: "chat_123",
+      },
+      schema: "murph.gateway-conversation.v1",
+      sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+      title: "Lab thread",
+    });
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+        body: JSON.stringify({
+          replyToMessageId: createGatewayAttachmentIdForTests(routeToken, "attachment_test"),
+          sessionKey: createGatewayConversationSessionKeyForTests(routeToken),
+          text: "Please follow up.",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Gateway opaque id is invalid.",
     });
     expect(stub.dispatchWithOutcome).not.toHaveBeenCalled();
   });
@@ -2310,6 +2423,15 @@ function createGatewayConversationSessionKeyForTests(routeToken: string): string
 function createGatewayOutboxMessageIdForTests(routeToken: string, sourceToken: string): string {
   return `gwcm_${Buffer.from(JSON.stringify({
     kind: "outbox-message",
+    routeToken,
+    sourceToken,
+    version: 2,
+  }), "utf8").toString("base64url")}`;
+}
+
+function createGatewayAttachmentIdForTests(routeToken: string, sourceToken: string): string {
+  return `gwca_${Buffer.from(JSON.stringify({
+    kind: "attachment",
     routeToken,
     sourceToken,
     version: 2,

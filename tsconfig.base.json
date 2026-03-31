@@ -97,9 +97,6 @@
       "murph": [
         "packages/cli/src/index.ts"
       ],
-      "murph/assistant-core": [
-        "packages/cli/src/assistant-core.ts"
-      ],
       "murph/gateway-core": [
         "packages/cli/src/gateway-core.ts"
       ],
@@ -121,6 +118,9 @@
       "murph/assistant/cron": [
         "packages/cli/src/assistant/cron.ts"
       ],
+      "murph/assistant/service": [
+        "packages/cli/src/assistant/service.ts"
+      ],
       "murph/assistant/outbox": [
         "packages/cli/src/assistant/outbox.ts"
       ],
@@ -130,8 +130,14 @@
       "murph/assistant/store": [
         "packages/cli/src/assistant/store.ts"
       ],
+      "murph/assistant/state-ids": [
+        "packages/cli/src/assistant/state-ids.ts"
+      ],
       "murph/operator-config": [
         "packages/cli/src/operator-config.ts"
+      ],
+      "murph/assistant-cli-contracts": [
+        "packages/cli/src/assistant-cli-contracts.ts"
       ],
       "@murph/device-syncd": [
         "packages/device-syncd/src/index.ts"

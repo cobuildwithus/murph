@@ -36,7 +36,7 @@ export async function waitForGatewayEventsByPolling(
     limit: parsed.limit,
     sessionKey: parsed.sessionKey,
   })
-  if (result.events.length > 0 || parsed.timeoutMs <= 0) {
+  if (result.events.length > 0) {
     return result
   }
 

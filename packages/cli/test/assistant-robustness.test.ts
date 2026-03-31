@@ -625,7 +625,7 @@ test('buildAssistantFailoverRoutes dedupes identical routes even when their name
   assert.equal(routes[0]?.providerOptions.baseUrl, 'http://127.0.0.1:11434/v1')
   assert.equal(routes[0]?.providerOptions.apiKeyEnv, undefined)
   assert.equal(routes[0]?.providerOptions.providerName, undefined)
-  assert.match(routes[0]?.label ?? '', /127\.0\.0\.1:11434/u)
+  assert.match(routes[0]?.label ?? '', /Ollama/u)
 })
 
 test('sendAssistantMessage fails over across provider routes and records cooldown and receipt state', async () => {

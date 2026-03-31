@@ -1,5 +1,11 @@
 import * as React from 'react'
 import { Box, Text, render, useApp, useInput } from 'ink'
+import {
+  listNamedOpenAICompatibleProviderPresets,
+  resolveOpenAICompatibleProviderPreset,
+  resolveOpenAICompatibleProviderPresetFromId,
+  type OpenAICompatibleProviderPreset,
+} from './assistant/openai-compatible-provider-presets.js'
 import { listAssistantCronPresets } from './assistant/cron/presets.js'
 import {
   DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
@@ -7,6 +13,7 @@ import {
 } from './setup-assistant.js'
 import {
   type SetupAssistantPreset,
+  type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupWearable,
   setupChannelValues,
@@ -35,6 +42,7 @@ export interface SetupWizardInput {
   initialAssistantApiKeyEnv?: string | null
   initialAssistantBaseUrl?: string | null
   initialAssistantPreset?: SetupAssistantPreset
+  initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
   initialAssistantProviderName?: string | null
   initialChannels?: readonly SetupChannel[]
   initialScheduledUpdates?: readonly string[]
@@ -53,11 +61,12 @@ export interface SetupWizardCompletionController {
   waitForResult(): Promise<SetupWizardResult>
 }
 
-export type SetupWizardAssistantProvider = 'openai' | 'compatible' | 'skip'
+export type SetupWizardAssistantProvider = SetupAssistantProviderPreset | 'skip'
 
 export type SetupWizardAssistantMethod =
   | 'openai-codex'
   | 'openai-api-key'
+  | 'compatible-provider'
   | 'compatible-endpoint'
   | 'compatible-codex-oss'
   | 'skip'
@@ -163,15 +172,15 @@ const DEFAULT_SETUP_LINQ_WEBHOOK_URL = 'http://127.0.0.1:8789/linq-webhook'
 const DEFAULT_SETUP_OPENAI_API_BASE_URL = 'https://api.openai.com/v1'
 
 const setupWizardAssistantProviderOptions: readonly SetupWizardAssistantProviderOption[] = [
+  ...listNamedOpenAICompatibleProviderPresets().map((preset) => ({
+    provider: preset.id,
+    title: preset.title,
+    description: buildSetupWizardAssistantProviderDescription(preset),
+  })),
   {
-    provider: 'openai',
-    title: 'OpenAI',
-    description: 'Use OpenAI for Murph’s default assistant.',
-  },
-  {
-    provider: 'compatible',
-    title: 'Local or compatible endpoint',
-    description: 'Use Ollama, LM Studio, vLLM, or another OpenAI-style endpoint.',
+    provider: 'custom',
+    title: 'Custom endpoint',
+    description: 'Use any other OpenAI-style endpoint, or keep the Codex local-model path.',
   },
   {
     provider: 'skip',
@@ -200,9 +209,9 @@ const setupWizardCompatibleAssistantMethodOptions: readonly SetupWizardAssistant
   {
     method: 'compatible-endpoint',
     title: 'Compatible endpoint',
-    description: 'Use Ollama, LM Studio, vLLM, or another OpenAI-style endpoint.',
+    description: 'Use any OpenAI-style endpoint and enter the details during setup.',
     detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
-    badges: [{ label: 'local-friendly', tone: 'accent' }],
+    badges: [{ label: 'manual', tone: 'accent' }],
   },
   {
     method: 'compatible-codex-oss',
@@ -440,6 +449,7 @@ export async function runSetupWizard(
       baseUrl: input.initialAssistantBaseUrl,
       preset: initialAssistantPreset,
       providerName: input.initialAssistantProviderName,
+      providerPreset: input.initialAssistantProviderPreset,
     })
     const initialAssistantMethod = inferSetupWizardAssistantMethod({
       preset: initialAssistantPreset,
@@ -493,7 +503,9 @@ export async function runSetupWizard(
       linqLocalWebhookUrl: input.linqLocalWebhookUrl,
     })
     const includePublicUrlStep = publicUrlReview.enabled
-    const includeAssistantMethodStep = selectedAssistantProvider !== 'skip'
+    const includeAssistantMethodStep = doesSetupWizardAssistantProviderRequireMethod(
+      selectedAssistantProvider,
+    )
     const publicUrlGuidance = publicUrlReview.enabled
       ? describeSetupWizardPublicUrlStrategyChoice({
           review: publicUrlReview,
@@ -558,10 +570,9 @@ export async function runSetupWizard(
           title: option.title,
         })),
         marker: 'radio',
-        nextStep:
-          selectedAssistantProvider === 'skip'
-            ? 'scheduled-updates'
-            : 'assistant-method',
+        nextStep: includeAssistantMethodStep
+          ? 'assistant-method'
+          : 'scheduled-updates',
         previousStep: 'intro',
         selectCurrentOnEnter: true,
         setIndex: setAssistantProviderIndex,
@@ -778,6 +789,19 @@ export async function runSetupWizard(
         }
 
         if (key.return) {
+          if (selectionStep.step === 'assistant-provider') {
+            const activeProvider =
+              setupWizardAssistantProviderOptions[assistantProviderIndex]?.provider ??
+              selectedAssistantProvider
+            selectionStep.toggleCurrent()
+            setStep(
+              doesSetupWizardAssistantProviderRequireMethod(activeProvider)
+                ? 'assistant-method'
+                : 'scheduled-updates',
+            )
+            return
+          }
+
           if (selectionStep.selectCurrentOnEnter) {
             selectionStep.toggleCurrent()
           }
@@ -1312,16 +1336,25 @@ export function inferSetupWizardAssistantProvider(input: {
   baseUrl?: string | null
   preset: SetupAssistantPreset
   providerName?: string | null
+  providerPreset?: SetupAssistantProviderPreset | null
 }): SetupWizardAssistantProvider {
   switch (input.preset) {
     case 'codex-cli':
       return 'openai'
     case 'codex-oss':
-      return 'compatible'
+      return resolveSetupWizardCompatibleProviderPreset(input)?.id ?? 'custom'
     case 'skip':
       return 'skip'
     case 'openai-compatible':
-      return isOpenAIAssistantSelection(input) ? 'openai' : 'compatible'
+      if (input.providerPreset) {
+        return input.providerPreset
+      }
+
+      if (isOpenAIAssistantSelection(input)) {
+        return 'openai'
+      }
+
+      return resolveSetupWizardCompatibleProviderPreset(input)?.id ?? 'custom'
   }
 }
 
@@ -1337,10 +1370,20 @@ function inferSetupWizardAssistantMethod(input: {
     case 'skip':
       return 'skip'
     case 'openai-compatible':
-      return input.provider === 'openai'
-        ? 'openai-api-key'
-        : 'compatible-endpoint'
+      if (input.provider === 'openai') {
+        return 'openai-api-key'
+      }
+
+      return doesSetupWizardAssistantProviderRequireMethod(input.provider)
+        ? 'compatible-endpoint'
+        : 'compatible-provider'
   }
+}
+
+function doesSetupWizardAssistantProviderRequireMethod(
+  provider: SetupWizardAssistantProvider,
+): boolean {
+  return provider === 'openai' || provider === 'custom'
 }
 
 function resolveSetupWizardAssistantMethodForProvider(input: {
@@ -1357,9 +1400,13 @@ function resolveSetupWizardAssistantMethodForProvider(input: {
       : 'openai-codex'
   }
 
-  return input.currentMethod === 'compatible-codex-oss'
-    ? 'compatible-codex-oss'
-    : 'compatible-endpoint'
+  if (input.provider === 'custom') {
+    return input.currentMethod === 'compatible-codex-oss'
+      ? 'compatible-codex-oss'
+      : 'compatible-endpoint'
+  }
+
+  return 'compatible-provider'
 }
 
 function listSetupWizardAssistantMethodOptions(
@@ -1368,9 +1415,11 @@ function listSetupWizardAssistantMethodOptions(
   switch (provider) {
     case 'openai':
       return setupWizardOpenAIAssistantMethodOptions
-    case 'compatible':
+    case 'custom':
       return setupWizardCompatibleAssistantMethodOptions
     case 'skip':
+      return []
+    default:
       return []
   }
 }
@@ -1383,18 +1432,18 @@ export function resolveSetupWizardAssistantSelection(input: {
   method: SetupWizardAssistantMethod
   provider: SetupWizardAssistantProvider
 }): SetupWizardResolvedAssistantSelection {
-  const preservedCompatibleBaseUrl =
-    input.initialProvider === 'compatible'
-      ? normalizeSetupWizardText(input.initialBaseUrl)
-      : null
-  const preservedCompatibleApiKeyEnv =
-    input.initialProvider === 'compatible'
-      ? normalizeSetupWizardText(input.initialApiKeyEnv)
-      : null
-  const preservedCompatibleProviderName =
-    input.initialProvider === 'compatible'
-      ? normalizeSetupWizardText(input.initialProviderName)
-      : null
+  const preservedSelection =
+    input.initialProvider === input.provider
+      ? {
+          apiKeyEnv: normalizeSetupWizardText(input.initialApiKeyEnv),
+          baseUrl: normalizeSetupWizardText(input.initialBaseUrl),
+          providerName: normalizeSetupWizardText(input.initialProviderName),
+        }
+      : {
+          apiKeyEnv: null,
+          baseUrl: null,
+          providerName: null,
+        }
 
   if (input.provider === 'skip') {
     return {
@@ -1411,14 +1460,15 @@ export function resolveSetupWizardAssistantSelection(input: {
 
   if (input.provider === 'openai') {
     if (input.method === 'openai-api-key') {
+      const apiKeyEnv = preservedSelection.apiKeyEnv ?? 'OPENAI_API_KEY'
       return {
-        apiKeyEnv: 'OPENAI_API_KEY',
-        baseUrl: DEFAULT_SETUP_OPENAI_API_BASE_URL,
-        detail: 'Murph will use OPENAI_API_KEY and ask which model to save next.',
+        apiKeyEnv,
+        baseUrl: preservedSelection.baseUrl ?? DEFAULT_SETUP_OPENAI_API_BASE_URL,
+        detail: `Murph will use ${apiKeyEnv} and ask which model to save next.`,
         methodLabel: 'OpenAI API key',
         preset: 'openai-compatible',
         providerLabel: 'OpenAI',
-        providerName: 'OpenAI',
+        providerName: preservedSelection.providerName ?? 'openai',
         summary: 'OpenAI · API key',
       }
     }
@@ -1435,30 +1485,82 @@ export function resolveSetupWizardAssistantSelection(input: {
     }
   }
 
-  if (input.method === 'compatible-codex-oss') {
+  if (input.provider === 'custom') {
+    if (input.method === 'compatible-codex-oss') {
+      return {
+        apiKeyEnv: null,
+        baseUrl: null,
+        detail: 'Murph will keep the Codex flow and ask which local model to save next.',
+        methodLabel: 'Codex local model',
+        preset: 'codex-oss',
+        providerLabel: 'Custom endpoint',
+        providerName: null,
+        summary: 'Custom endpoint · Codex local model',
+      }
+    }
+
     return {
-      apiKeyEnv: null,
-      baseUrl: null,
-      detail: 'Murph will keep the Codex flow and ask which local model to save next.',
-      methodLabel: 'Codex local model',
-      preset: 'codex-oss',
-      providerLabel: 'Local or compatible endpoint',
-      providerName: null,
-      summary: 'Local or compatible endpoint · Codex local model',
+      apiKeyEnv: preservedSelection.apiKeyEnv,
+      baseUrl:
+        preservedSelection.baseUrl ?? DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
+      detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
+      methodLabel: 'Compatible endpoint',
+      preset: 'openai-compatible',
+      providerLabel: 'Custom endpoint',
+      providerName: preservedSelection.providerName,
+      summary: 'Custom endpoint · Compatible endpoint',
     }
   }
 
+  const providerPreset =
+    resolveOpenAICompatibleProviderPresetFromId(input.provider) ??
+    resolveOpenAICompatibleProviderPresetFromId('custom')
+
   return {
-    apiKeyEnv: preservedCompatibleApiKeyEnv,
+    apiKeyEnv: preservedSelection.apiKeyEnv ?? providerPreset?.apiKeyEnv ?? null,
     baseUrl:
-      preservedCompatibleBaseUrl ?? DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
-    detail: 'Murph will ask for the endpoint URL and then let you choose a model.',
-    methodLabel: 'Compatible endpoint',
+      preservedSelection.baseUrl ??
+      providerPreset?.baseUrl ??
+      DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
+    detail: buildSetupWizardNamedProviderSelectionDetail({
+      apiKeyEnv: preservedSelection.apiKeyEnv ?? providerPreset?.apiKeyEnv ?? null,
+      preset: providerPreset,
+    }),
+    methodLabel: null,
     preset: 'openai-compatible',
-    providerLabel: 'Local or compatible endpoint',
-    providerName: preservedCompatibleProviderName,
-    summary: 'Local or compatible endpoint · Compatible endpoint',
+    providerLabel: providerPreset?.title ?? 'OpenAI-compatible provider',
+    providerName:
+      preservedSelection.providerName ?? providerPreset?.providerName ?? null,
+    summary: providerPreset?.title ?? 'OpenAI-compatible provider',
   }
+}
+
+function resolveSetupWizardCompatibleProviderPreset(input: {
+  apiKeyEnv?: string | null
+  baseUrl?: string | null
+  providerName?: string | null
+}): OpenAICompatibleProviderPreset | null {
+  const normalizedBaseUrl = normalizeSetupWizardText(input.baseUrl)
+  if (normalizedBaseUrl !== null) {
+    const preset = resolveOpenAICompatibleProviderPreset({
+      baseUrl: normalizedBaseUrl,
+    })
+    return preset?.id === 'openai' ? null : preset
+  }
+
+  const normalizedProviderName = normalizeSetupWizardText(input.providerName)
+  if (normalizedProviderName !== null) {
+    const preset = resolveOpenAICompatibleProviderPreset({
+      providerName: normalizedProviderName,
+    })
+    return preset?.id === 'openai' ? null : preset
+  }
+
+  const preset = resolveOpenAICompatibleProviderPreset({
+    apiKeyEnv: input.apiKeyEnv,
+  })
+
+  return preset?.id === 'openai' ? null : preset
 }
 
 function isOpenAIAssistantSelection(input: {
@@ -1466,22 +1568,60 @@ function isOpenAIAssistantSelection(input: {
   baseUrl?: string | null
   providerName?: string | null
 }): boolean {
-  const providerName = normalizeSetupWizardText(input.providerName)?.toLowerCase()
-  const baseUrl = normalizeSetupWizardText(input.baseUrl)
+  const normalizedProviderName = normalizeSetupWizardText(input.providerName)
+  if (normalizedProviderName !== null) {
+    return (
+      resolveOpenAICompatibleProviderPreset({
+        providerName: normalizedProviderName,
+      })?.id === 'openai'
+    )
+  }
 
-  return providerName === 'openai' || isOpenAIBaseUrl(baseUrl)
+  const normalizedBaseUrl = normalizeSetupWizardText(input.baseUrl)
+  if (normalizedBaseUrl !== null) {
+    return (
+      resolveOpenAICompatibleProviderPreset({
+        baseUrl: normalizedBaseUrl,
+      })?.id === 'openai'
+    )
+  }
+
+  return (
+    resolveOpenAICompatibleProviderPreset({
+      apiKeyEnv: input.apiKeyEnv,
+    })?.id === 'openai'
+  )
 }
 
-function isOpenAIBaseUrl(value: string | null | undefined): boolean {
-  if (value == null) {
-    return false
+function buildSetupWizardAssistantProviderDescription(
+  preset: OpenAICompatibleProviderPreset,
+): string {
+  if (preset.id === 'openai') {
+    return 'Use OpenAI. You can choose ChatGPT / Codex sign-in or an API key next.'
   }
 
-  try {
-    return new URL(value).hostname.toLowerCase() === 'api.openai.com'
-  } catch {
-    return false
+  if (preset.kind === 'local') {
+    return `Use ${preset.title} through its local OpenAI-compatible server.`
   }
+
+  if (preset.kind === 'gateway') {
+    return `Use ${preset.title} as an OpenAI-compatible gateway.`
+  }
+
+  return `Use ${preset.title} and choose a model during setup.`
+}
+
+function buildSetupWizardNamedProviderSelectionDetail(input: {
+  apiKeyEnv: string | null
+  preset: OpenAICompatibleProviderPreset | null
+}): string {
+  const providerTitle = input.preset?.title ?? 'this provider'
+
+  if (input.apiKeyEnv) {
+    return `Murph will use ${providerTitle} and read the key from ${input.apiKeyEnv}. It will ask which model to save next.`
+  }
+
+  return `Murph will use ${providerTitle} and ask which model to save next.`
 }
 
 function formatSetupChannel(channel: SetupChannel): string {
@@ -1607,16 +1747,21 @@ function buildSetupWizardAssistantProviderBadges(input: {
 }): SetupWizardInlineBadge[] {
   const badges: SetupWizardInlineBadge[] = []
 
-  switch (input.provider) {
-    case 'openai':
+  if (input.provider === 'skip') {
+    badges.push({ label: 'no change', tone: 'muted' })
+  } else if (input.provider === 'custom') {
+    badges.push({ label: 'manual', tone: 'accent' })
+  } else {
+    const preset = resolveOpenAICompatibleProviderPresetFromId(input.provider)
+    if (preset?.id === 'openai') {
       badges.push({ label: 'recommended', tone: 'success' })
-      break
-    case 'compatible':
+    } else if (preset?.kind === 'local') {
       badges.push({ label: 'local', tone: 'accent' })
-      break
-    case 'skip':
-      badges.push({ label: 'no change', tone: 'muted' })
-      break
+    } else if (preset?.kind === 'gateway') {
+      badges.push({ label: 'gateway', tone: 'accent' })
+    } else {
+      badges.push({ label: 'hosted', tone: 'muted' })
+    }
   }
 
   if (input.currentProvider === input.provider) {
@@ -1658,9 +1803,11 @@ function formatSetupWizardPromptTitle(
     case 'assistant-provider':
       return 'How should Murph answer?'
     case 'assistant-method':
-      return provider === 'openai'
-        ? 'How should Murph connect to OpenAI?'
-        : 'What kind of model source do you want?'
+      if (provider === 'openai') {
+        return 'How should Murph connect to OpenAI?'
+      }
+
+      return 'How should Murph connect to your endpoint?'
     case 'scheduled-updates':
       return 'Auto updates'
     case 'channels':
@@ -1680,11 +1827,11 @@ function formatSetupWizardStepIntro(
 ): string | undefined {
   switch (step) {
     case 'assistant-provider':
-      return 'Choose where Murph should get its default model.'
+      return 'Choose the provider or endpoint style Murph should use by default.'
     case 'assistant-method':
       return provider === 'openai'
         ? 'Pick the OpenAI path that fits you best.'
-        : 'Choose a local model source or another compatible endpoint.'
+        : 'Choose a manual endpoint or keep the Codex local-model flow.'
     case 'scheduled-updates':
       return 'These are optional check-ins Murph can send later.'
     case 'channels':

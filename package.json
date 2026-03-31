@@ -57,7 +57,8 @@
     "web:start": "pnpm --dir packages/web start",
     "setup:host": "bash scripts/setup-host.sh",
     "setup:linux": "bash scripts/setup-linux.sh",
-    "verify:workspace-boundaries": "node scripts/verify-workspace-boundaries.mjs"
+    "verify:workspace-boundaries": "node scripts/verify-workspace-boundaries.mjs",
+    "build:test-runtime:prepared": "node scripts/build-test-runtime-prepared.mjs"
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",

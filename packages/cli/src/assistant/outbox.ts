@@ -970,14 +970,20 @@ function hashAssistantOutboxIdentity(input: {
   threadId?: string | null
   turnId: string
 }): string {
+  const dedupeToken = normalizeNullableString(input.dedupeToken)
+  if (dedupeToken) {
+    return createHash('sha1')
+      .update(JSON.stringify({ dedupeToken }))
+      .digest('hex')
+  }
+
   return createHash('sha1')
     .update(
       JSON.stringify({
         message: input.message,
         sessionId: input.sessionId,
-        dedupeToken: normalizeNullableString(input.dedupeToken) ?? null,
-        turnId:
-          normalizeNullableString(input.dedupeToken) === null ? input.turnId : null,
+        dedupeToken: null,
+        turnId: input.turnId,
         channel: input.channel,
         identityId: input.identityId,
         actorId: input.actorId,

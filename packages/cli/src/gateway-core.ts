@@ -9,6 +9,7 @@
 
 export {
   gatewayAttachmentSchema,
+  gatewayDeliveryTargetKindValues,
   gatewayConversationDirectnessValues,
   gatewayConversationRouteSchema,
   gatewayConversationTitleSourceValues,
@@ -30,12 +31,14 @@ export {
   gatewayProjectionSnapshotSchema,
   gatewayReadMessagesInputSchema,
   gatewayReadMessagesResultSchema,
+  gatewayReplyRouteKindValues,
   gatewayReplyRouteSchema,
   gatewayRespondToPermissionInputSchema,
   gatewaySendMessageInputSchema,
   gatewaySendMessageResultSchema,
   gatewayWaitForEventsInputSchema,
   type GatewayAttachment,
+  type GatewayChannelDelivery,
   type GatewayConversation,
   type GatewayConversationDirectness,
   type GatewayConversationRoute,
@@ -58,12 +61,22 @@ export {
   type GatewayReadMessagesInput,
   type GatewayReadMessagesResult,
   type GatewayReplyRoute,
+  type GatewayReplyRouteKind,
   type GatewayRespondToPermissionInput,
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
   type GatewayService,
   type GatewayWaitForEventsInput,
 } from './gateway/contracts.js'
+
+export {
+  createGatewayInvalidRuntimeIdError,
+  createGatewaySessionNotFoundError,
+  createGatewayUnsupportedOperationError,
+  GATEWAY_SESSION_NOT_FOUND_CODE,
+  GATEWAY_UNSUPPORTED_OPERATION_CODE,
+  INVALID_GATEWAY_RUNTIME_ID_CODE,
+} from './gateway/errors.js'
 
 export {
   gatewayChannelSupportsReplyToMessage,
@@ -98,6 +111,14 @@ export {
 } from './gateway/snapshot.js'
 
 export {
+  assertGatewayAttachmentId,
+  assertGatewayConversationSessionKey,
+  assertGatewayMessageId,
+  createGatewayAttachmentId,
+  createGatewayCaptureMessageId,
+  createGatewayConversationSessionKey,
+  createGatewayOutboxMessageId,
+  readGatewayAttachmentId,
   readGatewayConversationSessionToken,
   readGatewayMessageKind,
   readGatewayMessageRouteToken,

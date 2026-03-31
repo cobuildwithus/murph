@@ -80,6 +80,7 @@ describe("hosted user env helpers", () => {
       update: {
         env: {
           FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+          HF_TOKEN: "hf-user",
           OPENAI_API_KEY: "sk-user",
           VENICE_API_KEY: "venice-user",
           XAI_API_KEY: "xai-user",
@@ -88,6 +89,7 @@ describe("hosted user env helpers", () => {
       },
     })).toEqual({
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
+      HF_TOKEN: "hf-user",
       OPENAI_API_KEY: "sk-user",
       VENICE_API_KEY: "venice-user",
       XAI_API_KEY: "xai-user",

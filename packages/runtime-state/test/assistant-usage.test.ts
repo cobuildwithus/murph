@@ -173,6 +173,14 @@ test("assistant usage credential source resolves against the hosted user env sna
   );
   assert.equal(
     resolveAssistantUsageCredentialSource({
+      apiKeyEnv: "HF_TOKEN",
+      provider: "openai-compatible",
+      userEnvKeys: ["HF_TOKEN"],
+    }),
+    "member",
+  );
+  assert.equal(
+    resolveAssistantUsageCredentialSource({
       apiKeyEnv: null,
       provider: "codex-cli",
       userEnvKeys: ["VENICE_API_KEY"],

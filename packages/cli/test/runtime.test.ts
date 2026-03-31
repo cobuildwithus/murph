@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import { createRuntimeUnavailableError } from '../src/runtime-errors.js'
 import {
   ensureCliRuntimeArtifactsWithOptions,
@@ -172,7 +172,7 @@ async function makeEmptyVaultFixture(): Promise<EmptyVaultFixture> {
   }
 }
 
-test.sequential(
+test(
   'importer-backed CLI commands return direct runtime payloads',
   async () => {
     const fixture = await makeEmptyVaultFixture()
@@ -268,7 +268,7 @@ test.sequential(
   runtimeCliTestTimeoutMs,
 )
 
-test.sequential(
+test(
   'show enforces non-queryable related ids and accepts returned lookup ids',
   async () => {
     const fixture = await makeFixtureVault()
@@ -358,7 +358,7 @@ test.sequential(
   runtimeCliTestTimeoutMs,
 )
 
-test.sequential(
+test(
   'full CLI registers audit tail/show and reads init-created audit entries',
   async () => {
     const fixture = await makeEmptyVaultFixture()
@@ -408,7 +408,7 @@ test.sequential(
   runtimeCliTestTimeoutMs,
 )
 
-test.sequential(
+test(
   'export pack materializes the derived five-file pack when --out is set',
   async () => {
     const fixture = await makeFixtureVault()

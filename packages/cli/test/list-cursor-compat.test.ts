@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'vitest'
+import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   repoRoot,
   requireData,
@@ -64,7 +64,7 @@ test('list help and schemas no longer expose cursor pagination options', async (
   assert.equal('dateTo' in intakeSchema.options.properties, false)
 }, CLI_LIST_TIMEOUT_MS)
 
-test.sequential('list commands still run after cursor removal', async () => {
+test('list commands still run after cursor removal', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const options = listCliOptions()
 
@@ -131,7 +131,7 @@ test.sequential('list commands still run after cursor removal', async () => {
   }
 }, CLI_LIST_TIMEOUT_MS)
 
-test.sequential('generic list applies date bounds and echoes renamed filter keys', async () => {
+test('generic list applies date bounds and echoes renamed filter keys', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const options = listCliOptions()
 
@@ -205,7 +205,7 @@ test.sequential('generic list applies date bounds and echoes renamed filter keys
   }
 }, CLI_LIST_TIMEOUT_MS)
 
-test.sequential('goal list keeps status-only filters canonical', async () => {
+test('goal list keeps status-only filters canonical', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const activeGoalPath = path.join(vaultRoot, 'goal-active.json')
   const pausedGoalPath = path.join(vaultRoot, 'goal-paused.json')
@@ -304,7 +304,7 @@ test.sequential('goal list keeps status-only filters canonical', async () => {
   }
 }, CLI_LIST_TIMEOUT_MS)
 
-test.sequential('generic list exposes record-type, status, stream, and tag filter parity', async () => {
+test('generic list exposes record-type, status, stream, and tag filter parity', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-list-'))
   const csvPath = path.join(vaultRoot, 'samples.csv')
   const experimentPath = path.join(
@@ -455,7 +455,7 @@ test.sequential('generic list exposes record-type, status, stream, and tag filte
   }
 }, CLI_LIST_TIMEOUT_MS)
 
-test.sequential('generic list rejects comma-delimited repeatable filter tokens', async () => {
+test('generic list rejects comma-delimited repeatable filter tokens', async () => {
   const result = await runSourceCli([
     'list',
     '--record-type',
@@ -471,7 +471,7 @@ test.sequential('generic list rejects comma-delimited repeatable filter tokens',
   )
 }, CLI_LIST_TIMEOUT_MS)
 
-test.sequential('generic list rejects unsupported record-type values', async () => {
+test('generic list rejects unsupported record-type values', async () => {
   const result = await runSourceCli([
     'list',
     '--record-type',

@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test } from "vitest";
+import { localParallelCliTest as test } from "./local-parallel-test.js";
 import { requireData, runCli } from "./cli-test-helpers.js";
 
-test.sequential("intake show and intake list route assessment reads through the noun-specific commands", async () => {
+test("intake show and intake list route assessment reads through the noun-specific commands", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
 
   try {
@@ -80,7 +80,7 @@ test.sequential("intake show and intake list route assessment reads through the 
   }
 });
 
-test.sequential("intake list applies date bounds and echoes renamed filter keys", async () => {
+test("intake list applies date bounds and echoes renamed filter keys", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
 
   try {
@@ -156,7 +156,7 @@ test.sequential("intake list applies date bounds and echoes renamed filter keys"
   }
 });
 
-test.sequential("intake list rejects the removed assessment status filter", async () => {
+test("intake list rejects the removed assessment status filter", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
 
   try {
@@ -181,7 +181,7 @@ test.sequential("intake list rejects the removed assessment status filter", asyn
   }
 });
 
-test.sequential("goal descriptor wiring keeps noun-specific and generic reads aligned", async () => {
+test("goal descriptor wiring keeps noun-specific and generic reads aligned", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal.json");
 
@@ -311,7 +311,7 @@ test.sequential("goal descriptor wiring keeps noun-specific and generic reads al
   }
 });
 
-test.sequential("goal show projects shared Goal relations through the noun-specific CLI surface", async () => {
+test("goal show projects shared Goal relations through the noun-specific CLI surface", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const parentPayloadPath = path.join(vaultRoot, "goal-parent.json");
   const relatedPayloadPath = path.join(vaultRoot, "goal-related.json");
@@ -436,7 +436,7 @@ test.sequential("goal show projects shared Goal relations through the noun-speci
   }
 });
 
-test.sequential("goal upsert rejects reserved vault-root overrides from JSON payloads", async () => {
+test("goal upsert rejects reserved vault-root overrides from JSON payloads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const redirectVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-override.json");
@@ -482,7 +482,7 @@ test.sequential("goal upsert rejects reserved vault-root overrides from JSON pay
   }
 });
 
-test.sequential("goal upsert preserves omitted fields on patch updates", async () => {
+test("goal upsert preserves omitted fields on patch updates", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "goal-create.json");
   const patchPriorityPayloadPath = path.join(vaultRoot, "goal-patch-priority.json");
@@ -574,7 +574,7 @@ test.sequential("goal upsert preserves omitted fields on patch updates", async (
   }
 });
 
-test.sequential("goal upsert validates payloads through the shared goal schema", async () => {
+test("goal upsert validates payloads through the shared goal schema", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");
 
@@ -606,7 +606,7 @@ test.sequential("goal upsert validates payloads through the shared goal schema",
   }
 });
 
-test.sequential("condition and allergy commands keep noun-specific and generic reads aligned", async () => {
+test("condition and allergy commands keep noun-specific and generic reads aligned", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const conditionPayloadPath = path.join(vaultRoot, "condition.json");
   const allergyPayloadPath = path.join(vaultRoot, "allergy.json");
@@ -740,7 +740,7 @@ test.sequential("condition and allergy commands keep noun-specific and generic r
   }
 });
 
-test.sequential("condition and allergy upsert validate payloads through the shared schemas", async () => {
+test("condition and allergy upsert validate payloads through the shared schemas", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const conditionPayloadPath = path.join(vaultRoot, "condition-invalid.json");
   const allergyPayloadPath = path.join(vaultRoot, "allergy-invalid.json");
@@ -793,7 +793,7 @@ test.sequential("condition and allergy upsert validate payloads through the shar
   }
 });
 
-test.sequential("condition, allergy, and family patch upserts preserve omitted create-only fields", async () => {
+test("condition, allergy, and family patch upserts preserve omitted create-only fields", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const conditionCreatePath = path.join(vaultRoot, "condition-create.json");
   const conditionPatchPath = path.join(vaultRoot, "condition-patch.json");
@@ -973,7 +973,7 @@ test.sequential("condition, allergy, and family patch upserts preserve omitted c
   }
 });
 
-test.sequential("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
+test("family descriptor wiring keeps member-specific commands aligned with generic health reads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family.json");
 
@@ -1080,7 +1080,7 @@ test.sequential("family descriptor wiring keeps member-specific commands aligned
   }
 });
 
-test.sequential("generic family show links ignore the removed familyMemberIds alias", async () => {
+test("generic family show links ignore the removed familyMemberIds alias", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const familyMemberId = "fam_01JNY0B2W4VG5C2A0G9S8M7R6P";
   const variantId = "var_01JNY0B2W4VG5C2A0G9S8M7R6Q";
@@ -1133,7 +1133,7 @@ Legacy alias coverage fixture.
   }
 });
 
-test.sequential("family upsert validates payloads through the shared schema and does not expose a fake status filter", async () => {
+test("family upsert validates payloads through the shared schema and does not expose a fake status filter", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "family-invalid.json");
 
@@ -1176,7 +1176,7 @@ test.sequential("family upsert validates payloads through the shared schema and 
   }
 });
 
-test.sequential("genetics descriptor wiring keeps variant-specific commands aligned with generic health reads", async () => {
+test("genetics descriptor wiring keeps variant-specific commands aligned with generic health reads", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "genetics.json");
 
@@ -1290,7 +1290,7 @@ test.sequential("genetics descriptor wiring keeps variant-specific commands alig
   }
 });
 
-test.sequential("genetics upsert validates payloads through the shared schema and preserves omitted gene values on patch updates", async () => {
+test("genetics upsert validates payloads through the shared schema and preserves omitted gene values on patch updates", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "genetics-create.json");
   const patchPayloadPath = path.join(vaultRoot, "genetics-patch.json");
@@ -1379,7 +1379,7 @@ test.sequential("genetics upsert validates payloads through the shared schema an
   }
 });
 
-test.sequential("protocol commands keep noun-specific and generic reads aligned", async () => {
+test("protocol commands keep noun-specific and generic reads aligned", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "protocol.json");
 
@@ -1470,7 +1470,7 @@ test.sequential("protocol commands keep noun-specific and generic reads aligned"
   }
 });
 
-test.sequential("history descriptor wiring preserves the shared history-ledger upsert result shape", async () => {
+test("history descriptor wiring preserves the shared history-ledger upsert result shape", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "history.json");
 
@@ -1549,7 +1549,7 @@ test.sequential("history descriptor wiring preserves the shared history-ledger u
   }
 });
 
-test.sequential("history list keeps canonical kind/data and echoes shared filters", async () => {
+test("history list keeps canonical kind/data and echoes shared filters", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const encounterPayloadPath = path.join(vaultRoot, "history-encounter.json");
 
@@ -1609,7 +1609,7 @@ test.sequential("history list keeps canonical kind/data and echoes shared filter
   }
 });
 
-test.sequential("blood-test descriptor wiring exposes a dedicated noun while preserving the shared event id", async () => {
+test("blood-test descriptor wiring exposes a dedicated noun while preserving the shared event id", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test.json");
 
@@ -1719,7 +1719,7 @@ test.sequential("blood-test descriptor wiring exposes a dedicated noun while pre
   }
 });
 
-test.sequential("blood-test list echoes shared filters and generic list kind routing", async () => {
+test("blood-test list echoes shared filters and generic list kind routing", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "blood-test-list.json");
 
@@ -1812,7 +1812,7 @@ test.sequential("blood-test list echoes shared filters and generic list kind rou
   }
 });
 
-test.sequential("profile current lookup stays wired for both noun-specific and generic show", async () => {
+test("profile current lookup stays wired for both noun-specific and generic show", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile.json");
 
@@ -1877,7 +1877,7 @@ test.sequential("profile current lookup stays wired for both noun-specific and g
   }
 });
 
-test.sequential("profile list and current show preserve canonical links and strip reserved fields", async () => {
+test("profile list and current show preserve canonical links and strip reserved fields", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const goalPayloadPath = path.join(vaultRoot, "goal-linked.json");
   const profilePayloadPath = path.join(vaultRoot, "profile-linked.json");
@@ -2056,7 +2056,7 @@ test.sequential("profile list and current show preserve canonical links and stri
   }
 });
 
-test.sequential("profile list preserves date-range filters after explicit adapter migration", async () => {
+test("profile list preserves date-range filters after explicit adapter migration", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const inRangePath = path.join(vaultRoot, "profile-in-range.json");
   const outOfRangePath = path.join(vaultRoot, "profile-out-of-range.json");
@@ -2137,7 +2137,7 @@ test.sequential("profile list preserves date-range filters after explicit adapte
   }
 });
 
-test.sequential("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
+test("supplement commands expose product metadata and a rolled-up compound ledger", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const primaryPayloadPath = path.join(vaultRoot, "supplement-primary.json");
   const secondaryPayloadPath = path.join(vaultRoot, "supplement-secondary.json");
@@ -2409,7 +2409,7 @@ test.sequential("supplement commands expose product metadata and a rolled-up com
   }
 }, 60_000);
 
-test.sequential("supplement rename moves the product record to the new slug while preserving the id", async () => {
+test("supplement rename moves the product record to the new slug while preserving the id", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-supplement-rename-"));
   const payloadPath = path.join(vaultRoot, "supplement.json");
 
@@ -2493,7 +2493,7 @@ test.sequential("supplement rename moves the product record to the new slug whil
   }
 });
 
-test.sequential("profile upsert rejects malformed profile payloads instead of coercing them to {}", async () => {
+test("profile upsert rejects malformed profile payloads instead of coercing them to {}", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "profile-invalid.json");
 

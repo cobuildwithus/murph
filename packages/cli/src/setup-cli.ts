@@ -4,6 +4,7 @@ import { assistantAutomationStateSchema } from './assistant-cli-contracts.js'
 import { resolveAssistantStatePaths } from './assistant/store/paths.js'
 import {
   type SetupAssistantPreset,
+  type SetupAssistantProviderPreset,
   type SetupChannel,
   type SetupCommandOptions,
   type SetupConfiguredWearable,
@@ -58,6 +59,7 @@ export interface SetupWizardRunner {
     initialAssistantApiKeyEnv?: string | null
     initialAssistantBaseUrl?: string | null
     initialAssistantPreset?: SetupAssistantPreset
+    initialAssistantProviderPreset?: SetupAssistantProviderPreset | null
     initialAssistantProviderName?: string | null
     initialChannels: readonly SetupChannel[]
     initialScheduledUpdates: readonly string[]
@@ -120,6 +122,8 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
     let selectedScheduledUpdates: string[] | null = null
     let selectedWearables: SetupWearable[] | null = null
     let selectedAssistantPreset: SetupAssistantPreset | null = null
+    let selectedAssistantProviderPreset: SetupAssistantProviderPreset | null | undefined =
+      context.options.assistantProviderPreset
     let selectedAssistantBaseUrl: string | null | undefined =
       context.options.assistantBaseUrl
     let selectedAssistantApiKeyEnv: string | null | undefined =
@@ -138,7 +142,10 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         initialAssistantApiKeyEnv: context.options.assistantApiKeyEnv,
         initialAssistantBaseUrl: context.options.assistantBaseUrl,
         initialAssistantPreset:
-          context.options.assistantPreset ?? getDefaultSetupAssistantPreset(),
+          inferSetupAssistantPresetFromOptions(context.options) ??
+          getDefaultSetupAssistantPreset(),
+        initialAssistantProviderPreset:
+          context.options.assistantProviderPreset ?? null,
         initialAssistantProviderName: context.options.assistantProviderName,
         initialChannels: await resolveInitialSetupWizardChannels(
           context.options.vault,
@@ -170,6 +177,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
         selectedAssistantProviderName = wizardResult.assistantProviderName
       }
 
+      selectedAssistantProviderPreset = undefined
       envOverrides = await runtimeEnv.promptForMissing({
         assistantApiKeyEnv: selectedAssistantApiKeyEnv,
         channels: selectedChannels,
@@ -183,6 +191,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
 
     const resolvedAssistantOptions = {
       ...context.options,
+      assistantProviderPreset: selectedAssistantProviderPreset,
       assistantApiKeyEnv: selectedAssistantApiKeyEnv,
       assistantBaseUrl: selectedAssistantBaseUrl,
       assistantProviderName: selectedAssistantProviderName,

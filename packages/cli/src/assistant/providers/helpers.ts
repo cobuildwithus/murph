@@ -1,4 +1,5 @@
 import { getAssistantBindingContextLines } from '../bindings.js'
+import { resolveOpenAICompatibleProviderTitle } from '../openai-compatible-provider-presets.js'
 import {
   normalizeNullableString,
   readAssistantEnvString,
@@ -39,7 +40,11 @@ export function buildOpenAICompatibleDiscoveryHeaders(input: {
 export function buildAssistantProviderLabel(config: AssistantProviderConfig): string {
   const explicitProviderName = normalizeNullableString(config.providerName)
   if (explicitProviderName) {
-    return explicitProviderName
+    return (
+      resolveOpenAICompatibleProviderTitle({
+        providerName: explicitProviderName,
+      }) ?? explicitProviderName
+    )
   }
 
   if (config.provider === 'codex-cli') {
@@ -47,6 +52,13 @@ export function buildAssistantProviderLabel(config: AssistantProviderConfig): st
   }
 
   const normalizedBaseUrl = normalizeNullableString(config.baseUrl)
+  const presetTitle = resolveOpenAICompatibleProviderTitle({
+    baseUrl: normalizedBaseUrl,
+  })
+  if (presetTitle) {
+    return presetTitle
+  }
+
   if (!normalizedBaseUrl) {
     return 'OpenAI-compatible endpoint'
   }

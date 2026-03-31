@@ -96,7 +96,7 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/parsers` | Local-first attachment parsing and derived artifact publication. |
 | `packages/query` | Read helpers, summaries, list/search helpers, and export-pack generation. |
 | `packages/device-syncd` | Local wearable/device OAuth, webhook, and reconcile daemon. |
-| `packages/assistant-core` | Headless assistant boundary for non-CLI consumers. |
+| `packages/assistant-core` | Headless local-only assistant/inbox/vault/operator-config boundary for non-CLI consumers. |
 | `packages/gateway-core` | Headless gateway boundary plus local gateway helpers. |
 | `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
 | `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |

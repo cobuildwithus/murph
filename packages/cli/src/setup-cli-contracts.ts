@@ -7,6 +7,9 @@ import {
 } from './assistant-cli-contracts.js'
 import { inboxBootstrapResultSchema } from './inbox-cli-contracts.js'
 import {
+  setupAssistantProviderPresetValues,
+} from './assistant/openai-compatible-provider-presets.js'
+import {
   isoTimestampSchema,
   pathSchema,
   requestIdSchema,
@@ -39,6 +42,9 @@ export const setupAssistantPresetValues = [
   'skip',
 ] as const
 export const setupAssistantPresetSchema = z.enum(setupAssistantPresetValues)
+export const setupAssistantProviderPresetSchema = z.enum(
+  setupAssistantProviderPresetValues,
+)
 export const setupAssistantAccountKindValues = [
   'account',
   'api-key',
@@ -168,6 +174,9 @@ export const setupCommandOptionsSchema = z.object({
   assistantPreset: setupAssistantPresetSchema
     .optional()
     .describe('Optional onboarding assistant preset: Codex CLI, Codex OSS/local model, OpenAI-compatible endpoint, or skip.'),
+  assistantProviderPreset: setupAssistantProviderPresetSchema
+    .optional()
+    .describe('Optional named OpenAI-compatible provider preset to save during setup, such as openrouter, venice, groq, ollama, or custom.'),
   assistantModel: z
     .string()
     .min(1)
@@ -226,6 +235,9 @@ export type WhisperModel = z.infer<typeof whisperModelSchema>
 export type SetupChannel = z.infer<typeof setupChannelSchema>
 export type SetupWearable = z.infer<typeof setupWearableSchema>
 export type SetupAssistantPreset = z.infer<typeof setupAssistantPresetSchema>
+export type SetupAssistantProviderPreset = z.infer<
+  typeof setupAssistantProviderPresetSchema
+>
 export type SetupAssistantAccountKind = z.infer<
   typeof setupAssistantAccountKindSchema
 >

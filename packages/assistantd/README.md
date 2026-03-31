@@ -74,3 +74,5 @@ assistantd now also serves the local derived gateway plane over loopback-only au
 - `POST /gateway/permissions/respond`
 
 These routes serve the operational conversation/message gateway surface for local MCP or other transport adapters without turning assistantd into a second canonical write owner.
+
+Local gateway helpers now honor the same assistantd base-url/token environment variables as the assistant client path, so consumers can route steady-state gateway reads/sends through the daemon whenever it is configured.

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -50,6 +51,8 @@ const cliIndexPath = path.join(packageDir, 'dist/index.js')
 const CLI_MAX_OUTPUT_BUFFER_BYTES = 8 * 1024 * 1024
 const CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS = 15_000
 const CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS = 100
+const CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_WAIT_TIMEOUT_MS = 60_000
+const CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_STALE_MS = 10 * 60_000
 const forwardedCliEnvKeys = [
   'CI',
   'COLORTERM',
@@ -101,6 +104,13 @@ const importSmokeArtifactPaths = [
   path.join(repoRoot, 'packages/cli/dist/setup-cli.js'),
   path.join(repoRoot, 'packages/cli/dist/setup-runtime-env.js'),
 ]
+const cliRuntimeArtifactRepairLockPath = path.join(
+  repoRoot,
+  'node_modules',
+  '.cache',
+  'murph',
+  'cli-runtime-artifacts.lock',
+)
 const PREPARED_CLI_RUNTIME_ARTIFACTS_ENV = 'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS' as const
 let cliRuntimeArtifactsVerified = false
 const strippedTestRunnerEnvKeys = ['NODE_OPTIONS', 'VITEST'] as const
@@ -285,21 +295,23 @@ export async function ensureCliRuntimeArtifactsWithOptions(options?: {
     return
   }
 
-  if (await waitForCliRuntimeArtifacts()) {
-    return
-  }
+  await withCliRuntimeArtifactRepairLock(async () => {
+    if (await verifyCliRuntimeArtifacts()) {
+      return
+    }
 
-  await rebuildCliRuntimeArtifacts()
+    await rebuildCliRuntimeArtifacts()
 
-  if (await verifyCliRuntimeArtifacts()) {
-    return
-  }
+    if (await verifyCliRuntimeArtifacts()) {
+      return
+    }
 
-  throw createMissingRuntimeArtifactsError()
+    throw createMissingRuntimeArtifactsError()
+  })
 }
 
 export async function rebuildCliRuntimeArtifacts(): Promise<void> {
-  await execWorkspaceCommand(['build:test-runtime'], { retryOnce: true })
+  await execWorkspaceCommand(['build:test-runtime:prepared'], { retryOnce: true })
 
   await execWorkspaceCommand([
     'exec',
@@ -406,7 +418,7 @@ async function waitForCliRuntimeArtifacts(): Promise<boolean> {
   const deadline = Date.now() + CLI_RUNTIME_ARTIFACT_WAIT_TIMEOUT_MS
 
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS))
+    await sleep(CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS)
 
     if (await verifyCliRuntimeArtifacts()) {
       return true
@@ -469,8 +481,85 @@ function createMissingRuntimeArtifactsError(): Error {
       : ''
 
   return new Error(
-    `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build:test-runtime\` before invoking CLI integration tests.`,
+    `Built CLI runtime artifacts are unavailable.${detail} Run \`pnpm build:test-runtime:prepared\` before invoking CLI integration tests.`,
   )
+}
+
+async function withCliRuntimeArtifactRepairLock(action: () => Promise<void>): Promise<void> {
+  const deadline = Date.now() + CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_WAIT_TIMEOUT_MS
+
+  await mkdir(path.dirname(cliRuntimeArtifactRepairLockPath), { recursive: true })
+
+  while (true) {
+    try {
+      await mkdir(cliRuntimeArtifactRepairLockPath)
+    } catch (error) {
+      if (!isDirectoryAlreadyExistsError(error)) {
+        throw error
+      }
+
+      if (await verifyCliRuntimeArtifacts()) {
+        return
+      }
+
+      if (await cleanupStaleCliRuntimeArtifactRepairLock()) {
+        continue
+      }
+
+      if (Date.now() >= deadline) {
+        throw new Error(
+          'Timed out waiting for the CLI runtime artifact repair lock to clear.',
+        )
+      }
+
+      await sleep(CLI_RUNTIME_ARTIFACT_WAIT_INTERVAL_MS)
+      continue
+    }
+
+    try {
+      await action()
+      return
+    } finally {
+      await rm(cliRuntimeArtifactRepairLockPath, { recursive: true, force: true })
+    }
+  }
+}
+
+async function cleanupStaleCliRuntimeArtifactRepairLock(): Promise<boolean> {
+  try {
+    const lockStats = await stat(cliRuntimeArtifactRepairLockPath)
+
+    if (Date.now() - lockStats.mtimeMs < CLI_RUNTIME_ARTIFACT_REPAIR_LOCK_STALE_MS) {
+      return false
+    }
+
+    await rm(cliRuntimeArtifactRepairLockPath, { recursive: true, force: true })
+    return true
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 'ENOENT'
+    ) {
+      return false
+    }
+
+    throw error
+  }
+}
+
+function isDirectoryAlreadyExistsError(error: unknown): boolean {
+  return (
+    error !== null &&
+    typeof error === 'object' &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'EEXIST'
+  )
+}
+
+async function sleep(delayMs: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
 async function canImportArtifact(artifactPath: string): Promise<boolean> {
