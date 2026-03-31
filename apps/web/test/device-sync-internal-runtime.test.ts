@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  mapHostedPublicAccountRecord: vi.fn((record: Record<string, unknown>) => ({
+  mapHostedInternalAccountRecord: vi.fn((record: Record<string, unknown>) => ({
     accessTokenExpiresAt: typeof record.accessTokenExpiresAt === "string" ? record.accessTokenExpiresAt : null,
     connectedAt: typeof record.connectedAt === "string" ? record.connectedAt : "2026-03-26T12:00:00.000Z",
     createdAt: typeof record.createdAt === "string" ? record.createdAt : "2026-03-26T12:00:00.000Z",
@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   hostedConnectionWithSecretArgs: {},
-  mapHostedPublicAccountRecord: mocks.mapHostedPublicAccountRecord,
+  mapHostedInternalAccountRecord: mocks.mapHostedInternalAccountRecord,
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {},
   requireHostedConnectionBundleRecord: mocks.requireHostedConnectionBundleRecord,
 }));

@@ -1,4 +1,5 @@
 export { createSecretCodec } from "./crypto.ts";
+export { redactPublicDeviceSyncMetadata, toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
 export { createDeviceSyncRegistry } from "./registry.ts";
 export { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";

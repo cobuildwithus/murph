@@ -120,10 +120,7 @@ test("Oura provider exchanges an auth code into a refreshable connection", async
   assert.equal(connection.tokens.refreshToken, "refresh-token");
   assert.deepEqual(connection.scopes, ["personal", "daily", "heartrate"]);
   assert.equal(connection.initialJobs?.[0]?.kind, "backfill");
-  assert.deepEqual(connection.metadata?.personalInfo, {
-    id: "oura-user-1",
-    email: "oura@example.com",
-  });
+  assert.equal(connection.metadata, undefined);
   assert.deepEqual(requests, [
     "https://api.ouraring.com/oauth/token",
     "https://api.ouraring.com/v2/usercollection/personal_info",

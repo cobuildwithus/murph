@@ -3,6 +3,7 @@ import { createImporters } from "@murph/importers";
 import { createSecretCodec } from "./crypto.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
+import { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
 import { createDeviceSyncRegistry } from "./registry.ts";
 import {
   addMilliseconds,
@@ -540,19 +541,25 @@ export class DeviceSyncService {
   }
 
   private toPublicAccount(account: StoredDeviceSyncAccount): PublicDeviceSyncAccount {
+    return toRedactedPublicDeviceSyncAccount(this.toInternalAccountRecord(account));
+  }
+
+  private toInternalAccountRecord(account: StoredDeviceSyncAccount): PublicDeviceSyncAccount {
     const {
       accessTokenEncrypted: _accessTokenEncrypted,
       refreshTokenEncrypted: _refreshTokenEncrypted,
       disconnectGeneration: _disconnectGeneration,
-      ...publicAccount
+      hostedObservedTokenVersion: _hostedObservedTokenVersion,
+      hostedObservedUpdatedAt: _hostedObservedUpdatedAt,
+      ...internalAccount
     } = account;
-    return publicAccount;
+    return internalAccount;
   }
 
   private toDecryptedAccount(account: StoredDeviceSyncAccount): DeviceSyncAccount {
     return {
       disconnectGeneration: account.disconnectGeneration,
-      ...this.toPublicAccount(account),
+      ...this.toInternalAccountRecord(account),
       accessToken: account.accessTokenEncrypted ? this.codec.decrypt(account.accessTokenEncrypted) : "",
       refreshToken: account.refreshTokenEncrypted ? this.codec.decrypt(account.refreshTokenEncrypted) : null,
     };

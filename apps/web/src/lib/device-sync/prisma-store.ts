@@ -30,6 +30,7 @@ import { PrismaHostedWebhookTraceStore } from "./prisma-store/webhook-traces";
 
 export {
   hostedConnectionWithSecretArgs,
+  mapHostedInternalAccountRecord,
   mapHostedPublicAccountRecord,
   requireHostedConnectionBundleRecord,
   requireHostedPublicAccountRecord,

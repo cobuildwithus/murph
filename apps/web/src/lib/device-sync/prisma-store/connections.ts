@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import { deviceSyncError } from "@murph/device-syncd";
+import { deviceSyncError, toRedactedPublicDeviceSyncAccount } from "@murph/device-syncd";
 
 import type {
   DeviceSyncAccountStatus,
@@ -302,7 +302,7 @@ export class PrismaHostedConnectionStore {
   }
 }
 
-export function mapHostedPublicAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
+export function mapHostedInternalAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
   return {
     id: record.id,
     provider: record.provider,
@@ -323,6 +323,10 @@ export function mapHostedPublicAccountRecord(record: HostedPublicAccountPrismaRe
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
   } satisfies PublicDeviceSyncAccount;
+}
+
+export function mapHostedPublicAccountRecord(record: HostedPublicAccountPrismaRecord): PublicDeviceSyncAccount {
+  return toRedactedPublicDeviceSyncAccount(mapHostedInternalAccountRecord(record));
 }
 
 export function requireHostedPublicAccountRecord(
@@ -351,7 +355,7 @@ export function requireHostedConnectionBundleRecord(
   return {
     userId: record.userId,
     account: {
-      ...mapHostedPublicAccountRecord(record),
+      ...mapHostedInternalAccountRecord(record),
       disconnectGeneration: 0,
       accessToken: codec.decrypt(record.secret.accessTokenEncrypted),
       refreshToken: record.secret.refreshTokenEncrypted ? codec.decrypt(record.secret.refreshTokenEncrypted) : null,
