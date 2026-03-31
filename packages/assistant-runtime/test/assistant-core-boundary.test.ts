@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { resolveAssistantStatePaths } from "@murph/runtime-state";
 import { test } from "vitest";
 
 import {
@@ -11,114 +12,100 @@ import {
   createIntegratedInboxServices,
   createIntegratedVaultServices,
   readAssistantAutomationState,
+  readOperatorConfig,
   resolveAssistantSelfDeliveryTarget,
   saveAssistantAutomationState,
-  saveAssistantSelfDeliveryTarget,
-} from "@murph/assistant-core";
-import {
-  readOperatorConfig,
-  resolveAssistantSelfDeliveryTarget as resolveCliAssistantSelfDeliveryTarget,
   saveAssistantOperatorDefaultsPatch,
-  saveAssistantSelfDeliveryTarget as saveCliAssistantSelfDeliveryTarget,
+  saveAssistantSelfDeliveryTarget,
   saveDefaultVaultConfig,
-} from "murph/operator-config";
-import {
-  readAssistantAutomationState as readCliAssistantAutomationState,
-  saveAssistantAutomationState as saveCliAssistantAutomationState,
-} from "murph/assistant/store";
+} from "@murph/assistant-core";
 
-test("assistant-runtime uses @murph/assistant-core as its source boundary while preserving murph compatibility exports", async () => {
+interface PackageManifest {
+  dependencies?: Record<string, string | undefined>;
+  exports?: Record<string, { default?: string; types?: string }>;
+}
+
+interface TsConfigShape {
+  references?: Array<{ path?: string }>;
+}
+
+test("assistant-runtime uses the dedicated @murph/assistant-core boundary instead of importing the CLI package", async () => {
   const runtimeManifest = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
-  ) as {
-    dependencies?: Record<string, string | undefined>;
-  };
+  ) as PackageManifest;
+  const cloudflareManifest = JSON.parse(
+    await readFile(new URL("../../../apps/cloudflare/package.json", import.meta.url), "utf8"),
+  ) as PackageManifest;
+  const assistantCoreManifest = JSON.parse(
+    await readFile(new URL("../../assistant-core/package.json", import.meta.url), "utf8"),
+  ) as PackageManifest;
+  const assistantCoreTsconfig = JSON.parse(
+    await readFile(new URL("../../assistant-core/tsconfig.json", import.meta.url), "utf8"),
+  ) as TsConfigShape;
   const cliManifest = JSON.parse(
     await readFile(new URL("../../cli/package.json", import.meta.url), "utf8"),
-  ) as {
-    exports: Record<string, { default?: string; types?: string }>;
-  };
-  const sourceFiles = await listFilesRecursive(new URL("../src/", import.meta.url));
+  ) as PackageManifest;
+  const assistantCoreIndexSource = await readFile(
+    new URL("../../assistant-core/src/index.ts", import.meta.url),
+    "utf8",
+  );
+  const runtimeSourceFiles = await listFilesRecursive(new URL("../src/", import.meta.url));
+  const assistantCoreSourceFiles = await listFilesRecursive(
+    new URL("../../assistant-core/src/", import.meta.url),
+  );
   const cloudflareNodeRunnerSource = await readFile(
     new URL("../../../apps/cloudflare/test/node-runner.test.ts", import.meta.url),
     "utf8",
   );
   const assistantCoreModule = await import("@murph/assistant-core");
-  const cliAssistantCoreModule = await import("murph/assistant-core");
-  const inboxServicesModule = await import("murph/inbox-services");
-  const vaultServicesModule = await import("murph/vault-services");
-  const vaultCliServicesModule = await import("murph/vault-cli-services");
   let sawAssistantCoreImport = false;
 
   assert.equal(runtimeManifest.dependencies?.["@murph/assistant-core"], "workspace:*");
+  assert.equal(runtimeManifest.dependencies?.murph, undefined);
+  assert.equal(cloudflareManifest.dependencies?.["@murph/assistant-core"], "workspace:*");
+  assert.equal(cloudflareManifest.dependencies?.murph, undefined);
+  assert.equal(assistantCoreManifest.dependencies?.murph, undefined);
   assert.equal(existsSync(new URL("../../assistant-services/package.json", import.meta.url)), false);
-  assert.equal(runtimeManifest.dependencies?.["@murph/assistant-services"], undefined);
-  assert.deepEqual(cliManifest.exports["./assistant-core"], {
-    default: "./dist/assistant-core.js",
-    types: "./dist/assistant-core.d.ts",
-  });
-  assert.deepEqual(cliManifest.exports["./vault-services"], {
-    default: "./dist/vault-services.js",
-    types: "./dist/vault-services.d.ts",
-  });
-  assert.deepEqual(cliManifest.exports["./vault-cli-services"], {
-    default: "./dist/vault-cli-services.js",
-    types: "./dist/vault-cli-services.d.ts",
-  });
+  assert.equal(cliManifest.exports?.["./assistant-core"], undefined);
+  assert.ok(
+    assistantCoreTsconfig.references?.every((reference) => reference.path !== "../cli"),
+    "packages/assistant-core/tsconfig.json must not reference ../cli",
+  );
+  assert.doesNotMatch(assistantCoreIndexSource, /\bfrom ["']murph\//u);
   assert.match(cloudflareNodeRunnerSource, /from ["']@murph\/assistant-core["']/u);
-  assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph["']/u);
+  assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph(\/|["'])/u);
 
-  for (const fileUrl of sourceFiles) {
+  for (const fileUrl of runtimeSourceFiles) {
     const source = await readFile(fileUrl, "utf8");
     assert.doesNotMatch(source, /@murph\/assistant-services/u);
+    assert.doesNotMatch(source, /\bfrom ["']murph(\/|["'])/u);
     if (/from ["']@murph\/assistant-core["']/u.test(source)) {
       sawAssistantCoreImport = true;
     }
   }
 
+  for (const fileUrl of assistantCoreSourceFiles) {
+    const source = await readFile(fileUrl, "utf8");
+    assert.doesNotMatch(source, /assistant-daemon-client/u);
+    assert.doesNotMatch(source, /\bfrom ["']murph(\/|["'])/u);
+  }
+
   assert.equal(sawAssistantCoreImport, true);
   assert.equal(assistantCoreModule.createIntegratedInboxServices, createIntegratedInboxServices);
-  assert.equal(cliAssistantCoreModule.createIntegratedInboxServices, createIntegratedInboxServices);
   assert.equal(assistantCoreModule.createIntegratedVaultServices, createIntegratedVaultServices);
-  assert.equal(
-    Object.hasOwn(assistantCoreModule, "createIntegratedInboxCliServices"),
-    false,
-  );
-  assert.equal(
-    Object.hasOwn(assistantCoreModule, "createIntegratedVaultCliServices"),
-    false,
-  );
-  assert.equal(
-    inboxServicesModule.createIntegratedInboxCliServices,
-    inboxServicesModule.createIntegratedInboxServices,
-  );
-  assert.equal(
-    Object.hasOwn(vaultServicesModule, "createIntegratedVaultCliServices"),
-    false,
-  );
-  assert.equal(
-    Object.hasOwn(vaultServicesModule, "createUnwiredVaultCliServices"),
-    false,
-  );
-  assert.equal(
-    vaultCliServicesModule.createIntegratedVaultCliServices,
-    vaultServicesModule.createIntegratedVaultServices,
-  );
-  assert.equal(
-    vaultCliServicesModule.createUnwiredVaultCliServices,
-    vaultServicesModule.createUnwiredVaultServices,
-  );
-  assert.equal(resolveAssistantSelfDeliveryTarget, resolveCliAssistantSelfDeliveryTarget);
-  assert.equal(saveAssistantSelfDeliveryTarget, saveCliAssistantSelfDeliveryTarget);
-  assert.equal(readAssistantAutomationState, readCliAssistantAutomationState);
-  assert.equal(saveAssistantAutomationState, saveCliAssistantAutomationState);
+  assert.equal(Object.hasOwn(assistantCoreModule, "createIntegratedInboxCliServices"), false);
+  assert.equal(Object.hasOwn(assistantCoreModule, "createIntegratedVaultCliServices"), false);
+  assert.equal(Object.hasOwn(assistantCoreModule, "createUnwiredVaultCliServices"), false);
+  assert.equal(Object.hasOwn(assistantCoreModule, "saveDefaultVaultConfig"), true);
+  assert.equal(Object.hasOwn(assistantCoreModule, "saveAssistantOperatorDefaultsPatch"), true);
 });
 
-test("assistant-core operator-config writes targets back in a CLI-readable shape", async () => {
+test("assistant-core operator-config writes the canonical local config shape", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-"));
 
   try {
     const homeRoot = path.join(workspaceRoot, "home");
+    const configPath = path.join(homeRoot, ".murph", "config.json");
     await saveDefaultVaultConfig("/tmp/existing-vault", homeRoot);
     await saveAssistantOperatorDefaultsPatch(
       {
@@ -183,12 +170,21 @@ test("assistant-core operator-config writes targets back in a CLI-readable shape
     assert.deepEqual(config.assistant?.selfDeliveryTargets?.email, saved);
     assert.match(config.updatedAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
 
+    const rawConfig = JSON.parse(await readFile(configPath, "utf8")) as {
+      assistant?: {
+        defaultsByProvider?: Record<string, { model?: string | null } | undefined>;
+        selfDeliveryTargets?: Record<string, unknown>;
+      };
+      defaultVault?: string | null;
+      schema?: string;
+    };
+    assert.equal(rawConfig.schema, "murph.operator-config.v1");
+    assert.equal(rawConfig.defaultVault, "/tmp/existing-vault");
+    assert.equal(rawConfig.assistant?.defaultsByProvider?.["openai-compatible"]?.model, "gpt-5.4");
+    assert.deepEqual(rawConfig.assistant?.selfDeliveryTargets?.email, saved);
+
     assert.deepEqual(
       await resolveAssistantSelfDeliveryTarget(" EMAIL ", homeRoot),
-      saved,
-    );
-    assert.deepEqual(
-      await resolveCliAssistantSelfDeliveryTarget("email", homeRoot),
       saved,
     );
   } finally {
@@ -226,7 +222,7 @@ test("assistant-core operator-config tolerates malformed existing config", async
   }
 });
 
-test("assistant-core operator-config rewrites schema-invalid assistant defaults into a CLI-readable config", async () => {
+test("assistant-core operator-config rewrites schema-invalid assistant defaults into a readable config", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-"));
 
   try {
@@ -267,7 +263,7 @@ test("assistant-core operator-config rewrites schema-invalid assistant defaults 
     assert.equal(config.assistant?.defaultsByProvider ?? null, null);
     assert.deepEqual(config.assistant?.selfDeliveryTargets?.email, saved);
     assert.deepEqual(
-      await resolveCliAssistantSelfDeliveryTarget("email", homeRoot),
+      await resolveAssistantSelfDeliveryTarget("email", homeRoot),
       saved,
     );
   } finally {
@@ -275,10 +271,14 @@ test("assistant-core operator-config rewrites schema-invalid assistant defaults 
   }
 });
 
-test("assistant-core automation state stays CLI-readable in both directions", async () => {
+test("assistant-core automation state round-trips through canonical local storage", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "assistant-core-boundary-vault-"));
+  const rewrittenVaultRoot = await mkdtemp(
+    path.join(tmpdir(), "assistant-core-boundary-vault-rewritten-"),
+  );
 
   try {
+    const automationPath = resolveAssistantStatePaths(vaultRoot).automationPath;
     const initial = await readAssistantAutomationState(vaultRoot);
     assert.equal(initial.autoReplyPrimed, true);
     assert.deepEqual(initial.autoReplyChannels, []);
@@ -294,20 +294,28 @@ test("assistant-core automation state stays CLI-readable in both directions", as
       }),
     );
 
-    assert.deepEqual(await readCliAssistantAutomationState(vaultRoot), coreSaved);
-
-    const cliSaved = await saveCliAssistantAutomationState(
-      vaultRoot,
-      assistantAutomationStateSchema.parse({
-        ...coreSaved,
-        preferredChannels: ["telegram"],
-        updatedAt: "2026-03-28T12:00:00.000Z",
-      }),
+    assert.deepEqual(
+      JSON.parse(await readFile(automationPath, "utf8")) as unknown,
+      coreSaved,
     );
 
-    assert.deepEqual(await readAssistantAutomationState(vaultRoot), cliSaved);
+    const rewritten = assistantAutomationStateSchema.parse({
+      ...coreSaved,
+      preferredChannels: ["telegram"],
+      updatedAt: "2026-03-28T12:00:00.000Z",
+    });
+    const rewrittenAutomationPath = resolveAssistantStatePaths(rewrittenVaultRoot).automationPath;
+    await mkdir(path.dirname(rewrittenAutomationPath), { recursive: true });
+    await writeFile(
+      rewrittenAutomationPath,
+      `${JSON.stringify(rewritten, null, 2)}\n`,
+      "utf8",
+    );
+
+    assert.deepEqual(await readAssistantAutomationState(rewrittenVaultRoot), rewritten);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
+    await rm(rewrittenVaultRoot, { force: true, recursive: true });
   }
 });
 

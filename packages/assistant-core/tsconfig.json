@@ -8,7 +8,25 @@
   },
   "references": [
     {
-      "path": "../cli"
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../runtime-state"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../importers"
+    },
+    {
+      "path": "../inboxd"
+    },
+    {
+      "path": "../query"
+    },
+    {
+      "path": "../parsers"
     }
   ],
   "include": [

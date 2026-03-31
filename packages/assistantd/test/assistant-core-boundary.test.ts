@@ -7,22 +7,33 @@ import { test } from 'vitest'
 
 import { createAssistantLocalService } from '../src/service.js'
 
-test('murph publishes assistant-core for headless assistant consumers', async () => {
+test('murph no longer publishes the removed assistant-core compatibility subpath', async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL('../../cli/package.json', import.meta.url), 'utf8'),
   ) as {
     exports: Record<string, { default?: string; types?: string }>
   }
 
-  assert.deepEqual(packageManifest.exports['./assistant-core'], {
-    default: './dist/assistant-core.js',
-    types: './dist/assistant-core.d.ts',
-  })
+  assert.equal(packageManifest.exports['./assistant-core'], undefined)
 })
 
-test('assistantd depends on headless murph subpaths instead of the root murph export', async () => {
+test('assistant-core is self-contained and assistantd depends on the dedicated headless packages', async () => {
+  const assistantdManifest = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as {
+    dependencies?: Record<string, string | undefined>
+  }
+  const assistantCoreManifest = JSON.parse(
+    await readFile(new URL('../../assistant-core/package.json', import.meta.url), 'utf8'),
+  ) as {
+    dependencies?: Record<string, string | undefined>
+  }
   const serviceSource = await readFile(new URL('../src/service.ts', import.meta.url), 'utf8')
   const httpSource = await readFile(new URL('../src/http.ts', import.meta.url), 'utf8')
+
+  assert.equal(assistantdManifest.dependencies?.['@murph/assistant-core'], 'workspace:*')
+  assert.equal(assistantdManifest.dependencies?.murph, undefined)
+  assert.equal(assistantCoreManifest.dependencies?.murph, undefined)
 
   assert.match(serviceSource, /from '@murph\/assistant-core'/)
   assert.match(serviceSource, /from '@murph\/gateway-core\/local'/)

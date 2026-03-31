@@ -37,8 +37,7 @@
     "@murph/hosted-execution": "workspace:*",
     "@murph/inboxd": "workspace:*",
     "@murph/parsers": "workspace:*",
-    "@murph/runtime-state": "workspace:*",
-    "murph": "workspace:*"
+    "@murph/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

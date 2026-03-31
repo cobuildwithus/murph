@@ -1,0 +1,28 @@
+export type {
+  AssistantCatalogModel,
+  AssistantModelCapabilities,
+  AssistantModelDiscoveryResult,
+  AssistantProviderCapabilities,
+  AssistantProviderDefinition,
+  AssistantProviderProgressEvent,
+  AssistantProviderTraits,
+  AssistantProviderTurnExecutionInput,
+  AssistantProviderTurnExecutionResult,
+  AssistantProviderTurnInput,
+  AssistantProviderUsage,
+} from './providers/types.js'
+export {
+  ASSISTANT_PROVIDER_DEFINITIONS,
+  createCatalogModel,
+  discoverAssistantProviderModels,
+  executeAssistantProviderTurn,
+  executeAssistantProviderTurnWithDefinition,
+  getAssistantProviderDefinition,
+  listAssistantProviderDefinitions,
+  listAssistantProviders,
+  resolveAssistantProviderCapabilities,
+  resolveAssistantProviderLabel,
+  resolveAssistantProviderStaticModels,
+  resolveAssistantProviderTraits,
+  shouldUseAssistantLocalTranscriptContext,
+} from './providers/registry.js'
