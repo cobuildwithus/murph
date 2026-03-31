@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   class MockDeviceSyncError extends Error {
@@ -91,6 +91,10 @@ describe("device sync callback redirect helpers", () => {
     httpModule = await import("../src/lib/device-sync/http");
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("maps device-sync domain errors through the shared JSON error helper", async () => {
     const sensitiveBodySnippet =
       "account_id=acct_fake_sensitive_123 access_token=tok_fake_sensitive_456 scope=offline";
@@ -125,12 +129,15 @@ describe("device sync callback redirect helpers", () => {
   });
 
   it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {
-    const invalidJsonResponse = httpModule.jsonError(
-      new SyntaxError("Unexpected token ] in JSON at position 3"),
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const invalidJsonError = new SyntaxError(
+      "Unexpected token ] in JSON at position 3 access_token=tok_fake_sensitive_123",
     );
-    const invalidRequestResponse = httpModule.jsonError(
-      new RangeError("Expected a shorter callback state value."),
+    const invalidRequestError = new RangeError(
+      "Expected a shorter callback state value. request_body={\"apiKey\":\"secret-value\"}",
     );
+    const invalidJsonResponse = httpModule.jsonError(invalidJsonError);
+    const invalidRequestResponse = httpModule.jsonError(invalidRequestError);
 
     expect(invalidJsonResponse.status).toBe(400);
     await expect(invalidJsonResponse.json()).resolves.toEqual({
@@ -147,6 +154,70 @@ describe("device sync callback redirect helpers", () => {
         message: "Invalid request.",
       },
     });
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenNthCalledWith(1, "Hosted device-sync route failed.", {
+      errorType: "SyntaxError",
+      internalMessage: "Hosted device-sync route failed unexpectedly.",
+    });
+    expect(warnSpy).toHaveBeenNthCalledWith(2, "Hosted device-sync route failed.", {
+      errorType: "RangeError",
+      internalMessage: "Hosted device-sync route failed unexpectedly.",
+    });
+    expect(warnSpy.mock.calls[0]?.[1]).not.toBe(invalidJsonError);
+    expect(warnSpy.mock.calls[1]?.[1]).not.toBe(invalidRequestError);
+  });
+
+  it("redacts raw thrown values from internal error logs", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const internalError = {
+      name: "WebhookFailure",
+      requestBody: {
+        accessToken: "tok_fake_sensitive_456",
+      },
+      tokenBundle: {
+        refreshToken: "refresh_fake_sensitive_789",
+      },
+    };
+
+    const response = httpModule.jsonError(internalError);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledOnce();
+    expect(errorSpy).toHaveBeenCalledWith("Hosted device-sync route failed.", {
+      errorType: "object",
+      internalMessage: "Hosted device-sync route failed unexpectedly.",
+    });
+    expect(errorSpy.mock.calls[0]?.[1]).not.toBe(internalError);
+  });
+
+  it("logs built-in error buckets instead of caller-controlled error names", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const internalError = new Error("request_body={\"token\":\"secret-value\"}");
+
+    internalError.name = "access_token=tok_fake_sensitive_999";
+
+    const response = httpModule.jsonError(internalError);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledOnce();
+    expect(errorSpy).toHaveBeenCalledWith("Hosted device-sync route failed.", {
+      errorType: "Error",
+      internalMessage: "Hosted device-sync route failed unexpectedly.",
+    });
+    expect(errorSpy.mock.calls[0]?.[1]).not.toBe(internalError);
   });
 
   it("passes through successful wrapped responses", async () => {

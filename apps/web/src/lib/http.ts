@@ -84,7 +84,7 @@ export function createJsonErrorResponse(
   }
 
   if (error instanceof SyntaxError) {
-    console.warn(options.logMessage, error);
+    logJsonError("warn", error, options);
     return NextResponse.json(
       {
         error: {
@@ -97,7 +97,7 @@ export function createJsonErrorResponse(
   }
 
   if (error instanceof TypeError || error instanceof RangeError) {
-    console.warn(options.logMessage, error);
+    logJsonError("warn", error, options);
     return NextResponse.json(
       {
         error: {
@@ -109,7 +109,7 @@ export function createJsonErrorResponse(
     );
   }
 
-  console.error(options.logMessage, error);
+  logJsonError("error", error, options);
   return NextResponse.json(
     {
       error: {
@@ -177,4 +177,31 @@ function matchJsonError(
   }
 
   return null;
+}
+
+function logJsonError(
+  level: "warn" | "error",
+  error: unknown,
+  options: JsonErrorResponseOptions,
+): void {
+  const log = level === "warn" ? console.warn : console.error;
+
+  log(options.logMessage, {
+    errorType: describeLoggedErrorType(error),
+    internalMessage: options.internalMessage,
+  });
+}
+
+function describeLoggedErrorType(error: unknown): string {
+  if (error instanceof Error) {
+    const constructorName = error.constructor?.name;
+
+    return typeof constructorName === "string" && constructorName ? constructorName : "Error";
+  }
+
+  if (Array.isArray(error)) {
+    return "array";
+  }
+
+  return error === null ? "null" : typeof error;
 }
