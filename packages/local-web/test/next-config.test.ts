@@ -22,6 +22,10 @@ test("resolveLocalWebWorkspaceSourceEntries points at source package entries", (
     path.resolve("/repo/packages/contracts/src/index.ts"),
   );
   assert.equal(
+    resolveLocalWebWorkspaceSourceEntries("/repo/packages/local-web")["@murph/device-syncd"],
+    path.resolve("/repo/packages/device-syncd/src/index.ts"),
+  );
+  assert.equal(
     resolveLocalWebWorkspaceSourceEntries("/repo/packages/local-web")["@murph/hosted-execution"],
     path.resolve("/repo/packages/hosted-execution/src/index.ts"),
   );

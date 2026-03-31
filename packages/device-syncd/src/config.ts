@@ -1,7 +1,7 @@
 import {
   DEVICE_SYNC_CONTROL_TOKEN_ENV_KEYS,
   DEVICE_SYNC_SECRET_ENV_KEYS,
-} from "@murph/runtime-state";
+} from "./client.ts";
 
 import { createOuraDeviceSyncProvider } from "./providers/oura.ts";
 import { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";

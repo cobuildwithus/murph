@@ -39,6 +39,7 @@ test("workspace source resolution keeps the hosted and local web package allowli
   ]);
   assert.deepEqual(LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES, [
     "@murph/contracts",
+    "@murph/device-syncd",
     "@murph/hosted-execution",
     "@murph/runtime-state",
     "@murph/query",
@@ -54,5 +55,5 @@ test("workspace source resolution does not widen beyond the explicit hosted/loca
 
   assert.equal("@murph/query" in hostedEntries, false);
   assert.equal("@murph/core" in localEntries, false);
-  assert.equal("@murph/device-syncd" in localEntries, false);
+  assert.equal("@murph/runtime-state" in localEntries, true);
 });

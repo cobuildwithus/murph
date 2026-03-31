@@ -14,6 +14,9 @@
       "path": "../runtime-state"
     },
     {
+      "path": "../device-syncd"
+    },
+    {
       "path": "../core/tsconfig.build.json"
     },
     {

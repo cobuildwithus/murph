@@ -23,6 +23,15 @@
       "@murph/contracts/*": [
         "packages/contracts/src/*"
       ],
+      "@murph/device-syncd": [
+        "packages/device-syncd/src/index.ts"
+      ],
+      "@murph/device-syncd/client": [
+        "packages/device-syncd/src/client.ts"
+      ],
+      "@murph/device-syncd/*": [
+        "packages/device-syncd/src/*.ts"
+      ],
       "@murph/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
