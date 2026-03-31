@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import type { DatabaseSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 import { resolveRuntimePaths } from "@murph/runtime-state";
 
@@ -13,8 +13,10 @@ import {
   createConnectorRegistry,
   createInboxPipeline,
   createImessageConnector,
+  listInboxCaptureMutations,
   normalizeImessageMessage,
   openInboxRuntime,
+  readInboxCaptureMutationHead,
   rebuildRuntimeFromVault,
   runPollConnector,
 } from "../src/index.ts";
@@ -488,6 +490,87 @@ test("completed attachment parse jobs refresh capture search text and attachment
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.captureId, capture.captureId);
   assert.match(hits[0]?.snippet ?? "", /Glucose 88 mg\/dL/);
+
+  pipeline.close();
+});
+
+
+test("capture mutation cursors advance for new captures, attachment parse updates, and direct capture rewrites", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-mutation-cursor-vault");
+  const sourceRoot = await makeTempDirectory("murph-inbox-mutation-cursor-source");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+
+  const documentPath = await writeExternalFile(sourceRoot, "cursor.pdf", "document");
+  const runtime = await openInboxRuntime({ vaultRoot });
+  const pipeline = await createInboxPipeline({ vaultRoot, runtime });
+
+  const capture = await pipeline.processCapture({
+    source: "imessage",
+    externalId: "cursor-1",
+    thread: { id: "chat-cursor" },
+    actor: { isSelf: false },
+    occurredAt: "2026-03-13T11:00:00.000Z",
+    text: "Original text",
+    attachments: [
+      {
+        kind: "document",
+        mime: "application/pdf",
+        originalPath: documentPath,
+        fileName: "cursor.pdf",
+      },
+    ],
+    raw: {},
+  });
+
+  const firstHead = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(firstHead > 0);
+  assert.deepEqual(await listInboxCaptureMutations({ vaultRoot, afterCursor: 0, limit: 10 }), [
+    {
+      captureId: capture.captureId,
+      cursor: firstHead,
+    },
+  ]);
+
+  const job = runtime.claimNextAttachmentParseJob();
+  assert.ok(job);
+  runtime.completeAttachmentParseJob({
+    jobId: job!.jobId,
+    attempt: job!.attempts,
+    providerId: "fake-document-parser",
+    resultPath: "derived/inbox/cursor.json",
+    extractedText: "Parsed cursor text",
+  });
+
+  const secondHead = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(secondHead > firstHead);
+  assert.deepEqual(await listInboxCaptureMutations({ vaultRoot, afterCursor: firstHead, limit: 10 }), [
+    {
+      captureId: capture.captureId,
+      cursor: secondHead,
+    },
+  ]);
+
+  const runtimeDatabase = new DatabaseSync(runtime.databasePath);
+  runtimeDatabase
+    .prepare(
+      `
+        update capture
+           set text_content = ?,
+               thread_title = ?
+         where capture_id = ?
+      `,
+    )
+    .run("Rewritten text", "Rewritten title", capture.captureId);
+  runtimeDatabase.close();
+
+  const thirdHead = await readInboxCaptureMutationHead(vaultRoot);
+  assert.ok(thirdHead > secondHead);
+  assert.deepEqual(await listInboxCaptureMutations({ vaultRoot, afterCursor: secondHead, limit: 10 }), [
+    {
+      captureId: capture.captureId,
+      cursor: thirdHead,
+    },
+  ]);
 
   pipeline.close();
 });

@@ -223,9 +223,12 @@ export type {
   PipelineContext,
 } from "./kernel/pipeline.ts";
 export {
+  listInboxCaptureMutations,
   openInboxRuntime,
+  readInboxCaptureMutationHead,
 } from "./kernel/sqlite.ts";
 export type {
+  InboxCaptureMutationRecord,
   InboxRuntimeStore,
   OpenInboxRuntimeInput,
 } from "./kernel/sqlite.ts";

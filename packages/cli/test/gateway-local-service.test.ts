@@ -394,12 +394,12 @@ test('local gateway hides actor-derived titles unless includeDerivedTitles is en
   }
 })
 
-test('local gateway persists serving tables and tracks a conservative capture signature', async () => {
+test('local gateway persists serving tables and advances the inbox-backed capture cursor', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-serving-store-'))
 
   try {
     await initializeVault({ vaultRoot })
-    let firstCaptureSignature: string | null = null
+    let firstCaptureCursor: string | null = null
 
     const runtime = await openInboxRuntime({ vaultRoot })
     const pipeline = await createInboxPipeline({ vaultRoot, runtime })
@@ -447,13 +447,13 @@ test('local gateway persists serving tables and tracks a conservative capture si
         .get('snapshot.json') as { value?: string } | undefined
       const captureSignature = gatewayDb
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('captures.signature') as { value?: string } | undefined
+        .get('captures.cursor') as { value?: string } | undefined
 
       assert.equal(conversationCount.count, 1)
       assert.equal(messageCount.count, 1)
       assert.equal(snapshotJson, undefined)
       assert.ok(captureSignature?.value)
-      firstCaptureSignature = captureSignature?.value ?? null
+      firstCaptureCursor = captureSignature?.value ?? null
     } finally {
       gatewayDb.close()
     }
@@ -506,13 +506,13 @@ test('local gateway persists serving tables and tracks a conservative capture si
         .get() as { count: number }
       const captureSignature = gatewayDbAfterIncrement
         .prepare('SELECT value FROM gateway_meta WHERE key = ?')
-        .get('captures.signature') as { value?: string } | undefined
+        .get('captures.cursor') as { value?: string } | undefined
 
       assert.equal(captureSourceCount.count, 2)
       assert.equal(messageCount.count, 2)
       assert.ok(captureSignature?.value)
-      assert.ok(firstCaptureSignature)
-      assert.notEqual(captureSignature?.value, firstCaptureSignature)
+      assert.ok(firstCaptureCursor)
+      assert.notEqual(captureSignature?.value, firstCaptureCursor)
     } finally {
       gatewayDbAfterIncrement.close()
     }
@@ -695,6 +695,88 @@ test('local gateway refreshes message projection when an existing capture is rew
       sessionKey: refreshedConversation!.sessionKey,
     })
     assert.equal(refreshedMessages.messages[0]?.text, 'Rewritten capture text')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway rebuilds when a legacy serving store is missing the capture cursor meta', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-legacy-cursor-rebuild-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8271',
+      thread: {
+        id: 'chat-legacy-cursor-rebuild',
+        title: 'Legacy title',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'Legacy capture text',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const initialConversation = (
+      await listGatewayConversationsLocal(vaultRoot, {
+        channel: null,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+        limit: 10,
+        search: null,
+      })
+    ).conversations[0]
+    assert.ok(initialConversation)
+
+    const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
+    try {
+      gatewayDb.prepare('DELETE FROM gateway_meta WHERE key = ?').run('captures.cursor')
+    } finally {
+      gatewayDb.close()
+    }
+
+    await rewriteInboxCaptureRuntimeRecord({
+      accountId: 'default',
+      externalId: 'linq:8271',
+      source: 'linq',
+      textContent: 'Rebuilt capture text',
+      threadTitle: 'Rebuilt title',
+      vaultRoot,
+    })
+
+    const refreshedConversation = (
+      await listGatewayConversationsLocal(vaultRoot, {
+        channel: null,
+        includeDerivedTitles: true,
+        includeLastMessage: true,
+        limit: 10,
+        search: null,
+      })
+    ).conversations[0]
+    assert.ok(refreshedConversation)
+    assert.equal(refreshedConversation?.title, 'Rebuilt title')
+    assert.equal(refreshedConversation?.lastMessagePreview, 'Rebuilt capture text')
+
+    const refreshedMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: initialConversation!.sessionKey,
+    })
+    assert.equal(refreshedMessages.messages[0]?.text, 'Rebuilt capture text')
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
   }
