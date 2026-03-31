@@ -16,7 +16,6 @@ export {
   parseFrontmatterScalar,
 } from "./frontmatter.ts";
 export { bankEntityDefinitionByKind } from "./bank-entities.ts";
-export { projectSupplementIngredients } from "./registry-helpers.ts";
 export {
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,

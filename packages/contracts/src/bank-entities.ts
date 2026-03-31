@@ -15,11 +15,7 @@ import {
   recipeUpsertPayloadSchema,
   workoutFormatUpsertPayloadSchema,
 } from "./shares.ts";
-import {
-  extractRegistryRelationTargets,
-  isPlainObject,
-  projectSupplementIngredients,
-} from "./registry-helpers.ts";
+import { extractRegistryRelationTargets } from "./registry-helpers.ts";
 import {
   foodFrontmatterSchema,
   providerFrontmatterSchema,
@@ -39,46 +35,13 @@ export type BankEntityKind =
   | "recipe"
   | "workout_format";
 
-export type BankEntitySortBehavior = "gene-title" | "priority-title" | "title";
 export type BankEntityRegistryLink = HealthEntityRegistryLink;
 export type BankEntityRegistryLinkCardinality = HealthEntityRegistryLinkCardinality;
 export type BankEntityRegistryLinkMetadata = HealthEntityRegistryLinkMetadata;
 
-export interface BankEntityRegistryProjectionHelpers {
-  firstBoolean(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): boolean | null;
-  firstNumber(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): number | null;
-  firstObject(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): Record<string, unknown> | null;
-  firstString(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): string | null;
-  firstStringArray(
-    source: Record<string, unknown>,
-    keys: readonly string[],
-  ): string[];
-}
-
-export interface BankEntityRegistryProjectionContext {
-  attributes: Record<string, unknown>;
-  helpers: BankEntityRegistryProjectionHelpers;
-  relativePath: string;
-}
-
-export interface BankEntityRegistryMetadata extends HealthEntityRegistryMetadata {
-  sortBehavior?: BankEntitySortBehavior;
-  transform?(
-    context: BankEntityRegistryProjectionContext,
-  ): Record<string, unknown>;
-}
+// Query-owned sort/materialization metadata lives in @murph/query;
+// contracts only describe canonical registry layout and validation.
+export interface BankEntityRegistryMetadata extends HealthEntityRegistryMetadata {}
 
 export type BankEntityDefinitionWithRegistry = BankEntityDefinition;
 
@@ -129,31 +92,6 @@ function defineBankRegistryEntity(
   };
 }
 
-function projectWorkoutStrengthExercises(
-  value: unknown,
-): Record<string, unknown>[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.filter(
-    (entry): entry is Record<string, unknown> =>
-      typeof entry === "object" && entry !== null && !Array.isArray(entry),
-  );
-}
-
-function projectFoodAutoLogDaily(
-  value: unknown,
-  helpers: BankEntityRegistryProjectionHelpers,
-): { time: string } | null {
-  if (!isPlainObject(value)) {
-    return null;
-  }
-
-  const time = helpers.firstString(value, ["time"]);
-  return time ? { time } : null;
-}
-
 const checkedBankEntityDefinitions = [
   ...HEALTH_BANK_ENTITY_KINDS.map((kind) =>
     requireHealthEntityRegistryDefinition(kind) as unknown as BankEntityDefinition,
@@ -186,23 +124,6 @@ const checkedBankEntityDefinitions = [
       ],
       titleKeys: ["title"],
       statusKeys: ["status"],
-      sortBehavior: "title",
-      transform({ attributes, helpers }) {
-        return {
-          summary: helpers.firstString(attributes, ["summary"]),
-          kind: helpers.firstString(attributes, ["kind"]),
-          brand: helpers.firstString(attributes, ["brand"]),
-          vendor: helpers.firstString(attributes, ["vendor"]),
-          location: helpers.firstString(attributes, ["location"]),
-          serving: helpers.firstString(attributes, ["serving"]),
-          aliases: helpers.firstStringArray(attributes, ["aliases"]),
-          ingredients: helpers.firstStringArray(attributes, ["ingredients"]),
-          tags: helpers.firstStringArray(attributes, ["tags"]),
-          note: helpers.firstString(attributes, ["note"]),
-          attachedProtocolIds: helpers.firstStringArray(attributes, ["attachedProtocolIds"]),
-          autoLogDaily: projectFoodAutoLogDaily(attributes.autoLogDaily, helpers),
-        };
-      },
     },
   }),
   defineBankRegistryEntity({
@@ -237,24 +158,6 @@ const checkedBankEntityDefinitions = [
       ],
       titleKeys: ["title"],
       statusKeys: ["status"],
-      sortBehavior: "title",
-      transform({ attributes, helpers }) {
-        return {
-          summary: helpers.firstString(attributes, ["summary"]),
-          cuisine: helpers.firstString(attributes, ["cuisine"]),
-          dishType: helpers.firstString(attributes, ["dishType"]),
-          source: helpers.firstString(attributes, ["source"]),
-          servings: helpers.firstNumber(attributes, ["servings"]),
-          prepTimeMinutes: helpers.firstNumber(attributes, ["prepTimeMinutes"]),
-          cookTimeMinutes: helpers.firstNumber(attributes, ["cookTimeMinutes"]),
-          totalTimeMinutes: helpers.firstNumber(attributes, ["totalTimeMinutes"]),
-          tags: helpers.firstStringArray(attributes, ["tags"]),
-          ingredients: helpers.firstStringArray(attributes, ["ingredients"]),
-          steps: helpers.firstStringArray(attributes, ["steps"]),
-          relatedGoalIds: helpers.firstStringArray(attributes, ["relatedGoalIds"]),
-          relatedConditionIds: helpers.firstStringArray(attributes, ["relatedConditionIds"]),
-        };
-      },
     },
   }),
   defineBankRegistryEntity({
@@ -275,18 +178,6 @@ const checkedBankEntityDefinitions = [
       relationKeys: [RELATED_IDS_COMPATIBILITY_RELATION],
       titleKeys: ["title"],
       statusKeys: ["status"],
-      sortBehavior: "title",
-      transform({ attributes, helpers }) {
-        return {
-          specialty: helpers.firstString(attributes, ["specialty"]),
-          organization: helpers.firstString(attributes, ["organization"]),
-          location: helpers.firstString(attributes, ["location"]),
-          website: helpers.firstString(attributes, ["website"]),
-          phone: helpers.firstString(attributes, ["phone"]),
-          note: helpers.firstString(attributes, ["note"]),
-          aliases: helpers.firstStringArray(attributes, ["aliases"]),
-        };
-      },
     },
   }),
   defineBankRegistryEntity({
@@ -308,19 +199,6 @@ const checkedBankEntityDefinitions = [
       upsertPayloadSchema: workoutFormatUpsertPayloadSchema as ZodTypeAny,
       titleKeys: ["title"],
       statusKeys: ["status"],
-      sortBehavior: "title",
-      transform({ attributes, helpers }) {
-        return {
-          summary: helpers.firstString(attributes, ["summary"]),
-          activityType: helpers.firstString(attributes, ["activityType"]),
-          durationMinutes: helpers.firstNumber(attributes, ["durationMinutes"]),
-          distanceKm: helpers.firstNumber(attributes, ["distanceKm"]),
-          strengthExercises: projectWorkoutStrengthExercises(attributes.strengthExercises),
-          tags: helpers.firstStringArray(attributes, ["tags"]),
-          note: helpers.firstString(attributes, ["note"]),
-          templateText: helpers.firstString(attributes, ["templateText"]),
-        };
-      },
     },
   }),
 ] as const satisfies readonly BankEntityDefinition[];

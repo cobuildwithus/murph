@@ -749,6 +749,8 @@ test("bank registry definitions inherit canonical registry metadata from shared 
     assert.deepEqual(registryDefinition.idKeys, definition.registry.idKeys);
     assert.deepEqual(registryDefinition.titleKeys, definition.registry.titleKeys);
     assert.deepEqual(registryDefinition.statusKeys, definition.registry.statusKeys);
+    assert.equal("transform" in definition.registry, false);
+    assert.equal("sortBehavior" in definition.registry, false);
     assert.equal(typeof registryDefinition.transform, "function");
   }
 });
