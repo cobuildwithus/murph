@@ -39,8 +39,8 @@ vi.mock("@/src/lib/linq/prisma-store", () => ({
   }),
 }));
 
-vi.mock("@murph/inboxd/linq", async () => {
-  const actual = await vi.importActual<typeof import("@murph/inboxd/linq")>("@murph/inboxd/linq");
+vi.mock("@murph/inboxd/linq-webhook", async () => {
+  const actual = await vi.importActual<typeof import("@murph/inboxd/linq-webhook")>("@murph/inboxd/linq-webhook");
 
   return {
     ...actual,
@@ -50,7 +50,7 @@ vi.mock("@murph/inboxd/linq", async () => {
 });
 
 type LinqControlPlaneModule = typeof import("../src/lib/linq/control-plane");
-type InboxdLinqModule = typeof import("@murph/inboxd/linq");
+type InboxdLinqModule = typeof import("@murph/inboxd/linq-webhook");
 
 let linqControlPlane: LinqControlPlaneModule;
 let inboxd: Pick<
@@ -63,7 +63,7 @@ const describe = baseDescribe.sequential;
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {
     linqControlPlane = await import("../src/lib/linq/control-plane");
-    inboxd = await vi.importActual<InboxdLinqModule>("@murph/inboxd/linq");
+    inboxd = await vi.importActual<InboxdLinqModule>("@murph/inboxd/linq-webhook");
     vi.stubGlobal("fetch", mocks.fetch);
   });
 
