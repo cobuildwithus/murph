@@ -31,6 +31,7 @@ import {
   buildAssistantCronSchedule,
   getAssistantCronPreset,
   getAssistantCronJob,
+  getAssistantCronJobTarget,
   getAssistantCronStatus,
   installAssistantCronPreset,
   listAssistantCronPresets,
@@ -39,6 +40,7 @@ import {
   processDueAssistantCronJobs,
   removeAssistantCronJob,
   runAssistantCronJobNow,
+  setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.ts'
 import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
@@ -372,6 +374,61 @@ test('assistant cron jobs persist cleanly and can be enabled, disabled, and remo
 
   const afterStatus = await getAssistantCronStatus(vaultRoot)
   assert.equal(afterStatus.totalJobs, 0)
+})
+
+test('assistant cron targets can be inspected and updated in place', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-cron-target-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const job = await addAssistantCronJob({
+    vault: vaultRoot,
+    name: 'weekly-health-snapshot',
+    prompt: 'Send my weekly health snapshot.',
+    schedule: buildAssistantCronSchedule({
+      every: '1d',
+    }),
+    channel: 'telegram',
+    sourceThreadId: 'chat-123',
+    sessionId: 'session-target-test',
+    alias: 'routine:weekly-health-snapshot',
+  })
+
+  const shown = await getAssistantCronJobTarget(vaultRoot, job.jobId)
+  assert.equal(shown.jobId, job.jobId)
+  assert.equal(shown.jobName, 'weekly-health-snapshot')
+  assert.equal(shown.target.channel, 'telegram')
+  assert.equal(shown.target.sourceThreadId, 'chat-123')
+  assert.equal(shown.bindingDelivery?.kind, 'thread')
+  assert.equal(shown.bindingDelivery?.target, 'chat-123')
+
+  const updated = await setAssistantCronJobTarget({
+    vault: vaultRoot,
+    job: 'weekly-health-snapshot',
+    channel: 'email',
+    identityId: 'sender@example.com',
+    deliveryTarget: 'me@example.com',
+  })
+
+  assert.equal(updated.changed, true)
+  assert.equal(updated.continuityReset, true)
+  assert.equal(updated.dryRun, false)
+  assert.equal(updated.beforeTarget.target.channel, 'telegram')
+  assert.equal(updated.afterTarget.target.channel, 'email')
+  assert.equal(updated.afterTarget.target.identityId, 'sender@example.com')
+  assert.equal(updated.afterTarget.target.deliveryTarget, 'me@example.com')
+  assert.equal(updated.job.target.sessionId, null)
+  assert.equal(updated.job.target.alias, null)
+
+  const reloaded = await getAssistantCronJob(vaultRoot, 'weekly-health-snapshot')
+  assert.equal(reloaded.jobId, job.jobId)
+  assert.equal(reloaded.target.channel, 'email')
+  assert.equal(reloaded.target.identityId, 'sender@example.com')
+  assert.equal(reloaded.target.deliveryTarget, 'me@example.com')
+  assert.equal(reloaded.target.sessionId, null)
+  assert.equal(reloaded.target.alias, null)
 })
 
 test('assistant cron jobs only bind assistant state when configured', async () => {

@@ -7,7 +7,7 @@ import {
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
-} from 'murph/assistant-core'
+} from '@murph/assistant-core'
 import {
   gatewayFetchAttachmentsInputSchema,
   gatewayGetConversationInputSchema,
@@ -27,7 +27,7 @@ import {
   type GatewayRespondToPermissionInput,
   type GatewaySendMessageInput,
   type GatewayWaitForEventsInput,
-} from 'murph/gateway-core'
+} from '@murph/gateway-core'
 import { isLoopbackRemoteAddress } from '@murph/runtime-state'
 import type { AssistantLocalService } from './service.js'
 
@@ -73,6 +73,7 @@ type AssistantSessionListRequest = Parameters<AssistantLocalService['listSession
 type AssistantOutboxDrainRequest = Parameters<AssistantLocalService['drainOutbox']>[0]
 type AssistantAutomationRunRequest = Parameters<AssistantLocalService['runAutomationOnce']>[0]
 type AssistantCronProcessRequest = Parameters<AssistantLocalService['processDueCron']>[0]
+type AssistantCronTargetSetRequest = Parameters<AssistantLocalService['setCronTarget']>[0]
 type AssistantGatewayListConversationsRequest = GatewayListConversationsInput & {
   vault?: string | null
 }
@@ -258,6 +259,10 @@ async function handleAssistantRequest(
       sendJson(response, 200, await input.service.listCronJobs(parseAssistantVaultQuery(url)))
       return
     }
+    if (method === 'GET' && url.pathname.startsWith('/cron/jobs/') && url.pathname.endsWith('/target')) {
+      sendJson(response, 200, await input.service.getCronTarget(parseAssistantCronTargetRoute(url)))
+      return
+    }
     if (method === 'GET' && url.pathname.startsWith('/cron/jobs/')) {
       sendJson(response, 200, await input.service.getCronJob(parseAssistantCronJobRoute(url)))
       return
@@ -274,6 +279,14 @@ async function handleAssistantRequest(
     if (method === 'POST' && url.pathname === '/cron/process-due') {
       const body = parseAssistantCronProcessRequestBody(await readJsonBody(request))
       sendJson(response, 200, await input.service.processDueCron(body))
+      return
+    }
+    if (method === 'POST' && url.pathname.startsWith('/cron/jobs/') && url.pathname.endsWith('/target')) {
+      const body = parseAssistantCronTargetSetRequestBody(
+        url,
+        await readJsonBody(request),
+      )
+      sendJson(response, 200, await input.service.setCronTarget(body))
       return
     }
 
@@ -663,6 +676,43 @@ function parseAssistantCronProcessRequestBody(payload: unknown): AssistantCronPr
   }
 }
 
+function parseAssistantCronTargetSetRequestBody(
+  url: URL,
+  payload: unknown,
+): AssistantCronTargetSetRequest {
+  const record = asAssistantRequestRecord(payload, 'cron target')
+  assertOptionalNullableStringField(record, 'vault', 'cron target')
+  assertOptionalNullableStringField(record, 'channel', 'cron target')
+  assertOptionalNullableStringField(record, 'identityId', 'cron target')
+  assertOptionalNullableStringField(record, 'participantId', 'cron target')
+  assertOptionalNullableStringField(record, 'sourceThreadId', 'cron target')
+  assertOptionalNullableStringField(record, 'deliveryTarget', 'cron target')
+  assertOptionalBooleanField(record, 'dryRun', 'cron target')
+
+  return {
+    job: parseAssistantCronTargetJobIdFromPath(url.pathname),
+    vault: readOptionalNullableStringField(record, 'vault', 'cron target'),
+    channel: readOptionalNullableStringField(record, 'channel', 'cron target'),
+    identityId: readOptionalNullableStringField(record, 'identityId', 'cron target'),
+    participantId: readOptionalNullableStringField(
+      record,
+      'participantId',
+      'cron target',
+    ),
+    sourceThreadId: readOptionalNullableStringField(
+      record,
+      'sourceThreadId',
+      'cron target',
+    ),
+    deliveryTarget: readOptionalNullableStringField(
+      record,
+      'deliveryTarget',
+      'cron target',
+    ),
+    dryRun: readOptionalBooleanField(record, 'dryRun', 'cron target'),
+  }
+}
+
 function parseAssistantCronJobRoute(url: URL): {
   job: string
   vault?: string | null
@@ -675,6 +725,40 @@ function parseAssistantCronJobRoute(url: URL): {
       parseAssistantCronJobIdField,
     ),
     vault: readOptionalNullableQuery(url, 'vault'),
+  }
+}
+
+function parseAssistantCronTargetRoute(url: URL): {
+  job: string
+  vault?: string | null
+} {
+  return {
+    job: parseAssistantCronTargetJobIdFromPath(url.pathname),
+    vault: readOptionalNullableQuery(url, 'vault'),
+  }
+}
+
+function parseAssistantCronTargetJobIdFromPath(pathname: string): string {
+  if (!pathname.startsWith('/cron/jobs/') || !pathname.endsWith('/target')) {
+    throw new AssistantHttpRequestError(
+      'Assistant cron target route requires a cron job id.',
+      400,
+    )
+  }
+
+  try {
+    return parseAssistantCronJobIdField(
+      decodeURIComponent(pathname.slice('/cron/jobs/'.length, -'/target'.length)),
+      'cron target route',
+    )
+  } catch (error) {
+    if (error instanceof AssistantHttpRequestError) {
+      throw error
+    }
+    throw new AssistantHttpRequestError(
+      'Assistant cron target route contained an invalid encoding.',
+      400,
+    )
   }
 }
 
@@ -842,6 +926,24 @@ function assertOptionalBooleanField(
       400,
     )
   }
+}
+
+function readOptionalBooleanField(
+  record: Record<string, unknown>,
+  key: string,
+  context: string,
+): boolean | undefined {
+  const value = record[key]
+  if (value === undefined) {
+    return undefined
+  }
+  if (typeof value !== 'boolean') {
+    throw new AssistantHttpRequestError(
+      `Assistant ${context} request field ${key} must be a boolean when present.`,
+      400,
+    )
+  }
+  return value
 }
 
 function assertOptionalFiniteNumberField(

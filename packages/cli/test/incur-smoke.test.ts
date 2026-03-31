@@ -395,6 +395,41 @@ test('assistant cron preset install schema exposes preset variables, instruction
   assert.deepEqual(schema.options.required, ['vault'])
 }, INCUR_SCHEMA_TIMEOUT_MS)
 
+test('assistant cron target set schema exposes the retargeting sources and delivery options', async () => {
+  const schema = JSON.parse(
+    await runRawCli([
+      'assistant',
+      'cron',
+      'target',
+      'set',
+      '--schema',
+      '--format',
+      'json',
+    ]),
+  ) as {
+    args: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+    options: {
+      properties: Record<string, unknown>
+      required?: string[]
+    }
+  }
+
+  assert.equal('job' in schema.args.properties, true)
+  assert.deepEqual(schema.args.required, ['job'])
+  assert.equal('toSelf' in schema.options.properties, true)
+  assert.equal('copyFrom' in schema.options.properties, true)
+  assert.equal('dryRun' in schema.options.properties, true)
+  assert.equal('channel' in schema.options.properties, true)
+  assert.equal('identity' in schema.options.properties, true)
+  assert.equal('participant' in schema.options.properties, true)
+  assert.equal('sourceThread' in schema.options.properties, true)
+  assert.equal('deliveryTarget' in schema.options.properties, true)
+  assert.deepEqual(schema.options.required, ['vault'])
+}, INCUR_SCHEMA_TIMEOUT_MS)
+
 test('assistant state schemas expose document ids and JSON input payload flags', async () => {
   const listSchema = JSON.parse(
     await runRawCli(['assistant', 'state', 'list', '--schema', '--format', 'json']),

@@ -14,6 +14,8 @@ import {
   assistantCronRunsResultSchema,
   assistantCronShowResultSchema,
   assistantCronStatusResultSchema,
+  assistantCronTargetSetResultSchema,
+  assistantCronTargetShowResultSchema,
   assistantDeliverResultSchema,
   assistantDoctorResultSchema,
   assistantMemoryForgetResultSchema,
@@ -47,6 +49,7 @@ import {
   buildAssistantCronSchedule,
   getAssistantCronPreset,
   getAssistantCronJob,
+  getAssistantCronJobTarget,
   getAssistantCronStatus,
   getAssistantStateDocument,
   installAssistantCronPreset,
@@ -62,6 +65,7 @@ import {
   runAssistantChat,
   runAssistantCronJobNow,
   sendAssistantMessage,
+  setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
   stopAssistantAutomation,
 } from '../assistant-runtime.js'
@@ -106,6 +110,7 @@ import {
   applyAssistantSelfDeliveryTargetDefaults,
   clearAssistantSelfDeliveryTargets,
   listAssistantSelfDeliveryTargets,
+  resolveAssistantSelfDeliveryTarget,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
 } from '../operator-config.js'
@@ -245,6 +250,27 @@ const assistantCronDeliveryOptionFields = {
     .optional()
     .describe(
       'Optional explicit outbound destination for each cron run. For iMessage this can be a phone number, email handle, or chat id; for Telegram it can be a chat id or <chatId>:topic:<messageThreadId>; for Linq it can be a chat id; for email it can be a recipient address while thread-bound cron jobs reply in place.',
+    ),
+}
+
+const assistantCronTargetSourceOptionFields = {
+  copyFrom: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Copy the current delivery target from another assistant cron job instead of providing route flags directly.',
+    ),
+  dryRun: z
+    .boolean()
+    .optional()
+    .describe('Validate and preview the target change without writing scheduler state.'),
+  toSelf: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Use the saved self-delivery target for one channel, such as email or telegram.',
     ),
 }
 
@@ -612,6 +638,82 @@ function assistantCronStateOptionsFromCli<T extends {
   return {
     bindState: options.state,
     stateDocId: options.stateDoc,
+  }
+}
+
+async function resolveAssistantCronTargetFromCli(input: {
+  copyFrom?: string
+  deliveryTarget?: string
+  identity?: string
+  participant?: string
+  sourceThread?: string
+  toSelf?: string
+  channel?: string
+  vault: string
+}) {
+  const hasExplicitRoute =
+    Boolean(input.channel) ||
+    Boolean(input.identity) ||
+    Boolean(input.participant) ||
+    Boolean(input.sourceThread) ||
+    Boolean(input.deliveryTarget)
+  const selectedSources = [
+    input.toSelf ? 'to-self' : null,
+    input.copyFrom ? 'copy-from' : null,
+    hasExplicitRoute ? 'explicit-route' : null,
+  ].filter((value): value is string => value !== null)
+
+  if (selectedSources.length !== 1) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Provide exactly one cron target source: --toSelf <channel>, --copyFrom <job>, or an explicit route via --channel/--identity/--participant/--sourceThread/--deliveryTarget.',
+    )
+  }
+
+  if (input.toSelf) {
+    const savedTarget = await resolveAssistantSelfDeliveryTarget(input.toSelf)
+    if (!savedTarget) {
+      throw new VaultCliError(
+        'ASSISTANT_SELF_TARGET_NOT_FOUND',
+        `No saved self-delivery target exists for channel "${input.toSelf}". Save one first with \`assistant self-target set ${input.toSelf} ...\`.`,
+      )
+    }
+
+    return {
+      channel: savedTarget.channel,
+      identityId: savedTarget.identityId ?? undefined,
+      participantId: savedTarget.participantId ?? undefined,
+      sourceThreadId: savedTarget.sourceThreadId ?? undefined,
+      deliveryTarget: savedTarget.deliveryTarget ?? undefined,
+    }
+  }
+
+  if (input.copyFrom) {
+    const sourceJobTarget = await getAssistantCronJobTarget(input.vault, input.copyFrom)
+    return {
+      channel: sourceJobTarget.target.channel ?? undefined,
+      identityId: sourceJobTarget.target.identityId ?? undefined,
+      participantId: sourceJobTarget.target.participantId ?? undefined,
+      sourceThreadId: sourceJobTarget.target.sourceThreadId ?? undefined,
+      deliveryTarget: sourceJobTarget.target.deliveryTarget ?? undefined,
+    }
+  }
+
+  const resolvedRoute = await resolveAssistantDeliveryRouteFromCli({
+    allowSingleSavedTargetFallback: false,
+    channel: input.channel,
+    identity: input.identity,
+    participant: input.participant,
+    sourceThread: input.sourceThread,
+    deliveryTarget: input.deliveryTarget,
+  })
+
+  return {
+    channel: resolvedRoute.channel ?? undefined,
+    identityId: resolvedRoute.identityId ?? undefined,
+    participantId: resolvedRoute.participantId ?? undefined,
+    sourceThreadId: resolvedRoute.sourceThreadId ?? undefined,
+    deliveryTarget: resolvedRoute.deliveryTarget ?? undefined,
   }
 }
 
@@ -1731,6 +1833,102 @@ export function registerAssistantCommands(
         }
       },
     })
+
+    const target = Cli.create('target', {
+      description:
+        'Inspect or replace the outbound delivery target for an existing assistant cron job.',
+    })
+
+    target.command('show', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to inspect.'),
+      }),
+      description: 'Show the current outbound delivery target for one assistant cron job.',
+      hint:
+        'Use this before retargeting a cron job so you can see the current channel, explicit destination, and inferred binding delivery.',
+      options: withBaseOptions(),
+      output: assistantCronTargetShowResultSchema,
+      async run(context) {
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          cronTarget: await getAssistantCronJobTarget(
+            context.options.vault,
+            context.args.job,
+          ),
+        }
+      },
+    })
+
+    target.command('set', {
+      args: z.object({
+        job: z.string().min(1).describe('Assistant cron job id or name to retarget.'),
+      }),
+      description:
+        'Replace the outbound delivery target for one assistant cron job in place.',
+      hint:
+        'Provide exactly one target source: `--toSelf <channel>`, `--copyFrom <job>`, or an explicit route via `--channel` plus the usual delivery flags. When the audience changes, Murph clears stored cron session continuity so the next run does not reuse the old routed conversation.',
+      examples: [
+        {
+          args: {
+            job: 'weekly-health-snapshot',
+          },
+          options: {
+            vault: './vault',
+            toSelf: 'email',
+          },
+          description: 'Retarget an existing cron job to the saved email self-target.',
+        },
+        {
+          args: {
+            job: 'condition-research-roundup',
+          },
+          options: {
+            vault: './vault',
+            copyFrom: 'weekly-health-snapshot',
+          },
+          description: 'Copy the current delivery target from another cron job.',
+        },
+      ],
+      options: withBaseOptions({
+        ...assistantCronTargetSourceOptionFields,
+        ...assistantCronDeliveryOptionFields,
+        channel: assistantSessionOptionFields.channel,
+        identity: assistantSessionOptionFields.identity,
+        participant: assistantSessionOptionFields.participant,
+        sourceThread: assistantSessionOptionFields.sourceThread,
+      }),
+      output: assistantCronTargetSetResultSchema,
+      async run(context) {
+        const resolvedTarget = await resolveAssistantCronTargetFromCli({
+          vault: context.options.vault,
+          channel: context.options.channel,
+          copyFrom: context.options.copyFrom,
+          deliveryTarget: context.options.deliveryTarget,
+          identity: context.options.identity,
+          participant: context.options.participant,
+          sourceThread: context.options.sourceThread,
+          toSelf: context.options.toSelf,
+        })
+        const result = await setAssistantCronJobTarget({
+          vault: context.options.vault,
+          job: context.args.job,
+          dryRun: context.options.dryRun,
+          ...resolvedTarget,
+        })
+
+        return {
+          ...buildAssistantCronResultPaths(context.options.vault),
+          job: result.job,
+          beforeTarget: result.beforeTarget,
+          afterTarget: result.afterTarget,
+          changed: result.changed,
+          continuityReset: result.continuityReset,
+          dryRun: result.dryRun,
+        }
+      },
+    })
+
+    cron.command(target)
 
     cron.command('add', {
       args: z.object({

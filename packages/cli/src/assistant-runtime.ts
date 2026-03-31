@@ -30,9 +30,11 @@ export {
 export type {
   AddAssistantCronJobInput,
   AssistantCronProcessDueResult,
+  AssistantCronTargetMutationResult,
   InstallAssistantCronPresetInput,
   InstallAssistantCronPresetResult,
   AssistantCronRunExecutionResult,
+  SetAssistantCronJobTargetInput,
   AssistantCronStatusSnapshot,
   ProcessDueAssistantCronJobsInput,
   RunAssistantCronJobInput,
@@ -42,6 +44,7 @@ export {
   buildAssistantCronSchedule,
   getAssistantCronPreset,
   getAssistantCronJob,
+  getAssistantCronJobTarget,
   getAssistantCronStatus,
   installAssistantCronPreset,
   listAssistantCronPresets,
@@ -50,6 +53,7 @@ export {
   processDueAssistantCronJobs,
   removeAssistantCronJob,
   runAssistantCronJobNow,
+  setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from './assistant/cron.js'
 export type {

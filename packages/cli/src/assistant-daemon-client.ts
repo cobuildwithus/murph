@@ -3,6 +3,7 @@ import {
   assistantAskResultSchema,
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
+  assistantCronTargetSnapshotSchema,
   assistantOutboxIntentSchema,
   assistantRunResultSchema,
   assistantSessionCompatSchema,
@@ -10,6 +11,7 @@ import {
   type AssistantAskResult,
   type AssistantCronJob,
   type AssistantCronRunRecord,
+  type AssistantCronTargetSnapshot,
   type AssistantOutboxIntent,
   type AssistantRunResult,
   type AssistantSession,
@@ -21,8 +23,10 @@ import type {
 } from './assistant/service-contracts.js'
 import type { RunAssistantAutomationInput } from './assistant/automation.js'
 import type {
+  AssistantCronTargetMutationResult,
   AssistantCronProcessDueResult,
   AssistantCronStatusSnapshot,
+  SetAssistantCronJobTargetInput,
 } from './assistant/cron.js'
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
 import { normalizeNullableString } from './assistant/shared.js'
@@ -325,6 +329,64 @@ export async function maybeGetAssistantCronJobViaDaemon(
     },
   )
   return assistantCronJobSchema.parse(payload)
+}
+
+export async function maybeGetAssistantCronTargetViaDaemon(
+  input: {
+    job: string
+    vault: string
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantCronTargetSnapshot | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath(
+      `/cron/jobs/${encodeURIComponent(input.job)}/target`,
+      {
+        vault: input.vault,
+      },
+    ),
+    {
+      env,
+      method: 'GET',
+    },
+  )
+  return assistantCronTargetSnapshotSchema.parse(payload)
+}
+
+export async function maybeSetAssistantCronTargetViaDaemon(
+  input: SetAssistantCronJobTargetInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<AssistantCronTargetMutationResult | null> {
+  if (!resolveAssistantDaemonClientConfig(env)) {
+    return null
+  }
+
+  const payload = await assistantDaemonFetchJson(
+    buildAssistantDaemonRoutePath(
+      `/cron/jobs/${encodeURIComponent(input.job)}/target`,
+      {
+        vault: input.vault,
+      },
+    ),
+    {
+      env,
+      method: 'POST',
+      body: {
+        channel: input.channel ?? null,
+        deliveryTarget: input.deliveryTarget ?? null,
+        dryRun: input.dryRun ?? false,
+        identityId: input.identityId ?? null,
+        participantId: input.participantId ?? null,
+        sourceThreadId: input.sourceThreadId ?? null,
+        vault: input.vault,
+      },
+    },
+  )
+  return parseAssistantCronTargetMutationPayload(payload)
 }
 
 export async function maybeListAssistantCronRunsViaDaemon(
@@ -653,6 +715,27 @@ function parseAssistantCronRunsPayload(
   }
 }
 
+function parseAssistantCronTargetMutationPayload(
+  payload: unknown,
+): AssistantCronTargetMutationResult {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('Assistant daemon returned an invalid cron target payload.')
+  }
+
+  const record = payload as Record<string, unknown>
+  return {
+    job: assistantCronJobSchema.parse(record.job),
+    beforeTarget: assistantCronTargetSnapshotSchema.parse(record.beforeTarget),
+    afterTarget: assistantCronTargetSnapshotSchema.parse(record.afterTarget),
+    changed: parseAssistantBooleanField(record.changed, 'changed'),
+    continuityReset: parseAssistantBooleanField(
+      record.continuityReset,
+      'continuityReset',
+    ),
+    dryRun: parseAssistantBooleanField(record.dryRun, 'dryRun'),
+  }
+}
+
 function parseAssistantCronProcessDuePayload(
   payload: unknown,
 ): AssistantCronProcessDueResult {
@@ -670,6 +753,13 @@ function parseAssistantCronProcessDuePayload(
 
 function parseAssistantCountField(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Assistant daemon payload field ${field} was invalid.`)
+  }
+  return value
+}
+
+function parseAssistantBooleanField(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
     throw new Error(`Assistant daemon payload field ${field} was invalid.`)
   }
   return value

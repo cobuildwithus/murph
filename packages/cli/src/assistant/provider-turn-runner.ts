@@ -1292,7 +1292,8 @@ function buildAssistantCronGuidanceText(
       'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
       'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
       'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
-      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
+      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, `assistant cron target show`, and `assistant cron runs` before changing an existing job.',
+      'When the user wants to retarget an existing cron job without recreating it, use `assistant cron target set`.',
       'Cron schedules execute while `assistant run` is active for the vault.',
       'When a user or cron prompt asks for research on a complex topic or a broad current-evidence scan, default to `research` so the tool runs `review:gpt --deep-research --send --wait`. Use `deepthink` only when the task is a GPT Pro synthesis without Deep Research.',
       'Deep Research can legitimately take 10 to 60 minutes, sometimes longer, so keep waiting on the tool unless it actually errors or times out. Murph defaults the overall timeout to 40m.',
@@ -1312,7 +1313,8 @@ function buildAssistantCronGuidanceText(
       'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
       'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
       'Use `assistant cron add` for one-shot reminders with `--at` and recurring jobs with `--every` or `--cron`.',
-      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, and `assistant cron runs` before changing an existing job.',
+      'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, `assistant cron target show`, and `assistant cron runs` before changing an existing job.',
+      'When the user wants to retarget an existing cron job without recreating it, use `assistant cron target set`.',
       'Cron schedules execute while `assistant run` is active for the vault.',
     ].join('\n\n')
   }
