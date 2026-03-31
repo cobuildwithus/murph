@@ -8,6 +8,7 @@ import {
   type LanguageModel,
   type ToolSet,
 } from 'ai'
+import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { z, type ZodType, type ZodTypeAny } from 'zod'
 import {
@@ -18,6 +19,7 @@ import {
   type AssistantToolSpec,
 } from './inbox-model-contracts.js'
 import { errorMessage } from './text/shared.js'
+import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
 
 export type JsonRecord = Record<string, unknown>
 
@@ -123,6 +125,17 @@ export interface GenerateAssistantObjectInput<TSchema extends z.ZodTypeAny> {
   temperature?: number
   tools?: ToolSet
 }
+
+const OPENAI_RESPONSES_AUTO_COMPACTION_THRESHOLD = 200_000
+const OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT = Object.freeze([
+  {
+    type: 'compaction',
+    compact_threshold: OPENAI_RESPONSES_AUTO_COMPACTION_THRESHOLD,
+  },
+] as const)
+
+type AssistantFetchInput = Parameters<typeof fetch>[0]
+type AssistantFetchInit = Parameters<typeof fetch>[1]
 
 export function createAssistantToolCatalog<
   const TDefinitions extends readonly AnyAssistantToolDefinition[],
@@ -269,6 +282,18 @@ export function resolveAssistantLanguageModel(
   spec: AssistantModelSpec,
 ): LanguageModel {
   if (spec.baseUrl) {
+    if (isAssistantOpenAIBaseUrl(spec.baseUrl)) {
+      const provider = createOpenAI({
+        name: normalizeAssistantProviderName(spec.providerName),
+        apiKey: resolveAssistantApiKey(spec),
+        baseURL: spec.baseUrl,
+        headers: spec.headers,
+        fetch: createAssistantOpenAIResponsesFetch(),
+      })
+
+      return provider.responses(spec.model)
+    }
+
     const provider = createOpenAICompatible({
       name: normalizeAssistantProviderName(spec.providerName),
       apiKey: resolveAssistantApiKey(spec),
@@ -369,6 +394,114 @@ function resolveAssistantPromptOrMessages(
   }
 
   throw new Error('Assistant generation requires either a prompt string or at least one message.')
+}
+
+function createAssistantOpenAIResponsesFetch(
+  baseFetch: typeof fetch = globalThis.fetch.bind(globalThis),
+): typeof fetch {
+  return async (input: AssistantFetchInput, init?: AssistantFetchInit) => {
+    const nextInit = await maybeInjectAssistantOpenAIResponsesCompaction(
+      input,
+      init,
+    )
+    return await baseFetch(input, nextInit)
+  }
+}
+
+async function maybeInjectAssistantOpenAIResponsesCompaction(
+  input: AssistantFetchInput,
+  init?: AssistantFetchInit,
+): Promise<AssistantFetchInit | undefined> {
+  if (!shouldInjectAssistantOpenAIResponsesCompaction(input, init)) {
+    return init
+  }
+
+  const body = await readAssistantFetchBody(input, init)
+  if (!body) {
+    return init
+  }
+
+  let payload: Record<string, unknown>
+
+  try {
+    payload = JSON.parse(body) as Record<string, unknown>
+  } catch {
+    return init
+  }
+
+  if ('context_management' in payload) {
+    return init
+  }
+
+  return {
+    ...init,
+    body: JSON.stringify({
+      ...payload,
+      context_management: OPENAI_RESPONSES_AUTO_COMPACTION_CONTEXT,
+    }),
+  }
+}
+
+function shouldInjectAssistantOpenAIResponsesCompaction(
+  input: AssistantFetchInput,
+  init?: AssistantFetchInit,
+): boolean {
+  const url = readAssistantFetchUrl(input)
+  if (!url) {
+    return false
+  }
+
+  const method = (
+    init?.method ??
+    (input instanceof Request ? input.method : 'POST')
+  ).toUpperCase()
+
+  if (method !== 'POST') {
+    return false
+  }
+
+  try {
+    return new URL(url).pathname.endsWith('/responses')
+  } catch {
+    return false
+  }
+}
+
+function readAssistantFetchUrl(
+  input: AssistantFetchInput,
+): string | null {
+  if (typeof input === 'string') {
+    return input
+  }
+
+  if (input instanceof URL) {
+    return input.toString()
+  }
+
+  if (input instanceof Request) {
+    return input.url
+  }
+
+  return null
+}
+
+async function readAssistantFetchBody(
+  input: AssistantFetchInput,
+  init?: AssistantFetchInit,
+): Promise<string | null> {
+  if (typeof init?.body === 'string') {
+    return init.body
+  }
+
+  if (input instanceof Request) {
+    try {
+      return await input.clone().text()
+    } catch {
+      return null
+    }
+  }
+
+  return null
 }
 
 function resolveAssistantApiKey(spec: AssistantModelSpec): string | undefined {

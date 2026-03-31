@@ -224,6 +224,7 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
     readAssistantProviderRecord(resultRecord?.totalUsage) ??
     readAssistantProviderRecord(resultRecord?.usage)
   const providerMetadata = readAssistantProviderRecord(resultRecord?.providerMetadata)
+  const openAiProviderMetadata = readAssistantProviderRecord(providerMetadata?.openai)
   const rawRecord = readAssistantProviderRecord(resultRecord?.raw)
   const responseRecord = readAssistantProviderRecord(resultRecord?.response)
   const requestRecord = readAssistantProviderRecord(resultRecord?.request)
@@ -264,6 +265,7 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
     providerMetadataJson: providerMetadata ?? null,
     providerName: input.providerConfig.providerName,
     providerRequestId: readAssistantProviderString(
+      openAiProviderMetadata?.responseId,
       responseRecord?.requestId,
       responseRecord?.id,
       requestRecord?.id,
@@ -293,6 +295,21 @@ export function extractOpenAICompatibleAssistantProviderUsage(input: {
         outputTokens,
       }),
   }
+}
+
+export function extractOpenAICompatibleProviderSessionId(
+  result: unknown,
+): string | null {
+  const resultRecord = readAssistantProviderRecord(result)
+  const providerMetadata = readAssistantProviderRecord(resultRecord?.providerMetadata)
+  const openAiProviderMetadata = readAssistantProviderRecord(providerMetadata?.openai)
+  const responseRecord = readAssistantProviderRecord(resultRecord?.response)
+
+  return readAssistantProviderString(
+    openAiProviderMetadata?.responseId,
+    responseRecord?.id,
+    responseRecord?.responseId,
+  )
 }
 
 export function extractCodexAssistantProviderUsage(input: {

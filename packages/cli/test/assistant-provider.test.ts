@@ -683,6 +683,42 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
   })
 })
 
+test('executeAssistantProviderTurn chains official OpenAI responses and stores the response id', async () => {
+  const languageModel = { provider: 'mock-model' }
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+    providerMetadata: {
+      openai: {
+        responseId: 'resp_123',
+      },
+    },
+  })
+
+  const result = await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'openai',
+    model: 'gpt-5',
+    systemPrompt: 'system prompt',
+    userPrompt: 'hello',
+    resumeProviderSessionId: 'resp_prev',
+  })
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  assert.deepEqual(generateCall?.providerOptions, {
+    openai: {
+      store: false,
+      previousResponseId: 'resp_prev',
+    },
+  })
+  assert.equal(result.providerSessionId, 'resp_123')
+  assert.ok(result.usage)
+  assert.equal(result.usage.providerRequestId, 'resp_123')
+})
+
 test('executeAssistantProviderTurn uses the prebuilt canonical assistant tool catalog for OpenAI-compatible tool-runtime turns', async () => {
   const languageModel = { provider: 'mock-model' }
   const aiSdkTools = {
