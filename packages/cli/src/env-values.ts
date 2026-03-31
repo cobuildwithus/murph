@@ -1,13 +1,5 @@
-export function readEnvValue(
-  env: NodeJS.ProcessEnv,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = env[key]?.trim()
-    if (value) {
-      return value
-    }
-  }
-
-  return null
-}
+/**
+ * Compatibility facade for the published murph package.
+ * The canonical headless implementation now lives in @murph/assistant-core/env-values.
+ */
+export * from '@murph/assistant-core/env-values'

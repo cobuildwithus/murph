@@ -58,25 +58,53 @@ export async function fetchJsonResponse<TResponse extends JsonFetchResponse>(inp
 }
 
 export async function readJsonErrorResponse(
-  response: Pick<JsonFetchResponse, 'json' | 'text'>,
+  response: Pick<JsonFetchResponse, 'text'>,
 ): Promise<{
   payload: unknown
   rawText: string | null
 }> {
-  let payload: unknown = null
-  let rawText: string | null = null
+  const rawText = await readResponseTextSafely(response)
+  if (rawText === null) {
+    return {
+      payload: null,
+      rawText: null,
+    }
+  }
 
-  try {
-    payload = await response.json()
-  } catch {
-    try {
-      rawText = await response.text()
-    } catch {}
+  const parsed = tryParseJsonText(rawText)
+  if (!parsed.ok) {
+    return {
+      payload: null,
+      rawText,
+    }
   }
 
   return {
-    payload,
-    rawText,
+    payload: parsed.value,
+    rawText: null,
+  }
+}
+
+async function readResponseTextSafely(
+  response: Pick<JsonFetchResponse, 'text'>,
+): Promise<string | null> {
+  try {
+    return await response.text()
+  } catch {
+    return null
+  }
+}
+
+function tryParseJsonText(rawText: string):
+  | { ok: true; value: unknown }
+  | { ok: false } {
+  try {
+    return {
+      ok: true,
+      value: JSON.parse(rawText) as unknown,
+    }
+  } catch {
+    return { ok: false }
   }
 }
 

@@ -1,2 +1,5 @@
-export * from './assistant/store.js'
-export * from './assistant/state.js'
+/**
+ * Compatibility facade for the published murph package.
+ * The canonical headless implementation now lives in @murph/assistant-core/assistant-state.
+ */
+export * from '@murph/assistant-core/assistant-state'

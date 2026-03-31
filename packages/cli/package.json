@@ -93,6 +93,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^2.0.35",
     "@ai-sdk/openai-compatible": "^2.0.35",
+    "@murph/assistant-core": "workspace:*",
     "@murph/assistantd": "workspace:*",
     "@murph/contracts": "workspace:*",
     "@murph/core": "workspace:*",
