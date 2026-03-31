@@ -29,6 +29,7 @@ import {
 } from '../snapshot.js'
 import { normalizeNullableString } from '../shared.js'
 import { readPermissionRows } from './permissions.js'
+import { readMeta, writeMeta } from './schema.js'
 import {
   type CaptureAttachmentRow,
   type CaptureSourceRow,
@@ -39,6 +40,10 @@ import {
   readOutboxSourceRows,
   readSessionSourceRows,
 } from './source-sync.js'
+
+const SNAPSHOT_EMPTY_META_KEY = 'snapshot.empty'
+const SNAPSHOT_GENERATED_AT_META_KEY = 'snapshot.generatedAt'
+const SNAPSHOT_INITIALIZED_META_KEY = 'snapshot.initialized'
 
 interface GatewayProjectionMessageAccumulator {
   actorDisplayName: string | null
@@ -120,6 +125,24 @@ export function writeSnapshotState(database: DatabaseSync, state: GatewaySnapsho
       event.summary,
     )
   }
+
+  if (state.snapshot) {
+    writeMeta(database, SNAPSHOT_INITIALIZED_META_KEY, '1')
+    writeMeta(database, SNAPSHOT_GENERATED_AT_META_KEY, state.snapshot.generatedAt)
+    writeMeta(
+      database,
+      SNAPSHOT_EMPTY_META_KEY,
+      state.snapshot.conversations.length === 0 &&
+        state.snapshot.messages.length === 0 &&
+        state.snapshot.permissions.length === 0
+        ? '1'
+        : '0',
+    )
+  } else {
+    writeMeta(database, SNAPSHOT_INITIALIZED_META_KEY, null)
+    writeMeta(database, SNAPSHOT_GENERATED_AT_META_KEY, null)
+    writeMeta(database, SNAPSHOT_EMPTY_META_KEY, null)
+  }
 }
 
 export function readSnapshotOrEmpty(database: DatabaseSync): GatewayProjectionSnapshot {
@@ -133,6 +156,14 @@ export function readSnapshotOrEmpty(database: DatabaseSync): GatewayProjectionSn
 }
 
 export function hasGatewayServingSnapshot(database: DatabaseSync): boolean {
+  if (readMeta(database, SNAPSHOT_INITIALIZED_META_KEY) !== '1') {
+    return false
+  }
+
+  if (readMeta(database, SNAPSHOT_EMPTY_META_KEY) === '1') {
+    return true
+  }
+
   return readGatewayTableCount(database, 'gateway_conversations') > 0 ||
     readGatewayTableCount(database, 'gateway_messages') > 0 ||
     readGatewayTableCount(database, 'gateway_permissions') > 0
@@ -522,6 +553,8 @@ function readStoredSnapshot(database: DatabaseSync): GatewayProjectionSnapshot |
     return null
   }
 
+  const generatedAt = readMeta(database, SNAPSHOT_GENERATED_AT_META_KEY) ?? new Date().toISOString()
+
   const conversations = database
     .prepare(`
       SELECT conversation_json AS conversationJson
@@ -564,7 +597,7 @@ function readStoredSnapshot(database: DatabaseSync): GatewayProjectionSnapshot |
 
   return gatewayProjectionSnapshotSchema.parse({
     schema: 'murph.gateway-projection-snapshot.v1',
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     conversations,
     messages,
     permissions,

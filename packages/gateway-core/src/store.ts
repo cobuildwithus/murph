@@ -49,6 +49,8 @@ import {
 } from './store/source-sync.js'
 
 const CAPTURE_CURSOR_META_KEY = 'captures.cursor'
+const CAPTURE_EMPTY_META_KEY = 'captures.empty'
+const CAPTURE_INITIALIZED_META_KEY = 'captures.initialized'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
 
@@ -132,11 +134,15 @@ export class LocalGatewayProjectionStore {
   }
 
   async sync(): Promise<void> {
+    const storedCaptureCursor = readNumericMeta(this.database, CAPTURE_CURSOR_META_KEY)
+    const captureSyncInitialized = readMeta(this.database, CAPTURE_INITIALIZED_META_KEY) === '1'
+    const captureSyncEmpty = readMeta(this.database, CAPTURE_EMPTY_META_KEY) === '1'
+    const captureSourceCount = readGatewayTableCount(this.database, 'gateway_capture_sources')
     const captureSyncState = await loadCaptureSyncState(
       this.vault,
-      readGatewayTableCount(this.database, 'gateway_capture_sources') > 0
-        ? readNumericMeta(this.database, CAPTURE_CURSOR_META_KEY)
-        : null,
+      !captureSyncInitialized || (captureSourceCount === 0 && !captureSyncEmpty)
+        ? null
+        : storedCaptureCursor,
     )
     const [sessions, outboxIntents] = await Promise.all([
       listAssistantSessions(this.vault),
@@ -161,6 +167,15 @@ export class LocalGatewayProjectionStore {
         )
         writeMeta(this.database, CAPTURE_CURSOR_META_KEY, String(captureSyncState.headCursor))
         changed = true
+      }
+
+      if (captureSyncState.kind !== 'noop') {
+        writeMeta(this.database, CAPTURE_INITIALIZED_META_KEY, '1')
+        writeMeta(
+          this.database,
+          CAPTURE_EMPTY_META_KEY,
+          readGatewayTableCount(this.database, 'gateway_capture_sources') === 0 ? '1' : '0',
+        )
       }
 
       if (readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature) {

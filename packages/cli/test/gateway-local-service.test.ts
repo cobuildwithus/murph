@@ -12,11 +12,12 @@ import {
 } from '@murph/runtime-state'
 import { test } from 'vitest'
 
-import { assistantSessionSchema } from '../src/assistant-cli-contracts.js'
-import { createAssistantBinding } from '../src/assistant/bindings.js'
+import { assistantSessionSchema } from '@murph/assistant-core/assistant-cli-contracts'
+import { createAssistantBinding } from '@murph/assistant-core/assistant/bindings'
 import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { saveAssistantSession } from '../src/assistant/store.js'
 import {
+  exportGatewayProjectionSnapshotLocal,
   fetchGatewayAttachmentsLocal,
   getGatewayConversationLocal,
   listGatewayConversationsLocal,
@@ -25,7 +26,7 @@ import {
   readGatewayMessagesLocal,
   respondToGatewayPermissionLocalWrapper,
   sendGatewayMessageLocal,
-} from '../src/gateway-core-local.js'
+} from '@murph/gateway-core/local'
 
 async function rewriteInboxCaptureRuntimeRecord(input: {
   accountId?: string | null
@@ -517,6 +518,187 @@ test('local gateway persists serving tables and advances the inbox-backed captur
       assert.notEqual(captureSignature?.value, firstCaptureCursor)
     } finally {
       gatewayDbAfterIncrement.close()
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway bootstraps empty serving snapshots once and keeps the stored snapshot metadata stable', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-empty-serving-store-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const firstSnapshot = await exportGatewayProjectionSnapshotLocal(vaultRoot)
+    const first = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(firstSnapshot.generatedAt.length > 0, true)
+    assert.equal(first.conversations.length, 0)
+
+    const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
+    let firstGeneratedAt: string | null = null
+    try {
+      const cursor = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.cursor') as { value?: string } | undefined
+      const snapshotInitialized = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.initialized') as { value?: string } | undefined
+      const snapshotGeneratedAt = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.generatedAt') as { value?: string } | undefined
+      const snapshotEmpty = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.empty') as { value?: string } | undefined
+      const conversationCount = gatewayDb
+        .prepare('SELECT COUNT(*) AS count FROM gateway_conversations')
+        .get() as { count: number }
+      const messageCount = gatewayDb
+        .prepare('SELECT COUNT(*) AS count FROM gateway_messages')
+        .get() as { count: number }
+
+      assert.equal(cursor?.value, '0')
+      assert.equal(snapshotInitialized?.value, '1')
+      assert.equal(snapshotEmpty?.value, '1')
+      assert.ok(snapshotGeneratedAt?.value)
+      assert.equal(conversationCount.count, 0)
+      assert.equal(messageCount.count, 0)
+      firstGeneratedAt = snapshotGeneratedAt?.value ?? null
+    } finally {
+      gatewayDb.close()
+    }
+
+    const secondSnapshot = await exportGatewayProjectionSnapshotLocal(vaultRoot)
+    const second = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(secondSnapshot.generatedAt, firstSnapshot.generatedAt)
+    assert.equal(second.conversations.length, 0)
+
+    const gatewayDbAfterSecondRead = openSqliteRuntimeDatabase(
+      resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath,
+    )
+    try {
+      const snapshotGeneratedAt = gatewayDbAfterSecondRead
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.generatedAt') as { value?: string } | undefined
+      const snapshotInitialized = gatewayDbAfterSecondRead
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.initialized') as { value?: string } | undefined
+      const snapshotEmpty = gatewayDbAfterSecondRead
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('snapshot.empty') as { value?: string } | undefined
+
+      assert.equal(snapshotInitialized?.value, '1')
+      assert.equal(snapshotEmpty?.value, '1')
+      assert.ok(firstGeneratedAt)
+      assert.equal(snapshotGeneratedAt?.value, firstGeneratedAt)
+    } finally {
+      gatewayDbAfterSecondRead.close()
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway rebuilds capture-serving rows when they are lost but the stored cursor is still current', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-capture-recovery-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8291',
+      thread: {
+        id: 'chat-capture-recovery',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'Initial capture text',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const initial = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(initial.conversations.length, 1)
+
+    const gatewayDb = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath)
+    try {
+      const cursor = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.cursor') as { value?: string } | undefined
+      const captureEmpty = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.empty') as { value?: string } | undefined
+      const captureInitialized = gatewayDb
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.initialized') as { value?: string } | undefined
+
+      assert.equal(captureInitialized?.value, '1')
+      assert.equal(captureEmpty?.value, '0')
+      assert.ok(cursor?.value)
+
+      gatewayDb.prepare('DELETE FROM gateway_capture_attachments').run()
+      gatewayDb.prepare('DELETE FROM gateway_capture_sources').run()
+      gatewayDb.prepare('DELETE FROM gateway_conversations').run()
+      gatewayDb.prepare('DELETE FROM gateway_messages').run()
+    } finally {
+      gatewayDb.close()
+    }
+
+    const rebuilt = await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })
+    assert.equal(rebuilt.conversations.length, 1)
+    assert.equal(rebuilt.conversations[0]?.lastMessagePreview, 'Initial capture text')
+
+    const gatewayDbAfterRebuild = openSqliteRuntimeDatabase(
+      resolveGatewayRuntimePaths(vaultRoot).gatewayDbPath,
+    )
+    try {
+      const captureSourceCount = gatewayDbAfterRebuild
+        .prepare('SELECT COUNT(*) AS count FROM gateway_capture_sources')
+        .get() as { count: number }
+      const captureEmpty = gatewayDbAfterRebuild
+        .prepare('SELECT value FROM gateway_meta WHERE key = ?')
+        .get('captures.empty') as { value?: string } | undefined
+
+      assert.equal(captureSourceCount.count, 1)
+      assert.equal(captureEmpty?.value, '0')
+    } finally {
+      gatewayDbAfterRebuild.close()
     }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true })
@@ -1083,6 +1265,7 @@ test('local gateway permission responses rebuild the projection and emit permiss
       cursor: 0,
       kinds: ['permission.resolved'],
       limit: 20,
+      sessionKey: null,
     })
     assert.equal(events.events.length, 1)
     assert.equal(events.events[0]?.kind, 'permission.resolved')

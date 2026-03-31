@@ -103,18 +103,6 @@
       "murph": [
         "packages/cli/src/index.ts"
       ],
-      "murph/gateway-core": [
-        "packages/cli/src/gateway-core.ts"
-      ],
-      "murph/gateway-core-local": [
-        "packages/cli/src/gateway-core-local.ts"
-      ],
-      "murph/inbox-services": [
-        "packages/cli/src/inbox-services.ts"
-      ],
-      "murph/vault-services": [
-        "packages/cli/src/vault-services.ts"
-      ],
       "murph/vault-cli-services": [
         "packages/cli/src/vault-cli-services.ts"
       ],
@@ -135,15 +123,6 @@
       ],
       "murph/assistant/store": [
         "packages/cli/src/assistant/store.ts"
-      ],
-      "murph/assistant/state-ids": [
-        "packages/cli/src/assistant/state-ids.ts"
-      ],
-      "murph/operator-config": [
-        "packages/cli/src/operator-config.ts"
-      ],
-      "murph/assistant-cli-contracts": [
-        "packages/cli/src/assistant-cli-contracts.ts"
       ],
       "@murph/device-syncd": [
         "packages/device-syncd/src/index.ts"

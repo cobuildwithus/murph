@@ -15,25 +15,9 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./inbox-services": {
-      "types": "./dist/inbox-services.d.ts",
-      "default": "./dist/inbox-services.js"
-    },
-    "./vault-services": {
-      "types": "./dist/vault-services.d.ts",
-      "default": "./dist/vault-services.js"
-    },
     "./vault-cli-services": {
       "types": "./dist/vault-cli-services.d.ts",
       "default": "./dist/vault-cli-services.js"
-    },
-    "./gateway-core": {
-      "types": "./dist/gateway-core.d.ts",
-      "default": "./dist/gateway-core.js"
-    },
-    "./gateway-core-local": {
-      "types": "./dist/gateway-core-local.d.ts",
-      "default": "./dist/gateway-core-local.js"
     },
     "./assistant/automation": {
       "types": "./dist/assistant/automation.d.ts",
@@ -58,18 +42,6 @@
     "./assistant/service": {
       "types": "./dist/assistant/service.d.ts",
       "default": "./dist/assistant/service.js"
-    },
-    "./assistant/state-ids": {
-      "types": "./dist/assistant/state-ids.d.ts",
-      "default": "./dist/assistant/state-ids.js"
-    },
-    "./assistant-cli-contracts": {
-      "types": "./dist/assistant-cli-contracts.d.ts",
-      "default": "./dist/assistant-cli-contracts.js"
-    },
-    "./operator-config": {
-      "types": "./dist/operator-config.d.ts",
-      "default": "./dist/operator-config.js"
     }
   },
   "files": [
@@ -109,8 +81,7 @@
     "ink-text-input": "^6.0.0",
     "incur": "0.3.4",
     "react": "^19.2.4",
-    "zod": "^4.1.8",
-    "@murph/gateway-core": "workspace:*"
+    "zod": "^4.1.8"
   },
   "devDependencies": {
     "@types/react": "^19.2.14"
