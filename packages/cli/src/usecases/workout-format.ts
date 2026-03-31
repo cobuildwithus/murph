@@ -221,15 +221,7 @@ async function loadWorkoutFormats(vault: string): Promise<WorkoutFormatRecord[]>
       const relativePath = `${WORKOUT_FORMATS_DIRECTORY}/${entry.name}`
       const resolvedFile = await resolveVaultPathOnDisk(vault, relativePath)
       const markdown = await readFile(resolvedFile.absolutePath, 'utf8')
-      try {
-        records.push(parseWorkoutFormatRecord(markdown, relativePath))
-      } catch (error) {
-        if (isLegacyWorkoutFormatCompatibilityError(error)) {
-          continue
-        }
-
-        throw error
-      }
+      records.push(parseWorkoutFormatRecord(markdown, relativePath))
     }
   } catch (error) {
     if (isMissingPathError(error)) {
@@ -738,13 +730,5 @@ function isMissingPathError(error: unknown) {
       typeof error === 'object' &&
       'code' in error &&
       error.code === 'ENOENT',
-  )
-}
-
-function isLegacyWorkoutFormatCompatibilityError(error: unknown) {
-  return (
-    error instanceof VaultCliError &&
-    error.code === 'contract_invalid' &&
-    /missing (workoutFormatId|activityType)/u.test(error.message)
   )
 }

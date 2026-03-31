@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
+import { createGatewayConversationSessionKey } from "@murph/gateway-core";
 import {
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,
@@ -29,17 +30,6 @@ import { HostedUserRunner } from "../src/user-runner.js";
 import { createTestSqlStorage } from "./sql-storage.js";
 
 const describe = baseDescribe.sequential;
-
-function createGatewayConversationSessionKey(routeKey: string): string {
-  return `gwcs_${Buffer.from(
-    JSON.stringify({
-      kind: "conversation",
-      routeKey,
-      version: 1,
-    }),
-    "utf8",
-  ).toString("base64url")}`;
-}
 
 describe("HostedUserRunner", () => {
   const bucket = createBucket();

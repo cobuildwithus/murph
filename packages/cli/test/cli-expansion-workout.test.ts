@@ -765,7 +765,7 @@ text: Legacy gym day template.
 )
 
 test(
-  'workout format scans skip stale legacy docs while direct legacy lookups still fail',
+  'workout format scans hard-fail on stale legacy docs after the cutover',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
@@ -821,8 +821,9 @@ text: Legacy gym day template.
         '--vault',
         vaultRoot,
       ])
-      assert.equal(shown.ok, true)
-      assert.equal(requireData(shown).entity.title, 'Good Day')
+      assert.equal(shown.ok, false)
+      assert.equal(shown.error.code, 'contract_invalid')
+      assert.match(shown.error.message ?? '', /missing workoutFormatId/u)
 
       const listed = await runCli<WorkoutFormatListEnvelope>([
         'workout',
@@ -831,9 +832,9 @@ text: Legacy gym day template.
         '--vault',
         vaultRoot,
       ])
-      assert.equal(listed.ok, true)
-      assert.equal(requireData(listed).count, 1)
-      assert.equal(requireData(listed).items[0]?.title, 'Good Day')
+      assert.equal(listed.ok, false)
+      assert.equal(listed.error.code, 'contract_invalid')
+      assert.match(listed.error.message ?? '', /missing workoutFormatId/u)
 
       const logged = await runCli<WorkoutAddEnvelope>([
         'workout',
@@ -845,20 +846,9 @@ text: Legacy gym day template.
         '--vault',
         vaultRoot,
       ])
-      assert.equal(logged.ok, true)
-      assert.equal(requireData(logged).activityType, 'strength-training')
-
-      const legacyShow = await runCli([
-        'workout',
-        'format',
-        'show',
-        'legacy-gym-day',
-        '--vault',
-        vaultRoot,
-      ])
-      assert.equal(legacyShow.ok, false)
-      assert.equal(legacyShow.error.code, 'contract_invalid')
-      assert.match(legacyShow.error.message ?? '', /missing workoutFormatId/u)
+      assert.equal(logged.ok, false)
+      assert.equal(logged.error.code, 'contract_invalid')
+      assert.match(logged.error.message ?? '', /missing workoutFormatId/u)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

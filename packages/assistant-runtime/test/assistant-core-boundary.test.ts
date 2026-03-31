@@ -49,6 +49,18 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
     new URL("../../assistant-core/src/index.ts", import.meta.url),
     "utf8",
   );
+  const assistantCoreInboxServicesSource = await readFile(
+    new URL("../../assistant-core/src/inbox-services.ts", import.meta.url),
+    "utf8",
+  );
+  const assistantCoreIntegratedServicesSource = await readFile(
+    new URL("../../assistant-core/src/usecases/integrated-services.ts", import.meta.url),
+    "utf8",
+  );
+  const assistantCoreTypesSource = await readFile(
+    new URL("../../assistant-core/src/usecases/types.ts", import.meta.url),
+    "utf8",
+  );
   const runtimeIndexSource = await readFile(
     new URL("../src/index.ts", import.meta.url),
     "utf8",
@@ -77,6 +89,17 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
     "packages/assistant-core/tsconfig.json must not reference ../cli",
   );
   assert.doesNotMatch(assistantCoreIndexSource, /\bfrom ["']murph\//u);
+  assert.doesNotMatch(assistantCoreInboxServicesSource, /\bcreateIntegratedInboxCliServices\b/u);
+  assert.doesNotMatch(assistantCoreInboxServicesSource, /\bInboxCliServices\b/u);
+  assert.doesNotMatch(
+    assistantCoreIntegratedServicesSource,
+    /\bcreateIntegratedVaultCliServices\b/u,
+  );
+  assert.doesNotMatch(
+    assistantCoreIntegratedServicesSource,
+    /\bcreateUnwiredVaultCliServices\b/u,
+  );
+  assert.doesNotMatch(assistantCoreTypesSource, /\bVaultCliServices\b/u);
   assert.doesNotMatch(runtimeIndexSource, /contracts\.ts/u);
   assert.match(cloudflareNodeRunnerSource, /from ["']@murph\/assistant-core["']/u);
   assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph(\/|["'])/u);

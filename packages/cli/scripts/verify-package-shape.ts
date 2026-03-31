@@ -31,6 +31,7 @@ interface TsConfigShape {
     declaration?: boolean
     noEmit?: boolean
     outDir?: string
+    paths?: Record<string, string[] | undefined>
     rootDir?: string
   }
   include?: string[]
@@ -51,6 +52,9 @@ const tsconfigBuild = JSON.parse(
 ) as TsConfigShape
 const tsconfigTypecheck = JSON.parse(
   await readFile(path.join(packageDir, 'tsconfig.typecheck.json'), 'utf8'),
+) as TsConfigShape
+const rootTsconfigBase = JSON.parse(
+  await readFile(path.join(packageDir, '../../tsconfig.base.json'), 'utf8'),
 ) as TsConfigShape
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
 
@@ -123,6 +127,10 @@ assert(
 assert(
   packageJson.exports?.['./vault-cli-services'] === undefined,
   'package.json must not publish the removed vault-cli-services compatibility subpath.',
+)
+assert(
+  rootTsconfigBase.compilerOptions?.paths?.['murph/vault-cli-services'] === undefined,
+  'tsconfig.base.json must not preserve the removed vault-cli-services compatibility path alias.',
 )
 assert(
   packageJson.exports?.['./assistant/service']?.default === './dist/assistant/service.js',
@@ -263,6 +271,14 @@ assert(
 assert(
   !/@murph\/assistant-core\//u.test(libraryEntry),
   'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
+)
+assert(
+  !/\bcreateIntegratedInboxCliServices\b/u.test(libraryEntry) &&
+    !/\bInboxCliServices\b/u.test(libraryEntry) &&
+    !/\bcreateIntegratedVaultCliServices\b/u.test(libraryEntry) &&
+    !/\bcreateUnwiredVaultCliServices\b/u.test(libraryEntry) &&
+    !/\bVaultCliServices\b/u.test(libraryEntry),
+  'src/index.ts must not re-export the removed CLI-shaped service compatibility aliases.',
 )
 
 console.log('packages/cli package shape verified.')

@@ -291,20 +291,43 @@ test('local gateway projection derives route-backed conversations and transcript
     assert.equal(messages.messages[1]?.direction, 'outbound')
     assert.equal(messages.messages[1]?.text, 'Please send the latest PDF.')
 
-    const legacySessionKey = createLegacyGatewayConversationSessionKey(
-      'channel:email|identity:murph%40example.com|thread:thread-labs',
+    const legacySessionKey = `gwcs_${Buffer.from(
+      JSON.stringify({
+        kind: 'conversation',
+        routeKey: 'channel:email|identity:murph%40example.com|thread:thread-labs',
+        version: 1,
+      }),
+      'utf8',
+    ).toString('base64url')}`
+    await assert.rejects(
+      getGatewayConversationLocal(vaultRoot, {
+        sessionKey: legacySessionKey,
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'ASSISTANT_INVALID_RUNTIME_ID')
+        assert.match(
+          error instanceof Error ? error.message : String(error),
+          /version is unsupported/u,
+        )
+        return true
+      },
     )
-    const fetchedFromLegacySessionKey = await getGatewayConversationLocal(vaultRoot, {
-      sessionKey: legacySessionKey,
-    })
-    assert.equal(fetchedFromLegacySessionKey?.sessionKey, emailConversation.sessionKey)
-    const messagesFromLegacySessionKey = await readGatewayMessagesLocal(vaultRoot, {
-      afterMessageId: null,
-      limit: 100,
-      oldestFirst: true,
-      sessionKey: legacySessionKey,
-    })
-    assert.equal(messagesFromLegacySessionKey.messages.length, 2)
+    await assert.rejects(
+      readGatewayMessagesLocal(vaultRoot, {
+        afterMessageId: null,
+        limit: 100,
+        oldestFirst: true,
+        sessionKey: legacySessionKey,
+      }),
+      (error: unknown) => {
+        assert.equal((error as { code?: string }).code, 'ASSISTANT_INVALID_RUNTIME_ID')
+        assert.match(
+          error instanceof Error ? error.message : String(error),
+          /version is unsupported/u,
+        )
+        return true
+      },
+    )
 
     const attachments = await fetchGatewayAttachmentsLocal(vaultRoot, {
       attachmentIds: [],
@@ -1356,17 +1379,6 @@ function assertGatewayOpaqueIdDoesNotExposeRawRoute(
   for (const fragment of forbiddenFragments) {
     assert.doesNotMatch(decoded, new RegExp(escapeRegExp(fragment), 'u'))
   }
-}
-
-function createLegacyGatewayConversationSessionKey(routeKey: string): string {
-  return `gwcs_${Buffer.from(
-    JSON.stringify({
-      kind: 'conversation',
-      routeKey,
-      version: 1,
-    }),
-    'utf8',
-  ).toString('base64url')}`
 }
 
 function escapeRegExp(value: string): string {

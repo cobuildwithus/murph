@@ -772,6 +772,3 @@ export function createUnwiredVaultServices(): VaultServices {
     devices: createUnwiredServiceGroup("devices", integratedServices.devices),
   }
 }
-
-export const createIntegratedVaultCliServices = createIntegratedVaultServices
-export const createUnwiredVaultCliServices = createUnwiredVaultServices
