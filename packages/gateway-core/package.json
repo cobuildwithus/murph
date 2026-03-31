@@ -35,7 +35,9 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "murph": "workspace:*",
+    "@murph/assistant-core": "workspace:*",
+    "@murph/inboxd": "workspace:*",
+    "@murph/runtime-state": "workspace:*",
     "incur": "0.3.4"
   }
 }

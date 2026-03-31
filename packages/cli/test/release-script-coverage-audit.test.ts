@@ -93,9 +93,9 @@ describe('monorepo release flow coverage audit', () => {
       '@murph/device-syncd',
       '@murph/inboxd',
       '@murph/parsers',
-      'murph',
       '@murph/assistant-core',
       '@murph/gateway-core',
+      'murph',
       '@murph/assistant-runtime',
       '@murph/assistantd',
     ])

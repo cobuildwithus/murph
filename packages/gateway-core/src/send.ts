@@ -1,12 +1,12 @@
-import { inferAssistantBindingDelivery } from '../assistant/channel-adapters.js'
-import { recordAssistantDiagnosticEvent } from '../assistant/diagnostics.js'
-import type { AssistantOutboxDispatchMode } from '../assistant/outbox.js'
-import { deliverAssistantOutboxMessage } from '../assistant/outbox.js'
-import { createAssistantTurnId } from '../assistant/turns.js'
+import { randomUUID } from 'node:crypto'
+
+import {
+  deliverAssistantOutboxMessage,
+  type AssistantOutboxDispatchMode,
+} from '@murph/assistant-core'
 import {
   gatewaySendMessageInputSchema,
   gatewaySendMessageResultSchema,
-  type GatewayConversationRoute,
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
 } from './contracts.js'
@@ -22,7 +22,10 @@ import {
 } from './errors.js'
 import { getGatewayConversationFromSnapshot } from './snapshot.js'
 import { LocalGatewayProjectionStore } from './store.js'
-import { gatewayChannelSupportsReplyToMessage } from './routes.js'
+import {
+  gatewayBindingDeliveryFromRoute,
+  gatewayChannelSupportsReplyToMessage,
+} from './routes.js'
 
 export async function sendGatewayMessageLocal(input: {
   dispatchMode?: AssistantOutboxDispatchMode
@@ -58,18 +61,7 @@ export async function sendGatewayMessageLocal(input: {
       store,
     })
 
-    const bindingDelivery = inferAssistantBindingDelivery({
-      channel: conversation.route.channel,
-      conversation: {
-        channel: conversation.route.channel,
-        identityId: conversation.route.identityId,
-        participantId: conversation.route.participantId,
-        threadId: conversation.route.threadId,
-        directness: conversation.route.directness,
-      },
-      deliveryKind: conversation.route.reply.kind,
-      deliveryTarget: conversation.route.reply.target,
-    })
+    const bindingDelivery = gatewayBindingDeliveryFromRoute(conversation.route)
     if (!bindingDelivery) {
       throw createGatewayUnsupportedOperationError(
         `Gateway session ${parsed.sessionKey} is missing a delivery target.`,
@@ -92,8 +84,8 @@ export async function sendGatewayMessageLocal(input: {
       replyToMessageId: deliveryReplyToMessageId,
       sessionId: resolveGatewayDeliverySessionId(parsed.sessionKey),
       threadId: conversation.route.threadId,
-      threadIsDirect: threadIsDirectFromRoute(conversation.route),
-      turnId: createAssistantTurnId(),
+      threadIsDirect: threadIsDirectFromRoute(conversation.route.directness),
+      turnId: createGatewaySendTurnId(),
       vault,
     })
 
@@ -102,23 +94,7 @@ export async function sendGatewayMessageLocal(input: {
       throw createGatewayUnsupportedOperationError(detail)
     }
 
-    await store.sync().catch(async (error) => {
-      await recordAssistantDiagnosticEvent({
-        code: 'GATEWAY_PROJECTION_REFRESH_FAILED',
-        component: 'delivery',
-        data: {
-          error:
-            error instanceof Error ? error.message : 'Unknown gateway refresh failure.',
-          sessionKey: parsed.sessionKey,
-        },
-        kind: 'gateway.projection.refresh_failed',
-        level: 'warn',
-        message:
-          'Gateway projection refresh failed after a successful send; the send result was preserved.',
-        sessionId: resolveGatewayDeliverySessionId(parsed.sessionKey),
-        vault,
-      }).catch(() => undefined)
-    })
+    await store.sync().catch(() => undefined)
 
     return gatewaySendMessageResultSchema.parse({
       sessionKey: parsed.sessionKey,
@@ -167,6 +143,10 @@ async function resolveGatewayReplyToMessageIdLocal(input: {
   return replyTarget
 }
 
+function createGatewaySendTurnId(): string {
+  return `turn_${randomUUID().replace(/-/gu, '')}`
+}
+
 function resolveGatewayDeliverySessionId(sessionKey: string): string {
   return `gwds_${sessionKey}`
 }
@@ -183,8 +163,10 @@ function buildGatewayClientRequestToken(
   return `gateway-send:${routeToken}:${normalized}`
 }
 
-function threadIsDirectFromRoute(route: GatewayConversationRoute): boolean | null {
-  switch (route.directness) {
+function threadIsDirectFromRoute(
+  directness: 'direct' | 'group' | 'unknown' | null,
+): boolean | null {
+  switch (directness) {
     case 'direct':
       return true
     case 'group':

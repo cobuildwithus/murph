@@ -181,6 +181,18 @@ export function gatewayChannelSupportsReplyToMessage(
   return normalizeNullableString(channel) === 'linq'
 }
 
+export function gatewayBindingDeliveryFromRoute(
+  route: GatewayConversationRoute | null | undefined,
+): { kind: GatewayReplyRouteKind; target: string } | null {
+  const normalized = normalizeGatewayConversationRoute(route)
+  return inferGatewayBindingDelivery({
+    channel: normalized.channel,
+    conversation: gatewayConversationRouteToConversationRef(normalized),
+    deliveryKind: normalized.reply.kind,
+    deliveryTarget: normalized.reply.target,
+  })
+}
+
 function inferGatewayBindingDelivery(input: {
   channel?: string | null
   conversation?: GatewayConversationRef | null
