@@ -1,4 +1,7 @@
 import {
+  resolveHostedEmailSenderIdentity,
+} from "@murph/hosted-execution";
+import {
   createHostedEmailThreadTarget,
   ensureHostedEmailReplySubject,
   normalizeHostedEmailAddress,
@@ -7,7 +10,6 @@ import {
   serializeHostedEmailThreadTarget,
   type HostedEmailThreadTarget,
 } from "@murph/runtime-state";
-import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
 import type { HostedEmailSendRequest } from "@murph/assistant-runtime";
 
 import type { R2BucketLike } from "./bundle-store.ts";

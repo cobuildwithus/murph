@@ -49,6 +49,10 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
     new URL("../../assistant-core/src/index.ts", import.meta.url),
     "utf8",
   );
+  const runtimeIndexSource = await readFile(
+    new URL("../src/index.ts", import.meta.url),
+    "utf8",
+  );
   const runtimeSourceFiles = await listFilesRecursive(new URL("../src/", import.meta.url));
   const assistantCoreSourceFiles = await listFilesRecursive(
     new URL("../../assistant-core/src/", import.meta.url),
@@ -58,6 +62,7 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
     "utf8",
   );
   const assistantCoreModule = await import("@murph/assistant-core");
+  const assistantRuntimeModule = await import("@murph/assistant-runtime");
   let sawAssistantCoreImport = false;
 
   assert.equal(runtimeManifest.dependencies?.["@murph/assistant-core"], "workspace:*");
@@ -72,6 +77,7 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
     "packages/assistant-core/tsconfig.json must not reference ../cli",
   );
   assert.doesNotMatch(assistantCoreIndexSource, /\bfrom ["']murph\//u);
+  assert.doesNotMatch(runtimeIndexSource, /contracts\.ts/u);
   assert.match(cloudflareNodeRunnerSource, /from ["']@murph\/assistant-core["']/u);
   assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph(\/|["'])/u);
 
@@ -98,6 +104,11 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
   assert.equal(Object.hasOwn(assistantCoreModule, "createUnwiredVaultCliServices"), false);
   assert.equal(Object.hasOwn(assistantCoreModule, "saveDefaultVaultConfig"), true);
   assert.equal(Object.hasOwn(assistantCoreModule, "saveAssistantOperatorDefaultsPatch"), true);
+  assert.equal(Object.hasOwn(assistantRuntimeModule, "parseHostedExecutionSideEffects"), false);
+  assert.equal(Object.hasOwn(assistantRuntimeModule, "parseHostedExecutionSideEffectRecord"), false);
+  assert.equal(Object.hasOwn(assistantRuntimeModule, "HostedExecutionSideEffect"), false);
+  assert.equal(Object.hasOwn(assistantRuntimeModule, "runHostedAssistantRuntimeJobInProcess"), true);
+  assert.equal(Object.hasOwn(assistantRuntimeModule, "readHostedRunnerCommitTimeoutMs"), true);
 });
 
 test("assistant-core operator-config writes the canonical local config shape", async () => {
