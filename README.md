@@ -1,4 +1,4 @@
-# Murph
+# Murph 🫀
 
 Murph is your personal health assistant.
 
