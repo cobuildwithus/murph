@@ -91,9 +91,19 @@ Optional tuning variables:
 - `CF_ALLOWED_USER_ENV_PREFIXES`
 - `HOSTED_EXECUTION_ALLOWED_WEB_CONTROL_HOSTS` (comma-separated `host[:port]` entries for runner web-control targets that do not share the public hosted-web host)
 
-Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
+Optional non-secret worker variables:
 
 - `DEVICE_SYNC_PUBLIC_BASE_URL`
+- `HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION`
+- `HOSTED_WEB_BASE_URL`
+- `HOSTED_DEVICE_SYNC_CONTROL_BASE_URL`
+- `HOSTED_AI_USAGE_BASE_URL`
+- `HOSTED_SHARE_API_BASE_URL`
+
+The hosted-web control-plane URLs above are consumed by the worker-side runner proxy layer. Only the subset allowlisted in `apps/cloudflare/src/runner-env.ts` is forwarded into the native container runtime.
+
+Optional non-secret provider/toolchain variables to expose through the worker and forward into the container:
+
 - `LINQ_API_BASE_URL`
 - `AGENTMAIL_BASE_URL`
 - `TELEGRAM_BOT_USERNAME`
@@ -119,12 +129,19 @@ Optional secret for staged bundle-key rotation:
 
 - `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`
 
+Additional hosted-web control-plane secrets:
+
+- `HOSTED_EXECUTION_INTERNAL_TOKEN`
+- `HOSTED_SHARE_INTERNAL_TOKEN`
+
 The checked-in scaffold and rendered deploy config both declare those four names in Wrangler's experimental `secrets.required` field, so `wrangler deploy` and `wrangler versions upload` fail early when any of them are missing from the Worker.
 
 Both control tokens are treated as required runtime inputs now, not just deploy-time placeholders:
 
 - missing `HOSTED_EXECUTION_CONTROL_TOKEN` makes `/internal/users/:userId/{status,run,env}` fail closed
 - missing `HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN` makes native container invoke requests fail closed before the runner job starts
+- missing `HOSTED_EXECUTION_INTERNAL_TOKEN` makes runner proxy calls to hosted web internal device-sync and usage routes fail closed
+- missing `HOSTED_SHARE_INTERNAL_TOKEN` makes hosted share payload fetches fail closed
 - changing `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY` or `CF_BUNDLE_KEY_ID` in place still requires staging older keys in `HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEYRING_JSON`; missing keyring entries fail closed on `keyId` mismatch
 
 ### Optional provider/runtime secrets
@@ -175,10 +192,14 @@ export CF_BUNDLES_BUCKET=hosted-execution-bundles-staging
 export CF_BUNDLES_PREVIEW_BUCKET=hosted-execution-bundles-staging-preview
 export CF_CONTAINER_INSTANCE_TYPE=basic
 export HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER=5m
+export HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION=true
 export HOSTED_EXECUTION_SIGNING_SECRET=...
 export HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY=...
 export HOSTED_EXECUTION_CONTROL_TOKEN=...
+export HOSTED_EXECUTION_INTERNAL_TOKEN=...
 export HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN=...
+export HOSTED_WEB_BASE_URL=https://your-hosted-web.example.com
+export HOSTED_SHARE_INTERNAL_TOKEN=...
 export CF_LOG_HEAD_SAMPLING_RATE=1
 export CF_TRACE_HEAD_SAMPLING_RATE=0.1
 
