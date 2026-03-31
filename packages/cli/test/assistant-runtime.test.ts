@@ -47,6 +47,12 @@ const runtimeMocks = vi.hoisted(() => ({
   executeAssistantProviderTurn: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
+  resolveAssistantProviderCapabilities: vi.fn((provider: string) => ({
+    supportsBoundTools: provider === 'openai-compatible' || provider === 'codex-cli',
+    supportsDirectCliExecution: provider !== 'openai-compatible',
+    supportsModelDiscovery: provider === 'openai-compatible',
+    supportsReasoningEffort: provider !== 'openai-compatible',
+  })),
   resolveAssistantProviderTraits: vi.fn((provider: string) =>
     provider === 'openai-compatible'
       ? {
@@ -87,6 +93,8 @@ vi.mock('../src/assistant-provider.js', async () => {
   return {
     ...actual,
     executeAssistantProviderTurn: runtimeMocks.executeAssistantProviderTurn,
+    resolveAssistantProviderCapabilities:
+      runtimeMocks.resolveAssistantProviderCapabilities,
     resolveAssistantProviderTraits: runtimeMocks.resolveAssistantProviderTraits,
   }
 })
@@ -213,7 +221,14 @@ beforeEach(() => {
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
+  runtimeMocks.resolveAssistantProviderCapabilities.mockReset()
   runtimeMocks.resolveAssistantProviderTraits.mockReset()
+  runtimeMocks.resolveAssistantProviderCapabilities.mockImplementation((provider: string) => ({
+    supportsBoundTools: provider === 'openai-compatible' || provider === 'codex-cli',
+    supportsDirectCliExecution: provider !== 'openai-compatible',
+    supportsModelDiscovery: provider === 'openai-compatible',
+    supportsReasoningEffort: provider !== 'openai-compatible',
+  }))
   runtimeMocks.resolveAssistantProviderTraits.mockImplementation((provider: string) =>
     provider === 'openai-compatible'
       ? {

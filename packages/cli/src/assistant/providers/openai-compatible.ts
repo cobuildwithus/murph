@@ -90,6 +90,7 @@ export function didOpenAiCompatibleProviderExecuteTool(error: unknown): boolean 
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
+    supportsBoundTools: true,
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
     supportsReasoningEffort: false,

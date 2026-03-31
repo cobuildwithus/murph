@@ -1066,6 +1066,31 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
 })
 
+test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profile', () => {
+  const catalog = createDefaultAssistantToolCatalog(
+    {
+      vault: '/tmp/murph-vault',
+      vaultServices: createStubVaultServices(),
+    },
+    {
+      includeAssistantRuntimeTools: false,
+      includeQueryTools: false,
+      includeStatefulWriteTools: false,
+      includeVaultTextReadTool: true,
+      includeVaultWriteTools: false,
+    },
+  )
+
+  assert.equal(catalog.hasTool('vault.fs.readText'), true)
+  assert.equal(catalog.hasTool('assistant.state.show'), false)
+  assert.equal(catalog.hasTool('assistant.memory.search'), false)
+  assert.equal(catalog.hasTool('assistant.cron.list'), false)
+  assert.equal(catalog.hasTool('assistant.selfTarget.list'), false)
+  assert.equal(catalog.hasTool('vault.show'), false)
+  assert.equal(catalog.hasTool('vault.journal.append'), false)
+  assert.equal(catalog.hasTool('vault.recipe.upsert'), false)
+})
+
 test('createDefaultAssistantToolCatalog vault.fs.readText enforces bounded UTF-8 reads inside the vault', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-read-text-'))
   const outsideRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-read-text-outside-'))

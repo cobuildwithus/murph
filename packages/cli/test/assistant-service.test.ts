@@ -1771,6 +1771,100 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
   }
 })
 
+test('sendAssistantMessage constrains OpenAI-compatible auto-reply turns to bounded vault text reads', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-auto-reply-tools-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'auto-reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:auto-reply-tools',
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      prompt: 'Can you follow up?',
+      turnTrigger: 'automation-auto-reply',
+    })
+
+    const providerCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    const toolCatalog = providerCall?.toolRuntime?.toolCatalog
+
+    assert.equal(providerCall?.provider, 'openai-compatible')
+    assert.equal(toolCatalog?.hasTool('vault.fs.readText'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.state.show'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.search'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.cron.status'), false)
+    assert.equal(toolCatalog?.hasTool('assistant.selfTarget.list'), false)
+    assert.equal(toolCatalog?.hasTool('vault.show'), false)
+    assert.equal(toolCatalog?.hasTool('vault.journal.append'), false)
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /does not expose Murph assistant-memory tools or direct shell access/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /does not expose Murph cron tools or direct shell access/u,
+    )
+    assert.equal(result.response, 'auto-reply')
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('sendAssistantMessage rejects Codex auto-reply routes that cannot honor the bound tool profile', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-codex-auto-reply-tools-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  try {
+    await assert.rejects(
+      () =>
+        sendAssistantMessage({
+          vault: vaultRoot,
+          alias: 'chat:codex-auto-reply-tools',
+          provider: 'codex-cli',
+          prompt: 'Can you follow up?',
+          turnTrigger: 'automation-auto-reply',
+        }),
+      (error) => {
+        assert.equal((error as { code?: string }).code, 'ASSISTANT_PROVIDER_UNSUPPORTED')
+        assert.match(
+          error instanceof Error ? error.message : String(error),
+          /bound read-only tool profile/u,
+        )
+        return true
+      },
+    )
+    assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 0)
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
 test('sendAssistantMessage rotates stale Codex provider sessions after a prompt-version change while keeping local transcript continuity', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-codex-prompt-version-'))
   const vaultRoot = path.join(parent, 'vault')

@@ -38,6 +38,7 @@ export interface AssistantModelDiscoveryResult {
 }
 
 export interface AssistantProviderCapabilities {
+  supportsBoundTools: boolean
   supportsDirectCliExecution: boolean
   supportsModelDiscovery: boolean
   supportsReasoningEffort: boolean

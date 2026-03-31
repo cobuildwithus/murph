@@ -14,6 +14,7 @@ import type { AssistantProviderDefinition } from './types.js'
 
 export const codexCliProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
+    supportsBoundTools: false,
     supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
     supportsReasoningEffort: true,

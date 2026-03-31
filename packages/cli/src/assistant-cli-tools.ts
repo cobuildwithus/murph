@@ -96,6 +96,8 @@ export interface AssistantToolCatalogOptions {
   includeAssistantRuntimeTools?: boolean
   includeQueryTools?: boolean
   includeStatefulWriteTools?: boolean
+  includeVaultTextReadTool?: boolean
+  includeVaultWriteTools?: boolean
 }
 
 export function createDefaultAssistantToolCatalog(
@@ -107,8 +109,13 @@ export function createDefaultAssistantToolCatalog(
       ? createAssistantRuntimeToolDefinitions(input, options)
       : []),
     ...createInboxPromotionToolDefinitions(input),
+    ...(options.includeVaultTextReadTool ?? true
+      ? createVaultTextReadToolDefinitions(input)
+      : []),
     ...(options.includeQueryTools ?? true ? createVaultQueryToolDefinitions(input) : []),
-    ...createVaultWriteToolDefinitions(input, options),
+    ...(options.includeVaultWriteTools ?? true
+      ? createVaultWriteToolDefinitions(input, options)
+      : []),
   ])
 }
 
@@ -119,6 +126,8 @@ export function createInboxRoutingAssistantToolCatalog(
     includeAssistantRuntimeTools: false,
     includeQueryTools: false,
     includeStatefulWriteTools: false,
+    includeVaultTextReadTool: false,
+    includeVaultWriteTools: true,
   })
 }
 
@@ -143,11 +152,10 @@ async function requireAssistantMemoryToolRecord(
   })
 }
 
-function createAssistantRuntimeToolDefinitions(
+function createVaultTextReadToolDefinitions(
   input: AssistantToolContext,
-  options: AssistantToolCatalogOptions = {},
 ) {
-  const readOnlyTools = [
+  return [
     defineAssistantTool({
       name: 'vault.fs.readText',
       description:
@@ -162,6 +170,14 @@ function createAssistantRuntimeToolDefinitions(
       execute: ({ path: candidatePath, maxChars }) =>
         readAssistantTextFile(input.vault, candidatePath, maxChars),
     }),
+  ]
+}
+
+function createAssistantRuntimeToolDefinitions(
+  input: AssistantToolContext,
+  options: AssistantToolCatalogOptions = {},
+) {
+  const readOnlyTools = [
     defineAssistantTool({
       name: 'assistant.state.list',
       description:
