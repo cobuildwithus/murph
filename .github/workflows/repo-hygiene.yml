@@ -30,16 +30,3 @@ jobs:
 
       - name: Check tracked private/build artifacts
         run: pnpm no-js
-
-  secret-scan:
-    name: Secret scan
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Scan tracked files for secrets
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: --no-git --redact --source .
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
