@@ -129,15 +129,7 @@ export class HostedLinqControlPlane {
     });
 
     if (event.event_type !== "message.received") {
-      return {
-        accepted: true,
-        duplicate: false,
-        routed: false,
-        ignored: true,
-        eventId: event.event_id,
-        eventType: event.event_type,
-        traceId: event.trace_id ?? null,
-      };
+      return buildIgnoredWebhookResult(event);
     }
 
     let messageEvent: ReturnType<typeof parseCanonicalLinqMessageReceivedEvent>;
@@ -158,32 +150,18 @@ export class HostedLinqControlPlane {
     const recipientPhone = normalizeOptionalRecipientPhone(messageEvent.data.recipient_phone ?? null);
 
     if (!recipientPhone) {
-      return {
-        accepted: true,
-        duplicate: false,
-        routed: false,
-        ignored: true,
+      return buildIgnoredWebhookResult(event, {
         reason: "recipient_phone_missing",
-        eventId: event.event_id,
-        eventType: event.event_type,
-        traceId: event.trace_id ?? null,
-      };
+      });
     }
 
     const binding = await this.getStore().getBindingByRecipientPhone(recipientPhone);
 
     if (!binding) {
-      return {
-        accepted: true,
-        duplicate: false,
-        routed: false,
-        ignored: true,
+      return buildIgnoredWebhookResult(event, {
         reason: "unpaired_recipient_phone",
         recipientPhone,
-        eventId: event.event_id,
-        eventType: event.event_type,
-        traceId: event.trace_id ?? null,
-      };
+      });
     }
 
     const queued = await this.getStore().queueWebhookEventIfNew({
@@ -282,6 +260,26 @@ export class HostedLinqControlPlane {
 
 export function createHostedLinqControlPlane(request: Request): HostedLinqControlPlane {
   return new HostedLinqControlPlane(request);
+}
+
+function buildIgnoredWebhookResult(
+  event: LinqWebhookEvent,
+  extra?: {
+    reason?: string;
+    recipientPhone?: string;
+  },
+) {
+  return {
+    accepted: true,
+    duplicate: false,
+    routed: false,
+    ignored: true,
+    ...(extra?.reason ? { reason: extra.reason } : {}),
+    ...(extra?.recipientPhone ? { recipientPhone: extra.recipientPhone } : {}),
+    eventId: event.event_id,
+    eventType: event.event_type,
+    traceId: event.trace_id ?? null,
+  };
 }
 
 function resolveWebhookOccurredAt(event: LinqWebhookEvent): string | null {

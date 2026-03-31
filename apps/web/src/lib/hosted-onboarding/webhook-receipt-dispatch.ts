@@ -6,7 +6,10 @@ import {
   type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
 
-import { readHostedWebhookReceiptState } from "./webhook-receipt-codec";
+import {
+  readHostedWebhookReceiptState,
+  toHostedWebhookReceiptRecord,
+} from "./webhook-receipt-codec";
 import { normalizePhoneNumber } from "./phone";
 import type { HostedWebhookDispatchSideEffect } from "./webhook-receipt-types";
 
@@ -63,7 +66,7 @@ export function readHostedWebhookReceiptDispatchByEventId(
     }
 
     if (dispatchRef.eventKind === "linq.message.received") {
-      const linqEvent = readHostedWebhookReceiptLinqEvent(
+      const linqEvent = toHostedWebhookReceiptRecord(
         sideEffect.payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
       );
       const normalizedPhoneNumber = readHostedWebhookReceiptNormalizedPhoneNumber(linqEvent);
@@ -82,7 +85,7 @@ export function readHostedWebhookReceiptDispatchByEventId(
     }
 
     if (dispatchRef.eventKind === "telegram.message.received") {
-      const telegramUpdate = readHostedWebhookReceiptTelegramUpdate(
+      const telegramUpdate = toHostedWebhookReceiptRecord(
         sideEffect.payload.telegramUpdate as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
       );
 
@@ -101,22 +104,6 @@ export function readHostedWebhookReceiptDispatchByEventId(
   }
 
   return null;
-}
-
-function readHostedWebhookReceiptLinqEvent(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function readHostedWebhookReceiptTelegramUpdate(
-  value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 function readHostedWebhookReceiptBotUserId(
@@ -141,11 +128,12 @@ function readHostedWebhookReceiptBotUserId(
 function inferHostedWebhookReceiptTelegramBotUserId(
   value: Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
 ): string | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const update = toHostedWebhookReceiptRecord(value);
+
+  if (!update) {
     return null;
   }
 
-  const update = value as Record<string, unknown>;
   const message = readHostedWebhookReceiptTelegramMessage(update.message)
     ?? readHostedWebhookReceiptTelegramMessage(update.business_message);
 
@@ -169,9 +157,7 @@ function inferHostedWebhookReceiptTelegramBotUserId(
 function readHostedWebhookReceiptTelegramMessage(
   value: unknown,
 ): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
+  return toHostedWebhookReceiptRecord(value as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined);
 }
 
 function readHostedWebhookReceiptTelegramUserId(value: unknown): string | null {

@@ -106,18 +106,13 @@ export async function markHostedAiUsageStripeMetered(input: {
   now?: string;
   prisma?: HostedAiUsageClient;
 }): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsage.update({
-    where: {
-      id: input.id,
-    },
-    data: {
-      stripeMeterError: null,
-      stripeMeterIdentifier: input.identifier,
-      stripeMeterStatus: "metered",
-      stripeMeteredAt: new Date(input.now ?? new Date().toISOString()),
-    },
+  await updateHostedAiUsageStripeMeterState({
+    id: input.id,
+    prisma: input.prisma,
+    stripeMeterError: null,
+    stripeMeterIdentifier: input.identifier,
+    stripeMeterStatus: "metered",
+    stripeMeteredAt: new Date(input.now ?? new Date().toISOString()),
   });
 }
 
@@ -126,18 +121,13 @@ export async function markHostedAiUsageStripeSkipped(input: {
   message: string;
   prisma?: HostedAiUsageClient;
 }): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsage.update({
-    where: {
-      id: input.id,
-    },
-    data: {
-      stripeMeterError: input.message,
-      stripeMeterIdentifier: null,
-      stripeMeterStatus: "skipped",
-      stripeMeteredAt: null,
-    },
+  await updateHostedAiUsageStripeMeterState({
+    id: input.id,
+    prisma: input.prisma,
+    stripeMeterError: input.message,
+    stripeMeterIdentifier: null,
+    stripeMeterStatus: "skipped",
+    stripeMeteredAt: null,
   });
 }
 
@@ -146,18 +136,13 @@ export async function markHostedAiUsageStripeRetryableFailure(input: {
   message: string;
   prisma?: HostedAiUsageClient;
 }): Promise<void> {
-  const prisma = input.prisma ?? getPrisma();
-
-  await prisma.hostedAiUsage.update({
-    where: {
-      id: input.id,
-    },
-    data: {
-      stripeMeterError: input.message,
-      stripeMeterIdentifier: null,
-      stripeMeterStatus: "pending",
-      stripeMeteredAt: null,
-    },
+  await updateHostedAiUsageStripeMeterState({
+    id: input.id,
+    prisma: input.prisma,
+    stripeMeterError: input.message,
+    stripeMeterIdentifier: null,
+    stripeMeterStatus: "pending",
+    stripeMeteredAt: null,
   });
 }
 
@@ -166,6 +151,24 @@ export async function markHostedAiUsageStripeFailed(input: {
   message: string;
   prisma?: HostedAiUsageClient;
 }): Promise<void> {
+  await updateHostedAiUsageStripeMeterState({
+    id: input.id,
+    prisma: input.prisma,
+    stripeMeterError: input.message,
+    stripeMeterIdentifier: null,
+    stripeMeterStatus: "failed",
+    stripeMeteredAt: null,
+  });
+}
+
+async function updateHostedAiUsageStripeMeterState(input: {
+  id: string;
+  prisma?: HostedAiUsageClient;
+  stripeMeterError: string | null;
+  stripeMeterIdentifier: string | null;
+  stripeMeterStatus: "failed" | "metered" | "pending" | "skipped";
+  stripeMeteredAt: Date | null;
+}): Promise<void> {
   const prisma = input.prisma ?? getPrisma();
 
   await prisma.hostedAiUsage.update({
@@ -173,10 +176,10 @@ export async function markHostedAiUsageStripeFailed(input: {
       id: input.id,
     },
     data: {
-      stripeMeterError: input.message,
-      stripeMeterIdentifier: null,
-      stripeMeterStatus: "failed",
-      stripeMeteredAt: null,
+      stripeMeterError: input.stripeMeterError,
+      stripeMeterIdentifier: input.stripeMeterIdentifier,
+      stripeMeterStatus: input.stripeMeterStatus,
+      stripeMeteredAt: input.stripeMeteredAt,
     },
   });
 }

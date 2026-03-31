@@ -38,41 +38,20 @@ export async function planHostedOnboardingLinqWebhook(input: {
   prisma: HostedWebhookReceiptPersistenceClient;
 }): Promise<HostedWebhookPlan<HostedOnboardingLinqWebhookResponse>> {
   if (input.event.event_type !== "message.received") {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: input.event.event_type,
-      },
-    };
+    return buildIgnoredLinqWebhookPlan(input.event.event_type);
   }
 
   const messageEvent = requireHostedLinqMessageReceivedEvent(input.event);
   const summary = summarizeHostedLinqMessage(messageEvent);
 
   if (summary.isFromMe) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "own-message",
-      },
-    };
+    return buildIgnoredLinqWebhookPlan("own-message");
   }
 
   const normalizedPhoneNumber = normalizePhoneNumber(summary.phoneNumber);
 
   if (!normalizedPhoneNumber) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "invalid-phone",
-      },
-    };
+    return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
 
   const existingMember = await input.prisma.hostedMember.findUnique({
@@ -159,6 +138,19 @@ export async function planHostedOnboardingLinqWebhook(input: {
     response: {
       ok: true,
       reason: "prompted-get-started",
+    },
+  };
+}
+
+function buildIgnoredLinqWebhookPlan(
+  reason: string,
+): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
+  return {
+    desiredSideEffects: [],
+    response: {
+      ok: true,
+      ignored: true,
+      reason,
     },
   };
 }
