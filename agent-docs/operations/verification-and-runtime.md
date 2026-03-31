@@ -7,7 +7,7 @@ Last verified: 2026-03-31
 | Change scope | Required commands | Notes |
 | --- | --- | --- |
 | Vault-only data changes under `vault/**` | No repo-wide commands by default. | Read back the touched vault records plus any audit or ledger entries written by the mutation path. Do not touch the coordination ledger unless the task expands into repo code/docs/process work. |
-| Docs/process-only | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Includes package-runtime checks, built CLI verification, the tracked-artifact hygiene guard, and fixture/scenario scaffolding because those are part of repo truth now. |
+| Docs/process-only | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Includes package-runtime checks, built CLI verification, the tracked-artifact hygiene guard, and fixture/scenario scaffolding because those are part of repo truth now. When those repo-wide commands are already known red for unrelated reasons, the scoped verification mode below may be used instead. |
 | Fixture/e2e/package-doc changes | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Verifies fixture corpus integrity, smoke-manifest wiring, package-runtime health, built CLI checks, command-surface coverage, and the source-artifact guard for handwritten JS-like files plus tracked `.env` / `.env.*` private files and generated residue such as `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, and `*.tsbuildinfo`. |
 | Changes under `packages/contracts`, `packages/hosted-execution`, `packages/runtime-state`, `packages/core`, `packages/importers`, `packages/inboxd`, `packages/parsers`, or `packages/query` | `pnpm typecheck`, `pnpm test:packages`, `pnpm test:smoke` | `pnpm test` remains required for full repo acceptance, but `pnpm test:packages` is the clean runtime signal when the doc-drift wrapper is blocked by an in-progress dirty worktree and now keeps the dedicated web/app verify lane out of the default package loop. The root Vitest leg still uses the curated repo acceptance surface, just expressed through project-mode `vitest.config.ts`, and `pnpm test:packages:coverage` keeps the same targeted V8 coverage gates without the heavier web/app smoke/build path. |
 | Changes under `packages/device-syncd` | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Repo checks typecheck/build the daemon in the workspace graph, execute its service/runtime tests plus Oura and WHOOP provider/config coverage through the root multi-project Vitest suite, and keep the local OAuth/token boundary documented alongside the CLI and web callers. |
@@ -18,6 +18,30 @@ Last verified: 2026-03-31
 | Changes under `packages/assistant-runtime` | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Repo checks include the package-local no-emit typecheck through the workspace scripts, plus package-local Vitest coverage through the root multi-project suite and the focused Cloudflare hosted-runner lanes that exercise the package through in-process and isolated child-process execution paths, including hosted verified-email self-target reconciliation, the direct `murph/assistant-core` boundary checks, scrubbed child-env launch, stripped supervisor proxy vars, per-run writable cache/temp roots, launch-time supervisor-`HOME` avoidance, and child-process reaping on abort. This package is the headless hosted execution surface for Cloudflare and should carry explicit runtime context rather than ambient process configuration. |
 | Changes under `packages/cli` | `pnpm typecheck`, `pnpm test`, `pnpm test:coverage` | Repo checks now run `packages/cli` typecheck plus package-local verification through `pnpm verify:cli`, and package tests build the shared incremental CLI runtime graph through `pnpm build:test-runtime` before exercising the built CLI package. The CLI Vitest surface now runs through six serial-safe workspace buckets, with local worker caps defaulting to `MURPH_VITEST_MAX_WORKERS=50%`, so the repo package lane no longer pays for one giant serialized CLI project. That narrower build still prepares the required hosted-execution, runtime-state, core, importer, device-syncd, query, inboxd, parser, and CLI runtime artifacts while avoiding repeated one-package-at-a-time rebuilds, and the shared CLI runtime-artifact helper can now trust that prepared lane instead of falling back to its slow wait-and-reverify path on every run. CLI runtime tests still execute through the built package path, so source coverage remains focused on the in-process `core`/`importers`/`query` runtime modules. Assistant provider, assistant cron, assistant status/doctor/stop resilience observability, failover/outbox/fault-injection, and outbound channel tests use mocks/stubs and do not execute live Codex, Ollama, gateway, iMessage, Telegram, Linq, or AgentMail sends in repo automation. |
 | User explicitly says to skip checks | Skip checks for that turn only. | User instruction takes precedence. |
+
+## Scoped Verification Mode
+
+Scoped verification may replace the repo-wide baseline only when all of the following are true:
+
+1. The change is narrow and bounded to one subsystem or one docs/process lane rather than a broad refactor.
+2. `pnpm typecheck`, `pnpm test`, or `pnpm test:coverage` are already credibly known red for unrelated reasons in the current branch or working session.
+3. You can name the exact failing command and failing target, and explain why your diff did not cause that failure.
+4. You run the highest-signal scoped checks available for the touched surface and record the evidence in handoff.
+
+Scoped verification is allowed for narrow changes such as:
+
+- docs/process-only updates when repo-wide checks are already known red and manual readback confirms the touched docs are internally consistent
+- package-local or app-local fixes with a focused test, typecheck, verify, or scenario command that exercises the changed surface directly
+- small config changes with a direct validation command or targeted test covering the changed contract
+
+Scoped verification is not allowed when the change is broad, cross-cutting, or high-risk, including schema/storage changes, billing/auth/trust-boundary changes, deploy/runtime entrypoint changes, or refactors that touch multiple subsystems. Those changes still need the full repo-wide baseline unless the user explicitly says otherwise.
+
+When using scoped verification, handoff must include:
+
+- that scoped verification mode was used
+- which repo-wide commands were omitted or left red
+- the prior unrelated failing command(s) and target(s)
+- the focused commands or direct scenario checks that were run instead
 
 ## Current Command Meaning
 
