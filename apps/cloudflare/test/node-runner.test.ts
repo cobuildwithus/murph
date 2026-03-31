@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
 import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
@@ -44,6 +44,8 @@ import {
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
 } from "../src/node-runner.ts";
+
+const describe = baseDescribe.sequential;
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];

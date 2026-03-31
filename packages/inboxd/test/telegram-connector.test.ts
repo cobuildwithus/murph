@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { test, vi } from "vitest";
+import { test as baseTest, vi } from "vitest";
 
 import {
   DEFAULT_TELEGRAM_ALLOWED_UPDATES,
@@ -17,6 +17,8 @@ import type {
   TelegramPollDriver,
   TelegramUpdateLike,
 } from "../src/index.ts";
+
+const test = baseTest.sequential;
 
 function createPersistedCapture(capture: InboundCapture): PersistedCapture {
   return {

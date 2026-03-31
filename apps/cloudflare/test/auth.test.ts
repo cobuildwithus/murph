@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import { createHostedExecutionSignature, verifyHostedExecutionSignature } from "../src/auth.js";
+
+const describe = baseDescribe.sequential;
 
 describe("hosted execution auth", () => {
   afterEach(() => {

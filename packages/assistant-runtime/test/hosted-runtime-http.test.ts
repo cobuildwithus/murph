@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { afterEach, test, vi } from "vitest";
+import { afterEach, test as baseTest, vi } from "vitest";
 
 import {
   createHostedExecutionServerDeviceSyncRuntimeClient,
@@ -12,6 +12,8 @@ import { sendHostedEmailOverWorker } from "../src/hosted-email.ts";
 import { createHostedInternalWorkerFetch } from "../src/hosted-runtime/internal-http.ts";
 import { ingestHostedEmailMessage } from "../src/hosted-runtime/events/email.ts";
 import { handleHostedShareAcceptedDispatch } from "../src/hosted-runtime/events/share.ts";
+
+const test = baseTest.sequential;
 
 const originalFetch = global.fetch;
 

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import {
   encodeHostedBundleBase64,
@@ -27,6 +27,8 @@ import {
 } from "../src/execution-journal.js";
 import { HostedUserRunner } from "../src/user-runner.js";
 import { createTestSqlStorage } from "./sql-storage.js";
+
+const describe = baseDescribe.sequential;
 
 function createGatewayConversationSessionKey(routeKey: string): string {
   return `gwcs_${Buffer.from(

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { afterAll, beforeAll, test, vi } from 'vitest'
+import { afterAll, beforeAll, test as baseTest, vi } from 'vitest'
 import {
   canUseAssistantDaemonForMessage,
   maybeDrainAssistantOutboxViaDaemon,
@@ -21,6 +21,8 @@ import {
   maybeUpdateAssistantSessionOptionsViaDaemon,
   resolveAssistantDaemonClientConfig,
 } from '../src/assistant-daemon-client.js'
+
+const test = baseTest.sequential
 
 type AssistantdFetchHandler = (
   input: RequestInfo | URL,

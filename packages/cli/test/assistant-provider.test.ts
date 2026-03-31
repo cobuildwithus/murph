@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { PassThrough } from 'node:stream'
-import { beforeEach, test, vi } from 'vitest'
+import { beforeEach, test as baseTest, vi } from 'vitest'
+
+const test = baseTest.sequential
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexPrompt: vi.fn(),
@@ -26,15 +28,15 @@ vi.mock('ai', () => ({
   stepCountIs: providerMocks.stepCountIs,
 }))
 
-vi.mock('../src/assistant-codex.js', () => ({
+vi.mock('@murph/assistant-core/assistant-codex', () => ({
   executeCodexPrompt: providerMocks.executeCodexPrompt,
 }))
 
-vi.mock('../src/model-harness.js', () => ({
+vi.mock('@murph/assistant-core/model-harness', () => ({
   resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
 }))
 
-vi.mock('../src/assistant-cli-tools.js', () => ({
+vi.mock('@murph/assistant-core/assistant-cli-tools', () => ({
   createDefaultAssistantToolCatalog: toolMocks.createDefaultAssistantToolCatalog,
 }))
 
@@ -54,7 +56,7 @@ import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderTraits,
-} from '../src/chat-provider.js'
+} from '@murph/assistant-core/chat-provider'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,
@@ -63,8 +65,8 @@ import {
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantProviderDefaults,
-} from '../src/operator-config.js'
-import { serializeAssistantProviderSessionOptions } from '../src/assistant/provider-config.js'
+} from '@murph/assistant-core/operator-config'
+import { serializeAssistantProviderSessionOptions } from '@murph/assistant-core/assistant/provider-config'
 import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
 beforeEach(() => {

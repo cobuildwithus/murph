@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
+
+const describe = baseDescribe.sequential;
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(async () => undefined),
