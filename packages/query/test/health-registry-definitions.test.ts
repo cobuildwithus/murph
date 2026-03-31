@@ -212,7 +212,6 @@ test("protocol query projection merges mixed relation alias arrays into normaliz
     "prot_related_01",
     "prot_shared_01",
     "prot_related_02",
-    "prot_01",
   ]);
 });
 
@@ -520,7 +519,6 @@ test("goal query projection round-trips shared Goal relation and window metadata
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6P",
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
     "exp_01JNY0B2W4VG5C2A0G9S8M7R6S",
-    "goal_01JNY0B2W4VG5C2A0G9S8M7R6Q",
   ]);
 
   const roundTripped = goalRecordFromEntity(entity);
@@ -669,7 +667,6 @@ test("condition query projection round-trips shared condition relation metadata"
   assert.deepEqual(entity.relatedIds, [
     "goal_01JNY0B2W4VG5C2A0G9S8M7R6R",
     "prot_01JNY0B2W4VG5C2A0G9S8M7R6S",
-    "cond_01JNY0B2W4VG5C2A0G9S8M7R6Q",
   ]);
 
   const roundTripped = conditionRecordFromEntity(entity);

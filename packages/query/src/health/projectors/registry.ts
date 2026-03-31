@@ -71,22 +71,6 @@ function buildRegistryLinks(
   );
 }
 
-function registryCompatibilitySelfIds(
-  family: BankEntityKind,
-  attributes: Record<string, unknown>,
-): string[] {
-  switch (family) {
-    case "goal":
-      return uniqueStrings([firstString(attributes, ["goalId"])]);
-    case "condition":
-      return uniqueStrings([firstString(attributes, ["conditionId"])]);
-    case "protocol":
-      return uniqueStrings([firstString(attributes, ["protocolId"])]);
-    default:
-      return [];
-  }
-}
-
 export function projectRegistryEntity(
   family: BankEntityKind,
   record: RegistryMarkdownRecord,
@@ -101,10 +85,7 @@ export function projectRegistryEntity(
       "resolvedOn",
     ]) ?? null;
   const links = buildRegistryLinks(family, attributes);
-  const relatedIds = uniqueStrings([
-    ...linkTargetIds(links),
-    ...registryCompatibilitySelfIds(family, attributes),
-  ]);
+  const relatedIds = uniqueStrings(linkTargetIds(links));
 
   return {
     entityId: record.entity.id,
