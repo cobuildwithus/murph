@@ -161,7 +161,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 ## Runtime boundary
 
-`apps/cloudflare` should treat `@murph/assistant-runtime` as its hosted execution surface. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
+`apps/cloudflare` should treat `@murph/assistant-runtime` as its hosted execution surface for runtime behavior and `@murph/hosted-execution` as the canonical owner of shared hosted execution contracts, callback hosts, env readers, and side-effect codecs. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless runtime package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
 
 ## Known follow-ups
 

@@ -3,15 +3,15 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murph/gateway-core";
 import {
+  parseHostedExecutionSideEffects,
+  type HostedExecutionSideEffect,
+  type HostedExecutionRunnerResult,
+} from "@murph/hosted-execution";
+import {
   decodeHostedBundleBase64,
   sha256HostedBundleHex,
   type HostedExecutionBundleRef,
 } from "@murph/runtime-state";
-import type { HostedExecutionRunnerResult } from "@murph/hosted-execution";
-import {
-  parseHostedExecutionSideEffects,
-  type HostedExecutionSideEffect,
-} from "@murph/assistant-runtime";
 
 import {
   bundleObjectKey,

@@ -9,15 +9,13 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   normalizeHostedExecutionBaseUrl,
-  readHostedExecutionWebControlPlaneEnvironment,
-  type HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
-import {
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
-  type HostedEmailSendRequest,
+  readHostedExecutionWebControlPlaneEnvironment,
   type HostedExecutionSideEffectRecord,
-} from "@murph/assistant-runtime";
+  type HostedExecutionWebControlPlaneEnvironment,
+} from "@murph/hosted-execution";
+import type { HostedEmailSendRequest } from "@murph/assistant-runtime";
 import { gatewayProjectionSnapshotSchema } from "@murph/gateway-core";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
