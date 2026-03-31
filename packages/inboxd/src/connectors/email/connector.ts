@@ -1,5 +1,5 @@
 import type { InboundCapture, PersistedCapture } from "../../contracts/capture.ts";
-import { createCaptureCheckpoint, waitForAbortOrTimeout } from "../../shared.ts";
+import { createCaptureCheckpoint, waitForAbortOrTimeout } from "../../shared-runtime.ts";
 import type { Cursor, EmitCapture, PollConnector } from "../types.ts";
 import { normalizeAgentmailMessage } from "./normalize.ts";
 import type {

@@ -7,15 +7,17 @@ import { test as baseTest, vi } from "vitest";
 
 import { loadVaultOverview } from "../src/lib/overview";
 import {
-  buildSuggestedCommand,
-  buildExampleVaultPath,
-  FIXTURE_VAULT_EXAMPLE,
   getConfiguredVaultRoot,
   VAULT_ENV,
   WEB_LAUNCH_CWD_ENV,
-  rememberLaunchCwd,
-  resolveConfiguredVaultRoot,
 } from "../src/lib/vault";
+import { resolveConfiguredVaultRoot } from "../src/lib/vault-config";
+import {
+  buildSuggestedCommand,
+  buildExampleVaultPath,
+  FIXTURE_VAULT_EXAMPLE,
+  rememberLaunchCwd,
+} from "../src/lib/vault-launch";
 import { createWebFixtureVault, destroyWebFixtureVault } from "./web-fixture";
 
 const test = baseTest.sequential;

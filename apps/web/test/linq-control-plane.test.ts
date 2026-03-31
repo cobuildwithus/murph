@@ -39,8 +39,8 @@ vi.mock("@/src/lib/linq/prisma-store", () => ({
   }),
 }));
 
-vi.mock("@murph/inboxd", async () => {
-  const actual = await vi.importActual<typeof import("@murph/inboxd")>("@murph/inboxd");
+vi.mock("@murph/inboxd/linq", async () => {
+  const actual = await vi.importActual<typeof import("@murph/inboxd/linq")>("@murph/inboxd/linq");
 
   return {
     ...actual,
@@ -50,11 +50,11 @@ vi.mock("@murph/inboxd", async () => {
 });
 
 type LinqControlPlaneModule = typeof import("../src/lib/linq/control-plane");
-type InboxdModule = typeof import("@murph/inboxd");
+type InboxdLinqModule = typeof import("@murph/inboxd/linq");
 
 let linqControlPlane: LinqControlPlaneModule;
 let inboxd: Pick<
-  InboxdModule,
+  InboxdLinqModule,
   "parseCanonicalLinqMessageReceivedEvent" | "verifyAndParseLinqWebhookRequest"
 >;
 const REMOVED_LINQ_WEBHOOK_SECRET_ALIAS = ["HEALTHY", "BOB", "LINQ", "WEBHOOK", "SECRET"].join("_");
@@ -63,7 +63,7 @@ const describe = baseDescribe.sequential;
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {
     linqControlPlane = await import("../src/lib/linq/control-plane");
-    inboxd = await vi.importActual<InboxdModule>("@murph/inboxd");
+    inboxd = await vi.importActual<InboxdLinqModule>("@murph/inboxd/linq");
     vi.stubGlobal("fetch", mocks.fetch);
   });
 

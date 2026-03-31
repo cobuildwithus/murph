@@ -1,5 +1,5 @@
 import type { InboundCapture } from "../../contracts/capture.ts";
-import { createCaptureCheckpoint } from "../../shared.ts";
+import { createCaptureCheckpoint } from "../../shared-runtime.ts";
 import type { Cursor, EmitCapture, PollConnector } from "../types.ts";
 import { compareInboundCaptures } from "./message.ts";
 

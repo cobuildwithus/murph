@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
+import { createRequire } from 'node:module'
 import { existsSync } from 'node:fs'
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   repoRoot,
@@ -20,6 +21,7 @@ const UTC_CLI_ENV = {
   ...process.env,
   TZ: 'UTC',
 }
+const require = createRequire(import.meta.url)
 
 interface RetrievalFixture {
   journalPath: string
@@ -648,7 +650,7 @@ test('search index status treats a pre-existing inbox runtime db as unindexed an
 
   try {
     await mkdir(runtimeRoot, { recursive: true })
-    const database = new DatabaseSync(runtimeDatabasePath)
+    const database = openDatabaseSync(runtimeDatabasePath)
     database.exec('CREATE TABLE inbox_state (id TEXT PRIMARY KEY, value TEXT NOT NULL);')
     database.close()
 
@@ -982,3 +984,8 @@ test('timeline rejects comma-delimited entry-type tokens', async () => {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 })
+
+function openDatabaseSync(databasePath: string): DatabaseSync {
+  const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite')
+  return new DatabaseSync(databasePath)
+}

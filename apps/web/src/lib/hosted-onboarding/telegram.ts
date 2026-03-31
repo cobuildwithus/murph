@@ -5,7 +5,7 @@ import {
   toTelegramChatMessage,
   type TelegramMessageLike,
   type TelegramUpdateLike,
-} from "@murph/inboxd";
+} from "@murph/inboxd/telegram";
 
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment } from "./runtime";

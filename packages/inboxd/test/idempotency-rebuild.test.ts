@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
 
 import {
@@ -26,6 +27,8 @@ import {
 import { findStoredCaptureEnvelope } from "../src/indexing/persist.ts";
 import { createDeterministicInboxCaptureId, walkNamedFiles } from "../src/shared.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
+
+const require = createRequire(import.meta.url);
 
 async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
@@ -67,7 +70,7 @@ function createCapture(overrides: Partial<InboundCapture> = {}): InboundCapture 
 }
 
 function countRows(databasePath: string, table: "attachment_parse_job" | "capture"): number {
-  const database = new DatabaseSync(databasePath);
+  const database = openDatabaseSync(databasePath);
 
   try {
     const row = database.prepare(`select count(*) as count from ${table}`).get() as { count: number };
@@ -823,7 +826,7 @@ test("openInboxRuntime rejects runtime rows missing canonical attachment ids", a
   await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
 
   const databasePath = resolveRuntimePaths(vaultRoot).inboxDbPath;
-  const database = new DatabaseSync(databasePath);
+  const database = openDatabaseSync(databasePath);
 
   try {
     database.exec(`
@@ -1000,3 +1003,8 @@ test("rebuildRuntimeFromVault chooses one canonical envelope for duplicate exter
 
   runtime.close();
 });
+
+function openDatabaseSync(databasePath: string): DatabaseSync {
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  return new DatabaseSync(databasePath);
+}
