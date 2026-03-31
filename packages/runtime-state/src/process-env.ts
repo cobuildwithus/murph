@@ -5,6 +5,11 @@ interface ScopedProcessEnvState {
   values: NodeJS.ProcessEnv;
 }
 
+interface ScopedProcessEnvPropertyContext {
+  property: string;
+  scopedState: ScopedProcessEnvState;
+}
+
 const processEnvStorage = new AsyncLocalStorage<ScopedProcessEnvState>();
 let installedProcessEnvProxy: NodeJS.ProcessEnv | null = null;
 
@@ -21,7 +26,7 @@ export function buildScopedProcessEnv(
 export function getScopedProcessEnv(
   fallbackEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  return processEnvStorage.getStore()?.values ?? fallbackEnv;
+  return getScopedProcessEnvState()?.values ?? fallbackEnv;
 }
 
 export async function withScopedProcessEnv<T>(
@@ -46,106 +51,130 @@ function ensureProcessEnvProxyInstalled(): void {
   const baseEnv = process.env;
   const proxy = new Proxy(baseEnv, {
     deleteProperty(target, property) {
-      const scopedState = processEnvStorage.getStore();
+      const context = resolveScopedProcessEnvPropertyContext(property);
 
-      if (typeof property === "string" && scopedState) {
-        delete scopedState.values[property];
-        scopedState.deletedKeys.add(property);
-        return true;
+      if (!context) {
+        return Reflect.deleteProperty(target, property);
       }
 
-      return Reflect.deleteProperty(target, property);
+      delete context.scopedState.values[context.property];
+      context.scopedState.deletedKeys.add(context.property);
+      return true;
     },
     get(target, property, receiver) {
-      const scopedState = processEnvStorage.getStore();
+      const context = resolveScopedProcessEnvPropertyContext(property);
 
-      if (
-        typeof property === "string" &&
-        scopedState
-      ) {
-        if (scopedState.deletedKeys.has(property)) {
-          return undefined;
-        }
+      if (!context) {
+        return Reflect.get(target, property, receiver);
+      }
 
-        if (Object.prototype.hasOwnProperty.call(scopedState.values, property)) {
-          return scopedState.values[property];
-        }
+      if (context.scopedState.deletedKeys.has(context.property)) {
+        return undefined;
+      }
+
+      if (hasScopedProcessEnvValue(context.scopedState, context.property)) {
+        return context.scopedState.values[context.property];
       }
 
       return Reflect.get(target, property, receiver);
     },
     getOwnPropertyDescriptor(target, property) {
-      const scopedState = processEnvStorage.getStore();
+      const context = resolveScopedProcessEnvPropertyContext(property);
 
-      if (
-        typeof property === "string" &&
-        scopedState
-      ) {
-        if (scopedState.deletedKeys.has(property)) {
-          return undefined;
-        }
-
-        if (!Object.prototype.hasOwnProperty.call(scopedState.values, property)) {
-          return Reflect.getOwnPropertyDescriptor(target, property);
-        }
-
-        return {
-          configurable: true,
-          enumerable: true,
-          value: scopedState.values[property],
-          writable: true,
-        };
+      if (!context) {
+        return Reflect.getOwnPropertyDescriptor(target, property);
       }
 
-      return Reflect.getOwnPropertyDescriptor(target, property);
+      if (context.scopedState.deletedKeys.has(context.property)) {
+        return undefined;
+      }
+
+      if (!hasScopedProcessEnvValue(context.scopedState, context.property)) {
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      }
+
+      return {
+        configurable: true,
+        enumerable: true,
+        value: context.scopedState.values[context.property],
+        writable: true,
+      };
     },
     has(target, property) {
-      const scopedState = processEnvStorage.getStore();
+      const context = resolveScopedProcessEnvPropertyContext(property);
 
-      if (
-        typeof property === "string" &&
-        scopedState
-      ) {
-        if (scopedState.deletedKeys.has(property)) {
-          return false;
-        }
+      if (!context) {
+        return Reflect.has(target, property);
+      }
 
-        if (Object.prototype.hasOwnProperty.call(scopedState.values, property)) {
-          return true;
-        }
+      if (context.scopedState.deletedKeys.has(context.property)) {
+        return false;
+      }
+
+      if (hasScopedProcessEnvValue(context.scopedState, context.property)) {
+        return true;
       }
 
       return Reflect.has(target, property);
     },
     ownKeys(target) {
-      const scopedState = processEnvStorage.getStore();
+      const scopedState = getScopedProcessEnvState();
       const keys = new Set(Reflect.ownKeys(target));
 
-      if (scopedState) {
-        for (const key of Reflect.ownKeys(scopedState.values)) {
-          keys.add(key);
-        }
+      if (!scopedState) {
+        return [...keys];
+      }
 
-        for (const key of scopedState.deletedKeys) {
-          keys.delete(key);
-        }
+      for (const key of Reflect.ownKeys(scopedState.values)) {
+        keys.add(key);
+      }
+
+      for (const key of scopedState.deletedKeys) {
+        keys.delete(key);
       }
 
       return [...keys];
     },
     set(target, property, value, receiver) {
-      const scopedState = processEnvStorage.getStore();
+      const context = resolveScopedProcessEnvPropertyContext(property);
 
-      if (typeof property === "string" && scopedState) {
-        scopedState.deletedKeys.delete(property);
-        scopedState.values[property] = String(value);
-        return true;
+      if (!context) {
+        return Reflect.set(target, property, value, receiver);
       }
 
-      return Reflect.set(target, property, value, receiver);
+      context.scopedState.deletedKeys.delete(context.property);
+      context.scopedState.values[context.property] = String(value);
+      return true;
     },
   });
 
   process.env = proxy;
   installedProcessEnvProxy = proxy;
+}
+
+function getScopedProcessEnvState(): ScopedProcessEnvState | null {
+  return processEnvStorage.getStore() ?? null;
+}
+
+function resolveScopedProcessEnvPropertyContext(
+  property: PropertyKey,
+): ScopedProcessEnvPropertyContext | null {
+  if (typeof property !== "string") {
+    return null;
+  }
+
+  const scopedState = getScopedProcessEnvState();
+  return scopedState
+    ? {
+        property,
+        scopedState,
+      }
+    : null;
+}
+
+function hasScopedProcessEnvValue(
+  scopedState: ScopedProcessEnvState,
+  property: string,
+): boolean {
+  return Object.prototype.hasOwnProperty.call(scopedState.values, property);
 }

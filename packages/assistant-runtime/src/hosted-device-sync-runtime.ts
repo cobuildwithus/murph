@@ -27,6 +27,7 @@ export interface HostedDeviceSyncRuntimeSyncState {
 }
 
 type HostedAccountHydrationInput = Parameters<DeviceSyncService["store"]["hydrateHostedAccount"]>[0];
+type HostedDeviceSyncRuntimeClient = ReturnType<typeof resolveHostedExecutionDeviceSyncRuntimeClient>;
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   dispatch: HostedExecutionDispatchRequest;
@@ -36,49 +37,27 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   timeoutMs: number | null;
   webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<HostedDeviceSyncRuntimeSyncState> {
-  if (!hasHostedDeviceSyncRuntimeAccess(input.webControlPlane)) {
-    return {
-      hostedToLocalAccountIds: new Map(),
-      localToHostedAccountIds: new Map(),
-      observedTokenVersions: new Map(),
-      snapshot: null,
-    };
-  }
-  const client = resolveHostedExecutionDeviceSyncRuntimeClient({
-    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+  const client = resolveHostedDeviceSyncRuntimeClientForUser({
     boundUserId: input.dispatch.event.userId,
     fetchImpl: input.fetchImpl,
-    internalToken: input.webControlPlane.internalToken,
     timeoutMs: input.timeoutMs,
+    webControlPlane: input.webControlPlane,
   });
   if (!client) {
-    return {
-      hostedToLocalAccountIds: new Map(),
-      localToHostedAccountIds: new Map(),
-      observedTokenVersions: new Map(),
-      snapshot: null,
-    };
+    return createEmptyHostedDeviceSyncRuntimeSyncState();
   }
 
   const snapshot = await client.fetchSnapshot();
-  const hostedToLocalAccountIds = new Map<string, string>();
-  const localToHostedAccountIds = new Map<string, string>();
-  const observedTokenVersions = new Map<string, number | null>();
-
+  const state = createEmptyHostedDeviceSyncRuntimeSyncState(snapshot);
   if (!snapshot) {
-    return {
-      hostedToLocalAccountIds,
-      localToHostedAccountIds,
-      observedTokenVersions,
-      snapshot: null,
-    };
+    return state;
   }
 
   const codec = createSecretCodec(input.secret);
   const now = input.dispatch.occurredAt;
 
   for (const entry of snapshot.connections) {
-    observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
+    state.observedTokenVersions.set(entry.connection.id, entry.tokenBundle?.tokenVersion ?? null);
     const existing = input.service.store.getAccountByExternalAccount(
       entry.connection.provider,
       entry.connection.externalAccountId,
@@ -104,24 +83,19 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       );
     }
 
-    hostedToLocalAccountIds.set(entry.connection.id, stored.id);
-    localToHostedAccountIds.set(stored.id, entry.connection.id);
+    state.hostedToLocalAccountIds.set(entry.connection.id, stored.id);
+    state.localToHostedAccountIds.set(stored.id, entry.connection.id);
   }
 
   if (input.dispatch.event.kind === "device-sync.wake") {
     applyHostedDeviceSyncWakeHint({
       dispatch: input.dispatch,
-      hostedToLocalAccountIds,
+      hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
     });
   }
 
-  return {
-    hostedToLocalAccountIds,
-    localToHostedAccountIds,
-    observedTokenVersions,
-    snapshot,
-  };
+  return state;
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
@@ -137,15 +111,11 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
     return;
   }
 
-  if (!hasHostedDeviceSyncRuntimeAccess(input.webControlPlane)) {
-    return;
-  }
-  const client = resolveHostedExecutionDeviceSyncRuntimeClient({
-    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+  const client = resolveHostedDeviceSyncRuntimeClientForUser({
     boundUserId: input.dispatch.event.userId,
     fetchImpl: input.fetchImpl,
-    internalToken: input.webControlPlane.internalToken,
     timeoutMs: input.timeoutMs,
+    webControlPlane: input.webControlPlane,
   });
   if (!client) {
     return;
@@ -183,14 +153,30 @@ export async function reconcileHostedDeviceSyncControlPlaneState(input: {
   });
 }
 
-function hasHostedDeviceSyncRuntimeAccess(
-  webControlPlane: HostedExecutionWebControlPlaneEnvironment,
-): boolean {
+function createEmptyHostedDeviceSyncRuntimeSyncState(
+  snapshot: HostedDeviceSyncRuntimeSnapshotResponse | null = null,
+): HostedDeviceSyncRuntimeSyncState {
+  return {
+    hostedToLocalAccountIds: new Map(),
+    localToHostedAccountIds: new Map(),
+    observedTokenVersions: new Map(),
+    snapshot,
+  };
+}
+
+function resolveHostedDeviceSyncRuntimeClientForUser(input: {
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs: number | null;
+  webControlPlane: HostedExecutionWebControlPlaneEnvironment;
+}): HostedDeviceSyncRuntimeClient {
   return resolveHostedExecutionDeviceSyncRuntimeClient({
-    baseUrl: webControlPlane.deviceSyncRuntimeBaseUrl,
-    boundUserId: "member_probe",
-    internalToken: webControlPlane.internalToken,
-  }) !== null;
+    baseUrl: input.webControlPlane.deviceSyncRuntimeBaseUrl,
+    boundUserId: input.boundUserId,
+    fetchImpl: input.fetchImpl,
+    internalToken: input.webControlPlane.internalToken,
+    timeoutMs: input.timeoutMs,
+  });
 }
 
 function applyHostedDeviceSyncWakeHint(input: {
@@ -249,16 +235,30 @@ function applyHostedDeviceSyncWakeHint(input: {
     });
   }
 
-  if (wake.hint?.nextReconcileAt !== undefined || wake.hint?.scopes !== undefined) {
-    input.service.store.patchAccount(localAccountId, {
-      ...(wake.hint?.nextReconcileAt !== undefined
-        ? { nextReconcileAt: wake.hint.nextReconcileAt ?? null }
-        : {}),
-      ...(wake.hint?.scopes !== undefined
-        ? { scopes: wake.hint.scopes ?? [] }
-        : {}),
-    });
+  const wakePatch = buildHostedDeviceSyncWakeAccountPatch(wake.hint);
+  if (wakePatch) {
+    input.service.store.patchAccount(localAccountId, wakePatch);
   }
+}
+
+function buildHostedDeviceSyncWakeAccountPatch(
+  hint: ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"],
+): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "scopes">> | null {
+  if (!hint || (hint.nextReconcileAt === undefined && hint.scopes === undefined)) {
+    return null;
+  }
+
+  const patch: Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "scopes">> = {};
+
+  if (hint.nextReconcileAt !== undefined) {
+    patch.nextReconcileAt = hint.nextReconcileAt ?? null;
+  }
+
+  if (hint.scopes !== undefined) {
+    patch.scopes = hint.scopes ?? [];
+  }
+
+  return patch;
 }
 
 function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
