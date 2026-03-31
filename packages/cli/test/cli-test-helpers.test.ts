@@ -6,6 +6,7 @@ import path from 'node:path'
 import { test } from 'vitest'
 
 import { resolveCliProcessExecutionMode, runCli, runRawCli } from './cli-test-helpers.js'
+import { resolveLocalCliSuiteConcurrency } from './local-parallel-test.js'
 
 test('cli test helpers route non-stdin commands through the persistent harness by default', () => {
   assert.equal(resolveCliProcessExecutionMode(), 'harness')
@@ -66,4 +67,35 @@ test('cli test helpers preserve non-zero exit behavior through the persistent ha
 
   assert.match(output, /command_not_found/iu)
   assert.match(output, /--wat/u)
+})
+
+test('local parallel CLI test helper keeps suite concurrency opt-in by default', () => {
+  assert.equal(resolveLocalCliSuiteConcurrency({}), false)
+})
+
+test('local parallel CLI test helper honors explicit suite-concurrency overrides from either env key', () => {
+  assert.equal(
+    resolveLocalCliSuiteConcurrency({
+      MURPH_VITEST_SUITE_CONCURRENCY: 'true',
+    }),
+    true,
+  )
+  assert.equal(
+    resolveLocalCliSuiteConcurrency({
+      MURPH_VITEST_SUITE_CONCURRENCY: 'false',
+    }),
+    false,
+  )
+  assert.equal(
+    resolveLocalCliSuiteConcurrency({
+      MURPH_TEST_SUITE_CONCURRENCY: 'true',
+    }),
+    true,
+  )
+  assert.equal(
+    resolveLocalCliSuiteConcurrency({
+      MURPH_TEST_SUITE_CONCURRENCY: 'false',
+    }),
+    false,
+  )
 })
