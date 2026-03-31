@@ -1,10 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { readdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 import {
   type AssistantChannelDelivery,
   assistantChannelDeliverySchema,
-  assistantDeliveryErrorSchema,
   assistantOutboxIntentSchema,
   type AssistantDeliveryError,
   type AssistantOutboxIntent,
@@ -15,11 +14,29 @@ import type { AssistantChannelDependencies } from './channel-adapters.js'
 import { deliverAssistantMessageOverBinding } from '../outbound-channel.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
-import { redactAssistantStateString } from './redaction.js'
 import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
 import { ensureAssistantState } from './store/persistence.js'
 import { resolveAssistantStatePaths, saveAssistantSession } from './store.js'
 import { appendAssistantTurnReceiptEvent, updateAssistantTurnReceipt } from './turns.js'
+import {
+  buildAssistantOutboxPersistedTarget,
+  buildAssistantOutboxRawTargetIdentity,
+  hashAssistantOutboxIdentity,
+  hashAssistantOutboxTargetFingerprint,
+  resolveAssistantOutboxIntentPath,
+  resolveAssistantOutboxQuarantineDirectory,
+  type AssistantOutboxPersistedTarget,
+  type AssistantOutboxPersistedTargetInput,
+  type AssistantOutboxRawTargetIdentityInput,
+} from './outbox/intents.js'
+import {
+  createAssistantDeliveryConfirmationPendingError,
+  isAssistantOutboxRetryableError,
+  normalizeAssistantDeliveryError,
+  resolveAssistantOutboxRetryDelayMs,
+  shouldBeginAssistantOutboxDispatch,
+  shouldDispatchAssistantOutboxIntent,
+} from './outbox/retry-policy.js'
 import {
   ensureAssistantStateDirectory,
   isMissingFileError,
@@ -27,13 +44,15 @@ import {
   warnAssistantBestEffortFailure,
   writeJsonFileAtomic,
 } from './shared.js'
-import { resolveAssistantOpaqueStateFilePath } from './state-ids.js'
 
 const ASSISTANT_OUTBOX_INTENT_SCHEMA = 'murph.assistant-outbox-intent.v1'
-const OUTBOX_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000]
-const STALE_SENDING_AFTER_MS = 10 * 60 * 1000
 
 export type { AssistantChannelDelivery }
+export {
+  isAssistantOutboxRetryableError,
+  normalizeAssistantDeliveryError,
+  shouldDispatchAssistantOutboxIntent,
+}
 
 export interface DispatchAssistantOutboxIntentResult {
   deliveryError: AssistantDeliveryError | null
@@ -77,32 +96,6 @@ export type DeliverAssistantOutboxMessageResult =
       kind: 'failed'
       session: AssistantSession | null
     }
-
-type AssistantOutboxRawTargetIdentityInput = {
-  actorId?: string | null
-  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
-  channel?: string | null
-  explicitTarget?: string | null
-  identityId?: string | null
-  replyToMessageId?: string | null
-  threadId?: string | null
-}
-
-type AssistantOutboxPersistedTargetInput = AssistantOutboxRawTargetIdentityInput & {
-  threadIsDirect?: boolean | null
-}
-
-type AssistantOutboxPersistedTarget = Pick<
-  AssistantOutboxIntent,
-  | 'actorId'
-  | 'bindingDelivery'
-  | 'channel'
-  | 'explicitTarget'
-  | 'identityId'
-  | 'replyToMessageId'
-  | 'threadId'
-  | 'threadIsDirect'
->
 
 export async function createAssistantOutboxIntent(input: {
   actorId?: string | null
@@ -768,99 +761,6 @@ export async function buildAssistantOutboxSummary(
   }
 }
 
-export function shouldDispatchAssistantOutboxIntent(
-  intent: AssistantOutboxIntent,
-  now: Date,
-): boolean {
-  switch (intent.status) {
-    case 'pending':
-    case 'retryable': {
-      if (!intent.nextAttemptAt) {
-        return true
-      }
-      const nextAttemptMs = Date.parse(intent.nextAttemptAt)
-      return !Number.isFinite(nextAttemptMs) || nextAttemptMs <= now.getTime()
-    }
-    case 'sending': {
-      const lastAttemptMs = intent.lastAttemptAt ? Date.parse(intent.lastAttemptAt) : Number.NaN
-      return !Number.isFinite(lastAttemptMs) || now.getTime() - lastAttemptMs >= STALE_SENDING_AFTER_MS
-    }
-    default:
-      return false
-  }
-}
-
-export function isAssistantOutboxRetryableError(error: unknown): boolean {
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'context' in error &&
-    typeof (error as { context?: unknown }).context === 'object' &&
-    (error as { context?: Record<string, unknown> }).context !== null &&
-    typeof (error as { context: Record<string, unknown> }).context.retryable === 'boolean'
-  ) {
-    return (error as { context: { retryable: boolean } }).context.retryable
-  }
-
-  if (
-    typeof error === 'object' &&
-    error !== null &&
-    'retryable' in error &&
-    typeof (error as { retryable?: unknown }).retryable === 'boolean'
-  ) {
-    return (error as { retryable: boolean }).retryable
-  }
-
-  const deliveryError = normalizeAssistantDeliveryError(error)
-  const code = deliveryError.code?.toUpperCase() ?? ''
-  const message = deliveryError.message.toLowerCase()
-  if (
-    code.endsWith('_REQUIRED') ||
-    code.includes('UNSUPPORTED') ||
-    code.includes('INVALID') ||
-    code.includes('TARGET_REQUIRED') ||
-    code.includes('CHANNEL_REQUIRED')
-  ) {
-    return false
-  }
-
-  return (
-    code.includes('REQUEST_FAILED') ||
-    code.includes('DELIVERY_FAILED') ||
-    code.includes('TIMEOUT') ||
-    code.includes('CONNECTION') ||
-    code.includes('UNAVAILABLE') ||
-    code.includes('RATE') ||
-    code.includes('LIMIT') ||
-    message.includes('timed out') ||
-    message.includes('temporary') ||
-    message.includes('retry') ||
-    message.includes('rate limit') ||
-    message.includes('too many requests') ||
-    message.includes('connection') ||
-    message.includes('network')
-  )
-}
-
-export function normalizeAssistantDeliveryError(
-  error: unknown,
-): AssistantDeliveryError {
-  return assistantDeliveryErrorSchema.parse({
-    code:
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      typeof (error as { code?: unknown }).code === 'string'
-        ? (error as { code: string }).code
-        : null,
-    message: redactAssistantStateString(
-      error instanceof Error && error.message.trim().length > 0
-        ? error.message
-        : String(error),
-    ),
-  })
-}
-
 function normalizeRequiredMessage(value: string): string {
   const normalized = normalizeNullableString(value)
   if (!normalized) {
@@ -868,24 +768,6 @@ function normalizeRequiredMessage(value: string): string {
   }
 
   return normalized
-}
-
-function resolveAssistantOutboxIntentPath(
-  outboxDirectory: string,
-  intentId: string,
-): string {
-  return resolveAssistantOpaqueStateFilePath({
-    directory: outboxDirectory,
-    extension: '.json',
-    kind: 'outbox intent',
-    value: intentId,
-  })
-}
-
-function resolveAssistantOutboxQuarantineDirectory(
-  outboxDirectory: string,
-): string {
-  return path.join(outboxDirectory, '.quarantine')
 }
 
 async function findAssistantOutboxIntentByDedupeKey(
@@ -901,107 +783,6 @@ async function findAssistantOutboxIntentByDedupeKey(
 
       return intent.status !== 'failed' && intent.status !== 'abandoned'
     }) ?? null
-  )
-}
-
-function buildAssistantOutboxRawTargetIdentity(
-  input: AssistantOutboxRawTargetIdentityInput,
-): AssistantOutboxRawTargetIdentityInput {
-  return {
-    channel: input.channel,
-    identityId: input.identityId,
-    actorId: input.actorId,
-    threadId: input.threadId,
-    replyToMessageId: input.replyToMessageId,
-    explicitTarget: input.explicitTarget,
-    bindingDelivery: input.bindingDelivery,
-  }
-}
-
-function buildAssistantOutboxPersistedTarget(
-  input: AssistantOutboxPersistedTargetInput,
-): AssistantOutboxPersistedTarget {
-  return {
-    channel: normalizeNullableString(input.channel),
-    identityId: normalizeNullableString(input.identityId),
-    actorId: normalizeNullableString(input.actorId),
-    threadId: normalizeNullableString(input.threadId),
-    threadIsDirect:
-      typeof input.threadIsDirect === 'boolean' ? input.threadIsDirect : null,
-    replyToMessageId: normalizeNullableString(input.replyToMessageId),
-    bindingDelivery: input.bindingDelivery ?? null,
-    explicitTarget: normalizeNullableString(input.explicitTarget),
-  }
-}
-
-function hashAssistantOutboxIdentity(input: {
-  actorId?: string | null
-  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
-  channel?: string | null
-  dedupeToken?: string | null
-  explicitTarget?: string | null
-  identityId?: string | null
-  message: string
-  replyToMessageId?: string | null
-  sessionId: string
-  threadId?: string | null
-  turnId: string
-}): string {
-  const dedupeToken = normalizeNullableString(input.dedupeToken)
-  if (dedupeToken) {
-    return createHash('sha1')
-      .update(JSON.stringify({ dedupeToken }))
-      .digest('hex')
-  }
-
-  return createHash('sha1')
-    .update(
-      JSON.stringify({
-        message: input.message,
-        sessionId: input.sessionId,
-        dedupeToken: null,
-        turnId: input.turnId,
-        channel: input.channel,
-        identityId: input.identityId,
-        actorId: input.actorId,
-        threadId: input.threadId,
-        replyToMessageId: input.replyToMessageId,
-        explicitTarget: input.explicitTarget,
-        bindingDelivery: input.bindingDelivery,
-      }),
-    )
-    .digest('hex')
-}
-
-function hashAssistantOutboxTargetFingerprint(input: {
-  actorId?: string | null
-  bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
-  channel?: string | null
-  explicitTarget?: string | null
-  identityId?: string | null
-  replyToMessageId?: string | null
-  threadId?: string | null
-}): string {
-  return createHash('sha1')
-    .update(
-      JSON.stringify({
-        channel: input.channel,
-        identityId: input.identityId,
-        actorId: input.actorId,
-        threadId: input.threadId,
-        replyToMessageId: input.replyToMessageId,
-        explicitTarget: input.explicitTarget,
-        bindingDelivery: input.bindingDelivery,
-      }),
-    )
-    .digest('hex')
-}
-
-function resolveAssistantOutboxRetryDelayMs(attemptCount: number): number {
-  return (
-    OUTBOX_RETRY_DELAYS_MS[
-      Math.min(Math.max(Math.trunc(attemptCount) - 1, 0), OUTBOX_RETRY_DELAYS_MS.length - 1)
-    ] ?? OUTBOX_RETRY_DELAYS_MS[OUTBOX_RETRY_DELAYS_MS.length - 1]!
   )
 }
 
@@ -1182,32 +963,8 @@ async function rescheduleAssistantOutboxConfirmationRetry(input: {
   })
 }
 
-function createAssistantDeliveryConfirmationPendingError(
-  cause?: unknown,
-): AssistantDeliveryError {
-  const detail = cause ? normalizeAssistantDeliveryError(cause).message : null
-  return assistantDeliveryErrorSchema.parse({
-    code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
-    message: detail
-      ? `Assistant outbound delivery may have succeeded already and must be reconciled before resend. ${detail}`
-      : 'Assistant outbound delivery may have succeeded already and must be reconciled before resend.',
-  })
-}
-
 function buildAssistantDeliveryIdempotencyKey(
   intent: Pick<AssistantOutboxIntent, 'intentId'>,
 ): string {
   return `assistant-outbox:${intent.intentId}`
-}
-
-function shouldBeginAssistantOutboxDispatch(
-  intent: AssistantOutboxIntent,
-  now: Date,
-  force: boolean,
-): boolean {
-  if (intent.status === 'sending') {
-    return shouldDispatchAssistantOutboxIntent(intent, now)
-  }
-
-  return force ? intent.status === 'pending' || intent.status === 'retryable' : shouldDispatchAssistantOutboxIntent(intent, now)
 }
