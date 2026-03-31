@@ -1,4 +1,4 @@
-import { appendFile, chmod, lstat, mkdir, readdir, rename } from 'node:fs/promises'
+import { appendFile, chmod, lstat, mkdir, readdir } from 'node:fs/promises'
 import path from 'node:path'
 
 import { ASSISTANT_STATE_DIRECTORY_NAME } from './shared.ts'
@@ -30,7 +30,6 @@ export function isAssistantStatePath(targetPath: string): boolean {
 }
 
 export async function ensureAssistantStateDirectory(directoryPath: string): Promise<void> {
-  await adoptLegacyAssistantStateBucketRootIfNeeded(directoryPath)
   await mkdir(directoryPath, { recursive: true })
 
   if (!isAssistantStatePath(directoryPath)) {
@@ -38,51 +37,6 @@ export async function ensureAssistantStateDirectory(directoryPath: string): Prom
   }
 
   await applyAssistantStateDirectoryModes(directoryPath)
-}
-
-async function adoptLegacyAssistantStateBucketRootIfNeeded(
-  directoryPath: string,
-): Promise<void> {
-  const bucketRoot = resolveAssistantStateBucketRoot(directoryPath)
-  if (!bucketRoot) {
-    return
-  }
-
-  if (await pathExists(bucketRoot.rootPath)) {
-    return
-  }
-
-  const siblingDirectories = await listDirectoryNames(bucketRoot.parentPath)
-  if (!siblingDirectories) {
-    return
-  }
-
-  const legacyCandidates = siblingDirectories.filter(
-    (entry) =>
-      entry !== bucketRoot.bucketName &&
-      isMatchingSiblingLocalStateBucket(entry, bucketRoot.bucketBaseName),
-  )
-  if (legacyCandidates.length !== 1) {
-    return
-  }
-
-  try {
-    await rename(
-      path.join(bucketRoot.parentPath, legacyCandidates[0]!),
-      bucketRoot.rootPath,
-    )
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      ((error as { code?: string }).code === 'ENOENT' ||
-        (error as { code?: string }).code === 'EEXIST')
-    ) {
-      return
-    }
-    throw error
-  }
 }
 
 export async function ensureAssistantStateParentDirectory(filePath: string): Promise<void> {
@@ -239,94 +193,5 @@ async function applyAssistantStateDirectoryModes(directoryPath: string): Promise
       continue
     }
     await chmod(currentPath, ASSISTANT_STATE_DIRECTORY_MODE)
-  }
-}
-
-function resolveAssistantStateBucketRoot(
-  directoryPath: string,
-): {
-  bucketBaseName: string
-  bucketName: string
-  parentPath: string
-  rootPath: string
-} | null {
-  const absolutePath = path.resolve(directoryPath)
-  const parsed = path.parse(absolutePath)
-  const relativeSegments = path
-    .relative(parsed.root, absolutePath)
-    .split(path.sep)
-    .filter((segment) => segment.length > 0)
-  const assistantStateIndex = relativeSegments.indexOf(ASSISTANT_STATE_DIRECTORY_NAME)
-  if (assistantStateIndex < 0 || assistantStateIndex + 1 >= relativeSegments.length) {
-    return null
-  }
-
-  const bucketName = relativeSegments[assistantStateIndex + 1] ?? null
-  const bucketBaseName = parseSiblingLocalStateBucketBaseName(bucketName)
-  if (!bucketName || !bucketBaseName) {
-    return null
-  }
-
-  const parentSegments = relativeSegments.slice(0, assistantStateIndex + 1)
-  const parentPath = path.join(parsed.root, ...parentSegments)
-
-  return {
-    bucketBaseName,
-    bucketName,
-    parentPath,
-    rootPath: path.join(parentPath, bucketName),
-  }
-}
-
-function parseSiblingLocalStateBucketBaseName(bucketName: string | null): string | null {
-  if (!bucketName) {
-    return null
-  }
-
-  const match = /^(.*)-([0-9a-f]{12})$/u.exec(bucketName)
-  const baseName = match?.[1]?.trim()
-  return baseName ? baseName : null
-}
-
-function isMatchingSiblingLocalStateBucket(
-  bucketName: string,
-  expectedBaseName: string,
-): boolean {
-  return parseSiblingLocalStateBucketBaseName(bucketName) === expectedBaseName
-}
-
-async function listDirectoryNames(directoryPath: string): Promise<string[] | null> {
-  try {
-    const entries = await readdir(directoryPath, {
-      withFileTypes: true,
-    })
-    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name)
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: string }).code === 'ENOENT'
-    ) {
-      return null
-    }
-    throw error
-  }
-}
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await lstat(targetPath)
-    return true
-  } catch (error) {
-    if (
-      error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      (error as { code?: string }).code === 'ENOENT'
-    ) {
-      return false
-    }
-    throw error
   }
 }
