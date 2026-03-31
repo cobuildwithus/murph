@@ -606,22 +606,11 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
 
       const grantedScopes = splitScopes(tokenPayload.scope);
       const effectiveScopes = grantedScopes.length > 0 ? grantedScopes : [...scopes];
-      const bodyMeasurement = hasWhoopScopeValue(effectiveScopes, "read:body_measurement")
-        ? await fetchWhoopJson<Record<string, unknown>>({
-            path: "/v2/user/measurement/body",
-            accessToken: tokens.accessToken,
-            optional: true,
-          })
-        : null;
 
       return {
         externalAccountId,
         displayName: buildDisplayName(profile ?? {}),
         scopes: effectiveScopes,
-        metadata: {
-          profile,
-          ...(bodyMeasurement ? { bodyMeasurement } : {}),
-        },
         tokens,
         initialJobs: [
           {

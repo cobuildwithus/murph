@@ -164,24 +164,21 @@ test("WHOOP provider builds a connect URL and exchanges an auth code into a refr
     windowStart: "2025-12-16T10:00:00.000Z",
     windowEnd: "2026-03-16T10:00:00.000Z",
   });
-  assert.deepEqual(connection.metadata?.profile, {
-    user_id: "whoop-user-1",
-    first_name: "Whoop",
-    last_name: "User",
-    email: "whoop@example.com",
-  });
+  assert.equal(connection.metadata, undefined);
   assert.deepEqual(requests, [
     "https://api.prod.whoop.com/oauth/oauth2/token",
     "https://api.prod.whoop.com/developer/v2/user/profile/basic",
   ]);
 });
 
-test("WHOOP provider stores body measurement as connect-time metadata when the granted scope allows it", async () => {
+test("WHOOP provider avoids persisting connect-time profile or body measurement metadata", async () => {
+  const requests: string[] = [];
   const provider = createWhoopDeviceSyncProvider({
     clientId: "whoop-client-id",
     clientSecret: "whoop-client-secret",
     fetchImpl: async (input) => {
       const url = readUrl(input);
+      requests.push(url);
 
       if (url === "https://api.prod.whoop.com/oauth/oauth2/token") {
         return createJsonResponse({
@@ -219,16 +216,11 @@ test("WHOOP provider stores body measurement as connect-time metadata when the g
     "auth-code-1",
   );
 
-  assert.deepEqual(connection.metadata, {
-    bodyMeasurement: {
-      height_meter: 1.83,
-    },
-    profile: {
-      first_name: "Whoop",
-      last_name: "User",
-      user_id: "whoop-user-1",
-    },
-  });
+  assert.equal(connection.metadata, undefined);
+  assert.deepEqual(requests, [
+    "https://api.prod.whoop.com/oauth/oauth2/token",
+    "https://api.prod.whoop.com/developer/v2/user/profile/basic",
+  ]);
 });
 
 test("WHOOP provider keeps the stored refresh token when refresh omits a replacement", async () => {

@@ -726,14 +726,7 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
 
     await context.importSnapshot(snapshot);
 
-    return {
-      metadataPatch:
-        includePersonalInfo && snapshot.personalInfo
-          ? {
-              personalInfo: snapshot.personalInfo,
-            }
-          : undefined,
-    };
+    return {};
   }
 
   async function fetchOuraResourceSnapshot(
@@ -943,9 +936,6 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         externalAccountId,
         displayName: buildDisplayName(personalInfo),
         scopes: grantedScopes,
-        metadata: {
-          personalInfo,
-        },
         tokens,
         initialJobs: [
           {

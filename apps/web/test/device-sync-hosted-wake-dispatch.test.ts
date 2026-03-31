@@ -130,6 +130,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   },
   generateHostedAgentBearerToken: vi.fn(),
   hostedConnectionWithSecretArgs: {},
+  mapHostedInternalAccountRecord: vi.fn(),
   mapHostedPublicAccountRecord: vi.fn(),
   requireHostedConnectionBundleRecord: vi.fn(),
 }));

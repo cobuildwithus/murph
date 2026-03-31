@@ -197,6 +197,52 @@ test("device sync service connects, imports, and deduplicates webhook traces", a
   service.close();
 });
 
+test("device sync service redacts connection metadata from public account responses while retaining internal provider state", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-public-redaction");
+  let seenMetadata: Record<string, unknown> | null = null;
+  const service = createDeviceSyncService({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob(context) {
+          seenMetadata = { ...context.account.metadata };
+          return {};
+        },
+      }),
+    ],
+  });
+
+  const begin = await service.startConnection({
+    provider: "demo",
+  });
+  const connected = await service.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "sensitive-connect-code",
+  });
+
+  assert.deepEqual(connected.account.metadata, {});
+  assert.equal(Object.prototype.hasOwnProperty.call(connected.account, "hostedObservedTokenVersion"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(connected.account, "hostedObservedUpdatedAt"), false);
+  assert.deepEqual(service.getAccount(connected.account.id)?.metadata, {});
+  assert.deepEqual(service.listAccounts()[0]?.metadata, {});
+  assert.deepEqual(service.store.getAccountById(connected.account.id)?.metadata, {
+    connectedBy: "sensitive-connect-code",
+  });
+
+  await service.runWorkerOnce();
+  assert.deepEqual(seenMetadata, {
+    connectedBy: "sensitive-connect-code",
+  });
+
+  service.close();
+});
+
 test("device sync service durably suppresses WHOOP webhook replays without trace_id even when retry deliveries have a new signature timestamp", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-whoop-replay");
   const imports: unknown[] = [];

@@ -15,7 +15,7 @@ import {
 
 import {
   hostedConnectionWithSecretArgs,
-  mapHostedPublicAccountRecord,
+  mapHostedInternalAccountRecord,
   PrismaDeviceSyncControlPlaneStore,
   requireHostedConnectionBundleRecord,
 } from "./prisma-store";
@@ -38,7 +38,7 @@ export async function buildHostedDeviceSyncRuntimeSnapshot(
   return {
     connections: records.map((record) => ({
       connection: normalizeHostedDeviceSyncRuntimeConnection(
-        mapHostedPublicAccountRecord(record),
+        mapHostedInternalAccountRecord(record),
       ),
       tokenBundle: record.secret
         ? (() => {
@@ -111,7 +111,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       if (connectionVersionMismatch) {
         return {
           connection: normalizeHostedDeviceSyncRuntimeConnection(
-            mapHostedPublicAccountRecord(existing),
+            mapHostedInternalAccountRecord(existing),
           ),
           connectionId: update.connectionId,
           status: "updated",
@@ -298,7 +298,7 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
 
       return {
         connection: normalizeHostedDeviceSyncRuntimeConnection(
-          mapHostedPublicAccountRecord(updatedRecord),
+          mapHostedInternalAccountRecord(updatedRecord),
         ),
         connectionId: update.connectionId,
         status: "updated",

@@ -173,23 +173,30 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   it("creates new hosted connections with the hosted random id shape", async () => {
-    let createdConnection: MutableConnectionRecord | null = null;
-    let createdSecret: MutableConnectionSecret | null = null;
+    const createdArtifacts: {
+      connection: MutableConnectionRecord | null;
+      secret: MutableConnectionSecret | null;
+    } = {
+      connection: null,
+      secret: null,
+    };
 
     const tx = {
       deviceConnection: {
         findFirst: async () => null,
         create: async ({ data }: { data: Record<string, unknown> }) => {
-          createdConnection = normalizeCreatedConnection(data);
-          return cloneConnection(createdConnection);
+          createdArtifacts.connection = normalizeCreatedConnection(data);
+          return cloneConnection(createdArtifacts.connection);
         },
         findUnique: async ({ where }: { where: { id: string } }) =>
-          createdConnection && createdConnection.id === where.id ? cloneConnection(createdConnection) : null,
+          createdArtifacts.connection && createdArtifacts.connection.id === where.id
+            ? cloneConnection(createdArtifacts.connection)
+            : null,
       },
       deviceConnectionSecret: {
         create: async ({ data }: { data: Record<string, unknown> }) => {
-          createdSecret = normalizeConnectionSecret(data);
-          return { ...createdSecret };
+          createdArtifacts.secret = normalizeConnectionSecret(data);
+          return { ...createdArtifacts.secret };
         },
       },
     };
@@ -226,16 +233,64 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
 
     expect(created.id).toBe(`dsc_${suffix}`);
     expect(created.id).not.toMatch(/^[a-z0-9-]+_[0-9A-HJKMNP-TV-Z]{26}$/u);
-    expect(createdConnection).toMatchObject({
+    expect(createdArtifacts.connection).toMatchObject({
       id: `dsc_${suffix}`,
       userId: "user-123",
       externalAccountId: "acct_456",
     });
-    expect(createdSecret).toMatchObject({
+    expect(createdArtifacts.secret).toMatchObject({
       connectionId: `dsc_${suffix}`,
       accessTokenEncrypted: "enc:access-token",
       refreshTokenEncrypted: "enc:refresh-token",
       tokenVersion: 1,
+      keyVersion: "v1",
+    });
+    expect(created.metadata).toEqual({});
+    expect(createdArtifacts.connection?.metadataJson).toEqual({
+      region: "us",
+    });
+  });
+
+  it("redacts connection metadata from public reads while preserving internal bundle metadata", async () => {
+    const connection = createConnectionRecord();
+    connection.metadataJson = {
+      personalInfo: {
+        email: "sensitive@example.com",
+      },
+      providerHint: "local-browser",
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findFirst: async ({ where }: { where: { id: string; userId: string } }) =>
+            connection.id === where.id && connection.userId === where.userId ? cloneConnection(connection) : null,
+        },
+      } as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => `enc:${value}`,
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+      },
+    });
+
+    await expect(store.getConnectionForUser("user-123", "dsc_123")).resolves.toMatchObject({
+      id: "dsc_123",
+      metadata: {},
+    });
+    await expect(store.getConnectionBundleForUser("user-123", "dsc_123")).resolves.toEqual({
+      userId: "user-123",
+      account: expect.objectContaining({
+        id: "dsc_123",
+        metadata: {
+          personalInfo: {
+            email: "sensitive@example.com",
+          },
+          providerHint: "local-browser",
+        },
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+      }),
+      tokenVersion: 4,
       keyVersion: "v1",
     });
   });
