@@ -12,6 +12,8 @@ const EXCLUSIVE_CREATE_LINK_FALLBACK_CODES = new Set<string>([
   "EXDEV",
 ]);
 
+type AtomicTempFileStep = (tempAbsolutePath: string) => Promise<void>;
+
 function buildAtomicTempPath(targetAbsolutePath: string): string {
   return path.join(
     path.dirname(targetAbsolutePath),
@@ -33,6 +35,10 @@ async function cleanupAtomicTempFile(tempAbsolutePath: string): Promise<void> {
   }
 }
 
+async function cleanupAtomicTempFileBestEffort(tempAbsolutePath: string): Promise<void> {
+  await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
+}
+
 function supportsExclusiveCreateLinkFallback(error: unknown): boolean {
   return isErrnoException(error) && EXCLUSIVE_CREATE_LINK_FALLBACK_CODES.has(error.code ?? "");
 }
@@ -51,107 +57,120 @@ async function preserveExistingTargetMode(
   }
 }
 
-export async function writeTextFileAtomic(targetAbsolutePath: string, content: string): Promise<void> {
+async function withPreparedAtomicTempFile(
+  targetAbsolutePath: string,
+  prepareTempFile: AtomicTempFileStep,
+  commitPreparedTempFile: AtomicTempFileStep,
+): Promise<void> {
   const tempAbsolutePath = buildAtomicTempPath(targetAbsolutePath);
   await ensureTargetDirectory(targetAbsolutePath);
 
   try {
-    await fs.writeFile(tempAbsolutePath, content, {
-      encoding: "utf8",
-      flag: "wx",
-    });
-    await preserveExistingTargetMode(targetAbsolutePath, tempAbsolutePath);
-    await fs.rename(tempAbsolutePath, targetAbsolutePath);
+    await prepareTempFile(tempAbsolutePath);
+    await commitPreparedTempFile(tempAbsolutePath);
   } catch (error) {
-    await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
+    await cleanupAtomicTempFileBestEffort(tempAbsolutePath);
     throw error;
   }
 }
 
-export async function copyFileAtomic(sourceAbsolutePath: string, targetAbsolutePath: string): Promise<void> {
-  const tempAbsolutePath = buildAtomicTempPath(targetAbsolutePath);
-  await ensureTargetDirectory(targetAbsolutePath);
+async function replaceTargetWithPreparedTempFile(
+  targetAbsolutePath: string,
+  tempAbsolutePath: string,
+): Promise<void> {
+  await preserveExistingTargetMode(targetAbsolutePath, tempAbsolutePath);
+  await fs.rename(tempAbsolutePath, targetAbsolutePath);
+}
 
+async function linkPreparedTempFileExclusively(input: {
+  targetAbsolutePath: string;
+  tempAbsolutePath: string;
+  fallbackCreateTarget: () => Promise<void>;
+}): Promise<void> {
   try {
-    await fs.copyFile(sourceAbsolutePath, tempAbsolutePath, fsConstants.COPYFILE_EXCL);
-    await preserveExistingTargetMode(targetAbsolutePath, tempAbsolutePath);
-    await fs.rename(tempAbsolutePath, targetAbsolutePath);
+    await fs.link(input.tempAbsolutePath, input.targetAbsolutePath);
   } catch (error) {
-    await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-    throw error;
+    if (!supportsExclusiveCreateLinkFallback(error)) {
+      throw error;
+    }
+
+    await cleanupAtomicTempFileBestEffort(input.tempAbsolutePath);
+    await input.fallbackCreateTarget();
+    return;
   }
+
+  await cleanupAtomicTempFileBestEffort(input.tempAbsolutePath);
+}
+
+export async function writeTextFileAtomic(targetAbsolutePath: string, content: string): Promise<void> {
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    async (tempAbsolutePath) => {
+      await fs.writeFile(tempAbsolutePath, content, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+    },
+    async (tempAbsolutePath) => {
+      await replaceTargetWithPreparedTempFile(targetAbsolutePath, tempAbsolutePath);
+    },
+  );
+}
+
+export async function copyFileAtomic(sourceAbsolutePath: string, targetAbsolutePath: string): Promise<void> {
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    async (tempAbsolutePath) => {
+      await fs.copyFile(sourceAbsolutePath, tempAbsolutePath, fsConstants.COPYFILE_EXCL);
+    },
+    async (tempAbsolutePath) => {
+      await replaceTargetWithPreparedTempFile(targetAbsolutePath, tempAbsolutePath);
+    },
+  );
 }
 
 export async function writeTextFileAtomicExclusive(
   targetAbsolutePath: string,
   content: string,
 ): Promise<void> {
-  const tempAbsolutePath = buildAtomicTempPath(targetAbsolutePath);
-  await ensureTargetDirectory(targetAbsolutePath);
-
-  try {
-    await fs.writeFile(tempAbsolutePath, content, {
-      encoding: "utf8",
-      flag: "wx",
-    });
-
-    let linked = false;
-
-    try {
-      await fs.link(tempAbsolutePath, targetAbsolutePath);
-      linked = true;
-    } catch (error) {
-      if (supportsExclusiveCreateLinkFallback(error)) {
-        await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-        await fs.writeFile(targetAbsolutePath, content, {
-          encoding: "utf8",
-          flag: "wx",
-        });
-        return;
-      }
-
-      throw error;
-    } finally {
-      if (linked) {
-        await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-      }
-    }
-  } catch (error) {
-    await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-    throw error;
-  }
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    async (tempAbsolutePath) => {
+      await fs.writeFile(tempAbsolutePath, content, {
+        encoding: "utf8",
+        flag: "wx",
+      });
+    },
+    async (tempAbsolutePath) => {
+      await linkPreparedTempFileExclusively({
+        targetAbsolutePath,
+        tempAbsolutePath,
+        fallbackCreateTarget: () =>
+          fs.writeFile(targetAbsolutePath, content, {
+            encoding: "utf8",
+            flag: "wx",
+          }),
+      });
+    },
+  );
 }
 
 export async function copyFileAtomicExclusive(
   sourceAbsolutePath: string,
   targetAbsolutePath: string,
 ): Promise<void> {
-  const tempAbsolutePath = buildAtomicTempPath(targetAbsolutePath);
-  await ensureTargetDirectory(targetAbsolutePath);
-
-  try {
-    await fs.copyFile(sourceAbsolutePath, tempAbsolutePath, fsConstants.COPYFILE_EXCL);
-
-    let linked = false;
-
-    try {
-      await fs.link(tempAbsolutePath, targetAbsolutePath);
-      linked = true;
-    } catch (error) {
-      if (supportsExclusiveCreateLinkFallback(error)) {
-        await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-        await fs.copyFile(sourceAbsolutePath, targetAbsolutePath, fsConstants.COPYFILE_EXCL);
-        return;
-      }
-
-      throw error;
-    } finally {
-      if (linked) {
-        await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-      }
-    }
-  } catch (error) {
-    await cleanupAtomicTempFile(tempAbsolutePath).catch(() => undefined);
-    throw error;
-  }
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    async (tempAbsolutePath) => {
+      await fs.copyFile(sourceAbsolutePath, tempAbsolutePath, fsConstants.COPYFILE_EXCL);
+    },
+    async (tempAbsolutePath) => {
+      await linkPreparedTempFileExclusively({
+        targetAbsolutePath,
+        tempAbsolutePath,
+        fallbackCreateTarget: () =>
+          fs.copyFile(sourceAbsolutePath, targetAbsolutePath, fsConstants.COPYFILE_EXCL),
+      });
+    },
+  );
 }

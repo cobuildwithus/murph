@@ -223,7 +223,7 @@ Browser auth for these routes should come from a trusted front-end/auth proxy th
 - `POST /api/device-sync/agents/pair`
 - `GET /api/device-sync/connections/:connectionId/status`
 
-The browser should see provider label, display name, status, scopes, last webhook time, and local-sync-needed indicators. It should never see raw provider tokens.
+The browser should see provider label, display name, status, scopes, last webhook time, and local-sync-needed indicators. It should never see raw provider tokens, raw `externalAccountId` values, or raw hosted connection ids; browser-facing `id` values should be opaque handles.
 
 ### Hosted local-agent routes
 

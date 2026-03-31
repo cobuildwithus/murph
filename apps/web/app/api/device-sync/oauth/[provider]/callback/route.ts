@@ -19,17 +19,18 @@ export async function GET(
   try {
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     const result = await controlPlane.handleOAuthCallback(providerName);
+    const browserConnection = controlPlane.toBrowserConnection(result.account);
     const redirect = providerCallbackRedirect({
       returnTo: result.returnTo,
       provider: result.account.provider,
-      connectionId: result.account.id,
+      connectionId: browserConnection.id,
     });
 
     return (
       redirect ??
       callbackHtml(
         `${result.account.provider} connected`,
-        `Connected ${result.account.provider} connection ${result.account.id} successfully.`,
+        `Connected ${result.account.provider} successfully.`,
       )
     );
   } catch (error) {

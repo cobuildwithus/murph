@@ -15,7 +15,11 @@ import {
   recipeUpsertPayloadSchema,
   workoutFormatUpsertPayloadSchema,
 } from "./shares.ts";
-import { extractRegistryRelationTargets } from "./registry-helpers.ts";
+import {
+  applyRegistryMetadataDefaults,
+  extractRegistryLinks,
+  extractRegistryRelatedIds,
+} from "./registry-helpers.ts";
 import {
   foodFrontmatterSchema,
   providerFrontmatterSchema,
@@ -69,6 +73,8 @@ const RELATED_IDS_COMPATIBILITY_RELATION: BankEntityRegistryLinkMetadata = {
   cardinality: "many",
 };
 
+type HealthBackedBankEntityKind = Extract<BankEntityKind, HealthEntityKind>;
+
 const HEALTH_BANK_ENTITY_KINDS = [
   "goal",
   "condition",
@@ -76,26 +82,19 @@ const HEALTH_BANK_ENTITY_KINDS = [
   "protocol",
   "family",
   "genetics",
-] as const satisfies readonly Extract<BankEntityKind, HealthEntityKind>[];
+] as const satisfies readonly HealthBackedBankEntityKind[];
 
 function defineBankRegistryEntity(
   input: DefineBankRegistryEntityInput,
 ): BankEntityDefinition {
   return {
     ...input,
-    registry: {
-      ...input.registry,
-      idField: input.registry.idField,
-      idKeys: input.registry.idKeys ?? [input.registry.idField],
-      slugKeys: input.registry.slugKeys ?? ["slug"],
-    },
+    registry: applyRegistryMetadataDefaults(input.registry),
   };
 }
 
 const checkedBankEntityDefinitions = [
-  ...HEALTH_BANK_ENTITY_KINDS.map((kind) =>
-    requireHealthEntityRegistryDefinition(kind) as unknown as BankEntityDefinition,
-  ),
+  ...HEALTH_BANK_ENTITY_KINDS.map((kind) => requireHealthEntityRegistryDefinition(kind)),
   defineBankRegistryEntity({
     kind: "food",
     listKinds: ["food"],
@@ -222,7 +221,7 @@ export function requireBankEntityRegistryDefinition(
   return definition;
 }
 
-function isHealthBackedBankEntityKind(kind: BankEntityKind): kind is Extract<BankEntityKind, HealthEntityKind> {
+function isHealthBackedBankEntityKind(kind: BankEntityKind): kind is HealthBackedBankEntityKind {
   return (HEALTH_BANK_ENTITY_KINDS as readonly string[]).includes(kind);
 }
 
@@ -234,15 +233,9 @@ export function extractBankEntityRegistryLinks(
     return extractHealthEntityRegistryLinks(kind, attributes);
   }
 
-  const definition = requireBankEntityRegistryDefinition(kind);
-  const relationKeys = definition.registry.relationKeys ?? [];
-
-  return relationKeys.flatMap((relation) =>
-    extractRegistryRelationTargets(attributes, relation).map((targetId) => ({
-      type: relation.type,
-      targetId,
-      sourceKeys: relation.keys,
-    })),
+  return extractRegistryLinks(
+    attributes,
+    requireBankEntityRegistryDefinition(kind).registry.relationKeys ?? [],
   );
 }
 
@@ -250,11 +243,7 @@ export function extractBankEntityRegistryRelatedIds(
   kind: BankEntityKind,
   attributes: Record<string, unknown>,
 ): string[] {
-  return [
-    ...new Set(
-      extractBankEntityRegistryLinks(kind, attributes).map((link) => link.targetId),
-    ),
-  ];
+  return extractRegistryRelatedIds(extractBankEntityRegistryLinks(kind, attributes));
 }
 
 export const goalBankEntityDefinition = requireBankEntityRegistryDefinition("goal");

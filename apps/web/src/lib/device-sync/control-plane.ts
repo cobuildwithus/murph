@@ -35,6 +35,11 @@ import {
   handleHostedDeviceSyncWebhookAccepted,
 } from "./wake-service";
 import {
+  createHostedBrowserConnectionId,
+  toHostedBrowserDeviceSyncConnection,
+  type HostedBrowserDeviceSyncConnection,
+} from "./public-connection";
+import {
   HostedDeviceSyncAgentSessionService,
   type HostedAgentSessionBearer,
   type HostedTokenExport,
@@ -101,9 +106,10 @@ export class HostedDeviceSyncControlPlane {
   }
 
   async listConnections(userId: string) {
+    const connections = await this.store.listConnectionsForUser(userId);
     return {
       providers: this.describeProviders(),
-      connections: await this.store.listConnectionsForUser(userId),
+      connections: connections.map((connection) => this.toBrowserConnection(connection)),
     };
   }
 
@@ -123,20 +129,11 @@ export class HostedDeviceSyncControlPlane {
     }
   }
 
-  async getConnectionStatus(userId: string, connectionId: string) {
-    const connection = await this.store.getConnectionForUser(userId, connectionId);
-
-    if (!connection) {
-      throw deviceSyncError({
-        code: "CONNECTION_NOT_FOUND",
-        message: "Hosted device-sync connection was not found for the current user.",
-        retryable: false,
-        httpStatus: 404,
-      });
-    }
+  async getConnectionStatus(userId: string, publicConnectionId: string) {
+    const connection = await this.requireOwnedBrowserConnection(userId, publicConnectionId);
 
     return {
-      connection,
+      connection: this.toBrowserConnection(connection),
     };
   }
 
@@ -166,15 +163,21 @@ export class HostedDeviceSyncControlPlane {
   }
 
   async disconnectConnection(userId: string, connectionId: string): Promise<{
-    connection: PublicDeviceSyncAccount;
+    connection: HostedBrowserDeviceSyncConnection;
     warning?: { code: string; message: string };
   }> {
-    return disconnectHostedDeviceSyncConnection({
-      connectionId,
+    const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
+    const disconnected = await disconnectHostedDeviceSyncConnection({
+      connectionId: connection.id,
       registry: this.registry,
       store: this.store,
       userId,
     });
+
+    return {
+      ...disconnected,
+      connection: this.toBrowserConnection(disconnected.connection),
+    };
   }
 
   async pairAgent(userId: string, label: string | null): Promise<{
@@ -259,6 +262,14 @@ export class HostedDeviceSyncControlPlane {
     patch: UpdateLocalHeartbeatInput,
   ) {
     return this.agentSessions.recordLocalHeartbeat(userId, connectionId, patch);
+  }
+
+  toBrowserConnection(account: PublicDeviceSyncAccount): HostedBrowserDeviceSyncConnection {
+    return toHostedBrowserDeviceSyncConnection(account, this.env.encryptionKey);
+  }
+
+  createBrowserConnectionId(connectionId: string): string {
+    return createHostedBrowserConnectionId(this.env.encryptionKey, connectionId);
   }
 
   private async runHostedWebhookAdminUpkeep(input: {
@@ -348,6 +359,26 @@ export class HostedDeviceSyncControlPlane {
           });
         },
       },
+    });
+  }
+
+  private async requireOwnedBrowserConnection(
+    userId: string,
+    publicConnectionId: string,
+  ): Promise<PublicDeviceSyncAccount> {
+    const connections = await this.store.listConnectionsForUser(userId);
+    const connection =
+      connections.find((candidate) => this.createBrowserConnectionId(candidate.id) === publicConnectionId) ?? null;
+
+    if (connection) {
+      return connection;
+    }
+
+    throw deviceSyncError({
+      code: "CONNECTION_NOT_FOUND",
+      message: "Hosted device-sync connection was not found for the current user.",
+      retryable: false,
+      httpStatus: 404,
     });
   }
 }

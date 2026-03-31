@@ -358,10 +358,12 @@ async function createAgentmailHttpError(
   let rawText: string | null = null;
 
   try {
-    payload = await response.json();
-  } catch {
+    rawText = await response.text();
+  } catch {}
+
+  if (rawText) {
     try {
-      rawText = await response.text();
+      payload = JSON.parse(rawText) as unknown;
     } catch {}
   }
 
