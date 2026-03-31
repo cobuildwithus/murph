@@ -41,6 +41,7 @@ export interface CreateAssistantSessionInput extends AssistantSessionLocator {
 
 export interface ResolveAssistantSessionInput
   extends CreateAssistantSessionInput {
+  allowBindingRebind?: boolean
   createIfMissing?: boolean
   maxSessionAgeMs?: number | null
 }

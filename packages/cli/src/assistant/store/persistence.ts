@@ -323,6 +323,7 @@ export async function persistResolvedSession(
   paths: AssistantStatePaths,
   session: AssistantSession,
   input: {
+    allowBindingRebind?: boolean
     alias: string | null
     bindingPatch: AssistantBindingPatch
     lookupSource: 'alias' | 'conversation-key' | 'session-id'
@@ -332,7 +333,13 @@ export async function persistResolvedSession(
     session.binding,
     input.bindingPatch,
   )
-  if (routingConflicts.length > 0) {
+  if (
+    routingConflicts.length > 0 &&
+    !(
+      input.allowBindingRebind === true &&
+      input.lookupSource === 'session-id'
+    )
+  ) {
     throw createAssistantSessionRoutingConflictError({
       conflicts: routingConflicts,
       lookupSource: input.lookupSource,
@@ -367,6 +374,7 @@ export async function loadAndPersistResolvedSession(input: {
   paths: AssistantStatePaths
   sessionId: string
   persistenceInput: {
+    allowBindingRebind?: boolean
     alias: string | null
     bindingPatch: AssistantBindingPatch
     lookupSource: 'alias' | 'conversation-key' | 'session-id'

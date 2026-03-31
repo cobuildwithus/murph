@@ -365,6 +365,28 @@ export async function maybeSetAssistantCronTargetViaDaemon(
     return null
   }
 
+  const body = {
+    channel: input.channel ?? null,
+    deliveryTarget: input.deliveryTarget ?? null,
+    dryRun: input.dryRun ?? false,
+    identityId: input.identityId ?? null,
+    participantId: input.participantId ?? null,
+    sourceThreadId: input.sourceThreadId ?? null,
+    vault: input.vault,
+  } as {
+    channel: string | null
+    deliveryTarget: string | null
+    dryRun: boolean
+    identityId: string | null
+    participantId: string | null
+    resetContinuity?: boolean
+    sourceThreadId: string | null
+    vault: string
+  }
+  if (input.resetContinuity !== undefined) {
+    body.resetContinuity = input.resetContinuity
+  }
+
   const payload = await assistantDaemonFetchJson(
     buildAssistantDaemonRoutePath(
       `/cron/jobs/${encodeURIComponent(input.job)}/target`,
@@ -375,15 +397,7 @@ export async function maybeSetAssistantCronTargetViaDaemon(
     {
       env,
       method: 'POST',
-      body: {
-        channel: input.channel ?? null,
-        deliveryTarget: input.deliveryTarget ?? null,
-        dryRun: input.dryRun ?? false,
-        identityId: input.identityId ?? null,
-        participantId: input.participantId ?? null,
-        sourceThreadId: input.sourceThreadId ?? null,
-        vault: input.vault,
-      },
+      body,
     },
   )
   return parseAssistantCronTargetMutationPayload(payload)

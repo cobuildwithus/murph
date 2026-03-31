@@ -265,6 +265,12 @@ const assistantCronTargetSourceOptionFields = {
     .boolean()
     .optional()
     .describe('Validate and preview the target change without writing scheduler state.'),
+  resetContinuity: z
+    .boolean()
+    .optional()
+    .describe(
+      'Clear the saved sessionId and alias while retargeting so the next run starts fresh instead of rebinding the existing assistant session.',
+    ),
   toSelf: z
     .string()
     .min(1)
@@ -1913,6 +1919,7 @@ export function registerAssistantCommands(
           vault: context.options.vault,
           job: context.args.job,
           dryRun: context.options.dryRun,
+          resetContinuity: context.options.resetContinuity,
           ...resolvedTarget,
         })
 

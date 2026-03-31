@@ -48,30 +48,36 @@ export function buildResolveAssistantSessionInput(
       ...input,
     }),
   )
-  const sessionId = input.conversation?.sessionId ?? input.sessionId ?? undefined
-  const alias = input.conversation?.alias ?? input.alias ?? undefined
-  const channel = input.conversation?.channel ?? input.channel ?? undefined
+  const conversation =
+    typeof input.conversation === 'object' && input.conversation !== null
+      ? input.conversation
+      : null
+  const sessionId = readAssistantSessionResolutionField({
+    input,
+    conversation,
+    field: 'sessionId',
+  })
+  const alias = readAssistantSessionResolutionField({
+    input,
+    conversation,
+    field: 'alias',
+  })
+  const channel = readAssistantSessionResolutionField({
+    input,
+    conversation,
+    field: 'channel',
+  })
   const identityId =
-    input.conversation?.identityId ??
-    input.identityId ??
+    readAssistantSessionResolutionField({
+      input,
+      conversation,
+      field: 'identityId',
+    }) ??
     defaults?.identityId ??
     undefined
-  const participantId =
-    input.conversation?.participantId ??
-    input.actorId ??
-    input.participantId ??
-    undefined
-  const threadId =
-    input.conversation?.threadId ??
-    input.threadId ??
-    input.sourceThreadId ??
-    undefined
-  const directness =
-    typeof input.threadIsDirect === 'boolean'
-      ? input.threadIsDirect
-        ? 'direct'
-        : 'group'
-      : input.conversation?.directness ?? null
+  const participantId = readAssistantSessionResolutionParticipant(input, conversation)
+  const threadId = readAssistantSessionResolutionThread(input, conversation)
+  const directness = readAssistantSessionResolutionDirectness(input, conversation)
   const threadIsDirect =
     typeof input.threadIsDirect === 'boolean'
       ? input.threadIsDirect
@@ -85,6 +91,7 @@ export function buildResolveAssistantSessionInput(
     vault: input.vault,
     ...(sessionId !== undefined ? { sessionId } : {}),
     ...(alias !== undefined ? { alias } : {}),
+    ...(input.allowBindingRebind === true ? { allowBindingRebind: true } : {}),
     ...(channel !== undefined ? { channel } : {}),
     ...(identityId !== undefined ? { identityId } : {}),
     ...(participantId !== undefined ? { actorId: participantId } : {}),
@@ -104,6 +111,67 @@ export function buildResolveAssistantSessionInput(
     reasoningEffort: providerConfig.reasoningEffort,
     maxSessionAgeMs: input.maxSessionAgeMs ?? null,
   }
+}
+
+function readAssistantSessionResolutionField(
+  input: {
+    conversation: NonNullable<AssistantSessionResolutionFields['conversation']> | null
+    field: 'alias' | 'channel' | 'identityId' | 'sessionId'
+    input: AssistantSessionResolutionFields
+  },
+): string | null | undefined {
+  if (input.conversation && input.field in input.conversation) {
+    return input.conversation[input.field]
+  }
+  if (input.field in input.input) {
+    return input.input[input.field]
+  }
+  return undefined
+}
+
+function readAssistantSessionResolutionParticipant(
+  input: AssistantSessionResolutionFields,
+  conversation: NonNullable<AssistantSessionResolutionFields['conversation']> | null,
+): string | null | undefined {
+  if (conversation && 'participantId' in conversation) {
+    return conversation.participantId
+  }
+  if ('actorId' in input) {
+    return input.actorId
+  }
+  if ('participantId' in input) {
+    return input.participantId
+  }
+  return undefined
+}
+
+function readAssistantSessionResolutionThread(
+  input: AssistantSessionResolutionFields,
+  conversation: NonNullable<AssistantSessionResolutionFields['conversation']> | null,
+): string | null | undefined {
+  if (conversation && 'threadId' in conversation) {
+    return conversation.threadId
+  }
+  if ('threadId' in input) {
+    return input.threadId
+  }
+  if ('sourceThreadId' in input) {
+    return input.sourceThreadId
+  }
+  return undefined
+}
+
+function readAssistantSessionResolutionDirectness(
+  input: AssistantSessionResolutionFields,
+  conversation: NonNullable<AssistantSessionResolutionFields['conversation']> | null,
+) {
+  if (typeof input.threadIsDirect === 'boolean') {
+    return input.threadIsDirect ? 'direct' : 'group'
+  }
+  if (conversation && 'directness' in conversation) {
+    return conversation.directness ?? null
+  }
+  return null
 }
 
 export async function resolveAssistantSessionForMessage(input: {

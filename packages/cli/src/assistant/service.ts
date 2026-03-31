@@ -103,6 +103,7 @@ export { buildResolveAssistantSessionInput } from './session-resolution.js'
 interface AssistantSessionResolutionFields {
   actorId?: string | null
   alias?: string | null
+  allowBindingRebind?: boolean
   approvalPolicy?: AssistantApprovalPolicy | null
   apiKeyEnv?: string | null
   baseUrl?: string | null

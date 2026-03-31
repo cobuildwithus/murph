@@ -715,6 +715,75 @@ test('resolveAssistantSession rejects clearing a saved participant binding becau
   assert.equal(persisted.binding.delivery?.target, '+15551234567')
 })
 
+test('resolveAssistantSession can explicitly rebind a saved session to a new delivery channel when allowed', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-session-rebind-channel-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  const created = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'cron:weekly-health-snapshot',
+    channel: 'telegram',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-1',
+    threadIsDirect: false,
+  })
+
+  await assert.rejects(
+    () =>
+      resolveAssistantSession({
+        vault: vaultRoot,
+        sessionId: created.session.sessionId,
+        channel: 'email',
+        identityId: 'sender@example.com',
+        participantId: null,
+        sourceThreadId: null,
+        threadIsDirect: null,
+        createIfMissing: false,
+      }),
+    (error: unknown) => {
+      assert.equal(
+        (error as { code?: unknown })?.code,
+        'ASSISTANT_SESSION_ROUTING_CONFLICT',
+      )
+      return true
+    },
+  )
+
+  const rebound = await resolveAssistantSession({
+    vault: vaultRoot,
+    sessionId: created.session.sessionId,
+    allowBindingRebind: true,
+    channel: 'email',
+    identityId: 'sender@example.com',
+    participantId: null,
+    sourceThreadId: null,
+    threadIsDirect: null,
+    createIfMissing: false,
+  })
+
+  assert.equal(rebound.session.sessionId, created.session.sessionId)
+  assert.equal(rebound.session.alias, 'cron:weekly-health-snapshot')
+  assert.equal(rebound.session.binding.channel, 'email')
+  assert.equal(rebound.session.binding.identityId, 'sender@example.com')
+  assert.equal(rebound.session.binding.actorId, null)
+  assert.equal(rebound.session.binding.threadId, null)
+  assert.equal(rebound.session.binding.threadIsDirect, null)
+  assert.equal(rebound.session.binding.conversationKey, null)
+  assert.equal(rebound.session.binding.delivery, null)
+
+  const persisted = await getAssistantSession(vaultRoot, created.session.sessionId)
+  assert.equal(persisted.binding.channel, 'email')
+  assert.equal(persisted.binding.identityId, 'sender@example.com')
+  assert.equal(persisted.binding.actorId, null)
+  assert.equal(persisted.binding.threadId, null)
+  assert.equal(persisted.binding.threadIsDirect, null)
+  assert.equal(persisted.binding.conversationKey, null)
+  assert.equal(persisted.binding.delivery, null)
+})
+
 test('resolveAssistantSession rejects alias reuse when the supplied routing metadata points at a different conversation', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-alias-routing-conflict-'))
   const vaultRoot = path.join(parent, 'vault')
