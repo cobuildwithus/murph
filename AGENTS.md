@@ -9,92 +9,54 @@ Durable guidance lives in `agent-docs/`.
 
 1. Explicit user instruction in the current chat turn.
 2. `Hard Rules (Non-Negotiable)` in this file.
-3. Other sections in this file.
-4. Detailed process docs under `agent-docs/**`.
+3. `agent-docs/operations/agent-workflow-routing.md`
+4. Other detailed docs under `agent-docs/**`.
 
 If instructions still conflict after applying this order, ask the user before acting.
 
-## Read Order
+## Read First
 
-Always read before repo code/docs/test/config work:
+Always read these before repo code/docs/test/config work:
 
 1. `agent-docs/index.md`
 2. `ARCHITECTURE.md`
 3. `agent-docs/references/repo-scope.md`
-4. `agent-docs/operations/verification-and-runtime.md`
+4. `agent-docs/operations/agent-workflow-routing.md`
 
-Read when relevant to the task:
+## Task Router
 
-1. `agent-docs/PRODUCT_SENSE.md` for user-facing product behavior or feature tradeoffs
-2. `agent-docs/PRODUCT_CONSTITUTION.md` for product direction or UX-principle decisions
-3. `agent-docs/FRONTEND.md` and `packages/web/AGENTS.md` for `packages/web` or UI-facing work
-4. `agent-docs/RELIABILITY.md` for retry, queueing, failure-mode, cron, or concurrency changes
-5. `agent-docs/SECURITY.md` for auth, secrets, trust-boundary, or externally exposed runtime changes
-6. `agent-docs/references/testing-ci-map.md` when choosing, adding, or debugging verification coverage
-7. `agent-docs/operations/completion-workflow.md` when the change will use completion audits, direct-scenario proof, or plan-bearing handoff
+| Task | Also read | Notes |
+| --- | --- | --- |
+| Vault-only data under `vault/**` | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. |
+| Docs/process-only | `agent-docs/operations/verification-and-runtime.md` | No audit subagents by default. |
+| Repo code/test/config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the task classes in the workflow-routing doc. |
+| UI or `packages/web` | `agent-docs/FRONTEND.md`, `packages/web/AGENTS.md` | Tailwind-only styling. Inspect desktop and mobile before handoff. |
+| Auth, secrets, trust boundaries, external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher-risk by default. |
+| Retries, queues, cron, concurrency, failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
+| Test selection or verification changes | `agent-docs/references/testing-ci-map.md` | Keep test coverage and doc claims aligned. |
+| Product behavior or UX tradeoffs | `agent-docs/PRODUCT_SENSE.md`, `agent-docs/PRODUCT_CONSTITUTION.md` | Prefer repo-local durable specs over chat memory. |
 
 ## Hard Rules (Non-Negotiable)
 
-- Always use Tailwind CSS utility classes in the web package (`packages/web`). No raw CSS — do not add custom classes to `globals.css` or create new `.css` files. All styling must be expressed as Tailwind utilities in JSX `className` props. The theme (colors, fonts, shadows, animations) is defined via `@theme` in `globals.css`.
-- For `packages/web` UI work, treat the app as an operator-facing observability surface by default: utility copy first, workspace/status hierarchy first, and no marketing-style hero treatment unless the user explicitly asks for it.
-- Treat `.env` and `.env*` files as sensitive inputs. Murph's CLI may load local `.env.local` and `.env` files at runtime for operator configuration, but agents must never print, commit, or otherwise expose their contents.
-- Do not introduce new `HB_`, `HEALTHYBOB_`, or similarly branded prefixes for env vars, error codes, config keys, identifiers, or docs unless the user explicitly asks for them; prefer neutral names.
-- Never print or commit full secrets, tokens, raw credentials, or full `Authorization` headers.
-- Inside this monorepo, source/test/config code must import sibling workspace packages by package name and only through declared public entrypoints; do not reach into another package's `src/` or `dist/` tree. Keep repo-local Next/Vitest source aliasing in `config/workspace-source-resolution.ts`, and do not add TS paths, aliases, or package-local typecheck steps that point internal consumers at sibling `dist/` output. Treat `dist/` as a publish/runtime artifact only.
-- Do not reintroduce custom Turbopack loader-based rewriting for repo-local workspace sources. Keep Next on `transpilePackages`, keep shared Next/Vitest source mapping in `config/workspace-source-resolution.ts`, and let TypeScript's `rewriteRelativeImportExtensions` own local relative `.ts` import rewriting.
+- In `packages/web`, use Tailwind utility classes only. Do not add raw CSS files or custom classes in `globals.css`.
+- Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
+- Never print or commit secrets, raw credentials, or full `Authorization` headers.
+- Do not introduce new `HB_`, `HEALTHYBOB_`, or similar branded prefixes unless the user explicitly asks for them.
+- Import sibling workspace packages by package name through declared public entrypoints only. Do not reach into another package's `src/` or `dist/`.
+- Do not reintroduce custom Turbopack loader-based rewriting for repo-local workspace sources.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
-- Default inbox, auto-reply, and vault-maintenance work is data work, not repo work: when the task's intended writes stay under `vault/**`, keep the work inside the vault and do not edit repo code/docs/process files unless the user explicitly asks for tooling or instruction changes.
-- COORDINATION_LEDGER hard gate applies to repo code/docs/test/config changes only. The canonical ledger file is `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`. It does not apply to vault-only data tasks whose writes stay under `vault/**`.
-- Ledger rows are active-work notices by default, not hard file locks. Read overlapping rows first, preserve adjacent edits, and coordinate through scope/symbol notes. Treat a row as exclusive only when it explicitly says overlap is unsafe, the lane is a large refactor, or the user gives a conflicting direction.
-- An empty table in `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` means no active work is currently registered.
-- Any spawned subagent that may review or edit code must read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`, follow the same hard gate before making code changes, and honor any explicit exclusive/refactor notes on overlapping rows.
-- Spawned subagents should default to a non-mini frontier model with `high` reasoning effort. Do not use mini variants unless the user explicitly asks for one or the task is purely trivial and the user has not asked for deeper thinking.
-- For non-doc repo changes that touch production code or tests, run completion workflow audits per `agent-docs/operations/completion-workflow.md`. The default path is `simplify` -> `task-finish-review`, but tiny low-risk changes may skip `simplify` and still require `task-finish-review`.
-- Those required audit passes must be executed explicitly via spawned subagents using the matching docs in `agent-docs/prompts/`; do not treat local self-review by the main implementation agent as satisfying the requirement.
-- Required completion-workflow audit subagents are review-only by default: do not let them edit files, run commit helpers, or create commits unless the user explicitly asks for audit agents that can patch code.
-- When spawning required audit passes, prefer fresh read-only review agents with narrow handoff context instead of forking the full implementation thread unless a specific blocked review question requires that broader context.
-- Treat the repo's mandatory completion-workflow audit passes as standing maintainer authorization for the required spawned subagents. When the current environment supports spawned agents, do not pause only to ask for separate delegation permission for those required audit passes. If the environment or tool policy still blocks subagents, say so explicitly and follow the higher-priority constraint.
-- Do not wait for an explicit user request before launching those required completion-workflow audit subagents; repo policy already authorizes them for qualifying changes.
-- Docs/process-only changes and vault-only data tasks skip completion workflow audit passes unless the user explicitly asks to run them.
-- For UI-affecting `packages/web` changes, inspect the rendered result at desktop and mobile sizes before handoff.
-- Until product/runtime tooling exists, do not invent fake compatibility or deployment requirements; define them in `agent-docs/operations/verification-and-runtime.md` and `package.json` in the same change that introduces them.
-- Keep this file short and route-oriented; move durable detail into `agent-docs/`.
+- Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
 
-## How To Work
+## Workflow Defaults
 
-- Before implementation, do a quick assumptions check; ask only for high-impact clarifications.
-- Continue working in the current tree even when unrelated external dirty changes appear.
-- Never revert, delete, or rewrite existing edits you did not make unless the user explicitly asks.
-- Keep files under roughly 500 lines when practical; only introduce or preserve larger files when there is a clear reason they need to stay that large.
-- Prefer narrow ledger rows and symbol claims. If you need temporary exclusive control of a file or symbol cluster, say so explicitly in the row notes and explain why overlap is unsafe.
-- If architecture-significant behavior changes, update matching docs in `agent-docs/` and `ARCHITECTURE.md`.
-- For multi-file or high-risk work, add an execution plan in `agent-docs/exec-plans/active/`. Narrow user-supplied patch landings may stay ledger-only while the work remains bounded, low-design, and single-turn.
-- For user-supplied patches or externally prepared diffs, treat the patch as intent rather than as authority to overwrite the live tree. Read the current file state first, preserve overlapping edits, land the smallest behavioral delta that satisfies the patch, and open a dedicated plan before continuing if the work expands into broader design or refactor decisions.
-- When the first real app/service/tooling modules land, update the verification docs and package scripts in the same change so the harness stays truthful.
-
-## Commit and Handoff
-
-- Same-turn task completion = acceptance, unless the user explicitly says `review first` or `do not commit`.
-- If you changed files, run the required checks defined below before handoff. If the task used an execution plan, close it and commit with `scripts/finish-task agent-docs/exec-plans/active/<plan>.md "type(scope): summary" path/to/file1 path/to/file2`. `scripts/finish-task` closes the active plan, moves it under `agent-docs/exec-plans/completed/`, and then creates a scoped commit containing that closed-plan artifact plus only the file paths you pass. Otherwise run `scripts/committer "type(scope): summary" path/to/file1 path/to/file2`.
-- If a required check fails for a credibly unrelated pre-existing reason, do not leave your scoped work uncommitted solely because the repo is red. Commit your exact touched files after recording the failing command, the failing target, and why your diff did not cause it. If you cannot defend that causal separation, treat the failure as blocking.
-- Use `scripts/finish-task` for plan-bearing tasks and `scripts/committer` otherwise (no manual `git commit`).
-- Agent-authored commit messages should use Conventional Commits (`feat|fix|refactor|build|ci|chore|docs|style|perf|test`).
-- If no files changed, do not create a commit.
-- Commit only exact file paths touched in the current turn.
-- Do not skip commit just because the tree is already dirty.
-- If a touched file already had edits, still commit and explicitly note that in handoff.
-
-## Required Checks
-
-- Current bootstrap baseline for repo code/docs/test changes:
-  - `pnpm typecheck`
-  - `pnpm test`
-  - `pnpm test:coverage`
-- When those baseline commands are already credibly known red for unrelated reasons, narrow changes may use the documented scoped verification mode in `agent-docs/operations/verification-and-runtime.md` instead of re-running the same repo-wide failures.
-- Vault-only data tasks under `vault/**` do not run repo-wide verification by default. Verify them by reading back the touched records plus any audit or ledger entries written by the mutation path.
-- These bootstrap commands currently validate shell-wrapper syntax plus docs drift/gardening integrity.
-- When repo-specific code/tooling is introduced, replace or extend these commands rather than bypassing them.
+- Repo code/docs/test/config work uses `agent-docs/exec-plans/active/COORDINATION_LEDGER.md`; vault-only data work does not by default.
+- Preserve unrelated worktree edits. Do not overwrite, discard, or revert work you did not make.
+- Use an execution plan for multi-file or high-risk work. Narrow supplied-patch landings may stay ledger-only when they remain bounded and single-turn.
+- If architecture-significant behavior changes, update `ARCHITECTURE.md` and the matching durable docs.
+- Same-turn task completion counts as acceptance unless the user says `review first` or `do not commit`.
+- Use `scripts/finish-task` for plan-bearing commits and `scripts/committer` otherwise.
+- Update `agent-docs/index.md` when durable docs are added, removed, moved, or materially repurposed.
 
 ## Notes
 
-- `agent-docs/index.md` is the canonical docs map for durable docs. Update it when durable docs move or change; execution-plan churn under `agent-docs/exec-plans/**` and coordination-ledger-only updates do not require index edits.
+- Keep this file short and route-oriented. Move durable detail into `agent-docs/`.
