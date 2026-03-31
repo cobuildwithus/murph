@@ -10,11 +10,7 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 export function resolveHostedPublicBaseUrl(
   source: EnvSource = process.env,
 ): string | null {
-  try {
-    return readHostedPublicBaseUrl(source);
-  } catch {
-    return null;
-  }
+  return resolveHostedPublicUrl(readHostedPublicBaseUrl, source);
 }
 
 export function readHostedPublicBaseUrl(
@@ -33,11 +29,7 @@ export function readHostedPublicBaseUrl(
 export function resolveHostedPublicOrigin(
   source: EnvSource = process.env,
 ): string | null {
-  try {
-    return readHostedPublicOrigin(source);
-  } catch {
-    return null;
-  }
+  return resolveHostedPublicUrl(readHostedPublicOrigin, source);
 }
 
 export function readHostedPublicOrigin(
@@ -50,11 +42,7 @@ export function readHostedPublicOrigin(
 export function resolveHostedDeviceSyncPublicBaseUrl(
   source: EnvSource = process.env,
 ): string | null {
-  try {
-    return readHostedDeviceSyncPublicBaseUrl(source);
-  } catch {
-    return null;
-  }
+  return resolveHostedPublicUrl(readHostedDeviceSyncPublicBaseUrl, source);
 }
 
 export function readHostedDeviceSyncPublicBaseUrl(
@@ -73,6 +61,17 @@ function appendHostedPath(
   }
 
   return new URL(pathname, `${origin}/`).toString().replace(/\/$/u, "");
+}
+
+function resolveHostedPublicUrl(
+  read: (source: EnvSource) => string | null,
+  source: EnvSource,
+): string | null {
+  try {
+    return read(source);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeConfiguredBaseUrl(value: string | null | undefined): string | null {

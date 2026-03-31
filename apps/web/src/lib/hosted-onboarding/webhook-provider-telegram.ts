@@ -37,47 +37,19 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   const summary = await summarizeHostedTelegramWebhook(input.update);
 
   if (!summary) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "unsupported-update",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan("unsupported-update");
   }
 
   if (summary.isBotMessage) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "own-message",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan("own-message");
   }
 
   if (!summary.isDirect) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: summary.chatType ?? "unsupported-chat",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan(summary.chatType ?? "unsupported-chat");
   }
 
   if (!summary.senderTelegramUserId) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "missing-sender",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
   const existingMember = await input.prisma.hostedMember.findUnique({
@@ -92,36 +64,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   });
 
   if (!existingMember) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "unlinked-telegram",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
   }
 
   if (existingMember.billingStatus !== HostedBillingStatus.active) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "inactive-member",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan("inactive-member");
   }
 
   if (existingMember.status === HostedMemberStatus.suspended) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "suspended-member",
-      },
-    };
+    return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
   return {
@@ -139,6 +90,19 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     response: {
       ok: true,
       reason: "dispatched-active-member",
+    },
+  };
+}
+
+function buildIgnoredTelegramWebhookPlan(
+  reason: string,
+): HostedOnboardingTelegramWebhookPlan {
+  return {
+    desiredSideEffects: [],
+    response: {
+      ok: true,
+      ignored: true,
+      reason,
     },
   };
 }
