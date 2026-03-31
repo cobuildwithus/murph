@@ -30,7 +30,7 @@ Always read these before repo code/docs/test/config work:
 | Vault-only data under `vault/**` | `agent-docs/operations/verification-and-runtime.md` | No repo ledger or repo-wide checks by default. |
 | Docs/process-only | `agent-docs/operations/verification-and-runtime.md` | No audit subagents by default. |
 | Repo code/test/config | `agent-docs/operations/completion-workflow.md`, `agent-docs/operations/verification-and-runtime.md` | Use the task classes in the workflow-routing doc. |
-| UI or `packages/web` | `agent-docs/FRONTEND.md`, `packages/web/AGENTS.md` | Tailwind-only styling. Inspect desktop and mobile before handoff. |
+| UI or `packages/local-web` | `agent-docs/FRONTEND.md`, `packages/local-web/AGENTS.md` | Tailwind-only styling. Inspect desktop and mobile before handoff. |
 | Auth, secrets, trust boundaries, external runtime surfaces | `agent-docs/SECURITY.md` | Treat as higher-risk by default. |
 | Retries, queues, cron, concurrency, failure handling | `agent-docs/RELIABILITY.md` | Capture direct proof for operational changes. |
 | Test selection or verification changes | `agent-docs/references/testing-ci-map.md` | Keep test coverage and doc claims aligned. |
@@ -38,7 +38,7 @@ Always read these before repo code/docs/test/config work:
 
 ## Hard Rules (Non-Negotiable)
 
-- In `packages/web`, use Tailwind utility classes only. Do not add raw CSS files or custom classes in `globals.css`.
+- In `packages/local-web`, use Tailwind utility classes only. Do not add raw CSS files or custom classes in `globals.css`.
 - Treat `.env` and `.env*` as sensitive. Never print, commit, or otherwise expose their contents.
 - Never print or commit secrets, raw credentials, or full `Authorization` headers.
 - Do not introduce new `HB_`, `HEALTHYBOB_`, or similar branded prefixes unless the user explicitly asks for them.

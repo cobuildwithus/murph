@@ -278,7 +278,7 @@ test("HomePage renders the setup state when no vault is configured", async () =>
     envVar: "VAULT",
     exampleVaultPath: "fixtures/demo-web-vault",
     status: "missing-config",
-    suggestedCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
+    suggestedCommand: "VAULT=fixtures/demo-web-vault pnpm local-web:dev",
   });
   mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({
     status: "unavailable",
@@ -310,7 +310,7 @@ test("HomePage renders the unreadable-vault error state", async () => {
     envVar: "VAULT",
     hint: "Confirm the configured vault path points at a Murph vault root, then restart the local app.",
     message: "The configured vault could not be read.",
-    recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
+    recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm local-web:dev",
     status: "error",
   });
   mockedLoadDeviceSyncOverviewFromEnv.mockResolvedValue({

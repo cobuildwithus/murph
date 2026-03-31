@@ -2,11 +2,11 @@
 
 ## Scope
 
-This doc governs UI work in `packages/web/**`.
+This doc governs UI work in `packages/local-web/**`.
 
 ## Surface Posture
 
-- `packages/web` is an operator-facing local observability surface by default.
+- `packages/local-web` is an operator-facing local observability surface by default.
 - Treat it as product UI, not a marketing page, unless the user explicitly asks for a branded/expressive redesign.
 - The current goals are clarity, scanability, read-only trustworthiness, and obvious next actions.
 
@@ -20,14 +20,14 @@ This doc governs UI work in `packages/web/**`.
 
 ## Visual Rules
 
-- Use the existing theme tokens and typography defined in `packages/web/app/globals.css`.
-- Preserve the established Tailwind-only styling approach for `packages/web`.
+- Use the existing theme tokens and typography defined in `packages/local-web/app/globals.css`.
+- Preserve the established Tailwind-only styling approach for `packages/local-web`.
 - Prefer calm surfaces, one accent family, and minimal chrome.
 - Avoid decorative hero sections, floating badges, and dense promo-like UI unless explicitly requested.
 
 ## Browser Verification
 
-- For UI-affecting `packages/web` changes, inspect the rendered route in a browser before handoff.
+- For UI-affecting `packages/local-web` changes, inspect the rendered route in a browser before handoff.
 - Check at least one desktop width and one mobile width.
 - Verify there is no horizontal overflow, clipped controls, broken wrapping, or fixed-element overlap.
 - When controls open dialogs, drawers, or other temporary states, inspect those states too.
@@ -38,4 +38,4 @@ Update these docs when frontend behavior or expectations materially change:
 
 - `agent-docs/PRODUCT_SENSE.md`
 - `agent-docs/operations/verification-and-runtime.md`
-- `packages/web/README.md`
+- `packages/local-web/README.md`

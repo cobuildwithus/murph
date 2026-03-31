@@ -13,7 +13,7 @@ Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown,
 - provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through `@murph/device-syncd`
-- a local read-only observability app in `packages/web`
+- a local read-only observability app in `packages/local-web`
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
 - shared hosted execution contracts and env/client helpers in `@murph/hosted-execution`
@@ -41,7 +41,7 @@ If `pnpm` is not available yet, use:
 
 The repo already carries a fixed-version monorepo release flow for the publishable package set, but until a public release is actually cut the recommended install path remains "run from this checkout".
 
-`pnpm setup` is not available because `pnpm` reserves `setup` as its own built-in command. Use `pnpm onboard` or `pnpm run setup` instead.
+`pnpm onboard` is the only supported repo-local onboarding command. `pnpm` reserves `setup` as a built-in command, so this repo no longer exposes a root `setup` script.
 
 ## Quick start
 
@@ -53,13 +53,13 @@ murph chat
 vault-cli vault stats
 vault-cli inbox doctor
 
-VAULT=./vault pnpm web:dev
+VAULT=./vault pnpm local-web:dev
 ```
 
 For a quick local web demo against the checked-in fixture vault:
 
 ```bash
-VAULT=fixtures/demo-web-vault pnpm web:dev
+VAULT=fixtures/demo-web-vault pnpm local-web:dev
 ```
 
 For the always-on assistant loop after setup:
@@ -101,7 +101,7 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
 | `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |
 | `packages/cli` | The published `murph` / `vault-cli` package and the main operator surface. |
-| `packages/web` | Local-only Next.js observability app over the query layer. |
+| `packages/local-web` | Local-only Next.js observability app over the query layer. |
 | `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
 | `apps/cloudflare` | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs. |
 | `fixtures` and `e2e` | Deterministic fixtures and smoke coverage. |
@@ -113,7 +113,7 @@ Murph now has three distinct runtime tiers:
 ### 1. Local operator surface
 
 - `vault-cli` / `murph` for vault operations, assistant chat, automation, onboarding, and diagnostics
-- `packages/web` for local read-only observability
+- `packages/local-web` for local read-only observability
 - `@murph/device-syncd` for local wearable sync
 - `@murph/assistantd` for the local assistant control plane
 
@@ -153,7 +153,7 @@ pnpm onboard --vault ./vault
 pnpm chat
 murph run
 murph device daemon start --vault ./vault
-VAULT=./vault pnpm web:dev
+VAULT=./vault pnpm local-web:dev
 ```
 
 ### Developer flows
@@ -162,7 +162,7 @@ VAULT=./vault pnpm web:dev
 pnpm typecheck
 pnpm test
 pnpm test:coverage
-pnpm web:dev
+pnpm local-web:dev
 pnpm --dir apps/web dev
 pnpm --dir apps/cloudflare verify
 ```
@@ -200,6 +200,6 @@ Those are contributor workflows, not the main product entrypoint, which is why t
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) for the top-level system map and trust boundaries
 - [`docs/architecture.md`](docs/architecture.md) for the one-page architecture summary
 - [`packages/cli/README.md`](packages/cli/README.md) for the CLI package and release flow
-- [`packages/web/README.md`](packages/web/README.md) for the local web app
+- [`packages/local-web/README.md`](packages/local-web/README.md) for the local web app
 - [`apps/web/README.md`](apps/web/README.md) for the hosted control plane
 - [`apps/cloudflare/README.md`](apps/cloudflare/README.md) for the hosted execution plane

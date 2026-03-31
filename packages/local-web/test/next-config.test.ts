@@ -14,15 +14,15 @@ import nextConfig from "../next.config";
 
 test("resolveLocalWebWorkspaceSourceEntries points at source package entries", () => {
   assert.equal(
-    resolveLocalWebWorkspaceSourceEntries("/repo/packages/web")["@murph/query"],
+    resolveLocalWebWorkspaceSourceEntries("/repo/packages/local-web")["@murph/query"],
     path.resolve("/repo/packages/query/src/index.ts"),
   );
   assert.equal(
-    resolveLocalWebWorkspaceSourceEntries("/repo/packages/web")["@murph/contracts"],
+    resolveLocalWebWorkspaceSourceEntries("/repo/packages/local-web")["@murph/contracts"],
     path.resolve("/repo/packages/contracts/src/index.ts"),
   );
   assert.equal(
-    resolveLocalWebWorkspaceSourceEntries("/repo/packages/web")["@murph/hosted-execution"],
+    resolveLocalWebWorkspaceSourceEntries("/repo/packages/local-web")["@murph/hosted-execution"],
     path.resolve("/repo/packages/hosted-execution/src/index.ts"),
   );
 });

@@ -28,6 +28,6 @@ export default defineProject({
     name: "local-web",
     environment: "node",
     ...resolveMurphVitestConcurrency(),
-    include: ["packages/web/test/**/*.test.ts"],
+    include: ["packages/local-web/test/**/*.test.ts"],
   },
 });

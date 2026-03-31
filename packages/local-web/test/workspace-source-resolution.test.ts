@@ -47,7 +47,7 @@ test("workspace source resolution keeps the hosted and local web package allowli
 
 test("workspace source resolution does not widen beyond the explicit hosted/local package sets", () => {
   const hostedEntries = resolveHostedWebWorkspaceSourceEntries("/repo/apps/web");
-  const localEntries = resolveLocalWebWorkspaceSourceEntries("/repo/packages/web");
+  const localEntries = resolveLocalWebWorkspaceSourceEntries("/repo/packages/local-web");
 
   assert.deepEqual(Object.keys(hostedEntries).sort(), [...HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES].sort());
   assert.deepEqual(Object.keys(localEntries).sort(), [...LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES].sort());

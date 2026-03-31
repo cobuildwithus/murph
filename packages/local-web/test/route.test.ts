@@ -69,7 +69,7 @@ test("overview route maps missing config to 503", async () => {
     envVar: "VAULT",
     exampleVaultPath: "fixtures/demo-web-vault",
     status: "missing-config",
-    suggestedCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
+    suggestedCommand: "VAULT=fixtures/demo-web-vault pnpm local-web:dev",
   });
 
   const response = await GET(new Request("http://localhost/api/overview"));
@@ -86,7 +86,7 @@ test("overview route maps unreadable vaults to 500", async () => {
     envVar: "VAULT",
     hint: "Confirm the configured vault path points at a Murph vault root, then restart the local app.",
     message: "The configured vault could not be read.",
-    recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm web:dev",
+    recoveryCommand: "VAULT=fixtures/demo-web-vault pnpm local-web:dev",
     status: "error",
   });
 

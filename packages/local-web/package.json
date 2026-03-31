@@ -1,5 +1,5 @@
 {
-  "name": "@murph/web",
+  "name": "@murph/local-web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,12 +8,12 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "build:app": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts build",
-    "dev": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts dev",
+    "build:app": "pnpm --dir ../.. exec tsx packages/local-web/scripts/next-local.ts build",
+    "dev": "pnpm --dir ../.. exec tsx packages/local-web/scripts/next-local.ts dev",
     "build": "pnpm build:app",
-    "start": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts start",
-    "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts packages/web && tsc -p tsconfig.json --pretty false",
-    "test": "pnpm --dir ../.. exec vitest run --config packages/web/vitest.config.ts --project local-web --no-coverage",
+    "start": "pnpm --dir ../.. exec tsx packages/local-web/scripts/next-local.ts start",
+    "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts packages/local-web && tsc -p tsconfig.json --pretty false",
+    "test": "pnpm --dir ../.. exec vitest run --config packages/local-web/vitest.config.ts --project local-web --no-coverage",
     "verify": "bash scripts/verify-fast.sh"
   },
   "dependencies": {

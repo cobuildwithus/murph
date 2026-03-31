@@ -17,7 +17,7 @@ Last verified: 2026-03-12
 
 ## Current Web Surface
 
-- `packages/web` is currently an operator-facing local observability UI, not a marketing site.
+- `packages/local-web` is currently an operator-facing local observability UI, not a marketing site.
 - Default to utility copy, current-state visibility, recent activity, and obvious next actions.
 - Prefer a compass-first read of the week: what changed, what stayed steady, what likely explains the shift, and what is probably not worth reacting to yet.
 - Prefer calm hierarchy and scannable sections over decorative density.

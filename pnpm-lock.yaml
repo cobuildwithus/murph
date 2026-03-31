@@ -398,7 +398,7 @@ importers:
 
   packages/runtime-state: {}
 
-  packages/web:
+  packages/local-web:
     dependencies:
       '@murph/contracts':
         specifier: workspace:*
