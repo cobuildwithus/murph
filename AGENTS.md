@@ -59,4 +59,5 @@ Always read these before repo code/docs/test/config work:
 
 ## Notes
 
+- This file should stay a compact router, not a policy manual. Target roughly 100 lines or less and keep the structure limited to: purpose, precedence, read-first docs, task router, non-negotiables, workflow defaults, and notes.
 - Keep this file short and route-oriented. Move durable detail into `agent-docs/`.

@@ -33,3 +33,4 @@ vault/
 apps/cloudflare/.dev.vars*
 apps/cloudflare/.runner.env*
 apps/cloudflare/.deploy
+.vercel

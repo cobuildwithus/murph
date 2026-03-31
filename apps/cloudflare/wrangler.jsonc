@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "hosted-runner",
+  "name": "murph-hosted",
   "main": "src/index.ts",
   "compatibility_date": "2026-03-27",
   "compatibility_flags": ["nodejs_compat"],
@@ -37,8 +37,8 @@
   "r2_buckets": [
     {
       "binding": "BUNDLES",
-      "bucket_name": "REPLACE_ME_hosted_execution_bundles",
-      "preview_bucket_name": "REPLACE_ME_hosted_execution_bundles_preview"
+      "bucket_name": "murph-hosted-bundles",
+      "preview_bucket_name": "murph-hosted-bundles-preview"
     }
   ],
   "observability": {
