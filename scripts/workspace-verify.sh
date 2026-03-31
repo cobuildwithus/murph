@@ -51,6 +51,8 @@ readonly typecheck_package_dirs=(
   "packages/query"
   "packages/inboxd"
   "packages/parsers"
+  "packages/gateway-core"
+  "packages/gateway-local"
   "packages/cli"
   "packages/assistantd"
   "packages/assistant-runtime"

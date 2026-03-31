@@ -97,8 +97,8 @@
       "@murph/gateway-core": [
         "packages/gateway-core/src/index.ts"
       ],
-      "@murph/gateway-core/local": [
-        "packages/gateway-core/src/local.ts"
+      "@murph/gateway-local": [
+        "packages/gateway-local/src/index.ts"
       ],
       "murph": [
         "packages/cli/src/index.ts"

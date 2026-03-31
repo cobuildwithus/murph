@@ -17,13 +17,13 @@ import {
   type GatewayReadMessagesResult,
   type GatewayService,
   type GatewayWaitForEventsInput,
-} from './contracts.js'
+} from '@murph/gateway-core'
 import {
   fetchGatewayAttachmentsFromSnapshot,
   getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
   readGatewayMessagesFromSnapshot,
-} from './projection.js'
+} from '@murph/gateway-core'
 import {
   exportGatewayProjectionSnapshotLocal,
   listGatewayOpenPermissionsLocal,

@@ -25,6 +25,7 @@ export const cloudflareVitestAliases = [
       "@murph/core": "packages/core/src/index.ts",
       "@murph/device-syncd": "packages/device-syncd/src/index.ts",
       "@murph/gateway-core": "packages/gateway-core/src/index.ts",
+      "@murph/gateway-local": "packages/gateway-local/src/index.ts",
       "@murph/hosted-execution": "packages/hosted-execution/src/index.ts",
       "@murph/importers": "packages/importers/src/index.ts",
       "@murph/inboxd": "packages/inboxd/src/index.ts",

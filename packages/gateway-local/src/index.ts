@@ -11,5 +11,5 @@ export {
   waitGatewayEventsLocal,
 } from './local-service.js'
 
-export { exportGatewayProjectionSnapshotLocal } from './projection.js'
+export { exportGatewayProjectionSnapshotLocal } from './store.js'
 export { sendGatewayMessageLocal } from './send.js'

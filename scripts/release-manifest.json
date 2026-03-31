@@ -27,6 +27,10 @@
       "path": "packages/gateway-core"
     },
     {
+      "name": "@murph/gateway-local",
+      "path": "packages/gateway-local"
+    },
+    {
       "name": "@murph/core",
       "path": "packages/core"
     },

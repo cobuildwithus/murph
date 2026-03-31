@@ -32,11 +32,12 @@ test('assistant-core is self-contained and assistantd depends on the dedicated h
   const httpSource = await readFile(new URL('../src/http.ts', import.meta.url), 'utf8')
 
   assert.equal(assistantdManifest.dependencies?.['@murph/assistant-core'], 'workspace:*')
+  assert.equal(assistantdManifest.dependencies?.['@murph/gateway-local'], 'workspace:*')
   assert.equal(assistantdManifest.dependencies?.murph, undefined)
   assert.equal(assistantCoreManifest.dependencies?.murph, undefined)
 
   assert.match(serviceSource, /from '@murph\/assistant-core'/)
-  assert.match(serviceSource, /from '@murph\/gateway-core\/local'/)
+  assert.match(serviceSource, /from '@murph\/gateway-local'/)
   assert.match(serviceSource, /from '@murph\/gateway-core'/)
   assert.match(httpSource, /from '@murph\/assistant-core'/)
   assert.match(httpSource, /from '@murph\/gateway-core'/)

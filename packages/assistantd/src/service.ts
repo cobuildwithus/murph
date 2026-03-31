@@ -33,7 +33,7 @@ import {
   type AssistantStatusResult,
   type RunAssistantAutomationInput,
 } from '@murph/assistant-core'
-import { createLocalGatewayService } from '@murph/gateway-core/local'
+import { createLocalGatewayService } from '@murph/gateway-local'
 import type { GatewayService } from '@murph/gateway-core'
 
 const ASSISTANTD_DISABLE_CLIENT_ENV = 'MURPH_ASSISTANTD_DISABLE_CLIENT'

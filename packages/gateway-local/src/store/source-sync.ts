@@ -17,19 +17,19 @@ import {
   type AssistantSession,
 } from '@murph/assistant-core'
 
-import type { GatewayAttachment, GatewayConversationRoute } from '../contracts.js'
+import type { GatewayAttachment, GatewayConversationRoute } from '@murph/gateway-core'
 import {
   createGatewayAttachmentId,
   createGatewayCaptureMessageId,
   createGatewayConversationSessionKey,
   createGatewayOutboxMessageId,
-} from '../opaque-ids.js'
+} from '@murph/gateway-core'
 import {
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
   gatewayConversationRouteFromOutboxIntent,
   resolveGatewayConversationRouteKey,
-} from '../routes.js'
+} from '@murph/gateway-core'
 import { normalizeNullableString } from '../shared.js'
 
 const CAPTURE_SYNC_BATCH_SIZE = 500

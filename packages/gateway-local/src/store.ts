@@ -8,7 +8,7 @@ import {
   DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
   pollGatewayEventLogState,
   waitForGatewayEventsByPolling,
-} from './event-log.js'
+} from '@murph/gateway-core'
 import {
   type GatewayListOpenPermissionsInput,
   type GatewayPermissionRequest,
@@ -17,7 +17,7 @@ import {
   type GatewayProjectionSnapshot,
   type GatewayRespondToPermissionInput,
   type GatewayWaitForEventsInput,
-} from './contracts.js'
+} from '@murph/gateway-core'
 import {
   listOpenPermissionsFromDatabase,
   respondToPermissionInDatabase,

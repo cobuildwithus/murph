@@ -18,10 +18,10 @@
       "path": "../gateway-core"
     },
     {
-      "path": "../runtime-state"
+      "path": "../gateway-local"
     },
     {
-      "path": "../cli"
+      "path": "../runtime-state"
     }
   ],
   "exclude": [

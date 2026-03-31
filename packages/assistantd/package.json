@@ -34,6 +34,7 @@
   "dependencies": {
     "@murph/assistant-core": "workspace:*",
     "@murph/gateway-core": "workspace:*",
+    "@murph/gateway-local": "workspace:*",
     "@murph/runtime-state": "workspace:*"
   },
   "engines": {

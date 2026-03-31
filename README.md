@@ -17,7 +17,7 @@ Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown,
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
 - shared hosted execution contracts and env/client helpers in `@murph/hosted-execution`
-- headless package boundaries for assistant and gateway consumers: `@murph/assistant-core`, `@murph/gateway-core`, `@murph/assistant-runtime`, and `@murph/assistantd`
+- headless package boundaries plus the explicit local gateway runtime package: `@murph/assistant-core`, `@murph/gateway-core`, `@murph/gateway-local`, `@murph/assistant-runtime`, and `@murph/assistantd`
 
 ## Recommended setup
 
@@ -97,7 +97,8 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/query` | Read helpers, summaries, list/search helpers, and export-pack generation. |
 | `packages/device-syncd` | Local wearable/device OAuth, webhook, and reconcile daemon. |
 | `packages/assistant-core` | Headless local-only assistant/inbox/vault/operator-config boundary for non-CLI consumers. |
-| `packages/gateway-core` | Headless gateway boundary plus local gateway helpers. |
+| `packages/gateway-core` | Headless transport-neutral gateway boundary. |
+| `packages/gateway-local` | Local vault-backed gateway runtime and projection store. |
 | `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
 | `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |
 | `packages/cli` | The published `murph` / `vault-cli` package and the main operator surface. |

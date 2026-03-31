@@ -9,23 +9,23 @@ import {
   gatewaySendMessageResultSchema,
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
-} from './contracts.js'
+} from '@murph/gateway-core'
 import {
   createGatewayOutboxMessageId,
   readGatewayConversationSessionToken,
   readGatewayMessageRouteToken,
-} from './opaque-ids.js'
+} from '@murph/gateway-core'
 import {
   createGatewayInvalidRuntimeIdError,
   createGatewaySessionNotFoundError,
   createGatewayUnsupportedOperationError,
-} from './errors.js'
-import { getGatewayConversationFromSnapshot } from './snapshot.js'
+} from '@murph/gateway-core'
+import { getGatewayConversationFromSnapshot } from '@murph/gateway-core'
 import { LocalGatewayProjectionStore } from './store.js'
 import {
   gatewayBindingDeliveryFromRoute,
   gatewayChannelSupportsReplyToMessage,
-} from './routes.js'
+} from '@murph/gateway-core'
 
 export async function sendGatewayMessageLocal(input: {
   dispatchMode?: AssistantOutboxDispatchMode
