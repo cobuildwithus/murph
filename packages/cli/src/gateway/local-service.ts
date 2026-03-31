@@ -42,17 +42,7 @@ export function createLocalGatewayService(vault: string): GatewayService {
     pollEvents: (input) => pollGatewayEventsLocal(vault, input),
     readMessages: (input) => readGatewayMessagesLocal(vault, input),
     respondToPermission: (input) => respondToGatewayPermissionLocal(vault, input),
-    sendMessage: async (input) => {
-      const parsed = gatewaySendMessageInputSchema.parse(input)
-      const snapshot = await exportGatewayProjectionSnapshotLocal(vault)
-      const result = await sendGatewayMessageLocal({
-        ...parsed,
-        snapshot,
-        vault,
-      })
-      await exportGatewayProjectionSnapshotLocal(vault)
-      return result
-    },
+    sendMessage: (input) => sendGatewayMessageLocal({ ...input, vault }),
     waitForEvents: (input) => waitGatewayEventsLocal(vault, input),
   }
 }

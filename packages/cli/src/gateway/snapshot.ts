@@ -351,7 +351,8 @@ export function pollGatewayEventLogState(
 
   return gatewayPollEventsResultSchema.parse({
     events,
-    nextCursor: events[events.length - 1]?.cursor ?? state.nextCursor,
+    nextCursor:
+      events[events.length - 1]?.cursor ?? Math.max(state.nextCursor, parsed.cursor),
     live: true,
   })
 }

@@ -1,5 +1,3 @@
-import { openInboxRuntime } from '@murph/inboxd'
-
 import { inferAssistantBindingDelivery } from '../assistant/channel-adapters.js'
 import type { AssistantOutboxDispatchMode } from '../assistant/outbox.js'
 import { deliverAssistantOutboxMessage } from '../assistant/outbox.js'
@@ -7,16 +5,14 @@ import { createAssistantTurnId } from '../assistant/turns.js'
 import {
   gatewaySendMessageInputSchema,
   gatewaySendMessageResultSchema,
-  type GatewayConversation,
   type GatewayConversationRoute,
-  type GatewayProjectionSnapshot,
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
 } from './contracts.js'
 import {
-  createGatewayCaptureMessageId,
   createGatewayOutboxMessageId,
   readGatewayConversationSessionToken,
+  readGatewayMessageRouteToken,
 } from './opaque-ids.js'
 import {
   createGatewayInvalidRuntimeIdError,
@@ -25,29 +21,19 @@ import {
 } from './errors.js'
 import { getGatewayConversationFromSnapshot } from './snapshot.js'
 import { LocalGatewayProjectionStore } from './store.js'
-import {
-  gatewayChannelSupportsReplyToMessage,
-  gatewayConversationRouteFromCapture,
-  resolveGatewayConversationRouteKey,
-} from './routes.js'
-
-const CAPTURE_SCAN_PAGE_SIZE = 500
+import { gatewayChannelSupportsReplyToMessage } from './routes.js'
 
 export async function sendGatewayMessageLocal(input: {
   dispatchMode?: AssistantOutboxDispatchMode
-  snapshot?: GatewayProjectionSnapshot | null
   vault: string
 } & GatewaySendMessageInput): Promise<GatewaySendMessageResult> {
-  const { dispatchMode, snapshot: providedSnapshot, vault, ...gatewayInput } = input
+  const { dispatchMode, vault, ...gatewayInput } = input
   const parsed = gatewaySendMessageInputSchema.parse(gatewayInput)
   const routeToken = readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
   const store = new LocalGatewayProjectionStore(vault)
 
   try {
-    const snapshot = providedSnapshot ?? (await store.syncAndReadSnapshot())
-    if (providedSnapshot) {
-      await store.sync()
-    }
+    const snapshot = await store.syncAndReadSnapshot()
 
     const conversation = getGatewayConversationFromSnapshot(snapshot, {
       sessionKey: parsed.sessionKey,
@@ -65,9 +51,10 @@ export async function sendGatewayMessageLocal(input: {
     }
 
     const deliveryReplyToMessageId = await resolveGatewayReplyToMessageIdLocal({
-      conversation,
+      channel: conversation.route.channel,
       replyToMessageId: parsed.replyToMessageId,
-      vault,
+      routeToken,
+      store,
     })
 
     const bindingDelivery = inferAssistantBindingDelivery({
@@ -129,25 +116,23 @@ export async function sendGatewayMessageLocal(input: {
 }
 
 async function resolveGatewayReplyToMessageIdLocal(input: {
-  conversation: GatewayConversation
+  channel: string | null
   replyToMessageId: string | null
-  vault: string
+  routeToken: string
+  store: LocalGatewayProjectionStore
 }): Promise<string | null> {
   if (!input.replyToMessageId) {
     return null
   }
 
-  if (!gatewayChannelSupportsReplyToMessage(input.conversation.route.channel)) {
+  if (!gatewayChannelSupportsReplyToMessage(input.channel)) {
     throw createGatewayUnsupportedOperationError(
-      `Gateway reply-to is not supported for ${input.conversation.route.channel ?? 'this channel'}.`,
+      `Gateway reply-to is not supported for ${input.channel ?? 'this channel'}.`,
     )
   }
 
-  const replyTarget = await findGatewayCaptureReplyTargetLocal(
-    input.vault,
-    input.replyToMessageId,
-    input.conversation.route.channel,
-  )
+  assertGatewayMessageBelongsToRoute(input.replyToMessageId, input.routeToken)
+  const replyTarget = input.store.readMessageProviderReplyTarget(input.replyToMessageId)
   if (!replyTarget) {
     throw createGatewayUnsupportedOperationError(
       'Gateway reply-to requires a channel message with a stable provider message id.',
@@ -155,63 +140,6 @@ async function resolveGatewayReplyToMessageIdLocal(input: {
   }
 
   return replyTarget
-}
-
-async function findGatewayCaptureReplyTargetLocal(
-  vault: string,
-  messageId: string,
-  channel: string | null,
-): Promise<string | null> {
-  const runtime = await openInboxRuntime({ vaultRoot: vault })
-  try {
-    let afterCaptureId: string | null = null
-    let afterOccurredAt: string | null = null
-
-    while (true) {
-      const page = runtime.listCaptures({
-        afterCaptureId,
-        afterOccurredAt,
-        limit: CAPTURE_SCAN_PAGE_SIZE,
-        oldestFirst: true,
-      })
-      if (page.length === 0) {
-        return null
-      }
-
-      for (const capture of page) {
-        const route = gatewayConversationRouteFromCapture(capture)
-        const routeKey = resolveGatewayConversationRouteKey(route)
-        if (!routeKey) {
-          continue
-        }
-        if (createGatewayCaptureMessageId(routeKey, capture.captureId) !== messageId) {
-          continue
-        }
-        return extractGatewayProviderReplyTarget(capture.externalId, channel)
-      }
-
-      const last = page[page.length - 1]
-      afterCaptureId = last?.captureId ?? null
-      afterOccurredAt = last?.occurredAt ?? null
-      if (page.length < CAPTURE_SCAN_PAGE_SIZE) {
-        return null
-      }
-    }
-  } finally {
-    runtime.close()
-  }
-}
-
-function extractGatewayProviderReplyTarget(
-  externalId: string,
-  channel: string | null,
-): string | null {
-  if (channel !== 'linq') {
-    return null
-  }
-  return externalId.startsWith('linq:') && externalId.length > 'linq:'.length
-    ? externalId.slice('linq:'.length)
-    : null
 }
 
 function resolveGatewayDeliverySessionId(sessionKey: string): string {
@@ -235,6 +163,25 @@ function readGatewayConversationSessionTokenOrThrow(sessionKey: string): string 
   } catch (error) {
     throw createGatewayInvalidRuntimeIdError(
       error instanceof Error ? error.message : 'Gateway session key is invalid.',
+    )
+  }
+}
+
+function assertGatewayMessageBelongsToRoute(messageId: string, routeToken: string): void {
+  const messageRouteToken = readGatewayMessageRouteTokenOrThrow(messageId)
+  if (messageRouteToken !== routeToken) {
+    throw createGatewayInvalidRuntimeIdError(
+      'Gateway message id did not belong to the requested session key.',
+    )
+  }
+}
+
+function readGatewayMessageRouteTokenOrThrow(messageId: string): string {
+  try {
+    return readGatewayMessageRouteToken(messageId)
+  } catch (error) {
+    throw createGatewayInvalidRuntimeIdError(
+      error instanceof Error ? error.message : 'Gateway message id is invalid.',
     )
   }
 }

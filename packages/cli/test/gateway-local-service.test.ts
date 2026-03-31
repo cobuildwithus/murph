@@ -12,6 +12,7 @@ import { createAssistantBinding } from '../src/assistant/bindings.js'
 import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { saveAssistantSession } from '../src/assistant/store.js'
 import {
+  createLocalGatewayService,
   fetchGatewayAttachmentsLocal,
   getGatewayConversationLocal,
   listGatewayConversationsLocal,
@@ -407,13 +408,13 @@ test('local gateway send uses route-bound assistant delivery and Linq reply targ
       limit: 20,
       sessionKey: conversation.sessionKey,
     })
+    const service = createLocalGatewayService(vaultRoot)
 
-    const sent = await sendGatewayMessageLocal({
+    const sent = await service.sendMessage({
       dispatchMode: 'queue-only',
       replyToMessageId: initialMessages.messages[0]?.messageId ?? null,
       sessionKey: conversation.sessionKey,
       text: 'I will check in later today.',
-      vault: vaultRoot,
     })
     assert.equal(sent.sessionKey, conversation.sessionKey)
     assert.equal(sent.queued, true)
@@ -498,3 +499,199 @@ function createLegacyGatewayConversationSessionKey(routeKey: string): string {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
 }
+
+test('local gateway send resolves reply-to provider ids from sent outbox messages within the same session', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-send-outbox-reply-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:5001',
+      thread: {
+        id: 'chat-send-2',
+        title: 'Check-ins',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:taylor',
+        displayName: 'Taylor',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T10:00:00.000Z',
+      receivedAt: '2026-03-30T10:00:01.000Z',
+      text: 'Can you check in later today?',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const conversation = (await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })).conversations[0]
+    assert.ok(conversation)
+
+    await saveAssistantOutboxIntent(vaultRoot, {
+      schema: 'murph.assistant-outbox-intent.v1',
+      intentId: 'outbox_gateway_linq_reply_source',
+      sessionId: 'gwds_source_session',
+      turnId: 'turn_gateway_linq_reply_source',
+      createdAt: '2026-03-30T10:01:00.000Z',
+      updatedAt: '2026-03-30T10:01:30.000Z',
+      lastAttemptAt: '2026-03-30T10:01:15.000Z',
+      nextAttemptAt: null,
+      sentAt: '2026-03-30T10:01:30.000Z',
+      attemptCount: 1,
+      status: 'sent',
+      message: 'I will check in later today.',
+      dedupeKey: 'gateway-linq-reply-source',
+      targetFingerprint: 'gateway-linq-reply-source',
+      channel: 'linq',
+      identityId: 'default',
+      actorId: 'contact:taylor',
+      threadId: 'chat-send-2',
+      threadIsDirect: true,
+      replyToMessageId: '5001',
+      bindingDelivery: {
+        kind: 'thread',
+        target: 'chat-send-2',
+      },
+      explicitTarget: null,
+      delivery: {
+        channel: 'linq',
+        idempotencyKey: 'idem-linq-reply-source',
+        providerMessageId: '6001',
+        providerThreadId: 'chat-send-2',
+        target: 'chat-send-2',
+        targetKind: 'thread',
+        sentAt: '2026-03-30T10:01:30.000Z',
+        messageLength: 28,
+      },
+      deliveryConfirmationPending: false,
+      deliveryIdempotencyKey: 'idem-linq-reply-source',
+      deliveryTransportIdempotent: true,
+      lastError: null,
+    })
+
+    const messages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: conversation.sessionKey,
+    })
+    const outboundMessageId = messages.messages.find((message) => message.direction === 'outbound')?.messageId
+    assert.ok(outboundMessageId)
+
+    const sent = await sendGatewayMessageLocal({
+      dispatchMode: 'queue-only',
+      replyToMessageId: outboundMessageId ?? null,
+      sessionKey: conversation.sessionKey,
+      text: 'Replying to the outbound thread message.',
+      vault: vaultRoot,
+    })
+    assert.equal(sent.sessionKey, conversation.sessionKey)
+
+    const queuedIntents = await listAssistantOutboxIntentsLocal(vaultRoot)
+    const replyIntent = queuedIntents.find((intent) => intent.intentId !== 'outbox_gateway_linq_reply_source')
+    assert.equal(replyIntent?.replyToMessageId, '6001')
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
+
+test('local gateway send rejects reply-to message ids from a different session', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-gateway-send-cross-session-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const runtime = await openInboxRuntime({ vaultRoot })
+    const pipeline = await createInboxPipeline({ vaultRoot, runtime })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:7001',
+      thread: {
+        id: 'chat-a',
+        title: 'Thread A',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:alex',
+        displayName: 'Alex',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T11:00:00.000Z',
+      receivedAt: '2026-03-30T11:00:01.000Z',
+      text: 'Thread A message',
+      attachments: [],
+      raw: {},
+    })
+    await pipeline.processCapture({
+      accountId: 'default',
+      source: 'linq',
+      externalId: 'linq:8001',
+      thread: {
+        id: 'chat-b',
+        title: 'Thread B',
+        isDirect: true,
+      },
+      actor: {
+        id: 'contact:blair',
+        displayName: 'Blair',
+        isSelf: false,
+      },
+      occurredAt: '2026-03-30T11:05:00.000Z',
+      receivedAt: '2026-03-30T11:05:01.000Z',
+      text: 'Thread B message',
+      attachments: [],
+      raw: {},
+    })
+    runtime.close()
+
+    const conversations = (await listGatewayConversationsLocal(vaultRoot, {
+      channel: null,
+      includeDerivedTitles: true,
+      includeLastMessage: true,
+      limit: 10,
+      search: null,
+    })).conversations
+    assert.equal(conversations.length, 2)
+
+    const firstConversation = conversations.find((conversation) => conversation.route.threadId === 'chat-a')
+    const secondConversation = conversations.find((conversation) => conversation.route.threadId === 'chat-b')
+    assert.ok(firstConversation)
+    assert.ok(secondConversation)
+
+    const secondMessages = await readGatewayMessagesLocal(vaultRoot, {
+      afterMessageId: null,
+      limit: 100,
+      oldestFirst: true,
+      sessionKey: secondConversation!.sessionKey,
+    })
+    const wrongReplyMessageId = secondMessages.messages[0]?.messageId ?? null
+    assert.ok(wrongReplyMessageId)
+
+    await assert.rejects(
+      () =>
+        sendGatewayMessageLocal({
+          dispatchMode: 'queue-only',
+          replyToMessageId: wrongReplyMessageId,
+          sessionKey: firstConversation!.sessionKey,
+          text: 'This should fail.',
+          vault: vaultRoot,
+        }),
+      /did not belong to the requested session key/i,
+    )
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
+  }
+})
