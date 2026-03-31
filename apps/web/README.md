@@ -170,6 +170,8 @@ Browser-authenticated routes:
 - `GET /api/linq/bindings`
 - `POST /api/linq/bindings`
 
+Hosted browser-facing device-sync responses intentionally omit `externalAccountId`, and the `id` returned from browser-facing connection routes is an opaque handle rather than the raw hosted `device_connection.id` value.
+
 Public provider-facing routes:
 
 - `GET /api/device-sync/oauth/:provider/callback`

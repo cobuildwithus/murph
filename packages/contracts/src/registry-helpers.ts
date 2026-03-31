@@ -1,6 +1,39 @@
+type RegistryMetadataDefaultsInput = {
+  idField?: string;
+  idKeys?: readonly string[];
+  slugKeys?: readonly string[];
+};
+
+type RegistryMetadataWithDefaults<TRegistry extends RegistryMetadataDefaultsInput> = Omit<
+  TRegistry,
+  "idField" | "idKeys" | "slugKeys"
+> & {
+  idField: string;
+  idKeys: readonly string[];
+  slugKeys: readonly string[];
+};
+
 interface RegistryRelationDefinition {
+  type: string;
   cardinality: "one" | "many";
   keys: readonly string[];
+}
+
+interface RegistryLink {
+  type: string;
+  targetId: string;
+  sourceKeys: readonly string[];
+}
+
+export function applyRegistryMetadataDefaults<
+  TRegistry extends RegistryMetadataDefaultsInput,
+>(registry: TRegistry & { idField: string }): RegistryMetadataWithDefaults<TRegistry> {
+  return {
+    ...registry,
+    idField: registry.idField,
+    idKeys: registry.idKeys ?? [registry.idField],
+    slugKeys: registry.slugKeys ?? ["slug"],
+  } as RegistryMetadataWithDefaults<TRegistry>;
 }
 
 export function normalizeRegistryString(value: unknown): string | null {
@@ -55,4 +88,23 @@ export function extractRegistryRelationTargets(
         (entry): entry is string => Boolean(entry),
       )
     : readMergedRegistryStringArray(source, relation.keys);
+}
+
+export function extractRegistryLinks(
+  source: Record<string, unknown>,
+  relations: readonly RegistryRelationDefinition[],
+): RegistryLink[] {
+  return relations.flatMap((relation) =>
+    extractRegistryRelationTargets(source, relation).map((targetId) => ({
+      type: relation.type,
+      targetId,
+      sourceKeys: relation.keys,
+    })),
+  );
+}
+
+export function extractRegistryRelatedIds<TLink extends { targetId: string }>(
+  links: readonly TLink[],
+): string[] {
+  return [...new Set(links.map((link) => link.targetId))];
 }

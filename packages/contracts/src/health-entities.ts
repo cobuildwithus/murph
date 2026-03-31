@@ -1,7 +1,11 @@
 import type { ZodTypeAny } from "zod";
 
 import { HEALTH_HISTORY_EVENT_KINDS, ID_PREFIXES } from "./constants.ts";
-import { extractRegistryRelationTargets } from "./registry-helpers.ts";
+import {
+  applyRegistryMetadataDefaults,
+  extractRegistryLinks,
+  extractRegistryRelatedIds,
+} from "./registry-helpers.ts";
 import {
   allergyUpsertPatchPayloadSchema,
   allergyUpsertPayloadSchema,
@@ -84,12 +88,9 @@ export interface DefineRegistryEntityInput extends Omit<HealthEntityDefinition, 
 export function defineRegistryEntity(
   input: DefineRegistryEntityInput,
 ): HealthEntityDefinitionWithRegistry {
-  const registry: HealthEntityRegistryMetadata = {
-    ...input.registry,
-    idField: input.registry.idField,
-    idKeys: input.registry.idKeys ?? [input.registry.idField],
-    slugKeys: input.registry.slugKeys ?? ["slug"],
-  };
+  const registry: HealthEntityRegistryMetadata = applyRegistryMetadataDefaults(
+    input.registry,
+  );
 
   return {
     ...input,
@@ -405,16 +406,16 @@ export function hasHealthEntityRegistry(
   return Boolean(definition.registry);
 }
 
-export function requireHealthEntityRegistryDefinition(
-  kind: HealthEntityKind,
-): HealthEntityDefinitionWithRegistry {
+export function requireHealthEntityRegistryDefinition<TKind extends HealthEntityKind>(
+  kind: TKind,
+): HealthEntityDefinitionWithRegistry & { kind: TKind } {
   const definition = healthEntityDefinitionByKind.get(kind);
 
   if (!definition || !hasHealthEntityRegistry(definition)) {
     throw new Error(`Health entity "${kind}" does not define a registry projection.`);
   }
 
-  return definition;
+  return definition as HealthEntityDefinitionWithRegistry & { kind: TKind };
 }
 
 export function extractHealthEntityRegistryLinks(
@@ -424,20 +425,14 @@ export function extractHealthEntityRegistryLinks(
   const definition = requireHealthEntityRegistryDefinition(kind);
   const relationKeys = definition.registry.relationKeys ?? [];
 
-  return relationKeys.flatMap((relation) =>
-    extractRegistryRelationTargets(attributes, relation).map((targetId) => ({
-      type: relation.type,
-      targetId,
-      sourceKeys: relation.keys,
-    })),
-  );
+  return extractRegistryLinks(attributes, relationKeys);
 }
 
 export function extractHealthEntityRegistryRelatedIds(
   kind: HealthEntityKind,
   attributes: Record<string, unknown>,
 ): string[] {
-  return [...new Set(extractHealthEntityRegistryLinks(kind, attributes).map((link) => link.targetId))];
+  return extractRegistryRelatedIds(extractHealthEntityRegistryLinks(kind, attributes));
 }
 
 export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");

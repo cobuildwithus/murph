@@ -423,10 +423,33 @@ describe("dispatchHostedDeviceSyncWake", () => {
     const controlPlane = new HostedDeviceSyncControlPlane(
       new Request("https://control.example.test/api/device-sync/connections/dsc_123/disconnect"),
     );
-
-    await expect(controlPlane.disconnectConnection("user-123", "dsc_123")).resolves.toEqual({
-      connection: {
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
         id: "dsc_123",
+        provider: "oura",
+        externalAccountId: "acct_sensitive",
+        displayName: "Oura",
+        status: "active",
+        scopes: ["heartrate"],
+        accessTokenExpiresAt: null,
+        metadata: {},
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+    ]);
+    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+
+    await expect(controlPlane.disconnectConnection("user-123", publicConnectionId)).resolves.toEqual({
+      connection: {
+        id: publicConnectionId,
         provider: "oura",
       },
     });
@@ -467,6 +490,110 @@ describe("dispatchHostedDeviceSyncWake", () => {
         tx: mocks.prismaTx,
       }),
     );
+  });
+
+  it("returns opaque browser connection ids and omits external account ids from browser reads", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/connections"),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        id: "dsc_123",
+        provider: "oura",
+        externalAccountId: "acct_sensitive",
+        displayName: "Oura",
+        status: "active",
+        scopes: ["heartrate"],
+        accessTokenExpiresAt: null,
+        metadata: {},
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+    ]);
+
+    await expect(controlPlane.listConnections("user-123")).resolves.toEqual({
+      providers: [],
+      connections: [
+        {
+          id: controlPlane.createBrowserConnectionId("dsc_123"),
+          provider: "oura",
+          displayName: "Oura",
+          status: "active",
+          scopes: ["heartrate"],
+          accessTokenExpiresAt: null,
+          metadata: {},
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          lastWebhookAt: null,
+          lastSyncStartedAt: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          nextReconcileAt: null,
+          createdAt: "2026-03-26T12:00:00.000Z",
+          updatedAt: "2026-03-26T12:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("resolves browser status reads through the opaque browser connection id", async () => {
+    const controlPlane = new HostedDeviceSyncControlPlane(
+      new Request("https://control.example.test/api/device-sync/connections/dspc_demo/status"),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        id: "dsc_123",
+        provider: "oura",
+        externalAccountId: "acct_sensitive",
+        displayName: "Oura",
+        status: "active",
+        scopes: ["heartrate"],
+        accessTokenExpiresAt: null,
+        metadata: {},
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+    ]);
+    const publicConnectionId = controlPlane.createBrowserConnectionId("dsc_123");
+
+    await expect(controlPlane.getConnectionStatus("user-123", publicConnectionId)).resolves.toEqual({
+      connection: {
+        id: publicConnectionId,
+        provider: "oura",
+        displayName: "Oura",
+        status: "active",
+        scopes: ["heartrate"],
+        accessTokenExpiresAt: null,
+        metadata: {},
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        lastWebhookAt: null,
+        lastSyncStartedAt: null,
+        lastSyncCompletedAt: null,
+        lastSyncErrorAt: null,
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        nextReconcileAt: null,
+        createdAt: "2026-03-26T12:00:00.000Z",
+        updatedAt: "2026-03-26T12:00:00.000Z",
+      },
+    });
   });
 
   it("dispatches a wake from the connected ingress hook when an owner exists", async () => {
