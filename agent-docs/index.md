@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-03-31 (verification docs now cover the incremental test-runtime build lane, local-parallel app verification defaults, and the prepared hosted-web Prisma generate flow while the rest of the durable routing/index remains unchanged)
+Last verified: 2026-03-31 (verification docs now cover the incremental test-runtime build lane, bucketed CLI/hosted-web/Cloudflare Node Vitest lanes, local-parallel app verification defaults, overlapped local package-plus-app test execution, and the prepared hosted-web Prisma generate flow while the rest of the durable routing/index remains unchanged)
 
 ## Purpose
 
