@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
+import type { AssistantStatePaths } from '@murph/runtime-state'
 import { searchAssistantMemory } from './memory.js'
 import {
   ensureAssistantStateDirectory,
@@ -9,7 +10,7 @@ import {
   writeJsonFileAtomic,
 } from './shared.js'
 import { createAssistantStateWriteLock } from './state-write-lock.js'
-import { resolveAssistantStatePaths, type AssistantStatePaths } from './store.js'
+import { resolveAssistantStatePaths } from './store.js'
 
 const assistantOnboardingSlotValues = ['name', 'tone', 'goals'] as const
 const ASSISTANT_ONBOARDING_SCHEMA = 'murph.assistant-onboarding.v1'

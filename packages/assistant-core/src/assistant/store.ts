@@ -51,7 +51,6 @@ export {
   resolveAssistantConversationLookupKey,
   resolveAssistantStatePaths,
 } from './store/paths.js'
-export type { AssistantStatePaths } from './store/paths.js'
 export type {
   AssistantSessionLocator,
   CreateAssistantSessionInput,

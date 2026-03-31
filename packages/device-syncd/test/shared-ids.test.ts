@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { generateUlid } from "@murph/runtime-state";
 import { test, vi } from "vitest";
 
 const { randomBytesMock } = vi.hoisted(() => ({
@@ -13,7 +14,7 @@ vi.mock("node:crypto", async () => {
   };
 });
 
-import { generatePrefixedId, generateStateCode, generateUlid, normalizeString, sanitizeKey } from "../src/shared.ts";
+import { generatePrefixedId, generateStateCode, normalizeString, sanitizeKey } from "../src/shared.ts";
 
 test("device-syncd id helpers preserve dash sanitation and state-code format", () => {
   assert.equal(generateUlid(0), "00000000000123456789ABCDEF");

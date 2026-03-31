@@ -3,7 +3,6 @@ import path from "node:path";
 import { DEVICE_SYNC_DB_RELATIVE_PATH, encodeRandomCrockford, generateUlid } from "@murph/runtime-state";
 
 export const DEFAULT_DEVICE_SYNC_HOST = "127.0.0.1";
-export { generateUlid } from "@murph/runtime-state";
 
 export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);

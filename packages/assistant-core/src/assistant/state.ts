@@ -2,11 +2,11 @@ import { readFile, readdir, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   AssistantStatePaths,
-} from './store.js'
+} from './store/paths.js'
 import {
   redactAssistantDisplayPath,
   resolveAssistantStatePaths,
-} from './store.js'
+} from './store/paths.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 import {
   ensureAssistantStateDirectory,

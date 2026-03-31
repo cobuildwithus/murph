@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   resolveAssistantStatePaths as resolveRuntimeAssistantStatePaths,
-  type AssistantStatePaths,
+  type AssistantStatePaths as RuntimeAssistantStatePaths,
 } from '@murph/runtime-state'
 import {
   type AssistantApprovalPolicy,
@@ -20,7 +20,7 @@ import {
 import { normalizeNullableString } from '../shared.js'
 import type { AssistantSessionLocator } from './types.js'
 
-export { type AssistantStatePaths } from '@murph/runtime-state'
+export type AssistantStatePaths = RuntimeAssistantStatePaths
 
 export function resolveAssistantStatePaths(
   vaultRoot: string,

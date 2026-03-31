@@ -1,5 +1,9 @@
 import { access, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import type {
+  AssistantStatePaths,
+  AssistantStatePermissionAudit,
+} from '@murph/runtime-state'
 import {
   assistantProviderRouteRecoverySchema,
   assistantProviderRouteRecoverySecretsSchema,
@@ -18,7 +22,6 @@ import {
   auditAssistantStatePermissions,
   isMissingFileError,
   writeJsonFileAtomic,
-  type AssistantStatePermissionAudit,
 } from '@murph/assistant-core/assistant/shared'
 import { assertAssistantSessionId } from '@murph/assistant-core/assistant/state-ids'
 import {
@@ -30,7 +33,6 @@ import {
   readAssistantSessionSecrets,
 } from '@murph/assistant-core/assistant/state-secrets'
 import { resolveAssistantSessionPath } from '@murph/assistant-core/assistant/store/persistence'
-import type { AssistantStatePaths } from '@murph/assistant-core/assistant/store/paths'
 
 export interface AssistantStateSecrecyAudit {
   malformedProviderRouteRecoverySecretSidecars: number

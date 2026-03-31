@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { AssistantStatePaths } from '@murph/runtime-state'
 import {
   assistantAutomationStateSchema,
   assistantDiagnosticEventSchema,
@@ -31,7 +32,7 @@ import {
   parseAssistantJsonLinesWithTailSalvage,
 } from '@murph/assistant-core/assistant/shared'
 import { redactAssistantDisplayPath } from './store.js'
-import { resolveAssistantStatePaths, type AssistantStatePaths } from '@murph/assistant-core/assistant/store/paths'
+import { resolveAssistantStatePaths } from '@murph/assistant-core/assistant/store/paths'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 

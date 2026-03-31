@@ -54,7 +54,7 @@ import { applyAssistantSelfDeliveryTargetDefaults } from '../operator-config.ts'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
-} from './store.ts'
+} from './store/paths.ts'
 import type { AssistantOutboxDispatchMode } from './outbox.ts'
 import { errorMessage, normalizeNullableString } from './shared.ts'
 import {

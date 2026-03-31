@@ -20,8 +20,6 @@ export {
   normalizeNullableString,
 } from '../text/shared.js'
 
-export type { AssistantStatePermissionAudit } from '@murph/runtime-state'
-
 export function readAssistantEnvString(
   env: NodeJS.ProcessEnv | null | undefined,
   key: string | null | undefined,
