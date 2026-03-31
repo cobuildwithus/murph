@@ -81,6 +81,10 @@ export interface AssistantProviderTurnInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  toolRuntime?: {
+    requestId?: string | null
+    vault: string
+  } | null
   userPrompt?: string | null
   workingDirectory: string
 }
@@ -104,6 +108,10 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
+  toolRuntime?: {
+    requestId?: string | null
+    vault: string
+  } | null
   userPrompt?: string | null
   workingDirectory: string
 }

@@ -902,6 +902,105 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
   }
 })
 
+test('sendAssistantMessage does not fail over a tool-bound OpenAI-compatible turn after a retryable error', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-robustness-tool-failover-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  robustnessMocks.executeAssistantProviderTurn.mockImplementation(async (input: any) => {
+    if (input.provider === 'openai-compatible') {
+      throw new VaultCliError(
+        'ASSISTANT_PROVIDER_TIMEOUT',
+        'Primary provider timed out after a tool-enabled attempt.',
+        {
+          retryable: true,
+        },
+      )
+    }
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'backup-thread',
+      response: 'backup reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  try {
+    await assert.rejects(
+      sendAssistantMessage({
+        vault: vaultRoot,
+        alias: 'chat:tool-failover',
+        prompt: 'set up a weekly check-in',
+        provider: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        failoverRoutes: [
+          {
+            name: 'backup-codex',
+            provider: 'codex-cli',
+            codexCommand: null,
+            model: 'gpt-5.4',
+            reasoningEffort: 'high',
+            sandbox: 'workspace-write',
+            approvalPolicy: 'never',
+            profile: 'default',
+            oss: false,
+            baseUrl: null,
+            providerName: null,
+            apiKeyEnv: null,
+            cooldownMs: null,
+          },
+        ],
+      }),
+      (error) =>
+        error instanceof VaultCliError &&
+        error.code === 'ASSISTANT_PROVIDER_TIMEOUT',
+    )
+
+    assert.equal(robustnessMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+    const primaryCall = robustnessMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    assert.equal(primaryCall?.provider, 'openai-compatible')
+    assert.equal(primaryCall?.toolRuntime?.vault, vaultRoot)
+    assert.equal(typeof primaryCall?.toolRuntime?.requestId, 'string')
+
+    const failoverState = await readAssistantFailoverState(vaultRoot)
+    assert.equal(failoverState.routes.length, 1)
+    assert.equal(failoverState.routes[0]?.provider, 'openai-compatible')
+    assert.equal(failoverState.routes[0]?.failureCount, 1)
+    assert.equal(failoverState.routes[0]?.successCount, 0)
+
+    const receipts = await listRecentAssistantTurnReceipts(vaultRoot, 1)
+    assert.deepEqual(
+      receipts[0]?.timeline.map((entry) => entry.kind),
+      [
+        'turn.started',
+        'user.persisted',
+        'provider.attempt.started',
+        'provider.attempt.failed',
+        'provider.cooldown.started',
+        'turn.completed',
+      ],
+    )
+    assert.equal(receipts[0]?.status, 'failed')
+    assert.equal(
+      receipts[0]?.timeline.some((entry) => entry.kind === 'provider.failover.applied'),
+      false,
+    )
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
 test('recordAssistantFailoverRouteFailure honors longer route cooldowns over the derived default', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-failover-cooldown-'))
   const vaultRoot = path.join(parent, 'vault')

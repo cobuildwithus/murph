@@ -47,6 +47,20 @@ const runtimeMocks = vi.hoisted(() => ({
   executeAssistantProviderTurn: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
+  resolveAssistantProviderTraits: vi.fn((provider: string) =>
+    provider === 'openai-compatible'
+      ? {
+          resumeKeyMode: 'none' as const,
+          sessionMode: 'stateless' as const,
+          transcriptContextMode: 'local-transcript' as const,
+          workspaceMode: 'none' as const,
+        }
+      : {
+          resumeKeyMode: 'provider-session-id' as const,
+          sessionMode: 'stateful' as const,
+          transcriptContextMode: 'provider-session' as const,
+          workspaceMode: 'direct-cli' as const,
+        }),
 }))
 
 vi.mock('../src/assistant-chat-ink.js', () => ({
@@ -73,6 +87,7 @@ vi.mock('../src/assistant-provider.js', async () => {
   return {
     ...actual,
     executeAssistantProviderTurn: runtimeMocks.executeAssistantProviderTurn,
+    resolveAssistantProviderTraits: runtimeMocks.resolveAssistantProviderTraits,
   }
 })
 
@@ -198,6 +213,21 @@ beforeEach(() => {
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
+  runtimeMocks.resolveAssistantProviderTraits.mockReset()
+  runtimeMocks.resolveAssistantProviderTraits.mockImplementation((provider: string) =>
+    provider === 'openai-compatible'
+      ? {
+          resumeKeyMode: 'none',
+          sessionMode: 'stateless',
+          transcriptContextMode: 'local-transcript',
+          workspaceMode: 'none',
+        }
+      : {
+          resumeKeyMode: 'provider-session-id',
+          sessionMode: 'stateful',
+          transcriptContextMode: 'provider-session',
+          workspaceMode: 'direct-cli',
+        })
 })
 
 
