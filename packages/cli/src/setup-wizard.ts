@@ -18,11 +18,11 @@ import {
   type SetupWearable,
   setupChannelValues,
   setupWearableValues,
-} from './setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 import {
   SETUP_RUNTIME_ENV_NOTICE,
   type SetupWizardRuntimeStatus,
-} from './setup-runtime-env.js'
+} from '@murph/assistant-core/setup-runtime-env'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 export interface SetupWizardResult {

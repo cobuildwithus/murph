@@ -12,7 +12,7 @@ import type {
   SetupAssistantAccount,
   SetupAssistantQuotaWindow,
   SetupConfiguredAssistant,
-} from './setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 
 const CODEX_AUTH_DIRECTORY = '.codex'
 const CODEX_AUTH_FILE_NAME = 'auth.json'

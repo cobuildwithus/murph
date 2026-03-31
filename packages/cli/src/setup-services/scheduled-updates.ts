@@ -7,7 +7,7 @@ import type { AssistantCronPreset } from '@murph/assistant-core/assistant-cli-co
 import type {
   SetupScheduledUpdate,
   SetupStepResult,
-} from '../setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 import { createStep } from './steps.js'
 
 export interface ConfigureSetupScheduledUpdatesInput {

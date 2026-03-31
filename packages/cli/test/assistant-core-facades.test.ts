@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readdir, readFile } from 'node:fs/promises'
+import { access, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -114,6 +114,45 @@ test('cli source no longer keeps export-only assistant-core facade files', async
 
   await walk(srcRoot)
   assert.deepEqual(facadeFiles, [])
+})
+
+test('cli no longer keeps duplicated assistant-core headless source files', async () => {
+  const removedDuplicateFiles = [
+    '../src/child-process-env.ts',
+    '../src/commands/query-record-command-helpers.ts',
+    '../src/inbox-app/bootstrap-doctor-strategies.ts',
+    '../src/inbox-app/bootstrap-doctor.ts',
+    '../src/inbox-app/environment.ts',
+    '../src/inbox-app/linq-endpoint.ts',
+    '../src/inbox-app/promotions.ts',
+    '../src/inbox-app/reads.ts',
+    '../src/inbox-app/runtime.ts',
+    '../src/inbox-app/service.ts',
+    '../src/inbox-app/sources.ts',
+    '../src/inbox-app/types.ts',
+    '../src/process-kill.ts',
+    '../src/setup-cli-contracts.ts',
+    '../src/setup-prompt-io.ts',
+    '../src/setup-runtime-env.ts',
+    '../src/usecases/document-meal-read.ts',
+    '../src/usecases/event-record-mutations.ts',
+    '../src/usecases/experiment-journal-vault.ts',
+    '../src/usecases/explicit-health-family-services.ts',
+    '../src/usecases/food-autolog.ts',
+    '../src/usecases/food.ts',
+    '../src/usecases/integrated-services.ts',
+    '../src/usecases/provider-event.ts',
+    '../src/usecases/recipe.ts',
+    '../src/usecases/record-mutations.ts',
+    '../src/usecases/runtime.ts',
+    '../src/usecases/shared.ts',
+    '../src/usecases/types.ts',
+    '../src/usecases/vault-usecase-helpers.ts',
+  ] as const
+
+  for (const relativePath of removedDuplicateFiles) {
+    await assert.rejects(() => access(new URL(relativePath, import.meta.url)))
+  }
 })
 
 test('cli package root no longer re-exports assistant-core compatibility shims', async () => {

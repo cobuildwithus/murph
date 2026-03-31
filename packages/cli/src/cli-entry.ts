@@ -29,7 +29,7 @@ export async function runMurphCliAction(
   const cliModule = await import('./index.js')
   const operatorConfigModule = await import('@murph/assistant-core/operator-config')
   const setupCliModule = await import('./setup-cli.js')
-  const setupRuntimeEnvModule = await import('./setup-runtime-env.js')
+  const setupRuntimeEnvModule = await import('@murph/assistant-core/setup-runtime-env')
 
   const cli = cliModule.default
   const {

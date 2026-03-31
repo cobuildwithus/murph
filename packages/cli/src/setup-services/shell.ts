@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { SetupStepResult } from '../setup-cli-contracts.js'
+import type { SetupStepResult } from '@murph/assistant-core/setup-cli-contracts'
 import { createStep, DEFAULT_USER_BIN_DIRECTORY } from './steps.js'
 import { defaultFileExists, isExecutable } from './process.js'
 

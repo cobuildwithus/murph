@@ -1,5 +1,5 @@
 import { assistantStopResultSchema } from '@murph/assistant-core/assistant-cli-contracts'
-import { tryKillProcess } from '../process-kill.js'
+import { tryKillProcess } from '@murph/assistant-core/process-kill'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   redactAssistantDisplayPath,

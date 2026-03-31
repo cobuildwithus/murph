@@ -12,7 +12,7 @@ import {
   documentLookupSchema,
   editDocumentRecord,
   rawImportManifestResultSchema,
-} from '../usecases/document-meal-read.js'
+} from '@murph/assistant-core/usecases/document-meal-read'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

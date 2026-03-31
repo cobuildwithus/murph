@@ -14,8 +14,8 @@ import {
   rawImportManifestResultSchema,
   showMealManifest,
   showMealRecord,
-} from '../usecases/document-meal-read.js'
-import { loadImportersRuntimeModule } from '../usecases/runtime.js'
+} from '@murph/assistant-core/usecases/document-meal-read'
+import { loadImportersRuntimeModule } from '@murph/assistant-core/usecases/runtime'
 import type { VaultServices } from '@murph/assistant-core/vault-services'
 import { registerArtifactBackedEntityGroup } from './health-command-factory.js'
 import {

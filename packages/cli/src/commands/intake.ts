@@ -8,7 +8,7 @@ import {
   pathSchema,
   showResultSchema,
 } from '@murph/assistant-core/vault-cli-contracts'
-import { loadImportersRuntimeModule } from '../usecases/runtime.js'
+import { loadImportersRuntimeModule } from '@murph/assistant-core/usecases/runtime'
 import type { VaultServices } from '@murph/assistant-core/vault-services'
 import {
   showAssessmentManifest,

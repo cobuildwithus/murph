@@ -10,9 +10,9 @@ import {
   toCommandShowEntity,
   type AuditCommandListItem,
   type CommandShowEntity,
-} from './query-record-command-helpers.js'
+} from '@murph/assistant-core/commands/query-record-command-helpers'
 
-export type { AuditCommandListItem } from './query-record-command-helpers.js'
+export type { AuditCommandListItem } from '@murph/assistant-core/commands/query-record-command-helpers'
 
 export type AuditSortOrder = 'asc' | 'desc'
 

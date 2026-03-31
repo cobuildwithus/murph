@@ -31,7 +31,7 @@ import {
   type SetupTools,
   type SetupWearable,
   type WhisperModel,
-} from './setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 import type { InboxBootstrapResult } from '@murph/assistant-core/inbox-cli-contracts'
 import {
   configureSetupChannels,
@@ -75,7 +75,7 @@ import {
   ensureWhisperModel,
   resolveExecutablePath,
 } from './setup-services/toolchain.js'
-import { describeSelectedSetupWearables } from './setup-runtime-env.js'
+import { describeSelectedSetupWearables } from '@murph/assistant-core/setup-runtime-env'
 
 interface SetupInput {
   vault: string

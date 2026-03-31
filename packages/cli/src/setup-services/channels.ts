@@ -4,7 +4,7 @@ import {
 } from '@murph/assistant-core/assistant-state'
 import { resolveAgentmailApiKey } from '@murph/assistant-core/agentmail-runtime'
 import { getAssistantChannelAdapter } from '@murph/assistant-core/assistant/channel-adapters'
-import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '../inbox-app/linq-endpoint.js'
+import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murph/assistant-core/inbox-app/linq-endpoint'
 import type { InboxServices } from '@murph/assistant-core/inbox-services'
 import type {
   SetupAgentmailInboxSelection,
@@ -13,13 +13,13 @@ import type {
 import {
   resolveSetupChannelMissingEnv,
   SETUP_RUNTIME_ENV_NOTICE,
-} from '../setup-runtime-env.js'
+} from '@murph/assistant-core/setup-runtime-env'
 import {
   type SetupChannel,
   type SetupConfiguredChannel,
   type SetupStepResult,
   setupChannelValues,
-} from '../setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 import { resolveTelegramBotToken } from '@murph/assistant-core/telegram-runtime'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { createStep } from './steps.js'
