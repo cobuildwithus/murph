@@ -10,16 +10,16 @@ import { test } from 'vitest'
 
 import {
   applyGatewayProjectionSnapshotToEventLog,
+  createGatewayConversationSessionKey,
   gatewayConversationRouteCanSend,
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
   gatewayConversationRouteFromOutboxIntent,
-  pollGatewayEventLogState,
   gatewayReadMessagesInputSchema,
   mergeGatewayConversationRoutes,
+  pollGatewayEventLogState,
   resolveGatewayConversationRouteKey,
-  createGatewayConversationSessionKey,
-} from '../src/gateway-core.js'
+} from '@murph/gateway-core'
 
 const execFileAsync = promisify(execFile)
 const gatewayCoreSourceDir = path.resolve(
@@ -29,39 +29,30 @@ const gatewayCoreSourceDir = path.resolve(
   'src',
 )
 
-test('murph publishes gateway-core for headless conversation gateway consumers', async () => {
+test('murph no longer publishes legacy gateway-core compatibility exports', async () => {
   const packageManifest = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8'),
   ) as {
     exports: Record<string, { default?: string; types?: string }>
   }
 
-  assert.deepEqual(packageManifest.exports['./gateway-core'], {
-    default: './dist/gateway-core.js',
-    types: './dist/gateway-core.d.ts',
-  })
-  assert.deepEqual(packageManifest.exports['./gateway-core-local'], {
-    default: './dist/gateway-core-local.js',
-    types: './dist/gateway-core-local.d.ts',
-  })
+  assert.equal(packageManifest.exports['./gateway-core'], undefined)
+  assert.equal(packageManifest.exports['./gateway-core-local'], undefined)
 })
 
-test('gateway-core is fully hard-cut over: the owner package owns ./local and murph only re-exports it', async () => {
+test('gateway-core is fully hard-cut over: the owner package owns ./local and murph no longer ships gateway compatibility shims', async () => {
   const packageManifest = JSON.parse(
     await readFile(path.resolve(gatewayCoreSourceDir, '..', 'package.json'), 'utf8'),
   ) as {
     dependencies?: Record<string, string | undefined>
   }
+  const cliPackageManifest = JSON.parse(
+    await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as {
+    dependencies?: Record<string, string | undefined>
+  }
   const packageIndex = await readFile(path.join(gatewayCoreSourceDir, 'index.ts'), 'utf8')
   const packageLocal = await readFile(path.join(gatewayCoreSourceDir, 'local.ts'), 'utf8')
-  const cliGatewayShim = await readFile(
-    new URL('../src/gateway-core.ts', import.meta.url),
-    'utf8',
-  )
-  const cliGatewayLocalShim = await readFile(
-    new URL('../src/gateway-core-local.ts', import.meta.url),
-    'utf8',
-  )
 
   assert.doesNotMatch(packageIndex, /from ['"]murph\/gateway-core['"]/u)
   assert.equal(packageManifest.dependencies?.murph, undefined)
@@ -69,15 +60,20 @@ test('gateway-core is fully hard-cut over: the owner package owns ./local and mu
   assert.match(packageLocal, /\.\/local-service\.js/u)
   assert.match(packageLocal, /\.\/projection\.js/u)
   assert.match(packageLocal, /\.\/send\.js/u)
-  assert.match(cliGatewayShim, /@murph\/gateway-core/u)
-  assert.match(cliGatewayLocalShim, /@murph\/gateway-core\/local/u)
+  assert.equal(cliPackageManifest.dependencies?.['@murph/gateway-core'], undefined)
 
+  await assert.rejects(
+    access(new URL('../src/gateway-core.ts', import.meta.url), constants.F_OK),
+  )
+  await assert.rejects(
+    access(new URL('../src/gateway-core-local.ts', import.meta.url), constants.F_OK),
+  )
   await assert.rejects(
     access(path.resolve(fileURLToPath(new URL('..', import.meta.url)), 'src', 'gateway'), constants.F_OK),
   )
 })
 
-test('workspace source resolution knows about the dedicated @murph/gateway-core packages while preserving murph compatibility exports', async () => {
+test('workspace source resolution points directly at the dedicated @murph/gateway-core packages with no murph compatibility alias left behind', async () => {
   const tsconfig = JSON.parse(
     await readFile(new URL('../../../tsconfig.base.json', import.meta.url), 'utf8'),
   ) as {
@@ -92,12 +88,8 @@ test('workspace source resolution knows about the dedicated @murph/gateway-core 
   assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-core/local'], [
     'packages/gateway-core/src/local.ts',
   ])
-  assert.deepEqual(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], [
-    'packages/cli/src/gateway-core.ts',
-  ])
-  assert.deepEqual(tsconfig.compilerOptions?.paths?.['murph/gateway-core-local'], [
-    'packages/cli/src/gateway-core-local.ts',
-  ])
+  assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], undefined)
+  assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core-local'], undefined)
 })
 
 test('gateway conversation routes normalize existing assistant bindings without leaking assistant-only field names', () => {
@@ -378,8 +370,8 @@ test('gateway sendability respects current channel delivery constraints', () => 
   )
 })
 
-test('built gateway-core import stays free of assistant runtime warnings', async () => {
-  const distPath = new URL('../dist/gateway-core.js', import.meta.url)
+test('built @murph/gateway-core import stays free of assistant runtime warnings', async () => {
+  const distPath = new URL('../../gateway-core/dist/index.js', import.meta.url)
   try {
     await access(distPath, constants.F_OK)
   } catch {

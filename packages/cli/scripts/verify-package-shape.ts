@@ -68,7 +68,7 @@ assert(
 )
 assert(
   packageJson.dependencies?.['@murph/assistant-core'] === 'workspace:*',
-  'package.json must depend on @murph/assistant-core so headless assistant runtime/state facades resolve through the dedicated owner package.',
+  'package.json must depend on @murph/assistant-core so the CLI can import the headless owner package directly.',
 )
 assert(
   packageJson.main === './dist/index.js',
@@ -116,44 +116,36 @@ assert(
   'package.json must publish assistant/service types from dist/assistant/service.d.ts.',
 )
 assert(
-  packageJson.exports?.['./assistant/state-ids']?.default === './dist/assistant/state-ids.js',
-  'package.json must publish assistant/state-ids from dist/assistant/state-ids.js.',
+  packageJson.exports?.['./assistant/state-ids'] === undefined,
+  'package.json must not publish the removed assistant/state-ids compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./assistant/state-ids']?.types === './dist/assistant/state-ids.d.ts',
-  'package.json must publish assistant/state-ids types from dist/assistant/state-ids.d.ts.',
+  packageJson.exports?.['./assistant-cli-contracts'] === undefined,
+  'package.json must not publish the removed assistant-cli-contracts compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./assistant-cli-contracts']?.default === './dist/assistant-cli-contracts.js',
-  'package.json must publish assistant-cli-contracts from dist/assistant-cli-contracts.js.',
+  packageJson.exports?.['./inbox-services'] === undefined,
+  'package.json must not publish the removed inbox-services compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./assistant-cli-contracts']?.types === './dist/assistant-cli-contracts.d.ts',
-  'package.json must publish assistant-cli-contracts types from dist/assistant-cli-contracts.d.ts.',
+  packageJson.exports?.['./operator-config'] === undefined,
+  'package.json must not publish the removed operator-config compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./gateway-core']?.default === './dist/gateway-core.js',
-  'package.json must publish the gateway-core headless surface from dist/gateway-core.js.',
+  packageJson.exports?.['./gateway-core'] === undefined,
+  'package.json must not publish the removed gateway-core compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./gateway-core']?.types === './dist/gateway-core.d.ts',
-  'package.json must publish gateway-core types from dist/gateway-core.d.ts.',
+  packageJson.exports?.['./gateway-core-local'] === undefined,
+  'package.json must not publish the removed gateway-core-local compatibility subpath.',
 )
 assert(
-  packageJson.exports?.['./gateway-core-local']?.default === './dist/gateway-core-local.js',
-  'package.json must publish the gateway-core-local surface from dist/gateway-core-local.js.',
+  packageJson.dependencies?.['@murph/gateway-core'] === undefined,
+  'package.json must not keep a runtime dependency on @murph/gateway-core after the hard cut.',
 )
 assert(
-  packageJson.exports?.['./gateway-core-local']?.types === './dist/gateway-core-local.d.ts',
-  'package.json must publish gateway-core-local types from dist/gateway-core-local.d.ts.',
-)
-assert(
-  packageJson.exports?.['./vault-services']?.default === './dist/vault-services.js',
-  'package.json must publish the neutral vault-services surface from dist/vault-services.js.',
-)
-assert(
-  packageJson.exports?.['./vault-services']?.types === './dist/vault-services.d.ts',
-  'package.json must publish vault-services types from dist/vault-services.d.ts.',
+  packageJson.exports?.['./vault-services'] === undefined,
+  'package.json must not publish the removed vault-services compatibility subpath.',
 )
 assert(
   (typeof packageJson.repository === 'object' ? packageJson.repository?.url : packageJson.repository) ===

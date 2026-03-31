@@ -486,12 +486,17 @@ export async function loadCaptureSyncState(
   currentCursor: number | null,
 ): Promise<CaptureSyncState> {
   const headCursor = await readInboxCaptureMutationHead(vault)
-  if (currentCursor === null || headCursor < currentCursor) {
+
+  async function rebuildState(): Promise<CaptureSyncState> {
     return {
       kind: 'rebuild',
       headCursor,
       captures: await listAllInboxCapturesByCreatedOrder(vault),
     }
+  }
+
+  if (currentCursor === null || headCursor < currentCursor) {
+    return rebuildState()
   }
 
   if (headCursor === currentCursor) {
@@ -511,7 +516,7 @@ export async function loadCaptureSyncState(
       vaultRoot: vault,
     })
     if (batch.length === 0) {
-      break
+      return rebuildState()
     }
 
     for (const mutation of batch) {
