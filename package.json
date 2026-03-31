@@ -38,6 +38,7 @@
     "plan:close": "bash scripts/close-exec-plan.sh",
     "task:finish": "bash scripts/finish-task",
     "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
+    "review:gpt:simplify": "cobuild-review-gpt --config scripts/review-gpt.config.sh --preset simplify",
     "review:gpt:full": "cobuild-review-gpt --config scripts/review-gpt-full.config.sh",
     "review:gpt:delay": "bash scripts/review-gpt-delay.sh",
     "review:gpt:data": "bash scripts/review-gpt-data.sh",
@@ -64,7 +65,7 @@
   },
   "devDependencies": {
     "@cobuild/repo-tools": "^0.1.15",
-    "@cobuild/review-gpt": "^0.5.16",
+    "@cobuild/review-gpt": "^0.5.17",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.1.2",
     "rimraf": "^6.0.1",
