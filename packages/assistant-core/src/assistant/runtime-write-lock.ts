@@ -5,7 +5,7 @@ import {
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
-} from './store.js'
+} from './store/paths.js'
 
 const assistantRuntimeWriteLock = createAssistantStateWriteLock<AssistantStatePaths>({
   ownerKeyPrefix: 'assistant-runtime-write',

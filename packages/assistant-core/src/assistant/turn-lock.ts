@@ -2,7 +2,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import {
   resolveAssistantStatePaths,
   type AssistantStatePaths,
-} from './store.js'
+} from './store/paths.js'
 import { createAssistantStateWriteLock } from './state-write-lock.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 
