@@ -1,6 +1,12 @@
 import { env, exports } from "cloudflare:workers";
 import { runDurableObjectAlarm } from "cloudflare:test";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  describe as baseDescribe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { createHostedExecutionSignature } from "../../src/auth.js";
 import { createHostedBundleStore } from "../../src/bundle-store.js";
@@ -30,6 +36,8 @@ interface UserRunnerRpcStub {
     userId: string;
   }>;
 }
+
+const describe = baseDescribe.sequential;
 
 describe("cloudflare worker runtime suite", () => {
   afterEach(() => {

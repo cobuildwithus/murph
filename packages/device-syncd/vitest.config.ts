@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineProject } from "vitest/config";
 
-import { resolveMurphVitestFileParallelism } from "../../config/vitest-parallelism.js";
+import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
 import {
@@ -30,7 +30,7 @@ export default defineProject({
     ...murphVitestNoTimeouts,
     name: "device-syncd",
     environment: "node",
-    fileParallelism: resolveMurphVitestFileParallelism(),
+    ...resolveMurphVitestConcurrency(),
     include: ["test/**/*.test.ts"],
   },
 });

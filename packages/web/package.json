@@ -14,7 +14,7 @@
     "start": "pnpm --dir ../.. exec tsx packages/web/scripts/next-local.ts start",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts packages/web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config packages/web/vitest.config.ts --project local-web --no-coverage",
-    "verify": "pnpm typecheck && pnpm test && pnpm build:app"
+    "verify": "bash scripts/verify-fast.sh"
   },
   "dependencies": {
     "@murph/contracts": "workspace:*",

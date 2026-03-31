@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 import {
   HOSTED_EXECUTION_SIGNATURE_HEADER,
@@ -10,6 +10,8 @@ import {
   dispatchHostedExecutionStatus,
   dispatchHostedExecutionBestEffort,
 } from "@/src/lib/hosted-execution/dispatch";
+
+const describe = baseDescribe.sequential;
 
 describe("dispatchHostedExecutionBestEffort", () => {
   const originalDispatchUrl = process.env.HOSTED_EXECUTION_DISPATCH_URL;

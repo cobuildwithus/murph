@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineProject } from "vitest/config";
 
-import { resolveMurphVitestFileParallelism } from "../../config/vitest-parallelism.js";
+import { resolveMurphVitestConcurrency } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
 import { cloudflareVitestAliases } from "./vitest.shared.js";
@@ -29,7 +29,7 @@ export default defineProject({
     ...murphVitestNoTimeouts,
     name: "cloudflare-node",
     environment: "node",
-    fileParallelism: resolveMurphVitestFileParallelism(),
+    ...resolveMurphVitestConcurrency(),
     exclude: ["apps/cloudflare/test/workers/**/*.test.ts"],
     include: ["apps/cloudflare/test/**/*.test.ts"],
   },

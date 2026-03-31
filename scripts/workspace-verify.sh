@@ -26,9 +26,13 @@ readonly shell_syntax_check_scripts=(
   "scripts/update-changelog.sh"
   "scripts/generate-release-notes.sh"
   "scripts/workspace-verify.sh"
+  "packages/web/scripts/verify-fast.sh"
+  "apps/web/scripts/verify-fast.sh"
+  "apps/cloudflare/scripts/verify-fast.sh"
 )
 
 readonly node_syntax_check_scripts=(
+  "scripts/build-test-runtime-prepared.mjs"
   "scripts/release-helpers.mjs"
   "scripts/verify-release-target.mjs"
   "scripts/pack-publishables.mjs"
@@ -134,7 +138,7 @@ run_repo_build_with_retry() {
 }
 
 run_test_runtime_artifact_build_with_retry() {
-  run_command_with_retry "build:test-runtime" pnpm build:test-runtime
+  run_command_with_retry "build:test-runtime:prepared" pnpm build:test-runtime:prepared
 }
 
 run_package_command_with_retry() {
@@ -164,6 +168,21 @@ wait_for_background_jobs() {
 }
 
 run_test_packages_common() {
+  if [[ "$test_lane_parallel" == "1" ]]; then
+    local pids=()
+
+    pnpm no-js &
+    pids+=("$!")
+    pnpm --dir "packages/contracts" test &
+    pids+=("$!")
+
+    if ! wait_for_background_jobs "${pids[@]}"; then
+      return 1
+    fi
+
+    return 0
+  fi
+
   pnpm no-js
   pnpm --dir "packages/contracts" test
 }
@@ -214,24 +233,26 @@ run_test() {
   bash "scripts/check-agent-docs-drift.sh"
   run_workspace_boundary_check
   run_test_packages_common
-  prepare_repo_vitest_runtime_artifacts
 
   if [[ "$test_lane_parallel" == "1" ]]; then
     local test_packages_pid
     local test_apps_pid
+    local smoke_pid
 
-    run_repo_vitest --no-coverage &
+    (prepare_repo_vitest_runtime_artifacts && run_repo_vitest --no-coverage) &
     test_packages_pid="$!"
     run_test_apps &
     test_apps_pid="$!"
+    pnpm exec tsx "e2e/smoke/verify-fixtures.ts" &
+    smoke_pid="$!"
 
-    wait_for_background_jobs "$test_packages_pid" "$test_apps_pid"
+    wait_for_background_jobs "$test_packages_pid" "$test_apps_pid" "$smoke_pid"
   else
+    prepare_repo_vitest_runtime_artifacts
     run_repo_vitest --no-coverage
     run_test_apps
+    pnpm exec tsx "e2e/smoke/verify-fixtures.ts"
   fi
-
-  pnpm exec tsx "e2e/smoke/verify-fixtures.ts"
 }
 
 run_test_packages() {
@@ -249,9 +270,25 @@ run_test_packages_coverage() {
 
 run_test_coverage() {
   bash "scripts/doc-gardening.sh" --fail-on-issues
-  run_test_packages_coverage
-  run_test_apps
-  pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage
+
+  if [[ "$test_lane_parallel" == "1" ]]; then
+    local coverage_pid
+    local test_apps_pid
+    local smoke_pid
+
+    run_test_packages_coverage &
+    coverage_pid="$!"
+    run_test_apps &
+    test_apps_pid="$!"
+    pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage &
+    smoke_pid="$!"
+
+    wait_for_background_jobs "$coverage_pid" "$test_apps_pid" "$smoke_pid"
+  else
+    run_test_packages_coverage
+    run_test_apps
+    pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage
+  fi
 }
 
 run_verify_cli() {

@@ -12,7 +12,7 @@
     "test": "pnpm typecheck && pnpm test:node",
     "test:node": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage",
     "test:workers": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage",
-    "verify": "pnpm typecheck && pnpm test:node && pnpm test:workers",
+    "verify": "bash scripts/verify-fast.sh",
     "deploy:config:render": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/render-deploy-config.ts",
     "deploy:preflight": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/validate-deploy-env.ts",
     "images:cleanup": "pnpm --dir ../.. exec tsx apps/cloudflare/scripts/cleanup-container-images.ts",

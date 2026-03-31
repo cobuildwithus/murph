@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 
-import { beforeEach, test, vi } from "vitest";
+import { beforeEach, test as baseTest, vi } from "vitest";
+
+const test = baseTest.sequential;
 
 vi.mock("../src/lib/overview", () => {
   return {

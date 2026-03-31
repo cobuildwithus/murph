@@ -1,6 +1,14 @@
 import { createHmac } from "node:crypto";
 
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe as baseDescribe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -50,6 +58,7 @@ let inboxd: Pick<
   "parseCanonicalLinqMessageReceivedEvent" | "verifyAndParseLinqWebhookRequest"
 >;
 const REMOVED_LINQ_WEBHOOK_SECRET_ALIAS = ["HEALTHY", "BOB", "LINQ", "WEBHOOK", "SECRET"].join("_");
+const describe = baseDescribe.sequential;
 
 describe("HostedLinqControlPlane", () => {
   beforeAll(async () => {

@@ -4,13 +4,13 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, defineProject } from "vitest/config";
 
 import {
-  resolveMurphVitestFileParallelism,
+  resolveMurphVitestConcurrency,
   resolveMurphVitestMaxWorkers,
 } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
-const cliVitestFileParallelism = resolveMurphVitestFileParallelism();
+const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
 
 type CliVitestProjectSpec = {
@@ -28,7 +28,7 @@ export function createCliVitestProject(name: string, fileNames: readonly string[
       ...murphVitestNoTimeouts,
       name,
       environment: "node",
-      fileParallelism: cliVitestFileParallelism,
+      ...cliVitestConcurrency,
       include: fileNames.map(cliTestFile),
     },
   });

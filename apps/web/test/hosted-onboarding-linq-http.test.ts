@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingLinqConfig: () => ({
@@ -10,6 +10,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import { sendHostedLinqChatMessage } from "@/src/lib/hosted-onboarding/linq";
 
 const originalFetch = globalThis.fetch;
+const describe = baseDescribe.sequential;
 
 describe("sendHostedLinqChatMessage", () => {
   beforeEach(() => {

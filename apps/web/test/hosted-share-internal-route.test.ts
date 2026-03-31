@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe as baseDescribe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { HOSTED_EXECUTION_USER_ID_HEADER } from "@murph/hosted-execution";
 
@@ -27,6 +35,7 @@ type RouteModule = typeof import("../app/api/hosted-share/internal/[shareId]/pay
 let route: RouteModule;
 
 const originalShareToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN;
+const describe = baseDescribe.sequential;
 
 describe("hosted share internal payload route", () => {
   beforeAll(async () => {
