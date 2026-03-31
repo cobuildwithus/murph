@@ -10,6 +10,7 @@ import {
 import {
   maybeRefreshAssistantTranscriptDistillation,
 } from './transcript-distillation.js'
+import { shouldUseAssistantOpenAIResponsesApi } from './provider-config.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
@@ -88,35 +89,42 @@ export async function persistAssistantTurnAndSession(input: {
     lastTurnAt: updatedAt,
     turnCount: input.session.turnCount + 1,
   })
-  const transcript = await state.transcripts.list(input.session.sessionId)
-  const distillation = await maybeRefreshAssistantTranscriptDistillation({
-    sessionId: input.session.sessionId,
-    transcript,
-    vault: input.input.vault,
+  const usesOpenAIResponsesApi = shouldUseAssistantOpenAIResponsesApi({
+    provider: input.providerResult.provider,
+    ...input.providerResult.providerOptions,
   })
 
-  if (distillation.created && distillation.distillation) {
-    await state.turns.appendEvent({
-      turnId: input.turnId,
-      kind: 'provider.context.refreshed',
-      detail: 'append-only transcript distillation refreshed',
-      metadata: {
-        distillationId: distillation.distillation.distillationId,
-        endEntryOffset: String(distillation.distillation.endEntryOffset),
-      },
-      at: distillation.distillation.createdAt,
-    })
-    await state.diagnostics.recordEvent({
-      component: 'assistant',
-      kind: 'turn.context.refreshed',
-      message: 'Assistant transcript distillation refreshed for an older session history window.',
+  if (!usesOpenAIResponsesApi) {
+    const transcript = await state.transcripts.list(input.session.sessionId)
+    const distillation = await maybeRefreshAssistantTranscriptDistillation({
       sessionId: input.session.sessionId,
-      turnId: input.turnId,
-      data: {
-        distillationId: distillation.distillation.distillationId,
-        endEntryOffset: distillation.distillation.endEntryOffset,
-      },
+      transcript,
+      vault: input.input.vault,
     })
+
+    if (distillation.created && distillation.distillation) {
+      await state.turns.appendEvent({
+        turnId: input.turnId,
+        kind: 'provider.context.refreshed',
+        detail: 'append-only transcript distillation refreshed',
+        metadata: {
+          distillationId: distillation.distillation.distillationId,
+          endEntryOffset: String(distillation.distillation.endEntryOffset),
+        },
+        at: distillation.distillation.createdAt,
+      })
+      await state.diagnostics.recordEvent({
+        component: 'assistant',
+        kind: 'turn.context.refreshed',
+        message: 'Assistant transcript distillation refreshed for an older session history window.',
+        sessionId: input.session.sessionId,
+        turnId: input.turnId,
+        data: {
+          distillationId: distillation.distillation.distillationId,
+          endEntryOffset: distillation.distillation.endEntryOffset,
+        },
+      })
+    }
   }
 
   return savedSession

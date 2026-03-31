@@ -300,6 +300,75 @@ test('sendAssistantMessage writes append-only transcript distillations once loca
   )
 })
 
+test('sendAssistantMessage chains official OpenAI responses without local transcript distillation', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-openai-responses-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(vaultRoot)
+  cleanupPaths.push(parent)
+
+  let responseCounter = 0
+  runtimeMocks.executeAssistantProviderTurn.mockImplementation(async () => {
+    responseCounter += 1
+    return {
+      provider: 'openai-compatible',
+      providerOptions: {
+        apiKeyEnv: 'OPENAI_API_KEY',
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5',
+        providerName: 'openai',
+      },
+      providerSessionId: `resp_${responseCounter}`,
+      response: `acknowledged ${responseCounter}`,
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  let latest = null as Awaited<ReturnType<typeof sendAssistantMessage>> | null
+  for (let index = 0; index < 9; index += 1) {
+    latest = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'imessage:openai-responses',
+      channel: 'imessage',
+      identityId: 'assistant:primary',
+      participantId: 'contact:openai',
+      sourceThreadId: 'chat-openai',
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      providerName: 'openai',
+      model: 'gpt-5',
+      prompt: `What changed on day ${index + 1}?`,
+    })
+  }
+
+  assert.ok(latest)
+
+  const providerCalls = runtimeMocks.executeAssistantProviderTurn.mock.calls.map(
+    (call) => call[0],
+  )
+  assert.equal(providerCalls[0]?.resumeProviderSessionId, null)
+  assert.equal(providerCalls[1]?.resumeProviderSessionId, 'resp_1')
+  assert.equal(providerCalls[1]?.conversationMessages, undefined)
+  assert.equal(providerCalls[1]?.continuityContext, null)
+  assert.equal(typeof providerCalls[1]?.systemPrompt, 'string')
+
+  const distillation = await readLatestAssistantTranscriptDistillation(
+    vaultRoot,
+    latest!.session.sessionId,
+  )
+  assert.equal(distillation, null)
+
+  const receipts = await listAssistantTurnReceipts(vaultRoot)
+  const latestReceipt = receipts[0]
+  assert.ok(latestReceipt)
+  assert.equal(
+    latestReceipt?.timeline.some((event) => event.kind === 'provider.context.refreshed'),
+    false,
+  )
+})
+
 test('sanitizeAssistantOutboundReply removes local source scaffolding for outbound channels', () => {
   const sanitized = sanitizeAssistantOutboundReply(
     [

@@ -6,6 +6,7 @@ import type {
 } from '../assistant-cli-contracts.js'
 import type { AssistantModelSpec } from '../model-harness.js'
 import {
+  isAssistantOpenAIBaseUrl,
   normalizeNullableString,
   readAssistantEnvString,
 } from './shared.js'
@@ -265,6 +266,16 @@ export function assistantProviderConfigsEqual(
   }
 
   return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight)
+}
+
+export function shouldUseAssistantOpenAIResponsesApi(
+  input: AssistantProviderConfigInput | null | undefined,
+): boolean {
+  const normalized = normalizeAssistantProviderConfig(input)
+  return (
+    normalized.provider === 'openai-compatible' &&
+    isAssistantOpenAIBaseUrl(normalized.baseUrl)
+  )
 }
 
 export function resolveAssistantModelSpecFromProviderConfig(

@@ -16,6 +16,7 @@ import {
   writeAssistantProviderStateResumeRouteId,
   writeAssistantProviderStateResumeWorkspaceKey,
 } from './provider-state.js'
+import { shouldUseAssistantOpenAIResponsesApi } from './provider-config.js'
 
 export function hashAssistantProviderWorkingDirectory(
   workingDirectory: string,
@@ -30,12 +31,19 @@ export function resolveAssistantProviderResumeKey(input: {
   binding: AssistantProviderBinding | null
   provider: AssistantChatProvider
 }): string | null {
+  if (!input.binding || input.binding.provider !== input.provider) {
+    return null
+  }
+
   const traits = resolveAssistantProviderTraits(input.provider)
-  if (
-    traits.resumeKeyMode !== 'provider-session-id' ||
-    !input.binding ||
-    input.binding.provider !== input.provider
-  ) {
+  const supportsProviderSessionResume =
+    traits.resumeKeyMode === 'provider-session-id' ||
+    shouldUseAssistantOpenAIResponsesApi({
+      provider: input.binding.provider,
+      ...input.binding.providerOptions,
+    })
+
+  if (!supportsProviderSessionResume) {
     return null
   }
 
@@ -52,6 +60,7 @@ export function shouldResumeAssistantProviderRecovery(
 
 export function resolveAssistantRouteResumeBinding(input: {
   provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
   recoveredBinding: AssistantProviderBinding | null
   routeId: string
   sessionBinding: AssistantProviderBinding | null
@@ -61,6 +70,7 @@ export function resolveAssistantRouteResumeBinding(input: {
     doesAssistantResumeBindingMatchRoute({
       binding: input.recoveredBinding,
       provider: input.provider,
+      providerOptions: input.providerOptions,
       routeId: input.routeId,
       workingDirectoryKey: input.workingDirectoryKey,
     })
@@ -72,6 +82,7 @@ export function resolveAssistantRouteResumeBinding(input: {
     doesAssistantResumeBindingMatchRoute({
       binding: input.sessionBinding,
       provider: input.provider,
+      providerOptions: input.providerOptions,
       routeId: input.routeId,
       workingDirectoryKey: input.workingDirectoryKey,
     })
@@ -85,6 +96,7 @@ export function resolveAssistantRouteResumeBinding(input: {
 export function doesAssistantResumeBindingMatchRoute(input: {
   binding: AssistantProviderBinding | null
   provider: AssistantChatProvider
+  providerOptions: AssistantProviderSessionOptions
   routeId: string
   workingDirectoryKey: string | null
 }): boolean {
@@ -101,6 +113,19 @@ export function doesAssistantResumeBindingMatchRoute(input: {
   const resumeWorkspaceKey = readAssistantProviderResumeWorkspaceKey({
     providerBinding: input.binding,
   })
+  const resumesOfficialOpenAIResponses =
+    shouldUseAssistantOpenAIResponsesApi({
+      provider: input.provider,
+      ...input.providerOptions,
+    }) &&
+    shouldUseAssistantOpenAIResponsesApi({
+      provider: input.binding.provider,
+      ...input.binding.providerOptions,
+    })
+
+  if (resumesOfficialOpenAIResponses) {
+    return true
+  }
 
   return (
     resumeRouteId === input.routeId &&
@@ -122,8 +147,14 @@ export function resolveNextAssistantProviderBinding(input: {
       ? input.previousBinding
       : null
   const traits = resolveAssistantProviderTraits(input.provider)
+  const supportsProviderSessionResume =
+    traits.resumeKeyMode === 'provider-session-id' ||
+    shouldUseAssistantOpenAIResponsesApi({
+      provider: input.provider,
+      ...input.providerOptions,
+    })
   const nextProviderSessionId =
-    traits.resumeKeyMode === 'provider-session-id'
+    supportsProviderSessionResume
       ? resolveNextAssistantProviderSessionId({
           previousBinding,
           providerSessionId: input.providerSessionId,

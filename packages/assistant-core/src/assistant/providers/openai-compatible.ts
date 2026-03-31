@@ -15,10 +15,14 @@ import {
   buildOpenAICompatibleDiscoveryHeaders,
   ensureTrailingSlash,
   extractOpenAICompatibleAssistantProviderUsage,
+  extractOpenAICompatibleProviderSessionId,
 } from './helpers.js'
 import type { AssistantProviderTraceUpdate } from '../provider-traces.js'
 import { normalizeNullableString } from '../shared.js'
-import { resolveAssistantModelSpecFromProviderConfig } from '../provider-config.js'
+import {
+  resolveAssistantModelSpecFromProviderConfig,
+  shouldUseAssistantOpenAIResponsesApi,
+} from '../provider-config.js'
 import type { AssistantProviderDefinition } from './types.js'
 
 const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
@@ -211,6 +215,8 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
+    const usesOpenAIResponsesApi =
+      shouldUseAssistantOpenAIResponsesApi(providerConfig)
     const toolEvents: unknown[] = []
     let executedToolCount = 0
     const tools = input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
@@ -248,13 +254,35 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
               tools,
             }
           : {}),
+        ...(usesOpenAIResponsesApi
+          ? {
+              providerOptions: {
+                openai: {
+                  store: false,
+                  ...(normalizeNullableString(input.resumeProviderSessionId)
+                    ? {
+                        previousResponseId: normalizeNullableString(
+                          input.resumeProviderSessionId,
+                        )!,
+                      }
+                    : {}),
+                },
+              },
+            }
+          : {}),
         system: normalizeNullableString(input.systemPrompt) ?? undefined,
         timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
       })
 
       return {
         provider: providerConfig.provider,
-        providerSessionId: null,
+        providerSessionId:
+          usesOpenAIResponsesApi
+            ? (
+                extractOpenAICompatibleProviderSessionId(result) ??
+                normalizeNullableString(input.resumeProviderSessionId)
+              )
+            : null,
         response: result.text,
         stderr: '',
         stdout: '',

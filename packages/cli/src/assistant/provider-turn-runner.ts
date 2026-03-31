@@ -71,6 +71,7 @@ import {
   buildAssistantTranscriptDistillationContinuityText,
   readLatestAssistantTranscriptDistillation,
 } from './transcript-distillation.js'
+import { shouldUseAssistantOpenAIResponsesApi } from './provider-config.js'
 import {
   appendAssistantTurnReceiptEvent,
 } from './turns.js'
@@ -424,10 +425,15 @@ async function resolveAssistantRouteTurnPlan(input: {
     : null
   const resumeProviderBinding = resolveAssistantResumeBinding({
     provider: input.route.provider,
+    providerOptions: input.route.providerOptions,
     recoveredBinding: recoveredProviderBinding,
     routeId: input.route.routeId,
     sessionBinding: activeProviderBinding,
     workingDirectoryKey,
+  })
+  const usesOpenAIResponsesApi = shouldUseAssistantOpenAIResponsesApi({
+    provider: input.route.provider,
+    ...input.route.providerOptions,
   })
   const shouldResetCodexProviderSession =
     shouldResetCodexProviderSessionForPromptVersion({
@@ -435,23 +441,33 @@ async function resolveAssistantRouteTurnPlan(input: {
       currentCodexPromptVersion: input.currentCodexPromptVersion,
       provider: input.route.provider,
     })
+  const resumeKeyBinding =
+    resumeProviderBinding ??
+    (usesOpenAIResponsesApi ? activeProviderBinding : null)
   const resumeProviderSessionId =
     shouldResetCodexProviderSession
       ? null
       : readAssistantProviderResumeKey({
-          binding: resumeProviderBinding,
+          binding: resumeKeyBinding,
           provider: input.route.provider,
         })
   const shouldInjectBootstrapContext =
-    routeTraits.sessionMode === 'stateless' ||
-    resumeProviderSessionId === null ||
-    shouldResetCodexProviderSession
+    usesOpenAIResponsesApi
+      ? resumeProviderSessionId === null || shouldResetCodexProviderSession
+      : (
+          routeTraits.sessionMode === 'stateless' ||
+          resumeProviderSessionId === null ||
+          shouldResetCodexProviderSession
+        )
   const shouldInjectFirstTurnOnboarding =
     input.input.enableFirstTurnOnboarding === true &&
     input.session.turnCount === 0 &&
     shouldInjectBootstrapContext
+  const shouldLoadConversationMessages =
+    routeTraits.transcriptContextMode === 'local-transcript' &&
+    (!usesOpenAIResponsesApi || resumeProviderSessionId === null)
   const conversationMessages =
-    routeTraits.transcriptContextMode === 'local-transcript'
+    shouldLoadConversationMessages
       ? removeTrailingCurrentUserPrompt(
           await loadAssistantConversationMessages({
             limit: 20,
@@ -461,18 +477,21 @@ async function resolveAssistantRouteTurnPlan(input: {
           input.input.prompt,
         )
       : undefined
-  const assistantMemoryPrompt = shouldInjectBootstrapContext
+  const shouldBuildSystemPrompt =
+    shouldInjectBootstrapContext || usesOpenAIResponsesApi
+  const assistantMemoryPrompt = shouldBuildSystemPrompt
     ? await loadAssistantMemoryPromptBlock({
         includeSensitiveHealthContext: input.sharedPlan.allowSensitiveHealthContext,
         vault: input.input.vault,
       })
     : null
-  const transcriptDistillation = shouldInjectBootstrapContext
-    ? await readLatestAssistantTranscriptDistillation(
-        input.input.vault,
-        input.session.sessionId,
-      )
-    : null
+  const transcriptDistillation =
+    shouldInjectBootstrapContext && !usesOpenAIResponsesApi
+      ? await readLatestAssistantTranscriptDistillation(
+          input.input.vault,
+          input.session.sessionId,
+        )
+      : null
   const continuityContext = [
     buildAssistantTranscriptDistillationContinuityText(transcriptDistillation),
     shouldResetCodexProviderSession
@@ -523,7 +542,7 @@ async function resolveAssistantRouteTurnPlan(input: {
         }
       : undefined,
     workingDirectory,
-    systemPrompt: shouldInjectBootstrapContext
+    systemPrompt: shouldBuildSystemPrompt
       ? buildAssistantSystemPrompt({
           assistantStateToolsAvailable,
           assistantCronToolsAvailable,

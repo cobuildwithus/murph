@@ -35,6 +35,25 @@ export function readAssistantEnvString(
   return typeof value === 'string' ? normalizeNullableString(value) : null
 }
 
+export function isAssistantOpenAIBaseUrl(
+  value: string | null | undefined,
+): boolean {
+  const normalized = normalizeNullableString(value)
+  if (!normalized) {
+    return false
+  }
+
+  try {
+    const parsed = new URL(normalized)
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname.toLowerCase() === 'api.openai.com'
+    )
+  } catch {
+    return false
+  }
+}
+
 export function normalizeRequiredText(value: string, fieldName: string): string {
   const normalized = normalizeNullableString(value)
   if (normalized) {

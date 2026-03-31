@@ -11,11 +11,28 @@ const harnessMocks = vi.hoisted(() => {
     provider: 'openai-compatible',
     model,
   }))
+  const openAIResponsesProvider = vi.fn((model: string) => ({
+    provider: 'openai-responses',
+    model,
+  }))
+  const openAIProvider = Object.assign(
+    vi.fn((model: string) => ({
+      provider: 'openai',
+      model,
+    })),
+    {
+      responses: openAIResponsesProvider,
+    },
+  )
+  const createOpenAI = vi.fn(() => openAIProvider)
   const createOpenAICompatible = vi.fn(() => openAICompatibleProvider)
 
   return {
     gateway,
     openAICompatibleProvider,
+    openAIProvider,
+    openAIResponsesProvider,
+    createOpenAI,
     createOpenAICompatible,
   }
 })
@@ -27,6 +44,10 @@ vi.mock('ai', async () => {
     gateway: harnessMocks.gateway,
   }
 })
+
+vi.mock('@ai-sdk/openai', () => ({
+  createOpenAI: harnessMocks.createOpenAI,
+}))
 
 vi.mock('@ai-sdk/openai-compatible', () => ({
   createOpenAICompatible: harnessMocks.createOpenAICompatible,
@@ -43,6 +64,9 @@ const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 beforeEach(() => {
   harnessMocks.gateway.mockClear()
   harnessMocks.openAICompatibleProvider.mockClear()
+  harnessMocks.openAIProvider.mockClear()
+  harnessMocks.openAIResponsesProvider.mockClear()
+  harnessMocks.createOpenAI.mockClear()
   harnessMocks.createOpenAICompatible.mockClear()
   delete process.env[TEST_API_KEY_ENV]
 })
@@ -82,6 +106,105 @@ test('resolveAssistantLanguageModel uses gateway when no baseUrl is provided', (
   })
   assert.deepEqual(harnessMocks.gateway.mock.calls, [['anthropic/claude-sonnet-4-5']])
   assert.equal(harnessMocks.createOpenAICompatible.mock.calls.length, 0)
+})
+
+test('resolveAssistantLanguageModel uses the OpenAI responses provider for the official OpenAI endpoint', () => {
+  process.env[TEST_API_KEY_ENV] = 'secret-key'
+
+  const model = resolveAssistantLanguageModel({
+    model: 'gpt-5',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: TEST_API_KEY_ENV,
+    providerName: 'openai',
+    headers: {
+      'x-test-header': 'bundle',
+    },
+  })
+
+  assert.deepEqual(model, {
+    provider: 'openai-responses',
+    model: 'gpt-5',
+  })
+  assert.equal(harnessMocks.createOpenAI.mock.calls.length, 1)
+  const createOpenAiCall = harnessMocks.createOpenAI.mock.calls[0]
+  assert.ok(createOpenAiCall)
+  const [createOpenAiOptions] = createOpenAiCall as unknown as [
+    {
+      apiKey?: string
+      baseURL?: string
+      fetch?: typeof fetch
+      headers?: Record<string, string>
+      name?: string
+    },
+  ]
+  assert.deepEqual(createOpenAiOptions.apiKey, 'secret-key')
+  assert.deepEqual(createOpenAiOptions.baseURL, 'https://api.openai.com/v1')
+  assert.deepEqual(createOpenAiOptions.headers, {
+    'x-test-header': 'bundle',
+  })
+  assert.deepEqual(createOpenAiOptions.name, 'openai')
+  assert.equal(typeof createOpenAiOptions.fetch, 'function')
+  assert.deepEqual(harnessMocks.openAIResponsesProvider.mock.calls, [['gpt-5']])
+  assert.equal(harnessMocks.createOpenAICompatible.mock.calls.length, 0)
+})
+
+
+test('resolveAssistantLanguageModel injects automatic OpenAI response compaction', async () => {
+  process.env[TEST_API_KEY_ENV] = 'secret-key'
+
+  const originalFetch = globalThis.fetch
+  const fetchSpy = vi.fn(async (
+    _input: Parameters<typeof fetch>[0],
+    init?: Parameters<typeof fetch>[1],
+  ) => {
+    return new Response(init?.body ?? '', {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+      },
+    })
+  })
+
+  globalThis.fetch = fetchSpy as typeof globalThis.fetch
+
+  try {
+    resolveAssistantLanguageModel({
+      model: 'gpt-5',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: TEST_API_KEY_ENV,
+      providerName: 'openai',
+    })
+
+    const createOpenAiCall = harnessMocks.createOpenAI.mock.calls[0]
+    assert.ok(createOpenAiCall)
+    const [createOpenAiOptions] = createOpenAiCall as unknown as [
+      {
+        fetch?: typeof fetch
+      },
+    ]
+    assert.equal(typeof createOpenAiOptions.fetch, 'function')
+    const wrappedFetch = createOpenAiOptions.fetch as typeof fetch
+    await wrappedFetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      body: JSON.stringify({
+        model: 'gpt-5',
+      }),
+    })
+
+    const forwardedInit = fetchSpy.mock.calls[0]?.[1] as Parameters<typeof fetch>[1] | undefined
+    assert.equal(typeof forwardedInit?.body, 'string')
+    assert.deepEqual(JSON.parse(forwardedInit?.body as string), {
+      model: 'gpt-5',
+      context_management: [
+        {
+          type: 'compaction',
+          compact_threshold: 200000,
+        },
+      ],
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('resolveAssistantLanguageModel uses the openai-compatible provider with env key fallback', () => {

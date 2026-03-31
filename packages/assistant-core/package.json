@@ -31,6 +31,7 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.35",
     "@ai-sdk/openai-compatible": "^2.0.35",
     "@murph/contracts": "workspace:*",
     "@murph/core": "workspace:*",
