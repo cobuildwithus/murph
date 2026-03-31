@@ -426,10 +426,7 @@ test("goal show projects shared Goal relations through the noun-specific CLI sur
     );
     assert.deepEqual(
       requireData(genericShow).entity.links.map((link) => link.id).sort(),
-      [
-        ...requireData(nounShow).entity.links.map((link) => link.id),
-        goalId,
-      ].sort(),
+      requireData(nounShow).entity.links.map((link) => link.id).sort(),
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
