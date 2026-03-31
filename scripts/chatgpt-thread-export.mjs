@@ -7,6 +7,7 @@ import {
   ensureTarget,
   waitForTargetContent,
 } from './chatgpt-managed-browser.mjs'
+import { filterThreadAttachmentCandidates } from './chatgpt-attachment-files.mjs'
 
 function parseArgs(argv) {
   const args = {
@@ -60,20 +61,12 @@ function parseArgs(argv) {
 async function captureThread(client) {
   return client.evaluate(`(() => {
     const bodyText = document.body?.innerText ?? ''
-    const filePattern = /\\.(patch|diff|zip|txt|json|md)\\b/i
-    const keywordPattern = /patch|diff|archive|zip|file/i
     const attachments = Array.from(document.querySelectorAll('button, a'))
       .map((element) => ({
         tag: element.tagName,
         text: (element.innerText || element.getAttribute('aria-label') || '').trim(),
         href: element.href || null,
       }))
-      .filter(
-        (item) =>
-          filePattern.test(item.text) ||
-          filePattern.test(item.href || '') ||
-          keywordPattern.test(item.text),
-      )
 
     const codeBlocks = Array.from(document.querySelectorAll('pre'))
       .map((element) => element.innerText)
@@ -104,7 +97,13 @@ async function main() {
   try {
     await client.send('Runtime.enable')
     await waitForTargetContent(client, args.chatUrl)
-    const snapshot = await captureThread(client)
+    const rawSnapshot = await captureThread(client)
+    const snapshot = {
+      ...rawSnapshot,
+      attachmentButtons: filterThreadAttachmentCandidates(
+        rawSnapshot.attachmentButtons,
+      ),
+    }
     const payload = {
       capturedAt: new Date().toISOString(),
       chatUrl: args.chatUrl,

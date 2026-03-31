@@ -104,13 +104,32 @@ async function removeIfPresent(filePath) {
 
 async function clickAttachment(client, attachmentText) {
   return client.evaluate(`(() => {
-    const button = Array.from(document.querySelectorAll('button')).find((element) => element.innerText.trim() === ${JSON.stringify(attachmentText)});
-    if (!button) {
+    const deriveHrefLabel = (href) => {
+      if (!href) {
+        return ''
+      }
+      try {
+        return decodeURIComponent(new URL(href).pathname.split('/').filter(Boolean).at(-1) || '')
+      } catch {
+        return decodeURIComponent(href.split('/').filter(Boolean).at(-1) || '')
+      }
+    }
+    const target = Array.from(document.querySelectorAll('button, a')).find((element) => {
+      const text = (element.innerText || element.getAttribute('aria-label') || '').trim()
+      return text === ${JSON.stringify(attachmentText)} || deriveHrefLabel(element.href || '') === ${JSON.stringify(attachmentText)}
+    })
+    if (!target) {
       return { found: false, availableButtons: Array.from(document.querySelectorAll('button')).map((element) => (element.innerText || element.getAttribute('aria-label') || '').trim()).filter(Boolean).slice(-80) }
     }
-    button.scrollIntoView({ block: 'center' })
-    button.click()
-    return { found: true, text: button.innerText.trim() }
+    const hrefLabel = deriveHrefLabel(target.href || '')
+    target.scrollIntoView({ block: 'center' })
+    target.click()
+    return {
+      found: true,
+      text: (target.innerText || target.getAttribute('aria-label') || '').trim(),
+      href: target.href || null,
+      hrefLabel,
+    }
   })()`)
 }
 
@@ -150,10 +169,15 @@ async function main() {
       )
     }
 
+    const expectedFilenames = new Set(
+      [args.attachmentText, clicked.text, clicked.hrefLabel]
+        .map((value) => String(value ?? '').trim())
+        .filter((value) => value.length > 0),
+    )
     const downloadStart = await client.waitForEvent(
       (event) =>
         event.method === 'Page.downloadWillBegin' &&
-        event.params?.suggestedFilename === args.attachmentText,
+        expectedFilenames.has(String(event.params?.suggestedFilename ?? '')),
       args.timeoutMs,
     )
     const downloadedFile = path.join(
