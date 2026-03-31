@@ -177,6 +177,10 @@ Verify your phone and finish Apple Pay here:
 ${input.joinUrl}`;
 }
 
+export function buildHostedGetStartedReply(): string {
+  return "Hey, I'm Murph. I'm here to help you live long and prosper. Ready to get started?";
+}
+
 function normalizeRequiredString(value: unknown, label: string): string {
   const normalized = normalizeNullableString(value);
 

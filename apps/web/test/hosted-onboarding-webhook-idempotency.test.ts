@@ -106,6 +106,10 @@ import {
   handleHostedOnboardingLinqWebhook,
   handleHostedStripeWebhook,
 } from "@/src/lib/hosted-onboarding/webhook-service";
+import {
+  buildHostedGetStartedReply,
+  buildHostedInviteReply,
+} from "@/src/lib/hosted-onboarding/linq";
 
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
@@ -208,13 +212,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("ignores a Linq webhook with no onboarding trigger without queueing side effects", async () => {
+  it("asks the Murph intro question for an existing inactive member even without an onboarding trigger", async () => {
     const prisma: any = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedInvite: {
-        create: vi.fn(),
+        create: vi.fn().mockResolvedValue(makePendingInvite({
+          inviteCode: "code_returning_member",
+          sentAt: null,
+        })),
+        findFirst: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedWebhookReceipt: {
@@ -231,6 +239,104 @@ describe("hosted onboarding webhook retry safety", () => {
           linqChatId: "chat_123",
           normalizedPhoneNumber: "+15551234567",
         }),
+        update: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "hello",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      reason: "prompted-get-started",
+    });
+
+    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+      ([payload]: [Record<string, unknown>]) => payload,
+    );
+    expect(receiptCalls.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payloadJson: buildWebhookReceiptPayload({
+            attemptCount: 1,
+            attemptId: expect.any(String),
+            completedAt: expect.any(String),
+            eventPayload: {
+              eventType: "message.received",
+            },
+            lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              ok: true,
+              reason: "prompted-get-started",
+            }),
+            sideEffects: [
+              buildLinqMessageSideEffect({
+                attemptCount: 1,
+                inviteId: null,
+                lastAttemptAt: expect.any(String),
+                message: buildHostedGetStartedReply(),
+                sentAt: expect.any(String),
+                status: "sent",
+              }),
+            ],
+            status: "completed",
+          }),
+        }),
+      }),
+    );
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
+    expect(prisma.hostedMember.update).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedGetStartedReply(),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
+  it("asks the Murph intro question on first contact before sending the signup link", async () => {
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue(makePendingInvite({
+          inviteCode: "code_first_contact",
+          sentAt: null,
+        })),
+        findFirst: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+        findUnique: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
     });
@@ -245,17 +351,331 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
-      ignored: true,
       ok: true,
-      reason: "no-trigger",
+      reason: "prompted-get-started",
     });
 
-    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedMember.create).not.toHaveBeenCalled();
-    expect(prisma.hostedMember.update).not.toHaveBeenCalled();
+    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+      ([payload]: [Record<string, unknown>]) => payload,
+    );
+    expect(receiptCalls.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payloadJson: buildWebhookReceiptPayload({
+            attemptCount: 1,
+            attemptId: expect.any(String),
+            completedAt: expect.any(String),
+            eventPayload: {
+              eventType: "message.received",
+            },
+            lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              ok: true,
+              reason: "prompted-get-started",
+            }),
+            sideEffects: [
+              buildLinqMessageSideEffect({
+                attemptCount: 1,
+                inviteId: null,
+                lastAttemptAt: expect.any(String),
+                message: buildHostedGetStartedReply(),
+                sentAt: expect.any(String),
+                status: "sent",
+              }),
+            ],
+            status: "completed",
+          }),
+        }),
+      }),
+    );
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedGetStartedReply(),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
+  it("sends the signup link on any follow-up reply after the intro question", async () => {
+    const pendingInvite = makePendingInvite({
+      inviteCode: "code_follow_up",
+      sentAt: null,
+    });
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(pendingInvite),
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...pendingInvite,
+          ...data,
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+        update: vi.fn(),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "yep",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "code_follow_up",
+      joinUrl: "https://join.example.test/join/code_follow_up",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
+      ([payload]: [Record<string, unknown>]) => payload,
+    );
+    expect(receiptCalls.at(-1)).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payloadJson: buildWebhookReceiptPayload({
+            attemptCount: 1,
+            attemptId: expect.any(String),
+            completedAt: expect.any(String),
+            eventPayload: {
+              eventType: "message.received",
+            },
+            lastReceivedAt: expect.any(String),
+            plannedAt: expect.any(String),
+            response: expect.objectContaining({
+              inviteCode: "code_follow_up",
+              joinUrl: "https://join.example.test/join/code_follow_up",
+              ok: true,
+              reason: "sent-signup-link",
+            }),
+            sideEffects: [
+              buildLinqMessageSideEffect({
+                attemptCount: 1,
+                inviteId: "invite_123",
+                lastAttemptAt: expect.any(String),
+                message: buildHostedInviteReply({
+                  activeSubscription: false,
+                  joinUrl: "https://join.example.test/join/code_follow_up",
+                }),
+                sentAt: expect.any(String),
+                status: "sent",
+              }),
+            ],
+            status: "completed",
+          }),
+        }),
+      }),
+    );
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_follow_up",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
+  it("resends the signup link on later replies while the member is still inactive", async () => {
+    const sentInvite = makePendingInvite({
+      inviteCode: "code_repeat_link",
+      sentAt: new Date("2026-03-26T12:05:00.000Z"),
+    });
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(sentInvite),
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...sentInvite,
+          ...data,
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+        update: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "still there?",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      inviteCode: "code_repeat_link",
+      joinUrl: "https://join.example.test/join/code_repeat_link",
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedInvite.update).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        channel: "linq",
+        linqChatId: "chat_123",
+        linqEventId: "evt_123",
+        triggerText: "still there?",
+      },
+    });
+    expect(prisma.hostedInvite.update).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        sentAt: expect.any(Date),
+      },
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedInviteReply({
+          activeSubscription: false,
+          joinUrl: "https://join.example.test/join/code_repeat_link",
+        }),
+        replyToMessageId: "msg_123",
+      }),
+    );
+  });
+
+  it("does not skip the intro question when the member only has an unsent non-Linq invite", async () => {
+    const pendingWebInvite = makePendingInvite({
+      channel: "web",
+      inviteCode: "code_from_web",
+      sentAt: null,
+    });
+    const prisma: any = withPrismaTransaction({
+      hostedBillingCheckout: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(pendingWebInvite),
+        update: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+          ...pendingWebInvite,
+          ...data,
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: null,
+          normalizedPhoneNumber: "+15551234567",
+        }),
+        update: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          linqChatId: "chat_123",
+          normalizedPhoneNumber: "+15551234567",
+        }),
+      },
+    });
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildLinqMessageWebhookBody({
+          text: "hello",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      reason: "prompted-get-started",
+    });
+
+    expect(prisma.hostedInvite.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
+      where: {
+        id: "invite_123",
+      },
+      data: {
+        channel: "linq",
+        linqChatId: "chat_123",
+        linqEventId: "evt_123",
+        triggerText: "hello",
+      },
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_123",
+        message: buildHostedGetStartedReply(),
+        replyToMessageId: "msg_123",
+      }),
+    );
   });
 
   it("completes a Linq active-member webhook after the dispatch is durably queued", async () => {
@@ -814,14 +1234,13 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
-              inviteCode: "join_123",
-              joinUrl: "https://join.example.test/join/join_123",
               ok: true,
+              reason: "prompted-get-started",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
-                inviteId: "invite_123",
-                message: expect.any(String),
+                inviteId: null,
+                message: buildHostedGetStartedReply(),
                 replyToMessageId: "msg_123",
                 status: "pending",
               }),
@@ -849,14 +1268,13 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
-              inviteCode: "join_123",
-              joinUrl: "https://join.example.test/join/join_123",
               ok: true,
+              reason: "prompted-get-started",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 1,
-                inviteId: "invite_123",
+                inviteId: null,
                 lastAttemptAt: expect.any(String),
                 lastError: {
                   code: null,
@@ -864,7 +1282,7 @@ describe("hosted onboarding webhook retry safety", () => {
                   name: "HostedOnboardingError",
                   retryable: true,
                 },
-                message: expect.any(String),
+                message: buildHostedGetStartedReply(),
                 replyToMessageId: "msg_123",
                 status: "pending",
               }),
@@ -888,9 +1306,8 @@ describe("hosted onboarding webhook retry safety", () => {
         timestamp: null,
       }),
     ).resolves.toMatchObject({
-      inviteCode: "join_123",
-      joinUrl: "https://join.example.test/join/join_123",
       ok: true,
+      reason: "prompted-get-started",
     });
 
     const secondAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls
@@ -909,16 +1326,15 @@ describe("hosted onboarding webhook retry safety", () => {
             lastReceivedAt: expect.any(String),
             plannedAt: expect.any(String),
             response: expect.objectContaining({
-              inviteCode: "join_123",
-              joinUrl: "https://join.example.test/join/join_123",
               ok: true,
+              reason: "prompted-get-started",
             }),
             sideEffects: [
               buildLinqMessageSideEffect({
                 attemptCount: 2,
-                inviteId: "invite_123",
+                inviteId: null,
                 lastAttemptAt: expect.any(String),
-                message: expect.any(String),
+                message: buildHostedGetStartedReply(),
                 replyToMessageId: "msg_123",
                 sentAt: expect.any(String),
                 status: "sent",
@@ -933,18 +1349,12 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
+        message: buildHostedGetStartedReply(),
         replyToMessageId: "msg_123",
       }),
     );
     expect(prisma.hostedInvite.create).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
-      where: {
-        id: "invite_123",
-      },
-      data: {
-        sentAt: expect.any(Date),
-      },
-    });
+    expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
   });
 
   it("does not resend an already-sent Linq invite reply when reclaiming a failed receipt", async () => {
@@ -1851,6 +2261,22 @@ function makeActiveMember() {
     invites: [],
     linqChatId: "chat_123",
     normalizedPhoneNumber: "+15551234567",
+  };
+}
+
+function makePendingInvite(input: {
+  channel?: "linq" | "share" | "web";
+  inviteCode?: string;
+  sentAt?: Date | null;
+} = {}) {
+  return {
+    channel: input.channel ?? "linq",
+    createdAt: new Date("2026-03-26T12:00:00.000Z"),
+    expiresAt: new Date("2026-04-02T12:00:00.000Z"),
+    id: "invite_123",
+    inviteCode: input.inviteCode ?? "code_123",
+    sentAt: input.sentAt ?? null,
+    status: "pending",
   };
 }
 

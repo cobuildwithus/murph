@@ -1,6 +1,7 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedInviteStatus } from "@prisma/client";
 
 import {
+  buildHostedGetStartedReply,
   buildHostedInviteReply,
   type HostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
@@ -12,7 +13,7 @@ import {
   ensureHostedMemberForPhone,
   issueHostedInvite,
 } from "./member-service";
-import { normalizePhoneNumber, shouldStartHostedOnboarding } from "./shared";
+import { normalizePhoneNumber } from "./shared";
 import {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
@@ -101,15 +102,22 @@ export async function planHostedOnboardingLinqWebhook(input: {
     };
   }
 
-  if (existingMember && !shouldStartHostedOnboarding(summary.text)) {
-    return {
-      desiredSideEffects: [],
-      response: {
-        ok: true,
-        ignored: true,
-        reason: "no-trigger",
-      },
-    };
+  const reusableInvite = existingMember
+    ? await findReusableHostedInvite({
+        memberId: existingMember.id,
+        prisma: input.prisma,
+      })
+    : null;
+
+  if (reusableInvite && !reusableInvite.sentAt) {
+    return buildSignupLinkResponse({
+      activeSubscription: false,
+      inviteCode: reusableInvite.inviteCode,
+      inviteId: reusableInvite.id,
+      messageId: summary.messageId,
+      chatId: summary.chatId,
+      sourceEventId: input.event.event_id,
+    });
   }
 
   const member = await ensureHostedMemberForPhone({
@@ -126,25 +134,89 @@ export async function planHostedOnboardingLinqWebhook(input: {
     prisma: input.prisma,
     triggerText: summary.text,
   });
-  const joinUrl = buildHostedInviteUrl(invite.inviteCode);
+
+  if (invite.sentAt) {
+    return buildSignupLinkResponse({
+      activeSubscription: member.billingStatus === HostedBillingStatus.active,
+      inviteCode: invite.inviteCode,
+      inviteId: invite.id,
+      messageId: summary.messageId,
+      chatId: summary.chatId,
+      sourceEventId: input.event.event_id,
+    });
+  }
 
   return {
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: summary.chatId,
-        inviteId: invite.id,
-        message: buildHostedInviteReply({
-          activeSubscription: member.billingStatus === HostedBillingStatus.active,
-          joinUrl,
-        }),
+        inviteId: null,
+        message: buildHostedGetStartedReply(),
         replyToMessageId: summary.messageId,
         sourceEventId: input.event.event_id,
       }),
     ],
     response: {
       ok: true,
-      inviteCode: invite.inviteCode,
+      reason: "prompted-get-started",
+    },
+  };
+}
+
+async function findReusableHostedInvite(input: {
+  memberId: string;
+  prisma: HostedWebhookReceiptPersistenceClient;
+}) {
+  return input.prisma.hostedInvite.findFirst({
+    where: {
+      memberId: input.memberId,
+      channel: "linq",
+      expiresAt: {
+        gt: new Date(),
+      },
+      status: {
+        in: [
+          HostedInviteStatus.pending,
+          HostedInviteStatus.opened,
+          HostedInviteStatus.authenticated,
+          HostedInviteStatus.paid,
+        ],
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+}
+
+function buildSignupLinkResponse(input: {
+  activeSubscription: boolean;
+  chatId: string;
+  inviteCode: string;
+  inviteId: string;
+  messageId: string;
+  sourceEventId: string;
+}): HostedWebhookPlan<HostedOnboardingLinqWebhookResponse> {
+  const joinUrl = buildHostedInviteUrl(input.inviteCode);
+
+  return {
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: input.chatId,
+        inviteId: input.inviteId,
+        message: buildHostedInviteReply({
+          activeSubscription: input.activeSubscription,
+          joinUrl,
+        }),
+        replyToMessageId: input.messageId,
+        sourceEventId: input.sourceEventId,
+      }),
+    ],
+    response: {
+      ok: true,
+      inviteCode: input.inviteCode,
       joinUrl,
+      reason: "sent-signup-link",
     },
   };
 }
