@@ -11,13 +11,13 @@ import {
   resolveInboxRuntimePaths,
 } from '@murph/runtime-state'
 
-import type {
-  AssistantOutboxIntent,
-  AssistantSession,
-} from '../assistant-cli-contracts.js'
-import { listAssistantOutboxIntentsLocal } from '../assistant/outbox.js'
-import { normalizeNullableString } from '../assistant/shared.js'
-import { listAssistantSessionsLocal } from '../assistant/store.js'
+import {
+  type AssistantOutboxIntent,
+  type AssistantSession,
+  listAssistantOutboxIntents,
+  listAssistantSessions,
+} from '@murph/assistant-core'
+import { normalizeNullableString } from './shared.js'
 import {
   DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
   DEFAULT_GATEWAY_EVENT_RETENTION,
@@ -251,8 +251,8 @@ export class LocalGatewayProjectionStore {
     // gateway messages or attachment metadata after inbox-side mutations.
     const [captures, sessions, outboxIntents] = await Promise.all([
       listAllInboxCapturesByCreatedOrder(this.vault),
-      listAssistantSessionsLocal(this.vault),
-      listAssistantOutboxIntentsLocal(this.vault),
+      listAssistantSessions(this.vault),
+      listAssistantOutboxIntents(this.vault),
     ])
     const captureSignature = computeCaptureSyncSignature(captures)
     const sessionSignature = computeSessionSyncSignature(sessions)

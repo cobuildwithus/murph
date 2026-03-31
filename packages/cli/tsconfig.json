@@ -24,6 +24,9 @@
     },
     {
       "path": "../query"
+    },
+    {
+      "path": "../gateway-core"
     }
   ],
   "include": [

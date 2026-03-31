@@ -262,6 +262,9 @@ importers:
       '@murph/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
+      '@murph/gateway-core':
+        specifier: workspace:*
+        version: link:../gateway-core
       '@murph/importers':
         specifier: workspace:*
         version: link:../importers
@@ -329,12 +332,18 @@ importers:
 
   packages/gateway-core:
     dependencies:
+      '@murph/assistant-core':
+        specifier: workspace:*
+        version: link:../assistant-core
+      '@murph/inboxd':
+        specifier: workspace:*
+        version: link:../inboxd
+      '@murph/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
       incur:
         specifier: 0.3.4
         version: 0.3.4(openapi-types@12.1.3)
-      murph:
-        specifier: workspace:*
-        version: link:../cli
 
   packages/hosted-execution:
     dependencies:
@@ -372,32 +381,6 @@ importers:
         specifier: 1.41.1
         version: 1.41.1
 
-  packages/parsers:
-    dependencies:
-      '@murph/core':
-        specifier: workspace:*
-        version: link:../core
-      '@murph/inboxd':
-        specifier: workspace:*
-        version: link:../inboxd
-      '@murph/runtime-state':
-        specifier: workspace:*
-        version: link:../runtime-state
-
-  packages/query:
-    dependencies:
-      '@murph/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-      '@murph/runtime-state':
-        specifier: workspace:*
-        version: link:../runtime-state
-      zod:
-        specifier: ^4.3.6
-        version: 4.3.6
-
-  packages/runtime-state: {}
-
   packages/local-web:
     dependencies:
       '@murph/contracts':
@@ -434,6 +417,32 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
+
+  packages/parsers:
+    dependencies:
+      '@murph/core':
+        specifier: workspace:*
+        version: link:../core
+      '@murph/inboxd':
+        specifier: workspace:*
+        version: link:../inboxd
+      '@murph/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
+
+  packages/query:
+    dependencies:
+      '@murph/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@murph/runtime-state':
+        specifier: workspace:*
+        version: link:../runtime-state
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
+  packages/runtime-state: {}
 
 packages:
 

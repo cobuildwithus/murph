@@ -31,7 +31,7 @@ import {
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
   type GatewayWaitForEventsInput,
-} from './gateway/contracts.js'
+} from '@murph/gateway-core'
 
 import { resolveAssistantDaemonClientConfig } from './assistant-daemon-client.js'
 

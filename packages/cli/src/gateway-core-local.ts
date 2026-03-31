@@ -1,15 +1,5 @@
-export {
-  createLocalGatewayService,
-  listGatewayOpenPermissionsLocalWrapper,
-  pollGatewayEventsLocalWrapper,
-  fetchGatewayAttachmentsLocal,
-  getGatewayConversationLocal,
-  listGatewayConversationsLocal,
-  readGatewayMessagesLocal,
-  respondToGatewayPermissionLocalWrapper,
-  sendGatewayMessage,
-  waitGatewayEventsLocal,
-} from './gateway/local-service.js'
-
-export { exportGatewayProjectionSnapshotLocal } from './gateway/projection.js'
-export { sendGatewayMessageLocal } from './gateway/send.js'
+/**
+ * Compatibility re-export for legacy murph consumers.
+ * The canonical local gateway boundary now lives in @murph/gateway-core/local.
+ */
+export * from '@murph/gateway-core/local'

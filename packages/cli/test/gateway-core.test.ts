@@ -46,12 +46,35 @@ test('murph publishes gateway-core for headless conversation gateway consumers',
   })
 })
 
-test('dedicated @murph/gateway-core package owns the transport-neutral exports while keeping the local subpath transitional', async () => {
+test('gateway-core is fully hard-cut over: the owner package owns ./local and murph only re-exports it', async () => {
+  const packageManifest = JSON.parse(
+    await readFile(path.resolve(gatewayCoreSourceDir, '..', 'package.json'), 'utf8'),
+  ) as {
+    dependencies?: Record<string, string | undefined>
+  }
   const packageIndex = await readFile(path.join(gatewayCoreSourceDir, 'index.ts'), 'utf8')
   const packageLocal = await readFile(path.join(gatewayCoreSourceDir, 'local.ts'), 'utf8')
+  const cliGatewayShim = await readFile(
+    new URL('../src/gateway-core.ts', import.meta.url),
+    'utf8',
+  )
+  const cliGatewayLocalShim = await readFile(
+    new URL('../src/gateway-core-local.ts', import.meta.url),
+    'utf8',
+  )
 
   assert.doesNotMatch(packageIndex, /from ['"]murph\/gateway-core['"]/u)
-  assert.match(packageLocal, /murph\/gateway-core-local/u)
+  assert.equal(packageManifest.dependencies?.murph, undefined)
+  assert.doesNotMatch(packageLocal, /murph\/gateway-core-local/u)
+  assert.match(packageLocal, /\.\/local-service\.js/u)
+  assert.match(packageLocal, /\.\/projection\.js/u)
+  assert.match(packageLocal, /\.\/send\.js/u)
+  assert.match(cliGatewayShim, /@murph\/gateway-core/u)
+  assert.match(cliGatewayLocalShim, /@murph\/gateway-core\/local/u)
+
+  await assert.rejects(
+    access(path.resolve(fileURLToPath(new URL('..', import.meta.url)), 'src', 'gateway'), constants.F_OK),
+  )
 })
 
 test('workspace source resolution knows about the dedicated @murph/gateway-core packages while preserving murph compatibility exports', async () => {

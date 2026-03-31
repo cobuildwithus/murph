@@ -8,10 +8,31 @@ import {
   resolveMurphVitestMaxWorkers,
 } from "../../config/vitest-parallelism.js";
 import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+import {
+  createVitestWorkspaceRuntimeAliases,
+  resolveWorkspaceSourceEntries,
+} from "../../config/workspace-source-resolution.js";
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const cliVitestConcurrency = resolveMurphVitestConcurrency();
 const cliVitestMaxWorkers = resolveMurphVitestMaxWorkers();
+const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
+  "@murph/assistant-core": "../assistant-core/src/index.ts",
+  "@murph/contracts": "../contracts/src/index.ts",
+  "@murph/core": "../core/src/index.ts",
+  "@murph/device-syncd": "../device-syncd/src/index.ts",
+  "@murph/gateway-core": "../gateway-core/src/index.ts",
+  "@murph/hosted-execution": "../hosted-execution/src/index.ts",
+  "@murph/importers": "../importers/src/index.ts",
+  "@murph/inboxd": "../inboxd/src/index.ts",
+  "@murph/parsers": "../parsers/src/index.ts",
+  "@murph/query": "../query/src/index.ts",
+  "@murph/runtime-state": "../runtime-state/src/index.ts",
+  murph: "./src/index.ts",
+} as const;
+const cliVitestRuntimeAliases = createVitestWorkspaceRuntimeAliases(
+  resolveWorkspaceSourceEntries(packageDir, WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS),
+);
 
 type CliVitestProjectSpec = {
   readonly name: string;
@@ -24,6 +45,9 @@ function cliTestFile(fileName: string): string {
 
 export function createCliVitestProject(name: string, fileNames: readonly string[]) {
   return defineProject({
+    resolve: {
+      alias: cliVitestRuntimeAliases,
+    },
     test: {
       ...murphVitestNoTimeouts,
       name,
