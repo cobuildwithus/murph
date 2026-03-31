@@ -1,4 +1,4 @@
-import { isLoopbackHostname } from './loopback-control-plane.ts';
+import { isLoopbackHostname } from "@murph/runtime-state";
 
 export const DEVICE_SYNC_BASE_URL_ENV = "DEVICE_SYNC_BASE_URL";
 export const DEVICE_SYNC_BASE_URL_ENV_KEYS = [
@@ -239,6 +239,7 @@ function readEnvValue(
 
   return null;
 }
+
 export function withControlPlaneAuth(
   headers: HeadersInit | undefined,
   controlToken: string | null,

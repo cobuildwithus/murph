@@ -9,7 +9,7 @@ import {
   resolveDeviceSyncControlToken as resolveSharedDeviceSyncControlToken,
   type DeviceSyncAccountRecord,
   type DeviceSyncProviderDescriptor,
-} from "@murph/runtime-state";
+} from "@murph/device-syncd/client";
 
 export {
   DEFAULT_DEVICE_SYNC_BASE_URL,

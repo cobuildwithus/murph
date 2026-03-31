@@ -5,6 +5,8 @@ import {
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
   DEVICE_SYNC_SECRET_ENV,
   DEVICE_SYNC_SECRET_ENV_KEYS,
+} from '@murph/device-syncd/client'
+import {
   resolveDeviceSyncRuntimePaths,
 } from '@murph/runtime-state'
 import {

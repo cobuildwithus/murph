@@ -2,9 +2,9 @@ import type {
   DeviceSyncAccountStatus,
   DeviceSyncAccountRecord,
   DeviceSyncProviderDescriptor,
-} from "@murph/runtime-state";
+} from "./client.ts";
 
-export type { DeviceSyncAccountStatus } from "@murph/runtime-state";
+export type { DeviceSyncAccountStatus } from "./client.ts";
 
 export interface DeviceSyncLogger {
   debug?(message: string, context?: Record<string, unknown>): void;

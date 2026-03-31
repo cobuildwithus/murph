@@ -22,6 +22,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
     "./hosted-hints": {
       "types": "./dist/hosted-hints.d.ts",
       "default": "./dist/hosted-hints.js"
