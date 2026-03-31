@@ -19,7 +19,7 @@ declare module 'incur' {
       'assistant cron runs': { args: { job: string }; options: { vault: string; requestId: string; limit: number } }
       'assistant cron show': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant cron status': { args: {}; options: { vault: string; requestId: string } }
-      'assistant cron target set': { args: { job: string }; options: { vault: string; requestId: string; copyFrom: string; dryRun: boolean; toSelf: string; deliveryTarget: string; channel: string; identity: string; participant: string; sourceThread: string } }
+      'assistant cron target set': { args: { job: string }; options: { vault: string; requestId: string; copyFrom: string; dryRun: boolean; resetContinuity: boolean; toSelf: string; deliveryTarget: string; channel: string; identity: string; participant: string; sourceThread: string } }
       'assistant cron target show': { args: { job: string }; options: { vault: string; requestId: string } }
       'assistant deliver': { args: { message: string }; options: { vault: string; requestId: string; session: string; alias: string; channel: string; identity: string; participant: string; sourceThread: string; deliveryTarget: string } }
       'assistant doctor': { args: {}; options: { vault: string; requestId: string } }

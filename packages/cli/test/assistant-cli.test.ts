@@ -677,14 +677,14 @@ test.sequential(
         ]),
       )
       assert.equal(dryRun.changed, true)
-      assert.equal(dryRun.continuityReset, true)
+      assert.equal(dryRun.continuityReset, false)
       assert.equal(dryRun.dryRun, true)
       assert.equal(dryRun.beforeTarget.target.channel, 'telegram')
       assert.equal(dryRun.afterTarget.target.channel, 'email')
       assert.equal(dryRun.afterTarget.target.identityId, 'sender@example.com')
       assert.equal(dryRun.afterTarget.target.deliveryTarget, 'me@example.com')
-      assert.equal(dryRun.afterTarget.target.sessionId, null)
-      assert.equal(dryRun.afterTarget.target.alias, null)
+      assert.equal(dryRun.afterTarget.target.sessionId, 'session_target_cli')
+      assert.equal(dryRun.afterTarget.target.alias, 'routine:weekly-health-snapshot')
 
       const updated = requireData(
         await runCli<{
@@ -713,13 +713,13 @@ test.sequential(
         ]),
       )
       assert.equal(updated.changed, true)
-      assert.equal(updated.continuityReset, true)
+      assert.equal(updated.continuityReset, false)
       assert.equal(updated.dryRun, false)
       assert.equal(updated.job.target.channel, 'email')
       assert.equal(updated.job.target.identityId, 'sender@example.com')
       assert.equal(updated.job.target.deliveryTarget, 'me@example.com')
-      assert.equal(updated.job.target.sessionId, null)
-      assert.equal(updated.job.target.alias, null)
+      assert.equal(updated.job.target.sessionId, 'session_target_cli')
+      assert.equal(updated.job.target.alias, 'routine:weekly-health-snapshot')
 
       const shownAfter = requireData(
         await runCli<{
@@ -743,6 +743,34 @@ test.sequential(
       assert.equal(shownAfter.cronTarget.target.channel, 'email')
       assert.equal(shownAfter.cronTarget.target.identityId, 'sender@example.com')
       assert.equal(shownAfter.cronTarget.target.deliveryTarget, 'me@example.com')
+
+      const reset = requireData(
+        await runCli<{
+          changed: boolean
+          continuityReset: boolean
+          job: {
+            target: {
+              sessionId: string | null
+              alias: string | null
+            }
+          }
+        }>([
+          'assistant',
+          'cron',
+          'target',
+          'set',
+          'weekly-health-snapshot',
+          '--vault',
+          vaultRoot,
+          '--toSelf',
+          'email',
+          '--resetContinuity',
+        ]),
+      )
+      assert.equal(reset.changed, false)
+      assert.equal(reset.continuityReset, true)
+      assert.equal(reset.job.target.sessionId, null)
+      assert.equal(reset.job.target.alias, null)
     } finally {
       restoreEnvironmentVariable('HOME', originalHome)
     }

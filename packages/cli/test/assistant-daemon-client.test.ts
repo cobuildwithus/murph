@@ -464,18 +464,24 @@ test('assistant daemon client routes serializable assistant operations through t
           deliveryTarget?: string | null
           dryRun?: boolean
           identityId?: string | null
+          resetContinuity?: boolean
           vault?: string | null
         }
         assert.equal(url.searchParams.get('vault'), '/tmp/vault')
         assert.equal(body.vault, '/tmp/vault')
+        if (body.dryRun === true) {
+          assert.equal('resetContinuity' in body, false)
+        } else {
+          assert.equal(body.resetContinuity, true)
+        }
         return new Response(
           JSON.stringify({
             job: {
               ...TEST_CRON_JOB,
               target: {
                 ...TEST_CRON_JOB.target,
-                sessionId: null,
-                alias: null,
+                sessionId: body.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
+                alias: body.resetContinuity ? null : TEST_CRON_JOB.target.alias,
                 channel: body.channel ?? TEST_CRON_JOB.target.channel,
                 identityId: body.identityId ?? null,
                 participantId: null,
@@ -497,8 +503,8 @@ test('assistant daemon client routes serializable assistant operations through t
               jobName: TEST_CRON_JOB.name,
               target: {
                 ...TEST_CRON_JOB.target,
-                sessionId: null,
-                alias: null,
+                sessionId: body.resetContinuity ? null : TEST_CRON_JOB.target.sessionId,
+                alias: body.resetContinuity ? null : TEST_CRON_JOB.target.alias,
                 channel: body.channel ?? TEST_CRON_JOB.target.channel,
                 identityId: body.identityId ?? null,
                 participantId: null,
@@ -508,7 +514,7 @@ test('assistant daemon client routes serializable assistant operations through t
               bindingDelivery: null,
             },
             changed: true,
-            continuityReset: true,
+            continuityReset: body.resetContinuity ?? false,
             dryRun: body.dryRun ?? false,
           }),
           { status: 200 },
@@ -721,9 +727,25 @@ test('assistant daemon client routes serializable assistant operations through t
     env,
   )
   assert.equal(retargeted?.changed, true)
-  assert.equal(retargeted?.continuityReset, true)
+  assert.equal(retargeted?.continuityReset, false)
   assert.equal(retargeted?.dryRun, true)
   assert.equal(retargeted?.afterTarget.target.channel, 'email')
+  assert.equal(retargeted?.afterTarget.target.sessionId, TEST_CRON_JOB.target.sessionId)
+
+  const resetRetargeted = await maybeSetAssistantCronTargetViaDaemon(
+    {
+      vault: '/tmp/vault',
+      job: TEST_CRON_JOB.jobId,
+      channel: 'email',
+      identityId: 'sender@example.com',
+      deliveryTarget: 'me@example.com',
+      resetContinuity: true,
+    },
+    env,
+  )
+  assert.equal(resetRetargeted?.changed, true)
+  assert.equal(resetRetargeted?.continuityReset, true)
+  assert.equal(resetRetargeted?.afterTarget.target.sessionId, null)
 
   const cronRuns = await maybeListAssistantCronRunsViaDaemon(
     {
@@ -775,7 +797,7 @@ test('assistant daemon client routes serializable assistant operations through t
   )
   assert.equal(automation?.scans, 1)
 
-  assert.equal(fetchMock.mock.calls.length, 17)
+  assert.equal(fetchMock.mock.calls.length, 18)
 })
 
 test('assistant daemon client refuses daemon routes that require local hooks or bespoke dependencies', async () => {
