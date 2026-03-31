@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 name_prefix="murph-chatgpt-audit"
 include_tests=0
-include_docs=1
+include_docs=0
 preset_dir="scripts/chatgpt-review-presets"
 package_script="scripts/package-audit-context.sh"
 
@@ -26,10 +26,6 @@ review_gpt_register_dir_preset "data-model-composability" "data-model-composabil
   "data-model-review" \
   "composable-data-model" \
   "scalable-data-model"
-review_gpt_register_dir_preset "simplify" "complexity-simplification.md" \
-  "Behavior-preserving simplification pass for Murph." \
-  "complexity" \
-  "complexity-simplification"
 review_gpt_register_dir_preset "bad-code" "bad-code-quality.md" \
   "Code quality and anti-pattern review for Murph." \
   "anti-patterns" \
@@ -44,11 +40,3 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "legacy-cleanup" \
   "hard-cut" \
   "greenfield-hard-cut"
-review_gpt_register_preset "task-finish-review" "agent-docs/prompts/task-finish-review.md" \
-  "Final completion audit for regressions, correctness, and security." \
-  "finish" \
-  "final-review"
-review_gpt_register_preset_group "completion" \
-  "Run the full completion workflow audit sequence." \
-  "simplify" \
-  "task-finish-review"
