@@ -1602,6 +1602,7 @@ test.sequential('source add defaults the Linq account identity to default when o
 test.sequential('sourceSetEnabled updates the persisted enabled flag for an existing connector', async () => {
   const fixture = await makeVaultFixture('murph-inbox-toggle-source')
   const services = createIntegratedInboxServices({
+    getPlatform: () => 'darwin',
     loadInboxModule: async () => createFakeInboxRuntimeModule(),
   })
 
@@ -2690,6 +2691,7 @@ test.sequential('run enables connector isolation and connector restarts for pars
   })
   const services = createIntegratedInboxServices({
     getHomeDirectory: () => fixture.homeRoot,
+    getPlatform: () => 'darwin',
     loadCoreModule: loadBuiltCoreRuntime,
     loadInboxModule: loadBuiltInboxRuntime,
     loadImessageDriver: async () =>
