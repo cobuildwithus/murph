@@ -9,7 +9,7 @@ import {
   safeParseContract,
   type HealthEntityDefinitionWithRegistry,
 } from "@murph/contracts";
-import { VaultCliError } from "../vault-cli-errors.js";
+import { VaultCliError } from "@murph/assistant-core/vault-cli-errors";
 import type {
   CommandContext,
   EntityLookupInput,
@@ -18,7 +18,7 @@ import type {
   HealthQueryServiceMethods,
   JsonFileInput,
   JsonObject,
-} from "../health-cli-method-types.js";
+} from "@murph/assistant-core/health-cli-method-types";
 import type {
   CoreRuntimeModule,
   CoreWriteServices,
@@ -26,7 +26,7 @@ import type {
   QueryServices,
   StopProtocolInput,
 } from "./types.js";
-import { getHealthRegistryCommandMetadata } from "../health-registry-command-metadata.js";
+import { getHealthRegistryCommandMetadata } from "@murph/assistant-core/health-registry-command-metadata";
 import {
   asEntityEnvelope,
   asListEnvelope,

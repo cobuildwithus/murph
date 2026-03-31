@@ -1,5 +1,5 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, withBaseOptions } from '../command-helpers.js'
+import { emptyArgsSchema, withBaseOptions } from '@murph/assistant-core/command-helpers'
 import {
   deviceAccountDisconnectResultSchema,
   deviceAccountListResultSchema,
@@ -11,8 +11,8 @@ import {
   deviceDaemonStopResultSchema,
   deviceProviderListResultSchema,
   deviceSyncBaseUrlSchema,
-} from '../device-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/device-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 
 const providerNameSchema = z
   .string()

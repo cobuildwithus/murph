@@ -3,16 +3,16 @@ import { readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema } from '@murph/contracts'
 import { z } from 'incur'
-import { firstString } from '../command-helpers.js'
+import { firstString } from '@murph/assistant-core/command-helpers'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
   type QueryVaultRecord as VaultRecord,
-} from '../query-runtime.js'
+} from '@murph/assistant-core/query-runtime'
 import { materializeExportPack } from '../usecases/shared.js'
 import { resolveVaultRelativePath } from '../usecases/vault-usecase-helpers.js'
-import { VaultCliError } from '../vault-cli-errors.js'
-import { pathSchema } from '../vault-cli-contracts.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { pathSchema } from '@murph/assistant-core/vault-cli-contracts'
 
 type JsonObject = Record<string, unknown>
 

@@ -19,7 +19,7 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantSession,
-} from '../src/assistant-state.js'
+} from '@murph/assistant-core/assistant-state'
 import {
   createAssistantMemoryTurnContextEnv,
   extractAssistantMemory,
@@ -31,28 +31,28 @@ import {
   resolveAssistantMemoryStoragePaths,
   searchAssistantMemory,
   upsertAssistantMemory,
-} from '../src/assistant/memory.js'
+} from '@murph/assistant-core/assistant/memory'
 import {
   getAssistantStatus,
 } from '../src/assistant-runtime.js'
 import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
-} from '../src/assistant/runtime-budgets.js'
-import { readAssistantCronRuns } from '../src/assistant/cron/store.js'
-import { withAssistantMemoryWriteLock } from '../src/assistant/memory/locking.js'
+} from '@murph/assistant-core/assistant/runtime-budgets'
+import { readAssistantCronRuns } from '@murph/assistant-core/assistant/cron/store'
+import { withAssistantMemoryWriteLock } from '@murph/assistant-core/assistant/memory/locking'
 import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
-import { readAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
-import { summarizeAssistantQuarantines } from '../src/assistant/quarantine.js'
-import { withAssistantRuntimeWriteLock } from '../src/assistant/runtime-write-lock.js'
-import { readAssistantSession } from '../src/assistant/store/persistence.js'
-import { listAssistantTranscriptDistillations } from '../src/assistant/transcript-distillation.js'
-import { readAssistantTurnReceipt } from '../src/assistant/turns.js'
+import { readAssistantProviderRouteRecovery } from '@murph/assistant-core/assistant/provider-turn-recovery'
+import { summarizeAssistantQuarantines } from '@murph/assistant-core/assistant/quarantine'
+import { withAssistantRuntimeWriteLock } from '@murph/assistant-core/assistant/runtime-write-lock'
+import { readAssistantSession } from '@murph/assistant-core/assistant/store/persistence'
+import { listAssistantTranscriptDistillations } from '@murph/assistant-core/assistant/transcript-distillation'
+import { readAssistantTurnReceipt } from '@murph/assistant-core/assistant/turns'
 import {
   assistantSessionSchema,
   parseAssistantSessionRecord,
-} from '../src/assistant-cli-contracts.js'
-import { redactAssistantSessionForDisplay } from '../src/assistant/redaction.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
+import { redactAssistantSessionForDisplay } from '@murph/assistant-core/assistant/redaction'
 
 const cleanupPaths: string[] = []
 

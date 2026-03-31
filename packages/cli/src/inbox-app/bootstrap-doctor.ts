@@ -2,7 +2,7 @@ import { resolveRuntimePaths } from '@murph/runtime-state'
 import type {
   InboxConnectorConfig,
   InboxDoctorCheck,
-} from '../inbox-cli-contracts.js'
+} from '@murph/assistant-core/inbox-cli-contracts'
 import type {
   DoctorContext,
   DoctorTargetResolution,
@@ -13,14 +13,14 @@ import {
   assertBootstrapStrictReady,
   toCliParserToolchain,
   toParserToolChecks,
-} from '../inbox-services/parser.js'
+} from '@murph/assistant-core/inbox-services/parser'
 import {
   ensureConfigFile,
   ensureDirectory,
   findConnector,
   readConfig,
   rebuildRuntime,
-} from '../inbox-services/state.js'
+} from '@murph/assistant-core/inbox-services/state'
 import {
   errorMessage,
   failCheck,
@@ -28,7 +28,7 @@ import {
   passCheck,
   relativeToVault,
   warnCheck,
-} from '../inbox-services/shared.js'
+} from '@murph/assistant-core/inbox-services/shared'
 import { DOCTOR_STRATEGIES } from './bootstrap-doctor-strategies.js'
 
 export function createInboxBootstrapDoctorOps(

@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import { openSqliteRuntimeDatabase } from '@murph/runtime-state'
-import { createIntegratedInboxServices } from '../src/inbox-services.js'
+import { createIntegratedInboxServices } from '@murph/assistant-core/inbox-services'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '../src/vault-services.js'
+import { createUnwiredVaultServices } from '@murph/assistant-core/vault-services'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

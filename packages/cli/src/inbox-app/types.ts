@@ -1,8 +1,8 @@
 import type { ConnectorRestartPolicy } from '@murph/inboxd'
 import type { RuntimePaths } from '@murph/runtime-state'
 import { z } from 'incur'
-import type { AgentmailApiClient } from '../agentmail-runtime.js'
-import { inboxPromotionStoreSchema } from '../inbox-cli-contracts.js'
+import type { AgentmailApiClient } from '@murph/assistant-core/agentmail-runtime'
+import { inboxPromotionStoreSchema } from '@murph/assistant-core/inbox-cli-contracts'
 import type {
   InboxAttachmentListResult,
   InboxAttachmentParseResult,
@@ -34,8 +34,8 @@ import type {
   InboxSourceAddResult,
   InboxSourceListResult,
   InboxSourceRemoveResult,
-} from '../inbox-cli-contracts.js'
-import type { QueryRuntimeModule } from '../query-runtime.js'
+} from '@murph/assistant-core/inbox-cli-contracts'
+import type { QueryRuntimeModule } from '@murph/assistant-core/query-runtime'
 import type { ImportersFactoryRuntimeModule } from '../usecases/types.js'
 
 export interface RuntimeAttachmentRecord {

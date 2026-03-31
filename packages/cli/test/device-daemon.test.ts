@@ -10,7 +10,7 @@ import {
   getManagedDeviceSyncDaemonStatus,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
-} from '../src/device-daemon.js'
+} from '@murph/assistant-core/device-daemon'
 
 interface SpawnProcessInput {
   command: string

@@ -7,17 +7,17 @@ import {
   healthEntityDefinitions,
 } from "@murph/contracts"
 
-import { VaultCliError } from "../vault-cli-errors.js"
+import { VaultCliError } from "@murph/assistant-core/vault-cli-errors"
 import {
   inferHealthEntityKind,
   isHealthQueryableRecordId,
-} from "../health-cli-descriptors.js"
-import { loadJsonInputObject } from "../json-input.js"
+} from "@murph/assistant-core/health-cli-descriptors"
+import { loadJsonInputObject } from "@murph/assistant-core/json-input"
 import {
   describeQueryLookupConstraint,
   inferQueryIdEntityKind,
   isQueryableQueryLookupId,
-} from "../query-runtime.js"
+} from "@murph/assistant-core/query-runtime"
 import {
   applyRecordPatch,
   type JsonObject as RecordMutationJsonObject,
@@ -26,8 +26,8 @@ import {
 import type {
   HealthEntityEnvelope,
   JsonObject,
-} from "../health-cli-method-types.js"
-import type { VaultValidateResult } from "../vault-cli-contracts.js"
+} from "@murph/assistant-core/health-cli-method-types"
+import type { VaultValidateResult } from "@murph/assistant-core/vault-cli-contracts"
 import type {
   QueryEntity,
 } from "./types.js"

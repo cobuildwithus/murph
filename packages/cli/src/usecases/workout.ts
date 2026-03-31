@@ -1,5 +1,5 @@
 import { type ActivityStrengthExercise } from '@murph/contracts'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   inferDurationMinutes,
   validateDurationMinutes,

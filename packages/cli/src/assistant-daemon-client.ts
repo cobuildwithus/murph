@@ -19,11 +19,11 @@ import {
   type AssistantRunResult,
   type AssistantSession,
   type AssistantStatusResult,
-} from './assistant-cli-contracts.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
-} from './assistant/service-contracts.js'
+} from '@murph/assistant-core/assistant/service-contracts'
 import type { RunAssistantAutomationInput } from './assistant/automation.js'
 import type {
   AssistantCronTargetMutationResult,
@@ -32,7 +32,7 @@ import type {
   SetAssistantCronJobTargetInput,
 } from './assistant/cron.js'
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
-import { normalizeNullableString } from './assistant/shared.js'
+import { normalizeNullableString } from '@murph/assistant-core/assistant/shared'
 
 export {
   resolveAssistantDaemonClientConfig,

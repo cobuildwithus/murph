@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 
 import { test } from 'vitest'
 
-import { extractAssistantMemory } from '../src/assistant/memory/extraction.js'
-import { compareAssistantMemorySearchHits } from '../src/assistant/memory/search.js'
-import { parseAssistantMemoryRecords } from '../src/assistant/memory/storage-format.js'
+import { extractAssistantMemory } from '@murph/assistant-core/assistant/memory/extraction'
+import { compareAssistantMemorySearchHits } from '@murph/assistant-core/assistant/memory/search'
+import { parseAssistantMemoryRecords } from '@murph/assistant-core/assistant/memory/storage-format'
 
 test('extractAssistantMemory classifies durable long-term memory apart from daily project context', () => {
   const extracted = extractAssistantMemory(

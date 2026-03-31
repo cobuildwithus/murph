@@ -22,9 +22,9 @@ const serviceMocks = vi.hoisted(() => ({
   executeAssistantProviderTurn: vi.fn(),
 }))
 
-vi.mock('../src/outbound-channel.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/outbound-channel.js')>(
-    '../src/outbound-channel.js',
+vi.mock('@murph/assistant-core/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/outbound-channel')>(
+    '@murph/assistant-core/outbound-channel',
   )
 
   return {
@@ -34,9 +34,9 @@ vi.mock('../src/outbound-channel.js', async () => {
   }
 })
 
-vi.mock('../src/assistant-provider.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant-provider.js')>(
-    '../src/assistant-provider.js',
+vi.mock('@murph/assistant-core/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/assistant-provider')>(
+    '@murph/assistant-core/assistant-provider',
   )
 
   return {
@@ -53,26 +53,26 @@ import {
 import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
-} from '../src/assistant/memory.js'
-import { resolveAssistantConversationPolicy } from '../src/assistant/conversation-policy.js'
-import { sanitizeAssistantOutboundReply } from '../src/assistant/reply-sanitizer.js'
+} from '@murph/assistant-core/assistant/memory'
+import { resolveAssistantConversationPolicy } from '@murph/assistant-core/assistant/conversation-policy'
+import { sanitizeAssistantOutboundReply } from '@murph/assistant-core/assistant/reply-sanitizer'
 import {
   VAULT_ENV,
   saveAssistantOperatorDefaultsPatch,
-} from '../src/operator-config.js'
-import { buildAssistantFailoverRoutes } from '../src/assistant/failover.js'
+} from '@murph/assistant-core/operator-config'
+import { buildAssistantFailoverRoutes } from '@murph/assistant-core/assistant/failover'
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantSession,
-} from '../src/assistant-state.js'
-import { readAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
+} from '@murph/assistant-core/assistant-state'
+import { readAssistantProviderRouteRecovery } from '@murph/assistant-core/assistant/provider-turn-recovery'
 import {
   attachOpenAiCompatibleProviderToolExecutionState,
-} from '../src/assistant/providers/openai-compatible.js'
-import { VaultCliError } from '../src/vault-cli-errors.js'
+} from '@murph/assistant-core/assistant/providers/openai-compatible'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 const cleanupPaths: string[] = []
 const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =
@@ -647,13 +647,9 @@ test('sendAssistantMessage gives the first provider turn direct CLI guidance, PA
     firstCall?.systemPrompt ?? '',
     /Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage/u,
   )
-  assert.match(firstCall?.systemPrompt ?? '', /keep waiting on the tool unless it actually errors or times out/u)
-  assert.match(firstCall?.systemPrompt ?? '', /`--timeout` is the normal control/u)
-  assert.match(firstCall?.systemPrompt ?? '', /`--wait-timeout` is only for the uncommon case/u)
-  assert.match(
-    firstCall?.systemPrompt ?? '',
-    /Cron prompts may explicitly tell you to use the research tool/u,
-  )
+  assert.match(firstCall?.systemPrompt ?? '', /keep waiting unless the command actually errors/u)
+  assert.match(firstCall?.systemPrompt ?? '', /`--timeout` is the normal knob/u)
+  assert.match(firstCall?.systemPrompt ?? '', /`--wait-timeout` is the advanced override/u)
   assert.match(firstCall?.systemPrompt ?? '', /murph/u)
   assert.equal(firstCall?.env?.[VAULT_ENV], path.resolve(vaultRoot))
   assert.equal(turnContext?.vault, path.resolve(vaultRoot))

@@ -97,12 +97,9 @@ const requiredRuntimeArtifactPaths = [
   binPath,
   cliIndexPath,
   path.join(repoRoot, 'packages/cli/dist/cli-entry.js'),
-  path.join(repoRoot, 'packages/cli/dist/vault-cli-contracts.js'),
-  path.join(repoRoot, 'packages/cli/dist/inbox-cli-contracts.js'),
 ]
 const importSmokeArtifactPaths = [
   ...requiredRuntimeArtifactPaths.filter((artifactPath) => artifactPath.endsWith('.js') && artifactPath !== binPath),
-  path.join(repoRoot, 'packages/cli/dist/operator-config.js'),
   path.join(repoRoot, 'packages/cli/dist/setup-cli.js'),
   path.join(repoRoot, 'packages/cli/dist/setup-runtime-env.js'),
 ]

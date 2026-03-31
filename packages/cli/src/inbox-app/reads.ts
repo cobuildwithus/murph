@@ -1,4 +1,4 @@
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import type {
   InboxAppEnvironment,
   InboxServices,
@@ -12,7 +12,7 @@ import {
   requireAttachmentParseJobs,
   requireAttachmentReparseSupport,
   summarizeParserDrain,
-} from '../inbox-services/parser.js'
+} from '@murph/assistant-core/inbox-services/parser'
 import {
   detailCapture,
   requireAttachmentRecord,
@@ -20,17 +20,17 @@ import {
   resolveSourceFilter,
   summarizeCapture,
   toCliAttachment,
-} from '../inbox-services/query.js'
+} from '@murph/assistant-core/inbox-services/query'
 import {
   readPromotionsByCapture,
-} from '../inbox-services/promotions.js'
+} from '@murph/assistant-core/inbox-services/promotions'
 import {
   readConfig,
   withInitializedInboxRuntime,
-} from '../inbox-services/state.js'
+} from '@murph/assistant-core/inbox-services/state'
 import {
   normalizeLimit,
-} from '../inbox-services/shared.js'
+} from '@murph/assistant-core/inbox-services/shared'
 
 export function createInboxReadOps(
   env: InboxAppEnvironment,

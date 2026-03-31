@@ -6,9 +6,9 @@ import {
   healthListResultSchema,
   healthShowResultSchema,
   type HealthCommandDescriptorEntry,
-} from './health-cli-descriptors.js'
-import type { InboxServices } from './inbox-services.js'
-import type { VaultServices } from './vault-services.js'
+} from '@murph/assistant-core/health-cli-descriptors'
+import type { InboxServices } from '@murph/assistant-core/inbox-services'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 import { registerAssistantCommands } from './commands/assistant.js'
 import { registerAuditCommands } from './commands/audit.js'
 import { registerDeviceCommands } from './commands/device.js'

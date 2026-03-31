@@ -1,11 +1,11 @@
 import { Cli, z } from 'incur'
-import { requestIdFromOptions, withBaseOptions } from '../command-helpers.js'
+import { requestIdFromOptions, withBaseOptions } from '@murph/assistant-core/command-helpers'
 import {
   listFilterSchema,
   listResultSchema,
   showResultSchema,
-} from '../vault-cli-contracts.js'
-import type { VaultServices } from '../vault-services.js'
+} from '@murph/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
 
 export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(

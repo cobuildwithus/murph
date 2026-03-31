@@ -13,7 +13,7 @@ import {
   WORKOUT_FORMATS_DIRECTORY,
 } from '@murph/core'
 import { generateUlid } from '@murph/runtime-state'
-import { VaultCliError } from '../vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { asListEnvelope } from './shared.js'
 import {
   resolveWorkoutCapture,

@@ -104,8 +104,25 @@ assert(
   'package.json exports must target dist/index.d.ts for types.',
 )
 assert(
+  JSON.stringify(Object.keys(packageJson.exports ?? {}).sort()) ===
+    JSON.stringify([
+      '.',
+      './assistant/automation',
+      './assistant/cron',
+      './assistant/outbox',
+      './assistant/service',
+      './assistant/status',
+      './assistant/store',
+    ]),
+  'package.json must expose only the intentional CLI root and daemon-wrapper subpaths.',
+)
+assert(
   packageJson.exports?.['./assistant-core'] === undefined,
   'package.json must not publish the removed assistant-core compatibility subpath.',
+)
+assert(
+  packageJson.exports?.['./vault-cli-services'] === undefined,
+  'package.json must not publish the removed vault-cli-services compatibility subpath.',
 )
 assert(
   packageJson.exports?.['./assistant/service']?.default === './dist/assistant/service.js',
@@ -242,6 +259,10 @@ const libraryEntry = await readFile(path.join(packageDir, 'src/index.ts'), 'utf8
 assert(
   !/\.serve\(\)/u.test(libraryEntry),
   'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
+)
+assert(
+  !/@murph\/assistant-core\//u.test(libraryEntry),
+  'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
 )
 
 console.log('packages/cli package shape verified.')

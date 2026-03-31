@@ -5,8 +5,8 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from './assistant/openai-compatible-provider-presets.js'
-import { listAssistantCronPresets } from './assistant/cron/presets.js'
+} from '@murph/assistant-core/assistant/openai-compatible-provider-presets'
+import { listAssistantCronPresets } from '@murph/assistant-core/assistant/cron/presets'
 import {
   DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
   getDefaultSetupAssistantPreset as getDefaultAssistantPreset,
@@ -23,7 +23,7 @@ import {
   SETUP_RUNTIME_ENV_NOTICE,
   type SetupWizardRuntimeStatus,
 } from './setup-runtime-env.js'
-import { VaultCliError } from './vault-cli-errors.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 export interface SetupWizardResult {
   assistantApiKeyEnv?: string | null

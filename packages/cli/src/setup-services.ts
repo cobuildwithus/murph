@@ -5,13 +5,13 @@ import { fileURLToPath } from 'node:url'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from './inbox-services.js'
+} from '@murph/assistant-core/inbox-services'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from './vault-services.js'
-import { VaultCliError } from './vault-cli-errors.js'
-import { resolveEffectiveTopLevelToken } from './command-helpers.js'
+} from '@murph/assistant-core/vault-services'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { resolveEffectiveTopLevelToken } from '@murph/assistant-core/command-helpers'
 import {
   buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
@@ -20,7 +20,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
   type AssistantOperatorDefaults,
-} from './operator-config.js'
+} from '@murph/assistant-core/operator-config'
 import {
   type SetupChannel,
   type SetupConfiguredAssistant,
@@ -32,7 +32,7 @@ import {
   type SetupWearable,
   type WhisperModel,
 } from './setup-cli-contracts.js'
-import type { InboxBootstrapResult } from './inbox-cli-contracts.js'
+import type { InboxBootstrapResult } from '@murph/assistant-core/inbox-cli-contracts'
 import {
   configureSetupChannels,
   normalizeSetupChannels,
@@ -59,7 +59,7 @@ import {
 } from './setup-services/shell.js'
 import {
   assistantProviderConfigsEqual,
-} from './assistant/provider-config.js'
+} from '@murph/assistant-core/assistant/provider-config'
 import {
   buildBaseFormulaSpecs,
   createStep,

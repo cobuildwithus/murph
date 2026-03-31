@@ -1,4 +1,4 @@
-import { loadRuntimeModule } from '../runtime-import.js'
+import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
 import type { ImportersRuntimeModule } from '../usecases/types.js'
 import { createRuntimeUnavailableError } from './query-record-command-helpers.js'
 

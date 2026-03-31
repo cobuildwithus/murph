@@ -3,17 +3,17 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, test, vi } from 'vitest'
-import type { InboxShowResult } from '../src/inbox-cli-contracts.js'
-import type { InboxServices } from '../src/inbox-services.js'
+import type { InboxShowResult } from '@murph/assistant-core/inbox-cli-contracts'
+import type { InboxServices } from '@murph/assistant-core/inbox-services'
 
 const routeHarnessMocks = vi.hoisted(() => ({
   generateAssistantObject: vi.fn(),
   resolveAssistantLanguageModel: vi.fn(() => ({ provider: 'mock-model' })),
 }))
 
-vi.mock('../src/model-harness.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/model-harness.js')>(
-    '../src/model-harness.js',
+vi.mock('@murph/assistant-core/model-harness', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/model-harness')>(
+    '@murph/assistant-core/model-harness',
   )
 
   return {
@@ -23,7 +23,7 @@ vi.mock('../src/model-harness.js', async () => {
   }
 })
 
-import { routeInboxCaptureWithModel } from '../src/inbox-model-harness.js'
+import { routeInboxCaptureWithModel } from '@murph/assistant-core/inbox-model-harness'
 
 afterEach(() => {
   routeHarnessMocks.generateAssistantObject.mockReset()

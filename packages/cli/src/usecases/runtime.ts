@@ -1,14 +1,14 @@
-import { loadRuntimeModule } from "../runtime-import.js"
-import { createRuntimeUnavailableError } from "../runtime-errors.js"
-import { VaultCliError } from "../vault-cli-errors.js"
+import { loadRuntimeModule } from "@murph/assistant-core/runtime-import"
+import { createRuntimeUnavailableError } from "@murph/assistant-core/runtime-errors"
+import { VaultCliError } from "@murph/assistant-core/vault-cli-errors"
 import {
   healthCoreRuntimeMethodNames,
   healthCoreServiceMethodNames,
   healthQueryRuntimeMethodNames,
   healthQueryServiceMethodNames,
-} from "../health-cli-descriptors.js"
+} from "@murph/assistant-core/health-cli-descriptors"
 
-import type { JsonObject } from "../health-cli-method-types.js"
+import type { JsonObject } from "@murph/assistant-core/health-cli-method-types"
 import type {
   CoreRuntimeModule,
   ImportersFactoryRuntimeModule,

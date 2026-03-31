@@ -3,11 +3,11 @@ import { Cli } from 'incur'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from './vault-services.js'
+} from '@murph/assistant-core/vault-services'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from './inbox-services.js'
+} from '@murph/assistant-core/inbox-services'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
 const require = createRequire(import.meta.url)

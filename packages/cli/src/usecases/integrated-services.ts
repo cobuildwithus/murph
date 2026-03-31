@@ -1,20 +1,20 @@
 import { resolveSystemTimeZone } from "@murph/contracts"
-import { VaultCliError } from "../vault-cli-errors.js"
+import { VaultCliError } from "@murph/assistant-core/vault-cli-errors"
 import {
   ensureManagedDeviceSyncControlPlane,
   getManagedDeviceSyncDaemonStatus,
   startManagedDeviceSyncDaemon,
   stopManagedDeviceSyncDaemon,
-} from "../device-daemon.js"
-import { createDeviceSyncClient } from "../device-sync-client.js"
+} from "@murph/assistant-core/device-daemon"
+import { createDeviceSyncClient } from "@murph/assistant-core/device-sync-client"
 
 import type {
   ListFilters,
-} from "../vault-cli-contracts.js"
+} from "@murph/assistant-core/vault-cli-contracts"
 import type {
   CommandContext,
   JsonObject,
-} from "../health-cli-method-types.js"
+} from "@murph/assistant-core/health-cli-method-types"
 import type {
   CoreWriteServices,
   DeviceSyncServices,
@@ -47,7 +47,7 @@ import {
 import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
-} from "../option-utils.js"
+} from "@murph/assistant-core/option-utils"
 import {
   listDocumentRecords as listDocumentsUseCase,
   showDocumentManifest as showDocumentImportManifestUseCase,

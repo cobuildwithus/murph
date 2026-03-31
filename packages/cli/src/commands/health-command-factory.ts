@@ -4,19 +4,19 @@ import {
   requestIdFromOptions,
   withBaseOptions,
   type CommonCommandOptions,
-} from '../command-helpers.js'
+} from '@murph/assistant-core/command-helpers'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '../json-input.js'
+} from '@murph/assistant-core/json-input'
 import type {
   CommandContext,
   EntityLookupInput as ShowCommandContext,
   HealthListInput as ListCommandContext,
   JsonFileInput as UpsertCommandContext,
-} from '../health-cli-method-types.js'
-export { healthPayloadSchema } from '../health-cli-descriptors.js'
-export { inputFileOptionSchema, normalizeInputFileOption } from '../json-input.js'
+} from '@murph/assistant-core/health-cli-method-types'
+export { healthPayloadSchema } from '@murph/assistant-core/health-cli-descriptors'
+export { inputFileOptionSchema, normalizeInputFileOption } from '@murph/assistant-core/json-input'
 
 const limitOptionSchema = z.number().int().positive().max(200).default(50)
 const localDateOptionSchema = z

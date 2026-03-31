@@ -1,9 +1,9 @@
-import type { AssistantChatProvider } from '../assistant-cli-contracts.js'
+import type { AssistantChatProvider } from '@murph/assistant-core/assistant-cli-contracts'
 import {
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
-} from './provider-config.js'
+} from '@murph/assistant-core/assistant/provider-config'
 import {
   createCatalogModel,
   discoverAssistantProviderModels as discoverAssistantProviderModelsWithRegistry,
@@ -13,13 +13,13 @@ import {
   type AssistantCatalogModel,
   type AssistantModelDiscoveryResult,
   type AssistantProviderCapabilities,
-} from './provider-registry.js'
-import { normalizeNullableString } from './shared.js'
+} from '@murph/assistant-core/assistant/provider-registry'
+import { normalizeNullableString } from '@murph/assistant-core/assistant/shared'
 
 export type {
   AssistantCatalogModel,
   AssistantModelDiscoveryResult,
-} from './provider-registry.js'
+} from '@murph/assistant-core/assistant/provider-registry'
 
 export interface AssistantModelOption {
   description: string

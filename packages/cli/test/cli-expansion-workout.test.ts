@@ -11,7 +11,7 @@ import {
 } from '@murph/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
-import { createIntegratedVaultServices } from '../src/vault-services.js'
+import { createIntegratedVaultServices } from '@murph/assistant-core/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 

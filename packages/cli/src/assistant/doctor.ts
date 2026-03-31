@@ -19,19 +19,19 @@ import {
   type AssistantDoctorResult,
   type AssistantOutboxIntent,
   type AssistantTurnReceipt,
-} from '../assistant-cli-contracts.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
 import {
   inspectAndRepairAssistantStateSecrecy,
   type AssistantStateSecrecyAudit,
 } from './doctor-security.js'
-import { summarizeAssistantQuarantines } from './quarantine.js'
-import { withAssistantRuntimeWriteLock } from './runtime-write-lock.js'
+import { summarizeAssistantQuarantines } from '@murph/assistant-core/assistant/quarantine'
+import { withAssistantRuntimeWriteLock } from '@murph/assistant-core/assistant/runtime-write-lock'
 import {
   isMissingFileError,
   parseAssistantJsonLinesWithTailSalvage,
-} from './shared.js'
+} from '@murph/assistant-core/assistant/shared'
 import { redactAssistantDisplayPath } from './store.js'
-import { resolveAssistantStatePaths, type AssistantStatePaths } from './store/paths.js'
+import { resolveAssistantStatePaths, type AssistantStatePaths } from '@murph/assistant-core/assistant/store/paths'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 

@@ -5,14 +5,14 @@ import {
   type QueryCanonicalEntity,
   type QueryRuntimeModule,
   type QueryVaultRecord,
-} from '../query-runtime.js'
-import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '../vault-cli-errors.js'
+} from '@murph/assistant-core/query-runtime'
+import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   isoTimestampSchema,
   localDateSchema,
   slugSchema,
-} from '../vault-cli-contracts.js'
+} from '@murph/assistant-core/vault-cli-contracts'
 import {
   asListEnvelope,
   readJsonPayload,

@@ -10,8 +10,8 @@ import {
   findHealthDescriptorForLookup,
   healthEntityDescriptorByKind,
   inferHealthEntityKind,
-} from "../src/health-cli-descriptors.js";
-import { getHealthRegistryCommandMetadata } from "../src/health-registry-command-metadata.js";
+} from "@murph/assistant-core/health-cli-descriptors";
+import { getHealthRegistryCommandMetadata } from "@murph/assistant-core/health-registry-command-metadata";
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,

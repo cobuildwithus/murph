@@ -6,9 +6,9 @@ import path from 'node:path'
 import { resolveRuntimePaths } from '@murph/runtime-state'
 import { test } from 'vitest'
 
-import { instantiateConnector } from '../src/inbox-services/connectors.js'
-import { normalizeDaemonState } from '../src/inbox-services/daemon.js'
-import { readPromotionsByCapture } from '../src/inbox-services/promotions.js'
+import { instantiateConnector } from '@murph/assistant-core/inbox-services/connectors'
+import { normalizeDaemonState } from '@murph/assistant-core/inbox-services/daemon'
+import { readPromotionsByCapture } from '@murph/assistant-core/inbox-services/promotions'
 
 test('instantiateConnector delegates iMessage defaults through the connector factory', async () => {
   let received: {

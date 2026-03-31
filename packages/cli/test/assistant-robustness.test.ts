@@ -23,9 +23,9 @@ const robustnessMocks = vi.hoisted(() => ({
         }),
 }))
 
-vi.mock('../src/outbound-channel.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/outbound-channel.js')>(
-    '../src/outbound-channel.js',
+vi.mock('@murph/assistant-core/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/outbound-channel')>(
+    '@murph/assistant-core/outbound-channel',
   )
 
   return {
@@ -35,9 +35,9 @@ vi.mock('../src/outbound-channel.js', async () => {
   }
 })
 
-vi.mock('../src/assistant-provider.js', async () => {
-  const actual = await vi.importActual<typeof import('../src/assistant-provider.js')>(
-    '../src/assistant-provider.js',
+vi.mock('@murph/assistant-core/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murph/assistant-core/assistant-provider')>(
+    '@murph/assistant-core/assistant-provider',
   )
 
   return {
@@ -54,23 +54,23 @@ import {
   sendAssistantMessage,
   stopAssistantAutomation,
 } from '../src/assistant-runtime.js'
-import { resolveAssistantStatePaths } from '../src/assistant-state.js'
-import { readAssistantDiagnosticsSnapshot } from '../src/assistant/diagnostics.js'
+import { resolveAssistantStatePaths } from '@murph/assistant-core/assistant-state'
+import { readAssistantDiagnosticsSnapshot } from '@murph/assistant-core/assistant/diagnostics'
 import {
   buildAssistantFailoverRoutes,
   readAssistantFailoverState,
   recordAssistantFailoverRouteFailure,
-} from '../src/assistant/failover.js'
-import { resetInjectedAssistantFaults } from '../src/assistant/fault-injection.js'
+} from '@murph/assistant-core/assistant/failover'
+import { resetInjectedAssistantFaults } from '@murph/assistant-core/assistant/fault-injection'
 import {
   drainAssistantOutbox,
   listAssistantOutboxIntents,
 } from '../src/assistant/outbox.js'
-import { listRecentAssistantTurnReceipts } from '../src/assistant/turns.js'
-import { VaultCliError } from '../src/vault-cli-errors.js'
+import { listRecentAssistantTurnReceipts } from '@murph/assistant-core/assistant/turns'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import {
   attachOpenAiCompatibleProviderToolExecutionState,
-} from '../src/assistant/providers/openai-compatible.js'
+} from '@murph/assistant-core/assistant/providers/openai-compatible'
 
 const cleanupPaths: string[] = []
 
@@ -698,7 +698,7 @@ test('sendAssistantMessage fails over across provider routes and records cooldow
     )
     assert.equal(backupCall?.model, 'backup-model')
     assert.equal(primaryCall?.conversationMessages, undefined)
-    assert.equal(Array.isArray(primaryCall?.configOverrides), true)
+    assert.equal(primaryCall?.configOverrides, undefined)
     assert.equal(backupCall?.configOverrides, undefined)
     assert.equal(backupCall?.conversationMessages?.length ?? 0, 0)
     assert.equal(backupCall?.userPrompt, 'summarize the latest updates')

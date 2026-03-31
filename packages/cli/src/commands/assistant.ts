@@ -41,9 +41,9 @@ import {
   assistantSessionShowResultSchema,
   assistantStopResultSchema,
   assistantStatusResultSchema,
-} from '../assistant-cli-contracts.js'
-import { deliverAssistantMessage } from '../assistant-channel.js'
-import type { ConversationRef } from '../assistant/conversation-ref.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
+import { deliverAssistantMessage } from '@murph/assistant-core/outbound-channel'
+import type { ConversationRef } from '@murph/assistant-core/assistant/conversation-ref'
 import {
   addAssistantCronJob,
   buildAssistantCronSchedule,
@@ -74,7 +74,7 @@ import { getAssistantStatus } from '../assistant/status.js'
 import {
   redactAssistantSessionForDisplay,
   redactAssistantSessionsForDisplay,
-} from '../assistant/redaction.js'
+} from '@murph/assistant-core/assistant/redaction'
 import {
   assertAssistantMemoryTurnContextVault,
   forgetAssistantMemory,
@@ -85,7 +85,7 @@ import {
   resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
   upsertAssistantMemory,
-} from '../assistant/memory.js'
+} from '@murph/assistant-core/assistant/memory'
 import {
   redactAssistantDisplayPath,
   getAssistantSession,
@@ -93,19 +93,19 @@ import {
   redactAssistantStateDocumentListEntry,
   redactAssistantStateDocumentSnapshot,
   resolveAssistantStatePaths,
-} from '../assistant-state.js'
+} from '@murph/assistant-core/assistant-state'
 import {
   emptyArgsSchema,
   parseHeadersJsonOption,
   requestIdFromOptions,
   withBaseOptions,
-} from '../command-helpers.js'
-import type { InboxServices } from '../inbox-services.js'
+} from '@murph/assistant-core/command-helpers'
+import type { InboxServices } from '@murph/assistant-core/inbox-services'
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
-} from '../json-input.js'
-import { normalizeRepeatableFlagOption } from '../option-utils.js'
+} from '@murph/assistant-core/json-input'
+import { normalizeRepeatableFlagOption } from '@murph/assistant-core/option-utils'
 import {
   applyAssistantSelfDeliveryTargetDefaults,
   clearAssistantSelfDeliveryTargets,
@@ -113,16 +113,16 @@ import {
   resolveAssistantSelfDeliveryTarget,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
-} from '../operator-config.js'
+} from '@murph/assistant-core/operator-config'
 import {
   formatAssistantRunEventForTerminal,
   formatForegroundLogLine,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
-import { VaultCliError } from '../vault-cli-errors.js'
-import type { VaultServices } from '../vault-services.js'
-import { requestIdSchema } from '../vault-cli-contracts.js'
+import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import type { VaultServices } from '@murph/assistant-core/vault-services'
+import { requestIdSchema } from '@murph/assistant-core/vault-cli-contracts'
 
 const assistantSessionOptionFields = {
   session: z

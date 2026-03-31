@@ -4,16 +4,16 @@ import {
   assistantChatProviderValues,
   assistantCronPresetSchema,
   assistantSandboxValues,
-} from './assistant-cli-contracts.js'
-import { inboxBootstrapResultSchema } from './inbox-cli-contracts.js'
+} from '@murph/assistant-core/assistant-cli-contracts'
+import { inboxBootstrapResultSchema } from '@murph/assistant-core/inbox-cli-contracts'
 import {
   setupAssistantProviderPresetValues,
-} from './assistant/openai-compatible-provider-presets.js'
+} from '@murph/assistant-core/assistant/openai-compatible-provider-presets'
 import {
   isoTimestampSchema,
   pathSchema,
   requestIdSchema,
-} from './vault-cli-contracts.js'
+} from '@murph/assistant-core/vault-cli-contracts'
 
 export const whisperModelValues = [
   'tiny',
