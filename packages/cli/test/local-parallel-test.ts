@@ -21,7 +21,7 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
   }
 }
 
-function resolveLocalCliSuiteConcurrency(
+export function resolveLocalCliSuiteConcurrency(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const override = parseBooleanEnv(
@@ -32,7 +32,11 @@ function resolveLocalCliSuiteConcurrency(
     return override
   }
 
-  return !env.CI
+  // Keep the helper aligned with the shared repo default. The CLI test
+  // package cannot import the repo-root config helper without breaking its
+  // package-local typecheck rootDir boundary, so this stays as a small local
+  // mirror of the shared opt-in policy.
+  return false
 }
 
 const localParallelCliTestBase = ((...args: Parameters<typeof test>) =>
