@@ -14,7 +14,7 @@ import {
   setupCommandOptionsSchema,
   setupResultSchema,
   setupWearableValues,
-} from './setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 import {
   createSetupAssistantResolver,
   getDefaultSetupAssistantPreset,
@@ -30,7 +30,7 @@ import {
   SETUP_RUNTIME_ENV_NOTICE,
   type SetupRuntimeEnvResolver,
   type SetupWizardRuntimeStatus,
-} from './setup-runtime-env.js'
+} from '@murph/assistant-core/setup-runtime-env'
 import {
   createSetupServices,
   detectSetupProgramName,

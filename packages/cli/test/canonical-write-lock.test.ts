@@ -293,7 +293,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
     },
     run: async () => {
       const { listProviderRecords, upsertEventRecord, upsertProviderRecord } = await import(
-        "../src/usecases/provider-event.js"
+        "@murph/assistant-core/usecases/provider-event"
       );
 
       await assert.rejects(
@@ -344,7 +344,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           coreRuntime: eventRuntime,
           run: async () => {
             const { upsertEventRecord: upsertEventRecordWithRuntime } = await import(
-              "../src/usecases/provider-event.js"
+              "@murph/assistant-core/usecases/provider-event"
             );
 
             await assert.rejects(
@@ -383,7 +383,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
             lookupRecordById: () => eventRecord,
           },
           run: async () => {
-            const { editEventRecord } = await import("../src/usecases/event-record-mutations.js");
+            const { editEventRecord } = await import("@murph/assistant-core/usecases/event-record-mutations");
 
             await assert.rejects(
               () =>
@@ -448,7 +448,7 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
       lookupRecordById: () => eventRecord,
     },
     run: async () => {
-      const { editEventRecord } = await import("../src/usecases/event-record-mutations.js");
+      const { editEventRecord } = await import("@murph/assistant-core/usecases/event-record-mutations");
 
       await editEventRecord({
         vault: "/tmp/mock-vault",
@@ -486,7 +486,7 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
     },
     run: async () => {
       const { appendJournalText, checkpointExperimentRecord } = await import(
-        "../src/usecases/experiment-journal-vault.js"
+        "@murph/assistant-core/usecases/experiment-journal-vault"
       );
 
       await assert.rejects(

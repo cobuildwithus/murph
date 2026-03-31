@@ -5,7 +5,7 @@ import type {
   SetupStepKind,
   SetupStepResult,
   WhisperModel,
-} from '../setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 import {
   assertCommandSucceeded,
   isExecutable,

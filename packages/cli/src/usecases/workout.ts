@@ -7,15 +7,15 @@ import {
 import {
   deleteEventRecord,
   editEventRecord,
-} from './event-record-mutations.js'
+} from '@murph/assistant-core/usecases/event-record-mutations'
 import {
   showEventRecord,
   upsertEventRecord,
-} from './provider-event.js'
+} from '@murph/assistant-core/usecases/provider-event'
 import {
   compactObject,
   normalizeOptionalText,
-} from './vault-usecase-helpers.js'
+} from '@murph/assistant-core/usecases/vault-usecase-helpers'
 
 const MILES_TO_KM = 1.609344
 

@@ -8,7 +8,7 @@ import type { VaultServices } from '@murph/assistant-core/vault-services'
 import {
   deleteProviderRecord,
   editProviderRecord,
-} from '../usecases/provider-event.js'
+} from '@murph/assistant-core/usecases/provider-event'
 import { registerRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

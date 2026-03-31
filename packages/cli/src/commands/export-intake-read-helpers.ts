@@ -9,8 +9,8 @@ import {
   type QueryRuntimeModule,
   type QueryVaultRecord as VaultRecord,
 } from '@murph/assistant-core/query-runtime'
-import { materializeExportPack } from '../usecases/shared.js'
-import { resolveVaultRelativePath } from '../usecases/vault-usecase-helpers.js'
+import { materializeExportPack } from '@murph/assistant-core/usecases/shared'
+import { resolveVaultRelativePath } from '@murph/assistant-core/usecases/vault-usecase-helpers'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { pathSchema } from '@murph/assistant-core/vault-cli-contracts'
 

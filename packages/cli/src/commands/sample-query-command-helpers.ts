@@ -8,7 +8,7 @@ import {
   type CommandShowEntity,
   type QueryRecord,
   type SampleCommandListItem,
-} from './query-record-command-helpers.js'
+} from '@murph/assistant-core/commands/query-record-command-helpers'
 
 export interface SampleListOptions {
   from?: string

@@ -16,12 +16,12 @@ import {
   formatSetupAssistantAccountLabel,
   type SetupAssistantAccountResolver,
 } from './setup-assistant-account.js'
-import { prepareSetupPromptInput } from './setup-prompt-io.js'
+import { prepareSetupPromptInput } from '@murph/assistant-core/setup-prompt-io'
 import {
   type SetupAssistantPreset,
   type SetupCommandOptions,
   type SetupConfiguredAssistant,
-} from './setup-cli-contracts.js'
+} from '@murph/assistant-core/setup-cli-contracts'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex-cli'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'

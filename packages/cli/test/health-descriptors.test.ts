@@ -15,7 +15,7 @@ import { getHealthRegistryCommandMetadata } from "@murph/assistant-core/health-r
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
-} from "../src/usecases/explicit-health-family-services.js";
+} from "@murph/assistant-core/usecases/explicit-health-family-services";
 
 test("CLI health descriptors inherit shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
-import { applyRecordPatch } from '../src/usecases/record-mutations.js'
+import { applyRecordPatch } from '@murph/assistant-core/usecases/record-mutations'
 
 test('applyRecordPatch requires at least one mutation source', async () => {
   await assert.rejects(

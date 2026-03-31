@@ -4,7 +4,7 @@ import { access, mkdir, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import { sanitizeChildProcessEnv } from '../child-process-env.js'
+import { sanitizeChildProcessEnv } from '@murph/assistant-core/child-process-env'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
 export interface CommandRunInput {

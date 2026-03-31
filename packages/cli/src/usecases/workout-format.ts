@@ -14,7 +14,7 @@ import {
 } from '@murph/core'
 import { generateUlid } from '@murph/runtime-state'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
-import { asListEnvelope } from './shared.js'
+import { asListEnvelope } from '@murph/assistant-core/usecases/shared'
 import {
   resolveWorkoutCapture,
   type AddWorkoutRecordInput,
@@ -24,7 +24,7 @@ import {
 import {
   compactObject,
   normalizeOptionalText,
-} from './vault-usecase-helpers.js'
+} from '@murph/assistant-core/usecases/vault-usecase-helpers'
 
 const LOAD_UNITS = new Set(['lb', 'kg'])
 const WORKOUT_FORMAT_RECORD_ID_PATTERN = new RegExp(`^${ID_PREFIXES.workoutFormat}_[0-9A-Za-z]+$`, 'u')

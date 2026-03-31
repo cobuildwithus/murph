@@ -9,11 +9,11 @@ import {
   showResultSchema,
 } from '@murph/assistant-core/vault-cli-contracts'
 import type { VaultServices } from '@murph/assistant-core/vault-services'
-import { dailyFoodTimeSchema } from '../usecases/food-autolog.js'
+import { dailyFoodTimeSchema } from '@murph/assistant-core/usecases/food-autolog'
 import {
   deleteFoodRecord,
   editFoodRecord,
-} from '../usecases/food.js'
+} from '@murph/assistant-core/usecases/food'
 import { createRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createDirectEntityDeleteCommandDefinition,

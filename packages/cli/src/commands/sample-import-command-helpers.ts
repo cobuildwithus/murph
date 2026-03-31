@@ -1,6 +1,6 @@
 import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
-import type { ImportersRuntimeModule } from '../usecases/types.js'
-import { createRuntimeUnavailableError } from './query-record-command-helpers.js'
+import type { ImportersRuntimeModule } from '@murph/assistant-core/usecases/types'
+import { createRuntimeUnavailableError } from '@murph/assistant-core/commands/query-record-command-helpers'
 
 export interface ImportCsvSamplesOptions {
   delimiter?: string

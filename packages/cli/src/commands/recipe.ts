@@ -10,7 +10,7 @@ import type { VaultServices } from '@murph/assistant-core/vault-services'
 import {
   deleteRecipeRecord,
   editRecipeRecord,
-} from '../usecases/recipe.js'
+} from '@murph/assistant-core/usecases/recipe'
 import { registerRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

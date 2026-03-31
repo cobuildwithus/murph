@@ -21,7 +21,6 @@ const baseSmokeImportPaths = [
   "packages/cli/dist/index.js",
   "packages/cli/dist/cli-entry.js",
   "packages/cli/dist/setup-cli.js",
-  "packages/cli/dist/setup-runtime-env.js",
 ].map((relativePath) => path.join(repoRoot, relativePath));
 const assistantCoreFacadeSmokeImportPaths = collectAssistantCoreFacadeSmokeImportPaths();
 const smokeImportPaths = [

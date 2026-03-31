@@ -45,10 +45,10 @@ import {
   describeSelectedSetupWearables,
   resolveSetupChannelMissingEnv,
   resolveSetupWearableMissingEnv,
-} from '../src/setup-runtime-env.js'
-import type { InboxSourceSetEnabledResult } from '../src/inbox-app/types.js'
+} from '@murph/assistant-core/setup-runtime-env'
+import type { InboxSourceSetEnabledResult } from '@murph/assistant-core/inbox-app/types'
 import type { InboxConnectorConfig } from '@murph/assistant-core/inbox-cli-contracts'
-import type { SetupResult } from '../src/setup-cli-contracts.js'
+import type { SetupResult } from '@murph/assistant-core/setup-cli-contracts'
 import {
   buildSetupWizardPublicUrlReview,
   createSetupWizardCompletionController,

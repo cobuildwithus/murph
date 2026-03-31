@@ -14,7 +14,7 @@ import {
   showStoredExportPack,
 } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
-import { materializeExportPack } from '../src/usecases/shared.js'
+import { materializeExportPack } from '@murph/assistant-core/usecases/shared'
 import {
   createIntegratedVaultServices,
   createUnwiredVaultServices,

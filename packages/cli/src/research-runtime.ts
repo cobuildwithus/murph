@@ -8,7 +8,7 @@ import {
   resolveAssistantOperatorDefaults,
   type AssistantOperatorDefaults,
 } from '@murph/assistant-core/operator-config'
-import { loadIntegratedRuntime } from './usecases/runtime.js'
+import { loadIntegratedRuntime } from '@murph/assistant-core/usecases/runtime'
 import {
   type ResearchExecutionMode,
   type ResearchRunResult,

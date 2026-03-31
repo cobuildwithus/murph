@@ -8,7 +8,7 @@ import {
   type AgentmailApiClient,
   type AgentmailInbox,
 } from '@murph/assistant-core/agentmail-runtime'
-import { prepareSetupPromptInput } from './setup-prompt-io.js'
+import { prepareSetupPromptInput } from '@murph/assistant-core/setup-prompt-io'
 import { normalizeNullableString } from '@murph/assistant-core/text/shared'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 
