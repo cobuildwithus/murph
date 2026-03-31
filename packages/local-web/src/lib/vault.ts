@@ -54,7 +54,7 @@ export function buildSuggestedCommand(
   const launchCwd = getLaunchCwd(env, cwd);
   const repoRoot = path.resolve(cwd, "../..");
   const command =
-    launchCwd === cwd ? "pnpm dev" : launchCwd === repoRoot ? "pnpm web:dev" : "pnpm --dir packages/web dev";
+    launchCwd === cwd ? "pnpm dev" : launchCwd === repoRoot ? "pnpm local-web:dev" : "pnpm --dir packages/local-web dev";
 
   return `${VAULT_ENV}=${buildExampleVaultPath(env, cwd)} ${command}`;
 }

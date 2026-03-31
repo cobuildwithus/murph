@@ -180,7 +180,7 @@ test("loadDeviceSyncOverviewFromEnv explains missing control-plane auth", async 
 
   assert.match(result.message, /authentication failed/u);
   assert.match(result.hint, /DEVICE_SYNC_CONTROL_TOKEN/u);
-  assert.match(result.suggestedCommand, /pnpm web:dev/u);
+  assert.match(result.suggestedCommand, /pnpm local-web:dev/u);
 });
 
 test("loadDeviceSyncOverviewFromEnv reports remote base URLs as unsupported when a control bearer is configured", async () => {

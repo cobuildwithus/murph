@@ -14,13 +14,13 @@ import {
 import { getGeneratedSourceSidecarSourcePath } from "../../../scripts/prune-generated-source-sidecars";
 
 test("check-no-js allowlists the current Next.js declaration stub exactly", async () => {
-  const nextEnvContents = await readFile("packages/web/next-env.d.ts", "utf8");
-  const allowedVariants = allowedDeclarationArtifacts.get("packages/web/next-env.d.ts");
+  const nextEnvContents = await readFile("packages/local-web/next-env.d.ts", "utf8");
+  const allowedVariants = allowedDeclarationArtifacts.get("packages/local-web/next-env.d.ts");
 
   assert.equal(Array.isArray(allowedVariants), true);
   assert.equal(allowedVariants?.includes(nextEnvContents), true);
   assert.equal(
-    isAllowedDeclarationArtifactContents("packages/web/next-env.d.ts", nextEnvContents),
+    isAllowedDeclarationArtifactContents("packages/local-web/next-env.d.ts", nextEnvContents),
     true,
   );
 });
@@ -28,7 +28,7 @@ test("check-no-js allowlists the current Next.js declaration stub exactly", asyn
 test("check-no-js rejects modified declaration stubs", () => {
   assert.equal(
     isAllowedDeclarationArtifactContents(
-      "packages/web/next-env.d.ts",
+      "packages/local-web/next-env.d.ts",
       '/// <reference types="next" />\n',
     ),
     false,
@@ -72,9 +72,9 @@ test("check-no-js also allowlists the hosted smoke Next.js declaration stub vari
 test("check-no-js rejects tracked local env files while allowlisting tracked examples", () => {
   assert.equal(isBlockedTrackedEnvArtifactPath(".env"), true);
   assert.equal(isBlockedTrackedEnvArtifactPath("apps/web/.env"), true);
-  assert.equal(isBlockedTrackedEnvArtifactPath("packages/web/.env.local"), true);
+  assert.equal(isBlockedTrackedEnvArtifactPath("packages/local-web/.env.local"), true);
   assert.equal(isBlockedTrackedEnvArtifactPath("apps/web/.env.example"), false);
-  assert.equal(isBlockedTrackedEnvArtifactPath("packages/web/.env.local.example"), false);
+  assert.equal(isBlockedTrackedEnvArtifactPath("packages/local-web/.env.local.example"), false);
   assert.equal(isBlockedTrackedEnvArtifactPath(".envrc"), false);
 });
 
@@ -84,18 +84,18 @@ test("check-no-js flags tracked generated/private artifact paths", () => {
   assert.equal(isBlockedTrackedArtifactPath("apps/web/.next"), true);
   assert.equal(isBlockedTrackedArtifactPath("apps/web/.next-dev/cache"), true);
   assert.equal(isBlockedTrackedArtifactPath("apps/web/.next-smoke/cache"), true);
-  assert.equal(isBlockedTrackedArtifactPath("packages/web/.next/server/app.js"), true);
+  assert.equal(isBlockedTrackedArtifactPath("packages/local-web/.next/server/app.js"), true);
   assert.equal(isBlockedTrackedArtifactPath(".next/cache/tsconfig.tsbuildinfo"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/core/dist/index.js"), true);
   assert.equal(isBlockedTrackedArtifactPath("packages/core/.test-dist/index.js"), true);
-  assert.equal(isBlockedTrackedArtifactPath("packages/web/next-env.d.ts"), false);
+  assert.equal(isBlockedTrackedArtifactPath("packages/local-web/next-env.d.ts"), false);
 });
 
 test("check-no-js flags bundle-only working-tree private/build artifacts", () => {
   assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.env", "file"), "apps/web/.env");
   assert.equal(
-    getBlockedWorkingTreeArtifactPath("packages/web/app.tsbuildinfo", "file"),
-    "packages/web/app.tsbuildinfo",
+    getBlockedWorkingTreeArtifactPath("packages/local-web/app.tsbuildinfo", "file"),
+    "packages/local-web/app.tsbuildinfo",
   );
   assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.env.example", "file"), null);
   assert.equal(getBlockedWorkingTreeArtifactPath("apps/web/.next", "directory"), "apps/web/.next/");
@@ -118,7 +118,7 @@ test("prune-generated-source-sidecars matches generated sidecars to tracked Type
   const trackedSourceFiles = new Set([
     "packages/contracts/src/index.ts",
     "apps/web/src/lib/http.ts",
-    "packages/web/src/example.tsx",
+    "packages/local-web/src/example.tsx",
   ]);
 
   assert.equal(
@@ -134,8 +134,8 @@ test("prune-generated-source-sidecars matches generated sidecars to tracked Type
     "apps/web/src/lib/http.ts",
   );
   assert.equal(
-    getGeneratedSourceSidecarSourcePath("packages/web/src/example.js.map", trackedSourceFiles),
-    "packages/web/src/example.tsx",
+    getGeneratedSourceSidecarSourcePath("packages/local-web/src/example.js.map", trackedSourceFiles),
+    "packages/local-web/src/example.tsx",
   );
   assert.equal(
     getGeneratedSourceSidecarSourcePath("packages/contracts/src/missing.js", trackedSourceFiles),

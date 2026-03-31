@@ -26,7 +26,7 @@ readonly shell_syntax_check_scripts=(
   "scripts/update-changelog.sh"
   "scripts/generate-release-notes.sh"
   "scripts/workspace-verify.sh"
-  "packages/web/scripts/verify-fast.sh"
+  "packages/local-web/scripts/verify-fast.sh"
   "apps/web/scripts/verify-fast.sh"
   "apps/cloudflare/scripts/verify-fast.sh"
 )
@@ -53,7 +53,7 @@ readonly typecheck_package_dirs=(
   "packages/cli"
   "packages/assistantd"
   "packages/assistant-runtime"
-  "packages/web"
+  "packages/local-web"
   "apps/web"
   "apps/cloudflare"
 )
@@ -191,7 +191,7 @@ run_test_apps() {
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
-    run_package_command_with_retry "packages/web" verify &
+    run_package_command_with_retry "packages/local-web" verify &
     pids+=("$!")
     run_package_command_with_retry "apps/web" verify &
     pids+=("$!")
@@ -205,7 +205,7 @@ run_test_apps() {
     return 0
   fi
 
-  run_package_command_with_retry "packages/web" verify
+  run_package_command_with_retry "packages/local-web" verify
   run_package_command_with_retry "apps/web" verify
   run_package_command_with_retry "apps/cloudflare" verify
 }

@@ -37,21 +37,21 @@ test("getConfiguredVaultRoot resolves relative paths from the launch cwd when pr
       [VAULT_ENV]: "fixtures/demo-web-vault",
       [WEB_LAUNCH_CWD_ENV]: "/repo",
     },
-    "/repo/packages/web",
+    "/repo/packages/local-web",
   );
 
   assert.equal(resolved, "/repo/fixtures/demo-web-vault");
   assert.equal(buildExampleVaultPath({
     [WEB_LAUNCH_CWD_ENV]: "/repo",
-  }, "/repo/packages/web"), "fixtures/demo-web-vault");
+  }, "/repo/packages/local-web"), "fixtures/demo-web-vault");
   assert.equal(
     buildSuggestedCommand(
       {
         [WEB_LAUNCH_CWD_ENV]: "/repo",
       },
-      "/repo/packages/web",
+      "/repo/packages/local-web",
     ),
-    `${VAULT_ENV}=fixtures/demo-web-vault pnpm web:dev`,
+    `${VAULT_ENV}=fixtures/demo-web-vault pnpm local-web:dev`,
   );
 });
 
@@ -79,7 +79,7 @@ test("resolveConfiguredVaultRoot falls back to the saved default vault when env 
     assert.equal(
       await resolveConfiguredVaultRoot({
         HOME: operatorHome,
-      }, "/repo/packages/web"),
+      }, "/repo/packages/local-web"),
       savedVaultRoot,
     );
   } finally {
@@ -110,7 +110,7 @@ test("resolveConfiguredVaultRoot keeps explicit env precedence over the saved de
           [WEB_LAUNCH_CWD_ENV]: "/repo",
           HOME: operatorHome,
         },
-        "/repo/packages/web",
+        "/repo/packages/local-web",
       ),
       "/repo/fixtures/demo-web-vault",
     );
@@ -129,7 +129,7 @@ test("resolveConfiguredVaultRoot ignores invalid saved operator config", async (
     assert.equal(
       await resolveConfiguredVaultRoot({
         HOME: operatorHome,
-      }, "/repo/packages/web"),
+      }, "/repo/packages/local-web"),
       null,
     );
   } finally {
@@ -141,7 +141,7 @@ test("rememberLaunchCwd stores the first launch cwd only", () => {
   const env: Record<string, string | undefined> = {};
 
   rememberLaunchCwd(env, "/repo");
-  rememberLaunchCwd(env, "/repo/packages/web");
+  rememberLaunchCwd(env, "/repo/packages/local-web");
 
   assert.equal(env[WEB_LAUNCH_CWD_ENV], "/repo");
 });
@@ -149,13 +149,13 @@ test("rememberLaunchCwd stores the first launch cwd only", () => {
 test("rememberLaunchCwd prefers INIT_CWD for package-local pnpm runs", () => {
   const env: Record<string, string | undefined> = {
     VAULT: "../../fixtures/demo-web-vault",
-    INIT_CWD: "/repo/packages/web",
+    INIT_CWD: "/repo/packages/local-web",
   };
 
   rememberLaunchCwd(env, "/repo");
 
-  assert.equal(env[WEB_LAUNCH_CWD_ENV], "/repo/packages/web");
-  assert.equal(getConfiguredVaultRoot(env, "/repo/packages/web"), "/repo/fixtures/demo-web-vault");
+  assert.equal(env[WEB_LAUNCH_CWD_ENV], "/repo/packages/local-web");
+  assert.equal(getConfiguredVaultRoot(env, "/repo/packages/local-web"), "/repo/fixtures/demo-web-vault");
 });
 
 test("loadVaultOverview reports missing config when no vault root is set", async () => {

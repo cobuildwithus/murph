@@ -33,12 +33,12 @@ test("workspace boundary helpers reject sibling path mappings into hosted Next a
   const { isSiblingBuildArtifactPath } = await loadVerifyWorkspaceBoundaryHelpers();
 
   assert.equal(
-    isSiblingBuildArtifactPath("packages/web", "apps/web", "/repo/apps/web/.next/server/app/page.js"),
+    isSiblingBuildArtifactPath("packages/local-web", "apps/web", "/repo/apps/web/.next/server/app/page.js"),
     true,
   );
   assert.equal(
     isSiblingBuildArtifactPath(
-      "packages/web",
+      "packages/local-web",
       "apps/web",
       "/repo/apps/web/.next-dev/cache/manifest.json",
     ),
@@ -46,7 +46,7 @@ test("workspace boundary helpers reject sibling path mappings into hosted Next a
   );
   assert.equal(
     isSiblingBuildArtifactPath(
-      "packages/web",
+      "packages/local-web",
       "apps/web",
       "/repo/apps/web/.next-smoke/server/app/page.js",
     ),

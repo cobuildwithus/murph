@@ -1,9 +1,9 @@
 ---
-description: Browser-backed frontend quality review for packages/web hierarchy, responsiveness, and polish
+description: Browser-backed frontend quality review for packages/local-web hierarchy, responsiveness, and polish
 action: browser-backed UI review
 ---
 
-You are performing a frontend quality review for completed `packages/web` UI-affecting changes.
+You are performing a frontend quality review for completed `packages/local-web` UI-affecting changes.
 
 Goal:
 Catch user-facing layout, hierarchy, and copy problems that functional tests or diff review miss.

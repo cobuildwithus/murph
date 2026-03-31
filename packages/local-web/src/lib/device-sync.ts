@@ -139,9 +139,9 @@ export async function loadDeviceSyncOverviewFromEnv(input: {
         ? "Set DEVICE_SYNC_CONTROL_TOKEN in the web server environment so it can call the local daemon."
         : "Start the Murph-managed local device sync daemon, then refresh this page to connect or inspect wearable accounts.",
       suggestedCommand: isLocalityError
-        ? "DEVICE_SYNC_BASE_URL=http://127.0.0.1:8788 DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
+        ? "DEVICE_SYNC_BASE_URL=http://127.0.0.1:8788 DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm local-web:dev"
         : isAuthError
-        ? "DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm web:dev"
+        ? "DEVICE_SYNC_CONTROL_TOKEN=<token> pnpm local-web:dev"
         : "murph device daemon start --vault <your-vault>",
     };
   }

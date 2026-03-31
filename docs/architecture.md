@@ -53,7 +53,7 @@ repo/
 - `packages/parsers` owns local-first multimedia parsing for inbox attachments and writes only derived artifacts under `derived/inbox/**`.
 - `packages/query` reads canonical vault state, builds derived export packs, and owns the optional lexical search index under `.runtime/search.sqlite`.
 - `packages/cli` exposes the `vault-cli` command surface, provider-backed assistant orchestration plus outbound channel delivery, and must not bypass core for canonical writes.
-- `packages/web` exposes a local-only observability UI, reads vault data through `packages/query`, and may initiate device auth/account actions through the local `packages/device-syncd` control plane without writing canonical vault data directly.
+- `packages/local-web` exposes a local-only observability UI, reads vault data through `packages/query`, and may initiate device auth/account actions through the local `packages/device-syncd` control plane without writing canonical vault data directly.
 
 ## Storage Model
 

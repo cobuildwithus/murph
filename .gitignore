@@ -11,8 +11,8 @@ coverage/
 .windsurf/
 /skills/
 /skills-lock.json
-/packages/web/skills/
-/packages/web/skills-lock.json
+/packages/local-web/skills/
+/packages/local-web/skills-lock.json
 *.log
 *.tsbuildinfo
 .test-dist/
