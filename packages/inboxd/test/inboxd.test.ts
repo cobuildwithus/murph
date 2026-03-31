@@ -952,7 +952,9 @@ test("runPollConnector backfills and watches iMessage messages while advancing t
     signal: controller.signal,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  for (let attempt = 0; attempt < 50 && watcher === null; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   assert.ok(watcher);
   await watcher?.({
     guid: "im-2",

@@ -798,13 +798,14 @@ describe("cloudflare worker routes", () => {
       sessionKey: "gwcs_worker_test",
     });
     expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(expect.objectContaining({
-      event: {
+      event: expect.objectContaining({
         kind: "gateway.message.send",
+        clientRequestId: null,
         replyToMessageId: null,
         sessionKey: "gwcs_worker_test",
         text: "Please follow up.",
         userId: "member_123",
-      },
+      }),
       eventId: expect.stringMatching(/^gateway-send:/u),
     }));
     await expect(sendResponse.json()).resolves.toMatchObject({
@@ -813,6 +814,41 @@ describe("cloudflare worker routes", () => {
       queued: true,
       sessionKey: "gwcs_worker_test",
     });
+  });
+
+  it("threads clientRequestId through hosted gateway sends and makes the dispatch id stable", async () => {
+    const stub = createUserRunnerStub();
+    const env = createWorkerEnv(stub, {
+      HOSTED_EXECUTION_CONTROL_TOKEN: "control-token",
+    });
+
+    const response = await worker.fetch(
+      new Request("https://runner.example.test/internal/users/member_123/gateway/messages/send", {
+        body: JSON.stringify({
+          clientRequestId: "req-456",
+          sessionKey: "gwcs_worker_test",
+          text: "Please follow up.",
+        }),
+        headers: {
+          authorization: "Bearer control-token",
+          "content-type": "application/json; charset=utf-8",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(stub.dispatchWithOutcome).toHaveBeenCalledWith(expect.objectContaining({
+      event: expect.objectContaining({
+        kind: "gateway.message.send",
+        clientRequestId: "req-456",
+        sessionKey: "gwcs_worker_test",
+        text: "Please follow up.",
+        userId: "member_123",
+      }),
+      eventId: expect.stringMatching(/^gateway-send:[0-9a-f]{32}$/u),
+    }));
   });
 
   it("rejects gateway reply-to sends for channels without stable reply-to support", async () => {

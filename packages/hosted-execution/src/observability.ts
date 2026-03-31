@@ -251,10 +251,31 @@ export function buildHostedExecutionStructuredLogRecord(
   };
 }
 
+function shouldEmitHostedExecutionStructuredLogToStdIo(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const override = env.MURPH_HOSTED_EXECUTION_STDIO_LOGS?.trim().toLowerCase();
+
+  if (override === "1" || override === "true" || override === "yes" || override === "on") {
+    return true;
+  }
+
+  if (override === "0" || override === "false" || override === "no" || override === "off") {
+    return false;
+  }
+
+  return env.VITEST !== "true";
+}
+
 export function emitHostedExecutionStructuredLog(
   input: HostedExecutionStructuredLogInput,
 ): HostedExecutionStructuredLogRecord {
   const record = buildHostedExecutionStructuredLogRecord(input);
+
+  if (!shouldEmitHostedExecutionStructuredLogToStdIo()) {
+    return record;
+  }
+
   const payload = JSON.stringify(record);
 
   switch (record.level) {

@@ -114,6 +114,8 @@ export async function createAssistantOutboxIntent(input: {
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
   createdAt?: string
+  dedupeToken?: string | null
+  deliveryIdempotencyKey?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   message: string
@@ -130,6 +132,7 @@ export async function createAssistantOutboxIntent(input: {
     const message = normalizeRequiredMessage(input.message)
     const rawTargetIdentity = buildAssistantOutboxRawTargetIdentity(input)
     const dedupeKey = hashAssistantOutboxIdentity({
+      dedupeToken: input.dedupeToken,
       message,
       sessionId: input.sessionId,
       turnId: input.turnId,
@@ -158,7 +161,7 @@ export async function createAssistantOutboxIntent(input: {
       ...buildAssistantOutboxPersistedTarget(input),
       delivery: null,
       deliveryConfirmationPending: false,
-      deliveryIdempotencyKey: null,
+      deliveryIdempotencyKey: normalizeNullableString(input.deliveryIdempotencyKey),
       deliveryTransportIdempotent: false,
       lastError: null,
     })
@@ -497,6 +500,8 @@ export async function deliverAssistantOutboxMessage(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  dedupeToken?: string | null
+  deliveryIdempotencyKey?: string | null
   dependencies?: AssistantChannelDependencies
   dispatchHooks?: AssistantOutboxDispatchHooks
   dispatchMode?: AssistantOutboxDispatchMode
@@ -514,6 +519,8 @@ export async function deliverAssistantOutboxMessage(input: {
     actorId: input.actorId,
     bindingDelivery: input.bindingDelivery,
     channel: input.channel,
+    dedupeToken: input.dedupeToken,
+    deliveryIdempotencyKey: input.deliveryIdempotencyKey,
     explicitTarget: input.explicitTarget,
     identityId: input.identityId,
     message: input.message,
@@ -954,6 +961,7 @@ function hashAssistantOutboxIdentity(input: {
   actorId?: string | null
   bindingDelivery?: AssistantOutboxIntent['bindingDelivery']
   channel?: string | null
+  dedupeToken?: string | null
   explicitTarget?: string | null
   identityId?: string | null
   message: string
@@ -967,7 +975,9 @@ function hashAssistantOutboxIdentity(input: {
       JSON.stringify({
         message: input.message,
         sessionId: input.sessionId,
-        turnId: input.turnId,
+        dedupeToken: normalizeNullableString(input.dedupeToken) ?? null,
+        turnId:
+          normalizeNullableString(input.dedupeToken) === null ? input.turnId : null,
         channel: input.channel,
         identityId: input.identityId,
         actorId: input.actorId,

@@ -13,6 +13,7 @@ import type {
 import type {
   AssistantProviderConfig,
 } from '../provider-config.js'
+import type { AssistantToolCatalog } from '../../model-harness.js'
 
 export interface AssistantModelCapabilities {
   images: boolean
@@ -51,6 +52,14 @@ export interface AssistantProviderTraits {
 
 export interface AssistantProviderProgressEvent extends CodexProgressEvent {}
 
+export interface AssistantProviderToolRuntime {
+  allowSensitiveHealthContext?: boolean
+  requestId?: string | null
+  sessionId?: string | null
+  toolCatalog?: AssistantToolCatalog | null
+  vault: string
+}
+
 export interface AssistantProviderTurnInput {
   abortSignal?: AbortSignal
   approvalPolicy?: AssistantApprovalPolicy | null
@@ -81,10 +90,7 @@ export interface AssistantProviderTurnInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  toolRuntime?: {
-    requestId?: string | null
-    vault: string
-  } | null
+  toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
   workingDirectory: string
 }
@@ -108,10 +114,7 @@ export interface AssistantProviderTurnExecutionInput {
   }
   showThinkingTraces?: boolean
   systemPrompt?: string | null
-  toolRuntime?: {
-    requestId?: string | null
-    vault: string
-  } | null
+  toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
   workingDirectory: string
 }

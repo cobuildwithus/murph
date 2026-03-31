@@ -4,14 +4,20 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, defineProject } from "vitest/config";
 
 import {
+  resolveMurphAppVitestMaxWorkers,
+  resolveMurphVitestFileParallelism,
+} from "../../config/vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+
+import {
   createVitestWorkspaceRuntimeAliases,
   resolveHostedWebWorkspaceSourceEntries,
 } from "../../config/workspace-source-resolution";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appDir, "../..");
-const hostedWebVitestMaxWorkers =
-  process.env.MURPH_APP_VITEST_MAX_WORKERS ?? process.env.MURPH_VITEST_MAX_WORKERS ?? "25%";
+const hostedWebVitestFileParallelism = resolveMurphVitestFileParallelism();
+const hostedWebVitestMaxWorkers = resolveMurphAppVitestMaxWorkers();
 const hostedWebAliases = [
   {
     find: "@",
@@ -30,9 +36,10 @@ function createHostedWebProject(name: string, patterns: readonly string[]) {
       alias: hostedWebAliases,
     },
     test: {
+      ...murphVitestNoTimeouts,
       name,
       environment: "node",
-      fileParallelism: false,
+      fileParallelism: hostedWebVitestFileParallelism,
       include: patterns.map(hostedWebPattern),
     },
   });
@@ -87,6 +94,7 @@ export const hostedWebVitestProjects = [
 
 export default defineConfig({
   test: {
+    ...murphVitestNoTimeouts,
     maxWorkers: hostedWebVitestMaxWorkers,
     projects: hostedWebVitestProjects,
   },

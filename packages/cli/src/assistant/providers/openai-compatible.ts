@@ -1,6 +1,8 @@
 import { generateText, stepCountIs } from 'ai'
-import { resolveAssistantLanguageModel } from '../../model-harness.js'
-import { createIntegratedVaultServices } from '../../vault-services.js'
+import {
+  resolveAssistantLanguageModel,
+  type AssistantAiSdkToolEvent,
+} from '../../model-harness.js'
 import { VaultCliError } from '../../vault-cli-errors.js'
 import {
   createCatalogModel,
@@ -14,6 +16,7 @@ import {
   ensureTrailingSlash,
   extractOpenAICompatibleAssistantProviderUsage,
 } from './helpers.js'
+import type { AssistantProviderTraceUpdate } from '../provider-traces.js'
 import { normalizeNullableString } from '../shared.js'
 import { resolveAssistantModelSpecFromProviderConfig } from '../provider-config.js'
 import type { AssistantProviderDefinition } from './types.js'
@@ -22,6 +25,68 @@ const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
 const OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS = 8
 const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
+const OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE = Symbol(
+  'openai-compatible-provider-tool-execution-state',
+)
+
+interface OpenAiCompatibleProviderToolExecutionState {
+  executedToolCount: number
+  rawEvents: unknown[]
+}
+
+export function attachOpenAiCompatibleProviderToolExecutionState(
+  error: unknown,
+  input: OpenAiCompatibleProviderToolExecutionState,
+): unknown {
+  if (error && typeof error === 'object') {
+    Object.defineProperty(error, OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE, {
+      configurable: true,
+      enumerable: false,
+      value: {
+        executedToolCount: Math.max(0, input.executedToolCount),
+        rawEvents: input.rawEvents,
+      } satisfies OpenAiCompatibleProviderToolExecutionState,
+      writable: true,
+    })
+  }
+
+  return error
+}
+
+export function readOpenAiCompatibleProviderToolExecutionState(
+  error: unknown,
+): OpenAiCompatibleProviderToolExecutionState | null {
+  if (!error || typeof error !== 'object') {
+    return null
+  }
+
+  const value = (
+    error as {
+      [OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE]?: unknown
+    }
+  )[OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE]
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const state = value as {
+    executedToolCount?: unknown
+    rawEvents?: unknown
+  }
+
+  return {
+    executedToolCount:
+      typeof state.executedToolCount === 'number' && state.executedToolCount >= 0
+        ? state.executedToolCount
+        : 0,
+    rawEvents: Array.isArray(state.rawEvents) ? state.rawEvents : [],
+  }
+}
+
+export function didOpenAiCompatibleProviderExecuteTool(error: unknown): boolean {
+  return (readOpenAiCompatibleProviderToolExecutionState(error)?.executedToolCount ?? 0) > 0
+}
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
@@ -145,42 +210,64 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       )
     }
 
-    const toolCatalog =
-      input.toolRuntime
-        ? (await import('../../assistant-cli-tools.js')).createDefaultAssistantToolCatalog({
-            requestId: input.toolRuntime.requestId ?? null,
-            vault: input.toolRuntime.vault,
-            vaultServices: createIntegratedVaultServices(),
+    const toolEvents: unknown[] = []
+    let executedToolCount = 0
+    const tools = input.toolRuntime?.toolCatalog?.createAiSdkTools('apply', {
+      onToolEvent: (event) => {
+        if (event.kind === 'started' && event.mode === 'apply') {
+          executedToolCount += 1
+        }
+
+        const rawEvent = createOpenAiCompatibleToolRawEvent({
+          event,
+          sequence: toolEvents.length + 1,
+        })
+        toolEvents.push(rawEvent)
+
+        const updates = buildOpenAiCompatibleToolTraceUpdates(event)
+        if (updates.length > 0) {
+          input.onTraceEvent?.({
+            providerSessionId: null,
+            rawEvent,
+            updates,
           })
-        : null
-    const tools = toolCatalog?.createAiSdkTools('apply')
+        }
+      },
+    }) ?? null
 
-    const result = await generateText({
-      abortSignal: input.abortSignal,
-      maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
-      messages: buildAssistantProviderMessages(input),
-      model: resolveAssistantLanguageModel(languageModelSpec),
-      ...(tools
-        ? {
-            stopWhen: stepCountIs(OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS),
-            tools,
-          }
-        : {}),
-      system: normalizeNullableString(input.systemPrompt) ?? undefined,
-      timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
-    })
+    try {
+      const result = await generateText({
+        abortSignal: input.abortSignal,
+        maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
+        messages: buildAssistantProviderMessages(input),
+        model: resolveAssistantLanguageModel(languageModelSpec),
+        ...(tools
+          ? {
+              stopWhen: stepCountIs(OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS),
+              tools,
+            }
+          : {}),
+        system: normalizeNullableString(input.systemPrompt) ?? undefined,
+        timeout: OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS,
+      })
 
-    return {
-      provider: providerConfig.provider,
-      providerSessionId: null,
-      response: result.text,
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
-      usage: extractOpenAICompatibleAssistantProviderUsage({
-        providerConfig,
-        result,
-      }),
+      return {
+        provider: providerConfig.provider,
+        providerSessionId: null,
+        response: result.text,
+        stderr: '',
+        stdout: '',
+        rawEvents: toolEvents,
+        usage: extractOpenAICompatibleAssistantProviderUsage({
+          providerConfig,
+          result,
+        }),
+      }
+    } catch (error) {
+      throw attachOpenAiCompatibleProviderToolExecutionState(error, {
+        executedToolCount,
+        rawEvents: toolEvents,
+      })
     }
   },
   resolveLabel(config) {
@@ -189,4 +276,62 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   resolveStaticModels() {
     return []
   },
+}
+
+function createOpenAiCompatibleToolRawEvent(input: {
+  event: AssistantAiSdkToolEvent
+  sequence: number
+}): Record<string, unknown> {
+  const rawEvent: Record<string, unknown> = {
+    type: `assistant.tool.${input.event.kind}`,
+    sequence: input.sequence,
+    mode: input.event.mode,
+    tool: input.event.tool,
+  }
+
+  if (input.event.kind === 'started' || input.event.kind === 'failed') {
+    rawEvent.input = input.event.input
+  }
+
+  if (input.event.kind === 'failed') {
+    rawEvent.errorCode = input.event.errorCode ?? null
+    rawEvent.errorMessage = input.event.errorMessage ?? null
+  }
+
+  return rawEvent
+}
+
+function buildOpenAiCompatibleToolTraceUpdates(
+  event: AssistantAiSdkToolEvent,
+): AssistantProviderTraceUpdate[] {
+  switch (event.kind) {
+    case 'started':
+      return [
+        {
+          kind: 'status',
+          text: `Running ${event.tool}…`,
+        },
+      ]
+    case 'previewed':
+      return [
+        {
+          kind: 'status',
+          text: `Planned ${event.tool}.`,
+        },
+      ]
+    case 'succeeded':
+      return [
+        {
+          kind: 'status',
+          text: `Finished ${event.tool}.`,
+        },
+      ]
+    case 'failed':
+      return [
+        {
+          kind: 'error',
+          text: `${event.tool} failed: ${event.errorMessage ?? 'Tool execution failed.'}`,
+        },
+      ]
+  }
 }

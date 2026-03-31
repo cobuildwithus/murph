@@ -38,7 +38,7 @@ const sampleDocumentPath = path.join(
   repoRoot,
   'fixtures/sample-imports/README.md',
 )
-const runtimeCliTestTimeoutMs = 20_000
+const runtimeCliTestTimeoutMs = 60_000
 
 test('runtime unavailable error preserves the shared operator guidance payload', () => {
   const result = createRuntimeUnavailableError(

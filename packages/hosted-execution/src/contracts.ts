@@ -99,6 +99,7 @@ export interface HostedExecutionVaultShareAcceptedEvent extends HostedExecutionB
 }
 
 export interface HostedExecutionGatewayMessageSendEvent extends HostedExecutionBaseEvent {
+  clientRequestId: string | null;
   kind: "gateway.message.send";
   replyToMessageId: string | null;
   sessionKey: string;

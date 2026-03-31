@@ -69,6 +69,9 @@ import {
   saveAssistantSession,
 } from '../src/assistant-state.js'
 import { readAssistantProviderRouteRecovery } from '../src/assistant/provider-turn-recovery.js'
+import {
+  attachOpenAiCompatibleProviderToolExecutionState,
+} from '../src/assistant/providers/openai-compatible.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
 
 const cleanupPaths: string[] = []
@@ -389,6 +392,36 @@ test('buildResolveAssistantSessionInput keeps locator shaping and operator defau
       providerName: null,
       headers: null,
       reasoningEffort: 'high',
+    },
+  )
+
+  assert.deepEqual(
+    buildResolveAssistantSessionInput(
+      {
+        vault: '/tmp/vault',
+        alias: 'chat:openai',
+        provider: 'openai-compatible',
+        model: 'gpt-oss:20b',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+      },
+      defaults,
+    ),
+    {
+      vault: '/tmp/vault',
+      alias: 'chat:openai',
+      identityId: 'assistant:primary',
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      maxSessionAgeMs: null,
+      sandbox: null,
+      approvalPolicy: null,
+      oss: false,
+      profile: null,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKeyEnv: null,
+      providerName: null,
+      headers: null,
+      reasoningEffort: null,
     },
   )
 })
@@ -4458,9 +4491,20 @@ test('sendAssistantMessage preserves the primary provider error for tool-bound o
 
   serviceMocks.executeAssistantProviderTurn
     .mockRejectedValueOnce(
-      new VaultCliError('ASSISTANT_PRIMARY_FAILED', 'Primary route failed.', {
-        retryable: true,
-      }),
+      attachOpenAiCompatibleProviderToolExecutionState(
+        new VaultCliError('ASSISTANT_PRIMARY_FAILED', 'Primary route failed.', {
+          retryable: true,
+        }),
+        {
+          executedToolCount: 1,
+          rawEvents: [
+            {
+              type: 'assistant.tool.started',
+              tool: 'assistant.memory.search',
+            },
+          ],
+        },
+      ),
     )
     .mockRejectedValueOnce(
       new VaultCliError('ASSISTANT_BACKUP_FAILED', 'Backup route failed.', {

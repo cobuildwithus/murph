@@ -68,6 +68,9 @@ import {
 } from '../src/assistant/outbox.js'
 import { listRecentAssistantTurnReceipts } from '../src/assistant/turns.js'
 import { VaultCliError } from '../src/vault-cli-errors.js'
+import {
+  attachOpenAiCompatibleProviderToolExecutionState,
+} from '../src/assistant/providers/openai-compatible.js'
 
 const cleanupPaths: string[] = []
 
@@ -916,11 +919,22 @@ test('sendAssistantMessage does not fail over a tool-bound OpenAI-compatible tur
 
   robustnessMocks.executeAssistantProviderTurn.mockImplementation(async (input: any) => {
     if (input.provider === 'openai-compatible') {
-      throw new VaultCliError(
-        'ASSISTANT_PROVIDER_TIMEOUT',
-        'Primary provider timed out after a tool-enabled attempt.',
+      throw attachOpenAiCompatibleProviderToolExecutionState(
+        new VaultCliError(
+          'ASSISTANT_PROVIDER_TIMEOUT',
+          'Primary provider timed out after a tool-enabled attempt.',
+          {
+            retryable: true,
+          },
+        ),
         {
-          retryable: true,
+          executedToolCount: 1,
+          rawEvents: [
+            {
+              type: 'assistant.tool.started',
+              tool: 'assistant.memory.search',
+            },
+          ],
         },
       )
     }
@@ -996,6 +1010,82 @@ test('sendAssistantMessage does not fail over a tool-bound OpenAI-compatible tur
       receipts[0]?.timeline.some((entry) => entry.kind === 'provider.failover.applied'),
       false,
     )
+  } finally {
+    restoreEnvironmentVariable('HOME', originalHome)
+  }
+})
+
+test('sendAssistantMessage fails over a no-tool OpenAI-compatible turn after a retryable error', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-robustness-openai-no-tool-failover-'))
+  const homeRoot = path.join(parent, 'home')
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(homeRoot, { recursive: true })
+  await mkdir(vaultRoot, { recursive: true })
+
+  const originalHome = process.env.HOME
+  process.env.HOME = homeRoot
+
+  robustnessMocks.executeAssistantProviderTurn.mockImplementation(async (input: any) => {
+    if (input.provider === 'openai-compatible') {
+      throw new VaultCliError(
+        'ASSISTANT_PROVIDER_TIMEOUT',
+        'Primary provider timed out before it used any bound tools.',
+        {
+          retryable: true,
+        },
+      )
+    }
+
+    return {
+      provider: 'codex-cli',
+      providerSessionId: 'backup-thread',
+      response: 'backup reply',
+      stderr: '',
+      stdout: '',
+      rawEvents: [],
+    }
+  })
+
+  try {
+    const result = await sendAssistantMessage({
+      vault: vaultRoot,
+      alias: 'chat:no-tool-failover',
+      prompt: 'set up a weekly check-in',
+      provider: 'openai-compatible',
+      model: 'gpt-oss:20b',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      failoverRoutes: [
+        {
+          name: 'backup-codex',
+          provider: 'codex-cli',
+          codexCommand: null,
+          model: 'gpt-5.4',
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          approvalPolicy: 'never',
+          profile: 'default',
+          oss: false,
+          baseUrl: null,
+          providerName: null,
+          apiKeyEnv: null,
+          cooldownMs: null,
+        },
+      ],
+    })
+
+    assert.equal(result.response, 'backup reply')
+    assert.equal(robustnessMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+    assert.equal(robustnessMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]?.provider, 'openai-compatible')
+    assert.equal(robustnessMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]?.provider, 'codex-cli')
+
+    const receipts = await listRecentAssistantTurnReceipts(vaultRoot, 1)
+    assert.equal(
+      receipts[0]?.timeline.some((entry) => entry.kind === 'provider.failover.applied'),
+      true,
+    )
+    assert.equal(receipts[0]?.status, 'completed')
   } finally {
     restoreEnvironmentVariable('HOME', originalHome)
   }

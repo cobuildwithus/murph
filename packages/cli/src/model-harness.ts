@@ -45,6 +45,20 @@ export function defineAssistantTool<
 
 export type AssistantToolExecutionMode = 'preview' | 'apply'
 
+export interface AssistantAiSdkToolEvent {
+  errorCode?: string | null
+  errorMessage?: string | null
+  input: JsonRecord
+  kind: 'failed' | 'previewed' | 'started' | 'succeeded'
+  mode: AssistantToolExecutionMode
+  result?: JsonRecord | null
+  tool: string
+}
+
+export interface AssistantCreateAiSdkToolsOptions {
+  onToolEvent?: (event: AssistantAiSdkToolEvent) => void
+}
+
 export interface AssistantModelTextPart {
   type: 'text'
   text: string
@@ -76,7 +90,10 @@ export interface AssistantModelMessage {
 }
 
 export interface AssistantToolCatalog {
-  createAiSdkTools(mode?: AssistantToolExecutionMode): ToolSet
+  createAiSdkTools(
+    mode?: AssistantToolExecutionMode,
+    options?: AssistantCreateAiSdkToolsOptions,
+  ): ToolSet
   executeCalls(input: {
     calls: readonly AssistantToolCall[]
     maxCalls?: number
@@ -119,7 +136,7 @@ export function createAssistantToolCatalog<
   }
 
   return {
-    createAiSdkTools(mode = 'preview') {
+    createAiSdkTools(mode = 'preview', options = {}) {
       const tools: ToolSet = {}
 
       for (const definition of toolMap.values()) {
@@ -128,8 +145,38 @@ export function createAssistantToolCatalog<
           inputSchema: definition.inputSchema as ZodType<
             z.infer<typeof definition.inputSchema>
           >,
-          execute: async (toolInput) =>
-            executeDefinition(definition, toolInput, mode),
+          execute: async (toolInput) => {
+            const normalizedInput = normalizeJsonRecord(toolInput)
+            options.onToolEvent?.({
+              input: normalizedInput,
+              kind: 'started',
+              mode,
+              tool: definition.name,
+            })
+
+            try {
+              const result = await executeDefinition(definition, toolInput, mode)
+              const normalizedResult = normalizeJsonRecord(result)
+              options.onToolEvent?.({
+                input: normalizedInput,
+                kind: mode === 'preview' ? 'previewed' : 'succeeded',
+                mode,
+                result: normalizedResult,
+                tool: definition.name,
+              })
+              return result
+            } catch (error) {
+              options.onToolEvent?.({
+                errorCode: inferAssistantErrorCode(error),
+                errorMessage: errorMessage(error),
+                input: normalizedInput,
+                kind: 'failed',
+                mode,
+                tool: definition.name,
+              })
+              throw error
+            }
+          },
         })
       }
 

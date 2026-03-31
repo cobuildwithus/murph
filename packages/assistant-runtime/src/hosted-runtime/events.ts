@@ -99,6 +99,7 @@ async function handleHostedDispatchEvent(input: {
       });
     case "gateway.message.send":
       await sendGatewayMessageLocal({
+        clientRequestId: dispatch.event.clientRequestId,
         dispatchMode: "queue-only",
         replyToMessageId: dispatch.event.replyToMessageId,
         sessionKey: dispatch.event.sessionKey,

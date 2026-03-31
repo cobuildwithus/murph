@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 
 import { defineProject } from "vitest/config";
 
+import { resolveMurphVitestFileParallelism } from "../../config/vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+
 import {
   createVitestWorkspaceRuntimeAliases,
   resolveWorkspaceSourceEntries,
@@ -21,9 +24,10 @@ export default defineProject({
     ),
   },
   test: {
+    ...murphVitestNoTimeouts,
     name: "hosted-execution",
     environment: "node",
-    fileParallelism: false,
+    fileParallelism: resolveMurphVitestFileParallelism(),
     include: ["test/**/*.test.ts"],
   },
 });

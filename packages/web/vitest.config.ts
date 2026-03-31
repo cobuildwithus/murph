@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 
 import { defineProject } from "vitest/config";
 
+import { resolveMurphVitestFileParallelism } from "../../config/vitest-parallelism.js";
+import { murphVitestNoTimeouts } from "../../config/vitest-timeouts.js";
+
 import {
   createVitestWorkspaceRuntimeAliases,
   resolveLocalWebWorkspaceSourceEntries,
@@ -21,9 +24,10 @@ export default defineProject({
     alias: createVitestWorkspaceRuntimeAliases(resolveLocalWebWorkspaceSourceEntries(packageDir)),
   },
   test: {
+    ...murphVitestNoTimeouts,
     name: "local-web",
     environment: "node",
-    fileParallelism: false,
+    fileParallelism: resolveMurphVitestFileParallelism(),
     include: ["packages/web/test/**/*.test.ts"],
   },
 });

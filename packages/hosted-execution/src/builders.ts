@@ -146,6 +146,7 @@ export function buildHostedExecutionVaultShareAcceptedDispatch(input: {
 }
 
 export function buildHostedExecutionGatewayMessageSendDispatch(input: {
+  clientRequestId?: string | null;
   eventId: string;
   occurredAt: string;
   replyToMessageId?: string | null;
@@ -155,6 +156,7 @@ export function buildHostedExecutionGatewayMessageSendDispatch(input: {
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
+      clientRequestId: input.clientRequestId ?? null,
       kind: "gateway.message.send",
       replyToMessageId: input.replyToMessageId ?? null,
       sessionKey: input.sessionKey,

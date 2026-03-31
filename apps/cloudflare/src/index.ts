@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { DurableObject } from "cloudflare:workers";
 export { ContainerProxy } from "@cloudflare/containers";
 
@@ -29,6 +31,7 @@ import {
   gatewaySendMessageResultSchema,
   gatewaySendMessageInputSchema,
   gatewayWaitForEventsInputSchema,
+  waitForGatewayEventsByPolling,
   type GatewayFetchAttachmentsInput,
   type GatewayGetConversationInput,
   type GatewayListConversationsInput,
@@ -558,7 +561,11 @@ async function handleGatewaySendRoute(
   }
 
   const dispatch = buildHostedExecutionGatewayMessageSendDispatch({
-    eventId: createGatewayDispatchEventId(),
+    clientRequestId: input.clientRequestId,
+    eventId: createGatewayDispatchEventId({
+      clientRequestId: input.clientRequestId,
+      sessionKey: input.sessionKey,
+    }),
     occurredAt: new Date().toISOString(),
     replyToMessageId: input.replyToMessageId,
     sessionKey: input.sessionKey,
@@ -619,31 +626,7 @@ async function waitForHostedGatewayEvents(
   poll: (input?: GatewayPollEventsInput) => Promise<GatewayPollEventsResult>,
   input: GatewayWaitForEventsInput,
 ): Promise<GatewayPollEventsResult> {
-  let result = await poll({
-    cursor: input.cursor,
-    kinds: input.kinds,
-    limit: input.limit,
-    sessionKey: input.sessionKey,
-  });
-  if (result.events.length > 0 || input.timeoutMs <= 0) {
-    return result;
-  }
-
-  const deadline = Date.now() + input.timeoutMs;
-  while (Date.now() < deadline) {
-    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
-    result = await poll({
-      cursor: input.cursor,
-      kinds: input.kinds,
-      limit: input.limit,
-      sessionKey: input.sessionKey,
-    });
-    if (result.events.length > 0) {
-      return result;
-    }
-  }
-
-  return result;
+  return waitForGatewayEventsByPolling(poll, input);
 }
 
 function requireGatewayStubMethod<TKey extends keyof UserRunnerDurableObjectStubLike>(
@@ -658,12 +641,19 @@ function requireGatewayStubMethod<TKey extends keyof UserRunnerDurableObjectStub
   return method as Exclude<UserRunnerDurableObjectStubLike[TKey], undefined>;
 }
 
-function createGatewayDispatchEventId(): string {
-  return `gateway-send:${Date.now()}:${Math.random().toString(16).slice(2, 10)}`;
-}
+function createGatewayDispatchEventId(input?: {
+  clientRequestId?: string | null;
+  sessionKey?: string | null;
+}): string {
+  if (typeof input?.clientRequestId === "string" && input.clientRequestId.trim().length > 0) {
+    const hash = createHash("sha1")
+      .update(`${input.sessionKey ?? "gateway"}\n${input.clientRequestId.trim()}`)
+      .digest("hex")
+      .slice(0, 32);
+    return `gateway-send:${hash}`;
+  }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return `gateway-send:${Date.now()}:${Math.random().toString(16).slice(2, 10)}`;
 }
 
 async function handleHostedEmailIngress(

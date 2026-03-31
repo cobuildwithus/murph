@@ -27,6 +27,12 @@ Narrow user-supplied patch landings may skip a dedicated plan when all of the fo
 
 If the patch starts drifting into broader design, refactor, or multi-turn work, open a plan before continuing.
 
+## Local Working Tree Note
+
+The repo's large-change-set plan guard remains strict for staged comparisons and CI-style commit ranges.
+
+Plain local working-tree verification is intentionally looser: if other agents have left many unrelated dirty files in the tree, `scripts/check-agent-docs-drift.sh` will not fail solely because the total local changed-file count exceeds the large-change threshold. The guard still enforces the usual code-versus-doc drift checks, and operators can re-enable a local threshold by setting `MURPH_WORKTREE_DRIFT_LARGE_CHANGE_THRESHOLD`.
+
 ## Completion Rule
 
 If a task used an execution plan and the task is done or abandoned, close that plan before handoff. Prefer `bash scripts/finish-task ...` when the task is also ready to commit.

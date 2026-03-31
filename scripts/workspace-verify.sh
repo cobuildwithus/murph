@@ -54,7 +54,7 @@ readonly typecheck_package_dirs=(
   "apps/cloudflare"
 )
 
-readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-50%}"
+readonly repo_vitest_max_workers="${MURPH_VITEST_MAX_WORKERS:-$([[ -n "${CI:-}" ]] && echo 50% || echo 75%)}"
 readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"

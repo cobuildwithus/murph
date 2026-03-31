@@ -8,7 +8,7 @@ import {
 import {
   openSqliteRuntimeDatabase,
   resolveGatewayRuntimePaths,
-  withImmediateTransaction,
+  resolveInboxRuntimePaths,
 } from '@murph/runtime-state'
 
 import type {
@@ -19,9 +19,11 @@ import { listAssistantOutboxIntentsLocal } from '../assistant/outbox.js'
 import { normalizeNullableString } from '../assistant/shared.js'
 import { listAssistantSessionsLocal } from '../assistant/store.js'
 import {
+  DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
   DEFAULT_GATEWAY_EVENT_RETENTION,
   applyGatewayProjectionSnapshotToEventLog,
   pollGatewayEventLogState,
+  waitForGatewayEventsByPolling,
 } from './event-log.js'
 import {
   gatewayConversationSchema,
@@ -63,12 +65,13 @@ import {
   deriveLastMessagePreview,
 } from './snapshot.js'
 
-const CAPTURE_SIGNATURE_META_KEY = 'captures.signature'
+const CAPTURE_CURSOR_CREATED_AT_META_KEY = 'captures.cursor.createdAt'
+const CAPTURE_CURSOR_ID_META_KEY = 'captures.cursor.captureId'
+const ATTACHMENT_CURSOR_UPDATED_AT_META_KEY = 'attachments.cursor.updatedAt'
+const ATTACHMENT_CURSOR_ID_META_KEY = 'attachments.cursor.attachmentId'
 const SESSION_SIGNATURE_META_KEY = 'sessions.signature'
 const OUTBOX_SIGNATURE_META_KEY = 'outbox.signature'
-const SNAPSHOT_JSON_META_KEY = 'snapshot.json'
-const GATEWAY_EVENT_POLL_INTERVAL_MS = 250
-const INBOX_CAPTURE_PAGE_SIZE = 500
+const INBOX_SYNC_PAGE_SIZE = 500
 
 interface CaptureSourceRow {
   accountId: string | null
@@ -168,6 +171,16 @@ interface GatewaySnapshotState {
   snapshot: GatewayProjectionSnapshot | null
 }
 
+interface GatewayCaptureSyncCursor {
+  captureId: string
+  createdAt: string
+}
+
+interface GatewayAttachmentSyncCursor {
+  attachmentId: string
+  updatedAt: string
+}
+
 export async function exportGatewayProjectionSnapshotLocal(
   vault: string,
 ): Promise<GatewayProjectionSnapshot> {
@@ -222,31 +235,13 @@ export async function waitForGatewayEventsLocal(
   vault: string,
   input?: GatewayWaitForEventsInput,
 ): Promise<GatewayPollEventsResult> {
-  const parsed = gatewayWaitForEventsInputSchema.parse(input ?? {})
   const store = new LocalGatewayProjectionStore(vault)
   try {
-    await store.sync()
-    const immediate = store.pollEvents(parsed)
-    if (immediate.events.length > 0) {
-      return immediate
-    }
-
-    const deadline = Date.now() + parsed.timeoutMs
-    while (Date.now() < deadline) {
-      await sleep(Math.min(GATEWAY_EVENT_POLL_INTERVAL_MS, deadline - Date.now()))
+    return await waitForGatewayEventsByPolling(async (pollInput) => {
       await store.sync()
-      const polled = store.pollEvents(parsed)
-      if (polled.events.length > 0) {
-        return polled
-      }
-    }
-
-    await store.sync()
-    return store.pollEvents({
-      cursor: parsed.cursor,
-      kinds: parsed.kinds,
-      limit: parsed.limit,
-      sessionKey: parsed.sessionKey,
+      return store.pollEvents(pollInput)
+    }, input, {
+      intervalMs: DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
     })
   } finally {
     store.close()
@@ -266,32 +261,98 @@ export class LocalGatewayProjectionStore {
   }
 
   async sync(): Promise<void> {
-    const [captures, sessions, outboxIntents] = await Promise.all([
-      listAllInboxCaptures(this.vault),
+    const [sessions, outboxIntents] = await Promise.all([
       listAssistantSessionsLocal(this.vault),
       listAssistantOutboxIntentsLocal(this.vault),
     ])
-    const captureSignature = computeCaptureSyncSignature(captures)
     const sessionSignature = computeSessionSyncSignature(sessions)
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)
+    const captureCursor = readGatewayCaptureSyncCursor(this.database)
+    const attachmentCursor = readGatewayAttachmentSyncCursor(this.database)
+    const captureSourceCount = readGatewayTableCount(this.database, 'gateway_capture_sources')
+    const rebuildCaptures = captureSourceCount === 0 || captureCursor === null
 
-    withImmediateTransaction(this.database, () => {
-      const changed =
-        readMeta(this.database, CAPTURE_SIGNATURE_META_KEY) !== captureSignature ||
-        readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature ||
-        readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature
+    await withGatewayImmediateTransaction(this.database, async () => {
+      let changed = false
+      const hadServingSnapshot = hasGatewayServingSnapshot(this.database)
+      let nextAttachmentCursor: GatewayAttachmentSyncCursor | null =
+        rebuildCaptures ? null : attachmentCursor
 
-      if (!changed && readMeta(this.database, SNAPSHOT_JSON_META_KEY) !== null) {
-        return
+      if (rebuildCaptures) {
+        clearCaptureSources(this.database)
+        let nextCaptureCursor: GatewayCaptureSyncCursor | null = null
+
+        while (true) {
+          const page = await listInboxCapturesCreatedSince(
+            this.vault,
+            nextCaptureCursor,
+            INBOX_SYNC_PAGE_SIZE,
+          )
+          if (page.captures.length > 0) {
+            upsertCaptureSources(this.database, page.captures)
+            changed = true
+          }
+          nextCaptureCursor = page.cursor
+          if (!page.hasMore) {
+            break
+          }
+        }
+
+        writeGatewayCaptureSyncCursor(this.database, nextCaptureCursor)
+        changed = changed || !hadServingSnapshot
+      } else {
+        let nextCaptureCursor = captureCursor
+
+        while (true) {
+          const page = await listInboxCapturesCreatedSince(
+            this.vault,
+            nextCaptureCursor,
+            INBOX_SYNC_PAGE_SIZE,
+          )
+          if (page.captures.length > 0) {
+            upsertCaptureSources(this.database, page.captures)
+            changed = true
+          }
+          nextCaptureCursor = page.cursor ?? nextCaptureCursor
+          if (!page.hasMore) {
+            break
+          }
+        }
+        writeGatewayCaptureSyncCursor(this.database, nextCaptureCursor)
       }
 
-      replaceCaptureSources(this.database, captures)
-      replaceSessionSources(this.database, sessions)
-      replaceOutboxSources(this.database, outboxIntents)
-      writeMeta(this.database, CAPTURE_SIGNATURE_META_KEY, captureSignature)
-      writeMeta(this.database, SESSION_SIGNATURE_META_KEY, sessionSignature)
-      writeMeta(this.database, OUTBOX_SIGNATURE_META_KEY, outboxSignature)
-      rebuildSnapshotState(this.database)
+      while (true) {
+        const page = await listAttachmentCaptureUpdatesSince(
+          this.vault,
+          nextAttachmentCursor,
+          INBOX_SYNC_PAGE_SIZE,
+        )
+        if (page.captures.length > 0) {
+          upsertCaptureSources(this.database, page.captures)
+          changed = true
+        }
+        nextAttachmentCursor = page.cursor
+        if (!page.hasMore) {
+          break
+        }
+      }
+      writeGatewayAttachmentSyncCursor(this.database, nextAttachmentCursor)
+
+      if (readMeta(this.database, SESSION_SIGNATURE_META_KEY) !== sessionSignature) {
+        replaceSessionSources(this.database, sessions)
+        writeMeta(this.database, SESSION_SIGNATURE_META_KEY, sessionSignature)
+        changed = true
+      }
+
+      if (readMeta(this.database, OUTBOX_SIGNATURE_META_KEY) !== outboxSignature) {
+        replaceOutboxSources(this.database, outboxIntents)
+        writeMeta(this.database, OUTBOX_SIGNATURE_META_KEY, outboxSignature)
+        changed = true
+      }
+
+      if (changed || !hasGatewayServingSnapshot(this.database)) {
+        rebuildSnapshotState(this.database)
+      }
     })
   }
 
@@ -330,37 +391,138 @@ export class LocalGatewayProjectionStore {
   }
 }
 
-async function listAllInboxCaptures(vault: string): Promise<InboxCaptureRecord[]> {
+async function listInboxCapturesCreatedSince(
+  vault: string,
+  cursor: GatewayCaptureSyncCursor | null,
+  limit: number,
+): Promise<{
+  captures: InboxCaptureRecord[]
+  cursor: GatewayCaptureSyncCursor | null
+  hasMore: boolean
+}> {
   const runtime = await openInboxRuntime({ vaultRoot: vault })
+  const database = openSqliteRuntimeDatabase(resolveInboxRuntimePaths(vault).inboxDbPath)
   try {
+    const rows = database
+      .prepare(
+        `SELECT capture_id AS captureId, created_at AS createdAt
+           FROM capture
+          WHERE (? IS NULL OR created_at > ? OR (created_at = ? AND capture_id > ?))
+          ORDER BY created_at ASC, capture_id ASC
+          LIMIT ?`,
+      )
+      .all(
+        cursor?.createdAt ?? null,
+        cursor?.createdAt ?? null,
+        cursor?.createdAt ?? null,
+        cursor?.captureId ?? null,
+        limit,
+      ) as Array<{ captureId: string; createdAt: string }>
+
     const captures: InboxCaptureRecord[] = []
-    let afterCaptureId: string | null = null
-    let afterOccurredAt: string | null = null
-
-    while (true) {
-      const page = runtime.listCaptures({
-        afterCaptureId,
-        afterOccurredAt,
-        limit: INBOX_CAPTURE_PAGE_SIZE,
-        oldestFirst: true,
-      })
-      if (page.length === 0) {
-        break
-      }
-
-      captures.push(...page)
-      const last = page[page.length - 1]
-      afterCaptureId = last?.captureId ?? null
-      afterOccurredAt = last?.occurredAt ?? null
-
-      if (page.length < INBOX_CAPTURE_PAGE_SIZE) {
-        break
+    for (const row of rows) {
+      const capture = runtime.getCapture(row.captureId)
+      if (capture) {
+        captures.push(capture)
       }
     }
 
-    return captures
+    const last = rows[rows.length - 1] ?? null
+    return {
+      captures,
+      cursor: last
+        ? {
+            captureId: last.captureId,
+            createdAt: last.createdAt,
+          }
+        : cursor,
+      hasMore: rows.length === limit,
+    }
   } finally {
+    database.close()
     runtime.close()
+  }
+}
+
+async function listAttachmentCaptureUpdatesSince(
+  vault: string,
+  cursor: GatewayAttachmentSyncCursor | null,
+  limit: number,
+): Promise<{
+  captures: InboxCaptureRecord[]
+  cursor: GatewayAttachmentSyncCursor | null
+  hasMore: boolean
+}> {
+  const runtime = await openInboxRuntime({ vaultRoot: vault })
+  const database = openSqliteRuntimeDatabase(resolveInboxRuntimePaths(vault).inboxDbPath)
+  try {
+    const rows = database
+      .prepare(
+        `SELECT attachment_id AS attachmentId,
+                capture_id AS captureId,
+                coalesce(parse_updated_at, created_at) AS updatedAt
+           FROM capture_attachment
+          WHERE (
+            ? IS NULL OR
+            coalesce(parse_updated_at, created_at) > ? OR
+            (
+              coalesce(parse_updated_at, created_at) = ? AND
+              attachment_id > ?
+            )
+          )
+          ORDER BY coalesce(parse_updated_at, created_at) ASC, attachment_id ASC
+          LIMIT ?`,
+      )
+      .all(
+        cursor?.updatedAt ?? null,
+        cursor?.updatedAt ?? null,
+        cursor?.updatedAt ?? null,
+        cursor?.attachmentId ?? null,
+        limit,
+      ) as Array<{ attachmentId: string; captureId: string; updatedAt: string }>
+
+    const captures: InboxCaptureRecord[] = []
+    const seenCaptureIds = new Set<string>()
+    for (const row of rows) {
+      if (seenCaptureIds.has(row.captureId)) {
+        continue
+      }
+      const capture = runtime.getCapture(row.captureId)
+      if (capture) {
+        captures.push(capture)
+        seenCaptureIds.add(row.captureId)
+      }
+    }
+
+    const last = rows[rows.length - 1] ?? null
+    return {
+      captures,
+      cursor: last
+        ? {
+            attachmentId: last.attachmentId,
+            updatedAt: last.updatedAt,
+          }
+        : cursor,
+      hasMore: rows.length === limit,
+    }
+  } finally {
+    database.close()
+    runtime.close()
+  }
+}
+
+async function withGatewayImmediateTransaction<T>(
+  database: DatabaseSync,
+  callback: () => Promise<T>,
+): Promise<T> {
+  database.exec('BEGIN IMMEDIATE')
+  try {
+    const result = await callback()
+    database.exec('COMMIT')
+    return result
+  } catch (error) {
+    database.exec('ROLLBACK')
+    throw error
   }
 }
 
@@ -453,6 +615,32 @@ function ensureGatewayStoreSchema(database: DatabaseSync): void {
       note TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS gateway_conversations (
+      session_key TEXT PRIMARY KEY,
+      route_key TEXT NOT NULL,
+      last_activity_at TEXT,
+      message_count INTEGER,
+      can_send INTEGER NOT NULL,
+      conversation_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS gateway_messages (
+      message_id TEXT PRIMARY KEY,
+      session_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      provider_message_id TEXT,
+      provider_thread_id TEXT,
+      message_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS gateway_attachments (
+      attachment_id TEXT PRIMARY KEY,
+      session_key TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      attachment_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS gateway_events (
       cursor INTEGER PRIMARY KEY,
       kind TEXT NOT NULL,
@@ -467,14 +655,24 @@ function ensureGatewayStoreSchema(database: DatabaseSync): void {
       ON gateway_capture_sources(route_key, provider_message_id, actor_is_self);
     CREATE INDEX IF NOT EXISTS gateway_outbox_sources_route_provider_idx
       ON gateway_outbox_sources(route_key, provider_message_id);
+    CREATE INDEX IF NOT EXISTS gateway_conversations_activity_idx
+      ON gateway_conversations(last_activity_at DESC, session_key ASC);
+    CREATE INDEX IF NOT EXISTS gateway_messages_session_created_idx
+      ON gateway_messages(session_key, created_at ASC, message_id ASC);
+    CREATE INDEX IF NOT EXISTS gateway_attachments_message_idx
+      ON gateway_attachments(message_id);
+    CREATE INDEX IF NOT EXISTS gateway_attachments_session_idx
+      ON gateway_attachments(session_key);
   `)
 }
 
-function replaceCaptureSources(database: DatabaseSync, captures: readonly InboxCaptureRecord[]): void {
+function clearCaptureSources(database: DatabaseSync): void {
   database.prepare('DELETE FROM gateway_capture_attachments').run()
   database.prepare('DELETE FROM gateway_capture_sources').run()
+}
 
-  const insertCapture = database.prepare(`
+function upsertCaptureSources(database: DatabaseSync, captures: readonly InboxCaptureRecord[]): void {
+  const upsertCapture = database.prepare(`
     INSERT INTO gateway_capture_sources (
       capture_id,
       route_key,
@@ -493,6 +691,22 @@ function replaceCaptureSources(database: DatabaseSync, captures: readonly InboxC
       thread_title,
       message_id
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(capture_id) DO UPDATE SET
+      route_key = excluded.route_key,
+      session_key = excluded.session_key,
+      source = excluded.source,
+      account_id = excluded.account_id,
+      external_id = excluded.external_id,
+      provider_message_id = excluded.provider_message_id,
+      actor_id = excluded.actor_id,
+      actor_display_name = excluded.actor_display_name,
+      actor_is_self = excluded.actor_is_self,
+      directness = excluded.directness,
+      occurred_at = excluded.occurred_at,
+      text = excluded.text,
+      thread_id = excluded.thread_id,
+      thread_title = excluded.thread_title,
+      message_id = excluded.message_id
   `)
   const insertAttachment = database.prepare(`
     INSERT INTO gateway_capture_attachments (
@@ -509,6 +723,9 @@ function replaceCaptureSources(database: DatabaseSync, captures: readonly InboxC
       transcript_text
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
+  const deleteAttachments = database.prepare(
+    'DELETE FROM gateway_capture_attachments WHERE capture_id = ?',
+  )
 
   for (const capture of captures) {
     const route = gatewayConversationRouteFromCapture(capture)
@@ -519,7 +736,7 @@ function replaceCaptureSources(database: DatabaseSync, captures: readonly InboxC
 
     const sessionKey = createGatewayConversationSessionKey(routeKey)
     const messageId = createGatewayCaptureMessageId(routeKey, capture.captureId)
-    insertCapture.run(
+    upsertCapture.run(
       capture.captureId,
       routeKey,
       sessionKey,
@@ -538,6 +755,7 @@ function replaceCaptureSources(database: DatabaseSync, captures: readonly InboxC
       messageId,
     )
 
+    deleteAttachments.run(capture.captureId)
     for (const attachment of capture.attachments) {
       const sourceAttachmentId = normalizeAttachmentSourceId(attachment)
       insertAttachment.run(
@@ -665,6 +883,135 @@ function rebuildSnapshotState(database: DatabaseSync): void {
     DEFAULT_GATEWAY_EVENT_RETENTION,
   )
   writeSnapshotState(database, nextState)
+}
+
+function replaceServingSnapshot(
+  database: DatabaseSync,
+  snapshot: GatewayProjectionSnapshot | null,
+): void {
+  database.prepare('DELETE FROM gateway_attachments').run()
+  database.prepare('DELETE FROM gateway_messages').run()
+  database.prepare('DELETE FROM gateway_conversations').run()
+
+  if (!snapshot) {
+    return
+  }
+
+  const insertConversation = database.prepare(`
+    INSERT INTO gateway_conversations (
+      session_key,
+      route_key,
+      last_activity_at,
+      message_count,
+      can_send,
+      conversation_json
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `)
+  const insertMessage = database.prepare(`
+    INSERT INTO gateway_messages (
+      message_id,
+      session_key,
+      created_at,
+      direction,
+      provider_message_id,
+      provider_thread_id,
+      message_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
+  const insertAttachment = database.prepare(`
+    INSERT INTO gateway_attachments (
+      attachment_id,
+      session_key,
+      message_id,
+      attachment_json
+    ) VALUES (?, ?, ?, ?)
+  `)
+
+  for (const conversation of snapshot.conversations) {
+    insertConversation.run(
+      conversation.sessionKey,
+      resolveGatewayConversationRouteKey(conversation.route) ?? conversation.sessionKey,
+      conversation.lastActivityAt,
+      conversation.messageCount,
+      conversation.canSend ? 1 : 0,
+      JSON.stringify(conversation),
+    )
+  }
+
+  for (const message of snapshot.messages) {
+    insertMessage.run(
+      message.messageId,
+      message.sessionKey,
+      message.createdAt,
+      message.direction,
+      null,
+      null,
+      JSON.stringify(message),
+    )
+    for (const attachment of message.attachments) {
+      insertAttachment.run(
+        attachment.attachmentId,
+        message.sessionKey,
+        message.messageId,
+        JSON.stringify(attachment),
+      )
+    }
+  }
+}
+
+function hasGatewayServingSnapshot(database: DatabaseSync): boolean {
+  return readGatewayTableCount(database, 'gateway_conversations') > 0 ||
+    readGatewayTableCount(database, 'gateway_messages') > 0 ||
+    readGatewayTableCount(database, 'gateway_permissions') > 0
+}
+
+function readGatewayTableCount(database: DatabaseSync, tableName: string): number {
+  const row = database
+    .prepare(`SELECT COUNT(*) AS count FROM ${tableName}`)
+    .get() as { count: number | null }
+  return row.count ?? 0
+}
+
+function readGatewayCaptureSyncCursor(
+  database: DatabaseSync,
+): GatewayCaptureSyncCursor | null {
+  const createdAt = readMeta(database, CAPTURE_CURSOR_CREATED_AT_META_KEY)
+  const captureId = readMeta(database, CAPTURE_CURSOR_ID_META_KEY)
+  return createdAt && captureId
+    ? {
+        captureId,
+        createdAt,
+      }
+    : null
+}
+
+function writeGatewayCaptureSyncCursor(
+  database: DatabaseSync,
+  cursor: GatewayCaptureSyncCursor | null,
+): void {
+  writeMeta(database, CAPTURE_CURSOR_CREATED_AT_META_KEY, cursor?.createdAt ?? null)
+  writeMeta(database, CAPTURE_CURSOR_ID_META_KEY, cursor?.captureId ?? null)
+}
+
+function readGatewayAttachmentSyncCursor(
+  database: DatabaseSync,
+): GatewayAttachmentSyncCursor | null {
+  const updatedAt = readMeta(database, ATTACHMENT_CURSOR_UPDATED_AT_META_KEY)
+  const attachmentId = readMeta(database, ATTACHMENT_CURSOR_ID_META_KEY)
+  return updatedAt && attachmentId
+    ? {
+        attachmentId,
+        updatedAt,
+      }
+    : null
+}
+
+function writeGatewayAttachmentSyncCursor(
+  database: DatabaseSync,
+  cursor: GatewayAttachmentSyncCursor | null,
+): void {
+  writeMeta(database, ATTACHMENT_CURSOR_UPDATED_AT_META_KEY, cursor?.updatedAt ?? null)
+  writeMeta(database, ATTACHMENT_CURSOR_ID_META_KEY, cursor?.attachmentId ?? null)
 }
 
 function buildSnapshotFromDatabase(database: DatabaseSync): GatewayProjectionSnapshot {
@@ -1135,7 +1482,7 @@ function readSnapshotState(database: DatabaseSync): GatewaySnapshotState {
 }
 
 function writeSnapshotState(database: DatabaseSync, state: GatewaySnapshotState): void {
-  writeMeta(database, SNAPSHOT_JSON_META_KEY, JSON.stringify(state.snapshot))
+  replaceServingSnapshot(database, state.snapshot)
   database.prepare('DELETE FROM gateway_events').run()
   const insert = database.prepare(`
     INSERT INTO gateway_events (
@@ -1162,11 +1509,57 @@ function writeSnapshotState(database: DatabaseSync, state: GatewaySnapshotState)
 }
 
 function readStoredSnapshot(database: DatabaseSync): GatewayProjectionSnapshot | null {
-  const raw = readMeta(database, SNAPSHOT_JSON_META_KEY)
-  if (!raw) {
+  if (!hasGatewayServingSnapshot(database)) {
     return null
   }
-  return gatewayProjectionSnapshotSchema.parse(JSON.parse(raw))
+
+  const conversations = database
+    .prepare(`
+      SELECT conversation_json AS conversationJson
+      FROM gateway_conversations
+      ORDER BY coalesce(last_activity_at, '') DESC, session_key ASC
+    `)
+    .all()
+    .map((row) =>
+      gatewayConversationSchema.parse(
+        JSON.parse((row as { conversationJson: string }).conversationJson),
+      ),
+    ) as GatewayConversation[]
+
+  const messages = database
+    .prepare(`
+      SELECT message_json AS messageJson
+      FROM gateway_messages
+      ORDER BY created_at ASC, message_id ASC
+    `)
+    .all()
+    .map((row) =>
+      gatewayMessageSchema.parse(
+        JSON.parse((row as { messageJson: string }).messageJson),
+      ),
+    )
+
+  const permissions = readPermissionRows(database).map((row) =>
+    gatewayPermissionRequestSchema.parse({
+      schema: 'murph.gateway-permission-request.v1',
+      requestId: row.requestId,
+      sessionKey: row.sessionKey,
+      action: row.action,
+      description: row.description,
+      status: row.status,
+      requestedAt: row.requestedAt,
+      resolvedAt: row.resolvedAt,
+      note: row.note,
+    }),
+  )
+
+  return gatewayProjectionSnapshotSchema.parse({
+    schema: 'murph.gateway-projection-snapshot.v1',
+    generatedAt: new Date().toISOString(),
+    conversations,
+    messages,
+    permissions,
+  })
 }
 
 function readSnapshotOrEmpty(database: DatabaseSync): GatewayProjectionSnapshot {
@@ -1289,39 +1682,6 @@ function respondToPermissionInDatabase(
   })
 }
 
-function computeCaptureSyncSignature(captures: readonly InboxCaptureRecord[]): string {
-  return JSON.stringify(
-    [...captures]
-      .map((capture) => ({
-        accountId: normalizeNullableString(capture.accountId ?? null),
-        actorDisplayName: normalizeNullableString(capture.actor.displayName ?? null),
-        actorId: normalizeNullableString(capture.actor.id ?? null),
-        actorIsSelf: capture.actor.isSelf,
-        attachments: capture.attachments.map((attachment) => ({
-          attachmentId: attachment.attachmentId,
-          byteSize: attachment.byteSize ?? null,
-          externalId: normalizeNullableString(attachment.externalId ?? null),
-          extractedText: attachment.extractedText ?? null,
-          fileName: attachment.fileName ?? null,
-          kind: attachment.kind,
-          mime: attachment.mime ?? null,
-          ordinal: attachment.ordinal,
-          parseState: normalizeNullableString(attachment.parseState ?? null),
-          transcriptText: attachment.transcriptText ?? null,
-        })),
-        captureId: capture.captureId,
-        externalId: capture.externalId,
-        occurredAt: capture.occurredAt,
-        source: capture.source,
-        text: capture.text ?? null,
-        threadId: normalizeNullableString(capture.thread.id ?? null),
-        threadIsDirect: capture.thread.isDirect,
-        threadTitle: normalizeNullableString(capture.thread.title ?? null),
-      }))
-      .sort((left, right) => left.captureId.localeCompare(right.captureId)),
-  )
-}
-
 function computeSessionSyncSignature(sessions: readonly AssistantSession[]): string {
   return JSON.stringify(
     [...sessions]
@@ -1371,8 +1731,4 @@ function writeMeta(database: DatabaseSync, key: string, value: string | null): v
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `)
     .run(key, value)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)))
 }
