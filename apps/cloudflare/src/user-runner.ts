@@ -446,7 +446,6 @@ export class HostedUserRunner {
             error,
             retryDelayMs: computeRetryDelayMs(this.env.retryDelayMs, nextPending.attempts + 1),
           });
-          record = await this.scheduler.syncNextWake();
           record = await this.advanceRunPhase({
             dispatch: nextPending.dispatch,
             error,

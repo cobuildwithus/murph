@@ -493,6 +493,7 @@ export class RunnerQueueStore {
     );
 
     if (input.clearError) {
+      meta.last_error = null;
       meta.last_error_at = null;
       meta.last_error_code = null;
     }

@@ -143,24 +143,18 @@ export class RunnerBundleSync {
         return swapped.record;
       }
 
-      if (
-        bundleState.bundleVersions.agentState !== nextExpectedVersions.agentState
-        && !sameHostedBundlePayloadRef(bundleState.bundleRefs.agentState, nextBundleRefs.agentState)
-      ) {
-        throw new Error(`Hosted agent-state bundle changed during finalize for ${userId}.`);
-      }
-
-      if (
-        bundleState.bundleVersions.vault !== nextExpectedVersions.vault
-        && !sameHostedBundlePayloadRef(bundleState.bundleRefs.vault, nextBundleRefs.vault)
-      ) {
-        throw new Error(`Hosted vault bundle changed during finalize for ${userId}.`);
-      }
+      assertBundleRefsStillCompatible({
+        currentBundleRefs: swapped.record.bundleRefs,
+        currentVersions: swapped.record.bundleVersions,
+        nextBundleRefs,
+        previousExpectedVersions: nextExpectedVersions,
+        userId,
+      });
 
       nextExpectedVersions = swapped.record.bundleVersions;
     }
 
-    throw new Error(`Hosted bundle finalize for ${userId} conflicted too many times.`);
+    throw new Error(`Hosted bundle update for ${userId} conflicted too many times.`);
   }
 
   private createBundleStore() {
@@ -191,5 +185,37 @@ export class RunnerBundleSync {
     } catch {
       // Best-effort cleanup only; do not fail successful bundle swaps.
     }
+  }
+}
+
+function assertBundleRefsStillCompatible(input: {
+  currentBundleRefs: RunnerStateRecord["bundleRefs"];
+  currentVersions: RunnerBundleVersions;
+  nextBundleRefs: RunnerStateRecord["bundleRefs"];
+  previousExpectedVersions: RunnerBundleVersions;
+  userId: string;
+}): void {
+  if (
+    input.currentVersions.agentState !== input.previousExpectedVersions.agentState
+    && !sameHostedBundlePayloadRef(
+      input.currentBundleRefs.agentState,
+      input.nextBundleRefs.agentState,
+    )
+  ) {
+    throw new Error(
+      `Hosted agent-state bundle changed while applying the runner result for ${input.userId}.`,
+    );
+  }
+
+  if (
+    input.currentVersions.vault !== input.previousExpectedVersions.vault
+    && !sameHostedBundlePayloadRef(
+      input.currentBundleRefs.vault,
+      input.nextBundleRefs.vault,
+    )
+  ) {
+    throw new Error(
+      `Hosted vault bundle changed while applying the runner result for ${input.userId}.`,
+    );
   }
 }
