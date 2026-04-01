@@ -113,6 +113,7 @@ export const inboxCaptureSummarySchema = z.object({
   externalId: z.string().min(1),
   threadId: z.string().min(1),
   threadTitle: z.string().min(1).nullable(),
+  threadIsDirect: z.boolean(),
   actorId: z.string().min(1).nullable(),
   actorName: z.string().min(1).nullable(),
   actorIsSelf: z.boolean(),
@@ -127,7 +128,6 @@ export const inboxCaptureSummarySchema = z.object({
 
 export const inboxCaptureDetailSchema = inboxCaptureSummarySchema.extend({
   createdAt: isoTimestampSchema,
-  threadIsDirect: z.boolean(),
   attachments: z.array(inboxAttachmentSchema),
 })
 

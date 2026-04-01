@@ -152,6 +152,7 @@ function pickHostedTelegramReplyMessage(
     chat: pickHostedTelegramChat(message.chat),
     contact: pickHostedTelegramContact(message.contact),
     date: message.date,
+    direct_messages_topic: pickHostedTelegramDirectMessagesTopic(message.direct_messages_topic),
     from: pickHostedTelegramUser(message.from),
     location: pickHostedTelegramLocation(message.location),
     media_group_id: message.media_group_id,

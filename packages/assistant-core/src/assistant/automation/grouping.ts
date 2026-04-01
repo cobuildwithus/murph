@@ -86,8 +86,11 @@ export async function collectAssistantAutoReplyGroup(input: {
     if (
       !candidate ||
       candidate.source !== first.source ||
+      candidate.accountId !== first.accountId ||
       candidate.threadId !== first.threadId ||
-      candidate.actorId !== first.actorId
+      candidate.threadIsDirect !== first.threadIsDirect ||
+      candidate.actorId !== first.actorId ||
+      candidate.actorIsSelf !== first.actorIsSelf
     ) {
       break
     }

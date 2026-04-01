@@ -4880,7 +4880,6 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
       schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
-      providerSessionId: 'thread-telegram-scope',
       providerOptions: {
         model: null,
         reasoningEffort: null,
@@ -4888,6 +4887,19 @@ test('scanAssistantAutoReplyOnce only auto-replies to Telegram direct chats', as
         approvalPolicy: 'never',
         profile: null,
         oss: false,
+      },
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-scope',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
       },
       alias: null,
       binding: {
@@ -5691,7 +5703,6 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
         schema: 'murph.assistant-session.v3',
         sessionId: input.sessionId,
         provider: 'codex-cli',
-        providerSessionId: 'thread-telegram-failure',
         providerOptions: {
           model: null,
           reasoningEffort: null,
@@ -5699,6 +5710,19 @@ test('scanAssistantAutoReplyOnce keeps scanning after a failed Telegram delivery
           approvalPolicy: 'never',
           profile: null,
           oss: false,
+        },
+        providerBinding: {
+          provider: 'codex-cli',
+          providerSessionId: 'thread-telegram-failure',
+          providerState: null,
+          providerOptions: {
+            model: null,
+            reasoningEffort: null,
+            sandbox: 'read-only',
+            approvalPolicy: 'never',
+            profile: null,
+            oss: false,
+          },
         },
         alias: null,
         binding: {
@@ -6045,6 +6069,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
       input: {
         raw: {
           message: {
+            message_id: 101,
             media_group_id: 'album-7',
           },
         },
@@ -6058,6 +6083,7 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
       input: {
         raw: {
           message: {
+            message_id: 102,
             media_group_id: 'album-7',
           },
         },
@@ -6080,7 +6106,6 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
       schema: 'murph.assistant-session.v3',
       sessionId: input.sessionId,
       provider: 'codex-cli',
-      providerSessionId: 'thread-telegram-album',
       providerOptions: {
         model: null,
         reasoningEffort: null,
@@ -6088,6 +6113,19 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
         approvalPolicy: 'never',
         profile: null,
         oss: false,
+      },
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-album',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
       },
       alias: null,
       binding: {
@@ -6212,6 +6250,8 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   })
   assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 1)
   assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 1)
+  const deliveryCall = runtimeMocks.deliverAssistantMessageOverBinding.mock.calls[0]?.[0]
+  assert.equal(deliveryCall?.replyToMessageId, '102')
 
   const firstArtifact = JSON.parse(
     await readFile(
@@ -6241,6 +6281,203 @@ test('scanAssistantAutoReplyOnce groups Telegram media albums into one assistant
   )
   assert.deepEqual(firstArtifact.groupCaptureIds, ['cap-album-1', 'cap-album-2'])
   assert.deepEqual(secondArtifact.groupCaptureIds, ['cap-album-1', 'cap-album-2'])
+})
+
+test('scanAssistantAutoReplyOnce does not group Telegram media albums across accounts', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-telegram-album-accounts-'))
+  const vaultRoot = path.join(parent, 'vault')
+  await mkdir(path.join(vaultRoot, 'raw', 'inbox'), {
+    recursive: true,
+  })
+  cleanupPaths.push(parent)
+
+  await writeFile(
+    path.join(vaultRoot, 'raw', 'inbox', 'album-a.json'),
+    JSON.stringify({
+      input: {
+        raw: {
+          message: {
+            message_id: 201,
+            media_group_id: 'album-9',
+          },
+        },
+      },
+    }),
+    'utf8',
+  )
+  await writeFile(
+    path.join(vaultRoot, 'raw', 'inbox', 'album-b.json'),
+    JSON.stringify({
+      input: {
+        raw: {
+          message: {
+            message_id: 202,
+            media_group_id: 'album-9',
+          },
+        },
+      },
+    }),
+    'utf8',
+  )
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'codex-cli',
+    providerSessionId: 'thread-telegram-album-accounts',
+    response: 'album reply',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockImplementation(async (input: any) => ({
+    message: input.message,
+    session: {
+      schema: 'murph.assistant-session.v3',
+      sessionId: input.sessionId,
+      provider: 'codex-cli',
+      providerOptions: {
+        model: null,
+        reasoningEffort: null,
+        sandbox: 'read-only',
+        approvalPolicy: 'never',
+        profile: null,
+        oss: false,
+      },
+      providerBinding: {
+        provider: 'codex-cli',
+        providerSessionId: 'thread-telegram-album-accounts',
+        providerState: null,
+        providerOptions: {
+          model: null,
+          reasoningEffort: null,
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+          profile: null,
+          oss: false,
+        },
+      },
+      alias: null,
+      binding: {
+        conversationKey: `channel:telegram|thread:${input.threadId}`,
+        channel: 'telegram',
+        identityId: null,
+        actorId: '111',
+        threadId: input.threadId,
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: input.threadId,
+        },
+      },
+      createdAt: '2026-03-18T00:00:00.000Z',
+      updatedAt: '2026-03-18T00:00:01.000Z',
+      lastTurnAt: '2026-03-18T00:00:01.000Z',
+      turnCount: 1,
+    },
+    delivery: {
+      channel: 'telegram',
+      target: input.threadId,
+      targetKind: 'thread',
+      sentAt: '2026-03-18T00:00:01.000Z',
+      messageLength: input.message.length,
+    },
+  }))
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-album-a',
+            source: 'telegram',
+            accountId: 'bot-a',
+            externalId: 'update:10',
+            threadId: '123',
+            threadTitle: 'Direct',
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T10:00:00Z',
+            receivedAt: null,
+            text: 'photo from bot a',
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/album-a.json',
+            eventId: 'evt-album-a',
+            promotions: [],
+          },
+          {
+            captureId: 'cap-album-b',
+            source: 'telegram',
+            accountId: 'bot-b',
+            externalId: 'update:11',
+            threadId: '123',
+            threadTitle: 'Direct',
+            actorId: '111',
+            actorName: 'Bob',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T10:00:01Z',
+            receivedAt: null,
+            text: 'photo from bot b',
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/album-b.json',
+            eventId: 'evt-album-b',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show(input: any) {
+      const first = input.captureId === 'cap-album-a'
+      return {
+        capture: {
+          captureId: input.captureId,
+          source: 'telegram',
+          accountId: first ? 'bot-a' : 'bot-b',
+          externalId: first ? 'update:10' : 'update:11',
+          threadId: '123',
+          threadTitle: 'Direct',
+          threadIsDirect: true,
+          actorId: '111',
+          actorName: 'Bob',
+          actorIsSelf: false,
+          occurredAt: first ? '2026-03-18T10:00:00Z' : '2026-03-18T10:00:01Z',
+          receivedAt: null,
+          text: first ? 'photo from bot a' : 'photo from bot b',
+          attachmentCount: 1,
+          envelopePath: first ? 'raw/inbox/album-a.json' : 'raw/inbox/album-b.json',
+          eventId: first ? 'evt-album-a' : 'evt-album-b',
+          createdAt: first ? '2026-03-18T10:00:00Z' : '2026-03-18T10:00:01Z',
+          promotions: [],
+          attachments: [
+            {
+              ordinal: 1,
+              kind: 'image',
+              fileName: first ? 'meal-a.jpg' : 'meal-b.jpg',
+              transcriptText: null,
+              extractedText: first ? 'plate a' : 'plate b',
+              parseState: 'succeeded',
+            },
+          ],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 2,
+    failed: 0,
+    replied: 2,
+    skipped: 0,
+  })
+  assert.equal(runtimeMocks.executeAssistantProviderTurn.mock.calls.length, 2)
+  assert.equal(runtimeMocks.deliverAssistantMessageOverBinding.mock.calls.length, 2)
 })
 
 test('runAssistantAutomation merges routing and reply into one inbox decision pass', async () => {

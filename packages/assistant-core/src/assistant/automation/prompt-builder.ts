@@ -8,6 +8,7 @@ const MAX_ATTACHMENT_TEXT_EXCERPT_CHARS = 600
 
 export interface TelegramAutoReplyMetadata {
   mediaGroupId: string | null
+  messageId: string | null
   replyContext: string | null
 }
 
@@ -108,6 +109,7 @@ export async function loadTelegramAutoReplyMetadata(
           ? message.media_group_id
           : null,
       ),
+      messageId: parseTelegramMessageId(message?.message_id),
       replyContext: buildTelegramReplyContext(message),
     }
   } catch {
@@ -215,7 +217,19 @@ function buildAttachmentTextExcerpt(text: string): string {
 function extractTelegramRawMessage(
   raw: Record<string, unknown> | null,
 ): Record<string, unknown> | null {
-  return asRecord(raw?.business_message) ?? asRecord(raw?.message)
+  return asRecord(raw?.message) ?? asRecord(raw?.business_message)
+}
+
+function parseTelegramMessageId(value: unknown): string | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return String(value)
+  }
+
+  if (typeof value === 'string' && /^\d+$/u.test(value.trim())) {
+    return value.trim()
+  }
+
+  return null
 }
 
 function buildTelegramReplyContext(
