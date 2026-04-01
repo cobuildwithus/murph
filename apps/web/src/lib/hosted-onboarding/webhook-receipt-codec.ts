@@ -340,6 +340,7 @@ function readHostedWebhookSideEffect(
         lastError,
         payload: {
           botUserId: readHostedWebhookReceiptString(payload.botUserId),
+          phoneLookupKey: readHostedWebhookReceiptString(payload.phoneLookupKey),
           schemaVersion: payload.schemaVersion as string,
           dispatchRef,
           storage: "reference",

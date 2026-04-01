@@ -1,20 +1,31 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  createHostedOpaqueIdentifier,
+  createHostedPhoneLookupKey,
+  readHostedPhoneHint,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { PrismaLinqControlPlaneStore } from "@/src/lib/linq/prisma-store";
 
+const DEFAULT_RECIPIENT_PHONE = "+15557654321";
+const DEFAULT_RECIPIENT_PHONE_MASK = readHostedPhoneHint(DEFAULT_RECIPIENT_PHONE);
+
 type MutableLinqWebhookEvent = {
-  id: number;
-  userId: string;
   bindingId: string;
-  recipientPhone: string;
-  eventId: string;
-  traceId: string | null;
-  eventType: string;
   chatId: string | null;
+  createdAt: Date;
+  eventId: string;
+  eventType: string;
+  id: number;
   messageId: string | null;
   occurredAt: Date | null;
   receivedAt: Date;
-  createdAt: Date;
+  recipientPhone: string;
+  traceId: string | null;
+  userId: string;
+  binding: {
+    recipientPhoneMask: string | null;
+  };
 };
 
 function createStore(seed: MutableLinqWebhookEvent[] = []) {
@@ -88,12 +99,12 @@ describe("PrismaLinqControlPlaneStore hosted Linq webhook events", () => {
     expect(createCalls[0]).toEqual({
       userId: "user-123",
       bindingId: "linqb_123",
-      recipientPhone: "+15557654321",
+      recipientPhone: createHostedPhoneLookupKey("+15557654321"),
       eventId: "evt_sparse_123",
       traceId: "trace_sparse_123",
       eventType: "message.received",
-      chatId: "chat_123",
-      messageId: "msg_123",
+      chatId: createHostedOpaqueIdentifier("linq.chat", "chat_123"),
+      messageId: createHostedOpaqueIdentifier("linq.message", "msg_123"),
       occurredAt: new Date("2026-03-25T10:00:05.000Z"),
       receivedAt: new Date("2026-03-25T10:00:06.000Z"),
     });
@@ -102,12 +113,12 @@ describe("PrismaLinqControlPlaneStore hosted Linq webhook events", () => {
       id: 1,
       userId: "user-123",
       bindingId: "linqb_123",
-      recipientPhone: "+15557654321",
+      recipientPhone: DEFAULT_RECIPIENT_PHONE_MASK,
       eventId: "evt_sparse_123",
       traceId: "trace_sparse_123",
       eventType: "message.received",
-      chatId: "chat_123",
-      messageId: "msg_123",
+      chatId: createHostedOpaqueIdentifier("linq.chat", "chat_123"),
+      messageId: createHostedOpaqueIdentifier("linq.message", "msg_123"),
       occurredAt: "2026-03-25T10:00:05.000Z",
       receivedAt: "2026-03-25T10:00:06.000Z",
       createdAt: "2026-03-25T10:00:06.000Z",
@@ -134,6 +145,9 @@ function normalizeEventRecord(id: number, data: Record<string, unknown>): Mutabl
   }
 
   return {
+    binding: {
+      recipientPhoneMask: DEFAULT_RECIPIENT_PHONE_MASK,
+    },
     id,
     userId: data.userId,
     bindingId: data.bindingId,
@@ -164,6 +178,9 @@ function matchesWhere(event: MutableLinqWebhookEvent, where: Record<string, unkn
 function cloneEvent(event: MutableLinqWebhookEvent): MutableLinqWebhookEvent {
   return {
     ...event,
+    binding: {
+      recipientPhoneMask: event.binding.recipientPhoneMask,
+    },
     traceId: event.traceId,
     chatId: event.chatId,
     messageId: event.messageId,

@@ -3,6 +3,10 @@ import {
   Prisma,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  createHostedOpaqueIdentifier,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => {
   const stripeConstructEvent = vi.fn();
@@ -70,7 +74,9 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     telegramWebhookSecret: null,
   }),
   getHostedOnboardingSecretCodec: () => ({
+    decrypt: (value: string) => value.startsWith("enc:") ? value.slice(4) : value,
     encrypt: (value: string) => `enc:${value}`,
+    keyVersion: "v1",
   }),
   requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   requireHostedStripeWebhookVerificationConfig: () => ({
@@ -573,9 +579,9 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       data: {
         channel: "linq",
-        linqChatId: "chat_123",
-        linqEventId: "evt_123",
-        triggerText: "still there?",
+        linqChatId: null,
+        linqEventId: null,
+        triggerText: null,
       },
     });
     expect(prisma.hostedInvite.update).toHaveBeenNthCalledWith(2, {
@@ -662,9 +668,9 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       data: {
         channel: "linq",
-        linqChatId: "chat_123",
-        linqEventId: "evt_123",
-        triggerText: "hello",
+        linqChatId: null,
+        linqEventId: null,
+        triggerText: null,
       },
     });
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
@@ -1314,31 +1320,16 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(secondAttemptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 2,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              ok: true,
-              reason: "prompted-get-started",
-            }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 2,
-                inviteId: null,
-                lastAttemptAt: expect.any(String),
-                message: buildHostedGetStartedReply(),
-                replyToMessageId: "msg_123",
-                sentAt: expect.any(String),
-                status: "sent",
+          payloadJson: expect.objectContaining({
+            receiptState: expect.objectContaining({
+              attemptCount: 2,
+              completedAt: expect.any(String),
+              response: expect.objectContaining({
+                ok: true,
+                reason: "prompted-get-started",
               }),
-            ],
-            status: "completed",
+              status: "completed",
+            }),
           }),
         }),
       }),
@@ -1452,25 +1443,12 @@ describe("hosted onboarding webhook retry safety", () => {
           },
         }),
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 2,
-            attemptId: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 1,
-                inviteId: "invite_123",
-                lastAttemptAt: "2026-03-26T12:00:00.250Z",
-                message: expect.any(String),
-                replyToMessageId: null,
-                sentAt: "2026-03-26T12:00:00.400Z",
-                status: "sent",
-              }),
-            ],
-            status: "processing",
+          payloadJson: expect.objectContaining({
+            receiptState: expect.objectContaining({
+              attemptCount: 2,
+              lastReceivedAt: expect.any(String),
+              status: "processing",
+            }),
           }),
         }),
       }),
@@ -1478,32 +1456,17 @@ describe("hosted onboarding webhook retry safety", () => {
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
-          payloadJson: buildWebhookReceiptPayload({
-            attemptCount: 2,
-            attemptId: expect.any(String),
-            completedAt: expect.any(String),
-            eventPayload: {
-              eventType: "message.received",
-            },
-            lastReceivedAt: expect.any(String),
-            plannedAt: expect.any(String),
-            response: expect.objectContaining({
-              inviteCode: "join_123",
-              joinUrl: "https://join.example.test/join/join_123",
-              ok: true,
-            }),
-            sideEffects: [
-              buildLinqMessageSideEffect({
-                attemptCount: 1,
-                inviteId: "invite_123",
-                lastAttemptAt: "2026-03-26T12:00:00.250Z",
-                message: expect.any(String),
-                replyToMessageId: "msg_123",
-                sentAt: "2026-03-26T12:00:00.400Z",
-                status: "sent",
+          payloadJson: expect.objectContaining({
+            receiptState: expect.objectContaining({
+              attemptCount: 2,
+              completedAt: expect.any(String),
+              response: expect.objectContaining({
+                inviteCode: "join_123",
+                joinUrl: "https://join.example.test/join/join_123",
+                ok: true,
               }),
-            ],
-            status: "completed",
+              status: "completed",
+            }),
           }),
         }),
       }),
@@ -1651,41 +1614,32 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(storedReceiptPayload).toEqual(
-      buildWebhookReceiptPayload({
-        attemptCount: 1,
-        attemptId: expect.any(String),
-        eventPayload: {
-          eventType: "message.received",
-        },
-        lastError: expect.objectContaining({
-          message: expect.stringContaining("may already have been delivered"),
-          name: "HostedOnboardingError",
-        }),
-        lastReceivedAt: expect.any(String),
-        plannedAt: expect.any(String),
-        response: expect.objectContaining({
-          inviteCode: "join_123",
-          joinUrl: "https://join.example.test/join/join_123",
-          ok: true,
-        }),
-        sideEffects: [
-          buildLinqMessageSideEffect({
-            attemptCount: 1,
-            inviteId: "invite_123",
-            lastAttemptAt: expect.any(String),
-            lastError: {
-              code: null,
-              message: "Receipt persistence failed after the Linq send.",
-              name: "Error",
-              retryable: null,
-            },
-            message: expect.stringContaining("https://join.example.test/join/join_123"),
-            replyToMessageId: "msg_123",
-            sentAt: expect.any(String),
-            status: "sent_unconfirmed",
+      expect.objectContaining({
+        receiptState: expect.objectContaining({
+          lastError: expect.objectContaining({
+            message: expect.stringContaining("may already have been delivered"),
+            name: "HostedOnboardingError",
           }),
-        ],
-        status: "failed",
+          response: expect.objectContaining({
+            inviteCode: "join_123",
+            joinUrl: "https://join.example.test/join/join_123",
+            ok: true,
+          }),
+          sideEffects: [
+            expect.objectContaining({
+              payload: expect.objectContaining({
+                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
+                keyVersion: "v1",
+              }),
+              result: expect.objectContaining({
+                chatId: expect.stringMatching(/^hbid:linq\.chat:v1:/),
+                messageId: expect.stringMatching(/^hbid:linq\.message:v1:/),
+              }),
+              status: "sent_unconfirmed",
+            }),
+          ],
+          status: "failed",
+        }),
       }),
     );
 
@@ -1705,41 +1659,43 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(storedReceiptPayload).toEqual(
-      buildWebhookReceiptPayload({
-        attemptCount: 1,
-        attemptId: expect.any(String),
+      expect.objectContaining({
         eventPayload: {
           eventType: "message.received",
         },
-        lastError: expect.objectContaining({
-          message: expect.stringContaining("may already have been delivered"),
-          name: "HostedOnboardingError",
-        }),
-        lastReceivedAt: expect.any(String),
-        plannedAt: expect.any(String),
-        response: expect.objectContaining({
-          inviteCode: "join_123",
-          joinUrl: "https://join.example.test/join/join_123",
-          ok: true,
-        }),
-        sideEffects: [
-          buildLinqMessageSideEffect({
-            attemptCount: 1,
-            inviteId: "invite_123",
-            lastAttemptAt: expect.any(String),
-            lastError: {
-              code: null,
-              message: "Receipt persistence failed after the Linq send.",
-              name: "Error",
-              retryable: null,
-            },
-            message: expect.stringContaining("https://join.example.test/join/join_123"),
-            replyToMessageId: "msg_123",
-            sentAt: expect.any(String),
-            status: "sent_unconfirmed",
+        receiptState: expect.objectContaining({
+          attemptCount: 1,
+          lastError: expect.objectContaining({
+            message: expect.stringContaining("may already have been delivered"),
+            name: "HostedOnboardingError",
           }),
-        ],
-        status: "failed",
+          plannedAt: expect.any(String),
+          response: expect.objectContaining({
+            inviteCode: "join_123",
+            joinUrl: "https://join.example.test/join/join_123",
+            ok: true,
+          }),
+          sideEffects: [
+            expect.objectContaining({
+              attemptCount: 1,
+              kind: "linq_message_send",
+              lastAttemptAt: expect.any(String),
+              lastError: {
+                code: null,
+                message: "Receipt persistence failed after the Linq send.",
+                name: "Error",
+                retryable: null,
+              },
+              payload: expect.objectContaining({
+                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
+                keyVersion: "v1",
+              }),
+              sentAt: expect.any(String),
+              status: "sent_unconfirmed",
+            }),
+          ],
+          status: "failed",
+        }),
       }),
     );
   });
@@ -1842,38 +1798,31 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(storedReceiptPayload).toEqual(
-      buildWebhookReceiptPayload({
-        attemptCount: 1,
-        attemptId: expect.any(String),
-        eventPayload: {
-          eventType: "message.received",
-        },
-        lastError: expect.objectContaining({
-          code: "hosted_webhook_side_effect_delivery_uncertain",
-          message: expect.stringContaining("may already have been delivered"),
-          name: "HostedOnboardingError",
-          retryable: false,
-        }),
-        lastReceivedAt: expect.any(String),
-        plannedAt: expect.any(String),
-        response: expect.objectContaining({
-          inviteCode: "join_123",
-          joinUrl: "https://join.example.test/join/join_123",
-          ok: true,
-        }),
-        sideEffects: [
-          buildLinqMessageSideEffect({
-            attemptCount: 1,
-            inviteId: "invite_123",
-            lastAttemptAt: expect.any(String),
-            lastError: null,
-            message: expect.stringContaining("https://join.example.test/join/join_123"),
-            replyToMessageId: "msg_123",
-            sentAt: null,
-            status: "pending",
+      expect.objectContaining({
+        receiptState: expect.objectContaining({
+          lastError: expect.objectContaining({
+            code: "hosted_webhook_side_effect_delivery_uncertain",
+            message: expect.stringContaining("may already have been delivered"),
+            name: "HostedOnboardingError",
+            retryable: false,
           }),
-        ],
-        status: "failed",
+          response: expect.objectContaining({
+            inviteCode: "join_123",
+            joinUrl: "https://join.example.test/join/join_123",
+            ok: true,
+          }),
+          sideEffects: [
+            expect.objectContaining({
+              payload: expect.objectContaining({
+                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
+                keyVersion: "v1",
+              }),
+              result: null,
+              status: "pending",
+            }),
+          ],
+          status: "failed",
+        }),
       }),
     );
 
@@ -1893,38 +1842,40 @@ describe("hosted onboarding webhook retry safety", () => {
 
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(storedReceiptPayload).toEqual(
-      buildWebhookReceiptPayload({
-        attemptCount: 1,
-        attemptId: expect.any(String),
+      expect.objectContaining({
         eventPayload: {
           eventType: "message.received",
         },
-        lastError: expect.objectContaining({
-          code: "hosted_webhook_side_effect_delivery_uncertain",
-          message: expect.stringContaining("may already have been delivered"),
-          name: "HostedOnboardingError",
-          retryable: false,
-        }),
-        lastReceivedAt: expect.any(String),
-        plannedAt: expect.any(String),
-        response: expect.objectContaining({
-          inviteCode: "join_123",
-          joinUrl: "https://join.example.test/join/join_123",
-          ok: true,
-        }),
-        sideEffects: [
-          buildLinqMessageSideEffect({
-            attemptCount: 1,
-            inviteId: "invite_123",
-            lastAttemptAt: expect.any(String),
-            lastError: null,
-            message: expect.stringContaining("https://join.example.test/join/join_123"),
-            replyToMessageId: "msg_123",
-            sentAt: null,
-            status: "pending",
+        receiptState: expect.objectContaining({
+          attemptCount: 1,
+          lastError: expect.objectContaining({
+            code: "hosted_webhook_side_effect_delivery_uncertain",
+            message: expect.stringContaining("may already have been delivered"),
+            name: "HostedOnboardingError",
+            retryable: false,
           }),
-        ],
-        status: "failed",
+          plannedAt: expect.any(String),
+          response: expect.objectContaining({
+            inviteCode: "join_123",
+            joinUrl: "https://join.example.test/join/join_123",
+            ok: true,
+          }),
+          sideEffects: [
+            expect.objectContaining({
+              attemptCount: 1,
+              kind: "linq_message_send",
+              lastAttemptAt: expect.any(String),
+              lastError: null,
+              payload: expect.objectContaining({
+                encryptedPayload: expect.stringContaining("https://join.example.test/join/join_123"),
+                keyVersion: "v1",
+              }),
+              sentAt: null,
+              status: "pending",
+            }),
+          ],
+          status: "failed",
+        }),
       }),
     );
   });
@@ -2294,10 +2245,10 @@ function buildDispatchSideEffect(input: {
     created_at: occurredAt,
     data: {
       chat_id: "chat_123",
-      from: "+15551234567",
+      from: createHostedOpaqueIdentifier("linq.from", "+15551234567"),
       is_from_me: false,
       message: {
-        id: "msg_123",
+        id: createHostedOpaqueIdentifier("linq.message", "msg_123"),
         parts: [
           {
             type: "text",
@@ -2306,7 +2257,7 @@ function buildDispatchSideEffect(input: {
         ],
       },
       received_at: "2026-03-26T12:00:00.000Z",
-      recipient_phone: "+15550000000",
+      recipient_phone: createHostedOpaqueIdentifier("linq.recipient", "+15550000000"),
       service: "sms",
     },
     event_id: input.eventId,
@@ -2330,6 +2281,7 @@ function buildDispatchSideEffect(input: {
         occurredAt,
         userId: "member_123",
       },
+      phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
       linqEvent,
     },
     result: input.status === "sent" ? { dispatched: true } : null,
@@ -2361,17 +2313,20 @@ function buildLinqMessageSideEffect(input: {
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
     payload: {
-      chatId: input.chatId ?? "chat_123",
-      inviteId: input.inviteId,
-      message: input.message ?? expect.any(String),
-      replyToMessageId: input.replyToMessageId ?? "msg_123",
+      encryptedPayload: `enc:${JSON.stringify({
+        chatId: input.chatId ?? "chat_123",
+        inviteId: input.inviteId,
+        message: input.message ?? expect.any(String),
+        replyToMessageId: input.replyToMessageId ?? "msg_123",
+      })}`,
+      keyVersion: "v1",
     },
     result:
       input.status === "pending"
         ? null
         : {
-            chatId: input.chatId ?? "chat_123",
-            messageId: input.messageId ?? "out_msg_123",
+            chatId: createHostedOpaqueIdentifier("linq.chat", input.chatId ?? "chat_123"),
+            messageId: createHostedOpaqueIdentifier("linq.message", input.messageId ?? "out_msg_123"),
           },
     sentAt:
       input.sentAt ??

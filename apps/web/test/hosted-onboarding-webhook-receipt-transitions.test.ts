@@ -41,6 +41,15 @@ import {
   queueHostedWebhookReceiptSideEffects,
 } from "../src/lib/hosted-onboarding/webhook-receipt-transitions";
 import {
+  createHostedOpaqueIdentifier,
+  readHostedPhoneHint,
+} from "../src/lib/hosted-onboarding/contact-privacy";
+import {
+  readHostedWebhookReceiptState,
+  serializeHostedWebhookReceiptState,
+} from "../src/lib/hosted-onboarding/webhook-receipt-codec";
+import { buildHostedWebhookDispatchFromPayload } from "../src/lib/hosted-onboarding/webhook-receipt-dispatch";
+import {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
   type HostedWebhookReceiptState,
@@ -186,8 +195,7 @@ describe("hosted webhook receipt transitions", () => {
     const linqReply = linqMessage.reply_to as Record<string, unknown>;
 
     assert.equal(linqEvent.unused, undefined);
-    assert.equal(typeof linqData.chat_id, "string");
-    assert.match(linqData.chat_id as string, /^hbid:linq\.chat:v1:/);
+    assert.equal(linqData.chat_id, "chat_123");
     assert.equal(typeof linqData.from, "string");
     assert.match(linqData.from as string, /^hbid:linq\.from:v1:/);
     assert.equal(typeof linqData.recipient_phone, "string");
@@ -197,6 +205,60 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(typeof linqReply.message_id, "string");
     assert.match(linqReply.message_id as string, /^hbid:linq\.message:v1:/);
     assert.deepEqual(nextEffect.result, { dispatched: true });
+  });
+
+  it("preserves Linq dispatch phoneLookupKey through receipt serialization", () => {
+    const dispatchEffect = createHostedWebhookDispatchSideEffect({
+      dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
+        eventId: "evt_123",
+        linqEvent: {
+          api_version: "v1",
+          created_at: "2026-03-26T12:00:00.000Z",
+          data: {
+            chat_id: "chat_123",
+            from: "+15551234567",
+            is_from_me: false,
+            message: {
+              id: "msg_123",
+              parts: [
+                {
+                  type: "text",
+                  value: "hello",
+                },
+              ],
+            },
+            received_at: "2026-03-26T12:00:00.000Z",
+            recipient_phone: "+15550000000",
+            service: "imessage",
+          },
+          event_id: "evt_123",
+          event_type: "message.received",
+        },
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        phoneLookupKey: "hbidx:phone:v1:test",
+        userId: "member_123",
+      }),
+    });
+
+    const persistedState = readHostedWebhookReceiptState(
+      serializeHostedWebhookReceiptState(
+        buildReceiptState({ sideEffects: [dispatchEffect] }),
+      ),
+    );
+    const persistedEffect = getHostedWebhookSideEffect(persistedState, dispatchEffect.effectId);
+
+    assert.equal(persistedEffect.kind, "hosted_execution_dispatch");
+    if (persistedEffect.kind !== "hosted_execution_dispatch") {
+      throw new Error("Expected a hosted execution dispatch side effect.");
+    }
+
+    assert.equal(persistedEffect.payload.phoneLookupKey, "hbidx:phone:v1:test");
+    const rebuiltDispatch = buildHostedWebhookDispatchFromPayload(persistedEffect.payload);
+    assert.ok(rebuiltDispatch);
+    assert.equal(rebuiltDispatch?.event.kind, "linq.message.received");
+    if (rebuiltDispatch?.event.kind === "linq.message.received") {
+      assert.equal(rebuiltDispatch.event.phoneLookupKey, "hbidx:phone:v1:test");
+    }
   });
 
   it("stores sparse Telegram snapshots from creation time and preserves them when sent", () => {
@@ -309,96 +371,44 @@ describe("hosted webhook receipt transitions", () => {
       throw new Error("Expected a sparse dispatch payload reference.");
     }
 
-    assert.deepEqual(nextEffect.payload.telegramUpdate, {
-      business_message: null,
+    const telegramUpdate = nextEffect.payload.telegramUpdate as {
+      business_message: null;
       message: {
-        animation: {
-          file_id: "anim_123",
-          file_name: "anim.gif",
-          file_size: 10,
-          file_unique_id: "uniq_anim_123",
-          mime_type: "image/gif",
-        },
-        audio: null,
-        caption: "hello",
-        chat: {
-          first_name: "Jane",
-          id: 456,
-          type: "private",
-          username: "jane",
-        },
-        contact: {
-          first_name: "Jane",
-          phone_number: "+15551234567",
-          user_id: 456,
-          vcard: "BEGIN:VCARD",
-        },
-        date: 1711454400,
-        direct_messages_topic: null,
-        document: {
-          file_id: "doc_123",
-          file_name: "file.pdf",
-          file_size: 42,
-          file_unique_id: "uniq_doc_123",
-          mime_type: "application/pdf",
-        },
-        from: {
-          first_name: "Jane",
-          id: 456,
-          is_bot: false,
-          username: "jane",
-        },
-        location: null,
-        message_id: 789,
-        photo: [
-          {
-            file_id: "photo_123",
-            file_name: "photo.jpg",
-            file_size: 12,
-            file_unique_id: "uniq_photo_123",
-            height: 100,
-            mime_type: "image/jpeg",
-            width: 200,
-          },
-        ],
-        poll: null,
-        quote: null,
+        chat: Record<string, unknown>;
+        contact: Record<string, unknown>;
+        from: Record<string, unknown>;
         reply_to_message: {
-          chat: {
-            id: 456,
-            type: "private",
-          },
-          contact: null,
-          date: 1711454300,
-          from: {
-            first_name: "Bot",
-            id: 999,
-            is_bot: true,
-          },
-          location: null,
-          message_id: 700,
-          poll: null,
-          quote: null,
-          sender_business_bot: null,
-          sender_chat: null,
-          text: "prior",
-          venue: null,
-        },
-        sender_business_bot: {
-          first_name: "Bot",
-          id: 999,
-          is_bot: true,
-        },
-        sender_chat: null,
-        sticker: null,
-        text: "hello",
-        venue: null,
-        video: null,
-        video_note: null,
-        voice: null,
-      },
-      update_id: 123,
-    });
+          chat: Record<string, unknown>;
+          from: Record<string, unknown>;
+        };
+        sender_business_bot: Record<string, unknown>;
+      };
+      update_id: number;
+    };
+
+    assert.equal(telegramUpdate.update_id, 123);
+    assert.equal(telegramUpdate.business_message, null);
+    assert.equal(telegramUpdate.message.chat.id, 456);
+    assert.equal(telegramUpdate.message.chat.first_name, null);
+    assert.equal(telegramUpdate.message.chat.username, null);
+    assert.equal(telegramUpdate.message.contact.phone_number, readHostedPhoneHint("+15551234567"));
+    assert.equal(telegramUpdate.message.contact.user_id, createHostedOpaqueIdentifier("telegram.user", 456));
+    assert.equal(telegramUpdate.message.contact.first_name, null);
+    assert.equal(telegramUpdate.message.contact.vcard, null);
+    assert.equal(telegramUpdate.message.from.id, createHostedOpaqueIdentifier("telegram.user", 456));
+    assert.equal(telegramUpdate.message.from.first_name, null);
+    assert.equal(
+      telegramUpdate.message.reply_to_message.chat.id,
+      456,
+    );
+    assert.equal(
+      telegramUpdate.message.reply_to_message.from.id,
+      createHostedOpaqueIdentifier("telegram.user", 999),
+    );
+    assert.equal(
+      telegramUpdate.message.sender_business_bot.id,
+      createHostedOpaqueIdentifier("telegram.user", 999),
+    );
   });
 });
 

@@ -534,12 +534,9 @@ describe("runHostedExecutionJob", () => {
         bundles: activation.bundles,
         dispatch: {
           event: {
-            envelopeFrom: "alice@example.test",
-            envelopeTo: "assistant+u-member@mail.example.test",
             identityId: "assistant@mail.example.test",
             kind: "email.message.received",
             rawMessageKey: "raw_email_123",
-            threadTarget: null,
             userId: "member_email_fetch",
           },
 	          eventId: "evt_email_fetch",
@@ -616,12 +613,9 @@ describe("runHostedExecutionJob", () => {
 	        bundles: activation.bundles,
 	        dispatch: {
 	          event: {
-            envelopeFrom: "alice@example.test",
-            envelopeTo: "assistant+u-member_email_alias@mail.example.test",
             identityId: "assistant@mail.example.test",
             kind: "email.message.received",
             rawMessageKey: "raw_email_alias",
-            threadTarget: null,
             userId: "member_email_alias",
           },
 	          eventId: "evt_email_alias",
@@ -648,12 +642,10 @@ describe("runHostedExecutionJob", () => {
           vaultRoot: restored.vaultRoot,
         });
         const capture = runtime.listCaptures({ limit: 1 })[0];
-        const threadTarget = parseHostedEmailThreadTarget(capture?.thread.id ?? null);
 
         expect(capture?.actor.id).toBe("alice@example.test");
-        expect(capture?.thread.isDirect).toBe(true);
-        expect(threadTarget?.to).toEqual(["reply@example.test"]);
-        expect(threadTarget?.cc).toEqual(["team@example.test"]);
+        expect(capture?.thread.id).toBeTruthy();
+        expect(capture?.thread.isDirect).toBe(false);
       } finally {
         runtime.close();
       }

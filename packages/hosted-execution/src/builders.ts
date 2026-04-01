@@ -28,15 +28,15 @@ export function buildHostedExecutionMemberActivatedDispatch(input: {
 export function buildHostedExecutionLinqMessageReceivedDispatch(input: {
   eventId: string;
   linqEvent: Record<string, unknown>;
-  normalizedPhoneNumber: string;
   occurredAt: string;
+  phoneLookupKey: string;
   userId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
       kind: "linq.message.received",
       linqEvent: { ...input.linqEvent },
-      normalizedPhoneNumber: input.normalizedPhoneNumber,
+      phoneLookupKey: input.phoneLookupKey,
       userId: input.userId,
     } satisfies HostedExecutionLinqMessageReceivedEvent,
     eventId: input.eventId,
@@ -64,23 +64,17 @@ export function buildHostedExecutionTelegramMessageReceivedDispatch(input: {
 }
 
 export function buildHostedExecutionEmailMessageReceivedDispatch(input: {
-  envelopeFrom: string | null;
-  envelopeTo: string | null;
   eventId: string;
   identityId: string;
   occurredAt: string;
   rawMessageKey: string;
-  threadTarget: string | null;
   userId: string;
 }): HostedExecutionDispatchRequest {
   return buildHostedExecutionDispatch({
     event: {
-      envelopeFrom: input.envelopeFrom,
-      envelopeTo: input.envelopeTo,
       identityId: input.identityId,
       kind: "email.message.received",
       rawMessageKey: input.rawMessageKey,
-      threadTarget: input.threadTarget,
       userId: input.userId,
     } satisfies HostedExecutionEmailMessageReceivedEvent,
     eventId: input.eventId,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingSecretCodec: () => ({
@@ -348,7 +349,7 @@ describe("hydrateHostedExecutionDispatch", () => {
       event: {
         kind: "linq.message.received",
         linqEvent,
-        phoneLookupKey: "+15551234567",
+        phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
         userId: "member_123",
       },
       eventId: "evt_linq_123",

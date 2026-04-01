@@ -4,24 +4,36 @@ import {
   HostedMemberStatus,
 } from "@prisma/client";
 
+import {
+  createHostedPhoneLookupKey,
+  readHostedPhoneHint,
+} from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import { getHostedOnboardingEnvironment, getHostedOnboardingSecretCodec } from "./runtime";
 import {
   generateHostedBootstrapSecret,
   generateHostedMemberId,
-  maskPhoneNumber,
 } from "./shared";
 import { normalizeHostedWalletAddress } from "./revnet";
 
 export async function ensureHostedMemberForPhone(input: {
-  linqChatId: string | null;
-  normalizedPhoneNumber: string;
+  phoneNumber: string;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<HostedMember> {
+  const phoneLookupKey = createHostedPhoneLookupKey(input.phoneNumber);
+
+  if (!phoneLookupKey) {
+    throw hostedOnboardingError({
+      code: "PHONE_NUMBER_INVALID",
+      message: "A valid phone number is required to issue a hosted invite.",
+      httpStatus: 400,
+    });
+  }
+
   const existingMember = await input.prisma.hostedMember.findUnique({
     where: {
-      normalizedPhoneNumber: input.normalizedPhoneNumber,
+      normalizedPhoneNumber: phoneLookupKey,
     },
   });
 
@@ -31,8 +43,8 @@ export async function ensureHostedMemberForPhone(input: {
         id: existingMember.id,
       },
       data: {
-        linqChatId: input.linqChatId ?? undefined,
-        ...buildHostedMemberPhoneStorage(input.normalizedPhoneNumber),
+        linqChatId: null,
+        ...buildHostedMemberPhoneStorage(input.phoneNumber),
         encryptedBootstrapSecret:
           existingMember.encryptedBootstrapSecret
             ? undefined
@@ -48,20 +60,29 @@ export async function ensureHostedMemberForPhone(input: {
   return input.prisma.hostedMember.create({
     data: {
       id: generateHostedMemberId(),
-      ...buildHostedMemberPhoneStorage(input.normalizedPhoneNumber),
+      ...buildHostedMemberPhoneStorage(input.phoneNumber),
       status: HostedMemberStatus.invited,
       billingStatus: HostedBillingStatus.not_started,
-      linqChatId: input.linqChatId,
+      linqChatId: null,
       encryptedBootstrapSecret: encryptHostedBootstrapSecret(),
       encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
     },
   });
 }
 
-function buildHostedMemberPhoneStorage(normalizedPhoneNumber: string) {
+function buildHostedMemberPhoneStorage(phoneNumber: string) {
+  const phoneLookupKey = createHostedPhoneLookupKey(phoneNumber);
+  if (!phoneLookupKey) {
+    throw hostedOnboardingError({
+      code: "PHONE_NUMBER_INVALID",
+      message: "A valid phone number is required to continue.",
+      httpStatus: 400,
+    });
+  }
+
   return {
-    maskedPhoneNumberHint: maskPhoneNumber(normalizedPhoneNumber),
-    normalizedPhoneNumber,
+    maskedPhoneNumberHint: readHostedPhoneHint(phoneNumber),
+    normalizedPhoneNumber: phoneLookupKey,
   };
 }
 
@@ -103,16 +124,30 @@ export async function ensureHostedMemberForPrivyIdentity(input: {
 }
 
 export async function reconcileHostedPrivyIdentityOnMember(input: {
-  expectedPhoneNumber?: string;
+  expectedPhoneHint?: string;
+  expectedPhoneLookupKey?: string;
   identity: HostedPrivyIdentity;
   member: HostedMember;
   prisma: PrismaClient;
   now: Date;
 }): Promise<HostedMember> {
-  if (input.expectedPhoneNumber && input.identity.phone.number !== input.expectedPhoneNumber) {
+  const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
+
+  if (!phoneLookupKey) {
+    throw hostedOnboardingError({
+      code: "PHONE_NUMBER_INVALID",
+      message: "A valid phone number is required to continue.",
+      httpStatus: 400,
+    });
+  }
+
+  if (
+    input.expectedPhoneLookupKey
+    && input.expectedPhoneLookupKey !== phoneLookupKey
+  ) {
     throw hostedOnboardingError({
       code: "PRIVY_PHONE_MISMATCH",
-      message: `Enter the same phone number that received this invite (${maskPhoneNumber(input.expectedPhoneNumber)}).`,
+      message: `Enter the same phone number that received this invite (${input.expectedPhoneHint ?? "your invited number"}).`,
       httpStatus: 403,
     });
   }
@@ -186,6 +221,7 @@ async function findHostedMemberForPrivyIdentity(input: {
 }): Promise<HostedMember | null> {
   const matches = new Map<string, HostedMember>();
   const normalizedWalletAddress = normalizeHostedWalletAddress(input.identity.wallet.address);
+  const phoneLookupKey = createHostedPhoneLookupKey(input.identity.phone.number);
 
   if (input.identity.userId) {
     const memberByPrivyUserId = await input.prisma.hostedMember.findUnique({
@@ -199,11 +235,13 @@ async function findHostedMemberForPrivyIdentity(input: {
     }
   }
 
-  const memberByPhoneNumber = await input.prisma.hostedMember.findUnique({
-    where: {
-      normalizedPhoneNumber: input.identity.phone.number,
-    },
-  });
+  const memberByPhoneNumber = phoneLookupKey
+    ? await input.prisma.hostedMember.findUnique({
+      where: {
+        normalizedPhoneNumber: phoneLookupKey,
+      },
+    })
+    : null;
 
   if (memberByPhoneNumber) {
     matches.set(memberByPhoneNumber.id, memberByPhoneNumber);

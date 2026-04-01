@@ -116,7 +116,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     linqEventId: null,
     memberId: member.id,
     prisma: input.prisma,
-    triggerText: summary.text,
+    triggerText: null,
   });
 
   if (invite.sentAt) {

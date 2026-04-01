@@ -21,11 +21,12 @@ Vault-only data tasks under `vault/**` skip this workflow unless the user explic
 9. Spawn a dedicated audit subagent for the final completion review and hand it `agent-docs/prompts/task-finish-review.md` plus the audit handoff packet below. Expect this audit to take about 5 to 10 minutes on non-trivial diffs; do not rush it or cancel it early just because it has not answered in the first minute.
 10. Treat the final completion review as the audit of remaining coverage and proof gaps too. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating a separate coverage-audit pass.
 11. Resolve high-severity findings before final handoff and re-run affected required checks after any post-review fixes.
-12. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <path> [path ...]` when the task is ready to commit.
+12. Do not automatically spawn another workflow audit subagent after that first final review. One extra audit rerun is allowed only when the first review forces a large or high-risk follow-up diff; otherwise finish locally after the post-fix checks.
+13. If the task used an active execution plan and the task is done or abandoned, close that plan before commit or handoff. Prefer `bash scripts/finish-task <active-plan-path> "type(scope): summary" <path> [path ...]` when the task is ready to commit.
     `scripts/finish-task` is the plan-aware wrapper: it only accepts a plan that still lives under `agent-docs/exec-plans/active/`, resolves the provided file/directory inputs into exact changed file paths before any plan move, closes that plan, then calls `scripts/committer` with the completed-plan artifact plus those resolved paths.
     If the task is ledger-only, or the plan was already moved out of `active/`, use `scripts/committer` directly instead of trying to force `finish-task`.
-13. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
-14. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
+14. Final handoff must report required-check results plus any direct scenario evidence; green required checks remain the default completion bar.
+15. If a required check fails for a credibly unrelated pre-existing reason, commit your exact touched files and hand off with the failing command, failing target, and why your diff did not cause it. If you cannot defend that separation, treat the failure as blocking.
 
 ## When To Add Simplify
 
@@ -53,6 +54,7 @@ If those conditions are not met, skip `simplify` and proceed directly to `task-f
 - Within this repo, required audit passes are standing-authorized by repo policy. Once the user has asked for repo work that reaches this workflow, do not stop only to ask for separate permission to run the required audit subagent passes.
 - When the current environment supports spawned agents, run those required audit passes directly as part of task completion instead of treating them as optional follow-up delegation.
 - Use a fresh subagent per pass unless the user explicitly instructs otherwise.
+- After the first final-review pass, do not spawn another workflow audit subagent by default. One extra rerun is the maximum, and only when the first pass produced a large or high-risk repair diff that materially changed the review surface.
 - When waiting on these audit subagents, prefer a patient wait window over repeated short polling. A realistic default is 5 to 10 minutes for each pass on medium or large diffs.
 - Do not cancel or close an audit subagent early just because it has been running for under 10 minutes unless you have concrete evidence that it is stuck or operating on the wrong scope.
 - Close audit subagents promptly after they return, time out, or are judged stuck so they cannot continue operating in the background.

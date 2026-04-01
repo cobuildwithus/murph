@@ -1,7 +1,11 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId, toIsoTimestamp } from "../device-sync/shared";
-import { normalizePhoneNumber } from "../hosted-onboarding/phone";
+import {
+  createHostedOpaqueIdentifier,
+  createHostedPhoneLookupKey,
+  readHostedPhoneHint,
+} from "../hosted-onboarding/contact-privacy";
 import { hostedLinqError } from "./errors";
 
 export interface HostedLinqBindingRecord {
@@ -42,7 +46,11 @@ export interface QueueHostedLinqWebhookEventInput {
 }
 
 type LinqBindingPrismaRecord = Prisma.LinqRecipientBindingGetPayload<Prisma.LinqRecipientBindingDefaultArgs>;
-type LinqWebhookEventPrismaRecord = Prisma.LinqWebhookEventGetPayload<Prisma.LinqWebhookEventDefaultArgs>;
+type LinqWebhookEventPrismaRecord = Prisma.LinqWebhookEventGetPayload<{
+  include: {
+    binding: true;
+  };
+}>;
 
 export class PrismaLinqControlPlaneStore {
   readonly prisma: PrismaClient;
@@ -58,7 +66,7 @@ export class PrismaLinqControlPlaneStore {
       },
       orderBy: [
         {
-          recipientPhone: "asc",
+          recipientPhoneMask: "asc",
         },
         {
           createdAt: "asc",
@@ -79,17 +87,18 @@ export class PrismaLinqControlPlaneStore {
     recipientPhone: string;
     label?: string | null;
   }): Promise<HostedLinqBindingRecord> {
-    const recipientPhone = normalizeCanonicalRecipientPhone(input.recipientPhone);
-    const existing = await this.findBindingByRecipientPhone(recipientPhone);
+    const recipientPhoneLookupKey = requireRecipientPhoneLookupKey(input.recipientPhone);
+    const recipientPhoneMask = readHostedPhoneHint(input.recipientPhone);
+    const existing = await this.findBindingByRecipientPhone(input.recipientPhone);
 
     if (existing) {
       if (existing.userId !== input.userId) {
         throw hostedLinqError({
           code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
-          message: `Linq recipient phone ${recipientPhone} is already paired to a different hosted user.`,
+          message: `Linq recipient phone ${recipientPhoneMask} is already paired to a different hosted user.`,
           httpStatus: 409,
           details: {
-            recipientPhone,
+            recipientPhone: recipientPhoneMask,
           },
         });
       }
@@ -100,7 +109,8 @@ export class PrismaLinqControlPlaneStore {
         },
         data: {
           label: input.label ?? null,
-          recipientPhone,
+          recipientPhone: recipientPhoneLookupKey,
+          recipientPhoneMask,
         },
       });
 
@@ -112,7 +122,8 @@ export class PrismaLinqControlPlaneStore {
         data: {
           id: generateHostedRandomPrefixedId("linqb"),
           userId: input.userId,
-          recipientPhone,
+          recipientPhone: recipientPhoneLookupKey,
+          recipientPhoneMask,
           label: input.label ?? null,
         },
       });
@@ -120,16 +131,16 @@ export class PrismaLinqControlPlaneStore {
       return mapHostedLinqBindingRecord(created);
     } catch (error) {
       if (isUniqueViolation(error)) {
-        const conflicted = await this.findBindingByRecipientPhone(recipientPhone);
+        const conflicted = await this.findBindingByRecipientPhone(input.recipientPhone);
 
         if (conflicted) {
           if (conflicted.userId !== input.userId) {
             throw hostedLinqError({
               code: "LINQ_BINDING_OWNERSHIP_CONFLICT",
-              message: `Linq recipient phone ${recipientPhone} is already paired to a different hosted user.`,
+              message: `Linq recipient phone ${recipientPhoneMask} is already paired to a different hosted user.`,
               httpStatus: 409,
               details: {
-                recipientPhone,
+                recipientPhone: recipientPhoneMask,
               },
               cause: error,
             });
@@ -141,7 +152,8 @@ export class PrismaLinqControlPlaneStore {
             },
             data: {
               label: input.label ?? null,
-              recipientPhone,
+              recipientPhone: recipientPhoneLookupKey,
+              recipientPhoneMask,
             },
           });
 
@@ -157,19 +169,24 @@ export class PrismaLinqControlPlaneStore {
     inserted: boolean;
     event: HostedLinqWebhookEventRecord;
   }> {
+    const recipientPhoneLookupKey = requireRecipientPhoneLookupKey(input.recipientPhone);
+
     try {
       const created = await this.prisma.linqWebhookEvent.create({
         data: {
           userId: input.userId,
           bindingId: input.bindingId,
-          recipientPhone: normalizeCanonicalRecipientPhone(input.recipientPhone),
+          recipientPhone: recipientPhoneLookupKey,
           eventId: input.eventId,
           traceId: input.traceId ?? null,
           eventType: input.eventType,
-          chatId: input.chatId ?? null,
-          messageId: input.messageId ?? null,
+          chatId: createHostedOpaqueIdentifier("linq.chat", input.chatId) ?? null,
+          messageId: createHostedOpaqueIdentifier("linq.message", input.messageId) ?? null,
           occurredAt: input.occurredAt ? new Date(input.occurredAt) : null,
           receivedAt: new Date(input.receivedAt),
+        },
+        include: {
+          binding: true,
         },
       });
 
@@ -185,6 +202,9 @@ export class PrismaLinqControlPlaneStore {
       const existing = await this.prisma.linqWebhookEvent.findUnique({
         where: {
           eventId: input.eventId,
+        },
+        include: {
+          binding: true,
         },
       });
 
@@ -216,6 +236,9 @@ export class PrismaLinqControlPlaneStore {
             }
           : {}),
       },
+      include: {
+        binding: true,
+      },
       orderBy: {
         id: "asc",
       },
@@ -226,9 +249,14 @@ export class PrismaLinqControlPlaneStore {
   }
 
   private async findBindingByRecipientPhone(recipientPhone: string): Promise<LinqBindingPrismaRecord | null> {
+    const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
+    if (!recipientPhoneLookupKey) {
+      return null;
+    }
+
     return this.prisma.linqRecipientBinding.findUnique({
       where: {
-        recipientPhone: normalizeCanonicalRecipientPhone(recipientPhone),
+        recipientPhone: recipientPhoneLookupKey,
       },
     });
   }
@@ -238,7 +266,7 @@ export function mapHostedLinqBindingRecord(record: LinqBindingPrismaRecord): Hos
   return {
     id: record.id,
     userId: record.userId,
-    recipientPhone: normalizeStoredRecipientPhone(record.recipientPhone) ?? record.recipientPhone,
+    recipientPhone: record.recipientPhoneMask ?? readHostedPhoneHint(record.recipientPhone),
     label: record.label,
     createdAt: toIsoTimestamp(record.createdAt),
     updatedAt: toIsoTimestamp(record.updatedAt),
@@ -250,7 +278,7 @@ export function mapHostedLinqWebhookEventRecord(record: LinqWebhookEventPrismaRe
     id: record.id,
     userId: record.userId,
     bindingId: record.bindingId,
-    recipientPhone: normalizeStoredRecipientPhone(record.recipientPhone) ?? record.recipientPhone,
+    recipientPhone: record.binding.recipientPhoneMask ?? readHostedPhoneHint(record.recipientPhone),
     eventId: record.eventId,
     traceId: record.traceId,
     eventType: record.eventType,
@@ -271,23 +299,19 @@ function isUniqueViolation(error: unknown): boolean {
   return candidate.code === "P2002";
 }
 
-function normalizeCanonicalRecipientPhone(recipientPhone: string): string {
-  const normalized = normalizeStoredRecipientPhone(recipientPhone);
-
-  if (normalized) {
-    return normalized;
+function requireRecipientPhoneLookupKey(recipientPhone: string): string {
+  const lookupKey = createHostedPhoneLookupKey(recipientPhone);
+  if (lookupKey) {
+    return lookupKey;
   }
 
+  const recipientPhoneMask = readHostedPhoneHint(recipientPhone);
   throw hostedLinqError({
     code: "LINQ_RECIPIENT_PHONE_INVALID",
-    message: `Linq recipient phone ${recipientPhone} is invalid.`,
+    message: `Linq recipient phone ${recipientPhoneMask} is invalid.`,
     httpStatus: 400,
     details: {
-      recipientPhone,
+      recipientPhone: recipientPhoneMask,
     },
   });
-}
-
-function normalizeStoredRecipientPhone(recipientPhone: string | null | undefined): string | null {
-  return normalizePhoneNumber(recipientPhone ?? null);
 }

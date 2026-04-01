@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { cookies } from "next/headers";
 
 import { getPrisma } from "@/src/lib/prisma";
+import { createHostedTelegramUserLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
@@ -48,10 +49,14 @@ export const POST = withJsonError(async (request: Request) => {
     }
 
     const telegramAccount = telegramSelection.account;
+    const telegramLookupKey = createHostedTelegramUserLookupKey(
+      telegramAccount?.telegramUserId,
+    );
 
     if (
       !telegramAccount
       || telegramAccount.telegramUserId !== expectedTelegramUserId
+      || !telegramLookupKey
     ) {
       throw hostedOnboardingError({
         code: "PRIVY_TELEGRAM_NOT_READY",
@@ -67,8 +72,8 @@ export const POST = withJsonError(async (request: Request) => {
           id: hostedSession.member.id,
         },
         data: {
-          telegramUserId: telegramAccount.telegramUserId,
-          telegramUsername: telegramAccount.username,
+          telegramUserId: telegramLookupKey,
+          telegramUsername: null,
         },
       });
     } catch (error) {
