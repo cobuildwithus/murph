@@ -276,7 +276,8 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     ? resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.baseline)
     : null;
   const baselineTokenBundle = input.baseline?.tokenBundle ?? null;
-  const tokenBundle = input.account.status === "disconnected"
+  const hasLocalTokenEscrow = input.account.accessTokenEncrypted.length > 0;
+  const tokenBundle = input.account.status === "disconnected" || !hasLocalTokenEscrow
     ? null
     : {
         accessToken: input.account.accessTokenEncrypted
@@ -389,62 +390,35 @@ function buildHostedAccountHydrationInput(input: {
   existing: StoredDeviceSyncAccount | null;
 }): HostedAccountHydrationInput {
   const hostedConnection = input.entry.connection;
-  const hostedLocalState = resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.entry);
+  const hostedLocalState = input.entry.localState;
   const hostedTokenVersion = input.entry.tokenBundle?.tokenVersion ?? null;
   const hostedUpdatedAt = hostedConnection.updatedAt ?? null;
-  const localHasPendingHostedConnectionChanges = hasLocalPendingHostedConnectionChanges({
-    account: input.existing,
-    codec: input.codec,
-    hostedConnection,
-    tokenBundle: input.entry.tokenBundle,
-  });
-  const hostedConnectionAdvanced = hasHostedConnectionAdvanced(input.existing, hostedUpdatedAt);
-  const hostedTokenAdvanced = hasHostedTokenAdvanced(input.existing, hostedTokenVersion);
-  const useHostedConnectionState =
-    !input.existing || !localHasPendingHostedConnectionChanges || hostedConnectionAdvanced;
-  const useHostedTokens =
-    hostedConnection.status === "disconnected"
-      ? useHostedConnectionState
-      : !input.existing || !localHasPendingHostedConnectionChanges || hostedTokenAdvanced;
-  const nextHostedObservedUpdatedAt = useHostedConnectionState
-    ? latestIsoTimestamp(input.existing?.hostedObservedUpdatedAt ?? null, hostedUpdatedAt)
-    : input.existing?.hostedObservedUpdatedAt ?? null;
-  const nextHostedObservedTokenVersion = useHostedTokens
-    ? latestObservedTokenVersion(input.existing?.hostedObservedTokenVersion ?? null, hostedTokenVersion)
-    : input.existing?.hostedObservedTokenVersion ?? null;
+  const nextHostedObservedUpdatedAt = hostedUpdatedAt ?? input.existing?.hostedObservedUpdatedAt ?? null;
+  const nextHostedObservedTokenVersion = hostedTokenVersion ?? input.existing?.hostedObservedTokenVersion ?? null;
 
   return {
+    clearTokens: input.entry.tokenBundle === null,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
     connection: {
       connectedAt: hostedConnection.connectedAt,
-      displayName: useHostedConnectionState
-        ? hostedConnection.displayName ?? null
-        : input.existing?.displayName ?? null,
+      displayName: hostedConnection.displayName ?? null,
       externalAccountId: hostedConnection.externalAccountId,
-      metadata: useHostedConnectionState
-        ? { ...hostedConnection.metadata }
-        : { ...(input.existing?.metadata ?? {}) },
+      metadata: { ...hostedConnection.metadata },
       provider: hostedConnection.provider,
-      scopes: useHostedConnectionState
-        ? [...hostedConnection.scopes]
-        : [...(input.existing?.scopes ?? [])],
-      status: useHostedConnectionState
-        ? hostedConnection.status
-        : input.existing?.status ?? hostedConnection.status,
+      scopes: [...hostedConnection.scopes],
+      status: hostedConnection.status,
       updatedAt: resolveHydratedHostedAccountUpdatedAt({
         connectedAt: hostedConnection.connectedAt,
         existing: input.existing,
         hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
-        useHostedConnectionState,
       }),
     },
     localState: resolveHydratedHostedLocalState({
       existing: input.existing,
       hostedLocalState,
-      useHostedConnectionState,
     }),
-    ...(useHostedTokens && input.entry.tokenBundle
+    ...(input.entry.tokenBundle
       ? {
           tokens: {
             accessToken: input.entry.tokenBundle.accessToken,
@@ -515,35 +489,12 @@ function assignErrorFieldUpdate(
 function resolveHostedDeviceSyncRuntimeLocalStateSnapshot(
   entry: HostedDeviceSyncRuntimeConnectionSnapshot,
 ): HostedDeviceSyncRuntimeLocalStateSnapshot {
-  if (entry.localState) {
-    return entry.localState;
-  }
-
-  const legacyConnection = entry.connection as HostedDeviceSyncRuntimeConnectionStateSnapshot & {
-    lastErrorCode?: string | null;
-    lastErrorMessage?: string | null;
-    lastSyncCompletedAt?: string | null;
-    lastSyncErrorAt?: string | null;
-    lastSyncStartedAt?: string | null;
-    lastWebhookAt?: string | null;
-    nextReconcileAt?: string | null;
-  };
-
-  return {
-    lastErrorCode: legacyConnection.lastErrorCode ?? null,
-    lastErrorMessage: legacyConnection.lastErrorMessage ?? null,
-    lastSyncCompletedAt: legacyConnection.lastSyncCompletedAt ?? null,
-    lastSyncErrorAt: legacyConnection.lastSyncErrorAt ?? null,
-    lastSyncStartedAt: legacyConnection.lastSyncStartedAt ?? null,
-    lastWebhookAt: legacyConnection.lastWebhookAt ?? null,
-    nextReconcileAt: legacyConnection.nextReconcileAt ?? null,
-  };
+  return entry.localState;
 }
 
 function resolveHydratedHostedLocalState(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
-  useHostedConnectionState: boolean;
 }): {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -571,7 +522,7 @@ function resolveHydratedHostedLocalState(input: {
       input.existing?.lastWebhookAt ?? null,
       input.hostedLocalState.lastWebhookAt ?? null,
     ),
-    nextReconcileAt: resolveHydratedNextReconcileAt(input),
+    nextReconcileAt: resolveHydratedNextReconcileAt(input.existing, input.hostedLocalState),
   };
 }
 
@@ -632,153 +583,6 @@ function resolveHydratedHostedLocalErrorState(input: {
   };
 }
 
-function hasLocalPendingHostedConnectionChanges(input: {
-  account: StoredDeviceSyncAccount | null;
-  codec: ReturnType<typeof createSecretCodec>;
-  hostedConnection: HostedDeviceSyncRuntimeConnectionStateSnapshot;
-  tokenBundle: HostedDeviceSyncRuntimeTokenBundle | null;
-}): boolean {
-  if (!input.account) {
-    return false;
-  }
-
-  // Hosted disconnect remains authoritative. Otherwise, rows without observed markers
-  // only preserve local state when the snapshot actually diverges from local runtime state.
-  const tokenMarkerUnacknowledgedAndDiffers = input.account.hostedObservedTokenVersion === null
-    || input.account.hostedObservedTokenVersion === undefined
-    ? hostedTokenBundleDiffers({
-        account: input.account,
-        codec: input.codec,
-        tokenBundle: input.tokenBundle,
-      })
-    : false;
-  const connectionDiffers = hostedConnectionStateDiffers(input.account, input.hostedConnection);
-
-  if (!input.account.hostedObservedUpdatedAt) {
-    return shouldPreserveLocalWhenObservedUpdatedAtMissing({
-      connectionDiffers,
-      hostedStatus: input.hostedConnection.status,
-      tokenMarkerUnacknowledgedAndDiffers,
-    });
-  }
-
-  const localUpdatedAtMs = parseIsoMs(input.account.updatedAt);
-  const hostedObservedUpdatedAtMs = parseIsoMs(input.account.hostedObservedUpdatedAt);
-
-  if (localUpdatedAtMs === null || hostedObservedUpdatedAtMs === null) {
-    return true;
-  }
-
-  return localUpdatedAtMs > hostedObservedUpdatedAtMs || tokenMarkerUnacknowledgedAndDiffers;
-}
-
-function hasHostedConnectionAdvanced(
-  account: StoredDeviceSyncAccount | null,
-  hostedUpdatedAt: string | null,
-): boolean {
-  if (!account) {
-    return hostedUpdatedAt !== null;
-  }
-
-  if (!hostedUpdatedAt) {
-    return false;
-  }
-
-  if (!account.hostedObservedUpdatedAt) {
-    return false;
-  }
-
-  const hostedUpdatedAtMs = parseIsoMs(hostedUpdatedAt);
-  const hostedObservedUpdatedAtMs = parseIsoMs(account.hostedObservedUpdatedAt);
-
-  if (hostedUpdatedAtMs === null || hostedObservedUpdatedAtMs === null) {
-    return false;
-  }
-
-  return hostedUpdatedAtMs > hostedObservedUpdatedAtMs;
-}
-
-function hasHostedTokenAdvanced(
-  account: StoredDeviceSyncAccount | null,
-  hostedTokenVersion: number | null,
-): boolean {
-  if (hostedTokenVersion === null) {
-    return false;
-  }
-
-  if (!account) {
-    return true;
-  }
-
-  if (account.hostedObservedTokenVersion === null || account.hostedObservedTokenVersion === undefined) {
-    return false;
-  }
-
-  return hostedTokenVersion > account.hostedObservedTokenVersion;
-}
-
-function hostedConnectionStateDiffers(
-  account: StoredDeviceSyncAccount,
-  hostedConnection: HostedDeviceSyncRuntimeConnectionStateSnapshot,
-): boolean {
-  return account.displayName !== (hostedConnection.displayName ?? null)
-    || account.status !== hostedConnection.status
-    || !equalStringArrays(account.scopes, hostedConnection.scopes)
-    || !equalJsonRecords(account.metadata, hostedConnection.metadata);
-}
-
-function hostedTokenBundleDiffers(input: {
-  account: StoredDeviceSyncAccount;
-  codec: ReturnType<typeof createSecretCodec>;
-  tokenBundle: HostedDeviceSyncRuntimeTokenBundle | null;
-}): boolean {
-  const localHasTokens = input.account.accessTokenEncrypted.length > 0
-    || input.account.refreshTokenEncrypted !== null
-    || input.account.accessTokenExpiresAt !== null;
-
-  if (!input.tokenBundle) {
-    return localHasTokens;
-  }
-
-  if (input.account.accessTokenEncrypted.length === 0) {
-    return true;
-  }
-
-  const localAccessToken = safeDecryptHostedAccountToken(input.codec, input.account.accessTokenEncrypted);
-  const localRefreshToken = input.account.refreshTokenEncrypted
-    ? safeDecryptHostedAccountToken(input.codec, input.account.refreshTokenEncrypted)
-    : null;
-
-  return localAccessToken === null
-    || (input.account.refreshTokenEncrypted !== null && localRefreshToken === null)
-    || localAccessToken !== input.tokenBundle.accessToken
-    || localRefreshToken !== (input.tokenBundle.refreshToken ?? null)
-    || (input.account.accessTokenExpiresAt ?? null) !== (input.tokenBundle.accessTokenExpiresAt ?? null);
-}
-
-function safeDecryptHostedAccountToken(
-  codec: ReturnType<typeof createSecretCodec>,
-  encryptedValue: string,
-): string | null {
-  try {
-    return codec.decrypt(encryptedValue);
-  } catch {
-    return null;
-  }
-}
-
-function shouldPreserveLocalWhenObservedUpdatedAtMissing(input: {
-  connectionDiffers: boolean;
-  hostedStatus: HostedDeviceSyncRuntimeConnectionStateSnapshot["status"];
-  tokenMarkerUnacknowledgedAndDiffers: boolean;
-}): boolean {
-  if (input.hostedStatus === "disconnected") {
-    return false;
-  }
-
-  return input.connectionDiffers || input.tokenMarkerUnacknowledgedAndDiffers;
-}
-
 function latestIsoTimestamp(left: string | null, right: string | null): string | null {
   if (!left) {
     return right;
@@ -802,41 +606,19 @@ function latestIsoTimestamp(left: string | null, right: string | null): string |
   return leftMs >= rightMs ? left : right;
 }
 
-function latestObservedTokenVersion(left: number | null, right: number | null): number | null {
-  if (left === null || left === undefined) {
-    return right ?? null;
-  }
-
-  if (right === null || right === undefined) {
-    return left;
-  }
-
-  return Math.max(left, right);
-}
-
 function resolveHydratedHostedAccountUpdatedAt(input: {
   connectedAt: string;
   existing: StoredDeviceSyncAccount | null;
   hostedObservedUpdatedAt: string | null;
-  useHostedConnectionState: boolean;
 }): string {
-  if (input.useHostedConnectionState) {
-    return input.hostedObservedUpdatedAt ?? input.existing?.updatedAt ?? input.connectedAt;
-  }
-
-  return input.existing?.updatedAt ?? input.hostedObservedUpdatedAt ?? input.connectedAt;
+  return input.hostedObservedUpdatedAt ?? input.existing?.updatedAt ?? input.connectedAt;
 }
 
-function resolveHydratedNextReconcileAt(input: {
-  existing: StoredDeviceSyncAccount | null;
-  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
-  useHostedConnectionState: boolean;
-}): string | null {
-  if (input.useHostedConnectionState) {
-    return input.hostedLocalState.nextReconcileAt ?? null;
-  }
-
-  return input.existing?.nextReconcileAt ?? input.hostedLocalState.nextReconcileAt ?? null;
+function resolveHydratedNextReconcileAt(
+  existing: StoredDeviceSyncAccount | null,
+  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot,
+): string | null {
+  return existing?.nextReconcileAt ?? hostedLocalState.nextReconcileAt ?? null;
 }
 
 function parseIsoMs(value: string): number | null {
