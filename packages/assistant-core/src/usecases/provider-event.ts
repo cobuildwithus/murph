@@ -1,4 +1,4 @@
-import { EVENT_KINDS } from '@murph/contracts'
+import { EVENT_KINDS, type JsonObject } from '@murph/contracts'
 import { z } from 'incur'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
@@ -24,8 +24,6 @@ import {
   stringArray,
   uniqueStrings,
 } from './vault-usecase-helpers.js'
-
-type JsonObject = Record<string, unknown>
 
 interface ProviderReadModel {
   providerId: string
@@ -78,11 +76,11 @@ interface ProviderEventCoreRuntime {
     vaultRoot: string
     stream: string
     unit: string
-    samples: Array<Record<string, unknown>>
+    samples: JsonObject[]
     sourcePath?: string
     source?: string
     quality?: string
-    batchProvenance?: Record<string, unknown>
+    batchProvenance?: JsonObject
   }): Promise<{
     count: number
     records: Array<{
@@ -623,11 +621,11 @@ export async function addSampleRecords(input: {
     typeof input.payload.batchProvenance === 'object' &&
     input.payload.batchProvenance !== null &&
     !Array.isArray(input.payload.batchProvenance)
-      ? (input.payload.batchProvenance as Record<string, unknown>)
+      ? input.payload.batchProvenance
       : undefined
   const samples = Array.isArray(input.payload.samples)
     ? input.payload.samples.filter(
-        (sample): sample is Record<string, unknown> =>
+        (sample): sample is JsonObject =>
           typeof sample === 'object' && sample !== null && !Array.isArray(sample),
       )
     : []

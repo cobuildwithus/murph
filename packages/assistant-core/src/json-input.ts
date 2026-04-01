@@ -1,8 +1,7 @@
 import { readFile } from 'node:fs/promises'
+import type { JsonObject } from '@murph/contracts'
 import { z } from 'incur'
 import { VaultCliError } from './vault-cli-errors.js'
-
-type JsonObject = Record<string, unknown>
 
 export const inputFileOptionSchema = z
   .string()

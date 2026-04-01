@@ -1,4 +1,4 @@
-import { EXPERIMENT_STATUSES } from '@murph/contracts'
+import { EXPERIMENT_STATUSES, type JsonObject } from '@murph/contracts'
 import { z } from 'incur'
 import {
   loadQueryRuntime,
@@ -28,7 +28,6 @@ import {
   uniqueStrings,
 } from './vault-usecase-helpers.js'
 
-type JsonObject = Record<string, unknown>
 type EntityFamily = 'experiment' | 'journal'
 type JournalLinkKind = 'eventIds' | 'sampleStreams'
 type JournalLinkOperation = 'link' | 'unlink'

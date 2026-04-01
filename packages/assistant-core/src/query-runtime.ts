@@ -1,6 +1,5 @@
+import type { JsonObject } from '@murph/contracts'
 import { loadRuntimeModule } from './runtime-import.js'
-
-type JsonObject = Record<string, unknown>
 
 interface IdFamilyDefinition {
   entityKind: string

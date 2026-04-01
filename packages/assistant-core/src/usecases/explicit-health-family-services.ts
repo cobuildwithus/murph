@@ -7,6 +7,7 @@ import {
   healthEntityDefinitionByKind,
   protocolRegistryEntityDefinition,
   safeParseContract,
+  type JsonObject,
   type HealthEntityDefinitionWithRegistry,
 } from "@murph/contracts";
 import { VaultCliError } from "../vault-cli-errors.js";
@@ -17,7 +18,6 @@ import type {
   HealthListInput,
   HealthQueryServiceMethods,
   JsonFileInput,
-  JsonObject,
 } from "../health-cli-method-types.js";
 import type {
   CoreRuntimeModule,
@@ -586,10 +586,10 @@ async function renameSupplementRecord(
   const { core } = await loadRuntime();
 
   try {
+    const isProtocolId = SUPPLEMENT_ID_PATTERN.test(lookup);
     const existing = await core.readProtocolItem({
       vaultRoot: input.vault,
-      protocolId: SUPPLEMENT_ID_PATTERN.test(lookup) ? lookup : undefined,
-      slug: SUPPLEMENT_ID_PATTERN.test(lookup) ? undefined : lookup,
+      ...(isProtocolId ? { protocolId: lookup } : { slug: lookup }),
       group: "supplement",
     });
 
