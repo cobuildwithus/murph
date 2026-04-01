@@ -642,10 +642,6 @@ async function shouldApplyHostedSameSecondStripeCollision(input: {
     return true;
   }
 
-  if (isHostedAccessBlockedBillingStatus(input.currentMember.billingStatus)) {
-    return false;
-  }
-
   return false;
 }
 

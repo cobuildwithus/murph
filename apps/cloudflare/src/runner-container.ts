@@ -10,7 +10,7 @@ import {
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 
-import { json, readJsonObject } from "./json.ts";
+import { json, methodNotAllowed, readJsonObject } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";
 
 const RUNNER_PORT = 8080;
@@ -124,7 +124,7 @@ export class RunnerContainer extends Container {
 
     if (url.pathname === "/internal/invoke") {
       if (request.method !== "POST") {
-        return json({ error: "Method not allowed." }, 405);
+        return methodNotAllowed();
       }
 
       const authorizationError = requireRunnerContainerAuthorization(
@@ -148,7 +148,7 @@ export class RunnerContainer extends Container {
 
     if (url.pathname === "/internal/destroy") {
       if (request.method !== "POST") {
-        return json({ error: "Method not allowed." }, 405);
+        return methodNotAllowed();
       }
 
       const authorizationError = requireRunnerContainerAuthorization(

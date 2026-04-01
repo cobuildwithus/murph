@@ -51,7 +51,14 @@ import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommittedResult,
 } from "./execution-journal.ts";
-import { json, readJsonObject, readOptionalJsonObject } from "./json.ts";
+import {
+  json,
+  methodNotAllowed,
+  notFound,
+  readJsonObject,
+  readOptionalJsonObject,
+  unauthorized,
+} from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
 import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import {
@@ -783,24 +790,12 @@ function matchNamedPath(pattern: RegExp): RouteMatcher {
   };
 }
 
-function methodNotAllowed(): Response {
-  return json({ error: "Method not allowed." }, 405);
-}
-
-function notFound(): Response {
-  return json({ error: "Not found" }, 404);
-}
-
 function respondToWrongMethod(response: WrongMethodResponse): Response {
   return response === "method-not-allowed" ? methodNotAllowed() : notFound();
 }
 
 function decodeRouteParam(value: string): string {
   return decodeURIComponent(value);
-}
-
-function unauthorized(): Response {
-  return json({ error: "Unauthorized" }, 401);
 }
 
 function mapWorkerRouteError(error: unknown): Response {
