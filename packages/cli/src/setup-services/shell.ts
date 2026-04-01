@@ -438,6 +438,38 @@ is_discovery_invocation() {
   return 1
 }
 
+resolve_command_token() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --)
+        if [ "$#" -gt 1 ]; then
+          printf '%s\n' "$2"
+          return 0
+        fi
+        return 1
+        ;;
+      --filter-output|--format|--token-limit|--token-offset)
+        if [ "$#" -lt 2 ]; then
+          return 1
+        fi
+        shift 2
+        continue
+        ;;
+      -*)
+        ;;
+      *)
+        printf '%s\n' "$1"
+        return 0
+        ;;
+    esac
+    shift
+  done
+
+  return 1
+}
+
+command_token="$(resolve_command_token "$@" || true)"
+
 if is_discovery_invocation "$@"; then
   if [ "$cli_dist_ready" = true ]; then
     run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node "$cli_bin_path" "$@"
@@ -454,20 +486,32 @@ ${workspaceCheckLines}
 
 build_failed=false
 if [ "\${#missing_packages[@]}" -gt 0 ]; then
-  if command -v pnpm >/dev/null 2>&1; then
-    for package_dir in "\${missing_packages[@]}"; do
-      if ! pnpm --dir "$package_dir" build >/dev/null; then
+  if [ "$command_token" = "onboard" ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      if ! pnpm --dir "$repo_root" build:test-runtime:prepared >/dev/null; then
         build_failed=true
-        break
       fi
-    done
-  elif command -v corepack >/dev/null 2>&1; then
-    for package_dir in "\${missing_packages[@]}"; do
-      if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
+    elif command -v corepack >/dev/null 2>&1; then
+      if ! corepack pnpm --dir "$repo_root" build:test-runtime:prepared >/dev/null; then
         build_failed=true
-        break
       fi
-    done
+    fi
+  else
+    if command -v pnpm >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        if ! pnpm --dir "$package_dir" build >/dev/null; then
+          build_failed=true
+          break
+        fi
+      done
+    elif command -v corepack >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
+          build_failed=true
+          break
+        fi
+      done
+    fi
   fi
 fi
 
