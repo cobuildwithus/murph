@@ -345,15 +345,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
       record.connection,
       `Hosted device-sync runtime snapshot response connections[${index}].connection`,
     ),
-    localState: record.localState === undefined
-      ? parseHostedExecutionDeviceSyncRuntimeLegacyLocalState(
-          record.connection,
-          `Hosted device-sync runtime snapshot response connections[${index}].connection`,
-        )
-      : parseHostedExecutionDeviceSyncRuntimeLocalState(
-          record.localState,
-          `Hosted device-sync runtime snapshot response connections[${index}].localState`,
-        ),
+    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
+      record.localState,
+      `Hosted device-sync runtime snapshot response connections[${index}].localState`,
+    ),
     tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
       record.tokenBundle,
       `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
@@ -438,23 +433,6 @@ function parseHostedExecutionDeviceSyncRuntimeConnection(
 }
 
 function parseHostedExecutionDeviceSyncRuntimeLocalState(
-  value: unknown,
-  label: string,
-): HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
-  const record = requireObject(value, label);
-
-  return {
-    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
-    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
-    lastSyncCompletedAt: readNullableString(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
-    lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
-    lastSyncStartedAt: readNullableString(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
-    lastWebhookAt: readNullableString(record.lastWebhookAt, `${label}.lastWebhookAt`),
-    nextReconcileAt: readNullableString(record.nextReconcileAt, `${label}.nextReconcileAt`),
-  };
-}
-
-function parseHostedExecutionDeviceSyncRuntimeLegacyLocalState(
   value: unknown,
   label: string,
 ): HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {

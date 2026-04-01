@@ -60,17 +60,16 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
   index: number,
 ): HostedDeviceSyncRuntimeConnectionUpdate {
   const record = requireObject(value, `updates[${index}]`);
-  const connection = record.connection === undefined
-    ? parseHostedDeviceSyncRuntimeLegacyConnectionStateUpdate(record, index)
-    : parseHostedDeviceSyncRuntimeConnectionStateUpdate(record.connection, index);
-  const localState = record.localState === undefined
-    ? parseHostedDeviceSyncRuntimeLegacyLocalStateUpdate(record, index)
-    : parseHostedDeviceSyncRuntimeLocalStateUpdate(record.localState, index);
+  assertNoLegacyHostedDeviceSyncRuntimeFlatFields(record, index);
 
   return {
     connectionId: requireString(record.connectionId, `updates[${index}].connectionId`),
-    ...(connection ? { connection } : {}),
-    ...(localState ? { localState } : {}),
+    ...(record.connection === undefined
+      ? {}
+      : { connection: parseHostedDeviceSyncRuntimeConnectionStateUpdate(record.connection, index) }),
+    ...(record.localState === undefined
+      ? {}
+      : { localState: parseHostedDeviceSyncRuntimeLocalStateUpdate(record.localState, index) }),
     ...(record.observedUpdatedAt === undefined
       ? {}
       : {
@@ -98,30 +97,33 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
   };
 }
 
-function parseHostedDeviceSyncRuntimeLegacyConnectionStateUpdate(
+function assertNoLegacyHostedDeviceSyncRuntimeFlatFields(
   record: Record<string, unknown>,
   index: number,
-): NonNullable<HostedDeviceSyncRuntimeConnectionUpdate["connection"]> | undefined {
-  const connection = {
-    ...(record.displayName === undefined
-      ? {}
-      : { displayName: readNullableString(record.displayName, `updates[${index}].displayName`) }),
-    ...(record.metadata === undefined
-      ? {}
-      : {
-          metadata: sanitizeStoredDeviceSyncMetadata(
-            requireObject(record.metadata, `updates[${index}].metadata`),
-          ),
-        }),
-    ...(record.scopes === undefined
-      ? {}
-      : { scopes: requireStringArray(record.scopes, `updates[${index}].scopes`) }),
-    ...(record.status === undefined
-      ? {}
-      : { status: parseDeviceSyncStatus(record.status, `updates[${index}].status`) }),
-  };
+): void {
+  const legacyConnectionKeys = ["displayName", "metadata", "scopes", "status"];
+  const legacyLocalStateKeys = [
+    "clearError",
+    "lastErrorCode",
+    "lastErrorMessage",
+    "lastSyncCompletedAt",
+    "lastSyncErrorAt",
+    "lastSyncStartedAt",
+    "lastWebhookAt",
+    "nextReconcileAt",
+  ];
 
-  return Object.keys(connection).length > 0 ? connection : undefined;
+  if (legacyConnectionKeys.some((key) => record[key] !== undefined)) {
+    throw new TypeError(
+      `updates[${index}].connection must be used for hosted-authoritative connection fields.`,
+    );
+  }
+
+  if (legacyLocalStateKeys.some((key) => record[key] !== undefined)) {
+    throw new TypeError(
+      `updates[${index}].localState must be used for local observation fields.`,
+    );
+  }
 }
 
 function parseHostedDeviceSyncRuntimeConnectionStateUpdate(
@@ -148,67 +150,6 @@ function parseHostedDeviceSyncRuntimeConnectionStateUpdate(
       ? {}
       : { status: parseDeviceSyncStatus(record.status, `updates[${index}].connection.status`) }),
   };
-}
-
-function parseHostedDeviceSyncRuntimeLegacyLocalStateUpdate(
-  record: Record<string, unknown>,
-  index: number,
-): NonNullable<HostedDeviceSyncRuntimeConnectionUpdate["localState"]> | undefined {
-  const localState = {
-    ...(record.clearError === undefined
-      ? {}
-      : { clearError: requireBoolean(record.clearError, `updates[${index}].clearError`) }),
-    ...(record.lastErrorCode === undefined
-      ? {}
-      : { lastErrorCode: readNullableString(record.lastErrorCode, `updates[${index}].lastErrorCode`) }),
-    ...(record.lastErrorMessage === undefined
-      ? {}
-      : {
-          lastErrorMessage: readNullableString(record.lastErrorMessage, `updates[${index}].lastErrorMessage`),
-        }),
-    ...(record.lastSyncCompletedAt === undefined
-      ? {}
-      : {
-          lastSyncCompletedAt: readNullableIsoTimestamp(
-            record.lastSyncCompletedAt,
-            `updates[${index}].lastSyncCompletedAt`,
-          ),
-        }),
-    ...(record.lastSyncErrorAt === undefined
-      ? {}
-      : {
-          lastSyncErrorAt: readNullableIsoTimestamp(
-            record.lastSyncErrorAt,
-            `updates[${index}].lastSyncErrorAt`,
-          ),
-        }),
-    ...(record.lastSyncStartedAt === undefined
-      ? {}
-      : {
-          lastSyncStartedAt: readNullableIsoTimestamp(
-            record.lastSyncStartedAt,
-            `updates[${index}].lastSyncStartedAt`,
-          ),
-        }),
-    ...(record.lastWebhookAt === undefined
-      ? {}
-      : {
-          lastWebhookAt: readNullableIsoTimestamp(
-            record.lastWebhookAt,
-            `updates[${index}].lastWebhookAt`,
-          ),
-        }),
-    ...(record.nextReconcileAt === undefined
-      ? {}
-      : {
-          nextReconcileAt: readNullableIsoTimestamp(
-            record.nextReconcileAt,
-            `updates[${index}].nextReconcileAt`,
-          ),
-        }),
-  };
-
-  return Object.keys(localState).length > 0 ? localState : undefined;
 }
 
 function parseHostedDeviceSyncRuntimeLocalStateUpdate(

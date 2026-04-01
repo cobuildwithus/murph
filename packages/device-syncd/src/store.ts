@@ -44,6 +44,7 @@ interface AccountPatchInput {
 }
 
 interface HostedAccountHydrationInput {
+  clearTokens?: boolean;
   connection: {
     connectedAt: string;
     displayName: string | null;
@@ -647,7 +648,8 @@ export class SqliteDeviceSyncStore {
         return null;
       }
 
-      const shouldClearTokens = input.connection.status === "disconnected" && input.tokens === undefined;
+      const shouldClearTokens = input.clearTokens === true
+        || (input.connection.status === "disconnected" && input.tokens === undefined);
       const { accessTokenEncrypted, refreshTokenEncrypted, accessTokenExpiresAt } = resolveHydratedHostedAccountTokens({
         existing,
         inputTokens: input.tokens,

@@ -240,41 +240,32 @@ describe("device-sync hosted runtime helpers", () => {
       userId: "user-123",
     })).toThrow("updates[0].observedUpdatedAt must be an ISO-8601 timestamp.");
 
-    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connectionId: "dsc_legacy",
           lastErrorCode: "PROVIDER_AUTH",
-          lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
-          metadata: {
-            nested: "drop-me",
-            source: "browser",
-          },
-          observedUpdatedAt: "2026-03-26T12:00:00+00:00",
           status: "reauthorization_required",
         },
       ],
       userId: "user-123",
-    })).toEqual({
+    })).toThrow();
+
+    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
       updates: [
         {
           connection: {
-            metadata: {
-              nested: "drop-me",
-              source: "browser",
-            },
-            status: "reauthorization_required",
+            status: "active",
           },
-          connectionId: "dsc_legacy",
+          connectionId: "dsc_mixed",
+          lastErrorCode: "PROVIDER_AUTH",
           localState: {
-            lastErrorCode: "PROVIDER_AUTH",
-            lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
+            lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
           },
-          observedUpdatedAt: "2026-03-26T12:00:00.000Z",
         },
       ],
       userId: "user-123",
-    });
+    })).toThrow("updates[0].localState must be used for local observation fields.");
   });
 
   it("skips stale token writes, fences expiry metadata, and emits a reauthorization signal when runtime state requires reconnect", async () => {

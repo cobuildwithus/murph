@@ -28,6 +28,7 @@ import {
   buildHostedExecutionStructuredLogRecord,
   emitHostedExecutionStructuredLog,
   deriveHostedExecutionErrorCode,
+  fetchHostedExecutionWebControlPlaneResponse,
   summarizeHostedExecutionError,
   HOSTED_EXECUTION_DISPATCH_PATH,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
@@ -44,7 +45,6 @@ import {
   readHostedExecutionWorkerEnvironment,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
-  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionUserStatus,
   resolveHostedDeviceSyncWakeContext,
   resolveHostedExecutionAiUsageClient,
@@ -324,71 +324,6 @@ describe("@murphai/hosted-execution", () => {
     });
   });
 
-  it("accepts legacy device-sync runtime snapshots that still keep local-state fields on connection", () => {
-    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
-      connections: [
-        {
-          connection: {
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-03-26T12:00:00.000Z",
-            createdAt: "2026-03-26T12:00:00.000Z",
-            displayName: "Legacy Oura",
-            externalAccountId: "oura_legacy",
-            id: "dsc_legacy",
-            lastErrorCode: "PROVIDER_AUTH",
-            lastErrorMessage: "Reconnect required",
-            lastSyncCompletedAt: "2026-03-26T11:50:00.000Z",
-            lastSyncErrorAt: "2026-03-26T11:45:00.000Z",
-            lastSyncStartedAt: "2026-03-26T11:40:00.000Z",
-            lastWebhookAt: "2026-03-26T11:35:00.000Z",
-            metadata: {
-              source: "oauth",
-            },
-            nextReconcileAt: "2026-03-26T12:30:00.000Z",
-            provider: "oura",
-            scopes: ["heartrate"],
-            status: "active",
-            updatedAt: "2026-03-26T12:05:00.000Z",
-          },
-          tokenBundle: null,
-        },
-      ],
-      generatedAt: "2026-03-26T12:10:00.000Z",
-      userId: "member_123",
-    })).toEqual({
-      connections: [
-        {
-          connection: {
-            accessTokenExpiresAt: null,
-            connectedAt: "2026-03-26T12:00:00.000Z",
-            createdAt: "2026-03-26T12:00:00.000Z",
-            displayName: "Legacy Oura",
-            externalAccountId: "oura_legacy",
-            id: "dsc_legacy",
-            metadata: {
-              source: "oauth",
-            },
-            provider: "oura",
-            scopes: ["heartrate"],
-            status: "active",
-            updatedAt: "2026-03-26T12:05:00.000Z",
-          },
-          localState: {
-            lastErrorCode: "PROVIDER_AUTH",
-            lastErrorMessage: "Reconnect required",
-            lastSyncCompletedAt: "2026-03-26T11:50:00.000Z",
-            lastSyncErrorAt: "2026-03-26T11:45:00.000Z",
-            lastSyncStartedAt: "2026-03-26T11:40:00.000Z",
-            lastWebhookAt: "2026-03-26T11:35:00.000Z",
-            nextReconcileAt: "2026-03-26T12:30:00.000Z",
-          },
-          tokenBundle: null,
-        },
-      ],
-      generatedAt: "2026-03-26T12:10:00.000Z",
-      userId: "member_123",
-    });
-  });
 
   it("derives stable hosted execution error codes and structured logs", () => {
     const error = new Error("Hosted runner container returned HTTP 503.");
@@ -580,6 +515,41 @@ describe("@murphai/hosted-execution", () => {
       }),
     );
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("shares one strict hosted web-control fetch policy helper", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    await fetchHostedExecutionWebControlPlaneResponse({
+      authorizationToken: "  internal-token  ",
+      baseUrl: "https://join.example.test/",
+      body: "{\"ok\":true}",
+      boundUserId: "member_123",
+      fetchImpl,
+      method: "POST",
+      path: "/api/internal/device-sync/runtime/snapshot",
+      search: "?provider=oura",
+      timeoutMs: 45_000,
+    });
+
+    expect(timeoutSpy).toHaveBeenCalledWith(45_000);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://join.example.test/api/internal/device-sync/runtime/snapshot?provider=oura",
+      expect.objectContaining({
+        body: "{\"ok\":true}",
+        headers: expect.any(Headers),
+        method: "POST",
+        redirect: "error",
+        signal: expect.any(AbortSignal),
+      }),
+    );
+
+    const requestHeaders = fetchImpl.mock.calls[0]?.[1]?.headers;
     expect(requestHeaders).toBeInstanceOf(Headers);
     expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
     expect((requestHeaders as Headers).get("content-type")).toBe("application/json");

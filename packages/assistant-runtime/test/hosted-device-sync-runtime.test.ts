@@ -26,6 +26,48 @@ vi.mock("@murphai/hosted-execution", async () => {
   };
 });
 
+function normalizeHostedSnapshotFixture<T extends {
+  connections: Array<{
+    connection: Record<string, unknown>;
+    localState?: Record<string, unknown>;
+    tokenBundle: Record<string, unknown> | null;
+  }>;
+}>(fixture: T): T {
+  return {
+    ...fixture,
+    connections: fixture.connections.map((entry) => {
+      if (entry.localState) {
+        return entry;
+      }
+
+      const {
+        lastErrorCode = null,
+        lastErrorMessage = null,
+        lastSyncCompletedAt = null,
+        lastSyncErrorAt = null,
+        lastSyncStartedAt = null,
+        lastWebhookAt = null,
+        nextReconcileAt = null,
+        ...connection
+      } = entry.connection;
+
+      return {
+        ...entry,
+        connection,
+        localState: {
+          lastErrorCode,
+          lastErrorMessage,
+          lastSyncCompletedAt,
+          lastSyncErrorAt,
+          lastSyncStartedAt,
+          lastWebhookAt,
+          nextReconcileAt,
+        },
+      };
+    }),
+  };
+}
+
 describe("hosted device-sync runtime", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -68,7 +110,7 @@ describe("hosted device-sync runtime", () => {
   });
 
   it("hydrates hosted control-plane snapshots through the store-owned hosted primitive and clears local tokens on disconnect", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -98,7 +140,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_123",
@@ -190,7 +232,7 @@ describe("hosted device-sync runtime", () => {
         lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
         lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
         lastWebhookAt: "2026-03-27T07:50:00.000Z",
-        nextReconcileAt: null,
+        nextReconcileAt: "2026-03-28T00:00:00.000Z",
       }),
     }));
     expect(markPendingJobsDeadForAccount).toHaveBeenCalledWith(
@@ -204,11 +246,11 @@ describe("hosted device-sync runtime", () => {
   });
 
   it("uses the worker proxy device-sync endpoint even when no web token is exposed to the runner", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
     const service = {
       store: {
         getAccountByExternalAccount: vi.fn(),
@@ -254,11 +296,11 @@ describe("hosted device-sync runtime", () => {
 
   it("forwards a custom fetch implementation into hosted device-sync snapshot reads", async () => {
     const fetchImpl = vi.fn(async () => new Response(null, { status: 200 }));
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
     const service = {
       store: {
         getAccountByExternalAccount: vi.fn(),
@@ -297,11 +339,11 @@ describe("hosted device-sync runtime", () => {
   });
 
   it("ignores hosted wake hints whose connection id was never reconciled to a local account id", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
     mocks.resolveHostedDeviceSyncWakeContext.mockReturnValue({
       connectionId: "hosted_missing",
       hint: {
@@ -354,8 +396,8 @@ describe("hosted device-sync runtime", () => {
     expect(state.hostedToLocalAccountIds.size).toBe(0);
   });
 
-  it("preserves fresher local tokens and nextReconcileAt when the hosted snapshot has not advanced", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("hydrates hosted connection and token state while preserving local nextReconcileAt", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -391,7 +433,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_456",
@@ -449,28 +491,30 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        displayName: "Local Whoop",
+        displayName: "Hosted Whoop",
         externalAccountId: "whoop-user-1",
         metadata: {
-          source: "local",
+          source: "hosted",
         },
         provider: "whoop",
         scopes: ["offline"],
         status: "active",
-        updatedAt: "2026-03-27T08:20:00.000Z",
+        updatedAt: "2026-03-27T08:00:00.000Z",
       }),
       hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
       localState: expect.objectContaining({
         nextReconcileAt: "2026-03-27T18:00:00.000Z",
       }),
+      tokens: expect.objectContaining({
+        accessToken: "hosted-access",
+        refreshToken: "hosted-refresh",
+      }),
     }));
-    const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(hydrateInput).not.toHaveProperty("tokens");
   });
 
-  it("preserves divergent local WHOOP auth state on the first sync when hosted observed markers are still null", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("hydrates hosted connection and token state on first sync while preserving local error state", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -506,7 +550,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_rollout_user",
@@ -564,24 +608,26 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        displayName: "Local Whoop",
-        status: "reauthorization_required",
-        updatedAt: "2026-03-27T08:20:00.000Z",
+        displayName: "Hosted Whoop",
+        status: "active",
+        updatedAt: "2026-03-27T08:00:00.000Z",
       }),
-      hostedObservedTokenVersion: null,
-      hostedObservedUpdatedAt: null,
+      hostedObservedTokenVersion: 2,
+      hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
       localState: expect.objectContaining({
         lastErrorCode: "PROVIDER_AUTH",
         lastErrorMessage: "Reconnect locally",
         nextReconcileAt: "2026-03-27T18:00:00.000Z",
       }),
+      tokens: expect.objectContaining({
+        accessToken: "hosted-access",
+        refreshToken: "hosted-refresh",
+      }),
     }));
-    const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(hydrateInput).not.toHaveProperty("tokens");
   });
 
-  it("does not let a webhook-only hosted touch clear fresher local auth errors", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("does not let a webhook-only hosted touch clear fresher local auth errors while hosted connection state still wins", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -617,7 +663,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:25:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_webhook_touch",
@@ -675,19 +721,24 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        status: "reauthorization_required",
-        updatedAt: "2026-03-27T08:23:00.000Z",
+        displayName: "Hosted Whoop",
+        status: "active",
+        updatedAt: "2026-03-27T08:00:00.000Z",
       }),
       localState: expect.objectContaining({
         lastErrorCode: "PROVIDER_AUTH",
         lastErrorMessage: "Reconnect locally",
         lastWebhookAt: "2026-03-27T08:24:00.000Z",
       }),
+      tokens: expect.objectContaining({
+        accessToken: "hosted-access",
+        refreshToken: "hosted-refresh",
+      }),
     }));
   });
 
-  it("treats a hosted snapshot without updatedAt as stale when local state is newer and unacknowledged", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("uses hosted connection and token state even when the hosted snapshot omits updatedAt", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -722,7 +773,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:45:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_missing_updated_at",
@@ -780,20 +831,23 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        displayName: "Local Whoop",
-        updatedAt: "2026-03-27T08:40:00.000Z",
+        displayName: "Hosted Whoop",
+        updatedAt: "2026-03-27T08:30:00.000Z",
       }),
+      hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
       localState: expect.objectContaining({
         nextReconcileAt: "2026-03-27T18:00:00.000Z",
       }),
+      tokens: expect.objectContaining({
+        accessToken: "stale-hosted-access",
+        refreshToken: "stale-hosted-refresh",
+      }),
     }));
-    const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(hydrateInput).not.toHaveProperty("tokens");
   });
 
-  it("fails safe to local ownership when hosted observed timestamps are malformed", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("replaces malformed local observed timestamps with the hosted snapshot markers", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -829,7 +883,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:45:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_malformed_marker",
@@ -887,20 +941,23 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        displayName: "Local Whoop",
-        updatedAt: "2026-03-27T08:40:00.000Z",
+        displayName: "Hosted Whoop",
+        updatedAt: "2026-03-27T08:00:00.000Z",
       }),
-      hostedObservedUpdatedAt: "not-a-date",
+      hostedObservedTokenVersion: 4,
+      hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
       localState: expect.objectContaining({
         nextReconcileAt: "2026-03-27T18:00:00.000Z",
       }),
+      tokens: expect.objectContaining({
+        accessToken: "stale-hosted-access",
+        refreshToken: "stale-hosted-refresh",
+      }),
     }));
-    const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(hydrateInput).not.toHaveProperty("tokens");
   });
 
-  it("does not regress observed hosted markers when a stale snapshot is ignored", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("tracks hosted observed markers directly when hosted connection and token state are authoritative", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -936,7 +993,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:45:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_987",
@@ -994,25 +1051,27 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        displayName: "Local Whoop",
+        displayName: "Hosted Whoop",
         externalAccountId: "whoop-user-3",
         metadata: {
-          source: "local",
+          source: "hosted",
         },
-        updatedAt: "2026-03-27T08:40:00.000Z",
+        updatedAt: "2026-03-27T08:20:00.000Z",
       }),
-      hostedObservedTokenVersion: 6,
-      hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
+      hostedObservedTokenVersion: 5,
+      hostedObservedUpdatedAt: "2026-03-27T08:20:00.000Z",
       localState: expect.objectContaining({
         nextReconcileAt: "2026-03-27T18:00:00.000Z",
       }),
+      tokens: expect.objectContaining({
+        accessToken: "stale-hosted-access",
+        refreshToken: "stale-hosted-refresh",
+      }),
     }));
-    const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(hydrateInput).not.toHaveProperty("tokens");
   });
 
-  it("hydrates hosted tokens when the hosted token version has advanced even if the hosted connection snapshot has not", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("hydrates hosted tokens and hosted connection state together", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -1048,7 +1107,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:05:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_999",
@@ -1106,14 +1165,15 @@ describe("hosted device-sync runtime", () => {
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
       connection: expect.objectContaining({
-        displayName: "Local Whoop",
+        displayName: "Hosted Whoop",
         externalAccountId: "whoop-user-3",
         metadata: {
-          source: "local",
+          source: "hosted",
         },
         provider: "whoop",
         scopes: ["offline"],
         status: "active",
+        updatedAt: "2026-03-27T08:00:00.000Z",
       }),
       hostedObservedTokenVersion: 5,
       hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
@@ -1138,8 +1198,8 @@ describe("hosted device-sync runtime", () => {
     expect(codec.decrypt(String(tokens?.refreshTokenEncrypted))).toBe("hosted-refresh-v5");
   });
 
-  it("applies hosted nextReconcileAt once the hosted snapshot has advanced", async () => {
-    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue({
+  it("preserves local nextReconcileAt even when hosted connection state advances", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
           connection: {
@@ -1175,7 +1235,7 @@ describe("hosted device-sync runtime", () => {
       ],
       generatedAt: "2026-03-27T08:35:00.000Z",
       userId: "user-123",
-    });
+    }));
 
     const existing = {
       id: "local_789",
@@ -1246,8 +1306,101 @@ describe("hosted device-sync runtime", () => {
       hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
       localState: expect.objectContaining({
-        nextReconcileAt: "2026-03-27T10:00:00.000Z",
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
       }),
+    }));
+  });
+
+  it("does not emit an empty token bundle when the hosted-authoritative snapshot cleared active escrow", async () => {
+    const { reconcileHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    const service = {
+      store: {
+        getAccountById: vi.fn(() => ({
+          accessTokenEncrypted: "",
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          createdAt: "2026-03-26T12:00:00.000Z",
+          disconnectGeneration: 0,
+          displayName: "Hosted Whoop",
+          externalAccountId: "whoop-cleared-escrow",
+          hostedObservedTokenVersion: null,
+          hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
+          id: "local_cleared_escrow",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: "2026-03-27T08:20:00.000Z",
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: "2026-03-27T08:10:00.000Z",
+          lastWebhookAt: "2026-03-27T07:50:00.000Z",
+          metadata: {
+            source: "hosted",
+          },
+          nextReconcileAt: "2026-03-27T18:00:00.000Z",
+          provider: "whoop",
+          refreshTokenEncrypted: null,
+          scopes: ["offline"],
+          status: "active",
+          updatedAt: "2026-03-27T08:30:00.000Z",
+        })),
+      },
+    };
+
+    await reconcileHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-123",
+        },
+        eventId: "evt_cleared_escrow",
+        occurredAt: "2026-03-27T08:35:00.000Z",
+      },
+      secret: "secret-for-tests",
+      service: service as never,
+      state: {
+        hostedToLocalAccountIds: new Map([["hosted_cleared_escrow", "local_cleared_escrow"]]),
+        localToHostedAccountIds: new Map([["local_cleared_escrow", "hosted_cleared_escrow"]]),
+        observedTokenVersions: new Map([["hosted_cleared_escrow", null]]),
+        snapshot: normalizeHostedSnapshotFixture({
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-03-26T12:00:00.000Z",
+                createdAt: "2026-03-26T12:00:00.000Z",
+                displayName: "Hosted Whoop",
+                externalAccountId: "whoop-cleared-escrow",
+                id: "hosted_cleared_escrow",
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-03-27T08:20:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-03-27T08:10:00.000Z",
+                lastWebhookAt: "2026-03-27T07:50:00.000Z",
+                metadata: {
+                  source: "hosted",
+                },
+                nextReconcileAt: "2026-03-27T18:00:00.000Z",
+                provider: "whoop",
+                scopes: ["offline"],
+                status: "active",
+                updatedAt: "2026-03-27T08:30:00.000Z",
+              },
+              tokenBundle: null,
+            },
+          ],
+          generatedAt: "2026-03-27T08:35:00.000Z",
+          userId: "user-123",
+        }),
+      },
+      timeoutMs: null,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "https://control.example.test",
+        internalToken: "internal-token",
+      },
+    });
+
+    expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
+      updates: [],
     }));
   });
 
@@ -1302,7 +1455,7 @@ describe("hosted device-sync runtime", () => {
         hostedToLocalAccountIds: new Map([["hosted_123", "local_123"]]),
         localToHostedAccountIds: new Map([["local_123", "hosted_123"]]),
         observedTokenVersions: new Map([["hosted_123", null]]),
-        snapshot: {
+        snapshot: normalizeHostedSnapshotFixture({
           connections: [
             {
               connection: {
@@ -1332,7 +1485,7 @@ describe("hosted device-sync runtime", () => {
           ],
           generatedAt: "2026-03-27T08:35:00.000Z",
           userId: "user-123",
-        },
+        }),
       },
       timeoutMs: null,
       webControlPlane: {
@@ -1420,7 +1573,7 @@ describe("hosted device-sync runtime", () => {
         hostedToLocalAccountIds: new Map([["hosted_321", "local_321"]]),
         localToHostedAccountIds: new Map([["local_321", "hosted_321"]]),
         observedTokenVersions: new Map([["hosted_321", null]]),
-        snapshot: {
+        snapshot: normalizeHostedSnapshotFixture({
           connections: [
             {
               connection: {
@@ -1450,7 +1603,7 @@ describe("hosted device-sync runtime", () => {
           ],
           generatedAt: "2026-03-27T08:35:00.000Z",
           userId: "user-123",
-        },
+        }),
       },
       timeoutMs: null,
       webControlPlane: {
@@ -1528,7 +1681,7 @@ describe("hosted device-sync runtime", () => {
         hostedToLocalAccountIds: new Map([["hosted_fetch_impl", "local_fetch_impl"]]),
         localToHostedAccountIds: new Map([["local_fetch_impl", "hosted_fetch_impl"]]),
         observedTokenVersions: new Map([["hosted_fetch_impl", null]]),
-        snapshot: {
+        snapshot: normalizeHostedSnapshotFixture({
           connections: [
             {
               connection: {
@@ -1558,7 +1711,7 @@ describe("hosted device-sync runtime", () => {
           ],
           generatedAt: "2026-03-27T08:35:00.000Z",
           userId: "user-123",
-        },
+        }),
       },
       timeoutMs: 7_000,
       webControlPlane: {
@@ -1626,7 +1779,7 @@ describe("hosted device-sync runtime", () => {
         hostedToLocalAccountIds: new Map([["hosted_654", "local_654"]]),
         localToHostedAccountIds: new Map([["local_654", "hosted_654"]]),
         observedTokenVersions: new Map([["hosted_654", null]]),
-        snapshot: {
+        snapshot: normalizeHostedSnapshotFixture({
           connections: [
             {
               connection: {
@@ -1656,7 +1809,7 @@ describe("hosted device-sync runtime", () => {
           ],
           generatedAt: "2026-03-27T08:35:00.000Z",
           userId: "user-123",
-        },
+        }),
       },
       timeoutMs: null,
       webControlPlane: {
