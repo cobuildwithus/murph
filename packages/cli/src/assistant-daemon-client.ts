@@ -23,7 +23,7 @@ import {
 import type {
   AssistantMessageInput,
   AssistantSessionResolutionFields,
-} from '@murphai/assistant-core/assistant/service-contracts'
+} from '@murphai/assistant-core/assistant-service'
 import type { RunAssistantAutomationInput } from './assistant/automation.js'
 import type {
   AssistantCronTargetMutationResult,
@@ -32,7 +32,7 @@ import type {
   SetAssistantCronJobTargetInput,
 } from './assistant/cron.js'
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
 
 export {
   resolveAssistantDaemonClientConfig,

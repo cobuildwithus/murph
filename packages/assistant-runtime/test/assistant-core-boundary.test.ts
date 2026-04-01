@@ -82,6 +82,19 @@ test("assistant-runtime uses the dedicated @murphai/assistant-core boundary inst
   assert.equal(cloudflareManifest.dependencies?.["@murphai/assistant-core"], "workspace:*");
   assert.equal(cloudflareManifest.dependencies?.murph, undefined);
   assert.equal(assistantCoreManifest.dependencies?.murph, undefined);
+  assert.equal(assistantCoreManifest.exports?.["./*"], undefined);
+  assert.equal(
+    assistantCoreManifest.exports?.["./assistant-runtime"]?.default,
+    "./dist/assistant-runtime.js",
+  );
+  assert.equal(
+    assistantCoreManifest.exports?.["./assistant-provider"]?.default,
+    "./dist/assistant-provider.js",
+  );
+  assert.equal(
+    assistantCoreManifest.exports?.["./assistant-state"]?.default,
+    "./dist/assistant-state.js",
+  );
   assert.equal(existsSync(new URL("../../assistant-services/package.json", import.meta.url)), false);
   assert.equal(cliManifest.exports?.["./assistant-core"], undefined);
   assert.ok(

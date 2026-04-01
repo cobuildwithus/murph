@@ -59,7 +59,7 @@ import {
 } from './setup-services/shell.js'
 import {
   assistantProviderConfigsEqual,
-} from '@murphai/assistant-core/assistant/provider-config'
+} from '@murphai/assistant-core/assistant-provider'
 import {
   buildBaseFormulaSpecs,
   createStep,

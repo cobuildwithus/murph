@@ -15,15 +15,15 @@ import {
   type AssistantSession,
   type AssistantSessionSecrets,
 } from '@murphai/assistant-core/assistant-cli-contracts'
-import { serializeAssistantProviderSessionOptions } from '@murphai/assistant-core/assistant/provider-config'
-import { normalizeAssistantSessionSnapshot } from '@murphai/assistant-core/assistant/provider-state'
-import { mergeAssistantHeaders } from '@murphai/assistant-core/assistant/redaction'
+import { serializeAssistantProviderSessionOptions } from '@murphai/assistant-core/assistant-provider'
+import { normalizeAssistantSessionSnapshot } from '@murphai/assistant-core/assistant-provider'
+import { mergeAssistantHeaders } from '@murphai/assistant-core/assistant-runtime'
 import {
   auditAssistantStatePermissions,
   isMissingFileError,
   writeJsonFileAtomic,
-} from '@murphai/assistant-core/assistant/shared'
-import { assertAssistantSessionId } from '@murphai/assistant-core/assistant/state-ids'
+} from '@murphai/assistant-core/assistant-runtime'
+import { assertAssistantSessionId } from '@murphai/assistant-core/assistant-state'
 import {
   extractAssistantProviderRouteRecoverySecretsForPersistence,
   extractAssistantSessionSecretsForPersistence,
@@ -31,8 +31,8 @@ import {
   persistAssistantSessionSecrets,
   readAssistantProviderRouteRecoverySecrets,
   readAssistantSessionSecrets,
-} from '@murphai/assistant-core/assistant/state-secrets'
-import { resolveAssistantSessionPath } from '@murphai/assistant-core/assistant/store/persistence'
+} from '@murphai/assistant-core/assistant-state'
+import { resolveAssistantSessionPath } from '@murphai/assistant-core/assistant-state'
 
 export interface AssistantStateSecrecyAudit {
   malformedProviderRouteRecoverySecretSidecars: number

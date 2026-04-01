@@ -18,7 +18,7 @@ import {
   assistantChatResultSchema,
   type AssistantSession,
 } from '@murphai/assistant-core/assistant-cli-contracts'
-import type { AssistantProviderProgressEvent } from '@murphai/assistant-core/assistant/provider-registry'
+import type { AssistantProviderProgressEvent } from '@murphai/assistant-core/assistant-provider'
 import {
   discoverAssistantProviderModels,
   resolveAssistantCatalogReasoningOptions,
@@ -29,7 +29,7 @@ import {
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
-} from '@murphai/assistant-core/assistant/provider-traces'
+} from '@murphai/assistant-core/assistant-provider'
 import { resolveCodexDisplayOptions } from '@murphai/assistant-core/assistant-codex'
 import {
   buildAssistantProviderDefaultsPatch,
@@ -47,15 +47,15 @@ import {
   extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
-} from '@murphai/assistant-core/assistant/provider-turn-recovery'
+} from '@murphai/assistant-core/assistant-provider'
 import {
   appendAssistantTranscriptEntries,
   isAssistantSessionNotFoundError,
   listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
 } from '../store.js'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
-import { redactAssistantSessionForDisplay } from '@murphai/assistant-core/assistant/redaction'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
+import { redactAssistantSessionForDisplay } from '@murphai/assistant-core/assistant-runtime'
 import {
   CHAT_COMPOSER_HINT,
   CHAT_SLASH_COMMANDS,

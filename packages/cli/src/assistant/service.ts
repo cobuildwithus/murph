@@ -11,9 +11,9 @@ import {
   updateAssistantSessionOptionsLocal,
   type AssistantMessageInput,
   type AssistantSessionResolutionFields,
-} from '@murphai/assistant-core/assistant/service'
+} from '@murphai/assistant-core/assistant-service'
 
-export * from '@murphai/assistant-core/assistant/service'
+export * from '@murphai/assistant-core/assistant-service'
 
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,

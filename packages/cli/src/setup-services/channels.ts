@@ -3,7 +3,7 @@ import {
   saveAssistantAutomationState,
 } from '@murphai/assistant-core/assistant-state'
 import { resolveAgentmailApiKey } from '@murphai/assistant-core/agentmail-runtime'
-import { getAssistantChannelAdapter } from '@murphai/assistant-core/assistant/channel-adapters'
+import { getAssistantChannelAdapter } from '@murphai/assistant-core/assistant-runtime'
 import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murphai/assistant-core/inbox-app/linq-endpoint'
 import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type {

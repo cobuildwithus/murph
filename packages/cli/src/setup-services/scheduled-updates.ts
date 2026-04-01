@@ -2,7 +2,7 @@ import {
   getAssistantCronPresetDefinition,
   listAssistantCronPresets,
   toAssistantCronPreset,
-} from '@murphai/assistant-core/assistant/cron/presets'
+} from '@murphai/assistant-core/assistant-cron'
 import type { AssistantCronPreset } from '@murphai/assistant-core/assistant-cli-contracts'
 import type {
   SetupScheduledUpdate,

@@ -5,6 +5,42 @@ import { fileURLToPath } from 'node:url'
 
 import { test } from 'vitest'
 
+const curatedAssistantCoreExports = [
+  './assistant-automation',
+  './assistant-cron',
+  './assistant-outbox',
+  './assistant-provider',
+  './assistant-runtime',
+  './assistant-service',
+  './assistant-state',
+  './assistant-status',
+  './assistant-store',
+] as const
+
+const preservedAssistantCoreLeafExports = [
+  './assistant/channel-adapters',
+  './assistant/conversation-policy',
+  './assistant/memory',
+  './assistant/provider-config',
+  './assistant/provider-registry',
+  './assistant/state',
+  './assistant/state-ids',
+  './assistant/transcript-distillation',
+  './assistant-cli-access',
+  './assistant-cli-tools',
+  './device-daemon',
+  './device-sync-client',
+  './health-registry-command-metadata',
+  './http-json-retry',
+  './inbox-app/types',
+  './inbox-services/connectors',
+  './model-harness',
+  './runtime-errors',
+  './usecases/experiment-journal-vault',
+  './usecases/explicit-health-family-services',
+  './usecases/record-mutations',
+] as const
+
 type PackageManifest = {
   dependencies?: Record<string, string | undefined>
   exports?: Record<string, { default?: string; types?: string }>
@@ -35,10 +71,13 @@ test('cli imports assistant-core directly and removes facade-only package subpat
   ) as TsConfigShape
 
   assert.equal(cliManifest.dependencies?.['@murphai/assistant-core'], 'workspace:*')
-  assert.deepEqual(assistantCoreManifest.exports?.['./*'], {
-    default: './dist/*.js',
-    types: './dist/*.d.ts',
-  })
+  assert.equal(assistantCoreManifest.exports?.['./*'], undefined)
+  for (const entrypoint of curatedAssistantCoreExports) {
+    assert.notEqual(assistantCoreManifest.exports?.[entrypoint], undefined)
+  }
+  for (const entrypoint of preservedAssistantCoreLeafExports) {
+    assert.notEqual(assistantCoreManifest.exports?.[entrypoint], undefined)
+  }
   assert.equal(
     cliTsconfig.references?.some((reference) => reference.path === '../assistant-core'),
     true,
@@ -106,7 +145,11 @@ test('cli source no longer keeps export-only assistant-core facade files', async
       if (!isPassthroughOnly) {
         continue
       }
-      if (lines.some((line) => /from ['"]@murph\/assistant-core\/[^'"]+['"]/u.test(line))) {
+      if (
+        lines.some((line) =>
+          /from ['"]@murph(?:ai)?\/assistant-core\/[^'"]+['"]/u.test(line),
+        )
+      ) {
         facadeFiles.push(path.relative(packageRoot, fileURLToPath(entryUrl)))
       }
     }

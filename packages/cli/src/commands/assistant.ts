@@ -43,7 +43,7 @@ import {
   assistantStatusResultSchema,
 } from '@murphai/assistant-core/assistant-cli-contracts'
 import { deliverAssistantMessage } from '@murphai/assistant-core/outbound-channel'
-import type { ConversationRef } from '@murphai/assistant-core/assistant/conversation-ref'
+import type { ConversationRef } from '@murphai/assistant-core/assistant-runtime'
 import {
   addAssistantCronJob,
   buildAssistantCronSchedule,
@@ -74,7 +74,7 @@ import { getAssistantStatus } from '../assistant/status.js'
 import {
   redactAssistantSessionForDisplay,
   redactAssistantSessionsForDisplay,
-} from '@murphai/assistant-core/assistant/redaction'
+} from '@murphai/assistant-core/assistant-runtime'
 import {
   assertAssistantMemoryTurnContextVault,
   forgetAssistantMemory,
@@ -85,7 +85,7 @@ import {
   resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
   upsertAssistantMemory,
-} from '@murphai/assistant-core/assistant/memory'
+} from '@murphai/assistant-core/assistant-runtime'
 import {
   redactAssistantDisplayPath,
   getAssistantSession,

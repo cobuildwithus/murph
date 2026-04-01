@@ -1,4 +1,4 @@
-import type { AssistantRunEvent } from '@murphai/assistant-core/assistant/automation/shared'
+import type { AssistantRunEvent } from '@murphai/assistant-core/assistant-automation'
 import type {
   InboxRunEvent,
   RuntimeCaptureRecordInput,

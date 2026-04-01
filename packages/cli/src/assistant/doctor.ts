@@ -25,14 +25,14 @@ import {
   inspectAndRepairAssistantStateSecrecy,
   type AssistantStateSecrecyAudit,
 } from './doctor-security.js'
-import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
-import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
+import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant-runtime'
+import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant-state'
 import {
   isMissingFileError,
   parseAssistantJsonLinesWithTailSalvage,
-} from '@murphai/assistant-core/assistant/shared'
+} from '@murphai/assistant-core/assistant-runtime'
 import { redactAssistantDisplayPath } from './store.js'
-import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant/store/paths'
+import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 
