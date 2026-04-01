@@ -13,10 +13,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(packageDir, "../.."),
   },
-  typescript: {
-    // Repo verification runs a dedicated package-local typecheck before build.
-    ignoreBuildErrors: true,
-  },
 };
 
 export default nextConfig;

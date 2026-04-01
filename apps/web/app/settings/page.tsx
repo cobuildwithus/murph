@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { cookies } from "next/headers";
 
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
@@ -10,8 +11,6 @@ import {
 } from "@/src/lib/hosted-onboarding/landing";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/shared";
-
-export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Murph account settings",
@@ -47,12 +46,12 @@ export default async function SettingsPage() {
               Open your latest Murph invite or account link in this browser first. The settings page only works
               for an active hosted session.
             </p>
-            <a
+            <Link
               href="/"
               className="inline-flex rounded border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50"
             >
               Return home
-            </a>
+            </Link>
           </section>
         ) : (
           <>

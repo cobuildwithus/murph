@@ -7,10 +7,8 @@ import {
   resolveHostedPrivyClientAppId,
   resolveHostedPrivyClientId,
 } from "@/src/lib/hosted-onboarding/landing";
-import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/member-service";
+import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/invite-service";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
-
-export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Murph hosted invite",

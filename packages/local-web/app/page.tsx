@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import {
   DEFAULT_SAMPLE_LIMIT,
   DEFAULT_TIMELINE_LIMIT,
@@ -325,12 +327,12 @@ function DeviceProviderCard({
             Default scopes: {provider.defaultScopes.join(", ")}
           </p>
         </div>
-        <a
+        <Link
           className="inline-flex items-center justify-center rounded-full bg-accent px-4 py-2 font-display text-[0.8rem] font-bold tracking-[0.12em] uppercase text-bg transition-colors hover:bg-ink hover:text-[#f7f1e9]"
           href={`/devices/connect/${encodeURIComponent(provider.provider)}`}
         >
           {connectLabel}
-        </a>
+        </Link>
       </div>
 
       {accounts.length ? (

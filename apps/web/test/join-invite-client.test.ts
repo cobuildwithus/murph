@@ -50,6 +50,28 @@ test("JoinInviteClient keeps the fallback copy when phone auth is ready but the 
   assert.doesNotMatch(markup, /data-hosted-phone-auth=/);
 });
 
+test("active invite state links to hosted settings with client navigation markup", () => {
+  const markup = renderToStaticMarkup(
+    createElement(JoinInviteClient, {
+      initialStatus: createStatus({
+        session: {
+          authenticated: true,
+          expiresAt: null,
+          matchesInvite: true,
+        },
+        stage: "active",
+      }),
+      inviteCode: "invite-code",
+      privyAppId: "cm_app_123",
+      shareCode: null,
+      sharePreview: null,
+    }),
+  );
+
+  assert.ok(markup.includes('href="/settings"'));
+  assert.match(markup, /Manage email settings/);
+});
+
 test("pending share acceptance stays in processing instead of announcing success", () => {
   assert.equal(
     resolveJoinInviteShareStateFromAccept({

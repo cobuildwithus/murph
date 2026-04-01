@@ -40,4 +40,5 @@ test("next.config keeps Turbopack focused on the repo root without custom worksp
   assert.deepEqual(nextConfig.turbopack, {
     root: process.cwd(),
   });
+  assert.equal(nextConfig.typescript, undefined);
 });

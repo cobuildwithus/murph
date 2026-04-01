@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+import Link from "next/link";
 
 export default async function JoinInviteCancelPage(input: {
   params: Promise<{ inviteCode: string }>;
@@ -24,12 +24,12 @@ export default async function JoinInviteCancelPage(input: {
           Your verified phone session is still ready. Jump back to the invite page whenever you want to finish
           checkout.
         </p>
-        <a
+        <Link
           href={href}
           className="inline-flex rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light"
         >
           Return to invite
-        </a>
+        </Link>
       </section>
     </main>
   );

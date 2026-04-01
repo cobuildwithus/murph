@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { startTransition, useEffect, useState } from "react";
 
 import type {
@@ -182,7 +183,7 @@ export function JoinInviteClient({
       <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
         <div className="space-y-3">
           <span className="inline-block rounded bg-olive/10 px-3.5 py-1.5 text-sm font-semibold text-olive">
-            Hosted access for {status.invite?.phoneHint ?? "your number"}
+            Invite for {status.invite?.phoneHint ?? "your number"}
           </span>
           <h1 className="text-4xl font-bold leading-none tracking-tight text-stone-900 md:text-5xl">
             {title}
@@ -221,8 +222,8 @@ export function JoinInviteClient({
           {status.session.authenticated && !status.session.matchesInvite ? (
             <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               <p>
-                This browser is currently signed in to a different hosted member. Continuing below will switch the
-                browser session to {status.invite?.phoneHint ?? "this invite"}.
+                This browser is already signed in with a different number. Sign out first to continue with{" "}
+                {status.invite?.phoneHint ?? "this invite"}.
               </p>
               <button
                 type="button"
@@ -230,7 +231,7 @@ export function JoinInviteClient({
                 disabled={pendingAction !== null}
                 className="rounded border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {pendingAction === "logout" ? "Signing out..." : "Sign out current browser session"}
+                {pendingAction === "logout" ? "Signing out..." : "Use this invite instead"}
               </button>
             </div>
           ) : null}
@@ -275,12 +276,12 @@ export function JoinInviteClient({
               <p>
                 Your hosted identity is active. Your phone-verified account and hosted session are all ready.
               </p>
-              <a
+              <Link
                 href="/settings"
                 className="inline-flex rounded border border-green-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50"
               >
                 Manage email settings
-              </a>
+              </Link>
               {sharePreview ? (
                 shareImportState === "completed" ? (
                   <p>{sharePreview.title} has been added to this hosted vault.</p>
@@ -303,11 +304,11 @@ export function JoinInviteClient({
       </section>
 
       <section className="space-y-2.5 rounded border border-stone-200/60 bg-white/80 p-5 text-sm leading-relaxed text-stone-500">
-        <strong className="text-stone-800">What happens here</strong>
-        <p>1. We verify the phone number that received this invite.</p>
-        <p>2. We create or reconnect your Murph account in Postgres.</p>
-        <p>3. We finish account setup and set a hosted session cookie.</p>
-        <p>4. We hand you off to checkout, then your hosted access turns active.</p>
+        <strong className="text-stone-800">What happens next</strong>
+        <p>1. Confirm the phone number from your invite.</p>
+        <p>2. Finish setting up your Murph account.</p>
+        <p>3. Complete checkout.</p>
+        <p>4. Start using Murph.</p>
       </section>
     </div>
   );
@@ -320,11 +321,11 @@ function resolveTitle(status: HostedInviteStatusPayload): string {
     case "expired":
       return "That invite link expired";
     case "register":
-      return "Verify your phone";
+      return "Finish joining Murph";
     case "authenticate":
-      return "Continue with your phone";
+      return "Keep going";
     case "checkout":
-      return "Finish checkout";
+      return "One last step";
     case "active":
       return "You\u2019re in";
     default:
@@ -339,15 +340,15 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
     case "expired":
       return "Text the Murph number again and we\u2019ll send you a fresh link.";
     case "register":
-      return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll finish setup and hand you off to Apple Pay.`;
+      return `Use ${status.invite?.phoneHint ?? "your number"} to claim this invite and finish joining Murph.`;
     case "authenticate":
-      return `Continue with the verified phone already linked to ${status.invite?.phoneHint ?? "this number"}.`;
+      return `You already started with ${status.invite?.phoneHint ?? "this number"}. Keep going and we’ll finish the rest.`;
     case "checkout":
-      return "Your phone is verified, setup is complete, and one more tap finishes hosted access.";
+      return "Your phone is confirmed. Finish checkout to start using Murph.";
     case "active":
-      return "Your hosted Murph access is active for this number.";
+      return "Your Murph account is ready.";
     default:
-      return "Murph hosted onboarding";
+      return "Murph signup";
   }
 }
 
