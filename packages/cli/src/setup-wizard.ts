@@ -296,6 +296,16 @@ export function getDefaultSetupWizardScheduledUpdates(): string[] {
   )
 }
 
+export function resolveSetupWizardInitialScheduledUpdates(
+  initialScheduledUpdates?: readonly string[],
+): string[] {
+  return sortSetupWizardScheduledUpdates(
+    initialScheduledUpdates === undefined
+      ? getDefaultSetupWizardScheduledUpdates()
+      : [...initialScheduledUpdates],
+  )
+}
+
 export function wrapSetupWizardIndex(
   currentIndex: number,
   length: number,
@@ -420,10 +430,8 @@ export async function runSetupWizard(
       ? [...input.initialChannels]
       : getDefaultSetupWizardChannels(input.platform),
   )
-  const initialScheduledUpdates = sortSetupWizardScheduledUpdates(
-    input.initialScheduledUpdates && input.initialScheduledUpdates.length > 0
-      ? [...input.initialScheduledUpdates]
-      : getDefaultSetupWizardScheduledUpdates(),
+  const initialScheduledUpdates = resolveSetupWizardInitialScheduledUpdates(
+    input.initialScheduledUpdates,
   )
   const initialWearables = sortSetupWizardWearables(
     input.initialWearables && input.initialWearables.length > 0

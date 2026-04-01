@@ -19,6 +19,7 @@ import {
   isSetupInvocation,
   listSetupPendingWearables,
   listSetupReadyWearables,
+  resolveInitialSetupWizardScheduledUpdates,
   resolveSetupPostLaunchAction,
   resolveInitialSetupWizardChannels,
   shouldAutoLaunchAssistantAfterSetup,
@@ -56,6 +57,7 @@ import {
   describeSetupWizardPublicUrlStrategyChoice,
   getDefaultSetupWizardScheduledUpdates,
   inferSetupWizardAssistantProvider,
+  resolveSetupWizardInitialScheduledUpdates,
   resolveSetupWizardAssistantSelection,
   type SetupWizardResult,
 } from '../src/setup-wizard.js'
@@ -127,6 +129,18 @@ test('setup wizard scheduled updates default to the starter bundle', () => {
   ])
 })
 
+test('setup wizard initial scheduled updates preserve explicit opt-out selections', () => {
+  assert.deepEqual(resolveSetupWizardInitialScheduledUpdates(undefined), [
+    'environment-health-watch',
+    'weekly-health-snapshot',
+  ])
+  assert.deepEqual(resolveSetupWizardInitialScheduledUpdates([]), [])
+  assert.deepEqual(
+    resolveSetupWizardInitialScheduledUpdates(['weekly-health-snapshot']),
+    ['weekly-health-snapshot'],
+  )
+})
+
 test('setup scheduled updates defer preset-backed jobs until an explicit delivery route is configured', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-scheduled-updates-'))
   const steps: SetupResult['steps'] = []
@@ -182,9 +196,30 @@ test('setup scheduled updates keep returning deferred recommendations on repeate
   assert.equal(steps[0]?.status, 'skipped')
 })
 
-test('setup scheduled updates surface deferred recommendation details without prompt templates and keep dry-run wording', () => {
+test('setup scheduled updates persist the selected presets for later onboarding reruns', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-scheduled-updates-state-'))
+
+  try {
+    await configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: ['environment-health-watch', 'weekly-health-snapshot'],
+      steps: [],
+      vault: vaultRoot,
+    })
+
+    const automationState = await readAssistantAutomationState(vaultRoot)
+    assert.deepEqual(automationState.preferredScheduledUpdates, [
+      'environment-health-watch',
+      'weekly-health-snapshot',
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('setup scheduled updates surface deferred recommendation details without prompt templates and keep dry-run wording', async () => {
   const steps: SetupResult['steps'] = []
-  const scheduledUpdates = configureSetupScheduledUpdates({
+  const scheduledUpdates = await configureSetupScheduledUpdates({
     dryRun: true,
     presetIds: ['weekly-health-snapshot'],
     steps,
@@ -204,11 +239,11 @@ test('setup scheduled updates surface deferred recommendation details without pr
   )
 })
 
-test('setup scheduled updates propagate unknown preset errors without mutating steps', () => {
+test('setup scheduled updates propagate unknown preset errors without mutating steps', async () => {
   const steps: SetupResult['steps'] = []
 
-  assert.throws(
-    () =>
+  await assert.rejects(
+    async () =>
       configureSetupScheduledUpdates({
         dryRun: false,
         presetIds: ['missing-preset'],
@@ -230,17 +265,27 @@ test('setup scheduled updates propagate unknown preset errors without mutating s
 })
 
 test('setup scheduled updates can be fully opted out during onboarding', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-scheduled-updates-optout-'))
   const steps: SetupResult['steps'] = []
 
-  const scheduledUpdates = await configureSetupScheduledUpdates({
-    dryRun: false,
-    presetIds: [],
-    steps,
-  })
+  try {
+    const scheduledUpdates = await configureSetupScheduledUpdates({
+      dryRun: false,
+      presetIds: [],
+      steps,
+      vault: vaultRoot,
+    })
 
-  assert.deepEqual(scheduledUpdates, [])
-  assert.equal(steps[0]?.status, 'skipped')
-  assert.match(steps[0]?.detail ?? '', /No assistant scheduled updates selected/u)
+    assert.deepEqual(scheduledUpdates, [])
+    assert.equal(steps[0]?.status, 'skipped')
+    assert.match(steps[0]?.detail ?? '', /No assistant scheduled updates selected/u)
+    assert.deepEqual(
+      (await readAssistantAutomationState(vaultRoot)).preferredScheduledUpdates,
+      [],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('public URL review recommends hosted apps/web for wearable ingress when no public base is configured', () => {
@@ -1515,6 +1560,47 @@ test('resolveInitialSetupWizardChannels reuses saved preferred email channels ev
     assert.deepEqual(
       await resolveInitialSetupWizardChannels(vaultRoot),
       ['email'],
+    )
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('resolveInitialSetupWizardScheduledUpdates reuses saved selections and respects explicit opt-out', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-setup-wizard-scheduled-updates-'))
+  const initialState = await readAssistantAutomationState(vaultRoot)
+
+  try {
+    assert.deepEqual(
+      await resolveInitialSetupWizardScheduledUpdates(vaultRoot),
+      getDefaultSetupWizardScheduledUpdates(),
+    )
+
+    await saveAssistantAutomationState(vaultRoot, {
+      ...initialState,
+      preferredScheduledUpdates: ['environment-health-watch'],
+      updatedAt: '2026-03-24T00:00:00.000Z',
+    })
+    assert.deepEqual(
+      await resolveInitialSetupWizardScheduledUpdates(vaultRoot),
+      ['environment-health-watch'],
+    )
+
+    await saveAssistantAutomationState(vaultRoot, {
+      ...initialState,
+      preferredScheduledUpdates: [],
+      updatedAt: '2026-03-24T00:00:01.000Z',
+    })
+    assert.deepEqual(await resolveInitialSetupWizardScheduledUpdates(vaultRoot), [])
+
+    await saveAssistantAutomationState(vaultRoot, {
+      ...initialState,
+      preferredScheduledUpdates: ['missing-preset'],
+      updatedAt: '2026-03-24T00:00:02.000Z',
+    })
+    assert.deepEqual(
+      await resolveInitialSetupWizardScheduledUpdates(vaultRoot),
+      getDefaultSetupWizardScheduledUpdates(),
     )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

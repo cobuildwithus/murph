@@ -227,6 +227,7 @@ export function createInboxAppEnvironment(
       preferredChannels,
       autoReplyBacklogChannels: backlogChannels,
       autoReplyPrimed: false,
+      preferredScheduledUpdates: state.preferredScheduledUpdates,
       updatedAt: new Date().toISOString(),
     })
 
