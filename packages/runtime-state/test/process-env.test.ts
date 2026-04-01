@@ -6,7 +6,7 @@ import {
   buildScopedProcessEnv,
   getScopedProcessEnv,
   withScopedProcessEnv,
-} from "../src/index.ts";
+} from "../src/node/index.ts";
 
 function restoreProcessEnvValue(key: string, value: string | undefined): void {
   if (value === undefined) {

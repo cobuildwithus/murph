@@ -3,15 +3,15 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
 import { resolveAssistantStatePaths } from "./assistant-state.ts";
+import type { HostedBundleArtifactRef } from "./hosted-bundle.ts";
 import {
   materializeHostedBundleArtifacts,
   restoreHostedBundleRoots,
   snapshotHostedBundleRoots,
-  type HostedBundleArtifactRef,
   type HostedBundleArtifactRestoreFilter,
   type HostedBundleArtifactRestoreInput,
   type HostedBundleArtifactSnapshotInput,
-} from "./hosted-bundle.ts";
+} from "./hosted-bundle-node.ts";
 
 const WORKSPACE_ASSISTANT_ROOT = "assistant-state";
 const WORKSPACE_OPERATOR_HOME_ROOT = "operator-home";

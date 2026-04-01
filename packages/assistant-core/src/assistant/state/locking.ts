@@ -1,7 +1,7 @@
 import {
   createAssistantStateWriteLock,
 } from '../state-write-lock.js'
-import type { AssistantStatePaths } from '@murph/runtime-state'
+import type { AssistantStatePaths } from '@murph/runtime-state/node'
 
 const ASSISTANT_STATE_DOC_LOCK_DIRECTORY = '.locks/assistant-state-doc-write'
 const ASSISTANT_STATE_DOC_LOCK_METADATA_PATH =

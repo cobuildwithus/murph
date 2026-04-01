@@ -1,11 +1,11 @@
 import {
   decodeHostedBundleBase64,
-  sameHostedBundlePayloadRef,
   sha256HostedBundleHex,
+  sameHostedBundlePayloadRef,
   type HostedExecutionBundleKind,
   type HostedExecutionBundleRef,
   type HostedExecutionBundleRefIdentity,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 
 import {
   readEncryptedR2Payload,

@@ -6,24 +6,26 @@ import { gzipSync } from "node:zlib";
 import { expect, test } from "vitest";
 
 import {
+  sameHostedBundlePayloadRef,
+  sameHostedExecutionBundleRef,
+  type HostedExecutionBundleRef,
+} from "../src/index.ts";
+import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
-  HOSTED_BUNDLE_SCHEMA,
   hasHostedBundleArtifactPath,
+  HOSTED_BUNDLE_SCHEMA,
   listHostedBundleArtifacts,
   materializeHostedExecutionArtifacts,
   readHostedBundleTextFile,
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   resolveAssistantStatePaths,
-  sameHostedBundlePayloadRef,
-  sameHostedExecutionBundleRef,
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
-  type HostedExecutionBundleRef,
   writeHostedBundleTextFile,
-} from "../src/index.ts";
+} from "../src/node/index.ts";
 
 test("hosted bundle helpers round-trip multi-root archives and base64 helpers", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-"));

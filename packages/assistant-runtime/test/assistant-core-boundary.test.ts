@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { resolveAssistantStatePaths } from "@murph/runtime-state";
+import { resolveAssistantStatePaths } from "@murph/runtime-state/node";
 import { test } from "vitest";
 
 import {

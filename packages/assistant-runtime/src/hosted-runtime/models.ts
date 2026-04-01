@@ -2,7 +2,7 @@ import { importSharePackIntoVault } from "@murph/core";
 import type { GatewayProjectionSnapshot } from "@murph/gateway-core";
 import {
   restoreHostedExecutionContext,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,

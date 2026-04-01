@@ -6,7 +6,7 @@ import { afterEach, test, vi } from 'vitest'
 import {
   createHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import {
   sendEmailMessage,
   sendImessageMessage,

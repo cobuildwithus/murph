@@ -203,7 +203,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(summary.packages.map((entry) => entry.name)).toEqual([
       '@murph/contracts',
       '@murph/hosted-execution',
-      '@murph/runtime-state',
+      '@murph/runtime-state/node',
       '@murph/gateway-core',
       '@murph/core',
       '@murph/query',

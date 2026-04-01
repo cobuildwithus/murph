@@ -8,7 +8,7 @@ import {
 } from '@murph/device-syncd/client'
 import {
   resolveDeviceSyncRuntimePaths,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import {
   DEVICE_SYNC_HOST_ENV,
   DEVICE_SYNC_HOST_ENV_KEYS,

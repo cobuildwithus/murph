@@ -7,7 +7,7 @@ import {
   resolveRuntimePaths,
   tableExists,
   withImmediateTransaction,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 
 import { readVault } from "./model.ts";
 import {

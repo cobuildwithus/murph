@@ -8,8 +8,10 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
-vi.mock("@murph/runtime-state", async () => {
-  const actual = await vi.importActual<typeof import("@murph/runtime-state")>("@murph/runtime-state");
+vi.mock("@murph/runtime-state/node", async () => {
+  const actual = await vi.importActual<typeof import("@murph/runtime-state/node")>(
+    "@murph/runtime-state/node",
+  );
 
   return {
     ...actual,

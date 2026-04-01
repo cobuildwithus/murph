@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { openSqliteRuntimeDatabase } from '@murph/runtime-state'
+import { openSqliteRuntimeDatabase } from '@murph/runtime-state/node'
 import { normalizeNullableString } from './assistant/shared.js'
 import { VaultCliError } from './vault-cli-errors.js'
 

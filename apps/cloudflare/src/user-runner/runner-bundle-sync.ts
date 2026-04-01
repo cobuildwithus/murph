@@ -3,7 +3,7 @@ import {
   encodeHostedBundleBase64,
   sameHostedBundlePayloadRef,
   type HostedExecutionBundleRef,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 import type { HostedExecutionRunnerResult } from "@murph/hosted-execution";
 
 import {

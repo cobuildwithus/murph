@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 export type RandomByteSource = (length: number) => Uint8Array;
@@ -18,7 +16,7 @@ export function encodeCrockford(value: number, length: number): string {
 
 export function encodeRandomCrockford(
   length: number,
-  randomByteSource: RandomByteSource = randomBytes,
+  randomByteSource: RandomByteSource = randomCryptoBytes,
 ): string {
   const bytes = randomByteSource(length);
   let encoded = "";
@@ -33,6 +31,17 @@ export function encodeRandomCrockford(
   return encoded.slice(0, length);
 }
 
-export function generateUlid(now = Date.now(), randomByteSource: RandomByteSource = randomBytes): string {
+export function generateUlid(
+  now = Date.now(),
+  randomByteSource: RandomByteSource = randomCryptoBytes,
+): string {
   return `${encodeCrockford(now, 10)}${encodeRandomCrockford(16, randomByteSource)}`;
+}
+
+function randomCryptoBytes(length: number): Uint8Array {
+  if (typeof crypto?.getRandomValues !== "function") {
+    throw new Error("Web Crypto getRandomValues is unavailable.");
+  }
+
+  return crypto.getRandomValues(new Uint8Array(length));
 }

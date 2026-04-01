@@ -5,7 +5,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
-import { resolveRuntimePaths } from "@murph/runtime-state";
+import { resolveRuntimePaths } from "@murph/runtime-state/node";
 
 import { initializeVault, readJsonlRecords } from "@murph/core";
 

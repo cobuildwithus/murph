@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murph/runtime-state";
+import { openSqliteRuntimeDatabase, withImmediateTransaction } from "@murph/runtime-state/node";
 
 import {
   generatePrefixedId,
