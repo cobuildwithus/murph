@@ -164,6 +164,7 @@ enum HostedBillingMode {
 }
 
 enum HostedBillingCheckoutStatus {
+  pending
   open
   completed
   expired
@@ -283,12 +284,12 @@ model HostedBillingCheckout {
   memberId                String                      @map("member_id")
   inviteId                String?                     @map("invite_id")
   hasShareContext         Boolean                     @default(false) @map("has_share_context")
-  stripeCheckoutSessionId String                      @unique @map("stripe_checkout_session_id")
+  stripeCheckoutSessionId String?                     @unique @map("stripe_checkout_session_id")
   stripeCustomerId        String?                     @map("stripe_customer_id")
   stripeSubscriptionId    String?                     @map("stripe_subscription_id")
   priceId                 String                      @map("price_id")
   mode                    HostedBillingMode
-  status                  HostedBillingCheckoutStatus @default(open)
+  status                  HostedBillingCheckoutStatus @default(pending)
   checkoutUrl             String?                     @map("checkout_url")
   amountTotal             Int?                        @map("amount_total")
   currency                String?                     @map("currency")

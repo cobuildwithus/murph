@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
     checkout: {
       sessions: {
         create: vi.fn(),
+        expire: vi.fn(),
         retrieve: vi.fn(),
       },
     },
@@ -129,6 +130,12 @@ describe("createHostedBillingCheckout", () => {
       hostedBillingCheckout: {
         create: vi.fn().mockResolvedValue({}),
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({
+          id: "checkout_123",
+          mode: "subscription",
+          status: HostedBillingCheckoutStatus.pending,
+        }),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedMember: {
@@ -207,11 +214,13 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
+    const createPendingCheckout = vi.fn(async ({ data }) => data);
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
-        create: vi.fn().mockResolvedValue({}),
-        count: vi.fn().mockResolvedValue(0),
+        create: createPendingCheckout,
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(makePendingCheckout()),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedMember: {
@@ -237,6 +246,7 @@ describe("createHostedBillingCheckout", () => {
       url: "https://billing.example.test/session_123",
     });
     const createdCustomerMetadata = mocks.stripe.customers.create.mock.calls[0]?.[0]?.metadata;
+    const createdCheckoutId = createPendingCheckout.mock.calls[0]?.[0]?.data?.id;
     expect(mocks.requireHostedPrivyUserForSession).toHaveBeenCalledWith(
       { get: expect.any(Function) },
       {
@@ -248,12 +258,13 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: {
+          checkoutId: createdCheckoutId,
           inviteId: "invite_123",
           memberId: "member_123",
         },
       }),
       expect.objectContaining({
-        idempotencyKey: "hosted-onboarding:stripe-checkout:member_123:invite_123:subscription:price_123:1",
+        idempotencyKey: `hosted-onboarding:stripe-checkout:${createdCheckoutId}`,
       }),
     );
     expect(createdCustomerMetadata).toEqual({
@@ -315,9 +326,17 @@ describe("createHostedBillingCheckout", () => {
       hostedBillingCheckout: {
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue({
+          hasShareContext: false,
+          id: "checkout_existing",
+          inviteId: "invite_123",
           checkoutUrl: "https://billing.example.test/existing-session",
+          memberId: "member_123",
+          mode: "subscription",
+          priceId: "price_123",
           stripeCheckoutSessionId: "cs_existing_123",
+          status: HostedBillingCheckoutStatus.open,
         }),
+        findUnique: vi.fn(),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedMember: {
@@ -385,11 +404,17 @@ describe("createHostedBillingCheckout", () => {
 
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
-        count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({}),
         findFirst: vi.fn().mockResolvedValue({
+          hasShareContext: false,
+          id: "checkout_existing",
+          inviteId: "invite_123",
           checkoutUrl: "https://billing.example.test/existing-session",
+          memberId: "member_123",
+          mode: "subscription",
+          priceId: "price_123",
           stripeCheckoutSessionId: "cs_existing_123",
+          status: HostedBillingCheckoutStatus.open,
         }),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
@@ -403,22 +428,21 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const result = await createHostedBillingCheckout({
-      cookieStore: { get: vi.fn() },
-      inviteCode: "invite-code",
-      now: NOW,
-      prisma,
-      sessionRecord: makeHostedSessionRecord("member_123"),
-      shareCode: "share_123",
+    await expect(
+      createHostedBillingCheckout({
+        cookieStore: { get: vi.fn() },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+        sessionRecord: makeHostedSessionRecord("member_123"),
+        shareCode: "share_123",
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_ALREADY_OPEN",
+      httpStatus: 409,
     });
-
-    expect(result).toEqual({
-      alreadyActive: false,
-      url: "https://billing.example.test/session_123",
-    });
-    expect(prisma.hostedBillingCheckout.findFirst).not.toHaveBeenCalled();
-    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
-    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_existing_123");
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it("does not reuse a share-created checkout for a later plain invite request", async () => {
@@ -450,15 +474,18 @@ describe("createHostedBillingCheckout", () => {
 
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
-        count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({}),
-        findFirst: vi.fn(async ({ where }: { where: { hasShareContext: boolean } }) =>
-          where.hasShareContext
-            ? {
-              checkoutUrl: "https://billing.example.test/share-session",
-              stripeCheckoutSessionId: "cs_share_123",
-            }
-            : null),
+        findFirst: vi.fn().mockResolvedValue({
+          hasShareContext: true,
+          id: "checkout_share",
+          inviteId: "invite_123",
+          checkoutUrl: "https://billing.example.test/share-session",
+          memberId: "member_123",
+          mode: "subscription",
+          priceId: "price_123",
+          stripeCheckoutSessionId: "cs_share_123",
+          status: HostedBillingCheckoutStatus.open,
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedMember: {
@@ -471,27 +498,20 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const result = await createHostedBillingCheckout({
-      cookieStore: { get: vi.fn() },
-      inviteCode: "invite-code",
-      now: NOW,
-      prisma,
-      sessionRecord: makeHostedSessionRecord("member_123"),
-    });
-
-    expect(result).toEqual({
-      alreadyActive: false,
-      url: "https://billing.example.test/session_123",
-    });
-    expect(prisma.hostedBillingCheckout.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          hasShareContext: false,
-        }),
+    await expect(
+      createHostedBillingCheckout({
+        cookieStore: { get: vi.fn() },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+        sessionRecord: makeHostedSessionRecord("member_123"),
       }),
-    );
-    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
-    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+    ).rejects.toMatchObject({
+      code: "HOSTED_BILLING_CHECKOUT_ALREADY_OPEN",
+      httpStatus: 409,
+    });
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_share_123");
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
   });
 
   it("expires a locally-open checkout attempt when Stripe reports the session is no longer open", async () => {
@@ -529,12 +549,22 @@ describe("createHostedBillingCheckout", () => {
 
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn().mockResolvedValue({}),
-        findFirst: vi.fn().mockResolvedValue({
-          checkoutUrl: "https://billing.example.test/existing-session",
-          stripeCheckoutSessionId: "cs_existing_123",
-        }),
+        create: vi.fn(async ({ data }) => data),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce({
+            hasShareContext: false,
+            id: "checkout_existing",
+            inviteId: "invite_123",
+            checkoutUrl: "https://billing.example.test/existing-session",
+            memberId: "member_123",
+            mode: "subscription",
+            priceId: "price_123",
+            stripeCheckoutSessionId: "cs_existing_123",
+            status: HostedBillingCheckoutStatus.open,
+          })
+          .mockResolvedValueOnce(null),
+        findUnique: vi.fn().mockResolvedValue(makePendingCheckout()),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       hostedMember: {
@@ -569,7 +599,7 @@ describe("createHostedBillingCheckout", () => {
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
   });
 
-  it("reuses a checked Stripe session after a concurrent P2002 during checkout creation", async () => {
+  it("retries Stripe creation from the same pending reservation using the reservation idempotency key", async () => {
     mocks.requireHostedInviteForAuthentication.mockResolvedValue(
       makeInvite({
         stripeCustomerId: "cus_existing_123",
@@ -595,28 +625,26 @@ describe("createHostedBillingCheckout", () => {
         id: "did:privy:user_123",
       },
     });
-    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
-      expires_at: Math.floor(new Date("2026-03-27T13:00:00.000Z").getTime() / 1000),
-      id: "cs_existing_123",
-      status: "open",
-      url: "https://billing.example.test/existing-session",
-    });
-
     const prisma = withHostedBillingTransaction({
       hostedBillingCheckout: {
-        count: vi.fn().mockResolvedValue(0),
-        create: vi.fn().mockRejectedValue(
-          new Prisma.PrismaClientKnownRequestError("conflict", {
-            clientVersion: "test",
-            code: "P2002",
-          }),
-        ),
         findFirst: vi.fn()
-          .mockResolvedValueOnce(null)
           .mockResolvedValue({
-            checkoutUrl: "https://billing.example.test/existing-session",
-            stripeCheckoutSessionId: "cs_existing_123",
+            hasShareContext: false,
+            id: "checkout_pending",
+            inviteId: "invite_123",
+            checkoutUrl: null,
+            memberId: "member_123",
+            mode: "subscription",
+            priceId: "price_123",
+            stripeCheckoutSessionId: null,
+            status: HostedBillingCheckoutStatus.pending,
           }),
+        findUnique: vi.fn().mockResolvedValue({
+          id: "checkout_pending",
+          mode: "subscription",
+          status: HostedBillingCheckoutStatus.pending,
+        }),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedMember: {
@@ -639,10 +667,102 @@ describe("createHostedBillingCheckout", () => {
 
     expect(result).toEqual({
       alreadyActive: false,
-      url: "https://billing.example.test/existing-session",
+      url: "https://billing.example.test/session_123",
     });
-    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_existing_123");
     expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+    expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        idempotencyKey: "hosted-onboarding:stripe-checkout:checkout_pending",
+      }),
+    );
+  });
+
+  it("marks the pending reservation failed if Stripe returns a session without a redirect url", async () => {
+    mocks.requireHostedInviteForAuthentication.mockResolvedValue(
+      makeInvite({
+        stripeCustomerId: "cus_existing_123",
+        walletAddress: "0x00000000000000000000000000000000000000aa",
+      }),
+    );
+    mocks.requireHostedPrivyUserForSession.mockResolvedValue({
+      linkedAccounts: [
+        {
+          address: "0x00000000000000000000000000000000000000aa",
+          chain_type: "ethereum",
+          connector_type: "embedded",
+          delegated: false,
+          id: "wallet_123",
+          imported: false,
+          type: "wallet",
+          wallet_client: "privy",
+          wallet_client_type: "privy",
+          wallet_index: 0,
+        },
+      ],
+      verifiedPrivyUser: {
+        id: "did:privy:user_123",
+      },
+    });
+    mocks.stripe.checkout.sessions.create.mockResolvedValue({
+      id: "cs_missing_url",
+      subscription: null,
+      url: null,
+    });
+
+    const prisma = withHostedBillingTransaction({
+      hostedBillingCheckout: {
+        create: vi.fn().mockResolvedValue({
+          id: "checkout_pending",
+          mode: "subscription",
+          status: HostedBillingCheckoutStatus.pending,
+        }),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue({
+          id: "checkout_pending",
+          mode: "subscription",
+          status: HostedBillingCheckoutStatus.pending,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.not_started,
+          id: "member_123",
+          stripeCustomerId: "cus_existing_123",
+        }),
+        update: vi.fn().mockResolvedValue({}),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    });
+
+    await expect(
+      createHostedBillingCheckout({
+        cookieStore: { get: vi.fn() },
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+        sessionRecord: makeHostedSessionRecord("member_123"),
+      }),
+    ).rejects.toMatchObject({
+      code: "CHECKOUT_URL_MISSING",
+      httpStatus: 502,
+    });
+    expect(prisma.hostedBillingCheckout.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: HostedBillingCheckoutStatus.failed,
+          stripeCheckoutSessionId: "cs_missing_url",
+        }),
+        where: expect.objectContaining({
+          id: "checkout_pending",
+          status: {
+            in: [HostedBillingCheckoutStatus.pending],
+          },
+        }),
+      }),
+    );
   });
 
   it("updates an existing Stripe customer without writing phone or wallet values into metadata", async () => {
@@ -674,9 +794,10 @@ describe("createHostedBillingCheckout", () => {
 
     const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
-        create: vi.fn().mockResolvedValue({}),
-        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn(async ({ data }) => data),
         findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(makePendingCheckout()),
+        update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
       hostedMember: {
@@ -822,7 +943,28 @@ function makeInvite(overrides: {
 }
 
 function asHostedBillingCheckoutPrisma<T extends Record<string, unknown>>(prisma: T): T & HostedBillingCheckoutPrisma {
-  return prisma as T & HostedBillingCheckoutPrisma;
+  const prismaWithQueryRaw = prisma as T & HostedBillingCheckoutPrisma;
+  if ("hostedBillingCheckout" in prismaWithQueryRaw && prismaWithQueryRaw.hostedBillingCheckout) {
+    const hostedBillingCheckout = prismaWithQueryRaw.hostedBillingCheckout as unknown as Record<string, unknown>;
+    hostedBillingCheckout.create ??= vi.fn(async ({ data }) => data);
+    hostedBillingCheckout.findFirst ??= vi.fn().mockResolvedValue(null);
+    hostedBillingCheckout.findUnique ??= vi.fn().mockResolvedValue(null);
+    hostedBillingCheckout.update ??= vi.fn().mockResolvedValue({});
+    hostedBillingCheckout.updateMany ??= vi.fn().mockResolvedValue({ count: 0 });
+  }
+  if ("hostedMember" in prismaWithQueryRaw && prismaWithQueryRaw.hostedMember) {
+    const hostedMember = prismaWithQueryRaw.hostedMember as unknown as Record<string, unknown>;
+    hostedMember.findUnique ??= vi.fn().mockResolvedValue(null);
+    hostedMember.update ??= vi.fn().mockResolvedValue({});
+    hostedMember.updateMany ??= vi.fn().mockResolvedValue({ count: 0 });
+  }
+  if (!("$queryRaw" in prismaWithQueryRaw)) {
+    Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
+      configurable: true,
+      value: vi.fn(async () => []),
+    });
+  }
+  return prismaWithQueryRaw;
 }
 
 function makeHostedSessionRecord(memberId: string): HostedBillingSessionRecord {
@@ -831,6 +973,23 @@ function makeHostedSessionRecord(memberId: string): HostedBillingSessionRecord {
       id: memberId,
     },
   } as unknown as HostedBillingSessionRecord;
+}
+
+function makePendingCheckout(overrides: Record<string, unknown> = {}) {
+  return {
+    checkoutUrl: null,
+    hasShareContext: false,
+    id: "checkout_pending",
+    inviteId: "invite_123",
+    memberId: "member_123",
+    mode: "subscription",
+    priceId: "price_123",
+    status: HostedBillingCheckoutStatus.pending,
+    stripeCheckoutSessionId: null,
+    stripeCustomerId: "cus_existing_123",
+    stripeSubscriptionId: null,
+    ...overrides,
+  };
 }
 
 function withHostedBillingTransaction<T extends Record<string, unknown>>(prisma: T): T & HostedBillingCheckoutPrisma {

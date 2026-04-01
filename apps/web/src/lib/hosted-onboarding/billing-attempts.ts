@@ -1,5 +1,6 @@
 import {
   HostedBillingCheckoutStatus,
+  type HostedBillingCheckout,
   type HostedBillingMode,
   type Prisma,
   type PrismaClient,
@@ -9,85 +10,97 @@ import { generateHostedCheckoutId } from "./shared";
 
 type HostedBillingAttemptClient = PrismaClient | Prisma.TransactionClient;
 
-export async function findOpenHostedBillingAttempt(input: {
-  hasShareContext: boolean;
-  inviteId: string | null;
+export async function findActiveHostedBillingAttemptForMember(input: {
   memberId: string;
-  mode: HostedBillingMode;
-  priceId: string;
   prisma: HostedBillingAttemptClient;
-}) {
-  const where = {
-    hasShareContext: input.hasShareContext,
-    inviteId: input.inviteId,
-    memberId: input.memberId,
-    mode: input.mode,
-    priceId: input.priceId,
-    status: HostedBillingCheckoutStatus.open,
-  } as Prisma.HostedBillingCheckoutWhereInput;
-
+}): Promise<HostedBillingCheckout | null> {
   return input.prisma.hostedBillingCheckout.findFirst({
-    where,
+    where: {
+      memberId: input.memberId,
+      status: {
+        in: [
+          HostedBillingCheckoutStatus.pending,
+          HostedBillingCheckoutStatus.open,
+        ],
+      },
+    } as Prisma.HostedBillingCheckoutWhereInput,
     orderBy: {
       createdAt: "desc",
     },
   });
 }
 
-export async function supersedeOpenHostedBillingAttempts(input: {
-  excludeCheckoutSessionId?: string | null;
-  inviteId: string | null;
-  memberId: string;
-  prisma: HostedBillingAttemptClient;
-}) {
-  await input.prisma.hostedBillingCheckout.updateMany({
-    where: {
-      memberId: input.memberId,
-      inviteId: input.inviteId,
-      status: HostedBillingCheckoutStatus.open,
-      ...(input.excludeCheckoutSessionId
-        ? {
-          stripeCheckoutSessionId: {
-            not: input.excludeCheckoutSessionId,
-          },
-        }
-        : {}),
-    },
-    data: {
-      status: HostedBillingCheckoutStatus.superseded,
-      supersededAt: new Date(),
-    },
-  });
-}
-
-export async function createHostedBillingAttempt(input: {
-  checkoutUrl: string;
+export async function createPendingHostedBillingAttempt(input: {
   hasShareContext: boolean;
   inviteId: string;
   memberId: string;
   mode: HostedBillingMode;
   priceId: string;
   prisma: HostedBillingAttemptClient;
-  stripeCheckoutSessionId: string;
   stripeCustomerId: string | null;
-  stripeSubscriptionId: string | null;
-}) {
+}): Promise<HostedBillingCheckout> {
   const data = {
     id: generateHostedCheckoutId(),
     hasShareContext: input.hasShareContext,
     memberId: input.memberId,
     inviteId: input.inviteId,
-    stripeCheckoutSessionId: input.stripeCheckoutSessionId,
+    stripeCheckoutSessionId: null,
     stripeCustomerId: input.stripeCustomerId,
-    stripeSubscriptionId: input.stripeSubscriptionId,
+    stripeSubscriptionId: null,
     priceId: input.priceId,
     mode: input.mode,
-    status: HostedBillingCheckoutStatus.open,
-    checkoutUrl: input.checkoutUrl,
+    status: HostedBillingCheckoutStatus.pending,
+    checkoutUrl: null,
   } as Prisma.HostedBillingCheckoutUncheckedCreateInput;
 
   return input.prisma.hostedBillingCheckout.create({
     data,
+  });
+}
+
+export async function finalizeHostedBillingAttemptById(input: {
+  checkoutId: string;
+  checkoutUrl: string;
+  prisma: HostedBillingAttemptClient;
+  stripeCheckoutSessionId: string;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+}) {
+  return input.prisma.hostedBillingCheckout.update({
+    where: {
+      id: input.checkoutId,
+    },
+    data: {
+      checkoutUrl: input.checkoutUrl,
+      status: HostedBillingCheckoutStatus.open,
+      stripeCheckoutSessionId: input.stripeCheckoutSessionId,
+      stripeCustomerId: input.stripeCustomerId,
+      stripeSubscriptionId: input.stripeSubscriptionId,
+    },
+  });
+}
+
+export async function failHostedBillingAttemptById(input: {
+  checkoutId: string;
+  prisma: HostedBillingAttemptClient;
+  statuses?: HostedBillingCheckoutStatus[];
+  stripeCheckoutSessionId?: string | null;
+}) {
+  await input.prisma.hostedBillingCheckout.updateMany({
+    where: {
+      id: input.checkoutId,
+      status: {
+        in: input.statuses ?? [HostedBillingCheckoutStatus.pending],
+      },
+    },
+    data: {
+      status: HostedBillingCheckoutStatus.failed,
+      ...(input.stripeCheckoutSessionId
+        ? {
+          stripeCheckoutSessionId: input.stripeCheckoutSessionId,
+        }
+        : {}),
+    },
   });
 }
 
