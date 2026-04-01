@@ -44,6 +44,7 @@ import {
   readHostedExecutionWorkerEnvironment,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedDeviceSyncJobHints,
+  parseHostedExecutionDeviceSyncRuntimeSnapshotResponse,
   parseHostedExecutionUserStatus,
   resolveHostedDeviceSyncWakeContext,
   resolveHostedExecutionAiUsageClient,
@@ -320,6 +321,72 @@ describe("@murphai/hosted-execution", () => {
         },
       ],
       userId: "user-123",
+    });
+  });
+
+  it("accepts legacy device-sync runtime snapshots that still keep local-state fields on connection", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Legacy Oura",
+            externalAccountId: "oura_legacy",
+            id: "dsc_legacy",
+            lastErrorCode: "PROVIDER_AUTH",
+            lastErrorMessage: "Reconnect required",
+            lastSyncCompletedAt: "2026-03-26T11:50:00.000Z",
+            lastSyncErrorAt: "2026-03-26T11:45:00.000Z",
+            lastSyncStartedAt: "2026-03-26T11:40:00.000Z",
+            lastWebhookAt: "2026-03-26T11:35:00.000Z",
+            metadata: {
+              source: "oauth",
+            },
+            nextReconcileAt: "2026-03-26T12:30:00.000Z",
+            provider: "oura",
+            scopes: ["heartrate"],
+            status: "active",
+            updatedAt: "2026-03-26T12:05:00.000Z",
+          },
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: "2026-03-26T12:10:00.000Z",
+      userId: "member_123",
+    })).toEqual({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Legacy Oura",
+            externalAccountId: "oura_legacy",
+            id: "dsc_legacy",
+            metadata: {
+              source: "oauth",
+            },
+            provider: "oura",
+            scopes: ["heartrate"],
+            status: "active",
+            updatedAt: "2026-03-26T12:05:00.000Z",
+          },
+          localState: {
+            lastErrorCode: "PROVIDER_AUTH",
+            lastErrorMessage: "Reconnect required",
+            lastSyncCompletedAt: "2026-03-26T11:50:00.000Z",
+            lastSyncErrorAt: "2026-03-26T11:45:00.000Z",
+            lastSyncStartedAt: "2026-03-26T11:40:00.000Z",
+            lastWebhookAt: "2026-03-26T11:35:00.000Z",
+            nextReconcileAt: "2026-03-26T12:30:00.000Z",
+          },
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: "2026-03-26T12:10:00.000Z",
+      userId: "member_123",
     });
   });
 

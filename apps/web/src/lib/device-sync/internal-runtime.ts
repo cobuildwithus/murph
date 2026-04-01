@@ -118,7 +118,11 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
           ),
           connectionId: update.connectionId,
           status: "updated",
-          tokenUpdate: existing.secret ? "unchanged" : "missing",
+          tokenUpdate: tokenMutationRequested
+            ? "skipped_version_mismatch"
+            : existing.secret
+              ? "unchanged"
+              : "missing",
         } satisfies HostedDeviceSyncRuntimeApplyEntry;
       }
 

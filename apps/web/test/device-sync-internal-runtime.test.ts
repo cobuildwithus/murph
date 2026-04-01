@@ -239,6 +239,42 @@ describe("device-sync hosted runtime helpers", () => {
       ],
       userId: "user-123",
     })).toThrow("updates[0].observedUpdatedAt must be an ISO-8601 timestamp.");
+
+    expect(parseHostedDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          connectionId: "dsc_legacy",
+          lastErrorCode: "PROVIDER_AUTH",
+          lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
+          metadata: {
+            nested: "drop-me",
+            source: "browser",
+          },
+          observedUpdatedAt: "2026-03-26T12:00:00+00:00",
+          status: "reauthorization_required",
+        },
+      ],
+      userId: "user-123",
+    })).toEqual({
+      updates: [
+        {
+          connection: {
+            metadata: {
+              nested: "drop-me",
+              source: "browser",
+            },
+            status: "reauthorization_required",
+          },
+          connectionId: "dsc_legacy",
+          localState: {
+            lastErrorCode: "PROVIDER_AUTH",
+            lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
+          },
+          observedUpdatedAt: "2026-03-26T12:00:00.000Z",
+        },
+      ],
+      userId: "user-123",
+    });
   });
 
   it("skips stale token writes, fences expiry metadata, and emits a reauthorization signal when runtime state requires reconnect", async () => {
@@ -647,6 +683,80 @@ describe("device-sync hosted runtime helpers", () => {
       ],
       userId: "user-123",
     });
+  });
+
+  it("reports token writes as skipped when a stale hosted row fences the request before any local-state mutation", async () => {
+    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+    const existing = {
+      accessTokenExpiresAt: null,
+      connectedAt: "2026-03-20T10:00:00.000Z",
+      createdAt: "2026-03-20T10:00:00.000Z",
+      displayName: "Hosted Active",
+      externalAccountId: "oura_refresh",
+      id: "dsc_token_midpass",
+      metadataJson: { source: "browser" },
+      provider: "oura",
+      scopes: ["heartrate"],
+      secret: {
+        accessTokenEncrypted: "enc:old-access",
+        refreshTokenEncrypted: "enc:old-refresh",
+        tokenVersion: 3,
+      },
+      status: "active",
+      updatedAt: new Date("2026-03-26T12:05:00.000Z"),
+      userId: "user-123",
+    };
+    const tx = {
+      deviceConnection: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn(),
+      },
+      deviceConnectionSecret: {
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    const store = {
+      codec: {
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+        encrypt: (value: string) => `enc:${value}`,
+        keyVersion: "v1",
+      },
+      createSignal: vi.fn(),
+      markConnectionDisconnected: vi.fn(),
+      prisma: {},
+      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    };
+
+    const result = await applyHostedDeviceSyncRuntimeUpdates(
+      store as never,
+      {
+        occurredAt: "2026-03-26T12:10:00.000Z",
+        updates: [
+          {
+            connectionId: "dsc_token_midpass",
+            observedUpdatedAt: "2026-03-26T12:00:00.000Z",
+            tokenBundle: {
+              accessToken: "new-access-token",
+              accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+              keyVersion: "local-runtime",
+              refreshToken: "new-refresh-token",
+              tokenVersion: 0,
+            },
+          },
+        ],
+        userId: "user-123",
+      },
+    );
+
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
+    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
+    expect(result.updates[0]?.tokenUpdate).toBe("skipped_version_mismatch");
   });
 
   it("does not bump token versions when a null-expiry token bundle is unchanged", async () => {
