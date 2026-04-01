@@ -123,3 +123,21 @@ export function shouldAutoContinueHostedPrivyClientSession(input: {
 
   return true;
 }
+
+export function shouldResetHostedPrivyClientSessionToSms(input: {
+  authenticated: boolean;
+  autoResetTriggered: boolean;
+  checkingAuthenticatedSession: boolean;
+  issue: HostedPrivyClientSessionIssue | null;
+  pendingAction: HostedPrivyClientPendingAction;
+}): boolean {
+  if (!input.authenticated || input.issue !== "missing-phone") {
+    return false;
+  }
+
+  if (input.checkingAuthenticatedSession || input.pendingAction !== null || input.autoResetTriggered) {
+    return false;
+  }
+
+  return true;
+}
