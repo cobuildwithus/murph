@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   handleHostedOnboardingLinqWebhook: vi.fn(),
 }));
@@ -46,6 +48,34 @@ describe("hosted onboarding Linq webhook route", () => {
       signature: "sha256=test",
       signal: request.signal,
       timestamp: "1711278000",
+    });
+  });
+
+  it("maps in-progress receipt retries to a retryable 503 response", async () => {
+    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValue(
+      hostedOnboardingError({
+        code: "WEBHOOK_RECEIPT_IN_PROGRESS",
+        httpStatus: 503,
+        message: "Hosted webhook receipt is already being processed.",
+        retryable: true,
+      }),
+    );
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "WEBHOOK_RECEIPT_IN_PROGRESS",
+        message: "Hosted webhook receipt is already being processed.",
+        retryable: true,
+      },
     });
   });
 });

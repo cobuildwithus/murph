@@ -206,6 +206,9 @@ function buildHostedWebhookDispatchSideEffectPayload(
         ...basePayload,
         linqEvent: sanitizeHostedLinqEventForStorage(
           minimizeHostedLinqMessageReceivedEvent(dispatch.event.linqEvent as never),
+          {
+            omitRecipientPhone: true,
+          },
         ),
         phoneLookupKey: dispatch.event.phoneLookupKey,
       };

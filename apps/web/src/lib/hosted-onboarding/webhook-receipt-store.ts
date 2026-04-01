@@ -289,10 +289,7 @@ async function reclaimHostedWebhookReceipt(
           currentClaim.state.status === "processing" &&
           !isHostedWebhookReceiptClaimExpired(currentClaim.claimExpiresAt, currentClaim.updatedAt, receivedAt)
         ) {
-          return {
-            result: null,
-            type: "return",
-          };
+          throw buildHostedWebhookReceiptInProgressError();
         }
 
         const nextClaim = claimHostedWebhookReceipt({
@@ -490,6 +487,15 @@ async function readHostedWebhookReceiptStoredClaim(input: {
     state: readHostedWebhookReceiptState(latestReceipt.payloadJson),
     updatedAt: latestReceipt.updatedAt,
   };
+}
+
+function buildHostedWebhookReceiptInProgressError(): Error {
+  return hostedOnboardingError({
+    code: "WEBHOOK_RECEIPT_IN_PROGRESS",
+    message: "Hosted webhook receipt is already being processed.",
+    httpStatus: 503,
+    retryable: true,
+  });
 }
 
 function buildHostedWebhookReceiptClaimError(): Error {

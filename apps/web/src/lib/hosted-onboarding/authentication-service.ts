@@ -56,11 +56,8 @@ export async function completeHostedPrivyVerification(input: {
 
   const activeInvite = invite ?? await issueHostedInvite({
     channel: "web",
-    linqChatId: null,
-    linqEventId: null,
     memberId: member.id,
     prisma,
-    triggerText: null,
   });
   const stage = member.billingStatus === HostedBillingStatus.active ? "active" : "checkout";
 

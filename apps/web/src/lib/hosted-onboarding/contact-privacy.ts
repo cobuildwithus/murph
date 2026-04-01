@@ -60,6 +60,9 @@ export function readHostedPhoneHint(value: string | null | undefined): string {
 
 export function sanitizeHostedLinqEventForStorage(
   value: Record<string, unknown>,
+  options: {
+    omitRecipientPhone?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const clone = cloneHostedJsonRecord(value);
   const data = toHostedRecord(clone.data);
@@ -79,6 +82,10 @@ export function sanitizeHostedLinqEventForStorage(
       "linq.recipient",
       normalizePhoneNumber(recipientPhone) ?? recipientPhone,
     );
+  }
+
+  if (options.omitRecipientPhone) {
+    delete data.recipient_phone;
   }
 
   const message = toHostedRecord(data.message);

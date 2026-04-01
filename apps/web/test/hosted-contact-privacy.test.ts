@@ -103,6 +103,34 @@ describe("hosted contact privacy", () => {
       .not.toHaveProperty("url");
   });
 
+  it("can omit the shared Linq recipient phone from stored dispatch snapshots", () => {
+    const sanitized = sanitizeHostedLinqEventForStorage({
+      data: {
+        from: "+15551230000",
+        message: {
+          id: "msg_123",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
+        },
+        recipient_phone: "+15557654321",
+      },
+    }, {
+      omitRecipientPhone: true,
+    });
+
+    expect(sanitized.data).toMatchObject({
+      from: expect.stringMatching(/^hbid:linq\.from:/u),
+      message: {
+        id: expect.stringMatching(/^hbid:linq\.message:/u),
+      },
+    });
+    expect(sanitized.data).not.toHaveProperty("recipient_phone");
+  });
+
   it("rejects duplicate connection updates in a single runtime apply request", () => {
     expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
       updates: [
