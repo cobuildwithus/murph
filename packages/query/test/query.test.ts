@@ -41,6 +41,7 @@ import {
   summarizeRecentOverviewJournals,
 } from "../src/index.ts";
 import {
+  type CanonicalEntity,
   linkTargetIds,
   normalizeCanonicalLinks,
   resolveCanonicalRecordClass,
@@ -562,6 +563,75 @@ test("createVaultReadModel keeps manual query fixtures aligned with records and 
     "smp_sync_01",
   ]);
   assert.deepEqual(vault.samples.map((record) => record.displayId), ["smp_sync_01"]);
+});
+
+test("createVaultReadModel accepts canonical entities as the authoritative read-model input", () => {
+  const entity: CanonicalEntity = {
+    entityId: "goal_sleep_01",
+    primaryLookupId: "improve-sleep",
+    lookupIds: ["goal_sleep_01", "improve-sleep"],
+    family: "goal",
+    recordClass: "bank",
+    kind: "goal",
+    status: "active",
+    occurredAt: null,
+    date: "2026-03-27",
+    path: "bank/goals/improve-sleep.md",
+    title: "Improve sleep consistency",
+    body: "Keep a stable bedtime.",
+    attributes: {
+      slug: "improve-sleep",
+      status: "active",
+    },
+    frontmatter: {
+      slug: "improve-sleep",
+      status: "active",
+      title: "Improve sleep consistency",
+    },
+    links: normalizeCanonicalLinks([
+      {
+        type: "related_to",
+        targetId: "cond_sleep_01",
+      },
+    ]),
+    relatedIds: ["cond_sleep_01"],
+    stream: null,
+    experimentSlug: null,
+    tags: ["sleep"],
+  };
+  const vault = createVaultReadModel({
+    vaultRoot: "/tmp/entity-vault",
+    metadata: null,
+    entities: [entity],
+  });
+
+  assert.deepEqual(vault.entities.map((entry) => entry.entityId), ["goal_sleep_01"]);
+  assert.deepEqual(vault.records.map((record) => record.displayId), ["goal_sleep_01"]);
+  assert.deepEqual(vault.byFamily.goal?.map((record) => record.displayId), ["goal_sleep_01"]);
+  assert.deepEqual(vault.goals.map((record) => record.displayId), ["goal_sleep_01"]);
+  assert.equal(vault.records[0]?.primaryLookupId, "improve-sleep");
+  assert.equal(vault.records[0]?.sourceFile, path.join("/tmp/entity-vault", "bank/goals/improve-sleep.md"));
+});
+
+test("createVaultReadModel preserves manual sourceFile values on the VaultRecord compatibility surface", () => {
+  const record = createRecord({
+    id: "goal_manual_source_01",
+    recordType: "goal",
+    sourcePath: "bank/goals/manual-source.md",
+    sourceFile: "/custom/manual-fixture.md",
+    primaryLookupId: "manual-source",
+    title: "Manual source fixture",
+    data: {},
+    frontmatter: {},
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/tmp/entity-vault",
+    metadata: null,
+    records: [record],
+  });
+
+  assert.equal(vault.records[0]?.sourceFile, "/custom/manual-fixture.md");
+  assert.equal(vault.goals[0]?.sourceFile, "/custom/manual-fixture.md");
 });
 
 test("buildExportPack produces derived exports payloads without touching the vault", async () => {
