@@ -238,30 +238,25 @@ function applyHostedDeviceSyncWakeHint(input: {
     });
   }
 
-  const wakePatch = buildHostedDeviceSyncWakeAccountPatch(wake.hint);
+  const wakePatch = buildHostedDeviceSyncWakeAccountPatch(account, wake.hint);
   if (wakePatch) {
     input.service.store.patchAccount(localAccountId, wakePatch);
   }
 }
 
 function buildHostedDeviceSyncWakeAccountPatch(
+  account: Pick<StoredDeviceSyncAccount, "nextReconcileAt">,
   hint: ReturnType<typeof resolveHostedDeviceSyncWakeContext>["hint"],
-): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "scopes">> | null {
-  if (!hint || (hint.nextReconcileAt === undefined && hint.scopes === undefined)) {
+): Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt">> | null {
+  if (!hint || hint.nextReconcileAt === undefined) {
     return null;
   }
 
-  const patch: Partial<Pick<StoredDeviceSyncAccount, "nextReconcileAt" | "scopes">> = {};
-
-  if (hint.nextReconcileAt !== undefined) {
-    patch.nextReconcileAt = hint.nextReconcileAt ?? null;
-  }
-
-  if (hint.scopes !== undefined) {
-    patch.scopes = hint.scopes ?? [];
-  }
-
-  return patch;
+  const nextReconcileAt = resolveHostedWakeNextReconcileAt(
+    account.nextReconcileAt ?? null,
+    hint.nextReconcileAt,
+  );
+  return nextReconcileAt ? { nextReconcileAt } : null;
 }
 
 function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
@@ -336,12 +331,11 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
     };
   }
 
-  if (input.account.nextReconcileAt !== (baselineLocalState?.nextReconcileAt ?? null)) {
-    update.localState = {
-      ...(update.localState ?? {}),
-      nextReconcileAt: input.account.nextReconcileAt ?? null,
-    };
-  }
+  assignForwardOnlyNextReconcileAtUpdate(
+    update,
+    input.account.nextReconcileAt ?? null,
+    baselineLocalState?.nextReconcileAt ?? null,
+  );
 
   if (!equalHostedDeviceSyncRuntimeTokenBundles(tokenBundle, baselineTokenBundle)) {
     update.observedTokenVersion = input.observedTokenVersion;
@@ -395,6 +389,10 @@ function buildHostedAccountHydrationInput(input: {
   const hostedUpdatedAt = hostedConnection.updatedAt ?? null;
   const nextHostedObservedUpdatedAt = hostedUpdatedAt ?? input.existing?.hostedObservedUpdatedAt ?? null;
   const nextHostedObservedTokenVersion = hostedTokenVersion ?? input.existing?.hostedObservedTokenVersion ?? null;
+  const hostedStateAdvanced = didHostedStateAdvance(
+    input.existing?.hostedObservedUpdatedAt ?? null,
+    nextHostedObservedUpdatedAt,
+  );
 
   return {
     clearTokens: input.entry.tokenBundle === null,
@@ -417,6 +415,7 @@ function buildHostedAccountHydrationInput(input: {
     localState: resolveHydratedHostedLocalState({
       existing: input.existing,
       hostedLocalState,
+      hostedStateAdvanced,
     }),
     ...(input.entry.tokenBundle
       ? {
@@ -495,6 +494,7 @@ function resolveHostedDeviceSyncRuntimeLocalStateSnapshot(
 function resolveHydratedHostedLocalState(input: {
   existing: StoredDeviceSyncAccount | null;
   hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
+  hostedStateAdvanced: boolean;
 }): {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -522,7 +522,7 @@ function resolveHydratedHostedLocalState(input: {
       input.existing?.lastWebhookAt ?? null,
       input.hostedLocalState.lastWebhookAt ?? null,
     ),
-    nextReconcileAt: resolveHydratedNextReconcileAt(input.existing, input.hostedLocalState),
+    nextReconcileAt: resolveHydratedNextReconcileAt(input),
   };
 }
 
@@ -606,6 +606,17 @@ function latestIsoTimestamp(left: string | null, right: string | null): string |
   return leftMs >= rightMs ? left : right;
 }
 
+function didHostedStateAdvance(
+  previousObservedUpdatedAt: string | null,
+  nextObservedUpdatedAt: string | null,
+): boolean {
+  return Boolean(
+    nextObservedUpdatedAt
+      && nextObservedUpdatedAt !== previousObservedUpdatedAt
+      && latestIsoTimestamp(previousObservedUpdatedAt, nextObservedUpdatedAt) === nextObservedUpdatedAt,
+  );
+}
+
 function resolveHydratedHostedAccountUpdatedAt(input: {
   connectedAt: string;
   existing: StoredDeviceSyncAccount | null;
@@ -614,16 +625,60 @@ function resolveHydratedHostedAccountUpdatedAt(input: {
   return input.hostedObservedUpdatedAt ?? input.existing?.updatedAt ?? input.connectedAt;
 }
 
-function resolveHydratedNextReconcileAt(
-  existing: StoredDeviceSyncAccount | null,
-  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot,
-): string | null {
-  return existing?.nextReconcileAt ?? hostedLocalState.nextReconcileAt ?? null;
+function resolveHydratedNextReconcileAt(input: {
+  existing: StoredDeviceSyncAccount | null;
+  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
+  hostedStateAdvanced: boolean;
+}): string | null {
+  const localNextReconcileAt = input.existing?.nextReconcileAt ?? null;
+  const hostedNextReconcileAt = input.hostedLocalState.nextReconcileAt ?? null;
+
+  if (!input.existing) {
+    return hostedNextReconcileAt;
+  }
+
+  if (input.hostedStateAdvanced) {
+    return hostedNextReconcileAt;
+  }
+
+  return latestIsoTimestamp(localNextReconcileAt, hostedNextReconcileAt);
 }
 
 function parseIsoMs(value: string): number | null {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function resolveHostedWakeNextReconcileAt(
+  existingValue: string | null,
+  hintedValue: string | null | undefined,
+): string | null {
+  if (!hintedValue || hintedValue === existingValue) {
+    return null;
+  }
+
+  return latestIsoTimestamp(existingValue, hintedValue) === hintedValue
+    ? hintedValue
+    : null;
+}
+
+function assignForwardOnlyNextReconcileAtUpdate(
+  update: HostedDeviceSyncRuntimeConnectionUpdate,
+  localValue: string | null,
+  baselineValue: string | null,
+): void {
+  if (!localValue || localValue === baselineValue) {
+    return;
+  }
+
+  if (latestIsoTimestamp(localValue, baselineValue) !== localValue) {
+    return;
+  }
+
+  update.localState = {
+    ...(update.localState ?? {}),
+    nextReconcileAt: localValue,
+  } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 
 function assignMonotonicTimestampUpdate(
