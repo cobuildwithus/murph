@@ -13,7 +13,7 @@ function createPrismaAdapter(): PrismaPg {
     throw new TypeError("DATABASE_URL is required for the hosted device-sync control plane.");
   }
 
-  return new PrismaPg({ connectionString: databaseUrl });
+  return new PrismaPg({ connectionString: normalizePrismaConnectionString(databaseUrl) });
 }
 
 export function getPrisma(): PrismaClient {
@@ -33,4 +33,25 @@ export function getPrisma(): PrismaClient {
   }
 
   return prisma;
+}
+
+export function normalizePrismaConnectionString(databaseUrl: string): string {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(databaseUrl);
+  } catch {
+    return databaseUrl;
+  }
+
+  let changed = false;
+
+  for (const key of ["sslcert", "sslkey", "sslrootcert"] as const) {
+    if (parsed.searchParams.get(key) === "system") {
+      parsed.searchParams.delete(key);
+      changed = true;
+    }
+  }
+
+  return changed ? parsed.toString() : databaseUrl;
 }

@@ -431,7 +431,7 @@ async function reconcileHostedPrivyIdentityOnMember(input: {
   ) {
     throw hostedOnboardingError({
       code: "PRIVY_WALLET_MISMATCH",
-      message: "This phone number is already linked to a different rewards wallet.",
+      message: "This phone number is already linked to different verified account details.",
       httpStatus: 409,
     });
   }

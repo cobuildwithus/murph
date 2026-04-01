@@ -270,7 +270,7 @@ export function JoinInviteClient({
           {status.stage === "active" ? (
             <div className="space-y-3 rounded border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
               <p>
-                Your hosted identity is active. Your phone-verified account, rewards wallet, and hosted session are all ready.
+                Your hosted identity is active. Your phone-verified account and hosted session are all ready.
               </p>
               <a
                 href="/settings"
@@ -303,7 +303,7 @@ export function JoinInviteClient({
         <strong className="text-stone-800">What happens here</strong>
         <p>1. We verify the phone number that received this invite.</p>
         <p>2. We create or reconnect your Murph account in Postgres.</p>
-        <p>3. We provision or reuse your self-custodial rewards wallet and set a hosted session cookie.</p>
+        <p>3. We finish account setup and set a hosted session cookie.</p>
         <p>4. We hand you off to checkout, then your hosted access turns active.</p>
       </section>
     </div>
@@ -336,11 +336,11 @@ function resolveSubtitle(status: HostedInviteStatusPayload): string {
     case "expired":
       return "Text the Murph number again and we\u2019ll send you a fresh link.";
     case "register":
-      return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll create your rewards wallet and hand you off to Apple Pay.`;
+      return `Verify ${status.invite?.phoneHint ?? "your number"} by text, then we\u2019ll finish setup and hand you off to Apple Pay.`;
     case "authenticate":
       return `Continue with the verified phone already linked to ${status.invite?.phoneHint ?? "this number"}.`;
     case "checkout":
-      return "Your phone is verified, your wallet is ready, and one more tap finishes hosted access.";
+      return "Your phone is verified, setup is complete, and one more tap finishes hosted access.";
     case "active":
       return "Your hosted Murph access is active for this number.";
     default:

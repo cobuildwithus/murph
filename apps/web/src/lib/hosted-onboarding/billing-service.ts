@@ -444,7 +444,7 @@ function resolveHostedMemberWalletAddress(input: {
       if (privyWalletAddress && privyWalletAddress !== walletAddress) {
         throw hostedOnboardingError({
           code: "HOSTED_WALLET_ADDRESS_CONFLICT",
-          message: "This hosted member is already bound to a different verified rewards wallet.",
+          message: "This hosted member is already bound to different verified account details.",
           httpStatus: 409,
         });
       }
@@ -458,7 +458,7 @@ function resolveHostedMemberWalletAddress(input: {
 
     throw hostedOnboardingError({
       code: "HOSTED_WALLET_ADDRESS_INVALID",
-      message: "The hosted wallet address must be a valid EVM address.",
+      message: "The hosted account details are invalid.",
       httpStatus: 400,
     });
   }
@@ -466,7 +466,7 @@ function resolveHostedMemberWalletAddress(input: {
   if (input.requireWalletAddress) {
     throw hostedOnboardingError({
       code: "HOSTED_WALLET_ADDRESS_REQUIRED",
-      message: "A hosted wallet address must be bound during verification before Stripe checkout can begin.",
+      message: "Your account setup must finish before Stripe checkout can begin.",
       httpStatus: 400,
     });
   }
@@ -480,7 +480,7 @@ export function requireHostedMemberWalletAddressForRevnet(member: HostedMember) 
   if (!walletAddress) {
     throw hostedOnboardingError({
       code: "REVNET_BENEFICIARY_REQUIRED",
-      message: "Hosted RevNet issuance requires a valid wallet address on the hosted member.",
+      message: "Hosted RevNet issuance requires valid account setup details on the hosted member.",
       httpStatus: 503,
       retryable: true,
       details: {
