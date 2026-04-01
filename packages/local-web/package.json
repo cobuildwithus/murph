@@ -11,6 +11,7 @@
     "build:app": "pnpm --dir ../.. exec tsx packages/local-web/scripts/next-local.ts build",
     "dev": "pnpm --dir ../.. exec tsx packages/local-web/scripts/next-local.ts dev",
     "build": "pnpm build:app",
+    "lint": "eslint .",
     "start": "pnpm --dir ../.. exec tsx packages/local-web/scripts/next-local.ts start",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts packages/local-web && tsc -p tsconfig.json --pretty false",
     "test": "pnpm --dir ../.. exec vitest run --config packages/local-web/vitest.config.ts --project local-web --no-coverage",
@@ -28,6 +29,8 @@
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.1"
   }
 }

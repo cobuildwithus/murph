@@ -23,3 +23,9 @@ The package launch wrapper blocks framework `.env*` reads and otherwise leaves h
 Within this repo, the app resolves workspace packages from source and lets Next transpile them directly. The local launcher no longer rebuilds workspace `dist/` trees before startup.
 The wrapper also preserves the original `pnpm` launch cwd so package-local relative vault paths like `../../fixtures/demo-web-vault` keep resolving from `packages/local-web`.
 If `DEVICE_SYNC_BASE_URL` points at a running local device-sync daemon and the server environment also has `DEVICE_SYNC_CONTROL_TOKEN`, the home page also renders a wearable section with one-click connect, reconcile, and disconnect actions. Those actions call the separate authenticated local device control plane and do not bypass the vault/query read boundary. The overview now leads with a compass-style weekly read before the operational device-sync section so the first question is what the week means, not what protocol to add next.
+
+## Local verification
+
+- `pnpm --dir packages/local-web lint` runs the explicit ESLint CLI with `eslint-config-next`.
+- `pnpm --dir packages/local-web test` is the fast Vitest loop for the local web package.
+- `pnpm --dir packages/local-web verify` adds package-local typecheck, lint, and production build coverage on top of that test loop.
