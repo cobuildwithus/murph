@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, startTransition } from "react";
 
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
@@ -157,12 +158,12 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
 
       {data.stage === "signin" ? (
         data.inviteCode ? (
-          <a
+          <Link
             href={`/join/${encodeURIComponent(data.inviteCode)}?share=${encodeURIComponent(shareCode)}`}
             className="inline-flex rounded-full bg-green-700 px-6 py-3 font-bold text-white no-underline transition-colors hover:bg-green-800"
           >
             Verify your phone and checkout
-          </a>
+          </Link>
         ) : (
           <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
             Sign in on this device after your hosted account is active, then open the link again to import the bundle.

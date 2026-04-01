@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from "next/constants";
@@ -22,6 +23,7 @@ import {
 } from "../next.config";
 
 const productionNextConfig = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD);
+const require = createRequire(import.meta.url);
 
 test("resolveHostedWebWorkspaceSourceEntries points at hosted source package entries", () => {
   assert.equal(
@@ -66,17 +68,24 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
 });
 
 test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
-  assert.deepEqual(productionNextConfig.turbopack, {
-    root: process.cwd(),
-  });
+  assert.equal(productionNextConfig.turbopack?.root, process.cwd());
+  assert.equal(productionNextConfig.webpack, undefined);
+  assert.equal(productionNextConfig.typescript, undefined);
 });
 
 test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", () => {
   const turbopackConfig = buildHostedWebTurbopackConfig();
+  const resolveAlias = turbopackConfig?.resolveAlias;
+  const hasOptionalModule = resolveHostedOptionalModule();
 
-  assert.deepEqual(turbopackConfig, {
-    root: process.cwd(),
-  });
+  assert.equal(turbopackConfig?.root, process.cwd());
+  if (hasOptionalModule) {
+    assert.equal(resolveAlias, undefined);
+  } else {
+    assert.deepEqual(resolveAlias, {
+      "@farcaster/mini-app-solana": "./src/lib/empty-module.ts",
+    });
+  }
 });
 
 test("resolvePrivyBaseDomainOrigin normalizes base-domain inputs into a Privy origin", () => {
@@ -164,3 +173,12 @@ test("next.config serves the hosted security headers on every route", async () =
     ],
   );
 });
+
+function resolveHostedOptionalModule(): boolean {
+  try {
+    require.resolve("@farcaster/mini-app-solana");
+    return true;
+  } catch {
+    return false;
+  }
+}

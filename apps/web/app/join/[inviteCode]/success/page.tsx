@@ -1,4 +1,4 @@
-export const dynamic = "force-dynamic";
+import Link from "next/link";
 
 export default async function JoinInviteSuccessPage(input: {
   params: Promise<{ inviteCode: string }>;
@@ -24,12 +24,12 @@ export default async function JoinInviteSuccessPage(input: {
           We&apos;re finishing hosted activation now. Head back to your invite page and it will show when the
           subscription state turns active.
         </p>
-        <a
+        <Link
           href={href}
           className="inline-flex rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light"
         >
           Return to Murph
-        </a>
+        </Link>
       </section>
     </main>
   );

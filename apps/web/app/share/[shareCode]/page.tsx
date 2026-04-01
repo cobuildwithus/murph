@@ -4,8 +4,6 @@ import { ShareLinkClient } from "@/src/components/hosted-share/share-link-client
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 
-export const dynamic = "force-dynamic";
-
 export default async function HostedSharePage(input: {
   params: Promise<{ shareCode: string }>;
   searchParams: Promise<{ invite?: string }>;

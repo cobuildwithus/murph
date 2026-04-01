@@ -87,6 +87,7 @@ test("SettingsPage renders a sign-in requirement when there is no hosted session
   const markup = renderToStaticMarkup(await SettingsPage());
 
   assert.match(markup, /Sign in to manage settings/);
+  assert.ok(markup.includes('href="/"'));
   assert.doesNotMatch(markup, /Hosted email settings/);
   assert.doesNotMatch(markup, /Hosted Telegram settings/);
 });

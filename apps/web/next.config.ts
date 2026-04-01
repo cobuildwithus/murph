@@ -135,22 +135,25 @@ export function buildHostedWebSecurityHeaders(
   return headers;
 }
 
-function installOptionalModuleFallbacks(config: Parameters<NonNullable<NextConfig["webpack"]>>[0]) {
-  config.resolve ??= {};
-  config.resolve.alias ??= {};
-
+function hasOptionalModule(specifier: string): boolean {
   try {
-    require.resolve("@farcaster/mini-app-solana");
+    require.resolve(specifier);
+    return true;
   } catch {
-    config.resolve.alias["@farcaster/mini-app-solana"] = false;
+    return false;
   }
-
-  return config;
 }
 
 export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
+  const resolveAlias: Record<string, string> = {};
+
+  if (!hasOptionalModule("@farcaster/mini-app-solana")) {
+    resolveAlias["@farcaster/mini-app-solana"] = "./src/lib/empty-module.ts";
+  }
+
   return {
     root: path.resolve(appDir, "../.."),
+    ...(Object.keys(resolveAlias).length > 0 ? { resolveAlias } : {}),
   };
 }
 
@@ -160,16 +163,12 @@ export function buildHostedWebNextConfig(phase: string): NextConfig {
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),
-    typescript: {
-      ignoreBuildErrors: true,
-    },
     headers: async () => [
       {
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(process.env),
       },
     ],
-    webpack: (config) => installOptionalModuleFallbacks(config),
   };
 }
 
