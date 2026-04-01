@@ -1,3 +1,8 @@
+export interface JsonErrorDetails {
+  code: string | null;
+  message: string | null;
+}
+
 export async function readOptionalJsonObject(response: Response): Promise<Record<string, unknown> | null> {
   const text = await response.text();
 
@@ -17,6 +22,15 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function readJsonErrorDetails(payload: Record<string, unknown> | null): JsonErrorDetails {
+  const errorPayload = isRecord(payload?.error) ? payload.error : null;
+
+  return {
+    code: typeof errorPayload?.code === "string" ? errorPayload.code : null,
+    message: typeof errorPayload?.message === "string" ? errorPayload.message : null,
+  };
+}
+
 export async function retrySyncOperation<T>(input: {
   errorFactory: (message: string) => Error;
   operation: () => Promise<T>;
@@ -26,11 +40,12 @@ export async function retrySyncOperation<T>(input: {
   timeoutMessage: string;
 }): Promise<T> {
   const retryDelaysMs = input.retryDelaysMs ?? [0, 250, 500, 1_000];
+  const sleepImpl = input.sleepImpl ?? sleep;
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
-    if (retryDelaysMs[attempt] > 0) {
-      await (input.sleepImpl ?? sleep)(retryDelaysMs[attempt]);
+  for (const delayMs of retryDelaysMs) {
+    if (delayMs > 0) {
+      await sleepImpl(delayMs);
     }
 
     try {

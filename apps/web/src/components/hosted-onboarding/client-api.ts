@@ -34,19 +34,57 @@ export async function requestHostedOnboardingJson<T>(input: {
     cache: "no-store",
     body: input.payload ? JSON.stringify(input.payload) : undefined,
   });
-  const data = (await response.json()) as T | ApiErrorPayload;
+  const data = await readOptionalJsonValue(response);
+  const errorPayload = readApiErrorPayload(data);
 
-  if (!response.ok || isApiErrorPayload(data)) {
+  if (!response.ok || errorPayload) {
     throw new HostedOnboardingApiError({
-      code: isApiErrorPayload(data) && typeof data.error.code === "string" ? data.error.code : null,
-      message: isApiErrorPayload(data) ? data.error.message : "Request failed.",
-      retryable: isApiErrorPayload(data) ? data.error.retryable === true : false,
+      code: errorPayload?.code ?? null,
+      message: errorPayload?.message ?? "Request failed.",
+      retryable: errorPayload?.retryable === true,
+    });
+  }
+
+  if (data === null || hasApiErrorKey(data)) {
+    throw new HostedOnboardingApiError({
+      code: null,
+      message: "Request returned an unexpected response.",
     });
   }
 
   return data as T;
 }
 
-function isApiErrorPayload(value: unknown): value is ApiErrorPayload {
-  return Boolean(value) && typeof value === "object" && "error" in (value as Record<string, unknown>);
+async function readOptionalJsonValue(response: Response): Promise<unknown> {
+  const text = await response.text();
+
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function readApiErrorPayload(value: unknown): ApiErrorPayload["error"] | null {
+  if (!isRecord(value) || !isRecord(value.error) || typeof value.error.message !== "string") {
+    return null;
+  }
+
+  return {
+    code: typeof value.error.code === "string" ? value.error.code : undefined,
+    message: value.error.message,
+    retryable: value.error.retryable === true ? true : undefined,
+  };
+}
+
+function hasApiErrorKey(value: unknown): boolean {
+  return isRecord(value) && "error" in value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

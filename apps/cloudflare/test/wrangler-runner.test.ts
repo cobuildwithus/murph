@@ -81,6 +81,19 @@ describe("wrangler runner helpers", () => {
 
     await expect(loggedCommand).rejects.toThrow("wrangler versions deploy exited with code 1.");
   });
+
+  it("fails cleanly when piped JSON stdio streams are unavailable", async () => {
+    const child = new EventEmitter();
+    Object.assign(child, {
+      stderr: null,
+      stdout: null,
+    });
+    spawnMock.mockReturnValueOnce(child);
+
+    await expect(runWranglerJson(["deployments", "status", "--json"])).rejects.toThrow(
+      "wrangler json runner requires piped stdout and stderr streams.",
+    );
+  });
 });
 
 function createSpawnedChild(): EventEmitter & {
