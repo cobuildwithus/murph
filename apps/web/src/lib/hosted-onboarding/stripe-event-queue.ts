@@ -519,14 +519,6 @@ function readHostedStripeEventCustomerId(type: string, object: Record<string, un
     return coerceStripeObjectId(object.customer as never);
   }
 
-  if (type === "refund.created") {
-    return null;
-  }
-
-  if (type.startsWith("charge.dispute.")) {
-    return null;
-  }
-
   return null;
 }
 

@@ -24,7 +24,7 @@ import type {
   HostedExecutionCommitPayload,
   HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
-import { json, readJsonObject } from "./json.ts";
+import { json, methodNotAllowed, notFound, readJsonObject } from "./json.ts";
 import { createHostedExecutionSideEffectJournalStore } from "./outbox-delivery-journal.ts";
 import {
   readHostedEmailConfig,
@@ -718,14 +718,6 @@ function requireRunnerInternalProxyAuthorization(
   }
 
   return null;
-}
-
-function methodNotAllowed(): Response {
-  return json({ error: "Method not allowed." }, 405);
-}
-
-function notFound(): Response {
-  return json({ error: "Not found" }, 404);
 }
 
 function resolveHostedRunnerWebControlBaseUrl(

@@ -7,6 +7,22 @@ export function json(body: unknown, status = 200): Response {
   });
 }
 
+export function jsonError(error: string, status: number): Response {
+  return json({ error }, status);
+}
+
+export function methodNotAllowed(): Response {
+  return jsonError("Method not allowed.", 405);
+}
+
+export function notFound(): Response {
+  return jsonError("Not found", 404);
+}
+
+export function unauthorized(): Response {
+  return jsonError("Unauthorized", 401);
+}
+
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
   return requireJsonObject((await request.json()) as unknown);
 }

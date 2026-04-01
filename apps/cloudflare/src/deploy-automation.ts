@@ -468,7 +468,7 @@ export function parseHostedContainerImageListOutput(
     throw new Error("Cloudflare image list output must be an array.");
   }
 
-  return parsed.flatMap((entry, index) => {
+  return parsed.map((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error(`Cloudflare image list entry ${index} must be an object.`);
     }
@@ -485,10 +485,10 @@ export function parseHostedContainerImageListOutput(
         .filter((tag) => tag.length > 0 && !tag.startsWith("sha256"))
       : [];
 
-    return [{
+    return {
       name,
       tags,
-    }];
+    };
   });
 }
 
