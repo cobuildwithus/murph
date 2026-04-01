@@ -22,6 +22,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./public-ingress": {
+      "types": "./dist/public-ingress.d.ts",
+      "default": "./dist/public-ingress.js"
+    },
     "./client": {
       "types": "./dist/client.d.ts",
       "default": "./dist/client.js"

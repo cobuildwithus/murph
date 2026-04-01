@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deviceSyncError } from "@murphai/device-syncd";
+import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),

@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
-import type { DeviceSyncAccount, DeviceSyncAccountStatus } from "@murphai/device-syncd";
+import type { DeviceSyncAccount, DeviceSyncAccountStatus } from "@murphai/device-syncd/public-ingress";
 
 export type HostedPrismaTransactionClient = Prisma.TransactionClient;
 

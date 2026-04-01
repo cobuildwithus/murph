@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   DeviceSyncWebhookTraceClaimResult,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 
 import { isUniqueViolation } from "./prisma-errors";
 import type { HostedPrismaTransactionClient } from "./types";

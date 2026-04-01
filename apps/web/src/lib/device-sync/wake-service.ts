@@ -6,7 +6,7 @@ import {
   type DeviceSyncRegistry,
   type ProviderConnectionResult,
   type PublicDeviceSyncAccount,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import type {
   HostedExecutionDispatchRequest,
@@ -372,4 +372,3 @@ function normalizeHostedDeviceSyncJobHints(input: {
     } satisfies HostedExecutionDeviceSyncJobHint;
   });
 }
-

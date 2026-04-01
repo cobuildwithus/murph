@@ -402,3 +402,37 @@ function attachOAuthCallbackContext(
     cause: error.cause,
   });
 }
+
+export { DeviceSyncError, deviceSyncError, isDeviceSyncError } from "./errors.ts";
+export { createDeviceSyncRegistry } from "./registry.ts";
+export { toRedactedPublicDeviceSyncAccount } from "./public-account.ts";
+export { sanitizeStoredDeviceSyncMetadata, toIsoTimestamp } from "./shared.ts";
+export { resolveDeviceSyncWebhookVerificationResponse } from "./webhook-verification.ts";
+export { buildPublicDeviceSyncErrorPayload } from "./http.ts";
+export {
+  readConfiguredOuraDeviceSyncProviderConfig,
+  readConfiguredWhoopDeviceSyncProviderConfig,
+} from "./config.ts";
+export { createOuraDeviceSyncProvider } from "./providers/oura.ts";
+export type { OuraDeviceSyncProviderConfig } from "./providers/oura.ts";
+export { createWhoopDeviceSyncProvider } from "./providers/whoop.ts";
+export type { WhoopDeviceSyncProviderConfig } from "./providers/whoop.ts";
+export type {
+  BeginConnectionResult,
+  ClaimDeviceSyncWebhookTraceInput,
+  CompleteConnectionResult,
+  DeviceSyncAccount,
+  DeviceSyncAccountStatus,
+  DeviceSyncJobInput,
+  DeviceSyncProvider,
+  DeviceSyncPublicIngressStore,
+  DeviceSyncRegistry,
+  DeviceSyncWebhookTraceClaimResult,
+  HandleWebhookResult,
+  OAuthStateRecord,
+  ProviderAuthTokens,
+  ProviderConnectionResult,
+  PublicDeviceSyncAccount,
+  PublicProviderDescriptor,
+  UpsertPublicDeviceSyncConnectionInput,
+} from "./types.ts";

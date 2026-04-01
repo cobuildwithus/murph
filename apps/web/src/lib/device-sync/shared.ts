@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-export { toIsoTimestamp } from "@murphai/device-syncd";
+export { toIsoTimestamp } from "@murphai/device-syncd/public-ingress";
 
 export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {

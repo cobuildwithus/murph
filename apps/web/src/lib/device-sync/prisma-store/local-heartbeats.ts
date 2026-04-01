@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
-import type { PublicDeviceSyncAccount } from "@murphai/device-syncd";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 
 import { PrismaHostedConnectionStore } from "./connections";
 import type { UpdateLocalHeartbeatInput } from "./types";

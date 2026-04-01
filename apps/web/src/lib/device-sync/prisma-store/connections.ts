@@ -4,13 +4,13 @@ import {
   deviceSyncError,
   sanitizeStoredDeviceSyncMetadata,
   toRedactedPublicDeviceSyncAccount,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 
 import type {
   DeviceSyncAccountStatus,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 import type { HostedSecretCodec } from "../crypto";
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";
