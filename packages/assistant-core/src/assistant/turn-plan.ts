@@ -1,5 +1,6 @@
 import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
 import { updateAssistantOnboardingSummary } from './onboarding.js'
+import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
 import type {
   AssistantMessageInput,
@@ -18,6 +19,7 @@ export async function resolveAssistantTurnSharedPlan(
       deliverResponse: input.deliverResponse,
       deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       deliveryTarget: input.deliveryTarget,
+      operatorAuthority: input.operatorAuthority,
       sourceThreadId: input.sourceThreadId,
       threadId: input.threadId,
       threadIsDirect: input.threadIsDirect,
@@ -35,6 +37,7 @@ export async function resolveAssistantTurnSharedPlan(
             vault: input.vault,
           })
         : null,
+    operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,
   }

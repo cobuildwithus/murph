@@ -37,6 +37,10 @@ const assistantConversationDirectnessValues = new Set([
   'group',
   'unknown',
 ])
+const assistantOperatorAuthorityValues = new Set([
+  'direct-operator',
+  'accepted-inbound-message',
+])
 const assistantCanonicalConversationFields = new Set([
   'alias',
   'channel',
@@ -327,11 +331,21 @@ function parseAssistantMessageRequestBody(payload: unknown): AssistantMessageReq
   }
   assertOptionalNullableStringField(record, 'deliveryTarget', 'message')
   assertOptionalNullableStringField(record, 'deliveryReplyToMessageId', 'message')
+  assertOptionalNullableStringField(record, 'operatorAuthority', 'message')
   assertOptionalNullableStringField(record, 'turnTrigger', 'message')
   assertOptionalBooleanField(record, 'deliverResponse', 'message')
   assertOptionalBooleanField(record, 'enableFirstTurnOnboarding', 'message')
   assertOptionalBooleanField(record, 'persistUserPromptOnFailure', 'message')
   assertOptionalObjectField(record, 'modelSpec', 'message')
+  if (
+    typeof record.operatorAuthority === 'string' &&
+    !assistantOperatorAuthorityValues.has(record.operatorAuthority)
+  ) {
+    throw new AssistantHttpRequestError(
+      `Assistant message operatorAuthority must be one of ${Array.from(assistantOperatorAuthorityValues).join(', ')}.`,
+      400,
+    )
+  }
   return record as AssistantMessageRequest
 }
 

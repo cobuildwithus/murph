@@ -35,6 +35,7 @@ import type { InboxServices } from './inbox-services.js'
 import {
   createAssistantToolCatalog,
   type AssistantToolCatalog,
+  type AssistantToolDefinition,
   defineAssistantTool,
 } from './model-harness.js'
 import {
@@ -100,22 +101,23 @@ export interface AssistantToolCatalogOptions {
   includeVaultWriteTools?: boolean
 }
 
+interface AssistantToolConcernDefinitions {
+  assistantRuntimeTools: AssistantToolDefinition[]
+  canonicalVaultWriteTools: AssistantToolDefinition[]
+  outwardSideEffectTools: AssistantToolDefinition[]
+  queryAndReadTools: AssistantToolDefinition[]
+}
+
 export function createDefaultAssistantToolCatalog(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
 ): AssistantToolCatalog {
+  const concerns = resolveAssistantToolConcernDefinitions(input, options)
   return createAssistantToolCatalog([
-    ...(options.includeAssistantRuntimeTools ?? true
-      ? createAssistantRuntimeToolDefinitions(input, options)
-      : []),
-    ...createInboxPromotionToolDefinitions(input),
-    ...(options.includeVaultTextReadTool ?? true
-      ? createVaultTextReadToolDefinitions(input)
-      : []),
-    ...(options.includeQueryTools ?? true ? createVaultQueryToolDefinitions(input) : []),
-    ...(options.includeVaultWriteTools ?? true
-      ? createVaultWriteToolDefinitions(input, options)
-      : []),
+    ...concerns.assistantRuntimeTools,
+    ...concerns.queryAndReadTools,
+    ...concerns.canonicalVaultWriteTools,
+    ...concerns.outwardSideEffectTools,
   ])
 }
 
@@ -129,6 +131,30 @@ export function createInboxRoutingAssistantToolCatalog(
     includeVaultTextReadTool: false,
     includeVaultWriteTools: true,
   })
+}
+
+function resolveAssistantToolConcernDefinitions(
+  input: AssistantToolContext,
+  options: AssistantToolCatalogOptions,
+): AssistantToolConcernDefinitions {
+  const includeAssistantRuntimeTools = options.includeAssistantRuntimeTools ?? true
+  const includeVaultWriteTools = options.includeVaultWriteTools ?? true
+
+  return {
+    assistantRuntimeTools: includeAssistantRuntimeTools
+      ? createAssistantRuntimeToolDefinitions(input, options)
+      : [],
+    canonicalVaultWriteTools: [
+      ...createInboxPromotionToolDefinitions(input),
+      ...(includeVaultWriteTools
+        ? createCanonicalVaultWriteToolDefinitions(input, options)
+        : []),
+    ],
+    outwardSideEffectTools: includeVaultWriteTools
+      ? createOutwardSideEffectToolDefinitions(input)
+      : [],
+    queryAndReadTools: createQueryAndReadToolDefinitions(input, options),
+  }
 }
 
 async function loadAssistantCronTools() {
@@ -846,7 +872,21 @@ function createVaultQueryToolDefinitions(
   ]
 }
 
-function createVaultWriteToolDefinitions(
+function createQueryAndReadToolDefinitions(
+  input: AssistantToolContext,
+  options: AssistantToolCatalogOptions = {},
+) {
+  return [
+    ...(options.includeVaultTextReadTool ?? true
+      ? createVaultTextReadToolDefinitions(input)
+      : []),
+    ...(options.includeQueryTools ?? true
+      ? createVaultQueryToolDefinitions(input)
+      : []),
+  ]
+}
+
+function createCanonicalVaultWriteToolDefinitions(
   input: AssistantToolContext,
   options: AssistantToolCatalogOptions = {},
 ) {
@@ -1041,58 +1081,6 @@ function createVaultWriteToolDefinitions(
       },
     }),
     defineAssistantTool({
-      name: 'vault.share.createLink',
-      description:
-        'Create a one-time hosted share link for remembered foods, recipes, and protocols. When a food has attached protocol ids, keep includeAttachedProtocols=true so the recipient gets the full smoothie + supplement bundle.',
-      inputSchema: z.object({
-        title: z.string().min(1).optional(),
-        foods: z.array(shareEntitySelectorSchema).optional(),
-        protocols: z.array(shareEntitySelectorSchema).optional(),
-        recipes: z.array(shareEntitySelectorSchema).optional(),
-        includeAttachedProtocols: z.boolean().optional(),
-        logMeal: z.object({
-          food: shareEntitySelectorSchema,
-          note: z.string().min(1).optional(),
-          occurredAt: isoTimestampSchema.optional(),
-        }).optional(),
-        recipientPhoneNumber: z.string().min(1).optional(),
-        inviteCode: z.string().min(1).optional(),
-        expiresInHours: z.number().int().positive().max(24 * 30).optional(),
-      }),
-      inputExample: {
-        foods: [
-          {
-            slug: 'morning-smoothie',
-          },
-        ],
-        includeAttachedProtocols: true,
-        logMeal: {
-          food: {
-            slug: 'morning-smoothie',
-          },
-        },
-      },
-      execute: async ({ expiresInHours, foods, includeAttachedProtocols, inviteCode, logMeal, protocols, recipientPhoneNumber, recipes, title }) => {
-        const pack = await buildSharePackFromVault({
-          vaultRoot: input.vault,
-          title,
-          foods,
-          protocols,
-          recipes,
-          includeAttachedProtocols,
-          logMeal,
-        })
-
-        return issueHostedShareLink({
-          pack,
-          expiresInHours,
-          inviteCode,
-          recipientPhoneNumber,
-          senderMemberId: process.env.HOSTED_MEMBER_ID ?? null,
-        })
-      },
-    }),
-    defineAssistantTool({
       name: 'vault.event.upsert',
       description:
         'Upsert one canonical event record from a JSON payload object.',
@@ -1215,6 +1203,65 @@ function createVaultWriteToolDefinitions(
   }
 
   return tools
+}
+
+function createOutwardSideEffectToolDefinitions(
+  input: AssistantToolContext,
+) {
+  return [
+    defineAssistantTool({
+      name: 'vault.share.createLink',
+      description:
+        'Create a one-time hosted share link for remembered foods, recipes, and protocols. When a food has attached protocol ids, keep includeAttachedProtocols=true so the recipient gets the full smoothie + supplement bundle.',
+      inputSchema: z.object({
+        title: z.string().min(1).optional(),
+        foods: z.array(shareEntitySelectorSchema).optional(),
+        protocols: z.array(shareEntitySelectorSchema).optional(),
+        recipes: z.array(shareEntitySelectorSchema).optional(),
+        includeAttachedProtocols: z.boolean().optional(),
+        logMeal: z.object({
+          food: shareEntitySelectorSchema,
+          note: z.string().min(1).optional(),
+          occurredAt: isoTimestampSchema.optional(),
+        }).optional(),
+        recipientPhoneNumber: z.string().min(1).optional(),
+        inviteCode: z.string().min(1).optional(),
+        expiresInHours: z.number().int().positive().max(24 * 30).optional(),
+      }),
+      inputExample: {
+        foods: [
+          {
+            slug: 'morning-smoothie',
+          },
+        ],
+        includeAttachedProtocols: true,
+        logMeal: {
+          food: {
+            slug: 'morning-smoothie',
+          },
+        },
+      },
+      execute: async ({ expiresInHours, foods, includeAttachedProtocols, inviteCode, logMeal, protocols, recipientPhoneNumber, recipes, title }) => {
+        const pack = await buildSharePackFromVault({
+          vaultRoot: input.vault,
+          title,
+          foods,
+          protocols,
+          recipes,
+          includeAttachedProtocols,
+          logMeal,
+        })
+
+        return issueHostedShareLink({
+          pack,
+          expiresInHours,
+          inviteCode,
+          recipientPhoneNumber,
+          senderMemberId: process.env.HOSTED_MEMBER_ID ?? null,
+        })
+      },
+    }),
+  ]
 }
 
 function createHealthUpsertToolDefinitions(
