@@ -1,24 +1,17 @@
 import path from "node:path";
 import {
   parseFrontmatterDocument as parseSharedFrontmatterDocument,
+  type FrontmatterObject,
   type FrontmatterParseProblem,
+  type FrontmatterScalar,
+  type FrontmatterValue,
+  type ParsedFrontmatterDocument,
 } from "@murph/contracts";
 import { z } from "zod";
 
-export type FrontmatterScalar = string | number | boolean | null;
-export type FrontmatterValue =
-  | FrontmatterScalar
-  | FrontmatterObject
-  | FrontmatterValue[];
+export type { FrontmatterObject, FrontmatterScalar, FrontmatterValue };
 
-export interface FrontmatterObject {
-  [key: string]: FrontmatterValue;
-}
-
-export interface FrontmatterDocument {
-  attributes: FrontmatterObject;
-  body: string;
-}
+export type FrontmatterDocument = Pick<ParsedFrontmatterDocument, "attributes" | "body">;
 
 export interface MarkdownDocumentRecord {
   relativePath: string;

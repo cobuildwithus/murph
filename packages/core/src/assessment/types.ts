@@ -1,12 +1,18 @@
+import {
+  ASSESSMENT_SOURCES as CONTRACT_ASSESSMENT_SOURCES,
+  CONTRACT_SCHEMA_VERSION,
+  type AssessmentSource,
+} from "@murph/contracts";
+
 import type { RawArtifact } from "../raw.ts";
 import type { UnknownRecord } from "../types.ts";
 import type { ProfileSnapshotProfile, ProfileSnapshotSource } from "../profile/types.ts";
 
-export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = "murph.assessment-response.v1";
+export const ASSESSMENT_RESPONSE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.assessmentResponse;
 export const ASSESSMENT_LEDGER_DIRECTORY = "ledger/assessments";
-export const ASSESSMENT_SOURCES = ["import", "manual", "derived"] as const;
+export const ASSESSMENT_SOURCES = CONTRACT_ASSESSMENT_SOURCES;
 
-export type AssessmentSource = (typeof ASSESSMENT_SOURCES)[number];
+export type { AssessmentSource };
 
 export interface AssessmentResponseRecord {
   schemaVersion: typeof ASSESSMENT_RESPONSE_SCHEMA_VERSION;

@@ -230,6 +230,85 @@ describe("HostedUserRunner", () => {
     }
   });
 
+  it("keeps per-user artifacts when bundle refs only differ by updatedAt", async () => {
+    const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-bundle-gc-updated-at-"));
+
+    try {
+      const vaultRoot = path.join(workspaceRoot, "vault");
+      const rawAttachmentPath = path.join(
+        vaultRoot,
+        "raw",
+        "inbox",
+        "example",
+        "photo.jpg",
+      );
+      await mkdir(path.dirname(rawAttachmentPath), { recursive: true });
+      await writeFile(path.join(vaultRoot, "vault.json"), "{\"schema\":\"vault\"}\n");
+      await writeFile(rawAttachmentPath, Buffer.from("image-bytes-placeholder\n", "utf8"));
+
+      const artifactStore = createHostedArtifactStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+        userId: "member_gc_same_ref",
+      });
+      const vaultBundle = await snapshotHostedBundleRoots({
+        externalizeFile: async (artifact) => {
+          const ref = {
+            byteSize: artifact.bytes.byteLength,
+            sha256: createHash("sha256").update(artifact.bytes).digest("hex"),
+          };
+          await artifactStore.writeArtifact(ref.sha256, artifact.bytes);
+          return ref;
+        },
+        kind: "vault",
+        roots: [
+          {
+            root: vaultRoot,
+            rootKey: "vault",
+          },
+        ],
+      });
+      const bundleStore = createHostedBundleStore({
+        bucket: bucket.api,
+        key: environment.bundleEncryptionKey,
+        keyId: environment.bundleEncryptionKeyId,
+      });
+      const [artifact] = listHostedBundleArtifacts({
+        bytes: vaultBundle!,
+        expectedKind: "vault",
+      });
+      const previousVaultRef = await bundleStore.writeBundle("vault", vaultBundle!);
+      const nextVaultRef = {
+        ...previousVaultRef,
+        updatedAt: "2026-03-27T00:00:01.000Z",
+      };
+      const collector = new HostedBundleGarbageCollector(
+        bucket.api,
+        environment.bundleEncryptionKey,
+        environment.bundleEncryptionKeyId,
+      );
+
+      await collector.cleanupBundleTransition({
+        nextBundleRefs: {
+          agentState: null,
+          vault: nextVaultRef,
+        },
+        previousBundleRefs: {
+          agentState: null,
+          vault: previousVaultRef,
+        },
+        userId: "member_gc_same_ref",
+      });
+
+      expect(bucket.keys()).toContain(
+        artifactObjectKey("member_gc_same_ref", artifact!.ref.sha256),
+      );
+    } finally {
+      await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
   it("cleans up orphaned per-user artifacts when a prefinalized commit is recovered", async () => {
     const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-recovered-bundle-gc-"));
 
@@ -474,6 +553,74 @@ describe("HostedUserRunner", () => {
     ).rejects.toThrow(
       "Hosted execution commit evt_duplicate_commit result does not match the existing durable commit.",
     );
+  });
+
+  it("does not rewrite finalized journal records when bundle refs only differ by updatedAt", async () => {
+    await persistHostedExecutionCommit({
+      bucket: bucket.api,
+      currentBundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      eventId: "evt_finalize_same_ref",
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
+        },
+        result: {
+          eventsHandled: 1,
+          summary: "ok",
+        },
+      },
+      userId: "member_123",
+    });
+
+    const journalStore = createHostedExecutionJournalStore({
+      bucket: bucket.api,
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+    });
+    const existing = await journalStore.readCommittedResult("member_123", "evt_finalize_same_ref");
+    if (!existing?.bundleRefs.agentState || !existing.bundleRefs.vault) {
+      throw new Error("Expected committed bundle refs to exist.");
+    }
+
+    const finalizedRecord = {
+      ...existing,
+      bundleRefs: {
+        agentState: {
+          ...existing.bundleRefs.agentState,
+          updatedAt: "2026-03-27T00:00:01.000Z",
+        },
+        vault: {
+          ...existing.bundleRefs.vault,
+          updatedAt: "2026-03-27T00:00:01.000Z",
+        },
+      },
+      finalizedAt: "2026-03-27T00:00:02.000Z",
+    };
+    await journalStore.writeCommittedResult("member_123", "evt_finalize_same_ref", finalizedRecord);
+    const writesBeforeFinalize = bucket.putCount();
+
+    const finalized = await persistHostedExecutionFinalBundles({
+      bucket: bucket.api,
+      eventId: "evt_finalize_same_ref",
+      key: environment.bundleEncryptionKey,
+      keyId: environment.bundleEncryptionKeyId,
+      payload: {
+        bundles: {
+          agentState: Buffer.from("agent-state").toString("base64"),
+          vault: Buffer.from("vault").toString("base64"),
+        },
+      },
+      userId: "member_123",
+    });
+
+    expect(finalized).toEqual(finalizedRecord);
+    expect(bucket.putCount()).toBe(writesBeforeFinalize);
   });
 
   it("rejects duplicate runner commits whose payload diverges from the first write", async () => {

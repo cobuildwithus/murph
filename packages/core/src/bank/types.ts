@@ -1,44 +1,55 @@
-import type { ActivityStrengthExercise } from "@murph/contracts";
+import {
+  ALLERGY_CRITICALITIES as CONTRACT_ALLERGY_CRITICALITIES,
+  ALLERGY_STATUSES as CONTRACT_ALLERGY_STATUSES,
+  CONDITION_CLINICAL_STATUSES as CONTRACT_CONDITION_CLINICAL_STATUSES,
+  CONDITION_SEVERITIES as CONTRACT_CONDITION_SEVERITIES,
+  CONDITION_VERIFICATION_STATUSES as CONTRACT_CONDITION_VERIFICATION_STATUSES,
+  CONTRACT_SCHEMA_VERSION,
+  FOOD_STATUSES as CONTRACT_FOOD_STATUSES,
+  FRONTMATTER_DOC_TYPES,
+  GOAL_HORIZONS as CONTRACT_GOAL_HORIZONS,
+  GOAL_STATUSES as CONTRACT_GOAL_STATUSES,
+  PROTOCOL_KINDS as CONTRACT_PROTOCOL_KINDS,
+  PROTOCOL_STATUSES as CONTRACT_PROTOCOL_STATUSES,
+  RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
+  WORKOUT_FORMAT_STATUSES as CONTRACT_WORKOUT_FORMAT_STATUSES,
+  type ActivityStrengthExercise,
+} from "@murph/contracts";
 
 import type { DateInput } from "../types.ts";
 
-export const GOAL_SCHEMA_VERSION = "murph.frontmatter.goal.v1";
-export const GOAL_DOC_TYPE = "goal";
-export const GOAL_STATUSES = ["active", "paused", "completed", "abandoned"] as const;
-export const GOAL_HORIZONS = ["short_term", "medium_term", "long_term", "ongoing"] as const;
+export const GOAL_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.goalFrontmatter;
+export const GOAL_DOC_TYPE = FRONTMATTER_DOC_TYPES.goal;
+export const GOAL_STATUSES = CONTRACT_GOAL_STATUSES;
+export const GOAL_HORIZONS = CONTRACT_GOAL_HORIZONS;
 
-export const CONDITION_SCHEMA_VERSION = "murph.frontmatter.condition.v1";
-export const CONDITION_DOC_TYPE = "condition";
-export const CONDITION_CLINICAL_STATUSES = ["active", "inactive", "resolved"] as const;
-export const CONDITION_VERIFICATION_STATUSES = [
-  "unconfirmed",
-  "provisional",
-  "confirmed",
-  "refuted",
-] as const;
-export const CONDITION_SEVERITIES = ["mild", "moderate", "severe"] as const;
+export const CONDITION_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.conditionFrontmatter;
+export const CONDITION_DOC_TYPE = FRONTMATTER_DOC_TYPES.condition;
+export const CONDITION_CLINICAL_STATUSES = CONTRACT_CONDITION_CLINICAL_STATUSES;
+export const CONDITION_VERIFICATION_STATUSES = CONTRACT_CONDITION_VERIFICATION_STATUSES;
+export const CONDITION_SEVERITIES = CONTRACT_CONDITION_SEVERITIES;
 
-export const ALLERGY_SCHEMA_VERSION = "murph.frontmatter.allergy.v1";
-export const ALLERGY_DOC_TYPE = "allergy";
-export const ALLERGY_STATUSES = ["active", "inactive", "resolved"] as const;
-export const ALLERGY_CRITICALITIES = ["low", "high", "unable_to_assess"] as const;
+export const ALLERGY_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.allergyFrontmatter;
+export const ALLERGY_DOC_TYPE = FRONTMATTER_DOC_TYPES.allergy;
+export const ALLERGY_STATUSES = CONTRACT_ALLERGY_STATUSES;
+export const ALLERGY_CRITICALITIES = CONTRACT_ALLERGY_CRITICALITIES;
 
-export const PROTOCOL_SCHEMA_VERSION = "murph.frontmatter.protocol.v1";
-export const PROTOCOL_DOC_TYPE = "protocol";
-export const PROTOCOL_KINDS = ["medication", "supplement", "therapy", "habit"] as const;
-export const PROTOCOL_STATUSES = ["active", "paused", "completed", "stopped"] as const;
+export const PROTOCOL_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.protocolFrontmatter;
+export const PROTOCOL_DOC_TYPE = FRONTMATTER_DOC_TYPES.protocol;
+export const PROTOCOL_KINDS = CONTRACT_PROTOCOL_KINDS;
+export const PROTOCOL_STATUSES = CONTRACT_PROTOCOL_STATUSES;
 
-export const RECIPE_SCHEMA_VERSION = "murph.frontmatter.recipe.v1";
-export const RECIPE_DOC_TYPE = "recipe";
-export const RECIPE_STATUSES = ["draft", "saved", "archived"] as const;
+export const RECIPE_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.recipeFrontmatter;
+export const RECIPE_DOC_TYPE = FRONTMATTER_DOC_TYPES.recipe;
+export const RECIPE_STATUSES = CONTRACT_RECIPE_STATUSES;
 
-export const FOOD_SCHEMA_VERSION = "murph.frontmatter.food.v1";
-export const FOOD_DOC_TYPE = "food";
-export const FOOD_STATUSES = ["active", "archived"] as const;
+export const FOOD_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.foodFrontmatter;
+export const FOOD_DOC_TYPE = FRONTMATTER_DOC_TYPES.food;
+export const FOOD_STATUSES = CONTRACT_FOOD_STATUSES;
 
-export const WORKOUT_FORMAT_SCHEMA_VERSION = "murph.frontmatter.workout-format.v1";
-export const WORKOUT_FORMAT_DOC_TYPE = "workout_format";
-export const WORKOUT_FORMAT_STATUSES = ["active", "archived"] as const;
+export const WORKOUT_FORMAT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.workoutFormatFrontmatter;
+export const WORKOUT_FORMAT_DOC_TYPE = FRONTMATTER_DOC_TYPES.workoutFormat;
+export const WORKOUT_FORMAT_STATUSES = CONTRACT_WORKOUT_FORMAT_STATUSES;
 
 export const GOALS_DIRECTORY = "bank/goals";
 export const CONDITIONS_DIRECTORY = "bank/conditions";

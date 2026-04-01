@@ -1,5 +1,6 @@
-import type {
-  HostedExecutionBundleRef,
+import {
+  sameHostedExecutionBundleRef,
+  type HostedExecutionBundleRef,
 } from "@murph/runtime-state";
 import type {
   HostedExecutionRunStatus,
@@ -104,15 +105,7 @@ export function sameBundleRef(
   left: HostedExecutionBundleRef | null,
   right: HostedExecutionBundleRef | null,
 ): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right) {
-    return false;
-  }
-
-  return left.hash === right.hash && left.key === right.key && left.size === right.size;
+  return sameHostedExecutionBundleRef(left, right);
 }
 
 export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {

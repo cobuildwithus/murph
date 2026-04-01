@@ -1,21 +1,19 @@
-import type { FileChangeOperation, JsonObject } from "@murph/contracts";
+import type {
+  FileChangeOperation,
+  FrontmatterObject,
+  FrontmatterScalar,
+  FrontmatterValue,
+  JsonObject,
+  ParsedFrontmatterDocument,
+} from "@murph/contracts";
 
 export type DateInput = string | number | Date;
 
 export type UnknownRecord = JsonObject;
 
-export type FrontmatterScalar = string | number | boolean | null;
+export type { FrontmatterObject, FrontmatterScalar, FrontmatterValue };
 
-export interface FrontmatterObject {
-  [key: string]: FrontmatterValue;
-}
-
-export type FrontmatterValue = FrontmatterScalar | FrontmatterObject | FrontmatterValue[];
-
-export interface FrontmatterDocument {
-  attributes: FrontmatterObject;
-  body: string;
-}
+export type FrontmatterDocument = Pick<ParsedFrontmatterDocument, "attributes" | "body">;
 
 export interface ValidationIssue {
   code: string;

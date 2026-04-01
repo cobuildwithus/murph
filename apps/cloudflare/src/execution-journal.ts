@@ -9,6 +9,7 @@ import {
 } from "@murph/hosted-execution";
 import {
   decodeHostedBundleBase64,
+  sameHostedExecutionBundleRef,
   sha256HostedBundleHex,
   type HostedExecutionBundleRef,
 } from "@murph/runtime-state";
@@ -203,8 +204,8 @@ export async function persistHostedExecutionFinalBundles(input: {
   };
 
   if (
-    sameHostedBundleRef(nextBundleRefs.agentState, existing.bundleRefs.agentState)
-    && sameHostedBundleRef(nextBundleRefs.vault, existing.bundleRefs.vault)
+    sameHostedExecutionBundleRef(nextBundleRefs.agentState, existing.bundleRefs.agentState)
+    && sameHostedExecutionBundleRef(nextBundleRefs.vault, existing.bundleRefs.vault)
     && existing.finalizedAt !== null
   ) {
     return existing;
@@ -327,13 +328,13 @@ function assertEquivalentDuplicateCommit(
     ),
   };
 
-  if (!sameHostedBundleRef(existing.bundleRefs.agentState, expectedBundleRefs.agentState)) {
+  if (!sameHostedExecutionBundleRef(existing.bundleRefs.agentState, expectedBundleRefs.agentState)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} agent-state bundle ref does not match the existing durable commit.`,
     );
   }
 
-  if (!sameHostedBundleRef(existing.bundleRefs.vault, expectedBundleRefs.vault)) {
+  if (!sameHostedExecutionBundleRef(existing.bundleRefs.vault, expectedBundleRefs.vault)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} vault bundle ref does not match the existing durable commit.`,
     );
@@ -370,23 +371,4 @@ function resolveExpectedCommittedBundleRef(
 
 function sameStructuredValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function sameHostedBundleRef(
-  left: HostedExecutionBundleRef | null,
-  right: HostedExecutionBundleRef | null,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right) {
-    return false;
-  }
-
-  return (
-    left.hash === right.hash
-    && left.key === right.key
-    && left.size === right.size
-  );
 }
