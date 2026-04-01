@@ -1,12 +1,9 @@
+import type { JsonObject, JsonValue } from '@murph/contracts'
+
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '../vault-cli-errors.js'
 
-type JsonPrimitive = string | number | boolean | null
-export type JsonValue = JsonPrimitive | JsonObject | JsonValue[]
-
-export interface JsonObject {
-  [key: string]: JsonValue
-}
+export type { JsonObject, JsonValue }
 
 interface ApplyRecordPatchInput {
   record: JsonObject

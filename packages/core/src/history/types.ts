@@ -1,9 +1,11 @@
 import {
+  ADVERSE_EFFECT_SEVERITIES as CONTRACT_ADVERSE_EFFECT_SEVERITIES,
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_FASTING_STATUSES,
   BLOOD_TEST_SPECIMEN_TYPES,
   EVENT_SOURCES,
   HEALTH_HISTORY_EVENT_KINDS,
+  TEST_RESULT_STATUSES as CONTRACT_TEST_RESULT_STATUSES,
 } from "@murph/contracts";
 
 import type {
@@ -25,8 +27,8 @@ export const HEALTH_HISTORY_SOURCES = EVENT_SOURCES;
 
 export const HISTORY_EVENT_ORDER = ["asc", "desc"] as const;
 export const PROCEDURE_STATUSES = ["planned", "completed", "cancelled"] as const;
-export const TEST_STATUSES = ["pending", "normal", "abnormal", "mixed", "unknown"] as const;
-export const ADVERSE_EFFECT_SEVERITIES = ["mild", "moderate", "severe"] as const;
+export const TEST_STATUSES = CONTRACT_TEST_RESULT_STATUSES;
+export const ADVERSE_EFFECT_SEVERITIES = CONTRACT_ADVERSE_EFFECT_SEVERITIES;
 
 export type HistoryEventKind = HealthHistoryEventKind;
 export type HistoryEventSource = EventSource;

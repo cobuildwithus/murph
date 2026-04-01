@@ -16,9 +16,11 @@ import {
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   resolveAssistantStatePaths,
+  sameHostedExecutionBundleRef,
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
   snapshotHostedExecutionContext,
+  type HostedExecutionBundleRef,
   writeHostedBundleTextFile,
 } from "../src/index.ts";
 
@@ -546,6 +548,36 @@ test("hosted bundle restore rejects backslash and drive-style traversal archive 
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
+});
+
+function buildBundleRef(overrides: Partial<HostedExecutionBundleRef> = {}): HostedExecutionBundleRef {
+  return {
+    hash: "sha256:abc",
+    key: "transient/bundles/vault/sha256-abc.bin",
+    size: 12,
+    updatedAt: "2026-03-31T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+test("sameHostedExecutionBundleRef ignores updatedAt when content identity matches", () => {
+  expect(
+    sameHostedExecutionBundleRef(
+      buildBundleRef({ updatedAt: "2026-03-31T00:00:00.000Z" }),
+      buildBundleRef({ updatedAt: "2026-03-31T00:05:00.000Z" }),
+    ),
+  ).toBe(true);
+});
+
+test("sameHostedExecutionBundleRef returns false when bundle identity changes", () => {
+  expect(
+    sameHostedExecutionBundleRef(
+      buildBundleRef(),
+      buildBundleRef({ hash: "sha256:def", key: "transient/bundles/vault/sha256-def.bin" }),
+    ),
+  ).toBe(false);
+  expect(sameHostedExecutionBundleRef(buildBundleRef(), null)).toBe(false);
+  expect(sameHostedExecutionBundleRef(null, null)).toBe(true);
 });
 
 function createHostedBundleArchiveBytes(archivePath: string): Uint8Array {

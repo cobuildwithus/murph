@@ -1,14 +1,19 @@
-import type { ProfileSnapshotProfile as ContractProfileSnapshotProfile } from "@murph/contracts";
+import {
+  CONTRACT_SCHEMA_VERSION,
+  FRONTMATTER_DOC_TYPES,
+  PROFILE_SNAPSHOT_SOURCES as CONTRACT_PROFILE_SNAPSHOT_SOURCES,
+  type ProfileSnapshotProfile,
+  type ProfileSnapshotSource,
+} from "@murph/contracts";
 
-export const PROFILE_SNAPSHOT_SCHEMA_VERSION = "murph.profile-snapshot.v1";
+export const PROFILE_SNAPSHOT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileSnapshot;
 export const PROFILE_SNAPSHOT_LEDGER_DIRECTORY = "ledger/profile-snapshots";
 export const PROFILE_CURRENT_DOCUMENT_PATH = "bank/profile/current.md";
-export const PROFILE_CURRENT_SCHEMA_VERSION = "murph.frontmatter.profile-current.v1";
-export const PROFILE_CURRENT_DOC_TYPE = "profile_current";
+export const PROFILE_CURRENT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileCurrentFrontmatter;
+export const PROFILE_CURRENT_DOC_TYPE = FRONTMATTER_DOC_TYPES.profileCurrent;
 
-export const PROFILE_SNAPSHOT_SOURCES = ["assessment_projection", "manual", "derived"] as const;
-export type ProfileSnapshotSource = (typeof PROFILE_SNAPSHOT_SOURCES)[number];
-export type ProfileSnapshotProfile = ContractProfileSnapshotProfile;
+export const PROFILE_SNAPSHOT_SOURCES = CONTRACT_PROFILE_SNAPSHOT_SOURCES;
+export type { ProfileSnapshotProfile, ProfileSnapshotSource };
 
 export interface ProfileSnapshotRecord {
   schemaVersion: typeof PROFILE_SNAPSHOT_SCHEMA_VERSION;

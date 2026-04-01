@@ -15,6 +15,21 @@ export interface HostedExecutionBundleRef {
   updatedAt: string;
 }
 
+export function sameHostedExecutionBundleRef(
+  left: HostedExecutionBundleRef | null | undefined,
+  right: HostedExecutionBundleRef | null | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.hash === right.hash && left.key === right.key && left.size === right.size;
+}
+
 export interface HostedBundleArtifactRef {
   byteSize: number;
   sha256: string;

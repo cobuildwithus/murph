@@ -1,5 +1,6 @@
 import {
   listHostedBundleArtifacts,
+  sameHostedExecutionBundleRef,
   type HostedExecutionBundleRef,
 } from "@murph/runtime-state";
 
@@ -53,7 +54,7 @@ export class HostedBundleGarbageCollector {
     previousVaultRef: HostedExecutionBundleRef | null;
     userId: string;
   }): Promise<void> {
-    if (sameBundleRef(input.previousVaultRef, input.nextVaultRef)) {
+    if (sameHostedExecutionBundleRef(input.previousVaultRef, input.nextVaultRef)) {
       return;
     }
 
@@ -104,34 +105,4 @@ export class HostedBundleGarbageCollector {
       }).map((artifact) => artifact.ref.sha256),
     );
   }
-}
-
-function sameBundleRef(
-  left: {
-    hash: string;
-    key: string;
-    size: number;
-    updatedAt: string;
-  } | null,
-  right: {
-    hash: string;
-    key: string;
-    size: number;
-    updatedAt: string;
-  } | null,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right) {
-    return false;
-  }
-
-  return (
-    left.hash === right.hash
-    && left.key === right.key
-    && left.size === right.size
-    && left.updatedAt === right.updatedAt
-  );
 }
