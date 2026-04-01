@@ -28,6 +28,21 @@ interface JsonErrorResponseOptions {
   matchers?: JsonErrorMatcher[];
 }
 
+export interface JsonRouteHelpersOptions {
+  defaultHeaders?: HeadersInit;
+  internalMessage: string;
+  logMessage: string;
+  matchers?: JsonErrorMatcher[];
+}
+
+export interface JsonRouteHelpers {
+  jsonError(error: unknown, headers?: HeadersInit): NextResponse;
+  jsonOk(payload: unknown, status?: number, headers?: HeadersInit): NextResponse;
+  withJsonError<TArgs extends unknown[]>(
+    handler: (...args: TArgs) => Promise<Response>,
+  ): (...args: TArgs) => Promise<Response>;
+}
+
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
   return requireJsonObject((await request.json()) as unknown);
 }
@@ -130,6 +145,35 @@ export function createJsonErrorResponse(
     },
     buildJsonResponseInit(options, 500),
   );
+}
+
+export function createJsonRouteHelpers(
+  options: JsonRouteHelpersOptions,
+): JsonRouteHelpers {
+  const jsonError = (error: unknown, headers?: HeadersInit): NextResponse =>
+    createJsonErrorResponse(error, {
+      defaultHeaders: options.defaultHeaders,
+      headers,
+      internalMessage: options.internalMessage,
+      logMessage: options.logMessage,
+      matchers: options.matchers,
+    });
+
+  const jsonOk = (payload: unknown, status = 200, headers?: HeadersInit): NextResponse =>
+    NextResponse.json(payload, {
+      headers: mergeJsonHeaders(options.defaultHeaders, headers),
+      status,
+    });
+
+  return {
+    jsonError,
+    jsonOk,
+    withJsonError<TArgs extends unknown[]>(
+      handler: (...args: TArgs) => Promise<Response>,
+    ): (...args: TArgs) => Promise<Response> {
+      return withJsonErrorHandling(handler, (error) => jsonError(error));
+    },
+  };
 }
 
 export function withJsonErrorHandling<TArgs extends unknown[], TResponse extends Response>(
