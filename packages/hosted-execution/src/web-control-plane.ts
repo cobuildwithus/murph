@@ -504,6 +504,40 @@ function normalizeHostedExecutionAuthorizationToken(value: string | null | undef
   return normalized.length > 0 ? normalized : null;
 }
 
+export async function fetchHostedExecutionWebControlPlaneResponse(input: {
+  authorizationToken?: string | null;
+  baseUrl: string;
+  body?: string;
+  boundUserId: string;
+  fetchImpl?: typeof fetch;
+  method: "GET" | "POST";
+  path: string;
+  search?: string | null;
+  timeoutMs: number | null;
+}): Promise<Response> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const targetUrl = new URL(
+    input.path.replace(/^\/+/u, ""),
+    `${requireHostedExecutionWebControlBaseUrl(input.baseUrl)}/`,
+  );
+
+  if (input.search) {
+    targetUrl.search = input.search;
+  }
+
+  return fetchImpl(targetUrl.toString(), {
+    ...(input.body === undefined ? {} : { body: input.body }),
+    headers: buildHostedExecutionRequestHeaders({
+      authorizationToken: normalizeHostedExecutionAuthorizationToken(input.authorizationToken),
+      boundUserId: input.boundUserId,
+      withJsonContentType: input.body !== undefined,
+    }),
+    method: input.method,
+    redirect: "error",
+    signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
+  });
+}
+
 async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   body?: Record<string, unknown>;
   boundUserId: string;
@@ -516,22 +550,16 @@ async function requestHostedExecutionWebControlPlaneJson<TResponse>(input: {
   authorizationToken?: string | null;
   url: string;
 }): Promise<TResponse> {
-  const fetchImpl = input.fetchImpl ?? fetch;
-  const body = input.body === undefined ? undefined : JSON.stringify(input.body);
-  const headers = buildHostedExecutionRequestHeaders({
-    authorizationToken: normalizeHostedExecutionAuthorizationToken(input.authorizationToken),
+  const response = await fetchHostedExecutionWebControlPlaneResponse({
+    authorizationToken: input.authorizationToken,
+    baseUrl: input.url,
+    body: input.body === undefined ? undefined : JSON.stringify(input.body),
     boundUserId: input.boundUserId,
-    withJsonContentType: body !== undefined,
+    fetchImpl: input.fetchImpl,
+    method: input.method,
+    path: input.path,
+    timeoutMs: input.timeoutMs,
   });
-  const response = await fetchImpl(
-    new URL(input.path.replace(/^\/+/u, ""), `${requireHostedExecutionWebControlBaseUrl(input.url)}/`).toString(),
-    {
-      ...(body === undefined ? {} : { body }),
-      headers,
-      method: input.method,
-      signal: typeof input.timeoutMs === "number" ? AbortSignal.timeout(input.timeoutMs) : undefined,
-    },
-  );
   const text = await response.text();
   const payload = parseJsonBody(text);
 

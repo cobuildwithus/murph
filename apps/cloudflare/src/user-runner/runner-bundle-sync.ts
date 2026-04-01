@@ -13,6 +13,7 @@ import {
   createHostedBundleStore,
   createHostedUserEnvStore,
   writeHostedBundleBytesIfChanged,
+  type HostedBundleStore,
   type R2BucketLike,
 } from "../bundle-store.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
@@ -54,8 +55,16 @@ export class RunnerBundleSync {
     const store = this.createBundleStore();
     const bundleState = await this.queueStore.readBundleMetaState();
     return {
-      agentState: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.agentState)),
-      vault: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.vault)),
+      agentState: encodeHostedBundleBase64(await readRequiredBundleForRunner({
+        bundleStore: store,
+        kind: "agent-state",
+        ref: bundleState.bundleRefs.agentState,
+      })),
+      vault: encodeHostedBundleBase64(await readRequiredBundleForRunner({
+        bundleStore: store,
+        kind: "vault",
+        ref: bundleState.bundleRefs.vault,
+      })),
     };
   }
 
@@ -186,6 +195,23 @@ export class RunnerBundleSync {
       // Best-effort cleanup only; do not fail successful bundle swaps.
     }
   }
+}
+
+async function readRequiredBundleForRunner(input: {
+  bundleStore: HostedBundleStore;
+  kind: "agent-state" | "vault";
+  ref: HostedExecutionBundleRefs["agentState"] | HostedExecutionBundleRefs["vault"];
+}): Promise<Uint8Array | null> {
+  if (!input.ref) {
+    return null;
+  }
+
+  const bytes = await input.bundleStore.readBundle(input.ref);
+  if (!bytes) {
+    throw new Error(`Hosted ${input.kind} bundle ${input.ref.key} is missing from R2.`);
+  }
+
+  return bytes;
 }
 
 function assertBundleRefsStillCompatible(input: {
