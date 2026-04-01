@@ -1,4 +1,3 @@
-import { IMessageSDK } from '@photon-ai/imessage-kit'
 import {
   parseTelegramThreadTarget,
   serializeTelegramThreadTarget,
@@ -27,6 +26,7 @@ import type {
   EmailRuntimeDependencies,
   FetchLike,
   FetchLikeResponse,
+  ImessageSdkLike,
   ImessageRuntimeDependencies,
   LinqRuntimeDependencies,
   TelegramRuntimeDependencies,
@@ -36,6 +36,7 @@ import { normalizeOptionalText } from './helpers.js'
 const TELEGRAM_MAX_TEXT_LENGTH = 4096
 const TELEGRAM_MAX_DELIVERY_ATTEMPTS = 3
 const TELEGRAM_SEND_TIMEOUT_MS = 30_000
+const IMESSAGE_KIT_MODULE_PARTS = ['@photon-ai', 'imessage-kit'] as const
 
 type TelegramParsedTarget = TelegramThreadTarget
 
@@ -82,7 +83,9 @@ export async function sendImessageMessage(
   let sdk
 
   try {
-    sdk = (dependencies.createSdk ?? (() => new IMessageSDK()))()
+    sdk = dependencies.createSdk
+      ? dependencies.createSdk()
+      : new (await loadImessageSdkConstructor())()
   } catch (error) {
     throw mapImessageRuntimeError(error)
   }
@@ -104,6 +107,33 @@ export async function sendImessageMessage(
     } catch {}
   }
 }
+
+async function loadImessageSdkConstructor(): Promise<new () => ImessageSdkLike> {
+  const imported = await importImessageKitModule()
+  const sdkConstructor =
+    imported && typeof imported === 'object' && 'IMessageSDK' in imported
+      ? (imported as { IMessageSDK?: unknown }).IMessageSDK
+      : null
+
+  if (typeof sdkConstructor !== 'function') {
+    throw new VaultCliError(
+      'ASSISTANT_IMESSAGE_UNAVAILABLE',
+      '@photon-ai/imessage-kit did not expose the expected IMessageSDK constructor.',
+    )
+  }
+
+  return sdkConstructor as new () => ImessageSdkLike
+}
+
+async function importImessageKitModule(): Promise<unknown> {
+  const specifier = IMESSAGE_KIT_MODULE_PARTS.join('/')
+  return await importDynamicModule(specifier)
+}
+
+const importDynamicModule = new Function(
+  'specifier',
+  'return import(specifier)',
+) as (specifier: string) => Promise<unknown>
 
 export async function sendTelegramMessage(
   input: {

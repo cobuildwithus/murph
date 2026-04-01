@@ -1782,6 +1782,17 @@ test('sendImessageMessage maps adapter database-open failures to permission guid
   )
 })
 
+test('sendImessageMessage loads the iMessage SDK at runtime instead of statically importing it', async () => {
+  const runtimeSource = await readFile(
+    path.resolve('packages/assistant-core/src/assistant/channels/runtime.ts'),
+    'utf8',
+  )
+
+  assert.doesNotMatch(runtimeSource, /from '@photon-ai\/imessage-kit'/u)
+  assert.match(runtimeSource, /IMESSAGE_KIT_MODULE_PARTS/u)
+  assert.match(runtimeSource, /new Function\(\s*'specifier',/u)
+})
+
 function restoreEnvironmentVariable(
   key: string,
   value: string | undefined,
