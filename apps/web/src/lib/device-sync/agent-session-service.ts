@@ -43,6 +43,23 @@ export interface HostedTokenExport {
   exportedAt: string;
 }
 
+type HostedProviderTokenRefreshResult =
+  | { status: "success"; tokens: ProviderAuthTokens }
+  | { status: "error"; error: unknown };
+
+type HostedTokenRefreshLockResult =
+  | {
+      status: "success";
+      connection: PublicDeviceSyncAccount;
+      tokenBundle: HostedTokenExport;
+      refreshed: boolean;
+      tokenVersionChanged: boolean;
+    }
+  | {
+      status: "error";
+      error: unknown;
+    };
+
 export class HostedDeviceSyncAgentSessionService {
   readonly request: Request;
   readonly store: PrismaDeviceSyncControlPlaneStore;
@@ -187,7 +204,7 @@ export class HostedDeviceSyncAgentSessionService {
   }> {
     const now = toIsoTimestamp(new Date());
 
-    const result = await this.store.withConnectionRefreshLock(connectionId, async (tx) => {
+    const result = await this.store.withConnectionRefreshLock<HostedTokenRefreshLockResult>(connectionId, async (tx) => {
       const record = await tx.deviceConnection.findFirst({
         where: {
           id: connectionId,
@@ -214,6 +231,7 @@ export class HostedDeviceSyncAgentSessionService {
         bundle.tokenVersion !== options.expectedTokenVersion
       ) {
         return {
+          status: "success",
           connection: currentConnection,
           tokenBundle: buildTokenExport(bundle, now),
           refreshed: false,
@@ -223,6 +241,7 @@ export class HostedDeviceSyncAgentSessionService {
 
       if (!options.force && !shouldRefreshHostedToken(bundle.account.accessTokenExpiresAt ?? null, now)) {
         return {
+          status: "success",
           connection: currentConnection,
           tokenBundle: buildTokenExport(bundle, now),
           refreshed: false,
@@ -231,12 +250,18 @@ export class HostedDeviceSyncAgentSessionService {
       }
 
       const provider = requireHostedDeviceSyncProvider(this.registry, bundle.account.provider);
-      const nextTokens = await this.refreshProviderTokensWithStatusHandling({
+      const refreshResult = await this.refreshProviderTokensWithStatusHandling({
         tx,
         provider,
         bundle,
         now,
       });
+
+      if (refreshResult.status === "error") {
+        return refreshResult;
+      }
+
+      const nextTokens = refreshResult.tokens;
       const nextRefreshToken = nextTokens.refreshToken ?? bundle.account.refreshToken;
       const updatedConnection = await tx.deviceConnection.update({
         where: {
@@ -265,6 +290,7 @@ export class HostedDeviceSyncAgentSessionService {
       });
 
       return {
+        status: "success",
         connection: mapHostedPublicAccountRecord(updatedConnection),
         tokenBundle: {
           accessToken: nextTokens.accessToken,
@@ -279,8 +305,15 @@ export class HostedDeviceSyncAgentSessionService {
       };
     });
 
+    if (result.status === "error") {
+      throw result.error;
+    }
+
     return {
-      ...result,
+      connection: result.connection,
+      tokenBundle: result.tokenBundle,
+      refreshed: result.refreshed,
+      tokenVersionChanged: result.tokenVersionChanged,
       agentSession: await this.rotateAgentSession(session, now),
     };
   }
@@ -376,9 +409,12 @@ export class HostedDeviceSyncAgentSessionService {
     provider: DeviceSyncProvider;
     bundle: HostedConnectionSecretBundle;
     now: string;
-  }): Promise<ProviderAuthTokens> {
+  }): Promise<HostedProviderTokenRefreshResult> {
     try {
-      return await input.provider.refreshTokens(input.bundle.account);
+      return {
+        status: "success",
+        tokens: await input.provider.refreshTokens(input.bundle.account),
+      };
     } catch (error) {
       if (isDeviceSyncError(error) && error.accountStatus) {
         await input.tx.deviceConnection.update({
@@ -408,7 +444,10 @@ export class HostedDeviceSyncAgentSessionService {
         });
       }
 
-      throw error;
+      return {
+        status: "error",
+        error,
+      };
     }
   }
 }

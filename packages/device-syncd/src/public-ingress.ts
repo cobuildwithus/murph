@@ -315,8 +315,6 @@ export class DeviceSyncPublicIngress {
       });
     }
 
-    await this.store.markWebhookReceived(account.id, now);
-
     try {
       await this.hooks.onWebhookAccepted?.({
         account,
@@ -324,13 +322,25 @@ export class DeviceSyncPublicIngress {
         provider,
         now,
       });
+
+      if (!this.hooks.onWebhookAccepted) {
+        await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+      }
     } catch (error) {
       await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
       throw error;
     }
 
-    if (!this.hooks.onWebhookAccepted) {
-      await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+    try {
+      await this.store.markWebhookReceived(account.id, now);
+    } catch (error) {
+      this.logger.warn?.("Failed to record last webhook receipt time after durable acceptance.", {
+        provider: provider.provider,
+        accountId: account.id,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return {
