@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { afterEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
@@ -30,6 +32,16 @@ describe("cloudflare worker routes", () => {
 
   it("re-exports ContainerProxy for container outbound routing", () => {
     expect(ExportedContainerProxy).toBe(PackageContainerProxy);
+  });
+
+  it("imports inbox email parsing through the email-only subpath", async () => {
+    const workerSource = await readFile(
+      path.resolve("apps/cloudflare/src/index.ts"),
+      "utf8",
+    );
+
+    expect(workerSource).not.toMatch(/from "@murph\/inboxd";/u);
+    expect(workerSource).toMatch(/@murph\/inboxd\/connectors\/email\/parsed/u);
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {

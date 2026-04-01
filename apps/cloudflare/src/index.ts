@@ -12,7 +12,10 @@ import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
-import { parseRawEmailMessage, readRawEmailHeaderValue } from "@murph/inboxd";
+import {
+  parseRawEmailMessage,
+  readRawEmailHeaderValue,
+} from "@murph/inboxd/connectors/email/parsed";
 
 import {
   gatewayFetchAttachmentsInputSchema,
