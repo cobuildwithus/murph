@@ -16,6 +16,7 @@ const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/contracts": "../contracts/src/index.ts",
   "@murphai/core": "../core/src/index.ts",
   "@murphai/inboxd": "./src/index.ts",
+  "@murphai/messaging-ingress": "../messaging-ingress/src/index.ts",
   "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;
 

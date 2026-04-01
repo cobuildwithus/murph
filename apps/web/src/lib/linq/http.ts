@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
-import { isLinqWebhookPayloadError, isLinqWebhookVerificationError } from "@murphai/inboxd/linq-webhook";
+import { isLinqWebhookPayloadError, isLinqWebhookVerificationError } from "@murphai/messaging-ingress/linq-webhook";
 
 import {
   createJsonRouteHelpers,

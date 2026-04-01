@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LinqWebhookPayloadError, LinqWebhookVerificationError } from "@murphai/inboxd/linq-webhook";
+import { LinqWebhookPayloadError, LinqWebhookVerificationError } from "@murphai/messaging-ingress/linq-webhook";
 
 const mocks = vi.hoisted(() => ({
   createHostedLinqControlPlane: vi.fn(),

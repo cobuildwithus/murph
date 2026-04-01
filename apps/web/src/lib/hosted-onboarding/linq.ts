@@ -1,16 +1,18 @@
 import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingEnvironment, requireHostedOnboardingLinqConfig } from "./runtime";
-import { extractLinqTextMessage, normalizeNullableString } from "./shared";
+import { normalizeNullableString } from "./shared";
 import { fetchLinqApi, LinqApiTimeoutError } from "../linq/api";
 import {
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseCanonicalLinqMessageReceivedEvent,
   parseLinqWebhookEvent,
+  resolveLinqWebhookOccurredAt,
+  summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
   type LinqMessageReceivedEvent,
   type LinqWebhookEvent,
-} from "@murphai/inboxd/linq-webhook";
+} from "@murphai/messaging-ingress/linq-webhook";
 
 export type HostedLinqWebhookEvent = LinqWebhookEvent;
 export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;
@@ -33,6 +35,20 @@ export function requireHostedLinqMessageReceivedEvent(
     return parseCanonicalLinqMessageReceivedEvent(event);
   } catch (error) {
     if (error instanceof TypeError) {
+      if (error.message.startsWith("Invalid ISO timestamp:")) {
+        throw hostedOnboardingError({
+          code: "LINQ_PAYLOAD_INVALID",
+          message: normalizeNullableString(
+            typeof event.data === "object" && event.data && "received_at" in event.data
+              ? String((event.data as { received_at?: unknown }).received_at ?? "")
+              : null,
+          )
+            ? "received_at must be a valid timestamp"
+            : "created_at must be a valid timestamp",
+          httpStatus: 400,
+        });
+      }
+
       throw hostedOnboardingError({
         code: "LINQ_PAYLOAD_INVALID",
         message: error.message,
@@ -153,17 +169,19 @@ export function summarizeHostedLinqMessage(event: HostedLinqMessageReceivedEvent
   phoneNumber: string;
   text: string | null;
 } {
+  const summary = summarizeLinqMessageReceivedEvent(event);
+
   return {
-    chatId: event.data.chat_id,
-    isFromMe: event.data.is_from_me,
-    messageId: event.data.message.id,
-    phoneNumber: event.data.from,
-    text: extractLinqTextMessage(event.data.message),
+    chatId: summary.chatId,
+    isFromMe: summary.isFromMe,
+    messageId: summary.messageId,
+    phoneNumber: summary.phoneNumber,
+    text: summary.text,
   };
 }
 
 export function resolveHostedLinqOccurredAt(event: HostedLinqMessageReceivedEvent): string {
-  return normalizeRequiredString(event.data.received_at ?? event.created_at, "Linq webhook occurredAt");
+  return resolveLinqWebhookOccurredAt(event);
 }
 
 export function buildHostedInviteReply(input: {

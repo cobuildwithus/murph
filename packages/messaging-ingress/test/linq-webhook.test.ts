@@ -4,7 +4,10 @@ import { createHmac } from "node:crypto";
 import { test } from "vitest";
 
 import {
+  minimizeLinqMessageReceivedEvent,
+  minimizeLinqWebhookEvent,
   parseCanonicalLinqMessageReceivedEvent,
+  summarizeLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
 } from "../src/index.ts";
 
@@ -38,8 +41,8 @@ test("verifyAndParseLinqWebhookRequest validates the Linq signature envelope", (
 
   const event = verifyAndParseLinqWebhookRequest({
     headers: new Headers({
-      "x-webhook-timestamp": timestamp,
       "x-webhook-signature": signature,
+      "x-webhook-timestamp": timestamp,
     }),
     rawBody: payload,
     webhookSecret: "secret-123",
@@ -74,8 +77,8 @@ test("verifyAndParseLinqWebhookRequest rejects invalid signatures", () => {
     () =>
       verifyAndParseLinqWebhookRequest({
         headers: {
-          "x-webhook-timestamp": "1711360800",
           "x-webhook-signature": "sha256=deadbeef",
+          "x-webhook-timestamp": "1711360800",
         },
         rawBody: payload,
         webhookSecret: "secret-123",
@@ -109,8 +112,8 @@ test("verifyAndParseLinqWebhookRequest rejects stale timestamps when a tolerance
     () =>
       verifyAndParseLinqWebhookRequest({
         headers: {
-          "x-webhook-timestamp": timestamp,
           "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+          "x-webhook-timestamp": timestamp,
         },
         now: 1711361400_000,
         rawBody: payload,
@@ -146,8 +149,8 @@ test("verifyAndParseLinqWebhookRequest rejects invalid timestamps when a toleran
     () =>
       verifyAndParseLinqWebhookRequest({
         headers: {
-          "x-webhook-timestamp": timestamp,
           "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+          "x-webhook-timestamp": timestamp,
         },
         now: 1711360800_000,
         rawBody: payload,
@@ -187,6 +190,139 @@ test("verifyAndParseLinqWebhookRequest requires a configured webhook secret", ()
       }),
     /Linq webhook secret is required/u,
   );
+});
+
+test("parseCanonicalLinqMessageReceivedEvent exposes summaries and minimizers", () => {
+  const event = parseCanonicalLinqMessageReceivedEvent({
+    api_version: "v3",
+    created_at: "2026-03-25T10:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        effect: {
+          name: "slam",
+          type: "bubble",
+        },
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "Hello",
+          },
+          {
+            attachment_id: "att_123",
+            filename: "photo.jpg",
+            mime_type: "image/jpeg",
+            size: 1234,
+            type: "media",
+            url: "https://files.example.test/photo.jpg",
+          },
+        ],
+        reply_to: {
+          message_id: "msg_122",
+          part_index: 0,
+        },
+      },
+      recipient_phone: "+15557654321",
+      received_at: "2026-03-25T09:59:59.000Z",
+      service: "SMS",
+    },
+    event_id: "evt_123",
+    event_type: "message.received",
+  });
+
+  assert.deepEqual(summarizeLinqMessageReceivedEvent(event), {
+    chatId: "chat_123",
+    isFromMe: false,
+    messageId: "msg_123",
+    phoneNumber: "+15551234567",
+    text: "Hello",
+  });
+
+  assert.deepEqual(minimizeLinqMessageReceivedEvent(event), {
+    api_version: "v3",
+    created_at: "2026-03-25T10:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        effect: {
+          name: "slam",
+          type: "bubble",
+        },
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "Hello",
+          },
+          {
+            attachment_id: "att_123",
+            filename: "photo.jpg",
+            mime_type: "image/jpeg",
+            size: 1234,
+            type: "media",
+          },
+        ],
+        reply_to: {
+          message_id: "msg_122",
+          part_index: 0,
+        },
+      },
+      received_at: "2026-03-25T09:59:59.000Z",
+      recipient_phone: "+15557654321",
+      service: "SMS",
+    },
+    event_id: "evt_123",
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: null,
+  });
+
+  assert.deepEqual(minimizeLinqWebhookEvent(event), {
+    api_version: "v3",
+    created_at: "2026-03-25T10:00:00.000Z",
+    data: {
+      chat_id: "chat_123",
+      from: "+15551234567",
+      is_from_me: false,
+      message: {
+        effect: {
+          name: "slam",
+          type: "bubble",
+        },
+        id: "msg_123",
+        parts: [
+          {
+            type: "text",
+            value: "Hello",
+          },
+          {
+            attachment_id: "att_123",
+            filename: "photo.jpg",
+            mime_type: "image/jpeg",
+            size: 1234,
+            type: "media",
+            url: "https://files.example.test/photo.jpg",
+          },
+        ],
+        reply_to: {
+          message_id: "msg_122",
+          part_index: 0,
+        },
+      },
+      received_at: "2026-03-25T09:59:59.000Z",
+      recipient_phone: "+15557654321",
+      service: "SMS",
+    },
+    event_id: "evt_123",
+    event_type: "message.received",
+    partner_id: null,
+    trace_id: null,
+  });
 });
 
 test("parseCanonicalLinqMessageReceivedEvent rejects a missing message object", () => {
@@ -291,14 +427,10 @@ test("parseCanonicalLinqMessageReceivedEvent rejects invalid timestamps", () => 
           },
         },
       }),
-    /created_at must be a valid timestamp/u,
+    /Invalid ISO timestamp: not-a-date/u,
   );
 });
 
 function signLinqWebhook(secret: string, payload: string, timestamp: string): string {
-  const signature = createHmac("sha256", secret)
-    .update(`${timestamp}.${payload}`)
-    .digest("hex");
-
-  return `sha256=${signature}`;
+  return `sha256=${createHmac("sha256", secret).update(`${timestamp}.${payload}`).digest("hex")}`;
 }

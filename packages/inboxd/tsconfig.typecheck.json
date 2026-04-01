@@ -8,6 +8,9 @@
   },
   "references": [
     {
+      "path": "../messaging-ingress"
+    },
+    {
       "path": "../contracts/tsconfig.build.json"
     },
     {

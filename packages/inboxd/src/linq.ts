@@ -2,6 +2,7 @@ export {
   createLinqWebhookConnector,
 } from "./connectors/linq/connector.ts";
 export {
+  assertLinqWebhookTimestampFresh,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseLinqWebhookEvent,
@@ -10,14 +11,21 @@ export {
   verifyLinqWebhookSignature,
   LinqWebhookPayloadError,
   LinqWebhookVerificationError,
-} from "./connectors/linq/webhook.ts";
+} from "@murphai/messaging-ingress/linq-webhook";
 export type {
   LinqWebhookConnectorOptions,
 } from "./connectors/linq/connector.ts";
 export {
-  normalizeLinqWebhookEvent,
+  buildLinqMessageText,
+  minimizeLinqMessageReceivedEvent,
+  minimizeLinqWebhookEvent,
   parseCanonicalLinqMessageReceivedEvent,
+  resolveLinqWebhookOccurredAt,
   requireLinqMessageReceivedEvent,
+  summarizeLinqMessageReceivedEvent,
+} from "@murphai/messaging-ingress/linq-webhook";
+export {
+  normalizeLinqWebhookEvent,
   toLinqChatMessage,
 } from "./connectors/linq/normalize.ts";
 export type {
@@ -34,4 +42,4 @@ export type {
   LinqSendMessageResponse,
   LinqTextPart,
   LinqWebhookEvent,
-} from "./connectors/linq/types.ts";
+} from "@murphai/messaging-ingress/linq-webhook";
