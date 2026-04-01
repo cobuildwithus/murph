@@ -1,80 +1,6 @@
+import { isHostedUserEnvKeyAllowed } from "./hosted-env-policy.ts";
+
 export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
-
-const DEFAULT_ALLOWED_USER_ENV_KEYS = [
-  "ANTHROPIC_API_KEY",
-  "CEREBRAS_API_KEY",
-  "DEEPSEEK_API_KEY",
-  "FFMPEG_COMMAND",
-  "FIREWORKS_API_KEY",
-  "GOOGLE_API_KEY",
-  "GOOGLE_GENERATIVE_AI_API_KEY",
-  "GROQ_API_KEY",
-  "HF_TOKEN",
-  "HUGGINGFACEHUB_API_TOKEN",
-  "HUGGINGFACE_API_KEY",
-  "HUGGING_FACE_HUB_TOKEN",
-  "LITELLM_PROXY_API_KEY",
-  "MISTRAL_API_KEY",
-  "NVIDIA_API_KEY",
-  "NGC_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENROUTER_API_KEY",
-  "PERPLEXITY_API_KEY",
-  "PDFTOTEXT_COMMAND",
-  "TOGETHER_API_KEY",
-  "VENICE_API_KEY",
-  "WHISPER_COMMAND",
-  "WHISPER_MODEL_PATH",
-  "XAI_API_KEY",
-] as const;
-
-const DEFAULT_ALLOWED_USER_ENV_PREFIXES = [
-  "ANTHROPIC_",
-  "CEREBRAS_",
-  "DEEPSEEK_",
-  "FIREWORKS_",
-  "GOOGLE_",
-  "GOOGLE_GENERATIVE_AI_",
-  "GROQ_",
-  "HF_",
-  "HOSTED_USER_",
-  "HUGGINGFACE_",
-  "HUGGING_FACE_",
-  "LITELLM_",
-  "LM_STUDIO_",
-  "MISTRAL_",
-  "NGC_",
-  "NVIDIA_",
-  "OPENAI_",
-  "OPENROUTER_",
-  "PERPLEXITY_",
-  "PDFTOTEXT_",
-  "TOGETHER_",
-  "VENICE_",
-  "VLLM_",
-  "WHISPER_",
-  "XAI_",
-] as const;
-
-const DISALLOWED_USER_ENV_KEYS = new Set([
-  "HOME",
-  "HOSTED_EXECUTION_BUNDLE_ENCRYPTION_KEY",
-  "HOSTED_EXECUTION_CONTROL_TOKEN",
-  "HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN",
-  "HOSTED_EXECUTION_SIGNING_SECRET",
-  "NODE_ENV",
-  "PATH",
-  "PORT",
-  "PWD",
-  "VAULT",
-]);
-
-const DISALLOWED_USER_ENV_PREFIXES = [
-  "CF_",
-  "HOSTED_EMAIL_",
-  "HOSTED_EXECUTION_",
-  "WRANGLER_",
-];
 
 export interface HostedUserEnvConfig {
   env: Record<string, string>;
@@ -279,45 +205,9 @@ function normalizeHostedUserEnvValue(value: string, key: string): string | null 
   return normalized;
 }
 
-function isHostedUserEnvKeyAllowed(
-  key: string,
-  source: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  if (DISALLOWED_USER_ENV_KEYS.has(key)) {
-    return false;
-  }
-
-  if (DISALLOWED_USER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
-    return false;
-  }
-
-  const allowedKeys = new Set([
-    ...DEFAULT_ALLOWED_USER_ENV_KEYS,
-    ...parseCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS),
-  ]);
-  if (allowedKeys.has(key)) {
-    return true;
-  }
-
-  const allowedPrefixes = [
-    ...DEFAULT_ALLOWED_USER_ENV_PREFIXES,
-    ...parseCsvList(source.HOSTED_EXECUTION_ALLOWED_USER_ENV_PREFIXES),
-  ];
-
-  return allowedPrefixes.some((prefix) => key.startsWith(prefix));
-}
-
 function sortHostedUserEnv(env: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env)
       .sort(([left], [right]) => left.localeCompare(right)),
   );
-}
-
-function parseCsvList(value: string | undefined): string[] {
-  return String(value ?? "")
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .map((entry) => entry.toUpperCase());
 }
