@@ -63,6 +63,6 @@
     "relationship"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-family-member.schema.json",
+  "$id": "@murphai/contracts/frontmatter-family-member.schema.json",
   "title": "Murph Family Member Frontmatter"
 }

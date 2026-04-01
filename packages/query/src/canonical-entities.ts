@@ -1,7 +1,7 @@
 import {
   extractIsoDatePrefix,
   type BankEntityKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 export type CanonicalRecordClass = "bank" | "ledger" | "sample" | "snapshot";
 

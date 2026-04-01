@@ -1,7 +1,7 @@
 import {
   profileSnapshotProfileSchema,
   safeParseContract,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import { emitAuditRecord } from "../audit.ts";
 import { toIsoTimestamp } from "../time.ts";

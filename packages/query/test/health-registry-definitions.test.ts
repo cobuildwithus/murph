@@ -14,7 +14,7 @@ import {
   hasHealthEntityRegistry,
   healthEntityDefinitionByKind,
   protocolRegistryEntityDefinition,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 import {

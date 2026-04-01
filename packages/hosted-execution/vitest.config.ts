@@ -13,8 +13,8 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murph/contracts": "../contracts/src/index.ts",
-  "@murph/hosted-execution": "./src/index.ts",
+  "@murphai/contracts": "../contracts/src/index.ts",
+  "@murphai/hosted-execution": "./src/index.ts",
 } as const;
 
 export default defineProject({

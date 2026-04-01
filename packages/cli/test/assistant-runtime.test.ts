@@ -11,27 +11,27 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
-} from '@murph/assistant-core/assistant-state'
-import { listPendingAssistantUsageRecords } from '@murph/runtime-state/node'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
-import { listAssistantTurnReceipts } from '@murph/assistant-core/assistant/receipts'
-import { readAssistantSession } from '@murph/assistant-core/assistant/store/persistence'
+} from '@murphai/assistant-core/assistant-state'
+import { listPendingAssistantUsageRecords } from '@murphai/runtime-state/node'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { listAssistantTurnReceipts } from '@murphai/assistant-core/assistant/receipts'
+import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveOperatorConfigPath,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
-} from '@murph/assistant-core/operator-config'
+} from '@murphai/assistant-core/operator-config'
 import {
   extractRecoveredAssistantSession,
   isAssistantProviderInterruptedError,
-} from '@murph/assistant-core/assistant/provider-turn-recovery'
-import * as assistantAutomationArtifacts from '@murph/assistant-core/assistant/automation/artifacts'
+} from '@murphai/assistant-core/assistant/provider-turn-recovery'
+import * as assistantAutomationArtifacts from '@murphai/assistant-core/assistant/automation/artifacts'
 import {
   buildAssistantAutoReplyPrompt,
-} from '@murph/assistant-core/assistant/automation/prompt-builder'
-import { sanitizeAssistantOutboundReply } from '@murph/assistant-core/assistant/reply-sanitizer'
+} from '@murphai/assistant-core/assistant/automation/prompt-builder'
+import { sanitizeAssistantOutboundReply } from '@murphai/assistant-core/assistant/reply-sanitizer'
 import {
   assertAssistantCronJobId,
   assertAssistantCronRunId,
@@ -39,8 +39,8 @@ import {
   assertAssistantSessionId,
   assertAssistantTranscriptDistillationId,
   assertAssistantTurnId,
-} from '@murph/assistant-core/assistant/state-ids'
-import { buildAssistantTranscriptDistillationContinuityText } from '@murph/assistant-core/assistant/transcript-distillation'
+} from '@murphai/assistant-core/assistant/state-ids'
+import { buildAssistantTranscriptDistillationContinuityText } from '@murphai/assistant-core/assistant/transcript-distillation'
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
@@ -73,9 +73,9 @@ vi.mock('../src/assistant-chat-ink.js', () => ({
   runAssistantChatWithInk: runtimeMocks.runAssistantChatWithInk,
 }))
 
-vi.mock('@murph/assistant-core/outbound-channel', async () => {
-  const actual = await vi.importActual<typeof import('@murph/assistant-core/outbound-channel')>(
-    '@murph/assistant-core/outbound-channel',
+vi.mock('@murphai/assistant-core/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-core/outbound-channel')>(
+    '@murphai/assistant-core/outbound-channel',
   )
 
   return {
@@ -85,9 +85,9 @@ vi.mock('@murph/assistant-core/outbound-channel', async () => {
   }
 })
 
-vi.mock('@murph/assistant-core/assistant-provider', async () => {
-  const actual = await vi.importActual<typeof import('@murph/assistant-core/assistant-provider')>(
-    '@murph/assistant-core/assistant-provider',
+vi.mock('@murphai/assistant-core/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant-provider')>(
+    '@murphai/assistant-core/assistant-provider',
   )
 
   return {
@@ -99,7 +99,7 @@ vi.mock('@murph/assistant-core/assistant-provider', async () => {
   }
 })
 
-vi.mock('@murph/assistant-core/inbox-model-harness', () => ({
+vi.mock('@murphai/assistant-core/inbox-model-harness', () => ({
   routeInboxCaptureWithModel: runtimeMocks.routeInboxCaptureWithModel,
 }))
 
@@ -113,7 +113,7 @@ import {
   scanAssistantInboxOnce,
   sendAssistantMessage,
 } from '../src/assistant-runtime.js'
-import { bridgeAbortSignals } from '@murph/assistant-core/assistant/automation/shared'
+import { bridgeAbortSignals } from '@murphai/assistant-core/assistant/automation/shared'
 import {
   CHAT_BANNER,
   CHAT_COMPOSER_HINT,

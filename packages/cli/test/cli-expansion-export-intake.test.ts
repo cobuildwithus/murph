@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { initializeVault } from '@murph/core'
-import { buildExportPack, readVault } from '@murph/query'
+import { initializeVault } from '@murphai/core'
+import { buildExportPack, readVault } from '@murphai/query'
 import { Cli } from 'incur'
 import { test } from 'vitest'
 import { registerExportCommands } from '../src/commands/export.js'
@@ -14,11 +14,11 @@ import {
   showStoredExportPack,
 } from '../src/commands/export-intake-read-helpers.js'
 import { registerIntakeCommands } from '../src/commands/intake.js'
-import { materializeExportPack } from '@murph/assistant-core/usecases/shared'
+import { materializeExportPack } from '@murphai/assistant-core/usecases/shared'
 import {
   createIntegratedVaultServices,
   createUnwiredVaultServices,
-} from '@murph/assistant-core/vault-services'
+} from '@murphai/assistant-core/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData } from './cli-test-helpers.js'
 

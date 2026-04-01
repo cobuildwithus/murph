@@ -2,7 +2,7 @@ import {
   parseTelegramThreadTarget,
   serializeTelegramThreadTarget,
   type TelegramThreadTarget,
-} from '@murph/inboxd'
+} from '@murphai/inboxd'
 import {
   createAgentmailApiClient,
   resolveAgentmailApiKey,

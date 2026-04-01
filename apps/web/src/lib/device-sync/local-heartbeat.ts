@@ -1,6 +1,6 @@
-import { deviceSyncError } from "@murph/device-syncd";
+import { deviceSyncError } from "@murphai/device-syncd";
 
-import type { PublicDeviceSyncAccount } from "@murph/device-syncd";
+import type { PublicDeviceSyncAccount } from "@murphai/device-syncd";
 import { normalizeNullableString } from "./shared";
 
 const HEARTBEAT_ALLOWED_FIELDS = new Set([

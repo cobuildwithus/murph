@@ -1,17 +1,17 @@
 import {
   gatewayProjectionSnapshotSchema,
   type GatewayProjectionSnapshot,
-} from "@murph/gateway-core";
+} from "@murphai/gateway-core";
 import {
   parseHostedExecutionSideEffects,
   type HostedExecutionSideEffect,
   type HostedExecutionRunnerResult,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   sameHostedBundlePayloadRef,
   type HostedExecutionBundleRef,
   type HostedExecutionBundleRefIdentity,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 
 import {
   createHostedBundleStore,

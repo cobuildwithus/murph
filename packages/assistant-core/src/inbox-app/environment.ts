@@ -47,15 +47,15 @@ function createParserRuntimeUnavailableError(
     cause instanceof Error
       ? {
           cause: cause.message,
-          packages: ['@murph/inboxd', '@murph/parsers'],
+          packages: ['@murphai/inboxd', '@murphai/parsers'],
         }
       : {
-          packages: ['@murph/inboxd', '@murph/parsers'],
+          packages: ['@murphai/inboxd', '@murphai/parsers'],
         }
 
   return new VaultCliError(
     'runtime_unavailable',
-    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @murph/inboxd and @murph/parsers.`,
+    `packages/cli can describe ${operation}, but local execution is blocked until the integrating workspace builds and links @murphai/inboxd and @murphai/parsers.`,
     details,
   )
 }
@@ -83,16 +83,16 @@ export function createInboxAppEnvironment(
   const getEnvironment = dependencies.getEnvironment ?? (() => process.env)
   const loadCore =
     dependencies.loadCoreModule ??
-    (() => loadRuntimeModule<CoreRuntimeModule>('@murph/core'))
+    (() => loadRuntimeModule<CoreRuntimeModule>('@murphai/core'))
   const loadImporters =
     dependencies.loadImportersModule ??
-    (() => loadRuntimeModule<ImportersFactoryRuntimeModule>('@murph/importers'))
+    (() => loadRuntimeModule<ImportersFactoryRuntimeModule>('@murphai/importers'))
   const loadInbox =
     dependencies.loadInboxModule ??
-    (() => loadRuntimeModule<InboxRuntimeModule>('@murph/inboxd'))
+    (() => loadRuntimeModule<InboxRuntimeModule>('@murphai/inboxd'))
   const loadParsers =
     dependencies.loadParsersModule ??
-    (() => loadRuntimeModule<ParsersRuntimeModule>('@murph/parsers'))
+    (() => loadRuntimeModule<ParsersRuntimeModule>('@murphai/parsers'))
   const loadQuery =
     dependencies.loadQueryModule ??
     (() => loadQueryRuntime())

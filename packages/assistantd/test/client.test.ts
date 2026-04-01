@@ -7,7 +7,7 @@ import {
   maybeGetGatewayConversationViaDaemon,
   maybeListGatewayConversationsViaDaemon,
   resolveAssistantDaemonClientConfig,
-} from '@murph/assistantd/client'
+} from '@murphai/assistantd/client'
 
 const test = baseTest.sequential
 

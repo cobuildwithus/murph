@@ -2,12 +2,12 @@ import {
   getAssistantCronPresetDefinition,
   listAssistantCronPresets,
   toAssistantCronPreset,
-} from '@murph/assistant-core/assistant/cron/presets'
-import type { AssistantCronPreset } from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant/cron/presets'
+import type { AssistantCronPreset } from '@murphai/assistant-core/assistant-cli-contracts'
 import type {
   SetupScheduledUpdate,
   SetupStepResult,
-} from '@murph/assistant-core/setup-cli-contracts'
+} from '@murphai/assistant-core/setup-cli-contracts'
 import { createStep } from './steps.js'
 
 export interface ConfigureSetupScheduledUpdatesInput {

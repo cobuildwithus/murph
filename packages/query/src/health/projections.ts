@@ -1,6 +1,6 @@
 import {
   type HealthHistoryEventKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import {
   type CanonicalEntity,
 } from "../canonical-entities.ts";

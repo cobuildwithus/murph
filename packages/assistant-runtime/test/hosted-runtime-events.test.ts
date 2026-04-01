@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@murph/gateway-local", () => ({
+vi.mock("@murphai/gateway-local", () => ({
   sendGatewayMessageLocal: mocks.sendGatewayMessageLocal,
 }));
 

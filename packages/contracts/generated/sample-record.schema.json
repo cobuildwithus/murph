@@ -721,6 +721,6 @@
       "additionalProperties": false
     }
   ],
-  "$id": "@murph/contracts/sample-record.schema.json",
+  "$id": "@murphai/contracts/sample-record.schema.json",
   "title": "Murph Sample Record"
 }

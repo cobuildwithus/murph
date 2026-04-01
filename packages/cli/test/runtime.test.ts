@@ -3,7 +3,7 @@ import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { localParallelCliTest as test } from './local-parallel-test.js'
-import { createRuntimeUnavailableError } from '@murph/assistant-core/runtime-errors'
+import { createRuntimeUnavailableError } from '@murphai/assistant-core/runtime-errors'
 import {
   ensureCliRuntimeArtifactsWithOptions,
   repoRoot,
@@ -49,14 +49,14 @@ test('runtime unavailable error preserves the shared operator guidance payload',
   assert.equal(result.code, 'runtime_unavailable')
   assert.equal(
     result.message,
-    'packages/cli can describe samples/audit query reads, but local execution is blocked until the integrating workspace installs incur and links @murph/core, @murph/importers, and @murph/query.',
+    'packages/cli can describe samples/audit query reads, but local execution is blocked until the integrating workspace installs incur and links @murphai/core, @murphai/importers, and @murphai/query.',
   )
   assert.deepEqual(result.context, {
     cause: 'module missing',
     packages: [
-      '@murph/core',
-      '@murph/importers',
-      '@murph/query',
+      '@murphai/core',
+      '@murphai/importers',
+      '@murphai/query',
       'incur',
     ],
   })

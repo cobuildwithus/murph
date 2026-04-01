@@ -7,7 +7,7 @@ import {
   isVaultError,
   normalizeRelativeVaultPath,
   resolveVaultPathOnDisk,
-} from "@murph/core";
+} from "@murphai/core";
 
 import type { ParserArtifactRef, ParserArtifactSummary } from "./contracts/artifact.js";
 import type { ParsedBlock, ParseBlockKind } from "./contracts/parse.js";

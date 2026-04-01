@@ -2,7 +2,7 @@ import {
   VARIANT_SIGNIFICANCES as CONTRACT_VARIANT_SIGNIFICANCES,
   VARIANT_ZYGOSITIES as CONTRACT_VARIANT_ZYGOSITIES,
   type GeneticVariantFrontmatter,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type { StoredMarkdownRegistryEntity } from "../bank/types.ts";
 

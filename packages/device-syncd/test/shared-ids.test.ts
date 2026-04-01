@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateUlid } from "@murph/runtime-state";
+import { generateUlid } from "@murphai/runtime-state";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
 import { generatePrefixedId, generateStateCode, normalizeString, sanitizeKey } from "../src/shared.ts";

@@ -1,6 +1,6 @@
 import { mkdir, open, writeFile } from 'node:fs/promises'
-import { FOOD_STATUSES, RECIPE_STATUSES } from '@murph/contracts'
-import { buildSharePackFromVault } from '@murph/core'
+import { FOOD_STATUSES, RECIPE_STATUSES } from '@murphai/contracts'
+import { buildSharePackFromVault } from '@murphai/core'
 import path from 'node:path'
 import { z } from 'zod'
 import {

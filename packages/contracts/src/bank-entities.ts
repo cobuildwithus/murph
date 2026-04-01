@@ -44,7 +44,7 @@ export type BankEntityRegistryLink = HealthEntityRegistryLink;
 export type BankEntityRegistryLinkCardinality = HealthEntityRegistryLinkCardinality;
 export type BankEntityRegistryLinkMetadata = HealthEntityRegistryLinkMetadata;
 
-// Query-owned sort/materialization metadata lives in @murph/query;
+// Query-owned sort/materialization metadata lives in @murphai/query;
 // contracts only describe canonical registry layout and validation.
 export interface BankEntityRegistryMetadata extends HealthEntityRegistryMetadata {}
 

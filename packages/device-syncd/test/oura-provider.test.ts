@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test } from "vitest";
-import { prepareDeviceProviderSnapshotImport } from "@murph/importers";
+import { prepareDeviceProviderSnapshotImport } from "@murphai/importers";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createOuraDeviceSyncProvider, resolveOuraWebhookVerificationChallenge } from "../src/providers/oura.ts";

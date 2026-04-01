@@ -66,7 +66,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/server", () => nextServer);
-vi.mock("@murph/device-syncd", () => deviceSyncd);
+vi.mock("@murphai/device-syncd", () => deviceSyncd);
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,

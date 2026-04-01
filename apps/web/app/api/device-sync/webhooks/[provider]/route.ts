@@ -1,4 +1,4 @@
-import { resolveDeviceSyncWebhookVerificationResponse } from "@murph/device-syncd";
+import { resolveDeviceSyncWebhookVerificationResponse } from "@murphai/device-syncd";
 
 import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
 import { jsonOk, resolveRouteParams, withJsonError } from "../../../../../src/lib/device-sync/http";

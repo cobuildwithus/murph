@@ -7,7 +7,7 @@ import {
   sharePackSchema,
   type SharePack,
   type SharePackEntity,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import { generateRecordId } from "./ids.ts";
 import { addMeal } from "./public-mutations.ts";

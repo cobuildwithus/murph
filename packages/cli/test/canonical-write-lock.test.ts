@@ -15,7 +15,7 @@ import {
   initializeVault,
   validateVault,
   VaultError,
-} from "@murph/core";
+} from "@murphai/core";
 import {
   ensureCliRuntimeArtifacts,
   repoRoot,
@@ -78,12 +78,12 @@ async function withCliUsecaseMocks<TResult>(options: {
   run: () => Promise<TResult>;
 }): Promise<TResult> {
   vi.resetModules();
-  vi.doMock("@murph/assistant-core/runtime-import", () => ({
+  vi.doMock("@murphai/assistant-core/runtime-import", () => ({
     loadRuntimeModule: async () => options.coreRuntime,
   }));
 
   if (options.queryRuntime) {
-    vi.doMock("@murph/assistant-core/query-runtime", () => ({
+    vi.doMock("@murphai/assistant-core/query-runtime", () => ({
       loadQueryRuntime: async () => options.queryRuntime,
     }));
   }
@@ -91,8 +91,8 @@ async function withCliUsecaseMocks<TResult>(options: {
   try {
     return await options.run();
   } finally {
-    vi.doUnmock("@murph/assistant-core/runtime-import");
-    vi.doUnmock("@murph/assistant-core/query-runtime");
+    vi.doUnmock("@murphai/assistant-core/runtime-import");
+    vi.doUnmock("@murphai/assistant-core/query-runtime");
     vi.resetModules();
   }
 }
@@ -293,7 +293,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
     },
     run: async () => {
       const { listProviderRecords, upsertEventRecord, upsertProviderRecord } = await import(
-        "@murph/assistant-core/usecases/provider-event"
+        "@murphai/assistant-core/usecases/provider-event"
       );
 
       await assert.rejects(
@@ -344,7 +344,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           coreRuntime: eventRuntime,
           run: async () => {
             const { upsertEventRecord: upsertEventRecordWithRuntime } = await import(
-              "@murph/assistant-core/usecases/provider-event"
+              "@murphai/assistant-core/usecases/provider-event"
             );
 
             await assert.rejects(
@@ -383,7 +383,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
             lookupRecordById: () => eventRecord,
           },
           run: async () => {
-            const { editEventRecord } = await import("@murph/assistant-core/usecases/event-record-mutations");
+            const { editEventRecord } = await import("@murphai/assistant-core/usecases/event-record-mutations");
 
             await assert.rejects(
               () =>
@@ -448,7 +448,7 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
       lookupRecordById: () => eventRecord,
     },
     run: async () => {
-      const { editEventRecord } = await import("@murph/assistant-core/usecases/event-record-mutations");
+      const { editEventRecord } = await import("@murphai/assistant-core/usecases/event-record-mutations");
 
       await editEventRecord({
         vault: "/tmp/mock-vault",
@@ -486,7 +486,7 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
     },
     run: async () => {
       const { appendJournalText, checkpointExperimentRecord } = await import(
-        "@murph/assistant-core/usecases/experiment-journal-vault"
+        "@murphai/assistant-core/usecases/experiment-journal-vault"
       );
 
       await assert.rejects(

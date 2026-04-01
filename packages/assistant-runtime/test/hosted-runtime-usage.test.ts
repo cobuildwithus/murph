@@ -8,9 +8,9 @@ const mocks = vi.hoisted(() => ({
   warn: vi.fn(),
 }));
 
-vi.mock("@murph/runtime-state/node", async () => {
-  const actual = await vi.importActual<typeof import("@murph/runtime-state/node")>(
-    "@murph/runtime-state/node",
+vi.mock("@murphai/runtime-state/node", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/runtime-state/node")>(
+    "@murphai/runtime-state/node",
   );
 
   return {
@@ -20,8 +20,8 @@ vi.mock("@murph/runtime-state/node", async () => {
   };
 });
 
-vi.mock("@murph/hosted-execution", async () => {
-  const actual = await vi.importActual<typeof import("@murph/hosted-execution")>("@murph/hosted-execution");
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>("@murphai/hosted-execution");
 
   return {
     ...actual,

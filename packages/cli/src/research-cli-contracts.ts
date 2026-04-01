@@ -1,5 +1,5 @@
 import { z } from 'incur'
-import { isoTimestampSchema, pathSchema } from '@murph/assistant-core/vault-cli-contracts'
+import { isoTimestampSchema, pathSchema } from '@murphai/assistant-core/vault-cli-contracts'
 
 export const researchExecutionModeValues = ['deep-research', 'gpt-pro'] as const
 

@@ -2,15 +2,15 @@ import { z } from 'incur'
 import {
   requestIdFromOptions,
   withBaseOptions,
-} from '@murph/assistant-core/command-helpers'
+} from '@murphai/assistant-core/command-helpers'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murph/assistant-core/json-input'
+} from '@murphai/assistant-core/json-input'
 import {
   deleteResultSchema,
   showResultSchema,
-} from '@murph/assistant-core/vault-cli-contracts'
+} from '@murphai/assistant-core/vault-cli-contracts'
 
 interface EntityCommandArgConfig {
   name: string

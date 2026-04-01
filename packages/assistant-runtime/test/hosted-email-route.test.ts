@@ -8,7 +8,7 @@ import { test } from "vitest";
 import {
   resolveAssistantStatePaths,
   resolveRuntimePaths,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 import { reconcileHostedVerifiedEmailSelfTarget } from "../src/hosted-email-route.ts";
 
 test("hosted email route reconciliation saves the email self-target from hosted sender env without inbox config", async () => {

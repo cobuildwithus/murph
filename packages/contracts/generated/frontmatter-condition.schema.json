@@ -96,6 +96,6 @@
     "clinicalStatus"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-condition.schema.json",
+  "$id": "@murphai/contracts/frontmatter-condition.schema.json",
   "title": "Murph Condition Frontmatter"
 }

@@ -4,8 +4,8 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
 
-import { openSqliteRuntimeDatabase } from "@murph/runtime-state/node";
-import { createIntegratedInboxServices } from "@murph/assistant-core/inbox-services";
+import { openSqliteRuntimeDatabase } from "@murphai/runtime-state/node";
+import { createIntegratedInboxServices } from "@murphai/assistant-core/inbox-services";
 
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;
 const builtInboxRuntimeUrl = new URL("../../inboxd/dist/index.js", import.meta.url).href;

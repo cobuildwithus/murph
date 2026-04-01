@@ -19,7 +19,7 @@ import {
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation as readWriteOperationMetadata,
   resolveVaultPath,
-} from '@murph/core'
+} from '@murphai/core'
 import { VaultCliError } from '../vault-cli-errors.js'
 import { isMissingFileError } from './shared.js'
 

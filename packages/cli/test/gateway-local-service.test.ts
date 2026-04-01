@@ -3,17 +3,17 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { initializeVault } from '@murph/core'
-import { createInboxPipeline, openInboxRuntime } from '@murph/inboxd'
+import { initializeVault } from '@murphai/core'
+import { createInboxPipeline, openInboxRuntime } from '@murphai/inboxd'
 import {
   openSqliteRuntimeDatabase,
   resolveGatewayRuntimePaths,
   resolveInboxRuntimePaths,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import { test } from 'vitest'
 
-import { assistantSessionSchema } from '@murph/assistant-core/assistant-cli-contracts'
-import { createAssistantBinding } from '@murph/assistant-core/assistant/bindings'
+import { assistantSessionSchema } from '@murphai/assistant-core/assistant-cli-contracts'
+import { createAssistantBinding } from '@murphai/assistant-core/assistant/bindings'
 import { listAssistantOutboxIntentsLocal, saveAssistantOutboxIntent } from '../src/assistant/outbox.js'
 import { saveAssistantSession } from '../src/assistant/store.js'
 import {
@@ -26,7 +26,7 @@ import {
   readGatewayMessagesLocal,
   respondToGatewayPermissionLocalWrapper,
   sendGatewayMessageLocal,
-} from '@murph/gateway-local'
+} from '@murphai/gateway-local'
 
 async function rewriteInboxCaptureRuntimeRecord(input: {
   accountId?: string | null

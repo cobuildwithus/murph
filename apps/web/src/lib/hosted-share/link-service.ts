@@ -1,5 +1,5 @@
 import { HostedBillingStatus, PrismaClient } from "@prisma/client";
-import { assertContract, sharePackSchema, type SharePack } from "@murph/contracts";
+import { assertContract, sharePackSchema, type SharePack } from "@murphai/contracts";
 
 import { getPrisma } from "../prisma";
 import {

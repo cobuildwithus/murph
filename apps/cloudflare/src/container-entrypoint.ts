@@ -4,10 +4,10 @@ import { pathToFileURL } from "node:url";
 import {
   parseHostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobInput,
-} from "@murph/assistant-runtime";
+} from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { runHostedExecutionJob } from "./node-runner.js";
 

@@ -26,8 +26,8 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@murph/device-syncd", async () => {
-  const actual = await vi.importActual<typeof import("@murph/device-syncd")>("@murph/device-syncd");
+vi.mock("@murphai/device-syncd", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/device-syncd")>("@murphai/device-syncd");
   return {
     ...actual,
     createDeviceSyncPublicIngress: mocks.createDeviceSyncPublicIngress,

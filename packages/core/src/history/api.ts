@@ -5,12 +5,12 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
   eventRecordSchema,
   safeParseContract,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { emitAuditRecord } from "../audit.ts";
 import { VaultError } from "../errors.ts";

@@ -1,4 +1,4 @@
-import { isLoopbackHttpBaseUrl } from '@murph/runtime-state'
+import { isLoopbackHttpBaseUrl } from '@murphai/runtime-state'
 import {
   gatewayAttachmentSchema,
   gatewayConversationSchema,
@@ -32,7 +32,7 @@ import {
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
   type GatewayWaitForEventsInput,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 
 const ASSISTANTD_BASE_URL_ENV_KEYS = [
   'MURPH_ASSISTANTD_BASE_URL',

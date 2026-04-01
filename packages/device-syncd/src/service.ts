@@ -1,4 +1,4 @@
-import { createImporters } from "@murph/importers";
+import { createImporters } from "@murphai/importers";
 
 import { createSecretCodec } from "./crypto.ts";
 import { deviceSyncError, isDeviceSyncError } from "./errors.ts";

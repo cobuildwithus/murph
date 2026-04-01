@@ -123,6 +123,6 @@
     "status"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-food.schema.json",
+  "$id": "@murphai/contracts/frontmatter-food.schema.json",
   "title": "Murph Food Frontmatter"
 }

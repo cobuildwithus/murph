@@ -1,4 +1,4 @@
-import type { InboxRuntimeStore } from "@murph/inboxd";
+import type { InboxRuntimeStore } from "@murphai/inboxd";
 
 import type { ParserArtifactRef } from "../contracts/artifact.js";
 import { resolveVaultRelativePath } from "../shared.js";

@@ -3,7 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import {
   DEFAULT_GATEWAY_EVENT_RETENTION,
   applyGatewayProjectionSnapshotToEventLog,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   gatewayConversationSchema,
   gatewayMessageSchema,
@@ -16,17 +16,17 @@ import {
   type GatewayEvent,
   type GatewayPermissionRequest,
   type GatewayProjectionSnapshot,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   gatewayConversationRouteCanSend,
   mergeGatewayConversationRoutes,
   resolveGatewayConversationRouteKey,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   compareGatewayConversationsDescending,
   compareGatewayMessagesAscending,
   deriveLastMessagePreview,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import { normalizeNullableString } from '../shared.js'
 import { readPermissionRows } from './permissions.js'
 import { readMeta, writeMeta } from './schema.js'

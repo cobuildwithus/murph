@@ -1,7 +1,7 @@
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { normalizeIanaTimeZone } from "@murph/contracts";
+import { normalizeIanaTimeZone } from "@murphai/contracts";
 import {
   buildOverviewMetrics,
   buildOverviewWeeklyStats,
@@ -20,7 +20,7 @@ import {
   type OverviewWeeklyStat as QueryOverviewWeeklyStat,
   type SafeSearchHit,
   type SafeSearchResult,
-} from "@murph/query";
+} from "@murphai/query";
 
 import {
   VAULT_ENV,

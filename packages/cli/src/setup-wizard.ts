@@ -5,8 +5,8 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murph/assistant-core/assistant/openai-compatible-provider-presets'
-import { listAssistantCronPresets } from '@murph/assistant-core/assistant/cron/presets'
+} from '@murphai/assistant-core/assistant/openai-compatible-provider-presets'
+import { listAssistantCronPresets } from '@murphai/assistant-core/assistant/cron/presets'
 import {
   DEFAULT_SETUP_OPENAI_COMPATIBLE_BASE_URL,
   getDefaultSetupAssistantPreset as getDefaultAssistantPreset,
@@ -18,12 +18,12 @@ import {
   type SetupWearable,
   setupChannelValues,
   setupWearableValues,
-} from '@murph/assistant-core/setup-cli-contracts'
+} from '@murphai/assistant-core/setup-cli-contracts'
 import {
   SETUP_RUNTIME_ENV_NOTICE,
   type SetupWizardRuntimeStatus,
-} from '@murph/assistant-core/setup-runtime-env'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-core/setup-runtime-env'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 export interface SetupWizardResult {
   assistantApiKeyEnv?: string | null

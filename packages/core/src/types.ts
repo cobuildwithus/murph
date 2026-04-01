@@ -5,7 +5,7 @@ import type {
   FrontmatterValue,
   JsonObject,
   ParsedFrontmatterDocument,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 export type DateInput = string | number | Date;
 

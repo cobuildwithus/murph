@@ -3,8 +3,36 @@ import assert from "node:assert/strict";
 import {
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
-} from "@murph/hosted-execution";
-import { describe, it } from "vitest";
+} from "@murphai/hosted-execution";
+import { beforeEach, describe, it, vi } from "vitest";
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/runtime")>(
+    "@/src/lib/hosted-onboarding/runtime",
+  );
+
+  return {
+    ...actual,
+    getHostedOnboardingEnvironment: () => ({
+      encryptionKey: "test-hosted-contact-privacy-key",
+      encryptionKeyVersion: "v1",
+      inviteTtlHours: 24,
+      isProduction: false,
+      linqApiBaseUrl: "https://linq.example.test",
+      linqApiToken: "linq-token",
+      linqWebhookSecret: "linq-secret",
+      publicBaseUrl: "https://join.example.test",
+      sessionCookieName: "hosted_session",
+      sessionTtlDays: 30,
+      stripeBillingMode: "payment",
+      stripePriceId: "price_123",
+      stripeSecretKey: "sk_test_123",
+      stripeWebhookSecret: "whsec_123",
+      telegramBotUsername: null,
+      telegramWebhookSecret: null,
+    }),
+  };
+});
 
 import {
   getHostedWebhookSideEffect,
@@ -19,6 +47,10 @@ import {
 } from "../src/lib/hosted-onboarding/webhook-receipt-types";
 
 describe("hosted webhook receipt transitions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("stores planning metadata even when planning produces no side effects", () => {
     const response = {
       ignored: true,
@@ -118,8 +150,8 @@ describe("hosted webhook receipt transitions", () => {
           trace_id: "trace_123",
           unused: "discard-me",
         },
-        normalizedPhoneNumber: "+15551234567",
         occurredAt: "2026-03-26T12:00:00.000Z",
+        phoneLookupKey: "hbidx:phone:v1:test",
         userId: "member_123",
       }),
     });
@@ -147,47 +179,23 @@ describe("hosted webhook receipt transitions", () => {
 
     assert.equal(nextEffect.status, "sent");
     assert.equal(nextEffect.payload.storage, "reference");
-    assert.deepEqual(nextEffect.payload.linqEvent, {
-      api_version: "2026-03-26",
-      created_at: "2026-03-26T12:00:00.000Z",
-      data: {
-        chat_id: "chat_123",
-        from: "+15551234567",
-        is_from_me: false,
-        message: {
-          effect: {
-            name: "confetti",
-            type: "animation",
-          },
-          id: "msg_123",
-          parts: [
-            {
-              type: "text",
-              value: "hello",
-            },
-            {
-              attachment_id: "att_123",
-              filename: "photo.jpg",
-              mime_type: "image/jpeg",
-              size: 123,
-              type: "image",
-              url: "https://example.test/photo.jpg",
-            },
-          ],
-          reply_to: {
-            message_id: "msg_parent",
-            part_index: 1,
-          },
-        },
-        received_at: "2026-03-26T12:00:00.000Z",
-        recipient_phone: "+15550000000",
-        service: "imessage",
-      },
-      event_id: "evt_123",
-      event_type: "message.received",
-      partner_id: "partner_123",
-      trace_id: "trace_123",
-    });
+    assert.equal(nextEffect.payload.phoneLookupKey, "hbidx:phone:v1:test");
+    const linqEvent = nextEffect.payload.linqEvent as Record<string, unknown>;
+    const linqData = linqEvent.data as Record<string, unknown>;
+    const linqMessage = linqData.message as Record<string, unknown>;
+    const linqReply = linqMessage.reply_to as Record<string, unknown>;
+
+    assert.equal(linqEvent.unused, undefined);
+    assert.equal(typeof linqData.chat_id, "string");
+    assert.match(linqData.chat_id as string, /^hbid:linq\.chat:v1:/);
+    assert.equal(typeof linqData.from, "string");
+    assert.match(linqData.from as string, /^hbid:linq\.from:v1:/);
+    assert.equal(typeof linqData.recipient_phone, "string");
+    assert.match(linqData.recipient_phone as string, /^hbid:linq\.recipient:v1:/);
+    assert.equal(typeof linqMessage.id, "string");
+    assert.match(linqMessage.id as string, /^hbid:linq\.message:v1:/);
+    assert.equal(typeof linqReply.message_id, "string");
+    assert.match(linqReply.message_id as string, /^hbid:linq\.message:v1:/);
     assert.deepEqual(nextEffect.result, { dispatched: true });
   });
 

@@ -11,11 +11,11 @@ import {
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
   type HostedExecutionUserStatus,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   parseRawEmailMessage,
   readRawEmailHeaderValue,
-} from "@murph/inboxd/connectors/email/parsed";
+} from "@murphai/inboxd/connectors/email/parsed";
 
 import {
   gatewayFetchAttachmentsInputSchema,
@@ -43,7 +43,7 @@ import {
   type GatewayRespondToPermissionInput,
   type GatewaySendMessageInput,
   type GatewayWaitForEventsInput,
-} from "@murph/gateway-core";
+} from "@murphai/gateway-core";
 
 import { readHostedExecutionSignatureHeaders, verifyHostedExecutionSignature } from "./auth.ts";
 import { createHostedUserEnvStore } from "./bundle-store.ts";
@@ -66,8 +66,7 @@ import {
 import {
   isHostedEmailInboundSenderAuthorized,
   readHostedVerifiedEmailFromEnv,
-  serializeHostedEmailThreadTarget,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 import {
   decodeHostedUserEnvPayload,
   parseHostedUserEnvUpdate,
@@ -702,20 +701,12 @@ async function handleHostedEmailIngress(
 
   const stub = await resolveUserRunnerStub(env, route.userId);
   await stub.dispatch(buildHostedExecutionEmailMessageReceivedDispatch({
-    envelopeFrom: normalizeHostedEmailEnvelopeAddress(message.from),
-    envelopeTo: normalizeHostedEmailEnvelopeAddress(message.to),
     eventId,
     identityId: route.identityId,
     occurredAt: new Date().toISOString(),
     rawMessageKey,
-    threadTarget: route.target ? serializeHostedEmailThreadTarget(route.target) : null,
     userId: route.userId,
   }));
-}
-
-function normalizeHostedEmailEnvelopeAddress(value: string | null | undefined): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized.length > 0 ? normalized.toLowerCase() : null;
 }
 
 async function authorizeHostedEmailIngress(input: {

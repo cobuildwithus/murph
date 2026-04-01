@@ -1,4 +1,4 @@
-# @murph/hosted-web
+# @murphai/hosted-web
 
 Hosted integration control plane for Vercel deployments.
 

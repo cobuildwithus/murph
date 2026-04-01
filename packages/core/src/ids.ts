@@ -1,4 +1,4 @@
-import { generateUlid } from "@murph/runtime-state";
+import { generateUlid } from "@murphai/runtime-state";
 
 import { ID_PREFIXES } from "./constants.ts";
 

@@ -3,10 +3,10 @@
   "compilerOptions": {
     "baseUrl": ".",
     "paths": {
-      "@murph/contracts": [
+      "@murphai/contracts": [
         "./dist/index.d.ts"
       ],
-      "@murph/contracts/schemas": [
+      "@murphai/contracts/schemas": [
         "./dist/schemas.d.ts"
       ]
     },

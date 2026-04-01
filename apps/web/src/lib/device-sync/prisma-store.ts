@@ -8,7 +8,7 @@ import type {
   OAuthStateRecord,
   PublicDeviceSyncAccount,
   UpsertPublicDeviceSyncConnectionInput,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 import type { HostedSecretCodec } from "./crypto";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";

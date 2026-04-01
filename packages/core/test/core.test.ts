@@ -12,7 +12,7 @@ import type {
   ExperimentEventRecord,
   MealEventRecord,
   SampleRecord,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import {
   AUDIT_ACTORS as CONTRACT_AUDIT_ACTORS,
   AUDIT_STATUSES as CONTRACT_AUDIT_STATUSES,
@@ -25,7 +25,7 @@ import {
   SAMPLE_QUALITIES as CONTRACT_SAMPLE_QUALITIES,
   SAMPLE_SOURCES as CONTRACT_SAMPLE_SOURCES,
   SAMPLE_STREAMS as CONTRACT_SAMPLE_STREAMS,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import {
   addMeal,

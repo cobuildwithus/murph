@@ -7,13 +7,13 @@ import {
   decodeHostedBundleBase64,
   materializeHostedExecutionArtifacts,
   restoreHostedExecutionContext,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 import type {
   HostedExecutionRunnerResult,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import {
   commitHostedExecutionResult,

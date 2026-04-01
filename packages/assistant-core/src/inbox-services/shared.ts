@@ -7,7 +7,7 @@ import {
   type InboxDoctorCheck,
 } from '../inbox-cli-contracts.js'
 import { errorMessage, normalizeNullableString } from '../text/shared.js'
-import { extractIsoDatePrefix } from '@murph/contracts'
+import { extractIsoDatePrefix } from '@murphai/contracts'
 
 import { VaultCliError } from '../vault-cli-errors.js'
 import type {

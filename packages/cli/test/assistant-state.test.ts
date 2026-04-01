@@ -19,7 +19,7 @@ import {
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantSession,
-} from '@murph/assistant-core/assistant-state'
+} from '@murphai/assistant-core/assistant-state'
 import {
   createAssistantMemoryTurnContextEnv,
   extractAssistantMemory,
@@ -31,28 +31,28 @@ import {
   resolveAssistantMemoryStoragePaths,
   searchAssistantMemory,
   upsertAssistantMemory,
-} from '@murph/assistant-core/assistant/memory'
+} from '@murphai/assistant-core/assistant/memory'
 import {
   getAssistantStatus,
 } from '../src/assistant-runtime.js'
 import {
   readAssistantRuntimeBudgetStatus,
   runAssistantRuntimeMaintenance,
-} from '@murph/assistant-core/assistant/runtime-budgets'
-import { readAssistantCronRuns } from '@murph/assistant-core/assistant/cron/store'
-import { withAssistantMemoryWriteLock } from '@murph/assistant-core/assistant/memory/locking'
+} from '@murphai/assistant-core/assistant/runtime-budgets'
+import { readAssistantCronRuns } from '@murphai/assistant-core/assistant/cron/store'
+import { withAssistantMemoryWriteLock } from '@murphai/assistant-core/assistant/memory/locking'
 import { readAssistantOutboxIntent } from '../src/assistant/outbox.js'
-import { readAssistantProviderRouteRecovery } from '@murph/assistant-core/assistant/provider-turn-recovery'
-import { summarizeAssistantQuarantines } from '@murph/assistant-core/assistant/quarantine'
-import { withAssistantRuntimeWriteLock } from '@murph/assistant-core/assistant/runtime-write-lock'
-import { readAssistantSession } from '@murph/assistant-core/assistant/store/persistence'
-import { listAssistantTranscriptDistillations } from '@murph/assistant-core/assistant/transcript-distillation'
-import { readAssistantTurnReceipt } from '@murph/assistant-core/assistant/turns'
+import { readAssistantProviderRouteRecovery } from '@murphai/assistant-core/assistant/provider-turn-recovery'
+import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
+import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
+import { readAssistantSession } from '@murphai/assistant-core/assistant/store/persistence'
+import { listAssistantTranscriptDistillations } from '@murphai/assistant-core/assistant/transcript-distillation'
+import { readAssistantTurnReceipt } from '@murphai/assistant-core/assistant/turns'
 import {
   assistantSessionSchema,
   parseAssistantSessionRecord,
-} from '@murph/assistant-core/assistant-cli-contracts'
-import { redactAssistantSessionForDisplay } from '@murph/assistant-core/assistant/redaction'
+} from '@murphai/assistant-core/assistant-cli-contracts'
+import { redactAssistantSessionForDisplay } from '@murphai/assistant-core/assistant/redaction'
 
 const cleanupPaths: string[] = []
 

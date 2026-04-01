@@ -1,8 +1,8 @@
 import type {
   HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
-} from "@murph/runtime-state";
-import type { SharePack } from "@murph/contracts";
+} from "@murphai/runtime-state";
+import type { SharePack } from "@murphai/contracts";
 import type {
   HostedExecutionRunContext,
   HostedExecutionRunStatus,
@@ -38,7 +38,7 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
 export interface HostedExecutionLinqMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "linq.message.received";
   linqEvent: Record<string, unknown>;
-  normalizedPhoneNumber: string;
+  phoneLookupKey: string;
 }
 
 export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecutionBaseEvent {
@@ -49,11 +49,8 @@ export interface HostedExecutionTelegramMessageReceivedEvent extends HostedExecu
 
 export interface HostedExecutionEmailMessageReceivedEvent extends HostedExecutionBaseEvent {
   kind: "email.message.received";
-  envelopeFrom: string | null;
-  envelopeTo: string | null;
   identityId: string;
   rawMessageKey: string;
-  threadTarget: string | null;
 }
 export interface HostedExecutionAssistantCronTickEvent extends HostedExecutionBaseEvent {
   kind: "assistant.cron.tick";

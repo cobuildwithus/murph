@@ -12,16 +12,16 @@ import {
 
 test("createVitestWorkspaceRuntimeAliases maps package roots and subpaths to workspace sources", () => {
   const aliases = createVitestWorkspaceRuntimeAliases({
-    "@murph/query": "/repo/packages/query/src/index.ts",
+    "@murphai/query": "/repo/packages/query/src/index.ts",
   });
 
   assert.deepEqual(aliases, [
     {
-      find: /^@murph\/query$/,
+      find: /^@murphai\/query$/,
       replacement: "/repo/packages/query/src/index.ts",
     },
     {
-      find: /^@murph\/query\/(.+)$/,
+      find: /^@murphai\/query\/(.+)$/,
       replacement: "/repo/packages/query/src/$1",
     },
   ]);
@@ -29,20 +29,20 @@ test("createVitestWorkspaceRuntimeAliases maps package roots and subpaths to wor
 
 test("workspace source resolution keeps the hosted and local web package allowlists exact", () => {
   assert.deepEqual(HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES, [
-    "@murph/contracts",
-    "@murph/hosted-execution",
-    "@murph/runtime-state",
-    "@murph/core",
-    "@murph/importers",
-    "@murph/inboxd",
-    "@murph/device-syncd",
+    "@murphai/contracts",
+    "@murphai/hosted-execution",
+    "@murphai/runtime-state",
+    "@murphai/core",
+    "@murphai/importers",
+    "@murphai/inboxd",
+    "@murphai/device-syncd",
   ]);
   assert.deepEqual(LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES, [
-    "@murph/contracts",
-    "@murph/device-syncd",
-    "@murph/hosted-execution",
-    "@murph/runtime-state",
-    "@murph/query",
+    "@murphai/contracts",
+    "@murphai/device-syncd",
+    "@murphai/hosted-execution",
+    "@murphai/runtime-state",
+    "@murphai/query",
   ]);
 });
 
@@ -53,7 +53,7 @@ test("workspace source resolution does not widen beyond the explicit hosted/loca
   assert.deepEqual(Object.keys(hostedEntries).sort(), [...HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES].sort());
   assert.deepEqual(Object.keys(localEntries).sort(), [...LOCAL_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES].sort());
 
-  assert.equal("@murph/query" in hostedEntries, false);
-  assert.equal("@murph/core" in localEntries, false);
-  assert.equal("@murph/runtime-state" in localEntries, true);
+  assert.equal("@murphai/query" in hostedEntries, false);
+  assert.equal("@murphai/core" in localEntries, false);
+  assert.equal("@murphai/runtime-state" in localEntries, true);
 });

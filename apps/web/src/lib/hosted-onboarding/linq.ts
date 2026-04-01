@@ -10,7 +10,7 @@ import {
   verifyAndParseLinqWebhookRequest,
   type LinqMessageReceivedEvent,
   type LinqWebhookEvent,
-} from "@murph/inboxd/linq-webhook";
+} from "@murphai/inboxd/linq-webhook";
 
 export type HostedLinqWebhookEvent = LinqWebhookEvent;
 export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedBillingStatus } from "@prisma/client";
-import type { SharePack } from "@murph/contracts";
+import type { SharePack } from "@murphai/contracts";
 
 const mocks = vi.hoisted(() => ({
   drainHostedExecutionOutbox: vi.fn(),

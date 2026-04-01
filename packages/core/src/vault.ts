@@ -24,7 +24,7 @@ import {
   sampleRecordSchema,
   vaultMetadataSchema,
   workoutFormatFrontmatterSchema,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import {
   DEFAULT_TIMEZONE,

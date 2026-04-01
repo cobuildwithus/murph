@@ -19,7 +19,7 @@ import {
   mergeGatewayConversationRoutes,
   pollGatewayEventLogState,
   resolveGatewayConversationRouteKey,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 
 const execFileAsync = promisify(execFile)
 const gatewayCoreSourceDir = path.resolve(
@@ -61,11 +61,11 @@ test('gateway-core stays transport-neutral and gateway-local owns the vault-back
   const packageLocal = await readFile(path.join(gatewayLocalSourceDir, 'index.ts'), 'utf8')
 
   assert.doesNotMatch(packageIndex, /from ['"]murph\/gateway-core['"]/u)
-  assert.equal(gatewayCoreManifest.dependencies?.['@murph/assistant-core'], undefined)
-  assert.equal(gatewayCoreManifest.dependencies?.['@murph/inboxd'], undefined)
-  assert.equal(gatewayCoreManifest.dependencies?.['@murph/runtime-state'], undefined)
-  assert.equal(gatewayLocalManifest.dependencies?.['@murph/gateway-core'], 'workspace:*')
-  assert.equal(gatewayLocalManifest.dependencies?.['@murph/assistant-core'], 'workspace:*')
+  assert.equal(gatewayCoreManifest.dependencies?.['@murphai/assistant-core'], undefined)
+  assert.equal(gatewayCoreManifest.dependencies?.['@murphai/inboxd'], undefined)
+  assert.equal(gatewayCoreManifest.dependencies?.['@murphai/runtime-state'], undefined)
+  assert.equal(gatewayLocalManifest.dependencies?.['@murphai/gateway-core'], 'workspace:*')
+  assert.equal(gatewayLocalManifest.dependencies?.['@murphai/assistant-core'], 'workspace:*')
   assert.doesNotMatch(packageLocal, /@murph\/gateway-core\/local/u)
   assert.match(packageLocal, /\.\/local-service\.js/u)
   assert.match(packageLocal, /\.\/store\.js/u)
@@ -99,13 +99,13 @@ test('workspace source resolution points directly at dedicated gateway-core and 
     }
   }
 
-  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-core'], [
+  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murphai/gateway-core'], [
     'packages/gateway-core/src/index.ts',
   ])
-  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murph/gateway-local'], [
+  assert.deepEqual(tsconfig.compilerOptions?.paths?.['@murphai/gateway-local'], [
     'packages/gateway-local/src/index.ts',
   ])
-  assert.equal(tsconfig.compilerOptions?.paths?.['@murph/gateway-core/local'], undefined)
+  assert.equal(tsconfig.compilerOptions?.paths?.['@murphai/gateway-core/local'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core'], undefined)
   assert.equal(tsconfig.compilerOptions?.paths?.['murph/gateway-core-local'], undefined)
 })
@@ -388,7 +388,7 @@ test('gateway sendability respects current channel delivery constraints', () => 
   )
 })
 
-test('built @murph/gateway-core import stays free of assistant runtime warnings', async () => {
+test('built @murphai/gateway-core import stays free of assistant runtime warnings', async () => {
   const distPath = new URL('../../gateway-core/dist/index.js', import.meta.url)
   try {
     await access(distPath, constants.F_OK)

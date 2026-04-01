@@ -2,7 +2,7 @@ import {
   DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   normalizeHostedExecutionBaseUrl,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import {
   fetchHostedJsonResponse,

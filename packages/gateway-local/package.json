@@ -1,5 +1,5 @@
 {
-  "name": "@murph/gateway-local",
+  "name": "@murphai/gateway-local",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -31,9 +31,9 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "@murph/assistant-core": "workspace:*",
-    "@murph/gateway-core": "workspace:*",
-    "@murph/inboxd": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/assistant-core": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   }
 }

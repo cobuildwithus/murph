@@ -5,11 +5,11 @@ import {
 import {
   getAssistantSessionLocal,
   listAssistantSessionsLocal,
-} from '@murph/assistant-core/assistant/store'
-import type { AssistantSession } from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant/store'
+import type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
 
-export * from '@murph/assistant-core/assistant/store'
-export type { AssistantSession } from '@murph/assistant-core/assistant-cli-contracts'
+export * from '@murphai/assistant-core/assistant/store'
+export type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
 
 export async function listAssistantSessions(
   vault: string,

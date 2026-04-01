@@ -1,4 +1,4 @@
-import type { BankEntityKind } from "@murph/contracts";
+import type { BankEntityKind } from "@murphai/contracts";
 
 import {
   compareCanonicalEntities,

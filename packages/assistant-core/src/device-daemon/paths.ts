@@ -5,10 +5,10 @@ import {
   DEVICE_SYNC_CONTROL_TOKEN_ENV,
   DEVICE_SYNC_SECRET_ENV,
   DEVICE_SYNC_SECRET_ENV_KEYS,
-} from '@murph/device-syncd/client'
+} from '@murphai/device-syncd/client'
 import {
   resolveDeviceSyncRuntimePaths,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import {
   DEVICE_SYNC_HOST_ENV,
   DEVICE_SYNC_HOST_ENV_KEYS,
@@ -47,7 +47,7 @@ export function resolveDeviceSyncDaemonBinPath(
 }
 
 export function resolveInstalledDeviceSyncPackageEntry(): string {
-  return require.resolve('@murph/device-syncd')
+  return require.resolve('@murphai/device-syncd')
 }
 
 export function buildManagedDeviceSyncEnvironment(input: {

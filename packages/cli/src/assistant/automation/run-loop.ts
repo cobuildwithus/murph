@@ -2,9 +2,9 @@ import { maybeRunAssistantAutomationViaDaemon } from '../../assistant-daemon-cli
 import {
   runAssistantAutomation as runAssistantAutomationLocal,
   type RunAssistantAutomationInput,
-} from '@murph/assistant-core/assistant/automation/run-loop'
+} from '@murphai/assistant-core/assistant/automation/run-loop'
 
-export * from '@murph/assistant-core/assistant/automation/run-loop'
+export * from '@murphai/assistant-core/assistant/automation/run-loop'
 
 export async function runAssistantAutomation(
   input: RunAssistantAutomationInput,

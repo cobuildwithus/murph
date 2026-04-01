@@ -65,6 +65,6 @@
     "startedOn"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-experiment.schema.json",
+  "$id": "@murphai/contracts/frontmatter-experiment.schema.json",
   "title": "Murph Experiment Frontmatter"
 }

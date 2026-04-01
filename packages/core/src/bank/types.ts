@@ -14,7 +14,7 @@ import {
   RECIPE_STATUSES as CONTRACT_RECIPE_STATUSES,
   WORKOUT_FORMAT_STATUSES as CONTRACT_WORKOUT_FORMAT_STATUSES,
   type ActivityStrengthExercise,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type { DateInput } from "../types.ts";
 

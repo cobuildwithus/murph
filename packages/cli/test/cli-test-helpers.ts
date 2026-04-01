@@ -827,7 +827,7 @@ function shouldRetryCliOutput(output: string | null): boolean {
 
   const referencesBuiltWorkspaceArtifact =
     output.includes('/dist/') &&
-    (output.includes('/packages/') || output.includes('/node_modules/@murph/'))
+    (output.includes('/packages/') || output.includes('/node_modules/@murphai/'))
   const isMissingModuleError =
     output.includes('ERR_MODULE_NOT_FOUND') ||
     output.includes('Cannot find module') ||

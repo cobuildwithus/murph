@@ -1,4 +1,4 @@
-import { isValidIanaTimeZone } from '@murph/contracts'
+import { isValidIanaTimeZone } from '@murphai/contracts'
 import { z } from 'incur'
 
 export const isoTimestampSchema = z

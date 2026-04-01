@@ -6,8 +6,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
-import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murph/core";
-import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@murph/inboxd";
+import { buildSharePackFromVault, initializeVault, listFoods, upsertFood, upsertProtocolItem } from "@murphai/core";
+import { createInboxPipeline, openInboxRuntime, rebuildRuntimeFromVault } from "@murphai/inboxd";
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
@@ -17,21 +17,21 @@ import {
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
   writePendingAssistantUsageRecord,
-} from "@murph/runtime-state/node";
-import { assistantOutboxIntentSchema } from "@murph/assistant-core";
+} from "@murphai/runtime-state/node";
+import { assistantOutboxIntentSchema } from "@murphai/assistant-core";
 import type {
   HostedAssistantRuntimeConfig,
   HostedAssistantRuntimeJobInput,
-} from "@murph/assistant-runtime";
+} from "@murphai/assistant-runtime";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
   runAssistantAutomation: vi.fn(),
 }));
 
-vi.mock("@murph/assistant-core", async () => {
-  const actual = await vi.importActual<typeof import("@murph/assistant-core")>(
-    "@murph/assistant-core",
+vi.mock("@murphai/assistant-core", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-core")>(
+    "@murphai/assistant-core",
   );
   return {
     ...actual,
@@ -93,8 +93,8 @@ describe("runHostedExecutionJob", () => {
     process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
     setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
-    const actualAssistantCore = await vi.importActual<typeof import("@murph/assistant-core")>(
-      "@murph/assistant-core",
+    const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-core")>(
+      "@murphai/assistant-core",
     );
     hostedCliMocks.dispatchAssistantOutboxIntent.mockImplementation((input) =>
       actualAssistantCore.dispatchAssistantOutboxIntent(input));

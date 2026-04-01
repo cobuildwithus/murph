@@ -1,7 +1,7 @@
 import {
   requireBankEntityRegistryDefinition,
   type BankEntityKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import {
   applyLimit,
   compareNullableStrings,

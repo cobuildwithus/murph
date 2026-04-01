@@ -22,7 +22,7 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionBundleRef,
   HostedExecutionUserStatus,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 
 interface UserRunnerRpcStub {
   bootstrapUser(userId: string): Promise<{ userId: string }>;

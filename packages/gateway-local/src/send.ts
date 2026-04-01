@@ -14,7 +14,7 @@ import {
   readGatewayMessageRouteToken,
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   assistantGatewayLocalMessageSender,
   type GatewayLocalDispatchMode,

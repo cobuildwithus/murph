@@ -1,6 +1,10 @@
-import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murph/hosted-execution";
+import { buildHostedExecutionTelegramMessageReceivedDispatch } from "@murphai/hosted-execution";
 import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 
+import {
+  createHostedTelegramUserLookupKey,
+  sanitizeHostedTelegramUpdateForStorage,
+} from "./contact-privacy";
 import {
   buildHostedTelegramWebhookEventId,
   parseHostedTelegramWebhookUpdate,
@@ -53,9 +57,16 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("missing-sender");
   }
 
+  const telegramUserLookupKey = createHostedTelegramUserLookupKey(
+    summary.senderTelegramUserId,
+  );
+  if (!telegramUserLookupKey) {
+    return buildIgnoredTelegramWebhookPlan("missing-sender");
+  }
+
   const existingMember = await input.prisma.hostedMember.findUnique({
     where: {
-      telegramUserId: summary.senderTelegramUserId,
+      telegramUserId: telegramUserLookupKey,
     },
     select: {
       billingStatus: true,
@@ -83,7 +94,9 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           botUserId: summary.botUserId,
           eventId: buildHostedTelegramWebhookEventId(input.update),
           occurredAt: summary.occurredAt,
-          telegramUpdate: minimizeHostedTelegramUpdate(input.update),
+          telegramUpdate: sanitizeHostedTelegramUpdateForStorage(
+            minimizeHostedTelegramUpdate(input.update),
+          ),
           userId: existingMember.id,
         }),
       }),

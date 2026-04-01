@@ -17,40 +17,40 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "paths": {
-      "@murph/contracts": [
+      "@murphai/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@murph/contracts/*": [
+      "@murphai/contracts/*": [
         "packages/contracts/src/*"
       ],
-      "@murph/device-syncd": [
+      "@murphai/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],
-      "@murph/device-syncd/client": [
+      "@murphai/device-syncd/client": [
         "packages/device-syncd/src/client.ts"
       ],
-      "@murph/device-syncd/*": [
+      "@murphai/device-syncd/*": [
         "packages/device-syncd/src/*.ts"
       ],
-      "@murph/hosted-execution": [
+      "@murphai/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
-      "@murph/hosted-execution/*": [
+      "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
-      "@murph/query": [
+      "@murphai/query": [
         "packages/query/src/index.ts"
       ],
-      "@murph/query/*": [
+      "@murphai/query/*": [
         "packages/query/src/*"
       ],
-      "@murph/runtime-state": [
+      "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
-      "@murph/runtime-state/node": [
+      "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
-      "@murph/runtime-state/*": [
+      "@murphai/runtime-state/*": [
         "packages/runtime-state/src/*"
       ]
     },

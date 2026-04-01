@@ -1,5 +1,5 @@
-import { resolveSystemTimeZone } from '@murph/contracts'
-import { loadVault } from '@murph/core'
+import { resolveSystemTimeZone } from '@murphai/contracts'
+import { loadVault } from '@murphai/core'
 import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,
@@ -1087,7 +1087,7 @@ async function runFoodAutoLogCronJob(input: {
   foodId: string
 }) {
   const [core, importers] = await Promise.all([
-    loadRuntimeModule<FoodAutoLogCoreRuntime>('@murph/core'),
+    loadRuntimeModule<FoodAutoLogCoreRuntime>('@murphai/core'),
     loadImporterRuntime(),
   ])
   const food = await core.readFood({

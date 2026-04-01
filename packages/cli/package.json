@@ -1,11 +1,14 @@
 {
-  "name": "murph",
+  "name": "@murphai/murph",
   "version": "0.0.0",
   "private": false,
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/cobuildwithus/murph"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -59,16 +62,16 @@
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@murph/assistant-core": "workspace:*",
-    "@murph/assistantd": "workspace:*",
-    "@murph/contracts": "workspace:*",
-    "@murph/core": "workspace:*",
-    "@murph/device-syncd": "workspace:*",
-    "@murph/importers": "workspace:*",
-    "@murph/inboxd": "workspace:*",
-    "@murph/parsers": "workspace:*",
-    "@murph/query": "workspace:*",
-    "@murph/runtime-state": "workspace:*",
+    "@murphai/assistant-core": "workspace:*",
+    "@murphai/assistantd": "workspace:*",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/importers": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/parsers": "workspace:*",
+    "@murphai/query": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
     "ink": "^6.8.0",
     "incur": "0.3.4",
     "react": "^19.2.4"

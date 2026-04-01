@@ -1,4 +1,4 @@
-# `@murph/contracts`
+# `@murphai/contracts`
 
 Owns the frozen vault contracts for the Murph baseline:
 
@@ -9,8 +9,8 @@ Owns the frozen vault contracts for the Murph baseline:
 
 Surface split:
 
-- `@murph/contracts` exports the canonical Zod-first runtime surface.
-- `@murph/contracts/schemas` exports the derived JSON Schema objects for artifact consumers.
+- `@murphai/contracts` exports the canonical Zod-first runtime surface.
+- `@murphai/contracts/schemas` exports the derived JSON Schema objects for artifact consumers.
 
 Package-local commands:
 

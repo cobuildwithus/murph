@@ -76,6 +76,6 @@
     "gene"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-genetic-variant.schema.json",
+  "$id": "@murphai/contracts/frontmatter-genetic-variant.schema.json",
   "title": "Murph Genetic Variant Frontmatter"
 }

@@ -14,19 +14,19 @@ const subpaths = [
   {
     exportKey: "./linq",
     label: "linq",
-    packageImport: "@murph/inboxd/linq",
+    packageImport: "@murphai/inboxd/linq",
     sourceFile: "src/linq.ts",
   },
   {
     exportKey: "./linq-webhook",
     label: "linq webhook",
-    packageImport: "@murph/inboxd/linq-webhook",
+    packageImport: "@murphai/inboxd/linq-webhook",
     sourceFile: "src/linq-webhook.ts",
   },
   {
     exportKey: "./telegram-webhook",
     label: "telegram webhook",
-    packageImport: "@murph/inboxd/telegram-webhook",
+    packageImport: "@murphai/inboxd/telegram-webhook",
     sourceFile: "src/telegram-webhook.ts",
   },
 ] as const;

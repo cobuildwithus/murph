@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import {
   type ActivityStrengthExercise,
   ID_PREFIXES,
-} from '@murph/contracts'
+} from '@murphai/contracts'
 import {
   applyCanonicalWriteBatch,
   parseFrontmatterDocument,
@@ -11,10 +11,10 @@ import {
   WORKOUT_FORMAT_DOC_TYPE,
   WORKOUT_FORMAT_SCHEMA_VERSION,
   WORKOUT_FORMATS_DIRECTORY,
-} from '@murph/core'
-import { generateUlid } from '@murph/runtime-state'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
-import { asListEnvelope } from '@murph/assistant-core/usecases/shared'
+} from '@murphai/core'
+import { generateUlid } from '@murphai/runtime-state'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { asListEnvelope } from '@murphai/assistant-core/usecases/shared'
 import {
   resolveWorkoutCapture,
   type AddWorkoutRecordInput,
@@ -24,7 +24,7 @@ import {
 import {
   compactObject,
   normalizeOptionalText,
-} from '@murph/assistant-core/usecases/vault-usecase-helpers'
+} from '@murphai/assistant-core/usecases/vault-usecase-helpers'
 
 const LOAD_UNITS = new Set(['lb', 'kg'])
 const WORKOUT_FORMAT_RECORD_ID_PATTERN = new RegExp(`^${ID_PREFIXES.workoutFormat}_[0-9A-Za-z]+$`, 'u')

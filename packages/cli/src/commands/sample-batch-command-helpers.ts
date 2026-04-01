@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises'
 import path from 'node:path'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   applyLimit,
   arrayOfStrings,
@@ -13,7 +13,7 @@ import {
   nullableString,
   numberOrNull,
   readJsonObject,
-} from '@murph/assistant-core/commands/query-record-command-helpers'
+} from '@murphai/assistant-core/commands/query-record-command-helpers'
 
 type JsonObject = Record<string, unknown>
 

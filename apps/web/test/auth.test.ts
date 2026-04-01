@@ -1,4 +1,4 @@
-import { DeviceSyncError } from "@murph/device-syncd";
+import { DeviceSyncError } from "@murphai/device-syncd";
 import { describe, expect, it } from "vitest";
 
 import {

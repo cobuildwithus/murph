@@ -2,6 +2,7 @@ import { getPrisma } from "../prisma";
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
+import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
 import { readRawBodyBuffer } from "../http";
 import { hostedLinqError } from "./errors";
 import { fetchLinqApi, LinqApiTimeoutError } from "./api";
@@ -11,7 +12,7 @@ import {
   parseCanonicalLinqMessageReceivedEvent,
   verifyAndParseLinqWebhookRequest,
   type LinqWebhookEvent,
-} from "@murph/inboxd/linq-webhook";
+} from "@murphai/inboxd/linq-webhook";
 
 export const HOSTED_LINQ_BASE_PATH = "/api/linq";
 export const HOSTED_LINQ_WEBHOOK_PATH = `${HOSTED_LINQ_BASE_PATH}/webhook`;
@@ -159,7 +160,7 @@ export class HostedLinqControlPlane {
     if (!binding) {
       return buildIgnoredWebhookResult(event, {
         reason: "unpaired_recipient_phone",
-        recipientPhone,
+        recipientPhone: readHostedPhoneHint(recipientPhone),
       });
     }
 
@@ -181,7 +182,7 @@ export class HostedLinqControlPlane {
       duplicate: !queued.inserted,
       routed: true,
       bindingId: binding.id,
-      recipientPhone,
+      recipientPhone: binding.recipientPhone,
       eventId: queued.event.eventId,
       eventType: queued.event.eventType,
       traceId: queued.event.traceId,
@@ -198,10 +199,10 @@ export class HostedLinqControlPlane {
 
     throw hostedLinqError({
       code: "LINQ_BINDING_RECIPIENT_UNVERIFIED",
-      message: `Configured Linq account does not control recipient phone ${recipientPhone}.`,
+      message: `Configured Linq account does not control recipient phone ${readHostedPhoneHint(recipientPhone)}.`,
       httpStatus: 403,
       details: {
-        recipientPhone,
+        recipientPhone: readHostedPhoneHint(recipientPhone),
       },
     });
   }

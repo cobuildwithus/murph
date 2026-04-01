@@ -1,4 +1,4 @@
-import { deviceSyncError, type DeviceSyncRegistry } from "@murph/device-syncd";
+import { deviceSyncError, type DeviceSyncRegistry } from "@murphai/device-syncd";
 
 import { getPrisma } from "../prisma";
 import { createHostedSecretCodec } from "./crypto";

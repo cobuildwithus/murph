@@ -1,4 +1,4 @@
-import type { HostedExecutionBundleRef } from "@murph/runtime-state";
+import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   buildHostedExecutionSharePayloadPath,
@@ -14,9 +14,9 @@ import {
   readHostedExecutionWebControlPlaneEnvironment,
   type HostedExecutionSideEffectRecord,
   type HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
-import type { HostedEmailSendRequest } from "@murph/assistant-runtime";
-import { gatewayProjectionSnapshotSchema } from "@murph/gateway-core";
+} from "@murphai/hosted-execution";
+import type { HostedEmailSendRequest } from "@murphai/assistant-runtime";
+import { gatewayProjectionSnapshotSchema } from "@murphai/gateway-core";
 
 import { createHostedArtifactStore } from "./bundle-store.ts";
 import { readHostedExecutionEnvironment } from "./env.ts";

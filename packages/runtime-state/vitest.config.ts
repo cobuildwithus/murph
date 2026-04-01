@@ -13,7 +13,7 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murph/runtime-state": "./src/index.ts",
+  "@murphai/runtime-state": "./src/index.ts",
 } as const;
 
 export default defineProject({

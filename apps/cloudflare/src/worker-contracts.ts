@@ -12,9 +12,9 @@ import type {
   GatewayReadMessagesInput,
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
-} from "@murph/gateway-core";
+} from "@murphai/gateway-core";
 
-import type { HostedExecutionBundleRef } from "@murph/runtime-state";
+import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {

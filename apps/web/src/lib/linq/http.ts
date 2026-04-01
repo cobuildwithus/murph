@@ -1,5 +1,5 @@
-import { isDeviceSyncError } from "@murph/device-syncd";
-import { isLinqWebhookPayloadError, isLinqWebhookVerificationError } from "@murph/inboxd/linq-webhook";
+import { isDeviceSyncError } from "@murphai/device-syncd";
+import { isLinqWebhookPayloadError, isLinqWebhookVerificationError } from "@murphai/inboxd/linq-webhook";
 import { NextResponse } from "next/server";
 
 import {

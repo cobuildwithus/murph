@@ -1,4 +1,4 @@
-import { EXPERIMENT_STATUSES } from '@murph/contracts'
+import { EXPERIMENT_STATUSES } from '@murphai/contracts'
 import { Cli, z } from 'incur'
 import {
   inputFileOptionSchema,
@@ -12,8 +12,8 @@ import {
   pathSchema,
   showResultSchema,
   slugSchema,
-} from '@murph/assistant-core/vault-cli-contracts'
-import type { VaultServices } from '@murph/assistant-core/vault-services'
+} from '@murphai/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import { registerLifecycleEntityGroup } from './health-command-factory.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)

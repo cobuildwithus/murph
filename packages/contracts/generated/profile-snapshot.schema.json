@@ -95,7 +95,7 @@
     "profile"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/profile-snapshot.schema.json",
+  "$id": "@murphai/contracts/profile-snapshot.schema.json",
   "title": "Murph Profile Snapshot",
   "$defs": {
     "__schema0": {

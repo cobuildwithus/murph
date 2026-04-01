@@ -1,4 +1,4 @@
-# `murph` (`packages/cli`)
+# `@murphai/murph` (`packages/cli`)
 
 Owns the `vault-cli` command surface. The CLI may validate inputs and format outputs, but it must delegate all canonical writes to core.
 
@@ -9,24 +9,24 @@ Owns the `vault-cli` command surface. The CLI may validate inputs and format out
 - Machine-facing callers should rely on Incur's native envelope via `--verbose --format json` instead of a Murph-specific wrapper contract.
 - Built-in Incur surfaces such as `--help`, `--schema`, `--llms`, and `completions bash` are part of the package verification surface and should remain truthful as command metadata evolves.
 - Library exports and the executable bin are now split: `src/index.ts` is the package entrypoint, and `src/bin.ts` is the CLI launcher.
-- Default runtime services now lazy-load the workspace `@murph/core`, `@murph/importers`, and `@murph/query` package boundaries instead of reaching into sibling `src/` trees.
+- Default runtime services now lazy-load the workspace `@murphai/core`, `@murphai/importers`, and `@murphai/query` package boundaries instead of reaching into sibling `src/` trees.
 - `packages/cli` now extends the shared `../../tsconfig.base.json`; `tsconfig.json` is the buildable package project, `tsconfig.build.json` stays as the local build alias, and `tsconfig.typecheck.json` covers package-local scripts and tests.
 - Package-local verification scripts and runtime tests now live in TypeScript under `scripts/` and `test/`.
 - Local build now runs in this workspace, and the built binary can be exercised with `node dist/bin.js ...` after `pnpm --dir packages/cli build`.
-- Top-level retrieval commands now include `search` for lexical read-model search, `search index status` / `search index rebuild` for the optional SQLite FTS index stored in `.runtime/search.sqlite`, with CLI code importing the headless query helpers from `@murph/assistant-core` instead of keeping a local compatibility layer.
-- The inbox CLI runtime now resolves `.runtime` paths through `@murph/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
-- The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion while importing the underlying headless inbox services from `@murph/assistant-core`.
+- Top-level retrieval commands now include `search` for lexical read-model search, `search index status` / `search index rebuild` for the optional SQLite FTS index stored in `.runtime/search.sqlite`, with CLI code importing the headless query helpers from `@murphai/assistant-core` instead of keeping a local compatibility layer.
+- The inbox CLI runtime now resolves `.runtime` paths through `@murphai/runtime-state`, so inbox config/state/promotions JSON and `inboxd.sqlite` stay aligned with inboxd itself.
+- The CLI now also owns an `inbox` command group for local runtime init/source management, diagnostics, backfill, foreground daemon control, and inbox capture review/promotion while importing the underlying headless inbox services from `@murphai/assistant-core`.
 - The CLI now also owns an `assistant` command group for provider-backed local chat turns, Ink-backed local chat UI fallback, assistant-session metadata plus local transcripts outside the vault, outbound channel delivery, and an always-on inbox triage loop via `src/assistant-runtime.ts`.
-- The dedicated `@murph/assistant-core` package owns the headless assistant/inbox/vault/operator-config modules plus the shared inbox-app, usecase, and setup/runtime helper layers directly; the CLI now imports that package in place and keeps only command/setup orchestration plus the daemon-aware wrappers that genuinely belong at the CLI transport boundary.
+- The dedicated `@murphai/assistant-core` package owns the headless assistant/inbox/vault/operator-config modules plus the shared inbox-app, usecase, and setup/runtime helper layers directly; the CLI now imports that package in place and keeps only command/setup orchestration plus the daemon-aware wrappers that genuinely belong at the CLI transport boundary.
 - iMessage-backed inbox and assistant delivery flows now depend directly on `@photon-ai/imessage-kit` instead of late-loading that package at call time, while Telegram delivery and ingestion share the same assistant channel binding abstraction.
-- The built CLI package shape exposes both `vault-cli` and a setup-focused `murph` alias from the same entrypoint; `murph`, `murph --help`, and `murph setup ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
+- The published CLI package is `@murphai/murph`, and it exposes both `vault-cli` and an onboarding-focused `murph` alias from the same entrypoint; `murph`, `murph --help`, and `murph onboard ...` land on the setup surface, while other operator/data-plane commands stay under `vault-cli`.
 
 ## Host setup (macOS and Linux)
 
-Once `murph` is published, the installed-package onboarding path will be:
+Once `@murphai/murph` is published, the installed-package onboarding path will be:
 
 ```bash
-murph setup
+murph onboard
 ```
 
 That command installs or reuses the local parser dependencies (`ffmpeg`, `poppler`/`pdftotext`, `whisper-cpp`), downloads a Whisper model into `~/.murph/toolchain/models/whisper/`, initializes the default `./vault` target unless you override it, saves that vault as the default Murph CLI vault for later commands, runs inbox bootstrap, and then launches `assistant run` automatically when at least one selected channel is fully configured for auto-reply, falling back to `assistant chat` otherwise.
@@ -57,14 +57,21 @@ The release flow bumps every publishable package in the manifest to one shared v
 
 The first publish set is:
 
-- `@murph/contracts`
-- `@murph/runtime-state`
-- `@murph/core`
-- `@murph/query`
-- `@murph/importers`
-- `@murph/inboxd`
-- `@murph/parsers`
-- `murph`
+- `@murphai/contracts`
+- `@murphai/hosted-execution`
+- `@murphai/runtime-state`
+- `@murphai/assistant-core`
+- `@murphai/gateway-core`
+- `@murphai/gateway-local`
+- `@murphai/core`
+- `@murphai/query`
+- `@murphai/importers`
+- `@murphai/device-syncd`
+- `@murphai/inboxd`
+- `@murphai/parsers`
+- `@murphai/assistant-runtime`
+- `@murphai/assistantd`
+- `@murphai/murph`
 
 `pnpm release:check` now installs with the frozen lockfile, builds the workspace, runs the repo checks, verifies that every workspace dependency in the publish set stays inside the publish set, and packs every publishable package with `pnpm pack`.
 

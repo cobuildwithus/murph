@@ -1,4 +1,4 @@
-import type { DeviceSyncProvider, PublicDeviceSyncAccount } from "@murph/device-syncd";
+import type { DeviceSyncProvider, PublicDeviceSyncAccount } from "@murphai/device-syncd";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 

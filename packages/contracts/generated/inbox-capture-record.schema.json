@@ -296,7 +296,7 @@
     "attachments"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/inbox-capture-record.schema.json",
+  "$id": "@murphai/contracts/inbox-capture-record.schema.json",
   "title": "Murph Inbox Capture Record",
   "$defs": {
     "__schema0": {

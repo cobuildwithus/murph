@@ -2,7 +2,7 @@ import {
   parseFrontmatterDocument,
   parseFrontmatterScalar,
   type FrontmatterValue,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 export interface ParsedMarkdownDocument {
   attributes: Record<string, unknown>;

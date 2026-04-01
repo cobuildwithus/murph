@@ -5,7 +5,7 @@ import {
   assessmentResponseSchema,
   jsonObjectSchema,
   safeParseContract,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import { buildAuditRecord, resolveAuditShardPath } from "../audit.ts";
 import { generateRecordId } from "../ids.ts";

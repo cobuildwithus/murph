@@ -1,7 +1,7 @@
 import type {
   HostedBundleArtifactRef,
   HostedWorkspaceArtifactPersistInput,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 
 import { readHostedRunnerCommitTimeoutMs } from "./callbacks.ts";
 

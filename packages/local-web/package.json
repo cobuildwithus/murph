@@ -1,5 +1,5 @@
 {
-  "name": "@murph/local-web",
+  "name": "@murphai/local-web",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,9 @@
     "verify": "bash scripts/verify-fast.sh"
   },
   "dependencies": {
-    "@murph/contracts": "workspace:*",
-    "@murph/device-syncd": "workspace:*",
-    "@murph/query": "workspace:*",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/query": "workspace:*",
     "@tailwindcss/postcss": "^4.2.1",
     "next": "^16.2.2",
     "react": "^19.2.4",

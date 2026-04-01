@@ -12,12 +12,12 @@ Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown,
 - a typed CLI and onboarding flow in `packages/cli`
 - provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
 - inbox capture, indexing, and parser-driven attachment extraction
-- local wearable/device sync through `@murph/device-syncd`
+- local wearable/device sync through `@murphai/device-syncd`
 - a local read-only observability app in `packages/local-web`
 - a hosted Next.js integration control plane in `apps/web`
 - a hosted Cloudflare execution plane in `apps/cloudflare`
-- shared hosted execution contracts and env/client helpers in `@murph/hosted-execution`
-- headless package boundaries plus the explicit local gateway runtime package: `@murph/assistant-core`, `@murph/gateway-core`, `@murph/gateway-local`, `@murph/assistant-runtime`, and `@murph/assistantd`
+- shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
+- headless package boundaries plus the explicit local gateway runtime package: `@murphai/assistant-core`, `@murphai/gateway-core`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`
 
 ## Recommended setup
 
@@ -104,7 +104,7 @@ The result is a system you can inspect with normal filesystem tools while still 
 | `packages/gateway-local` | Local vault-backed gateway runtime and projection store. |
 | `packages/assistant-runtime` | Headless hosted execution surface used by Cloudflare runner paths. |
 | `packages/assistantd` | Local assistant daemon with a loopback-only bearer-authenticated control plane. |
-| `packages/cli` | The published `murph` / `vault-cli` package and the main operator surface. |
+| `packages/cli` | The published `@murphai/murph` package, exposing the `murph` / `vault-cli` binaries and the main operator surface. |
 | `packages/local-web` | Local-only Next.js observability app over the query layer. |
 | `apps/web` | Hosted Next.js control plane for onboarding, billing, OAuth, webhooks, and execution dispatch/outbox. |
 | `apps/cloudflare` | Hosted execution plane for signed internal dispatch, per-user coordination, encrypted hosted bundles, and container-backed runs. |
@@ -118,8 +118,8 @@ Murph now has three distinct runtime tiers:
 
 - `vault-cli` / `murph` for vault operations, assistant chat, automation, onboarding, and diagnostics
 - `packages/local-web` for local read-only observability
-- `@murph/device-syncd` for local wearable sync
-- `@murph/assistantd` for the local assistant control plane
+- `@murphai/device-syncd` for local wearable sync
+- `@murphai/assistantd` for the local assistant control plane
 
 ### 2. Hosted control plane
 
@@ -128,7 +128,7 @@ Murph now has three distinct runtime tiers:
 
 ### 3. Hosted execution plane
 
-- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, and executes one-shot inbox/parser/assistant/device-sync/share-import work through `@murph/assistant-runtime`
+- `apps/cloudflare` restores encrypted hosted bundles, coordinates per-user runs, and executes one-shot inbox/parser/assistant/device-sync/share-import work through `@murphai/assistant-runtime`
 - it is intentionally separate from the public hosted web app
 
 ## CLI surface

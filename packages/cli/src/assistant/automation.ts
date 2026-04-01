@@ -7,17 +7,17 @@ export type {
   AssistantAutomationScanResult,
   AssistantInboxScanResult,
   AssistantRunEvent,
-} from '@murph/assistant-core/assistant/automation/shared'
+} from '@murphai/assistant-core/assistant/automation/shared'
 export {
   runAssistantAutomation,
   type RunAssistantAutomationInput,
 } from './automation/run-loop.js'
 export {
   scanAssistantAutomationOnce,
-} from '@murph/assistant-core/assistant/automation/scanner'
+} from '@murphai/assistant-core/assistant/automation/scanner'
 export {
   scanAssistantAutoReplyOnce,
-} from '@murph/assistant-core/assistant/automation/reply'
+} from '@murphai/assistant-core/assistant/automation/reply'
 export {
   scanAssistantInboxOnce,
-} from '@murph/assistant-core/assistant/automation/routing'
+} from '@murphai/assistant-core/assistant/automation/routing'

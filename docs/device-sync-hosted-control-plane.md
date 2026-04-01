@@ -7,7 +7,7 @@ Last verified against repo layout: 2026-03-23
 `packages/device-syncd` currently combines three concerns in one local runtime:
 - public OAuth callback and webhook ingress
 - durable integration state such as OAuth state, encrypted provider tokens, webhook traces, and queued jobs in `.runtime/device-syncd.sqlite`
-- local data-plane execution that fetches provider payloads and imports normalized snapshots into the vault through `@murph/importers`
+- local data-plane execution that fetches provider payloads and imports normalized snapshots into the vault through `@murphai/importers`
 
 That works well for local-first setups, but it makes production callback/webhook hosting awkward because the public surface is attached to the same long-lived local process that owns vault writes.
 
@@ -52,7 +52,7 @@ Responsibilities:
 - local token cache
 - scheduled reconcile/backfill execution
 - direct WHOOP/Oura data fetches whenever possible
-- normalization/import through `@murph/importers`
+- normalization/import through `@murphai/importers`
 - the only component that writes health records into the local vault
 - sparse synchronization with the hosted control plane for token export/refresh and pending-sync markers
 

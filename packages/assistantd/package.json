@@ -1,5 +1,5 @@
 {
-  "name": "@murph/assistantd",
+  "name": "@murphai/assistantd",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -36,10 +36,10 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/assistant-core": "workspace:*",
-    "@murph/gateway-core": "workspace:*",
-    "@murph/gateway-local": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/assistant-core": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
+    "@murphai/gateway-local": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

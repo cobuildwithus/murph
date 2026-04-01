@@ -2,7 +2,7 @@ import {
   extractBankEntityRegistryLinks,
   type BankEntityKind,
   type BankEntityRegistryLink,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import {
   linkTargetIds,

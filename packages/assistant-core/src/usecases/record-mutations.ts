@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from '@murph/contracts'
+import type { JsonObject, JsonValue } from '@murphai/contracts'
 
 import { loadJsonInputObject } from '../json-input.js'
 import { VaultCliError } from '../vault-cli-errors.js'

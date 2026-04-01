@@ -13,7 +13,7 @@ import {
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
   type HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { normalizeHostedEmailBaseUrl } from "../hosted-email.ts";
 import type {

@@ -25,7 +25,7 @@ import {
   type GatewayReadMessagesInput,
   type GatewayReadMessagesResult,
   type GatewayRespondToPermissionInput,
-} from "@murph/gateway-core";
+} from "@murphai/gateway-core";
 
 import type { DurableObjectStateLike } from "./user-runner/types.js";
 

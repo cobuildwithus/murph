@@ -1,5 +1,5 @@
 {
-  "name": "@murph/parsers",
+  "name": "@murphai/parsers",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -29,9 +29,9 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/core": "workspace:*",
-    "@murph/inboxd": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/core": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

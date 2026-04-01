@@ -28,15 +28,15 @@ vi.mock('ai', () => ({
   stepCountIs: providerMocks.stepCountIs,
 }))
 
-vi.mock('@murph/assistant-core/assistant-codex', () => ({
+vi.mock('@murphai/assistant-core/assistant-codex', () => ({
   executeCodexPrompt: providerMocks.executeCodexPrompt,
 }))
 
-vi.mock('@murph/assistant-core/model-harness', () => ({
+vi.mock('@murphai/assistant-core/model-harness', () => ({
   resolveAssistantLanguageModel: providerMocks.resolveAssistantLanguageModel,
 }))
 
-vi.mock('@murph/assistant-core/assistant-cli-tools', () => ({
+vi.mock('@murphai/assistant-core/assistant-cli-tools', () => ({
   createDefaultAssistantToolCatalog: toolMocks.createDefaultAssistantToolCatalog,
 }))
 
@@ -56,7 +56,7 @@ import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderTraits,
-} from '@murph/assistant-core/chat-provider'
+} from '@murphai/assistant-core/chat-provider'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,
@@ -65,8 +65,8 @@ import {
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantProviderDefaults,
-} from '@murph/assistant-core/operator-config'
-import { serializeAssistantProviderSessionOptions } from '@murph/assistant-core/assistant/provider-config'
+} from '@murphai/assistant-core/operator-config'
+import { serializeAssistantProviderSessionOptions } from '@murphai/assistant-core/assistant/provider-config'
 import { createSetupAssistantResolver } from '../src/setup-assistant.js'
 
 beforeEach(() => {

@@ -6,17 +6,17 @@ import { afterEach, test, vi } from 'vitest'
 import {
   createHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import {
   sendEmailMessage,
   sendImessageMessage,
   sendLinqMessage,
   sendTelegramMessage,
-} from '@murph/assistant-core/assistant/channel-adapters'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-core/assistant/channel-adapters'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
-type OutboundChannelModule = Awaited<typeof import('@murph/assistant-core/outbound-channel')>
-type AssistantStateModule = Awaited<typeof import('@murph/assistant-core/assistant-state')>
+type OutboundChannelModule = Awaited<typeof import('@murphai/assistant-core/outbound-channel')>
+type AssistantStateModule = Awaited<typeof import('@murphai/assistant-core/assistant-state')>
 
 const cleanupPaths: string[] = []
 
@@ -24,23 +24,23 @@ async function deliverAssistantMessage(
   input: Parameters<OutboundChannelModule['deliverAssistantMessage']>[0],
   dependencies?: Parameters<OutboundChannelModule['deliverAssistantMessage']>[1],
 ) {
-  const module: OutboundChannelModule = await import('@murph/assistant-core/outbound-channel')
+  const module: OutboundChannelModule = await import('@murphai/assistant-core/outbound-channel')
   return module.deliverAssistantMessage(input, dependencies)
 }
 
 async function resolveImessageDeliveryCandidates(
   input: Parameters<
-    Awaited<typeof import('@murph/assistant-core/outbound-channel')>['resolveImessageDeliveryCandidates']
+    Awaited<typeof import('@murphai/assistant-core/outbound-channel')>['resolveImessageDeliveryCandidates']
   >[0],
 ) {
-  return (await import('@murph/assistant-core/outbound-channel')).resolveImessageDeliveryCandidates(input)
+  return (await import('@murphai/assistant-core/outbound-channel')).resolveImessageDeliveryCandidates(input)
 }
 
 async function getAssistantSession(
   vault: Parameters<AssistantStateModule['getAssistantSession']>[0],
   sessionId: Parameters<AssistantStateModule['getAssistantSession']>[1],
 ) {
-  const module: AssistantStateModule = await import('@murph/assistant-core/assistant-state')
+  const module: AssistantStateModule = await import('@murphai/assistant-core/assistant-state')
   return module.getAssistantSession(vault, sessionId)
 }
 
@@ -49,11 +49,11 @@ async function resolveAssistantSession(
     AssistantStateModule['resolveAssistantSession']
   >[0],
 ) {
-  return (await import('@murph/assistant-core/assistant-state')).resolveAssistantSession(input)
+  return (await import('@murphai/assistant-core/assistant-state')).resolveAssistantSession(input)
 }
 
 async function resolveAssistantStatePaths(vaultRoot: string) {
-  return (await import('@murph/assistant-core/assistant-state')).resolveAssistantStatePaths(vaultRoot)
+  return (await import('@murphai/assistant-core/assistant-state')).resolveAssistantStatePaths(vaultRoot)
 }
 
 function assertAssistantOutboxDispatch<TExpected extends object>(

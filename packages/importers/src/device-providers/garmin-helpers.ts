@@ -3,7 +3,7 @@ import {
   formatTimeZoneDateTimeParts,
   extractIsoDatePrefix,
   normalizeIanaTimeZone,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {

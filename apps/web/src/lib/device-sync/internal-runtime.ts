@@ -1,8 +1,8 @@
 import type {
   DeviceSyncAccountStatus,
   PublicDeviceSyncAccount,
-} from "@murph/device-syncd";
-import { sanitizeStoredDeviceSyncMetadata } from "@murph/device-syncd";
+} from "@murphai/device-syncd";
+import { sanitizeStoredDeviceSyncMetadata } from "@murphai/device-syncd";
 import {
   type HostedExecutionDeviceSyncRuntimeApplyEntry as HostedDeviceSyncRuntimeApplyEntry,
   type HostedExecutionDeviceSyncRuntimeApplyRequest as HostedDeviceSyncRuntimeApplyRequest,
@@ -12,7 +12,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeSnapshotRequest as HostedDeviceSyncRuntimeSnapshotRequest,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import {
   hostedConnectionWithSecretArgs,

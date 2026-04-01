@@ -1,14 +1,14 @@
-# `@murph/local-web`
+# `@murphai/local-web`
 
 Local-only Next.js read surface for the Murph vault.
 
 ## Purpose
 
-- read the vault on the server through `@murph/query`
+- read the vault on the server through `@murphai/query`
 - render a small operator-facing observability UI
 - lead the home surface with a calm weekly compass: what changed, what stayed steady, what likely explains the week, and what is probably not worth reacting to yet
 - stay read-only for canonical vault data and avoid inventing a second storage system
-- optionally start device OAuth/account actions through a separate local `@murph/device-syncd` control plane
+- optionally start device OAuth/account actions through a separate local `@murphai/device-syncd` control plane
 - keep search scoped to safe record fields instead of path-derived metadata
 
 ## Local usage

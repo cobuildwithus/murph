@@ -5,7 +5,7 @@ import {
   type CreateInboxPipelineInput,
   type InboxPipeline,
   type PollConnector,
-} from "@murph/inboxd";
+} from "@murphai/inboxd";
 
 import type { CreateInboxParserServiceInput, InboxParserService } from "../service.js";
 import { createInboxParserService } from "../service.js";

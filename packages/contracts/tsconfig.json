@@ -6,13 +6,13 @@
     "composite": false,
     "incremental": false,
     "paths": {
-      "@murph/contracts": [
+      "@murphai/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@murph/contracts/schemas": [
+      "@murphai/contracts/schemas": [
         "packages/contracts/src/schemas.ts"
       ],
-      "@murph/contracts/*": [
+      "@murphai/contracts/*": [
         "packages/contracts/src/*.ts"
       ]
     }

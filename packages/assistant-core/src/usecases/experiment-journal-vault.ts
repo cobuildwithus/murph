@@ -1,4 +1,4 @@
-import { EXPERIMENT_STATUSES, type JsonObject } from '@murph/contracts'
+import { EXPERIMENT_STATUSES, type JsonObject } from '@murphai/contracts'
 import { z } from 'incur'
 import {
   loadQueryRuntime,
@@ -736,7 +736,7 @@ async function loadExperimentJournalVaultQueryRuntime(): Promise<QueryRuntimeMod
 }
 
 async function loadExperimentJournalVaultCoreRuntime(): Promise<ExperimentJournalVaultCoreRuntime> {
-  return loadRuntimeModule<ExperimentJournalVaultCoreRuntime>('@murph/core')
+  return loadRuntimeModule<ExperimentJournalVaultCoreRuntime>('@murphai/core')
 }
 
 function latestIsoTimestamp(records: readonly QueryVaultRecord[]) {

@@ -2,13 +2,13 @@ import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import {
   parseHostedAssistantRuntimeJobInput,
   type HostedAssistantRuntimeJobInput,
-} from "@murph/assistant-runtime";
+} from "@murphai/assistant-runtime";
 import {
   emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
   type HostedExecutionRunnerResult,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { json, readJsonObject } from "./json.ts";
 import { handleRunnerOutboundRequest, type RunnerOutboundEnvironmentSource } from "./runner-outbound.ts";

@@ -1,4 +1,4 @@
-import { isLoopbackHostname } from "@murph/runtime-state";
+import { isLoopbackHostname } from "@murphai/runtime-state";
 
 export const DEVICE_SYNC_BASE_URL_ENV = "DEVICE_SYNC_BASE_URL";
 export const DEVICE_SYNC_BASE_URL_ENV_KEYS = [

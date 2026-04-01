@@ -7,16 +7,16 @@ import {
   initializeVault,
   upsertFood,
   upsertProtocolItem,
-} from '@murph/core'
-import type { AssistantAskResult } from '@murph/assistant-core/assistant-cli-contracts'
-import { writeAssistantChatResultArtifacts } from '@murph/assistant-core/assistant/automation/artifacts'
+} from '@murphai/core'
+import type { AssistantAskResult } from '@murphai/assistant-core/assistant-cli-contracts'
+import { writeAssistantChatResultArtifacts } from '@murphai/assistant-core/assistant/automation/artifacts'
 import {
   createDefaultAssistantToolCatalog,
   createInboxRoutingAssistantToolCatalog,
-} from '@murph/assistant-core/assistant-cli-tools'
-import { materializeInboxModelBundle } from '@murph/assistant-core/inbox-model-harness'
-import type { InboxServices } from '@murph/assistant-core/inbox-services'
-import type { VaultServices } from '@murph/assistant-core/vault-services'
+} from '@murphai/assistant-core/assistant-cli-tools'
+import { materializeInboxModelBundle } from '@murphai/assistant-core/inbox-model-harness'
+import type { InboxServices } from '@murphai/assistant-core/inbox-services'
+import type { VaultServices } from '@murphai/assistant-core/vault-services'
 
 const test = baseTest.sequential
 

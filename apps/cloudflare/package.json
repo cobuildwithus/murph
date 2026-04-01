@@ -1,5 +1,5 @@
 {
-  "name": "@murph/cloudflare-runner",
+  "name": "@murphai/cloudflare-runner",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -30,15 +30,15 @@
   },
   "dependencies": {
     "@cloudflare/containers": "^0.2.0",
-    "@murph/assistant-core": "workspace:*",
-    "@murph/assistant-runtime": "workspace:*",
-    "@murph/core": "workspace:*",
-    "@murph/device-syncd": "workspace:*",
-    "@murph/gateway-core": "workspace:*",
-    "@murph/hosted-execution": "workspace:*",
-    "@murph/inboxd": "workspace:*",
-    "@murph/parsers": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/assistant-core": "workspace:*",
+    "@murphai/assistant-runtime": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/device-syncd": "workspace:*",
+    "@murphai/gateway-core": "workspace:*",
+    "@murphai/hosted-execution": "workspace:*",
+    "@murphai/inboxd": "workspace:*",
+    "@murphai/parsers": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.13.4",

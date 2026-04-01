@@ -6,13 +6,13 @@ import {
   type DeviceSyncRegistry,
   type ProviderConnectionResult,
   type PublicDeviceSyncAccount,
-} from "@murph/device-syncd";
-import { shapeHostedDeviceSyncJobHintPayload } from "@murph/device-syncd/hosted-hints";
+} from "@murphai/device-syncd";
+import { shapeHostedDeviceSyncJobHintPayload } from "@murphai/device-syncd/hosted-hints";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncWakeEvent,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";

@@ -21,6 +21,7 @@ NC='\033[0m'
 MURPH_REQUIRED_NODE_VERSION="${MURPH_REQUIRED_NODE_VERSION:-22.16.0}"
 MURPH_NODE_LINE="${MURPH_NODE_LINE:-22}"
 MURPH_REPO_URL="${MURPH_REPO_URL:-https://github.com/cobuildwithus/murph.git}"
+MURPH_NPM_PACKAGE="${MURPH_NPM_PACKAGE:-@murphai/murph}"
 MURPH_INSTALL_METHOD="${MURPH_INSTALL_METHOD:-auto}"
 MURPH_VERSION="${MURPH_VERSION:-latest}"
 MURPH_BETA="${MURPH_BETA:-0}"
@@ -160,6 +161,7 @@ Examples:
 
 Environment variables:
   MURPH_INSTALL_METHOD=auto|npm|git
+  MURPH_NPM_PACKAGE=@murphai/murph
   MURPH_VERSION=latest|beta|<semver>|<git-ref>
   MURPH_BETA=0|1
   MURPH_GIT_DIR=/path/to/checkout
@@ -685,7 +687,7 @@ detect_murph_checkout() {
   if ! grep -q '"name"[[:space:]]*:[[:space:]]*"murph-workspace"' "$dir/package.json" 2>/dev/null; then
     return 1
   fi
-  if ! grep -q '"name"[[:space:]]*:[[:space:]]*"murph"' "$dir/packages/cli/package.json" 2>/dev/null; then
+  if ! grep -q '"name"[[:space:]]*:[[:space:]]*"@murphai/murph"' "$dir/packages/cli/package.json" 2>/dev/null; then
     return 1
   fi
   echo "$dir"
@@ -731,7 +733,7 @@ version_looks_like_raw_npm_spec() {
 }
 
 resolve_beta_version() {
-  npm view murph dist-tags.beta 2>/dev/null || true
+  npm view "$MURPH_NPM_PACKAGE" dist-tags.beta 2>/dev/null || true
 }
 
 resolve_npm_install_spec() {
@@ -744,7 +746,7 @@ resolve_npm_install_spec() {
       version="$beta"
       ui_info "Using Murph beta tag ${beta}"
     else
-      ui_warn "No npm beta dist-tag found for murph; falling back to latest"
+      ui_warn "No npm beta dist-tag found for ${MURPH_NPM_PACKAGE}; falling back to latest"
       version="latest"
     fi
   fi
@@ -754,7 +756,7 @@ resolve_npm_install_spec() {
     return 0
   fi
 
-  echo "murph@${version}"
+  echo "${MURPH_NPM_PACKAGE}@${version}"
 }
 
 npm_package_available() {

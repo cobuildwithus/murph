@@ -13,18 +13,18 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murph/assistant-core": "../assistant-core/src/index.ts",
-  "@murph/assistant-runtime": "./src/index.ts",
-  "@murph/contracts": "../contracts/src/index.ts",
-  "@murph/core": "../core/src/index.ts",
-  "@murph/device-syncd": "../device-syncd/src/index.ts",
-  "@murph/gateway-core": "../gateway-core/src/index.ts",
-  "@murph/gateway-local": "../gateway-local/src/index.ts",
-  "@murph/hosted-execution": "../hosted-execution/src/index.ts",
-  "@murph/importers": "../importers/src/index.ts",
-  "@murph/inboxd": "../inboxd/src/index.ts",
-  "@murph/parsers": "../parsers/src/index.ts",
-  "@murph/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/assistant-core": "../assistant-core/src/index.ts",
+  "@murphai/assistant-runtime": "./src/index.ts",
+  "@murphai/contracts": "../contracts/src/index.ts",
+  "@murphai/core": "../core/src/index.ts",
+  "@murphai/device-syncd": "../device-syncd/src/index.ts",
+  "@murphai/gateway-core": "../gateway-core/src/index.ts",
+  "@murphai/gateway-local": "../gateway-local/src/index.ts",
+  "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
+  "@murphai/importers": "../importers/src/index.ts",
+  "@murphai/inboxd": "../inboxd/src/index.ts",
+  "@murphai/parsers": "../parsers/src/index.ts",
+  "@murphai/runtime-state": "../runtime-state/src/index.ts",
   murph: "../cli/src/index.ts",
 } as const;
 

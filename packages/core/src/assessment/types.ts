@@ -2,7 +2,7 @@ import {
   ASSESSMENT_SOURCES as CONTRACT_ASSESSMENT_SOURCES,
   CONTRACT_SCHEMA_VERSION,
   type AssessmentSource,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type { RawArtifact } from "../raw.ts";
 import type { UnknownRecord } from "../types.ts";

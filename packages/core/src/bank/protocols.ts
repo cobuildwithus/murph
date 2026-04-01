@@ -1,7 +1,7 @@
 import {
   deriveProtocolGroupFromRelativePath,
   type ProtocolUpsertPayload,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";

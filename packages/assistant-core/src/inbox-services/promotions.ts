@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
-import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murph/core'
+import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
 import { resolveAssistantVaultPath } from '../assistant-vault-paths.js'
 import {
   inboxPromotionStoreSchema,

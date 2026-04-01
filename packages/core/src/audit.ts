@@ -5,7 +5,7 @@ import type {
   AuditStatus,
   ErrorCodeValue,
   FileChangeOperation,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import {
   AUDIT_ACTORS,

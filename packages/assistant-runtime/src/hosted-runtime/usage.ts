@@ -1,11 +1,11 @@
 import {
   deletePendingAssistantUsageRecord,
   listPendingAssistantUsageRecords,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 import {
   resolveHostedExecutionAiUsageClient,
   summarizeHostedExecutionError,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 export interface HostedPendingAssistantUsageExportResult {
   exported: number;

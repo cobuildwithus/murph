@@ -1,5 +1,5 @@
 import { mkdir } from 'node:fs/promises'
-import { resolveRuntimePaths } from '@murph/runtime-state/node'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import {
   inboxRuntimeConfigSchema,
   type InboxConnectorConfig,

@@ -3,16 +3,16 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionOutboxPayload as SharedHostedExecutionOutboxPayload,
   HostedExecutionDispatchRef as SharedHostedExecutionDispatchRef,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
   buildHostedExecutionOutboxPayload as buildSharedHostedExecutionOutboxPayload,
   buildHostedExecutionDispatchRef as buildSharedHostedExecutionDispatchRef,
   readHostedExecutionOutboxPayload as readSharedHostedExecutionOutboxPayload,
   readHostedExecutionDispatchRef as readSharedHostedExecutionDispatchRef,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
-export { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murph/hosted-execution";
+export { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
 
 export type HostedExecutionDispatchRef = Prisma.InputJsonObject & SharedHostedExecutionDispatchRef;
 export type HostedExecutionOutboxPayload = SharedHostedExecutionOutboxPayload;

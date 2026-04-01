@@ -1,5 +1,5 @@
 {
-  "name": "@murph/importers",
+  "name": "@murphai/importers",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -29,8 +29,8 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/contracts": "workspace:*",
-    "@murph/core": "workspace:*",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
     "zod": "^4.3.6"
   }
 }

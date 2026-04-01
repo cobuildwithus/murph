@@ -11,8 +11,8 @@ import {
   type AssistantOutboxDispatchMode,
   type AssistantOutboxIntent,
   type AssistantSession,
-} from '@murph/assistant-core'
-import type { GatewayReplyRouteKind } from '@murph/gateway-core'
+} from '@murphai/assistant-core'
+import type { GatewayReplyRouteKind } from '@murphai/gateway-core'
 
 export type GatewayLocalDispatchMode = AssistantOutboxDispatchMode
 

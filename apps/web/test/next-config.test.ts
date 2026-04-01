@@ -27,15 +27,15 @@ const require = createRequire(import.meta.url);
 
 test("resolveHostedWebWorkspaceSourceEntries points at hosted source package entries", () => {
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murph/device-syncd"],
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/device-syncd"],
     path.resolve("/repo/packages/device-syncd/src/index.ts"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murph/core"],
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/core"],
     path.resolve("/repo/packages/core/src/index.ts"),
   );
   assert.equal(
-    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murph/hosted-execution"],
+    resolveHostedWebWorkspaceSourceEntries("/repo/apps/web")["@murphai/hosted-execution"],
     path.resolve("/repo/packages/hosted-execution/src/index.ts"),
   );
 });

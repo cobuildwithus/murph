@@ -2,7 +2,7 @@ import {
   conditionRegistryEntityDefinition,
   extractHealthEntityRegistryLinks,
   type ConditionFrontmatter,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";

@@ -1,4 +1,4 @@
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   applyLimit,
   compareByLatest,
@@ -8,7 +8,7 @@ import {
   type CommandShowEntity,
   type QueryRecord,
   type SampleCommandListItem,
-} from '@murph/assistant-core/commands/query-record-command-helpers'
+} from '@murphai/assistant-core/commands/query-record-command-helpers'
 
 export interface SampleListOptions {
   from?: string

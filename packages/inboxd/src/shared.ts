@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { generateUlid } from "@murph/runtime-state";
+import { generateUlid } from "@murphai/runtime-state";
 
 import {
   assertPathWithinVaultOnDisk,
   normalizeRelativeVaultPath,
   resolveVaultPathOnDisk,
-} from "@murph/core";
+} from "@murphai/core";
 
 import type { StoredAttachment } from "./contracts/capture.ts";
 import {

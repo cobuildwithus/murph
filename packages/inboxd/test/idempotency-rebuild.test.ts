@@ -13,8 +13,8 @@ import {
   listWriteOperationMetadataPaths,
   readJsonlRecords,
   readStoredWriteOperation,
-} from "@murph/core";
-import { resolveRuntimePaths } from "@murph/runtime-state/node";
+} from "@murphai/core";
+import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
 import {
   appendImportAudit,

@@ -3,7 +3,7 @@ import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchRef,
   readHostedExecutionOutboxPayload,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { buildHostedDeviceSyncWakeDispatchFromSignal } from "../device-sync/hosted-dispatch";
 import { toJsonRecord } from "../device-sync/shared";

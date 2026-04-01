@@ -25,7 +25,7 @@ import {
   executeCodexPrompt,
   extractCodexTraceUpdates,
   resolveCodexDisplayOptions,
-} from '@murph/assistant-core/assistant-codex'
+} from '@murphai/assistant-core/assistant-codex'
 
 const cleanupPaths: string[] = []
 

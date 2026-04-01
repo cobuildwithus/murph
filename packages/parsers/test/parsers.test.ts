@@ -4,13 +4,13 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { initializeVault } from "@murph/core";
+import { initializeVault } from "@murphai/core";
 import {
   createInboxPipeline,
   openInboxRuntime,
   rebuildRuntimeFromVault,
   type InboxRuntimeStore,
-} from "@murph/inboxd";
+} from "@murphai/inboxd";
 
 import {
   createConfiguredParserRegistry,

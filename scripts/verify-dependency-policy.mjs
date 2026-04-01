@@ -106,7 +106,7 @@ for (const manifestPath of manifestPaths) {
         seen.set(dependencyName, sectionName);
       }
 
-      if (dependencyName.startsWith("@murph/") && !spec.startsWith("workspace:")) {
+      if (dependencyName.startsWith("@murphai/") && !spec.startsWith("workspace:")) {
         errors.push(`${relPath} ${sectionName}.${dependencyName} must use the workspace: protocol.`);
       }
 

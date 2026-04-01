@@ -3,10 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test, vi } from 'vitest'
-import { readAssistantAutomationState } from '@murph/assistant-core/assistant-state'
+import { readAssistantAutomationState } from '@murphai/assistant-core/assistant-state'
 import { createSetupAgentmailSelectionResolver } from '../src/setup-agentmail.js'
 import { configureSetupChannels } from '../src/setup-services/channels.js'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 test('configureSetupChannels enables Telegram auto-reply only after the doctor probe passes', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channels-'))

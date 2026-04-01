@@ -4,7 +4,7 @@ import {
   PROFILE_SNAPSHOT_SOURCES as CONTRACT_PROFILE_SNAPSHOT_SOURCES,
   type ProfileSnapshotProfile,
   type ProfileSnapshotSource,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 export const PROFILE_SNAPSHOT_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.profileSnapshot;
 export const PROFILE_SNAPSHOT_LEDGER_DIRECTORY = "ledger/profile-snapshots";

@@ -2,11 +2,14 @@ import { randomBytes } from "node:crypto";
 
 import {
   readHostedExecutionDispatchRef,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import { Prisma } from "@prisma/client";
 
+import { createHostedOpaqueIdentifier } from "./contact-privacy";
+import { getHostedOnboardingSecretCodec } from "./runtime";
 import type {
   HostedWebhookEventPayload,
+  HostedWebhookLinqMessageSideEffect,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptErrorState,
   HostedWebhookResponsePayload,
@@ -203,6 +206,75 @@ function readHostedWebhookErrorState<TErrorState extends HostedWebhookReceiptErr
   } as TErrorState;
 }
 
+function serializeHostedLinqMessageSideEffectPayload(
+  payload: HostedWebhookLinqMessageSideEffect["payload"],
+): Prisma.InputJsonObject {
+  const codec = getHostedOnboardingSecretCodec();
+
+  return {
+    encryptedPayload: codec.encrypt(JSON.stringify(payload)),
+    keyVersion: codec.keyVersion,
+  } satisfies Prisma.InputJsonObject;
+}
+
+function serializeHostedLinqMessageSideEffectResult(
+  result: HostedWebhookLinqMessageSideEffect["result"],
+): Prisma.InputJsonValue | null {
+  if (!result) {
+    return null;
+  }
+
+  return {
+    chatId: createHostedOpaqueIdentifier("linq.chat", result.chatId),
+    messageId: createHostedOpaqueIdentifier("linq.message", result.messageId),
+  } satisfies Prisma.InputJsonObject;
+}
+
+function readHostedWebhookLinqMessageSideEffectPayload(
+  payload: Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>,
+): HostedWebhookLinqMessageSideEffect["payload"] | null {
+  const encryptedPayload = readHostedWebhookReceiptString(payload.encryptedPayload);
+
+  if (encryptedPayload) {
+    try {
+      const decrypted = JSON.parse(
+        getHostedOnboardingSecretCodec().decrypt(encryptedPayload),
+      ) as Record<string, unknown>;
+      const chatId = readHostedWebhookReceiptString(decrypted.chatId as Prisma.InputJsonValue);
+      const message = readHostedWebhookReceiptString(decrypted.message as Prisma.InputJsonValue);
+
+      if (!chatId || !message) {
+        return null;
+      }
+
+      return {
+        chatId,
+        inviteId: readHostedWebhookReceiptString(decrypted.inviteId as Prisma.InputJsonValue),
+        message,
+        replyToMessageId: readHostedWebhookReceiptString(
+          decrypted.replyToMessageId as Prisma.InputJsonValue,
+        ),
+      } satisfies HostedWebhookLinqMessageSideEffect["payload"];
+    } catch {
+      return null;
+    }
+  }
+
+  const chatId = readHostedWebhookReceiptString(payload.chatId);
+  const message = readHostedWebhookReceiptString(payload.message);
+
+  if (!chatId || !message) {
+    return null;
+  }
+
+  return {
+    chatId,
+    inviteId: readHostedWebhookReceiptString(payload.inviteId),
+    message,
+    replyToMessageId: readHostedWebhookReceiptString(payload.replyToMessageId),
+  } satisfies HostedWebhookLinqMessageSideEffect["payload"];
+}
+
 function serializeHostedWebhookSideEffect(
   effect: HostedWebhookSideEffect,
 ): Prisma.InputJsonObject {
@@ -212,8 +284,14 @@ function serializeHostedWebhookSideEffect(
     kind: effect.kind,
     lastAttemptAt: effect.lastAttemptAt,
     lastError: effect.lastError,
-    payload: effect.payload as unknown as Prisma.InputJsonValue,
-    result: effect.result as unknown as Prisma.InputJsonValue,
+    payload:
+      effect.kind === "linq_message_send"
+        ? serializeHostedLinqMessageSideEffectPayload(effect.payload)
+        : effect.payload as unknown as Prisma.InputJsonValue,
+    result:
+      effect.kind === "linq_message_send"
+        ? serializeHostedLinqMessageSideEffectResult(effect.result)
+        : effect.result as unknown as Prisma.InputJsonValue,
     sentAt: effect.sentAt,
     status: effect.status,
   } satisfies Prisma.InputJsonObject;
@@ -274,10 +352,9 @@ function readHostedWebhookSideEffect(
       };
     }
     case "linq_message_send": {
-      const chatId = readHostedWebhookReceiptString(payload.chatId);
-      const message = readHostedWebhookReceiptString(payload.message);
+      const linqPayload = readHostedWebhookLinqMessageSideEffectPayload(payload);
 
-      if (!chatId || !message) {
+      if (!linqPayload) {
         return null;
       }
 
@@ -287,12 +364,7 @@ function readHostedWebhookSideEffect(
         kind,
         lastAttemptAt,
         lastError,
-        payload: {
-          chatId,
-          inviteId: readHostedWebhookReceiptString(payload.inviteId),
-          message,
-          replyToMessageId: readHostedWebhookReceiptString(payload.replyToMessageId),
-        },
+        payload: linqPayload,
         result:
           Object.keys(result).length === 0
             ? null

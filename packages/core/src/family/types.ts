@@ -1,4 +1,4 @@
-import type { FamilyMemberFrontmatter } from "@murph/contracts";
+import type { FamilyMemberFrontmatter } from "@murphai/contracts";
 
 import type { StoredMarkdownRegistryEntity } from "../bank/types.ts";
 

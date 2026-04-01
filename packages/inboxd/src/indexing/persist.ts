@@ -9,7 +9,7 @@ import {
   type AuditRecord,
   type EventRecord,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import {
   acquireCanonicalWriteLock,
   applyCanonicalWriteBatch,
@@ -19,7 +19,7 @@ import {
   readJsonlRecords,
   VAULT_LAYOUT,
   walkVaultFiles,
-} from "@murph/core";
+} from "@murphai/core";
 
 import type { InboundCapture, StoredAttachment, StoredCapture } from "../contracts/capture.ts";
 import {

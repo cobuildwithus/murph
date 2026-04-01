@@ -4,13 +4,13 @@ import path from "node:path";
 import {
   readHostedEmailCapabilities,
   type HostedExecutionDispatchRequest,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   createIntegratedInboxServices,
   createIntegratedVaultServices,
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from "@murph/assistant-core";
+} from "@murphai/assistant-core";
 
 import type { HostedBootstrapResult } from "./models.ts";
 import { hostedAssistantAutomationEnabledFromEnv } from "./environment.ts";

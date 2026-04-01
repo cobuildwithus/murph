@@ -4,13 +4,13 @@ import {
   buildHostedExecutionTelegramMessageReceivedDispatch,
   readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import {
   readHostedWebhookReceiptState,
   toHostedWebhookReceiptRecord,
 } from "./webhook-receipt-codec";
-import { normalizePhoneNumber } from "./phone";
+import { createHostedPhoneLookupKey } from "./contact-privacy";
 import type { HostedWebhookDispatchSideEffect } from "./webhook-receipt-types";
 
 const EMPTY_DISPATCH_REF_FALLBACK = {
@@ -67,17 +67,17 @@ export function buildHostedWebhookDispatchFromPayload(
     const linqEvent = toHostedWebhookReceiptRecord(
       payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
     );
-    const normalizedPhoneNumber = readHostedWebhookReceiptNormalizedPhoneNumber(linqEvent);
+    const phoneLookupKey = readHostedWebhookReceiptPhoneLookupKey(payload);
 
-    if (!linqEvent || !normalizedPhoneNumber) {
+    if (!linqEvent || !phoneLookupKey) {
       return null;
     }
 
     return buildHostedExecutionLinqMessageReceivedDispatch({
       eventId: dispatchRef.eventId,
       linqEvent,
-      normalizedPhoneNumber,
       occurredAt: dispatchRef.occurredAt,
+      phoneLookupKey,
       userId: dispatchRef.userId,
     });
   }
@@ -180,18 +180,21 @@ function readHostedWebhookReceiptTelegramUserIsBot(value: unknown): boolean {
   );
 }
 
-function readHostedWebhookReceiptNormalizedPhoneNumber(
-  linqEvent: Record<string, unknown> | null,
+function readHostedWebhookReceiptPhoneLookupKey(
+  payload: HostedWebhookDispatchSideEffect["payload"],
 ): string | null {
-  if (!linqEvent) {
-    return null;
+  if (typeof payload.phoneLookupKey === "string" && payload.phoneLookupKey.trim().length > 0) {
+    return payload.phoneLookupKey.trim();
   }
 
-  const eventData = linqEvent.data;
+  const linqEvent = toHostedWebhookReceiptRecord(
+    payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+  );
+  const fromValue = linqEvent && typeof linqEvent.data === "object" && linqEvent.data && !Array.isArray(linqEvent.data)
+    ? (linqEvent.data as Record<string, unknown>).from
+    : null;
 
-  if (!eventData || typeof eventData !== "object" || Array.isArray(eventData)) {
-    return null;
-  }
-
-  return normalizePhoneNumber((eventData as Record<string, unknown>).from as string | null | undefined);
+  return typeof fromValue === "string"
+    ? createHostedPhoneLookupKey(fromValue)
+    : null;
 }

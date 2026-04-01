@@ -3,8 +3,8 @@ import {
   type TelegramAttachmentDownloadDriver,
   type TelegramFile,
   type TelegramUpdateLike,
-} from "@murph/inboxd";
-import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+} from "@murphai/inboxd";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 

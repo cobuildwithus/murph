@@ -1,11 +1,11 @@
 import { maybeGetAssistantStatusViaDaemon } from '../assistant-daemon-client.js'
 import {
   getAssistantStatusLocal,
-} from '@murph/assistant-core/assistant/status'
-import type { AssistantStatusResult } from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant/status'
+import type { AssistantStatusResult } from '@murphai/assistant-core/assistant-cli-contracts'
 
-export * from '@murph/assistant-core/assistant/status'
-export type { AssistantStatusResult } from '@murph/assistant-core/assistant-cli-contracts'
+export * from '@murphai/assistant-core/assistant/status'
+export type { AssistantStatusResult } from '@murphai/assistant-core/assistant-cli-contracts'
 
 export async function getAssistantStatus(
   input:

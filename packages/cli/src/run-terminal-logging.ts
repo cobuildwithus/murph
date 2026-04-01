@@ -1,9 +1,9 @@
-import type { AssistantRunEvent } from '@murph/assistant-core/assistant/automation/shared'
+import type { AssistantRunEvent } from '@murphai/assistant-core/assistant/automation/shared'
 import type {
   InboxRunEvent,
   RuntimeCaptureRecordInput,
-} from '@murph/assistant-core/inbox-services'
-import { normalizeNullableString as normalizeLabel } from '@murph/assistant-core/text/shared'
+} from '@murphai/assistant-core/inbox-services'
+import { normalizeNullableString as normalizeLabel } from '@murphai/assistant-core/text/shared'
 
 export type ForegroundLogScope = 'assistant' | 'inbox'
 

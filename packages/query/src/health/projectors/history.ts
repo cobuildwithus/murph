@@ -1,6 +1,6 @@
 import {
   HEALTH_HISTORY_EVENT_KINDS,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import {
   compareCanonicalEntities,

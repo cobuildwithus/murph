@@ -35,31 +35,31 @@ importers:
       '@cloudflare/containers':
         specifier: ^0.2.0
         version: 0.2.0
-      '@murph/assistant-core':
+      '@murphai/assistant-core':
         specifier: workspace:*
         version: link:../../packages/assistant-core
-      '@murph/assistant-runtime':
+      '@murphai/assistant-runtime':
         specifier: workspace:*
         version: link:../../packages/assistant-runtime
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@murph/device-syncd':
+      '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../../packages/device-syncd
-      '@murph/gateway-core':
+      '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../../packages/gateway-core
-      '@murph/hosted-execution':
+      '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../../packages/hosted-execution
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../../packages/inboxd
-      '@murph/parsers':
+      '@murphai/parsers':
         specifier: workspace:*
         version: link:../../packages/parsers
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../../packages/runtime-state
     devDependencies:
@@ -93,25 +93,25 @@ importers:
       '@cobuild/wire':
         specifier: ^0.3.6
         version: 0.3.6(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@4.3.6)
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@murph/device-syncd':
+      '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../../packages/device-syncd
-      '@murph/hosted-execution':
+      '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../../packages/hosted-execution
-      '@murph/importers':
+      '@murphai/importers':
         specifier: workspace:*
         version: link:../../packages/importers
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../../packages/inboxd
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../../packages/runtime-state
       '@prisma/adapter-pg':
@@ -193,28 +193,28 @@ importers:
       '@ai-sdk/openai-compatible':
         specifier: ^2.0.35
         version: 2.0.35(zod@4.3.6)
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murph/device-syncd':
+      '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
-      '@murph/importers':
+      '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
-      '@murph/parsers':
+      '@murphai/parsers':
         specifier: workspace:*
         version: link:../parsers
-      '@murph/query':
+      '@murphai/query':
         specifier: workspace:*
         version: link:../query
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
       '@photon-ai/imessage-kit':
@@ -232,79 +232,79 @@ importers:
 
   packages/assistant-runtime:
     dependencies:
-      '@murph/assistant-core':
+      '@murphai/assistant-core':
         specifier: workspace:*
         version: link:../assistant-core
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murph/device-syncd':
+      '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
-      '@murph/gateway-core':
+      '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
-      '@murph/gateway-local':
+      '@murphai/gateway-local':
         specifier: workspace:*
         version: link:../gateway-local
-      '@murph/hosted-execution':
+      '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../hosted-execution
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
-      '@murph/parsers':
+      '@murphai/parsers':
         specifier: workspace:*
         version: link:../parsers
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
   packages/assistantd:
     dependencies:
-      '@murph/assistant-core':
+      '@murphai/assistant-core':
         specifier: workspace:*
         version: link:../assistant-core
-      '@murph/gateway-core':
+      '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
-      '@murph/gateway-local':
+      '@murphai/gateway-local':
         specifier: workspace:*
         version: link:../gateway-local
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
   packages/cli:
     dependencies:
-      '@murph/assistant-core':
+      '@murphai/assistant-core':
         specifier: workspace:*
         version: link:../assistant-core
-      '@murph/assistantd':
+      '@murphai/assistantd':
         specifier: workspace:*
         version: link:../assistantd
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murph/device-syncd':
+      '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
-      '@murph/importers':
+      '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
-      '@murph/parsers':
+      '@murphai/parsers':
         specifier: workspace:*
         version: link:../parsers
-      '@murph/query':
+      '@murphai/query':
         specifier: workspace:*
         version: link:../query
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
       incur:
@@ -335,19 +335,19 @@ importers:
 
   packages/core:
     dependencies:
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
   packages/device-syncd:
     dependencies:
-      '@murph/importers':
+      '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
@@ -359,34 +359,34 @@ importers:
 
   packages/gateway-local:
     dependencies:
-      '@murph/assistant-core':
+      '@murphai/assistant-core':
         specifier: workspace:*
         version: link:../assistant-core
-      '@murph/gateway-core':
+      '@murphai/gateway-core':
         specifier: workspace:*
         version: link:../gateway-core
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
   packages/hosted-execution:
     dependencies:
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
   packages/importers:
     dependencies:
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../core
       zod:
@@ -395,13 +395,13 @@ importers:
 
   packages/inboxd:
     dependencies:
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
       '@photon-ai/imessage-kit':
@@ -413,13 +413,13 @@ importers:
 
   packages/local-web:
     dependencies:
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/device-syncd':
+      '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
-      '@murph/query':
+      '@murphai/query':
         specifier: workspace:*
         version: link:../query
       '@tailwindcss/postcss':
@@ -453,22 +453,22 @@ importers:
 
   packages/parsers:
     dependencies:
-      '@murph/core':
+      '@murphai/core':
         specifier: workspace:*
         version: link:../core
-      '@murph/inboxd':
+      '@murphai/inboxd':
         specifier: workspace:*
         version: link:../inboxd
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
 
   packages/query:
     dependencies:
-      '@murph/contracts':
+      '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@murph/runtime-state':
+      '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
       zod:

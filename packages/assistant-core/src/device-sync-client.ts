@@ -10,7 +10,7 @@ import {
   resolveDeviceSyncControlToken as resolveSharedDeviceSyncControlToken,
   type DeviceSyncAccountRecord,
   type DeviceSyncProviderDescriptor,
-} from '@murph/device-syncd/client'
+} from '@murphai/device-syncd/client'
 
 import { VaultCliError } from './vault-cli-errors.js'
 

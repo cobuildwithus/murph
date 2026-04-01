@@ -1,4 +1,4 @@
-import { RECIPE_STATUSES, ID_PREFIXES, isContractId, type JsonObject } from '@murph/contracts'
+import { RECIPE_STATUSES, ID_PREFIXES, isContractId, type JsonObject } from '@murphai/contracts'
 import { z } from 'incur'
 
 import { loadRuntimeModule } from '../runtime-import.js'
@@ -437,7 +437,7 @@ async function readRecipeEntries(vaultRoot: string) {
 }
 
 async function loadRecipeCoreRuntime(): Promise<RecipeCoreRuntime> {
-  return loadRuntimeModule<RecipeCoreRuntime>('@murph/core')
+  return loadRuntimeModule<RecipeCoreRuntime>('@murphai/core')
 }
 
 function buildRecipeData(recipe: RecipeReadModel): JsonObject {

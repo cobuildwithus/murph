@@ -6,13 +6,13 @@ import {
   readInboxCaptureMutationHead,
   type InboxCaptureRecord,
   type IndexedAttachment,
-} from '@murph/inboxd'
+} from '@murphai/inboxd'
 import {
   openSqliteRuntimeDatabase,
   resolveInboxRuntimePaths,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 
-import type { GatewayAttachment, GatewayConversationRoute } from '@murph/gateway-core'
+import type { GatewayAttachment, GatewayConversationRoute } from '@murphai/gateway-core'
 import type {
   GatewayLocalOutboxSource,
   GatewayLocalSessionSource,
@@ -22,13 +22,13 @@ import {
   createGatewayCaptureMessageId,
   createGatewayConversationSessionKey,
   createGatewayOutboxMessageId,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   gatewayConversationRouteFromBinding,
   gatewayConversationRouteFromCapture,
   gatewayConversationRouteFromOutboxIntent,
   resolveGatewayConversationRouteKey,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import { normalizeNullableString } from '../shared.js'
 
 const CAPTURE_SYNC_BATCH_SIZE = 500

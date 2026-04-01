@@ -25,49 +25,49 @@
       "@/*": [
         "apps/web/*"
       ],
-      "@murph/contracts": [
+      "@murphai/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@murph/contracts/*": [
+      "@murphai/contracts/*": [
         "packages/contracts/src/*"
       ],
-      "@murph/hosted-execution": [
+      "@murphai/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
-      "@murph/hosted-execution/*": [
+      "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
-      "@murph/runtime-state": [
+      "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
-      "@murph/runtime-state/node": [
+      "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
-      "@murph/runtime-state/*": [
+      "@murphai/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],
-      "@murph/core": [
+      "@murphai/core": [
         "packages/core/src/index.ts"
       ],
-      "@murph/core/*": [
+      "@murphai/core/*": [
         "packages/core/src/*"
       ],
-      "@murph/importers": [
+      "@murphai/importers": [
         "packages/importers/src/index.ts"
       ],
-      "@murph/importers/*": [
+      "@murphai/importers/*": [
         "packages/importers/src/*"
       ],
-      "@murph/inboxd": [
+      "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
-      "@murph/inboxd/*": [
+      "@murphai/inboxd/*": [
         "packages/inboxd/src/*"
       ],
-      "@murph/device-syncd": [
+      "@murphai/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],
-      "@murph/device-syncd/*": [
+      "@murphai/device-syncd/*": [
         "packages/device-syncd/src/*"
       ]
     },
