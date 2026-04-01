@@ -9,7 +9,9 @@ const scanRoots = ["packages", "apps", "e2e"] as const;
 const blockedExtensions = new Set([".js", ".mjs", ".cjs", ".d.ts"]);
 const allowedSourceArtifacts = new Set([
   "packages/local-web/postcss.config.mjs",
+  "packages/local-web/eslint.config.mjs",
   "apps/web/postcss.config.mjs",
+  "apps/web/eslint.config.mjs",
 ]);
 const blockedTrackedArtifactDirectoryNames = new Set([
   "dist",
@@ -117,7 +119,7 @@ export async function main(): Promise<void> {
   }
 
   console.log(
-    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and fixed PostCSS config paths, and no tracked .env/.env.* private files or dist/.next/.next-dev/.next-smoke/.test-dist/*.tsbuildinfo artifacts, were found.",
+    "No handwritten .js, .mjs, .cjs, or .d.ts files beyond the allowlisted Next.js declaration stubs and the fixed {postcss,eslint}.config.mjs framework config paths, and no tracked .env/.env.* private files or dist/.next/.next-dev/.next-smoke/.test-dist/*.tsbuildinfo artifacts, were found.",
   );
 }
 
