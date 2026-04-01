@@ -171,7 +171,7 @@ export default function HomePage() {
                 <div className="mt-4 space-y-2 border-t border-white/15 pt-4">
                   <strong className="text-sm">Prefer texting?</strong>
                   <p className="text-sm leading-relaxed text-white/50">
-                    Text {signupPhone.displayValue} and we&apos;ll send you a
+                    Text {signupPhone.displayValue}{" "}and we&apos;ll send you a{" "}
                     signup link.
                   </p>
                   <a
