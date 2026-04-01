@@ -11,6 +11,7 @@ import {
   HOSTED_WEB_DEV_DIST_DIR,
   HOSTED_WEB_SMOKE_DIST_DIR,
   createHostedWebSmokeEnvironment,
+  isHostedWebDevFileSystemCacheEnabled,
   resolveHostedWebDistDir,
 } from "../next-artifacts";
 import {
@@ -67,10 +68,52 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
   );
 });
 
+test("hosted web dev filesystem cache stays opt-in", () => {
+  assert.equal(isHostedWebDevFileSystemCacheEnabled(), false);
+  assert.equal(
+    isHostedWebDevFileSystemCacheEnabled({
+      MURPH_NEXT_DEV_FILESYSTEM_CACHE: "1",
+    } as unknown as NodeJS.ProcessEnv),
+    true,
+  );
+  assert.equal(
+    isHostedWebDevFileSystemCacheEnabled({
+      MURPH_NEXT_DEV_FILESYSTEM_CACHE: "yes",
+    } as unknown as NodeJS.ProcessEnv),
+    true,
+  );
+});
+
 test("next.config keeps Turbopack focused on the repo root without custom workspace rewrite rules", () => {
   assert.equal(productionNextConfig.turbopack?.root, process.cwd());
   assert.equal(productionNextConfig.webpack, undefined);
   assert.equal(productionNextConfig.typescript, undefined);
+});
+
+test("next.config disables the Turbopack dev filesystem cache unless explicitly enabled", () => {
+  const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
+
+  try {
+    delete process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
+    assert.equal(
+      buildHostedWebNextConfig(PHASE_DEVELOPMENT_SERVER).experimental
+        ?.turbopackFileSystemCacheForDev,
+      false,
+    );
+
+    process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE = "1";
+    assert.equal(
+      buildHostedWebNextConfig(PHASE_DEVELOPMENT_SERVER).experimental
+        ?.turbopackFileSystemCacheForDev,
+      true,
+    );
+  } finally {
+    if (previousValue === undefined) {
+      delete process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
+    } else {
+      process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE = previousValue;
+    }
+  }
 });
 
 test("buildHostedWebTurbopackConfig always points Turbopack at the repo root", () => {
