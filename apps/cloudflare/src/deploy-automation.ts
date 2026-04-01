@@ -191,7 +191,7 @@ export function readHostedDeployAutomationEnvironment(
       "CF_RETRY_DELAY_MS",
     ),
     runnerCommitTimeoutMs: normalizePositiveIntegerString(
-      normalizeString(source.CF_RUNNER_COMMIT_TIMEOUT_MS) ?? "30000",
+      source.CF_RUNNER_COMMIT_TIMEOUT_MS,
       "30000",
       "CF_RUNNER_COMMIT_TIMEOUT_MS",
     ),
@@ -295,15 +295,12 @@ export function buildHostedWranglerDeployConfig(
 }
 
 function readHostedWorkerVars(source: EnvSource): Record<string, string> {
-  const normalized: Record<string, string | undefined> = {};
-
-  for (const key of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
-    const resolved = normalizeString(source[key]);
-    normalized[key] = resolved
-      ?? (key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER" ? DEFAULT_CONTAINER_SLEEP_AFTER : undefined);
-  }
-
-  return readPresentStringMap(normalized, HOSTED_WORKER_OPTIONAL_VAR_NAMES);
+  return Object.fromEntries(
+    HOSTED_WORKER_OPTIONAL_VAR_NAMES.flatMap((key) => {
+      const value = resolveHostedWorkerVar(source, key);
+      return value ? [[key, value] as const] : [];
+    }),
+  );
 }
 
 export function buildHostedWorkerSecretsPayload(
@@ -428,6 +425,19 @@ function normalizeSamplingRate(
   }
 
   return parsed;
+}
+
+function resolveHostedWorkerVar(
+  source: EnvSource,
+  key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
+): string | null {
+  const value = normalizeString(source[key]);
+
+  if (value) {
+    return value;
+  }
+
+  return key === "HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER" ? DEFAULT_CONTAINER_SLEEP_AFTER : null;
 }
 
 function requirePositiveNumber(value: unknown, label: string): number {

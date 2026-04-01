@@ -18,7 +18,9 @@ export function parseHostedContainerImageListOutput(
     parsed = JSON.parse(output) as unknown;
   } catch (error) {
     throw new Error(
-      `Cloudflare image list output must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      `Cloudflare image list output must be valid JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
   }
 
@@ -27,17 +29,16 @@ export function parseHostedContainerImageListOutput(
   }
 
   return parsed.map((entry, index) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    if (!isRecord(entry)) {
       throw new Error(`Cloudflare image list entry ${index} must be an object.`);
     }
 
-    const record = entry as Record<string, unknown>;
     const name = requireString(
-      typeof record.name === "string" ? record.name : undefined,
+      typeof entry.name === "string" ? entry.name : undefined,
       `Cloudflare image list entry ${index} name`,
     );
-    const tags = Array.isArray(record.tags)
-      ? record.tags
+    const tags = Array.isArray(entry.tags)
+      ? entry.tags
         .filter((tag): tag is string => typeof tag === "string")
         .map((tag) => tag.trim())
         .filter((tag) => tag.length > 0 && !tag.startsWith("sha256"))
@@ -87,4 +88,8 @@ function requireString(value: string | undefined, label: string): string {
   }
 
   return normalized;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

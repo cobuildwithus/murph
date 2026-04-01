@@ -234,10 +234,15 @@ export function isHostedUserEnvKeyAllowed(
 export function buildHostedRunnerContainerEnv(
   source: UnknownEnvSource,
 ): Record<string, string> {
+  const automationEnabled = hostedAssistantAutomationEnabledFromUnknownEnv(source);
   const values: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(source)) {
-    if (typeof value !== "string" || value.length === 0 || !shouldForwardHostedRunnerEnv(key, source)) {
+    if (
+      typeof value !== "string"
+      || value.length === 0
+      || !shouldForwardHostedRunnerEnv(key, automationEnabled)
+    ) {
       continue;
     }
 
@@ -255,10 +260,11 @@ export function filterHostedRunnerUserEnv(
   env: Readonly<Record<string, string>>,
   source: UnknownEnvSource,
 ): Record<string, string> {
+  const automationEnabled = hostedAssistantAutomationEnabledFromUnknownEnv(source);
   const values: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(env)) {
-    if (shouldStripAutomationOnlyRunnerEnvKey(key, source)) {
+    if (isAutomationOnlyRunnerEnvKey(key, automationEnabled)) {
       continue;
     }
 
@@ -268,31 +274,22 @@ export function filterHostedRunnerUserEnv(
   return values;
 }
 
-function shouldForwardHostedRunnerEnv(
-  key: string,
-  source: UnknownEnvSource,
-): boolean {
-  if (shouldStripAutomationOnlyRunnerEnvKey(key, source)) {
-    return false;
-  }
+function shouldForwardHostedRunnerEnv(key: string, automationEnabled: boolean): boolean {
+  return !isAutomationOnlyRunnerEnvKey(key, automationEnabled) && isAllowedRunnerEnvKey(key);
+}
 
+function isAllowedRunnerEnvKey(key: string): boolean {
   return RUNNER_EXACT_ALLOWED_ENV_KEYS.has(key)
     || RUNNER_ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
-function shouldStripAutomationOnlyRunnerEnvKey(
-  key: string,
-  source: UnknownEnvSource,
-): boolean {
-  if (hostedAssistantAutomationEnabledFromUnknownEnv(source)) {
+function isAutomationOnlyRunnerEnvKey(key: string, automationEnabled: boolean): boolean {
+  if (automationEnabled) {
     return false;
   }
 
-  if (AUTOMATION_ONLY_RUNNER_ENV_KEYS.has(key)) {
-    return true;
-  }
-
-  return AUTOMATION_ONLY_RUNNER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
+  return AUTOMATION_ONLY_RUNNER_ENV_KEYS.has(key)
+    || AUTOMATION_ONLY_RUNNER_ENV_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 function hostedAssistantAutomationEnabledFromUnknownEnv(
