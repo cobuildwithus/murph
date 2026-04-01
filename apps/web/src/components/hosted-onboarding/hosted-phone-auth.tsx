@@ -8,7 +8,7 @@ import {
 } from "@privy-io/react-auth";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
+import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import {
   describeHostedPrivyClientSessionIssue,
   ensureHostedPrivyPhoneAndWalletReady,
@@ -36,6 +36,16 @@ interface HostedPhoneAuthProps {
   privyAppId: string;
 }
 
+const HOSTED_PHONE_COUNTRY_OPTIONS = [
+  { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
+  { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
+  { code: "GB", dialCode: "+44", label: "United Kingdom", placeholder: "07700 900123" },
+  { code: "AU", dialCode: "+61", label: "Australia", placeholder: "0400 111 222" },
+  { code: "NZ", dialCode: "+64", label: "New Zealand", placeholder: "021 123 4567" },
+] as const;
+
+const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
+
 export function HostedPhoneAuth({ privyAppId, ...props }: HostedPhoneAuthProps) {
   return (
     <HostedPrivyProvider appId={privyAppId}>
@@ -60,11 +70,21 @@ function HostedPhoneAuthInner({
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<HostedPrivyClientPendingAction>(null);
+  const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const autoContinueTriggered = useRef(false);
 
-  const normalizedPhoneNumber = useMemo(() => normalizePhoneNumber(phoneNumber), [phoneNumber]);
+  const selectedPhoneCountry = useMemo(
+    () =>
+      HOSTED_PHONE_COUNTRY_OPTIONS.find((option) => option.code === phoneCountryCode)
+      ?? HOSTED_PHONE_COUNTRY_OPTIONS[0],
+    [phoneCountryCode],
+  );
+  const normalizedPhoneNumber = useMemo(
+    () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
+    [phoneNumber, selectedPhoneCountry.dialCode],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +151,7 @@ function HostedPhoneAuthInner({
     setErrorMessage(null);
 
     if (!normalizedPhoneNumber) {
-      setErrorMessage("Enter a valid phone number in international format, like +1 415 555 2671.");
+      setErrorMessage(`Enter a valid phone number for ${selectedPhoneCountry.label}.`);
       return;
     }
 
@@ -200,6 +220,7 @@ function HostedPhoneAuthInner({
       await logout();
       await onClearHostedSession?.();
       setCode("");
+      setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
       setPhoneNumber("");
       setStep("phone");
     } catch (error) {
@@ -227,15 +248,35 @@ function HostedPhoneAuthInner({
           <label className="text-sm font-semibold text-stone-900" htmlFor={`hosted-phone-${mode}`}>
             {mode === "invite" ? "Phone number that received this invite" : "Your phone number"}
           </label>
-          <input
-            id={`hosted-phone-${mode}`}
-            autoComplete="tel"
-            inputMode="tel"
-            placeholder="+1 415 555 2671"
-            value={phoneNumber}
-            onChange={(event) => setPhoneNumber(event.currentTarget.value)}
-            className={inputClasses}
-          />
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <label className="sr-only" htmlFor={`hosted-phone-country-${mode}`}>
+              Country or region
+            </label>
+            <select
+              id={`hosted-phone-country-${mode}`}
+              value={phoneCountryCode}
+              onChange={(event) => setPhoneCountryCode(event.currentTarget.value)}
+              className="rounded border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-900 focus:border-olive-light focus:outline-none focus:ring-2 focus:ring-olive-light/20 sm:w-56"
+            >
+              {HOSTED_PHONE_COUNTRY_OPTIONS.map((option) => (
+                <option key={option.code} value={option.code}>
+                  {`${option.label} (${option.dialCode})`}
+                </option>
+              ))}
+            </select>
+            <input
+              id={`hosted-phone-${mode}`}
+              autoComplete="tel-national"
+              inputMode="tel"
+              placeholder={selectedPhoneCountry.placeholder}
+              value={phoneNumber}
+              onChange={(event) => setPhoneNumber(event.currentTarget.value)}
+              className={`${inputClasses} sm:flex-1`}
+            />
+          </div>
+          <p className="text-sm text-stone-500">
+            {`Defaulting to ${selectedPhoneCountry.label}. Type the local number and we’ll add ${selectedPhoneCountry.dialCode} automatically.`}
+          </p>
           {mode === "invite" ? (
             <p className="text-sm text-stone-500">
               {`Use the same number we texted${phoneHint ? ` (${phoneHint})` : ""}.`}
