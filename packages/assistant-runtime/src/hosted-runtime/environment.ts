@@ -7,17 +7,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
-  HOSTED_EXECUTION_CALLBACK_HOSTS,
+  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   HOSTED_EXECUTION_PROXY_HOSTS,
-  normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
+  readHostedExecutionWebControlPlaneEnvironment,
   type HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
 
 export { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
-
-import { normalizeHostedEmailBaseUrl } from "../hosted-email.ts";
 import type {
   HostedAssistantRuntimeConfig,
   NormalizedHostedAssistantRuntimeConfig,
@@ -45,25 +46,33 @@ export interface HostedRuntimeChildLauncherDirectories {
 export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
 ): NormalizedHostedAssistantRuntimeConfig {
+  const forwardedEnv = { ...(input?.forwardedEnv ?? {}) };
+  const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(forwardedEnv, {
+    allowHttpHosts: Object.values(HOSTED_EXECUTION_PROXY_HOSTS),
+    allowHttpLocalhost: true,
+  });
+
   return {
-    artifactsBaseUrl: normalizeCallbackBaseUrl(
-      input?.artifactsBaseUrl,
-      DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
-    ),
-    commitBaseUrl: normalizeCallbackBaseUrl(
-      input?.commitBaseUrl,
-      DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
-    ),
+    artifactsBaseUrl: DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
+    commitBaseUrl: DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
-    emailBaseUrl: normalizeHostedEmailBaseUrl(input?.emailBaseUrl),
+    emailBaseUrl: DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
     internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
-    forwardedEnv: { ...(input?.forwardedEnv ?? {}) },
-    sideEffectsBaseUrl: normalizeCallbackBaseUrl(
-      input?.sideEffectsBaseUrl,
-      DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
-    ),
+    forwardedEnv,
+    sideEffectsBaseUrl: DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
     userEnv: { ...(input?.userEnv ?? {}) },
-    webControlPlane: normalizeHostedExecutionWebControlPlaneConfig(input?.webControlPlane ?? null),
+    webControlPlane: {
+      ...webControlPlane,
+      deviceSyncRuntimeBaseUrl:
+        webControlPlane.deviceSyncRuntimeBaseUrl
+        ?? DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
+      shareBaseUrl:
+        webControlPlane.shareBaseUrl
+        ?? DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
+      usageBaseUrl:
+        webControlPlane.usageBaseUrl
+        ?? DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
+    },
   };
 }
 
@@ -167,40 +176,4 @@ export async function withHostedProcessEnvironment<T>(input: {
       }
     }
   }
-}
-
-function normalizeCallbackBaseUrl(value: string | null | undefined, fallback: string): string {
-  const candidate = value && value.trim().length > 0 ? value : fallback;
-  const normalized = normalizeHostedExecutionBaseUrl(candidate, {
-    allowHttpHosts: Object.values(HOSTED_EXECUTION_CALLBACK_HOSTS),
-    allowHttpLocalhost: true,
-  });
-
-  if (!normalized) {
-    throw new TypeError("Hosted assistant runtime callback baseUrl must be configured.");
-  }
-
-  return normalized;
-}
-
-function normalizeHostedExecutionWebControlPlaneConfig(
-  value: Partial<HostedExecutionWebControlPlaneEnvironment> | null,
-): HostedExecutionWebControlPlaneEnvironment {
-  return {
-    deviceSyncRuntimeBaseUrl: normalizeHostedExecutionBaseUrl(value?.deviceSyncRuntimeBaseUrl, {
-      allowHttpHosts: [HOSTED_EXECUTION_PROXY_HOSTS.deviceSync],
-      allowHttpLocalhost: true,
-    }),
-    internalToken: normalizeHostedExecutionString(value?.internalToken),
-    schedulerToken: normalizeHostedExecutionString(value?.schedulerToken),
-    shareBaseUrl: normalizeHostedExecutionBaseUrl(value?.shareBaseUrl, {
-      allowHttpHosts: [HOSTED_EXECUTION_PROXY_HOSTS.sharePack],
-      allowHttpLocalhost: true,
-    }),
-    shareToken: normalizeHostedExecutionString(value?.shareToken),
-    usageBaseUrl: normalizeHostedExecutionBaseUrl(value?.usageBaseUrl, {
-      allowHttpHosts: [HOSTED_EXECUTION_PROXY_HOSTS.usage],
-      allowHttpLocalhost: true,
-    }),
-  };
 }

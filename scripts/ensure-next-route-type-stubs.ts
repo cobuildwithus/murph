@@ -9,6 +9,11 @@ const routeTypesStubContents = [
   "export {};",
   "",
 ].join("\n");
+const routeTypesRuntimeStubContents = [
+  "// Auto-generated route-type runtime stub for clean typecheck flows.",
+  "export {};",
+  "",
+].join("\n");
 
 export async function ensureNextRouteTypeStubForWorkspace(
   workspaceRelativePath: string,
@@ -39,7 +44,23 @@ export async function ensureNextRouteTypeStub(nextEnvPath: string): Promise<stri
     await writeFile(stubPath, routeTypesStubContents, "utf8");
   }
 
+  await ensureNextRouteTypesRuntimeStub(stubPath);
+
   return stubPath;
+}
+
+async function ensureNextRouteTypesRuntimeStub(routeTypesStubPath: string): Promise<void> {
+  if (!routeTypesStubPath.endsWith("/routes.d.ts")) {
+    return;
+  }
+
+  const runtimeStubPath = routeTypesStubPath.replace(/\.d\.ts$/u, ".js");
+
+  try {
+    await readFile(runtimeStubPath, "utf8");
+  } catch {
+    await writeFile(runtimeStubPath, routeTypesRuntimeStubContents, "utf8");
+  }
 }
 
 async function main(): Promise<void> {

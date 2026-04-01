@@ -22,6 +22,7 @@ test("ensureNextRouteTypeStub materializes the referenced route-types file when 
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "murph-next-route-stubs-"));
   const nextEnvPath = path.join(tempRoot, "next-env.d.ts");
   const expectedStubPath = path.join(tempRoot, ".next-smoke/dev/types/routes.d.ts");
+  const expectedRuntimeStubPath = path.join(tempRoot, ".next-smoke/dev/types/routes.js");
 
   await writeFile(
     nextEnvPath,
@@ -40,5 +41,9 @@ test("ensureNextRouteTypeStub materializes the referenced route-types file when 
   assert.equal(
     await readFile(expectedStubPath, "utf8"),
     "// Auto-generated route-type stub for clean typecheck flows.\nexport {};\n",
+  );
+  assert.equal(
+    await readFile(expectedRuntimeStubPath, "utf8"),
+    "// Auto-generated route-type runtime stub for clean typecheck flows.\nexport {};\n",
   );
 });

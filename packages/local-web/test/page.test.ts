@@ -71,7 +71,7 @@ test("HomePage renders the ready state", async () => {
     generatedAt: "2026-03-12T15:00:00Z",
     metrics: [
       {
-        label: "records",
+        label: "entities",
         note: "Canonical read model rows",
         value: 10,
       },

@@ -203,7 +203,7 @@ test("loadVaultOverview summarizes a readable vault without leaking source paths
 
     assert.equal(result.status, "ready");
     assert.equal(result.timeZone, "Australia/Melbourne");
-    assert.equal(result.metrics.find((metric) => metric.label === "records")?.value, 10);
+    assert.equal(result.metrics.find((metric) => metric.label === "entities")?.value, 10);
     assert.equal(result.currentProfile?.topGoals[0]?.title, "Protect sleep consistency");
     assert.equal(result.currentProfile?.summary?.includes("#"), false);
     assert.equal(result.recentJournals[0]?.title, "March 12");

@@ -15,6 +15,10 @@
       "path": "packages/hosted-execution"
     },
     {
+      "name": "@murphai/messaging-ingress",
+      "path": "packages/messaging-ingress"
+    },
+    {
       "name": "@murphai/runtime-state",
       "path": "packages/runtime-state"
     },

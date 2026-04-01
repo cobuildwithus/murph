@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { access, readdir, rm } from "node:fs/promises";
+import { access, readFile, readdir, rm } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -24,6 +24,7 @@ async function main(): Promise<void> {
   const repoRoot = path.resolve(packageDir, "../..");
   const distDir = path.join(packageDir, HOSTED_WEB_SMOKE_DIST_DIR);
   const port = await reserveTcpPort();
+  await clearStaleHostedWebSmokeLocks(distDir);
   await pruneTurbopackCache(distDir);
   const child = spawn(
     resolvePnpmCommand(),
@@ -196,6 +197,62 @@ async function reserveTcpPort(): Promise<number> {
   });
 }
 
+async function clearStaleHostedWebSmokeLocks(distDir: string): Promise<void> {
+  const nextLockPath = path.join(distDir, "dev", "lock");
+  const lockDescriptor = await readHostedWebSmokeLockDescriptor(nextLockPath);
+
+  if (lockDescriptor === null) {
+    return;
+  }
+
+  if (isProcessRunning(lockDescriptor.pid)) {
+    throw new Error(
+      `apps/web smoke dist dir already has an active Next dev process (pid ${lockDescriptor.pid}, port ${lockDescriptor.port}).`,
+    );
+  }
+
+  await rm(nextLockPath, { force: true });
+}
+
+async function readHostedWebSmokeLockDescriptor(
+  lockPath: string,
+): Promise<{ pid: number; port: number } | null> {
+  let rawLock: string;
+
+  try {
+    rawLock = await readFile(lockPath, "utf8");
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(rawLock) as unknown;
+  } catch {
+    return null;
+  }
+
+  if (
+    !isJsonObject(parsed)
+    || typeof parsed.pid !== "number"
+    || !Number.isInteger(parsed.pid)
+    || typeof parsed.port !== "number"
+    || !Number.isInteger(parsed.port)
+  ) {
+    return null;
+  }
+
+  return {
+    pid: parsed.pid,
+    port: parsed.port,
+  };
+}
+
 function installProcessTerminationCleanup(
   child: HostedWebSmokeChildProcess,
 ): () => void {
@@ -322,6 +379,37 @@ async function pruneTurbopackCache(distDir: string): Promise<void> {
     rm(path.join(distDir, "cache", "turbopack"), { force: true, recursive: true }),
     rm(path.join(distDir, "dev", "cache", "turbopack"), { force: true, recursive: true }),
   ]);
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ENOENT",
+  );
+}
+
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (
+      error
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "ESRCH"
+    ) {
+      return false;
+    }
+
+    return true;
+  }
 }
 
 async function sleep(durationMs: number): Promise<void> {
