@@ -2,9 +2,12 @@ import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
   sameHostedBundlePayloadRef,
-  type HostedExecutionBundleRef,
 } from "@murphai/runtime-state/node";
-import type { HostedExecutionRunnerResult } from "@murphai/hosted-execution";
+import type {
+  HostedExecutionBundleRefs,
+  HostedExecutionRunnerResult,
+  HostedExecutionUserEnvStatus,
+} from "@murphai/hosted-execution";
 
 import {
   createHostedBundleStore,
@@ -66,7 +69,7 @@ export class RunnerBundleSync {
   async updateUserEnv(
     userId: string,
     update: HostedUserEnvUpdate,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  ): Promise<HostedExecutionUserEnvStatus> {
     const currentUserEnv = await this.readUserEnv(userId);
     const nextUserEnv = applyHostedUserEnvUpdate({
       current: currentUserEnv,
@@ -179,14 +182,8 @@ export class RunnerBundleSync {
   }
 
   private async cleanupBundleTransitionBestEffort(input: {
-    nextBundleRefs: {
-      agentState: HostedExecutionBundleRef | null;
-      vault: HostedExecutionBundleRef | null;
-    };
-    previousBundleRefs: {
-      agentState: HostedExecutionBundleRef | null;
-      vault: HostedExecutionBundleRef | null;
-    };
+    nextBundleRefs: HostedExecutionBundleRefs;
+    previousBundleRefs: HostedExecutionBundleRefs;
     userId: string;
   }): Promise<void> {
     try {

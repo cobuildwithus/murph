@@ -1,4 +1,3 @@
-import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_AI_USAGE_RECORD_PATH,
   buildHostedExecutionSharePayloadPath,
@@ -9,9 +8,12 @@ import {
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
   HOSTED_EXECUTION_USER_ID_HEADER,
   normalizeHostedExecutionBaseUrl,
+  parseHostedExecutionBundlePayloads,
+  parseHostedExecutionBundleRefsRecord,
   parseHostedExecutionSideEffectRecord,
   parseHostedExecutionSideEffects,
   readHostedExecutionWebControlPlaneEnvironment,
+  type HostedExecutionBundleRefs,
   type HostedExecutionSideEffectRecord,
   type HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
@@ -32,7 +34,6 @@ import {
   sendHostedEmailMessage,
 } from "./hosted-email.ts";
 import type {
-  WorkerCurrentBundleRefs,
   WorkerEnvironmentContract,
   WorkerUserRunnerStubLike,
 } from "./worker-contracts.ts";
@@ -553,17 +554,16 @@ async function resolveRunnerOutboundUserRunnerStub(
 }
 
 function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): HostedExecutionCommitPayload & {
-  currentBundleRefs: WorkerCurrentBundleRefs;
+  currentBundleRefs: HostedExecutionBundleRefs;
 } {
-  const bundles = requireRecord(payload.bundles, "bundles");
   const result = requireRecord(payload.result, "result");
 
   return {
-    bundles: {
-      agentState: readHostedBundleBase64Value(bundles.agentState, "bundles.agentState"),
-      vault: readHostedBundleBase64Value(bundles.vault, "bundles.vault"),
-    },
-    currentBundleRefs: readCommittedBundleRefs(payload.currentBundleRefs),
+    bundles: parseHostedExecutionBundlePayloads(payload.bundles, "bundles"),
+    currentBundleRefs: parseHostedExecutionBundleRefsRecord(
+      payload.currentBundleRefs,
+      "currentBundleRefs",
+    ),
     gatewayProjectionSnapshot:
       payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
         ? null
@@ -580,65 +580,13 @@ function parseHostedExecutionCommitRequest(payload: Record<string, unknown>): Ho
 function parseHostedExecutionFinalizeRequest(
   payload: Record<string, unknown>,
 ): HostedExecutionFinalizePayload {
-  const bundles = requireRecord(payload.bundles, "bundles");
-
   return {
-    bundles: {
-      agentState: readHostedBundleBase64Value(bundles.agentState, "bundles.agentState"),
-      vault: readHostedBundleBase64Value(bundles.vault, "bundles.vault"),
-    },
+    bundles: parseHostedExecutionBundlePayloads(payload.bundles, "bundles"),
     gatewayProjectionSnapshot:
       payload.gatewayProjectionSnapshot === undefined || payload.gatewayProjectionSnapshot === null
         ? null
         : gatewayProjectionSnapshotSchema.parse(payload.gatewayProjectionSnapshot),
   };
-}
-
-function readCommittedBundleRefs(value: unknown): WorkerCurrentBundleRefs {
-  const record = requireRecord(value, "currentBundleRefs");
-
-  return {
-    agentState: readHostedBundleRef(record.agentState),
-    vault: readHostedBundleRef(record.vault),
-  };
-}
-
-function readHostedBundleRef(value: unknown): HostedExecutionBundleRef | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (!isRecord(value)) {
-    throw new TypeError("Commit bundle refs must be objects or null.");
-  }
-
-  if (
-    typeof value.hash !== "string"
-    || typeof value.key !== "string"
-    || typeof value.size !== "number"
-    || typeof value.updatedAt !== "string"
-  ) {
-    throw new TypeError("Commit bundle refs must include hash, key, size, and updatedAt.");
-  }
-
-  return {
-    hash: value.hash,
-    key: value.key,
-    size: value.size,
-    updatedAt: value.updatedAt,
-  };
-}
-
-function readHostedBundleBase64Value(value: unknown, label: string): string | null {
-  if (value === null) {
-    return null;
-  }
-
-  if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a base64 string or null.`);
-  }
-
-  return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

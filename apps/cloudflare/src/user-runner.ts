@@ -1,10 +1,11 @@
 import type {
-  HostedExecutionBundleRef,
+  HostedExecutionBundleRefs,
   HostedExecutionDispatchResult,
   HostedExecutionDispatchRequest,
   HostedExecutionRunLevel,
   HostedExecutionRunContext,
   HostedExecutionRunPhase,
+  HostedExecutionUserEnvStatus,
   HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import type { HostedAssistantRuntimeJobInput } from "@murphai/assistant-runtime";
@@ -275,7 +276,7 @@ export class HostedUserRunner {
     return toUserStatus(await this.queueStore.readState());
   }
 
-  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  async getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus> {
     const userId = await this.requireBoundUserId();
     return {
       configuredUserEnvKeys: listHostedUserEnvKeys(await this.bundleSync.readUserEnv(userId)),
@@ -285,12 +286,12 @@ export class HostedUserRunner {
 
   async updateUserEnv(
     update: HostedUserEnvUpdate,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  ): Promise<HostedExecutionUserEnvStatus> {
     const userId = await this.requireBoundUserId();
     return this.withUserEnvLock(() => this.bundleSync.updateUserEnv(userId, update));
   }
 
-  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  async clearUserEnv(): Promise<HostedExecutionUserEnvStatus> {
     return this.updateUserEnv({
       env: {},
       mode: "replace",
@@ -300,10 +301,7 @@ export class HostedUserRunner {
   async commit(input: {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
+      currentBundleRefs: HostedExecutionBundleRefs;
     };
   }): Promise<HostedExecutionCommittedResult> {
     const existingLock = this.commitLocks.get(input.eventId);
@@ -697,10 +695,7 @@ export class HostedUserRunner {
   private async commitOnce(input: {
     eventId: string;
     payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
+      currentBundleRefs: HostedExecutionBundleRefs;
     };
   }): Promise<HostedExecutionCommittedResult> {
     const userId = await this.requireBoundUserId();

@@ -473,7 +473,7 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundles.agentState must be a base64 string or null.");
+    )).rejects.toThrow("bundles.agentState must be a string or null.");
 
     await expect(() => callRunnerOutbound(
       new Request("http://commit.worker/events/evt_bad_commit/commit", {
@@ -497,7 +497,7 @@ describe("cloudflare worker routes", () => {
         method: "POST",
       }),
       harness.env,
-    )).rejects.toThrow("bundles.vault must be a base64 string or null.");
+    )).rejects.toThrow("bundles.vault must be a string or null.");
 
     const publicCommitResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/runner-events/member_123/evt_commit/commit", {

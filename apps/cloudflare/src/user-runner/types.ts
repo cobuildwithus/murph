@@ -1,5 +1,5 @@
-import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
 import type {
+  HostedExecutionBundleRefs,
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
   HostedExecutionDispatchRequest,
@@ -57,10 +57,7 @@ export interface RunnerBundleVersions {
 export interface RunnerStateRecord {
   activated: boolean;
   backpressuredEventIds: string[];
-  bundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
+  bundleRefs: HostedExecutionBundleRefs;
   bundleVersions: RunnerBundleVersions;
   inFlight: boolean;
   lastError: string | null;

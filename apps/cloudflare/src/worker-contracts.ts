@@ -13,8 +13,7 @@ import type {
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
 } from "@murphai/gateway-core";
-
-import type { HostedExecutionBundleRef } from "@murphai/runtime-state";
+import type { HostedExecutionBundleRefs } from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.ts";
 import type {
@@ -23,15 +22,10 @@ import type {
   HostedExecutionFinalizePayload,
 } from "./execution-journal.ts";
 
-export interface WorkerCurrentBundleRefs {
-  agentState: HostedExecutionBundleRef | null;
-  vault: HostedExecutionBundleRef | null;
-}
-
 export interface WorkerUserRunnerCommitInput {
   eventId: string;
   payload: HostedExecutionCommitPayload & {
-    currentBundleRefs: WorkerCurrentBundleRefs;
+    currentBundleRefs: HostedExecutionBundleRefs;
   };
 }
 

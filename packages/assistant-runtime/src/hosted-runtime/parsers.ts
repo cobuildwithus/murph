@@ -1,5 +1,5 @@
 import {
-  parseHostedExecutionBundleRef,
+  parseHostedExecutionBundleRefsRecord,
   parseHostedExecutionRunnerRequest,
   parseHostedExecutionSideEffects,
   type HostedExecutionRunnerResult,
@@ -138,16 +138,12 @@ function parseHostedExecutionCommitCallback(
   value: unknown,
 ): HostedExecutionCommitCallback {
   const record = requireObject(value, "Hosted assistant runtime commit callback");
-  const bundleRefs = requireObject(
-    record.bundleRefs,
-    "Hosted assistant runtime commit callback.bundleRefs",
-  );
 
   return {
-    bundleRefs: {
-      agentState: parseHostedExecutionBundleRef(bundleRefs.agentState),
-      vault: parseHostedExecutionBundleRef(bundleRefs.vault),
-    },
+    bundleRefs: parseHostedExecutionBundleRefsRecord(
+      record.bundleRefs,
+      "Hosted assistant runtime commit callback.bundleRefs",
+    ),
   };
 }
 

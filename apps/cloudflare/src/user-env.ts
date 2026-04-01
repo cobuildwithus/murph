@@ -1,3 +1,8 @@
+import {
+  parseHostedExecutionUserEnvUpdate,
+  type HostedExecutionUserEnvUpdate,
+} from "@murphai/hosted-execution";
+
 import { isHostedUserEnvKeyAllowed } from "./hosted-env-policy.ts";
 
 export const HOSTED_USER_ENV_SCHEMA = "murph.hosted-user-env.v1";
@@ -8,10 +13,7 @@ export interface HostedUserEnvConfig {
   updatedAt: string;
 }
 
-export interface HostedUserEnvUpdate {
-  env: Record<string, string | null>;
-  mode: "merge" | "replace";
-}
+export type HostedUserEnvUpdate = HostedExecutionUserEnvUpdate;
 
 const utf8Decoder = new TextDecoder();
 const utf8Encoder = new TextEncoder();
@@ -111,30 +113,20 @@ export function parseHostedUserEnvUpdate(value: unknown): HostedUserEnvUpdate {
         "Hosted user env request body field `env` must be a JSON object.",
       )
     : payload;
-  const mode = payload.mode === "replace" ? "replace" : "merge";
-  const env: Record<string, string | null> = {};
+  const env: Record<string, unknown> = {};
 
   for (const [key, rawValue] of Object.entries(rawEnv)) {
     if (key === "env" || key === "mode") {
       continue;
     }
 
-    if (rawValue === null) {
-      env[key] = null;
-      continue;
-    }
-
-    if (typeof rawValue !== "string") {
-      throw new TypeError(`Hosted user env value for ${key} must be a string or null.`);
-    }
-
     env[key] = rawValue;
   }
 
-  return {
+  return parseHostedExecutionUserEnvUpdate({
     env,
-    mode,
-  };
+    mode: payload.mode === "replace" ? "replace" : "merge",
+  });
 }
 
 export function createHostedUserEnvConfig(
