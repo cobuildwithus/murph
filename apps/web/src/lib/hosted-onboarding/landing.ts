@@ -45,6 +45,10 @@ export function resolveHostedPrivyClientAppId(source: NodeJS.ProcessEnv = proces
   return normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_APP_ID);
 }
 
+export function resolveHostedPrivyClientId(source: NodeJS.ProcessEnv = process.env): string | null {
+  return normalizeEnvValue(source.NEXT_PUBLIC_PRIVY_CLIENT_ID);
+}
+
 export function hasHostedPrivyClientConfig(source: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(resolveHostedPrivyClientAppId(source));
 }

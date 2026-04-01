@@ -3,7 +3,10 @@ import { cookies } from "next/headers";
 
 import { JoinInviteClient } from "@/src/components/hosted-onboarding/join-invite-client";
 import { buildHostedSharePageData } from "@/src/lib/hosted-share/service";
-import { resolveHostedPrivyClientAppId } from "@/src/lib/hosted-onboarding/landing";
+import {
+  resolveHostedPrivyClientAppId,
+  resolveHostedPrivyClientId,
+} from "@/src/lib/hosted-onboarding/landing";
 import { buildHostedInvitePageData } from "@/src/lib/hosted-onboarding/member-service";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 
@@ -37,6 +40,7 @@ export default async function JoinInvitePage(input: {
   });
   const shareCode = typeof searchParams.share === "string" ? decodeURIComponent(searchParams.share) : null;
   const privyAppId = resolveHostedPrivyClientAppId();
+  const privyClientId = resolveHostedPrivyClientId();
   const shareData = shareCode
     ? await buildHostedSharePageData({
         inviteCode: decodeURIComponent(inviteCode),
@@ -52,6 +56,7 @@ export default async function JoinInvitePage(input: {
           inviteCode={decodeURIComponent(inviteCode)}
           initialStatus={initialStatus}
           privyAppId={privyAppId}
+          privyClientId={privyClientId}
           shareCode={shareCode}
           sharePreview={shareData?.share?.preview ?? null}
         />

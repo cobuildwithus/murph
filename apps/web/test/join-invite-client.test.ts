@@ -5,12 +5,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
-  HostedPhoneAuth(input: { mode: string; privyAppId: string }) {
+  HostedPhoneAuth(input: { mode: string; privyAppId: string; privyClientId?: string | null }) {
     return createElement(
       "div",
       {
         "data-hosted-phone-auth": input.mode,
         "data-privy-app-id": input.privyAppId,
+        "data-privy-client-id": input.privyClientId ?? "",
       },
       "Hosted phone auth",
     );

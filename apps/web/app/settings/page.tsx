@@ -4,7 +4,10 @@ import { cookies } from "next/headers";
 import { HostedPrivyProvider } from "@/src/components/hosted-onboarding/privy-provider";
 import { HostedEmailSettings } from "@/src/components/settings/hosted-email-settings";
 import { HostedTelegramSettings } from "@/src/components/settings/hosted-telegram-settings";
-import { resolveHostedPrivyClientAppId } from "@/src/lib/hosted-onboarding/landing";
+import {
+  resolveHostedPrivyClientAppId,
+  resolveHostedPrivyClientId,
+} from "@/src/lib/hosted-onboarding/landing";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/shared";
 
@@ -19,6 +22,7 @@ export default async function SettingsPage() {
   const cookieStore = await cookies();
   const sessionRecord = await resolveHostedSessionFromCookieStore(cookieStore);
   const privyAppId = resolveHostedPrivyClientAppId();
+  const privyClientId = resolveHostedPrivyClientId();
 
   return (
     <main className="min-h-screen px-5 py-12 md:px-8">
@@ -85,7 +89,7 @@ export default async function SettingsPage() {
                 and make sure email and Telegram login and linking are enabled in the Privy dashboard before using this page.
               </section>
             ) : (
-              <HostedPrivyProvider appId={privyAppId}>
+              <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
                 <div className="grid gap-6 xl:grid-cols-2">
                   <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
                     <HostedEmailSettings expectedPrivyUserId={sessionRecord.member.privyUserId} />

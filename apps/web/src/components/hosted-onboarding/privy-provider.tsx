@@ -10,10 +10,11 @@ import {
   HOSTED_PRIVY_WALLET_CHAIN_APPEARANCE,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
-export function HostedPrivyProvider(input: { appId: string; children: ReactNode }) {
+export function HostedPrivyProvider(input: { appId: string; children: ReactNode; clientId?: string | null }) {
   return (
     <PrivyProvider
       appId={input.appId}
+      {...(input.clientId ? { clientId: input.clientId } : {})}
       config={{
         appearance: {
           walletChainType: HOSTED_PRIVY_WALLET_CHAIN_APPEARANCE,

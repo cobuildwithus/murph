@@ -8,6 +8,7 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => {
   return {
     resolveHostedInstallScriptUrl: vi.fn(),
     resolveHostedPrivyClientAppId: vi.fn(),
+    resolveHostedPrivyClientId: vi.fn(),
     resolveHostedSignupPhoneNumber: vi.fn(),
   };
 });
@@ -20,12 +21,13 @@ vi.mock("@/src/lib/hosted-onboarding/privy", () => {
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => {
   return {
-    HostedPhoneAuth(input: { mode: string; privyAppId: string | null }) {
+    HostedPhoneAuth(input: { mode: string; privyAppId: string | null; privyClientId?: string | null }) {
       return createElement(
         "div",
         {
           "data-hosted-phone-auth": input.mode,
           "data-privy-app-id": input.privyAppId ?? "",
+          "data-privy-client-id": input.privyClientId ?? "",
         },
         "Hosted phone auth",
       );
@@ -39,17 +41,24 @@ beforeEach(() => {
 
 test("HomePage renders the fallback copy when hosted phone auth is not ready", async () => {
   const { default: HomePage } = await import("../app/page");
-  const { resolveHostedInstallScriptUrl, resolveHostedPrivyClientAppId, resolveHostedSignupPhoneNumber } = await import(
+  const {
+    resolveHostedInstallScriptUrl,
+    resolveHostedPrivyClientAppId,
+    resolveHostedPrivyClientId,
+    resolveHostedSignupPhoneNumber,
+  } = await import(
     "@/src/lib/hosted-onboarding/landing"
   );
   const { hasHostedPrivyPhoneAuthConfig } = await import("@/src/lib/hosted-onboarding/privy");
   const mockedResolveHostedInstallScriptUrl = vi.mocked(resolveHostedInstallScriptUrl);
   const mockedResolveHostedPrivyClientAppId = vi.mocked(resolveHostedPrivyClientAppId);
+  const mockedResolveHostedPrivyClientId = vi.mocked(resolveHostedPrivyClientId);
   const mockedResolveHostedSignupPhoneNumber = vi.mocked(resolveHostedSignupPhoneNumber);
   const mockedHasHostedPrivyPhoneAuthConfig = vi.mocked(hasHostedPrivyPhoneAuthConfig);
 
   mockedResolveHostedInstallScriptUrl.mockReturnValue(null);
   mockedResolveHostedPrivyClientAppId.mockReturnValue(null);
+  mockedResolveHostedPrivyClientId.mockReturnValue(null);
   mockedResolveHostedSignupPhoneNumber.mockReturnValue(null);
   mockedHasHostedPrivyPhoneAuthConfig.mockReturnValue(false);
 
@@ -73,17 +82,24 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
 
 test("HomePage renders the hosted phone auth UI when hosted phone auth is ready", async () => {
   const { default: HomePage } = await import("../app/page");
-  const { resolveHostedInstallScriptUrl, resolveHostedPrivyClientAppId, resolveHostedSignupPhoneNumber } = await import(
+  const {
+    resolveHostedInstallScriptUrl,
+    resolveHostedPrivyClientAppId,
+    resolveHostedPrivyClientId,
+    resolveHostedSignupPhoneNumber,
+  } = await import(
     "@/src/lib/hosted-onboarding/landing"
   );
   const { hasHostedPrivyPhoneAuthConfig } = await import("@/src/lib/hosted-onboarding/privy");
   const mockedResolveHostedInstallScriptUrl = vi.mocked(resolveHostedInstallScriptUrl);
   const mockedResolveHostedPrivyClientAppId = vi.mocked(resolveHostedPrivyClientAppId);
+  const mockedResolveHostedPrivyClientId = vi.mocked(resolveHostedPrivyClientId);
   const mockedResolveHostedSignupPhoneNumber = vi.mocked(resolveHostedSignupPhoneNumber);
   const mockedHasHostedPrivyPhoneAuthConfig = vi.mocked(hasHostedPrivyPhoneAuthConfig);
 
   mockedResolveHostedInstallScriptUrl.mockReturnValue("https://murph.example.test/install.sh");
   mockedResolveHostedPrivyClientAppId.mockReturnValue("cm_app_123");
+  mockedResolveHostedPrivyClientId.mockReturnValue("client_123");
   mockedResolveHostedSignupPhoneNumber.mockReturnValue(null);
   mockedHasHostedPrivyPhoneAuthConfig.mockReturnValue(true);
 
@@ -93,6 +109,7 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
   assert.match(markup, /View the GitHub repo/);
   assert.match(markup, /data-hosted-phone-auth="public"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
+  assert.match(markup, /data-privy-client-id="client_123"/);
   assert.match(markup, /Hosted phone auth/);
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
@@ -106,17 +123,24 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
 
 test("HomePage keeps the fallback copy when the server auth config is ready but the public app id is missing", async () => {
   const { default: HomePage } = await import("../app/page");
-  const { resolveHostedInstallScriptUrl, resolveHostedPrivyClientAppId, resolveHostedSignupPhoneNumber } = await import(
+  const {
+    resolveHostedInstallScriptUrl,
+    resolveHostedPrivyClientAppId,
+    resolveHostedPrivyClientId,
+    resolveHostedSignupPhoneNumber,
+  } = await import(
     "@/src/lib/hosted-onboarding/landing"
   );
   const { hasHostedPrivyPhoneAuthConfig } = await import("@/src/lib/hosted-onboarding/privy");
   const mockedResolveHostedInstallScriptUrl = vi.mocked(resolveHostedInstallScriptUrl);
   const mockedResolveHostedPrivyClientAppId = vi.mocked(resolveHostedPrivyClientAppId);
+  const mockedResolveHostedPrivyClientId = vi.mocked(resolveHostedPrivyClientId);
   const mockedResolveHostedSignupPhoneNumber = vi.mocked(resolveHostedSignupPhoneNumber);
   const mockedHasHostedPrivyPhoneAuthConfig = vi.mocked(hasHostedPrivyPhoneAuthConfig);
 
   mockedResolveHostedInstallScriptUrl.mockReturnValue("https://murph.example.test/install.sh");
   mockedResolveHostedPrivyClientAppId.mockReturnValue(null);
+  mockedResolveHostedPrivyClientId.mockReturnValue(null);
   mockedResolveHostedSignupPhoneNumber.mockReturnValue(null);
   mockedHasHostedPrivyPhoneAuthConfig.mockReturnValue(true);
 

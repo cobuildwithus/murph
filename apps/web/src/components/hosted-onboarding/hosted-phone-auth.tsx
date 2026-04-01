@@ -43,6 +43,7 @@ interface HostedPhoneAuthProps {
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   phoneHint?: string | null;
   privyAppId: string;
+  privyClientId?: string | null;
 }
 
 interface HostedPhoneCountryOption {
@@ -59,9 +60,9 @@ const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
-export function HostedPhoneAuth({ privyAppId, ...props }: HostedPhoneAuthProps) {
+export function HostedPhoneAuth({ privyAppId, privyClientId, ...props }: HostedPhoneAuthProps) {
   return (
-    <HostedPrivyProvider appId={privyAppId}>
+    <HostedPrivyProvider appId={privyAppId} clientId={privyClientId}>
       <HostedPhoneAuthInner {...props} />
     </HostedPrivyProvider>
   );
