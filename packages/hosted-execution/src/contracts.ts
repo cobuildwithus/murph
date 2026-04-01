@@ -1,3 +1,7 @@
+import type {
+  HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
+  HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
+} from "@murph/runtime-state";
 import type { SharePack } from "@murph/contracts";
 import type {
   HostedExecutionRunContext,
@@ -122,7 +126,7 @@ export interface HostedExecutionDispatchRequest {
   occurredAt: string;
 }
 
-export type HostedExecutionBundleKind = "vault" | "agent-state";
+export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
 export interface HostedExecutionRunnerRequest {
   bundles: {
@@ -145,12 +149,7 @@ export interface HostedExecutionRunnerResult {
   };
 }
 
-export interface HostedExecutionBundleRef {
-  hash: string;
-  key: string;
-  size: number;
-  updatedAt: string;
-}
+export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
 
 export interface HostedExecutionUserStatus {
   backpressuredEventIds?: string[];

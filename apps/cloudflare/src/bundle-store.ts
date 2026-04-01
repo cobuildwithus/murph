@@ -1,6 +1,11 @@
-import { createHash } from "node:crypto";
-
-import type { HostedExecutionBundleKind, HostedExecutionBundleRef } from "@murph/runtime-state";
+import {
+  decodeHostedBundleBase64,
+  sameHostedBundlePayloadRef,
+  sha256HostedBundleHex,
+  type HostedExecutionBundleKind,
+  type HostedExecutionBundleRef,
+  type HostedExecutionBundleRefIdentity,
+} from "@murph/runtime-state";
 
 import {
   readEncryptedR2Payload,
@@ -29,6 +34,81 @@ export interface HostedUserEnvStore {
   writeUserEnv(userId: string, plaintext: Uint8Array): Promise<void>;
 }
 
+export function describeHostedBundleBytesRef(
+  kind: HostedExecutionBundleKind,
+  plaintext: Uint8Array,
+): HostedExecutionBundleRefIdentity {
+  const hash = sha256HostedBundleHex(plaintext);
+
+  return {
+    hash,
+    key: bundleObjectKey(kind, hash),
+    size: plaintext.byteLength,
+  };
+}
+
+export function describeHostedBase64BundleRef(input: {
+  kind: HostedExecutionBundleKind;
+  value: string | null;
+}): {
+  plaintext: Uint8Array;
+  ref: HostedExecutionBundleRefIdentity;
+} | null {
+  if (input.value === null) {
+    return null;
+  }
+
+  const plaintext = decodeHostedBundleBase64(input.value) ?? new Uint8Array();
+
+  return {
+    plaintext,
+    ref: describeHostedBundleBytesRef(input.kind, plaintext),
+  };
+}
+
+export async function writeHostedBundleBytesIfChanged(input: {
+  bundleStore: HostedBundleStore;
+  currentRef: HostedExecutionBundleRef | null;
+  kind: HostedExecutionBundleKind;
+  plaintext: Uint8Array;
+}): Promise<HostedExecutionBundleRef> {
+  const nextRef = describeHostedBundleBytesRef(input.kind, input.plaintext);
+
+  if (sameHostedBundlePayloadRef(input.currentRef, nextRef)) {
+    return input.currentRef!;
+  }
+
+  const writtenRef = await input.bundleStore.writeBundle(input.kind, input.plaintext);
+
+  return {
+    ...writtenRef,
+    size: writtenRef.size ?? input.plaintext.byteLength,
+  };
+}
+
+export async function writeHostedBase64BundleIfChanged(input: {
+  bundleStore: HostedBundleStore;
+  currentRef: HostedExecutionBundleRef | null;
+  kind: HostedExecutionBundleKind;
+  value: string | null;
+}): Promise<HostedExecutionBundleRef | null> {
+  const decoded = describeHostedBase64BundleRef({
+    kind: input.kind,
+    value: input.value,
+  });
+
+  if (!decoded) {
+    return null;
+  }
+
+  return writeHostedBundleBytesIfChanged({
+    bundleStore: input.bundleStore,
+    currentRef: input.currentRef,
+    kind: input.kind,
+    plaintext: decoded.plaintext,
+  });
+}
+
 export function createHostedBundleStore(input: {
   bucket: R2BucketLike;
   key: Uint8Array;
@@ -51,7 +131,7 @@ export function createHostedBundleStore(input: {
     },
 
     async writeBundle(kind, plaintext) {
-      const hash = sha256Hex(plaintext);
+      const hash = sha256HostedBundleHex(plaintext);
       const key = bundleObjectKey(kind, hash);
       await writeEncryptedR2Payload({
         bucket: input.bucket,
@@ -94,7 +174,7 @@ export function createHostedArtifactStore(input: {
     },
 
     async writeArtifact(sha256, plaintext) {
-      const actualSha256 = sha256Hex(plaintext);
+      const actualSha256 = sha256HostedBundleHex(plaintext);
       if (actualSha256 !== sha256) {
         throw new Error(`Hosted artifact hash mismatch: expected ${sha256}, got ${actualSha256}.`);
       }
@@ -153,8 +233,4 @@ export function artifactObjectKey(userId: string, sha256: string): string {
 
 function userEnvObjectKey(userId: string): string {
   return `users/${encodeURIComponent(userId)}/user-env.json`;
-}
-
-function sha256Hex(input: Uint8Array): string {
-  return createHash("sha256").update(input).digest("hex");
 }

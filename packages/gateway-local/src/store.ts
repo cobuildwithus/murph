@@ -1,15 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite'
 
-import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murph/runtime-state'
-
-import { listAssistantOutboxIntents, listAssistantSessions } from '@murph/assistant-core'
-import { normalizeNullableString } from './shared.js'
 import {
   DEFAULT_GATEWAY_EVENT_POLL_INTERVAL_MS,
   pollGatewayEventLogState,
   waitForGatewayEventsByPolling,
-} from '@murph/gateway-core'
-import {
   type GatewayListOpenPermissionsInput,
   type GatewayPermissionRequest,
   type GatewayPollEventsInput,
@@ -18,6 +12,13 @@ import {
   type GatewayRespondToPermissionInput,
   type GatewayWaitForEventsInput,
 } from '@murph/gateway-core'
+import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murph/runtime-state'
+
+import {
+  assistantGatewayLocalProjectionSourceReader,
+  type GatewayLocalProjectionSourceReader,
+} from './assistant-adapter.js'
+import { normalizeNullableString } from './shared.js'
 import {
   listOpenPermissionsFromDatabase,
   respondToPermissionInDatabase,
@@ -121,12 +122,22 @@ export async function waitForGatewayEventsLocal(
   }
 }
 
+export interface LocalGatewayProjectionStoreDependencies {
+  sourceReader?: GatewayLocalProjectionSourceReader
+}
+
 export class LocalGatewayProjectionStore {
   private readonly database: DatabaseSync
+  private readonly sourceReader: GatewayLocalProjectionSourceReader
 
-  constructor(private readonly vault: string) {
+  constructor(
+    private readonly vault: string,
+    dependencies: LocalGatewayProjectionStoreDependencies = {},
+  ) {
     this.database = openSqliteRuntimeDatabase(resolveGatewayRuntimePaths(vault).gatewayDbPath)
     ensureGatewayStoreSchema(this.database)
+    this.sourceReader =
+      dependencies.sourceReader ?? assistantGatewayLocalProjectionSourceReader
   }
 
   close(): void {
@@ -145,8 +156,8 @@ export class LocalGatewayProjectionStore {
         : storedCaptureCursor,
     )
     const [sessions, outboxIntents] = await Promise.all([
-      listAssistantSessions(this.vault),
-      listAssistantOutboxIntents(this.vault),
+      this.sourceReader.listSessionSources(this.vault),
+      this.sourceReader.listOutboxSources(this.vault),
     ])
     const sessionSignature = computeSessionSyncSignature(sessions)
     const outboxSignature = computeOutboxSyncSignature(outboxIntents)

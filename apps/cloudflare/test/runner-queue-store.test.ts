@@ -110,7 +110,8 @@ describe("RunnerQueueStore", () => {
       }),
     );
 
-    const record = await store.readState();
+    const repairedStore = new RunnerQueueStore(state as never);
+    const record = await repairedStore.readState();
     expect(record.bundleRefs.agentState).toBeNull();
     expect(record.bundleRefs.vault).toBeNull();
     expect(record.lastError).toContain("cleared malformed bundle ref(s): agent-state, vault");
@@ -125,6 +126,40 @@ describe("RunnerQueueStore", () => {
     ).one();
     expect(meta.agent_state_bundle_ref_json).toBeNull();
     expect(meta.vault_bundle_ref_json).toBeNull();
+  });
+
+  it("sanitizes malformed bundle refs when callers only read bundle meta state", async () => {
+    const state = createState();
+    const store = new RunnerQueueStore(state as never);
+    await store.bootstrapUser("member_123");
+
+    const sql = state.storage.sql!;
+    sql.exec(
+      `UPDATE runner_meta
+        SET agent_state_bundle_ref_json = ?, vault_bundle_ref_json = ?
+        WHERE singleton = 1`,
+      "{not-json",
+      JSON.stringify({
+        hash: 7,
+      }),
+    );
+
+    const bundleMetaState = await store.readBundleMetaState();
+    expect(bundleMetaState.bundleRefs.agentState).toBeNull();
+    expect(bundleMetaState.bundleRefs.vault).toBeNull();
+
+    const meta = sql.exec<{
+      agent_state_bundle_ref_json: string | null;
+      last_error: string | null;
+      vault_bundle_ref_json: string | null;
+    }>(
+      `SELECT agent_state_bundle_ref_json, vault_bundle_ref_json, last_error
+      FROM runner_meta
+      WHERE singleton = 1`,
+    ).one();
+    expect(meta.agent_state_bundle_ref_json).toBeNull();
+    expect(meta.vault_bundle_ref_json).toBeNull();
+    expect(meta.last_error).toContain("cleared malformed bundle ref(s): agent-state, vault");
   });
 
   it("stores redacted operator-safe retry errors", async () => {

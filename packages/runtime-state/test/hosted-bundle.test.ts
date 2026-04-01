@@ -16,6 +16,7 @@ import {
   restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   resolveAssistantStatePaths,
+  sameHostedBundlePayloadRef,
   sameHostedExecutionBundleRef,
   sha256HostedBundleHex,
   snapshotHostedBundleRoots,
@@ -578,6 +579,15 @@ test("sameHostedExecutionBundleRef returns false when bundle identity changes", 
   ).toBe(false);
   expect(sameHostedExecutionBundleRef(buildBundleRef(), null)).toBe(false);
   expect(sameHostedExecutionBundleRef(null, null)).toBe(true);
+});
+
+test("sameHostedBundlePayloadRef ignores updatedAt metadata and compares payload identity only", () => {
+  expect(
+    sameHostedBundlePayloadRef(
+      buildBundleRef({ updatedAt: "2026-03-31T00:00:00.000Z" }),
+      buildBundleRef({ updatedAt: "2026-04-01T00:00:00.000Z" }),
+    ),
+  ).toBe(true);
 });
 
 function createHostedBundleArchiveBytes(archivePath: string): Uint8Array {

@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildHostedLifecycleWranglerArgs,
-  createHostedLifecycleWranglerError,
   resolveHostedLifecycleBucketNames,
 } from "../src/r2-lifecycle.js";
 
@@ -34,8 +33,6 @@ describe("r2 lifecycle helpers", () => {
       bucketName: "hosted-bundles",
       lifecycleConfigPath: path.join("apps", "cloudflare", "r2-bundles-lifecycle.json"),
     })).toEqual([
-      "exec",
-      "wrangler",
       "r2",
       "bucket",
       "lifecycle",
@@ -44,16 +41,5 @@ describe("r2 lifecycle helpers", () => {
       "--file",
       path.join("apps", "cloudflare", "r2-bundles-lifecycle.json"),
     ]);
-  });
-
-  it("formats non-zero exit and signal failures", () => {
-    expect(createHostedLifecycleWranglerError({
-      code: 1,
-      signal: null,
-    }).message).toBe("wrangler exited with code 1.");
-    expect(createHostedLifecycleWranglerError({
-      code: null,
-      signal: "SIGTERM",
-    }).message).toBe("wrangler exited from signal SIGTERM.");
   });
 });

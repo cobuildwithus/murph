@@ -10,9 +10,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-pnpm install --frozen-lockfile
-pnpm build
-pnpm verify:repo
+corepack pnpm install --frozen-lockfile
+corepack pnpm build
+corepack pnpm verify:repo
 
 bash -n scripts/release-check.sh scripts/release.sh scripts/update-changelog.sh scripts/generate-release-notes.sh
 node --check scripts/release-helpers.mjs

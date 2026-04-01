@@ -516,7 +516,7 @@ export class HostedUserRunner {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const bundleState = await this.queueStore.readBundleState();
+    const bundleState = await this.queueStore.readBundleMetaState();
     const requestBody: HostedExecutionRunnerRequest & {
       commit: {
         bundleRefs: typeof bundleState.bundleRefs;
@@ -530,7 +530,7 @@ export class HostedUserRunner {
       };
       userEnv: Record<string, string>;
     } = {
-      bundles: await this.bundleSync.readBundlesForRunner(userId),
+      bundles: await this.bundleSync.readBundlesForRunner(),
       commit: {
         bundleRefs: bundleState.bundleRefs,
       },

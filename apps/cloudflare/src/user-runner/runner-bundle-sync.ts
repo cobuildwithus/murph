@@ -1,17 +1,15 @@
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
-  sha256HostedBundleHex,
+  sameHostedBundlePayloadRef,
+  type HostedExecutionBundleRef,
 } from "@murph/runtime-state";
-import type {
-  HostedExecutionBundleRef,
-  HostedExecutionBundleKind,
-  HostedExecutionRunnerResult,
-} from "@murph/hosted-execution";
+import type { HostedExecutionRunnerResult } from "@murph/hosted-execution";
 
 import {
   createHostedBundleStore,
   createHostedUserEnvStore,
+  writeHostedBundleBytesIfChanged,
   type R2BucketLike,
 } from "../bundle-store.js";
 import { HostedBundleGarbageCollector } from "../bundle-gc.js";
@@ -24,7 +22,6 @@ import {
 } from "../user-env.js";
 import { RunnerQueueStore } from "./runner-queue-store.js";
 import {
-  sameBundleRef,
   type RunnerBundleVersions,
   type RunnerStateRecord,
 } from "./types.js";
@@ -50,9 +47,9 @@ export class RunnerBundleSync {
     );
   }
 
-  async readBundlesForRunner(userId: string): Promise<HostedExecutionRunnerResult["bundles"]> {
+  async readBundlesForRunner(): Promise<HostedExecutionRunnerResult["bundles"]> {
     const store = this.createBundleStore();
-    const bundleState = await this.queueStore.readBundleState();
+    const bundleState = await this.queueStore.readBundleMetaState();
     return {
       agentState: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.agentState)),
       vault: encodeHostedBundleBase64(await store.readBundle(bundleState.bundleRefs.vault)),
@@ -104,26 +101,29 @@ export class RunnerBundleSync {
     bundles: HostedExecutionRunnerResult["bundles"],
   ): Promise<RunnerStateRecord> {
     let nextExpectedVersions = expectedVersions;
+    const bundleStore = this.createBundleStore();
     const nextAgentStateBytes = decodeHostedBundleBase64(bundles.agentState);
     const nextVaultBytes = decodeHostedBundleBase64(bundles.vault);
 
     for (let attempt = 0; attempt < BUNDLE_SWAP_RETRY_LIMIT; attempt += 1) {
-      const bundleState = await this.queueStore.readBundleState();
+      const bundleState = await this.queueStore.readBundleMetaState();
       const nextBundleRefs = {
-        agentState: await this.resolveNextBundleRef(
-          userId,
-          "agent-state",
-          nextAgentStateBytes,
-          bundles.agentState,
-          bundleState.bundleRefs.agentState,
-        ),
-        vault: await this.resolveNextBundleRef(
-          userId,
-          "vault",
-          nextVaultBytes,
-          bundles.vault,
-          bundleState.bundleRefs.vault,
-        ),
+        agentState: bundles.agentState === null
+          ? null
+          : await writeHostedBundleBytesIfChanged({
+              bundleStore,
+              currentRef: bundleState.bundleRefs.agentState,
+              kind: "agent-state",
+              plaintext: nextAgentStateBytes ?? new Uint8Array(),
+            }),
+        vault: bundles.vault === null
+          ? null
+          : await writeHostedBundleBytesIfChanged({
+              bundleStore,
+              currentRef: bundleState.bundleRefs.vault,
+              kind: "vault",
+              plaintext: nextVaultBytes ?? new Uint8Array(),
+            }),
       };
 
       const swapped = await this.queueStore.compareAndSwapBundleRefs({
@@ -142,14 +142,14 @@ export class RunnerBundleSync {
 
       if (
         bundleState.bundleVersions.agentState !== nextExpectedVersions.agentState
-        && !sameBundleRef(bundleState.bundleRefs.agentState, nextBundleRefs.agentState)
+        && !sameHostedBundlePayloadRef(bundleState.bundleRefs.agentState, nextBundleRefs.agentState)
       ) {
         throw new Error(`Hosted agent-state bundle changed during finalize for ${userId}.`);
       }
 
       if (
         bundleState.bundleVersions.vault !== nextExpectedVersions.vault
-        && !sameBundleRef(bundleState.bundleRefs.vault, nextBundleRefs.vault)
+        && !sameHostedBundlePayloadRef(bundleState.bundleRefs.vault, nextBundleRefs.vault)
       ) {
         throw new Error(`Hosted vault bundle changed during finalize for ${userId}.`);
       }
@@ -176,41 +176,6 @@ export class RunnerBundleSync {
       keyId: this.bundleEncryptionKeyId,
       keysById: this.bundleEncryptionKeysById,
     });
-  }
-
-  private async resolveNextBundleRef(
-    userId: string,
-    kind: HostedExecutionBundleKind,
-    decodedBundle: Uint8Array | null,
-    encodedBundle: string | null,
-    currentRef: HostedExecutionBundleRef | null,
-  ): Promise<HostedExecutionBundleRef | null> {
-    if (encodedBundle === null) {
-      return null;
-    }
-
-    return this.writeBundleBytes(
-      kind,
-      decodedBundle ?? new Uint8Array(),
-      currentRef,
-    );
-  }
-
-  private async writeBundleBytes(
-    kind: HostedExecutionBundleKind,
-    plaintext: Uint8Array,
-    currentRef: HostedExecutionBundleRef | null,
-  ) {
-    const hash = sha256HostedBundleHex(plaintext);
-    if (currentRef && currentRef.hash === hash && currentRef.size === plaintext.byteLength) {
-      return currentRef;
-    }
-
-    const ref = await this.createBundleStore().writeBundle(kind, plaintext);
-    return {
-      ...ref,
-      size: ref.size ?? plaintext.byteLength,
-    };
   }
 
   private async cleanupBundleTransitionBestEffort(input: {

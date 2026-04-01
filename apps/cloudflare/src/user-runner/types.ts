@@ -1,7 +1,4 @@
-import {
-  sameHostedExecutionBundleRef,
-  type HostedExecutionBundleRef,
-} from "@murph/runtime-state";
+import type { HostedExecutionBundleRef } from "@murph/runtime-state";
 import type {
   HostedExecutionRunStatus,
   HostedExecutionTimelineEntry,
@@ -99,13 +96,6 @@ export function earliestIsoTimestamp(
   return values
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .sort((left, right) => Date.parse(left) - Date.parse(right))[0] ?? null;
-}
-
-export function sameBundleRef(
-  left: HostedExecutionBundleRef | null,
-  right: HostedExecutionBundleRef | null,
-): boolean {
-  return sameHostedExecutionBundleRef(left, right);
 }
 
 export function toUserStatus(record: RunnerStateRecord): HostedExecutionUserStatus {

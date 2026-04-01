@@ -1,3 +1,20 @@
 packages:
   - packages/*
   - apps/*
+nodeVersion: 22.16.0
+engineStrict: true
+savePrefix: ''
+packageManagerStrictVersion: true
+managePackageManagerVersions: true
+verifyDepsBeforeRun: error
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+# Ignore provenance-era drift for older releases that predate broad trusted publishing.
+trustPolicyIgnoreAfter: 259200
+blockExoticSubdeps: true
+# Keep this list intentionally short. Review new entries with `pnpm deps:approve-builds` on a trusted machine.
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  esbuild: true
+  prisma: true

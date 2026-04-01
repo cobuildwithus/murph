@@ -1,6 +1,6 @@
 import {
   listHostedBundleArtifacts,
-  sameHostedExecutionBundleRef,
+  sameHostedBundlePayloadRef,
   type HostedExecutionBundleRef,
 } from "@murph/runtime-state";
 
@@ -54,7 +54,7 @@ export class HostedBundleGarbageCollector {
     previousVaultRef: HostedExecutionBundleRef | null;
     userId: string;
   }): Promise<void> {
-    if (sameHostedExecutionBundleRef(input.previousVaultRef, input.nextVaultRef)) {
+    if (sameHostedBundlePayloadRef(input.previousVaultRef, input.nextVaultRef)) {
       return;
     }
 

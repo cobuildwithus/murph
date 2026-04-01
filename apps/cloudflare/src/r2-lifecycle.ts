@@ -18,8 +18,6 @@ export function buildHostedLifecycleWranglerArgs(input: {
   lifecycleConfigPath: string;
 }): string[] {
   return [
-    "exec",
-    "wrangler",
     "r2",
     "bucket",
     "lifecycle",
@@ -28,17 +26,6 @@ export function buildHostedLifecycleWranglerArgs(input: {
     "--file",
     input.lifecycleConfigPath,
   ];
-}
-
-export function createHostedLifecycleWranglerError(input: {
-  code: number | null;
-  signal: NodeJS.Signals | null;
-}): Error {
-  return new Error(
-    input.signal
-      ? `wrangler exited from signal ${input.signal}.`
-      : `wrangler exited with code ${input.code ?? "unknown"}.`,
-  );
 }
 
 function normalizeString(value: string | undefined): string | null {

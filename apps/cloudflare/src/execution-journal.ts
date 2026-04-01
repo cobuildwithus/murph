@@ -8,15 +8,15 @@ import {
   type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
 import {
-  decodeHostedBundleBase64,
-  sameHostedExecutionBundleRef,
-  sha256HostedBundleHex,
+  sameHostedBundlePayloadRef,
   type HostedExecutionBundleRef,
+  type HostedExecutionBundleRefIdentity,
 } from "@murph/runtime-state";
 
 import {
-  bundleObjectKey,
   createHostedBundleStore,
+  describeHostedBase64BundleRef,
+  writeHostedBase64BundleIfChanged,
   type R2BucketLike,
 } from "./bundle-store.js";
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
@@ -127,13 +127,13 @@ export async function persistHostedExecutionCommit(input: {
   const committedAt = new Date().toISOString();
   const committedResult: HostedExecutionCommittedResult = {
     bundleRefs: {
-      agentState: await writeCommittedBundle({
+      agentState: await writeHostedBase64BundleIfChanged({
         bundleStore,
         currentRef: input.currentBundleRefs.agentState,
         kind: "agent-state",
         value: input.payload.bundles.agentState,
       }),
-      vault: await writeCommittedBundle({
+      vault: await writeHostedBase64BundleIfChanged({
         bundleStore,
         currentRef: input.currentBundleRefs.vault,
         kind: "vault",
@@ -189,13 +189,13 @@ export async function persistHostedExecutionFinalBundles(input: {
     keysById: input.keysById,
   });
   const nextBundleRefs = {
-    agentState: await writeCommittedBundle({
+    agentState: await writeHostedBase64BundleIfChanged({
       bundleStore,
       currentRef: existing.bundleRefs.agentState,
       kind: "agent-state",
       value: input.payload.bundles.agentState,
     }),
-    vault: await writeCommittedBundle({
+    vault: await writeHostedBase64BundleIfChanged({
       bundleStore,
       currentRef: existing.bundleRefs.vault,
       kind: "vault",
@@ -204,8 +204,8 @@ export async function persistHostedExecutionFinalBundles(input: {
   };
 
   if (
-    sameHostedExecutionBundleRef(nextBundleRefs.agentState, existing.bundleRefs.agentState)
-    && sameHostedExecutionBundleRef(nextBundleRefs.vault, existing.bundleRefs.vault)
+    sameHostedBundlePayloadRef(nextBundleRefs.agentState, existing.bundleRefs.agentState)
+    && sameHostedBundlePayloadRef(nextBundleRefs.vault, existing.bundleRefs.vault)
     && existing.finalizedAt !== null
   ) {
     return existing;
@@ -220,35 +220,6 @@ export async function persistHostedExecutionFinalBundles(input: {
   };
   await journalStore.writeCommittedResult(input.userId, input.eventId, finalizedResult);
   return finalizedResult;
-}
-
-async function writeCommittedBundle(input: {
-  bundleStore: ReturnType<typeof createHostedBundleStore>;
-  currentRef: HostedExecutionBundleRef | null;
-  kind: "agent-state" | "vault";
-  value: string | null;
-}): Promise<HostedExecutionBundleRef | null> {
-  if (input.value === null) {
-    return null;
-  }
-
-  const plaintext = decodeHostedBundleBase64(input.value) ?? new Uint8Array();
-  const hash = sha256HostedBundleHex(plaintext);
-
-  if (
-    input.currentRef
-    && input.currentRef.hash === hash
-    && input.currentRef.size === plaintext.byteLength
-  ) {
-    return input.currentRef;
-  }
-
-  const ref = await input.bundleStore.writeBundle(input.kind, plaintext);
-
-  return {
-    ...ref,
-    size: ref.size ?? plaintext.byteLength,
-  };
 }
 
 function committedResultObjectKey(userId: string, eventId: string): string {
@@ -328,13 +299,13 @@ function assertEquivalentDuplicateCommit(
     ),
   };
 
-  if (!sameHostedExecutionBundleRef(existing.bundleRefs.agentState, expectedBundleRefs.agentState)) {
+  if (!sameHostedBundlePayloadRef(existing.bundleRefs.agentState, expectedBundleRefs.agentState)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} agent-state bundle ref does not match the existing durable commit.`,
     );
   }
 
-  if (!sameHostedExecutionBundleRef(existing.bundleRefs.vault, expectedBundleRefs.vault)) {
+  if (!sameHostedBundlePayloadRef(existing.bundleRefs.vault, expectedBundleRefs.vault)) {
     throw new Error(
       `Hosted execution commit ${input.eventId} vault bundle ref does not match the existing durable commit.`,
     );
@@ -345,28 +316,19 @@ function resolveExpectedCommittedBundleRef(
   kind: "agent-state" | "vault",
   currentRef: HostedExecutionBundleRef | null,
   value: string | null,
-): HostedExecutionBundleRef | null {
-  if (value === null) {
+): HostedExecutionBundleRefIdentity | null {
+  const decoded = describeHostedBase64BundleRef({
+    kind,
+    value,
+  });
+
+  if (!decoded) {
     return null;
   }
 
-  const plaintext = decodeHostedBundleBase64(value) ?? new Uint8Array();
-  const hash = sha256HostedBundleHex(plaintext);
-
-  if (
-    currentRef
-    && currentRef.hash === hash
-    && currentRef.size === plaintext.byteLength
-  ) {
-    return currentRef;
-  }
-
-  return {
-    hash,
-    key: bundleObjectKey(kind, hash),
-    size: plaintext.byteLength,
-    updatedAt: "",
-  };
+  return sameHostedBundlePayloadRef(currentRef, decoded.ref)
+    ? currentRef
+    : decoded.ref;
 }
 
 function sameStructuredValue(left: unknown, right: unknown): boolean {
