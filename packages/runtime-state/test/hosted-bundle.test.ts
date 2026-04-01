@@ -85,6 +85,13 @@ test("hosted bundle helpers round-trip multi-root archives and base64 helpers", 
   }
 });
 
+test("hosted bundle base64 decoding rejects malformed payloads but preserves empty bundles", () => {
+  expect(decodeHostedBundleBase64("")).toEqual(new Uint8Array());
+  expect(Buffer.from(decodeHostedBundleBase64(" Zm9v ") ?? [])).toEqual(Buffer.from("foo"));
+  expect(() => decodeHostedBundleBase64("%%%")).toThrow("Hosted bundle payload must be valid base64.");
+  expect(() => decodeHostedBundleBase64("Zg")).toThrow("Hosted bundle payload must be valid base64.");
+});
+
 test("hosted execution snapshots collapse into one workspace bundle and externalize raw artifacts", async () => {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-"));
   const restoreRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-context-restore-"));

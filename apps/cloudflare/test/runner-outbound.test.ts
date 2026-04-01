@@ -67,20 +67,23 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://web.example.test/api/internal/device-sync/runtime/snapshot"),
+      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
       expect.objectContaining({
         body: JSON.stringify({
           provider: "oura",
           userId: "member_123",
         }),
-        headers: expect.objectContaining({
-          authorization: "Bearer internal-token",
-          "content-type": "application/json; charset=utf-8",
-          "x-hosted-execution-user-id": "member_123",
-        }),
+        headers: expect.any(Headers),
         method: "POST",
+        redirect: "error",
+        signal: expect.any(AbortSignal),
       }),
     );
+    const requestHeaders = (fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined)?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("fails closed when a runner web-control base URL host is not allowlisted", async () => {
@@ -131,7 +134,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://web.example.test/api/internal/device-sync/runtime/snapshot"),
+      "https://web.example.test/api/internal/device-sync/runtime/snapshot",
       expect.any(Object),
     );
   });
@@ -162,19 +165,20 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://web.example.test/api/hosted-share/internal/share_123/payload"),
+      "https://web.example.test/api/hosted-share/internal/share_123/payload",
       expect.objectContaining({
         body: JSON.stringify({
           shareCode: "code_123",
         }),
-        headers: expect.objectContaining({
-          authorization: "Bearer share-token",
-          "content-type": "application/json; charset=utf-8",
-          "x-hosted-execution-user-id": "member_123",
-        }),
+        headers: expect.any(Headers),
         method: "POST",
       }),
     );
+    const requestHeaders = (fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined)?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer share-token");
+    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("fails closed when the dedicated hosted share token is missing", async () => {
@@ -275,7 +279,7 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://web.example.test/api/internal/hosted-execution/usage/record"),
+      "https://web.example.test/api/internal/hosted-execution/usage/record",
       expect.objectContaining({
         body: JSON.stringify({
           usage: [
@@ -284,14 +288,15 @@ describe("handleRunnerOutboundRequest", () => {
             },
           ],
         }),
-        headers: expect.objectContaining({
-          authorization: "Bearer internal-token",
-          "content-type": "application/json; charset=utf-8",
-          "x-hosted-execution-user-id": "member_123",
-        }),
+        headers: expect.any(Headers),
         method: "POST",
       }),
     );
+    const requestHeaders = (fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined)?.[1]?.headers;
+    expect(requestHeaders).toBeInstanceOf(Headers);
+    expect((requestHeaders as Headers).get("authorization")).toBe("Bearer internal-token");
+    expect((requestHeaders as Headers).get("content-type")).toBe("application/json");
+    expect((requestHeaders as Headers).get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("rejects side-effect writes when the route effect id and payload effect id differ", async () => {

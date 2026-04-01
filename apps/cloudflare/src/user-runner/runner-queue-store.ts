@@ -242,9 +242,7 @@ export class RunnerQueueStore {
     }
 
     meta.in_flight = 1;
-    meta.last_error = null;
-    meta.last_error_at = null;
-    meta.last_error_code = null;
+    this.clearLastErrorMetaSync(meta);
     meta.retrying_event_id = nextPending.attempts > 0 ? nextPending.eventId : null;
     this.writeMetaRowSync(meta);
     return {
@@ -269,9 +267,7 @@ export class RunnerQueueStore {
         .filter((eventId) => eventId !== committed.eventId),
     );
     meta.in_flight = 0;
-    meta.last_error = null;
-    meta.last_error_at = null;
-    meta.last_error_code = null;
+    this.clearLastErrorMetaSync(meta);
     meta.last_event_id = committed.eventId;
     meta.last_run_at = committed.committedAt;
     meta.retrying_event_id = null;
@@ -289,8 +285,7 @@ export class RunnerQueueStore {
     const meta = this.requireMetaRowSync();
     assignRunnerBundleRefs(meta, committed.bundleRefs);
     meta.in_flight = 0;
-    meta.last_error_at = null;
-    meta.last_error_code = null;
+    this.clearLastErrorMetaSync(meta);
     meta.last_event_id = committed.eventId;
     meta.last_run_at = committed.committedAt;
     meta.retrying_event_id = this.hasPendingDispatchSync(committed.eventId)
@@ -493,9 +488,7 @@ export class RunnerQueueStore {
     );
 
     if (input.clearError) {
-      meta.last_error = null;
-      meta.last_error_at = null;
-      meta.last_error_code = null;
+      this.clearLastErrorMetaSync(meta);
     }
 
     if (errorCode) {
@@ -921,6 +914,12 @@ export class RunnerQueueStore {
 
   private deletePoisonedEventSync(eventId: string): void {
     this.sql.exec("DELETE FROM poisoned_events WHERE event_id = ?", eventId);
+  }
+
+  private clearLastErrorMetaSync(meta: RunnerMetaRow): void {
+    meta.last_error = null;
+    meta.last_error_at = null;
+    meta.last_error_code = null;
   }
 
   private get sql() {

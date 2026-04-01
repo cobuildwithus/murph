@@ -299,6 +299,43 @@ describe("RunnerQueueStore", () => {
     expect(eventState.lastError).not.toContain("ops@example.com");
   });
 
+  it("clears stale last-error text when committed bundles are synchronized after a finalize retry", async () => {
+    const state = createState();
+    const store = new RunnerQueueStore(state as never);
+    await store.bootstrapUser("member_123");
+
+    state.storage.sql!.exec(
+      `UPDATE runner_meta
+        SET last_error = ?, last_error_at = ?, last_error_code = ?
+        WHERE singleton = 1`,
+      "Hosted execution runtime failed.",
+      "2026-03-29T10:00:00.000Z",
+      "runner_http_error",
+    );
+
+    const committed: HostedExecutionCommittedResult = {
+      bundleRefs: {
+        agentState: null,
+        vault: null,
+      },
+      committedAt: "2026-03-29T10:00:00.000Z",
+      eventId: "evt_finalize_cleared",
+      finalizedAt: null,
+      gatewayProjectionSnapshot: null,
+      result: {
+        eventsHandled: 1,
+        summary: "ok",
+      },
+      sideEffects: [],
+      userId: "member_123",
+    };
+
+    const result = await store.syncCommittedBundles(committed);
+    expect(result.lastError).toBeNull();
+    expect(result.lastErrorAt).toBeNull();
+    expect(result.lastErrorCode).toBeNull();
+  });
+
   it("records a bounded run trace and derives stable error codes", async () => {
     const state = createState();
     const store = new RunnerQueueStore(state as never);

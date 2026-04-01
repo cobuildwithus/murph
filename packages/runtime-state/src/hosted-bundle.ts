@@ -11,6 +11,7 @@ const MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 const MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT = 50_000;
 const MAX_HOSTED_BUNDLE_PATH_LENGTH = 4_096;
 const MAX_HOSTED_BUNDLE_ROOT_LENGTH = 256;
+const BASE64_CANONICAL_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
 export interface HostedBundleArtifactRef {
   byteSize: number;
@@ -174,7 +175,7 @@ export function encodeHostedBundleBase64(value: Uint8Array | ArrayBuffer | null)
 }
 
 export function decodeHostedBundleBase64(value: string | null): Uint8Array | null {
-  return value ? Uint8Array.from(Buffer.from(value, "base64")) : null;
+  return value === null ? null : decodeStrictBase64(value, "Hosted bundle payload must be valid base64.");
 }
 
 export function sha256HostedBundleHex(bytes: Uint8Array | ArrayBuffer): string {
@@ -253,6 +254,28 @@ export function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint
       ),
     ),
   );
+}
+
+function decodeStrictBase64(value: string, errorMessage: string): Uint8Array {
+  const normalized = value.trim();
+
+  if (normalized.length === 0) {
+    return new Uint8Array();
+  }
+
+  if (
+    normalized.length % 4 !== 0
+    || !BASE64_CANONICAL_PATTERN.test(normalized)
+  ) {
+    throw new TypeError(errorMessage);
+  }
+
+  const decoded = Buffer.from(normalized, "base64");
+  if (decoded.toString("base64") !== normalized) {
+    throw new TypeError(errorMessage);
+  }
+
+  return Uint8Array.from(decoded);
 }
 
 function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {

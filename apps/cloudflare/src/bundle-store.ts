@@ -121,13 +121,20 @@ export function createHostedBundleStore(input: {
         return null;
       }
 
-      return readEncryptedR2Payload({
+      const plaintext = await readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: ref.key,
       });
+
+      if (!plaintext) {
+        return null;
+      }
+
+      assertHostedBundleMatchesRef(ref, plaintext);
+      return plaintext;
     },
 
     async writeBundle(kind, plaintext) {
@@ -164,13 +171,24 @@ export function createHostedArtifactStore(input: {
     },
 
     async readArtifact(sha256) {
-      return readEncryptedR2Payload({
+      const plaintext = await readEncryptedR2Payload({
         bucket: input.bucket,
         cryptoKey: input.key,
         cryptoKeysById: input.keysById,
         expectedKeyId: input.keyId,
         key: artifactObjectKey(input.userId, sha256),
       });
+
+      if (!plaintext) {
+        return null;
+      }
+
+      const actualSha256 = sha256HostedBundleHex(plaintext);
+      if (actualSha256 !== sha256) {
+        throw new Error(`Hosted artifact hash mismatch: expected ${sha256}, got ${actualSha256}.`);
+      }
+
+      return plaintext;
     },
 
     async writeArtifact(sha256, plaintext) {
@@ -229,6 +247,24 @@ export function bundleObjectKey(kind: HostedExecutionBundleKind, hash: string): 
 
 export function artifactObjectKey(userId: string, sha256: string): string {
   return `users/${encodeURIComponent(userId)}/artifacts/${sha256}.artifact.bin`;
+}
+
+function assertHostedBundleMatchesRef(
+  ref: HostedExecutionBundleRef,
+  plaintext: Uint8Array,
+): void {
+  if (plaintext.byteLength !== ref.size) {
+    throw new Error(
+      `Hosted bundle ${ref.key} size mismatch: expected ${ref.size}, got ${plaintext.byteLength}.`,
+    );
+  }
+
+  const actualHash = sha256HostedBundleHex(plaintext);
+  if (actualHash !== ref.hash) {
+    throw new Error(
+      `Hosted bundle ${ref.key} hash mismatch: expected ${ref.hash}, got ${actualHash}.`,
+    );
+  }
 }
 
 function userEnvObjectKey(userId: string): string {

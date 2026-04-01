@@ -6,7 +6,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_PROXY_HOSTS,
   HOSTED_EXECUTION_RUNNER_PROXY_TOKEN_HEADER,
-  HOSTED_EXECUTION_USER_ID_HEADER,
+  fetchHostedExecutionWebControlPlaneResponse,
   normalizeHostedExecutionBaseUrl,
   parseHostedExecutionBundlePayloads,
   parseHostedExecutionBundleRefsRecord,
@@ -115,6 +115,7 @@ export async function handleRunnerOutboundRequest(
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.deviceSync) {
     return handleRunnerDeviceSyncControlRequest({
       env,
+      environment,
       request,
       url,
       userId,
@@ -125,6 +126,7 @@ export async function handleRunnerOutboundRequest(
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.sharePack) {
     return handleRunnerSharePackRequest({
       env,
+      environment,
       request,
       url,
       userId,
@@ -135,6 +137,7 @@ export async function handleRunnerOutboundRequest(
   if (url.hostname === HOSTED_EXECUTION_PROXY_HOSTS.usage) {
     return handleRunnerUsageRecordRequest({
       env,
+      environment,
       request,
       url,
       userId,
@@ -398,6 +401,7 @@ async function handleRunnerSideEffectRequest(input: {
 
 async function handleRunnerDeviceSyncControlRequest(input: {
   env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
   userId: string;
@@ -427,15 +431,17 @@ async function handleRunnerDeviceSyncControlRequest(input: {
     ),
     body: JSON.stringify(payload),
     method: "POST",
+    pathname: input.url.pathname,
     search: input.url.search,
+    timeoutMs: input.environment.runnerTimeoutMs,
     token: input.webControlPlane.internalToken,
     userId: input.userId,
-    pathname: input.url.pathname,
   });
 }
 
 async function handleRunnerSharePackRequest(input: {
   env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
   userId: string;
@@ -467,15 +473,17 @@ async function handleRunnerSharePackRequest(input: {
     ),
     body: JSON.stringify(payload),
     method: "POST",
+    pathname: input.url.pathname,
     search: "",
+    timeoutMs: input.environment.runnerTimeoutMs,
     token: input.webControlPlane.shareToken,
     userId: input.userId,
-    pathname: input.url.pathname,
   });
 }
 
 async function handleRunnerUsageRecordRequest(input: {
   env: RunnerOutboundEnvironmentSource;
+  environment: ReturnType<typeof readHostedExecutionEnvironment>;
   request: Request;
   url: URL;
   userId: string;
@@ -497,6 +505,7 @@ async function handleRunnerUsageRecordRequest(input: {
     method: "POST",
     pathname: input.url.pathname,
     search: input.url.search,
+    timeoutMs: input.environment.runnerTimeoutMs,
     token: input.webControlPlane.internalToken,
     userId: input.userId,
   });
@@ -508,6 +517,7 @@ async function forwardRunnerWebControlRequest(input: {
   method: "GET" | "POST";
   pathname: string;
   search: string;
+  timeoutMs: number | null;
   token: string | null;
   userId: string;
 }): Promise<Response> {
@@ -523,20 +533,15 @@ async function forwardRunnerWebControlRequest(input: {
     }, 503);
   }
 
-  const targetUrl = new URL(input.pathname, input.actualBaseUrl);
-  targetUrl.search = input.search;
-  return fetch(targetUrl, {
+  return fetchHostedExecutionWebControlPlaneResponse({
+    authorizationToken: input.token,
+    baseUrl: input.actualBaseUrl,
     body: input.body,
-    headers: {
-      authorization: `Bearer ${input.token}`,
-      ...(input.body
-        ? {
-            "content-type": "application/json; charset=utf-8",
-          }
-        : {}),
-      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
-    },
+    boundUserId: input.userId,
     method: input.method,
+    path: input.pathname,
+    search: input.search,
+    timeoutMs: input.timeoutMs,
   });
 }
 
