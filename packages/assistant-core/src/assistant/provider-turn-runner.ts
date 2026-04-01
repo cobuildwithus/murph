@@ -11,7 +11,6 @@ import {
   buildAssistantStateMcpConfig,
   resolveAssistantCliAccessContext,
 } from '../assistant-cli-access.js'
-import { VaultCliError } from '../vault-cli-errors.js'
 import {
   createDefaultAssistantToolCatalog,
   type AssistantToolCatalogOptions,
@@ -284,11 +283,7 @@ function buildAssistantProviderTurnExecutionPlan(input: {
       vault: input.input.vault,
       vaultServices: createIntegratedVaultServices(),
     },
-    resolveAssistantToolCatalogOptions(input.input.turnTrigger),
-  )
-  const routes = resolveAssistantExecutionRoutes(
-    input.routes,
-    input.input.turnTrigger,
+    {},
   )
 
   return {
@@ -301,53 +296,16 @@ function buildAssistantProviderTurnExecutionPlan(input: {
       turnId: `${input.resolvedSession.sessionId}:${input.turnCreatedAt}`,
       vault: input.input.vault,
     }),
-    primaryRoute: routes[0] ?? null,
-    routes,
+    primaryRoute: input.routes[0] ?? null,
+    routes: input.routes,
     sharedPlan: input.plan,
     toolCatalog,
     turnId: input.turnId,
   }
 }
 
-function resolveAssistantToolCatalogOptions(
-  turnTrigger: AssistantMessageInput['turnTrigger'],
-): AssistantToolCatalogOptions {
-  if (turnTrigger === 'automation-auto-reply') {
-    return {
-      includeAssistantRuntimeTools: false,
-      includeQueryTools: false,
-      includeStatefulWriteTools: false,
-      includeVaultTextReadTool: true,
-      includeVaultWriteTools: false,
-    }
-  }
-
-  return {}
-}
-
 function shouldExposeBoundAssistantTools(provider: AssistantChatProvider): boolean {
   return resolveAssistantProviderCapabilities(provider).supportsBoundTools
-}
-
-function resolveAssistantExecutionRoutes(
-  routes: readonly ResolvedAssistantFailoverRoute[],
-  turnTrigger: AssistantMessageInput['turnTrigger'],
-): readonly ResolvedAssistantFailoverRoute[] {
-  if (turnTrigger !== 'automation-auto-reply') {
-    return routes
-  }
-
-  const safeRoutes = routes.filter((route) =>
-    shouldExposeBoundAssistantTools(route.provider),
-  )
-  if (safeRoutes.length > 0) {
-    return safeRoutes
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_PROVIDER_UNSUPPORTED',
-    'Assistant auto-reply requires a provider route that supports the bound read-only tool profile; Codex direct-CLI routes are not allowed for auto-reply.',
-  )
 }
 
 async function resolveAssistantProviderAttemptPlan(input: {
