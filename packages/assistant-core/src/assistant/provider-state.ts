@@ -239,8 +239,16 @@ export function normalizeAssistantSessionSnapshot(
   )
 
   return {
-    ...session,
     schema: 'murph.assistant-session.v3',
+    sessionId: session.sessionId,
+    provider: session.provider,
+    providerOptions: session.providerOptions,
     providerBinding,
+    alias: session.alias,
+    binding: session.binding,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    lastTurnAt: session.lastTurnAt,
+    turnCount: session.turnCount,
   }
 }

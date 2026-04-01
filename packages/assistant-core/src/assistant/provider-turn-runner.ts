@@ -15,18 +15,16 @@ import {
   createDefaultAssistantToolCatalog,
 } from '../assistant-cli-tools.js'
 import {
-  executeAssistantProviderTurn,
+  executeAssistantProviderTurnAttempt,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderTraits,
   type AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
 import {
-  didOpenAiCompatibleProviderExecuteTool,
-} from './providers/openai-compatible.js'
-import {
   executeWithCanonicalWriteGuard,
 } from './canonical-write-guard.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
+import { normalizeAssistantExecutionContext } from './execution-context.js'
 import { errorMessage } from './shared.js'
 import {
   getAssistantFailoverCooldownUntil,
@@ -274,8 +272,10 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   turnCreatedAt: string
   turnId: string
 }): AssistantProviderTurnExecutionPlan {
+  const executionContext = normalizeAssistantExecutionContext(input.input.executionContext)
   const toolCatalog = createDefaultAssistantToolCatalog({
     allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+    executionContext,
     requestId: input.turnId,
     sessionId: input.resolvedSession.sessionId,
     vault: input.input.vault,
@@ -561,8 +561,8 @@ async function executeAssistantProviderAttempt(input: {
     const result = await executeWithCanonicalWriteGuard({
       enabled: routeTraits.workspaceMode === 'direct-cli',
       vaultRoot: executionPlan.input.vault,
-      execute: () =>
-        executeAssistantProviderTurn({
+      execute: async () => {
+        const attemptResult = await executeAssistantProviderTurnAttempt({
           abortSignal: executionPlan.input.abortSignal,
           provider: attemptPlan.route.provider,
           workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -599,7 +599,16 @@ async function executeAssistantProviderAttempt(input: {
           oss: attemptPlan.route.providerOptions.oss,
           onTraceEvent: executionPlan.input.onTraceEvent,
           showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
-        }),
+        })
+        if (!attemptResult.ok) {
+          throw attachAssistantProviderAttemptMetadata(
+            attemptResult.error,
+            attemptResult.metadata,
+          )
+        }
+
+        return attemptResult.result
+      },
     })
 
     const nextFailoverState = await recordAssistantFailoverRouteSuccess({
@@ -695,7 +704,8 @@ async function executeAssistantProviderAttempt(input: {
     const outcomeKind = classifyAssistantProviderAttemptFailure({
       abortSignal: executionPlan.input.abortSignal,
       error,
-      executedBoundAssistantTool: didOpenAiCompatibleProviderExecuteTool(error),
+      executedBoundAssistantTool:
+        readAssistantProviderAttemptMetadata(error).executedToolCount > 0,
       nextRoute,
     })
 
@@ -753,6 +763,80 @@ function classifyAssistantProviderAttemptFailure(input: {
   }
 
   return 'retry_next_route'
+}
+
+const ASSISTANT_PROVIDER_ATTEMPT_METADATA = Symbol('assistant-provider-attempt-metadata')
+
+function attachAssistantProviderAttemptMetadata(
+  error: unknown,
+  metadata: {
+    executedToolCount: number
+    rawToolEvents: readonly unknown[]
+  },
+): unknown {
+  const normalized = {
+    executedToolCount: Math.max(0, metadata.executedToolCount),
+    rawToolEvents: [...metadata.rawToolEvents],
+  }
+
+  if (error && typeof error === 'object') {
+    Object.defineProperty(error, ASSISTANT_PROVIDER_ATTEMPT_METADATA, {
+      configurable: true,
+      enumerable: false,
+      value: normalized,
+      writable: false,
+    })
+    return error
+  }
+
+  const wrapped = new Error(errorMessage(error), {
+    cause: error,
+  }) as Error & {
+    [ASSISTANT_PROVIDER_ATTEMPT_METADATA]?: typeof normalized
+  }
+  Object.defineProperty(wrapped, ASSISTANT_PROVIDER_ATTEMPT_METADATA, {
+    configurable: true,
+    enumerable: false,
+    value: normalized,
+    writable: false,
+  })
+  return wrapped
+}
+
+function readAssistantProviderAttemptMetadata(error: unknown): {
+  executedToolCount: number
+  rawToolEvents: readonly unknown[]
+} {
+  if (!error || typeof error !== 'object') {
+    return {
+      executedToolCount: 0,
+      rawToolEvents: [],
+    }
+  }
+
+  const metadata = (
+    error as {
+      [ASSISTANT_PROVIDER_ATTEMPT_METADATA]?: unknown
+    }
+  )[ASSISTANT_PROVIDER_ATTEMPT_METADATA]
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return {
+      executedToolCount: 0,
+      rawToolEvents: [],
+    }
+  }
+
+  const candidate = metadata as {
+    executedToolCount?: unknown
+    rawToolEvents?: unknown
+  }
+  return {
+    executedToolCount:
+      typeof candidate.executedToolCount === 'number' && candidate.executedToolCount >= 0
+        ? candidate.executedToolCount
+        : 0,
+    rawToolEvents: Array.isArray(candidate.rawToolEvents) ? candidate.rawToolEvents : [],
+  }
 }
 
 async function recordProviderCooldownFailoverApplied(input: {

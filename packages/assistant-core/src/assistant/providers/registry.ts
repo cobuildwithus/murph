@@ -10,9 +10,11 @@ import type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantModelDiscoveryResult,
+  AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
   AssistantProviderTraits,
+  AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
@@ -97,9 +99,28 @@ export function resolveAssistantProviderStaticModels(
 export async function executeAssistantProviderTurnWithDefinition(
   input: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnExecutionResult> {
-  return await resolveAssistantProviderDefinition(input.providerConfig.provider).executeTurn(
-    input,
-  )
+  const result = await executeAssistantProviderTurnAttemptWithDefinition(input)
+  if (!result.ok) {
+    throw result.error
+  }
+
+  return result.result
+}
+
+export async function executeAssistantProviderTurnAttemptWithDefinition(
+  input: AssistantProviderTurnExecutionInput,
+): Promise<AssistantProviderTurnAttemptResult> {
+  try {
+    return await resolveAssistantProviderDefinition(input.providerConfig.provider).executeTurn(
+      input,
+    )
+  } catch (error) {
+    return {
+      error,
+      metadata: createEmptyAssistantProviderAttemptMetadata(),
+      ok: false,
+    }
+  }
 }
 
 export async function executeAssistantProviderTurn(
@@ -108,6 +129,31 @@ export async function executeAssistantProviderTurn(
   const providerConfig = normalizeAssistantProviderConfig(input)
 
   return await executeAssistantProviderTurnWithDefinition({
+    abortSignal: input.abortSignal,
+    configOverrides: input.configOverrides,
+    continuityContext: input.continuityContext,
+    conversationMessages: input.conversationMessages,
+    env: input.env,
+    onEvent: input.onEvent,
+    onTraceEvent: input.onTraceEvent,
+    prompt: input.prompt,
+    providerConfig,
+    resumeProviderSessionId: input.resumeProviderSessionId,
+    sessionContext: input.sessionContext,
+    showThinkingTraces: input.showThinkingTraces,
+    systemPrompt: input.systemPrompt,
+    toolRuntime: input.toolRuntime,
+    userPrompt: input.userPrompt,
+    workingDirectory: input.workingDirectory,
+  })
+}
+
+export async function executeAssistantProviderTurnAttempt(
+  input: AssistantProviderTurnInput,
+): Promise<AssistantProviderTurnAttemptResult> {
+  const providerConfig = normalizeAssistantProviderConfig(input)
+
+  return await executeAssistantProviderTurnAttemptWithDefinition({
     abortSignal: input.abortSignal,
     configOverrides: input.configOverrides,
     continuityContext: input.continuityContext,
@@ -142,10 +188,19 @@ export type {
   AssistantCatalogModel,
   AssistantModelCapabilities,
   AssistantModelDiscoveryResult,
+  AssistantProviderAttemptMetadata,
   AssistantProviderCapabilities,
   AssistantProviderDefinition,
   AssistantProviderTraits,
+  AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionInput,
   AssistantProviderTurnExecutionResult,
   AssistantProviderTurnInput,
 } from './types.js'
+
+function createEmptyAssistantProviderAttemptMetadata(): AssistantProviderAttemptMetadata {
+  return {
+    executedToolCount: 0,
+    rawToolEvents: [],
+  }
+}

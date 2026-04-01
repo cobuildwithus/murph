@@ -16,6 +16,7 @@ import {
 import {
   refreshAssistantStatusSnapshot,
 } from "@murphai/assistant-core";
+import type { AssistantExecutionContext } from "@murphai/assistant-core";
 import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
@@ -40,6 +41,7 @@ import { exportHostedPendingAssistantUsage } from "./usage.ts";
 
 export async function executeHostedDispatchForCommit(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
+  executionContext: AssistantExecutionContext;
   internalWorkerFetch?: typeof fetch;
   materializedArtifactPaths?: ReadonlySet<string>;
   request: HostedAssistantRuntimeJobRequest;
@@ -68,6 +70,7 @@ export async function executeHostedDispatchForCommit(input: {
   const maintenanceMetrics = await runHostedMaintenanceLoop({
     artifactMaterializer: input.artifactMaterializer ?? null,
     dispatch: input.request.dispatch,
+    executionContext: input.executionContext,
     internalWorkerFetch: input.internalWorkerFetch,
     requestId: input.request.dispatch.eventId,
     timeoutMs: input.runtime.commitTimeoutMs,

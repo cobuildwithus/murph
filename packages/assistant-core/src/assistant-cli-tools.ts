@@ -44,6 +44,7 @@ import {
 } from './operator-config.js'
 import { VaultCliError } from './vault-cli-errors.js'
 import type { VaultServices } from './vault-services.js'
+import type { AssistantExecutionContext } from './assistant/execution-context.js'
 
 const localDateSchema = z
   .string()
@@ -86,6 +87,7 @@ const assistantToolTextReadChunkBytes = 4_096
 interface AssistantToolContext {
   allowSensitiveHealthContext?: boolean
   captureId?: string
+  executionContext?: AssistantExecutionContext | null
   inboxServices?: InboxServices
   requestId?: string | null
   sessionId?: string | null
@@ -1257,7 +1259,7 @@ function createOutwardSideEffectToolDefinitions(
           expiresInHours,
           inviteCode,
           recipientPhoneNumber,
-          senderMemberId: process.env.HOSTED_MEMBER_ID ?? null,
+          senderMemberId: input.executionContext?.hosted?.memberId ?? null,
         })
       },
     }),

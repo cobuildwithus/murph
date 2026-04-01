@@ -5,15 +5,17 @@ import {
   writePendingAssistantUsageRecord,
 } from '@murphai/runtime-state/node'
 import type { ExecutedAssistantProviderTurnResult } from './service-contracts.js'
+import type { AssistantExecutionContext } from './execution-context.js'
 import { normalizeNullableString } from './shared.js'
 
 export async function persistPendingAssistantUsageEvent(input: {
+  executionContext: AssistantExecutionContext
   providerResult: ExecutedAssistantProviderTurnResult
   turnId: string
   vault: string
 }): Promise<void> {
   const usage = input.providerResult.usage
-  const hostedMemberId = normalizeNullableString(process.env.HOSTED_MEMBER_ID)
+  const hostedMemberId = normalizeNullableString(input.executionContext.hosted?.memberId)
   const apiKeyEnv = normalizeNullableString(
     usage?.apiKeyEnv ?? input.providerResult.providerOptions.apiKeyEnv,
   )
@@ -49,7 +51,7 @@ export async function persistPendingAssistantUsageEvent(input: {
       credentialSource: resolveAssistantUsageCredentialSource({
         apiKeyEnv,
         provider: input.providerResult.provider,
-        userEnvKeys: readHostedUserEnvKeysFromProcessEnv(process.env),
+        userEnvKeys: [...(input.executionContext.hosted?.userEnvKeys ?? [])],
       }),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
@@ -63,19 +65,4 @@ export async function persistPendingAssistantUsageEvent(input: {
       rawUsageJson: usage.rawUsageJson,
     },
   })
-}
-
-function readHostedUserEnvKeysFromProcessEnv(
-  env: Readonly<Record<string, string | undefined>>,
-): string[] {
-  const raw = normalizeNullableString(env.HOSTED_EXECUTION_USER_ENV_KEYS)
-
-  if (!raw) {
-    return []
-  }
-
-  return raw
-    .split(',')
-    .map((key) => normalizeNullableString(key))
-    .filter((key): key is string => key !== null)
 }

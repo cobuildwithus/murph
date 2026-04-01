@@ -2,6 +2,7 @@ import type { AssistantAutomationState } from '../../assistant-cli-contracts.js'
 import type { InboxServices } from '../../inbox-services.js'
 import type { AssistantModelSpec } from '../../model-harness.js'
 import type { VaultServices } from '../../vault-services.js'
+import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import { collectAssistantAutoReplyGroup } from './grouping.js'
 import {
@@ -39,6 +40,7 @@ interface AssistantAutomationCandidate {
 export async function scanAssistantAutomationOnce(input: {
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
@@ -225,6 +227,7 @@ export async function scanAssistantAutomationOnce(input: {
         context,
         deliveryDispatchMode: input.deliveryDispatchMode,
         enabledChannels: replyChannels,
+        executionContext: input.executionContext,
         inboxServices: input.inboxServices,
         onEvent: input.onEvent,
         providerHeartbeatMs: input.providerHeartbeatMs,

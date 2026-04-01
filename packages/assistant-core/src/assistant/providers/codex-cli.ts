@@ -64,16 +64,23 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     })
 
     return {
-      provider: providerConfig.provider,
-      providerSessionId: result.sessionId,
-      response: result.finalMessage,
-      stderr: result.stderr,
-      stdout: result.stdout,
-      rawEvents: result.jsonEvents,
-      usage: extractCodexAssistantProviderUsage({
-        providerConfig,
+      metadata: {
+        executedToolCount: 0,
+        rawToolEvents: [],
+      },
+      ok: true,
+      result: {
+        provider: providerConfig.provider,
+        providerSessionId: result.sessionId,
+        response: result.finalMessage,
+        stderr: result.stderr,
+        stdout: result.stdout,
         rawEvents: result.jsonEvents,
-      }),
+        usage: extractCodexAssistantProviderUsage({
+          providerConfig,
+          rawEvents: result.jsonEvents,
+        }),
+      },
     }
   },
   resolveLabel(config) {

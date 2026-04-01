@@ -141,16 +141,12 @@ export function createHostedRuntimeChildProcessEnv(input: {
 
 export async function withHostedProcessEnvironment<T>(input: {
   envOverrides: Record<string, string>;
-  hostedMemberId: string;
-  hostedUserEnvKeys: readonly string[];
   operatorHomeRoot: string;
   vaultRoot: string;
 }, run: () => Promise<T>): Promise<T> {
   const previousValues = new Map<string, string | undefined>();
   const nextValues: Record<string, string> = {
     ...input.envOverrides,
-    HOSTED_EXECUTION_USER_ENV_KEYS: input.hostedUserEnvKeys.join(","),
-    HOSTED_MEMBER_ID: input.hostedMemberId,
     HOME: input.operatorHomeRoot,
     VAULT: input.vaultRoot,
   };

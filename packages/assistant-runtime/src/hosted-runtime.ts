@@ -14,6 +14,7 @@ import type {
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
+import type { AssistantExecutionContext } from "@murphai/assistant-core";
 
 import {
   commitHostedExecutionResult,
@@ -96,12 +97,16 @@ export async function runHostedAssistantRuntimeJobInProcess(
       ...runtime.forwardedEnv,
       ...runtime.userEnv,
     };
+    const executionContext: AssistantExecutionContext = {
+      hosted: {
+        memberId: input.request.dispatch.event.userId,
+        userEnvKeys: Object.keys(runtime.userEnv),
+      },
+    };
 
     return await withHostedProcessEnvironment(
       {
         envOverrides: runtimeEnv,
-        hostedMemberId: input.request.dispatch.event.userId,
-        hostedUserEnvKeys: Object.keys(runtime.userEnv),
         operatorHomeRoot: restored.operatorHomeRoot,
         vaultRoot: restored.vaultRoot,
       },
@@ -135,6 +140,7 @@ export async function runHostedAssistantRuntimeJobInProcess(
               request: input.request,
               restored,
               runtime,
+              executionContext,
               runtimeEnv,
             });
 

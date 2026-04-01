@@ -61,6 +61,7 @@ import {
   assertAssistantStateDocumentId,
   buildDefaultAssistantCronStateDocId,
 } from './state.ts'
+import type { AssistantExecutionContext } from './execution-context.ts'
 
 export type { AssistantCronTargetSnapshot } from '../assistant-cli-contracts.ts'
 
@@ -138,6 +139,7 @@ export interface RunAssistantCronJobInput {
 
 export interface ProcessDueAssistantCronJobsInput {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
   limit?: number
   signal?: AbortSignal
   vault: string
@@ -598,6 +600,7 @@ export async function processDueAssistantCronJobsLocal(
 
     const result = await executeClaimedAssistantCronJob({
       deliveryDispatchMode: input.deliveryDispatchMode,
+      executionContext: input.executionContext,
       paths,
       signal: input.signal,
       trigger: 'scheduled',
@@ -724,6 +727,7 @@ async function claimNextDueAssistantCronJob(
 
 async function executeClaimedAssistantCronJob(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  executionContext?: AssistantExecutionContext | null
   job: AssistantCronJob
   paths: AssistantStatePaths
   signal?: AbortSignal
@@ -754,6 +758,7 @@ async function executeClaimedAssistantCronJob(input: {
       const result = await sendAssistantMessageLocal({
         vault: input.vault,
         prompt: buildAssistantCronExecutionPrompt(input.job),
+        executionContext: input.executionContext,
         sessionId: input.job.target.sessionId,
         alias: input.job.target.alias,
         allowBindingRebind: input.job.target.sessionId !== null,

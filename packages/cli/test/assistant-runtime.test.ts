@@ -44,6 +44,7 @@ import { buildAssistantTranscriptDistillationContinuityText } from '@murphai/ass
 
 const runtimeMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
+  executeAssistantProviderTurnAttempt: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
@@ -93,6 +94,8 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
 
   return {
     ...actual,
+    executeAssistantProviderTurnAttempt:
+      runtimeMocks.executeAssistantProviderTurnAttempt,
     executeAssistantProviderTurn: runtimeMocks.executeAssistantProviderTurn,
     resolveAssistantProviderCapabilities:
       runtimeMocks.resolveAssistantProviderCapabilities,
@@ -219,6 +222,7 @@ afterEach(async () => {
 
 beforeEach(() => {
   runtimeMocks.deliverAssistantMessageOverBinding.mockReset()
+  runtimeMocks.executeAssistantProviderTurnAttempt.mockReset()
   runtimeMocks.executeAssistantProviderTurn.mockReset()
   runtimeMocks.routeInboxCaptureWithModel.mockReset()
   runtimeMocks.runAssistantChatWithInk.mockReset()
@@ -245,6 +249,29 @@ beforeEach(() => {
           transcriptContextMode: 'provider-session',
           workspaceMode: 'direct-cli',
         })
+  runtimeMocks.executeAssistantProviderTurnAttempt.mockImplementation(
+    async (...args: Parameters<typeof runtimeMocks.executeAssistantProviderTurn>) => {
+      try {
+        return {
+          metadata: {
+            executedToolCount: 0,
+            rawToolEvents: [],
+          },
+          ok: true,
+          result: await runtimeMocks.executeAssistantProviderTurn(...args),
+        }
+      } catch (error) {
+        return {
+          error,
+          metadata: {
+            executedToolCount: 0,
+            rawToolEvents: [],
+          },
+          ok: false,
+        }
+      }
+    },
+  )
 })
 
 
@@ -556,13 +583,11 @@ test('sendAssistantMessage persists only assistant session metadata and reuses p
   assert.equal(secondCall.userPrompt, 'What about today?')
 })
 
-test('sendAssistantMessage does not persist hosted usage records outside hosted runs', async () => {
+test('sendAssistantMessage does not persist hosted usage records without hosted execution context', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
-
-  const originalHostedMemberId = process.env.HOSTED_MEMBER_ID
 
   runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
     provider: 'codex-cli',
@@ -592,22 +617,16 @@ test('sendAssistantMessage does not persist hosted usage records outside hosted 
     },
   })
 
-  delete process.env.HOSTED_MEMBER_ID
-
-  try {
-    await sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'imessage:bob',
-      channel: 'imessage',
-      identityId: 'assistant:primary',
-      participantId: 'contact:bob',
-      sourceThreadId: 'chat-123',
-      provider: 'codex-cli',
-      prompt: 'Count my tokens.',
-    })
-  } finally {
-    restoreEnvironmentVariable('HOSTED_MEMBER_ID', originalHostedMemberId)
-  }
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'imessage:bob',
+    channel: 'imessage',
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-123',
+    provider: 'codex-cli',
+    prompt: 'Count my tokens.',
+  })
 
   const usageEntries = await listDirectoryEntries(
     resolveAssistantStatePaths(vaultRoot).usagePendingDirectory,
@@ -616,14 +635,11 @@ test('sendAssistantMessage does not persist hosted usage records outside hosted 
   assert.deepEqual(usageEntries, [])
 })
 
-test('sendAssistantMessage freezes hosted usage credential ownership from the current user env snapshot', async () => {
+test('sendAssistantMessage freezes hosted usage credential ownership from the provided execution context', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-runtime-'))
   const vaultRoot = path.join(parent, 'vault')
   await mkdir(vaultRoot)
   cleanupPaths.push(parent)
-
-  const originalHostedMemberId = process.env.HOSTED_MEMBER_ID
-  const originalHostedUserEnvKeys = process.env.HOSTED_EXECUTION_USER_ENV_KEYS
 
   runtimeMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
     provider: 'codex-cli',
@@ -653,24 +669,22 @@ test('sendAssistantMessage freezes hosted usage credential ownership from the cu
     },
   })
 
-  process.env.HOSTED_MEMBER_ID = 'member_123'
-  process.env.HOSTED_EXECUTION_USER_ENV_KEYS = 'VENICE_API_KEY'
-
-  try {
-    await sendAssistantMessage({
-      vault: vaultRoot,
-      alias: 'imessage:bob',
-      channel: 'imessage',
-      identityId: 'assistant:primary',
-      participantId: 'contact:bob',
-      sourceThreadId: 'chat-123',
-      provider: 'codex-cli',
-      prompt: 'Count my tokens.',
-    })
-  } finally {
-    restoreEnvironmentVariable('HOSTED_MEMBER_ID', originalHostedMemberId)
-    restoreEnvironmentVariable('HOSTED_EXECUTION_USER_ENV_KEYS', originalHostedUserEnvKeys)
-  }
+  await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'imessage:bob',
+    channel: 'imessage',
+    executionContext: {
+      hosted: {
+        memberId: 'member_123',
+        userEnvKeys: ['VENICE_API_KEY'],
+      },
+    },
+    identityId: 'assistant:primary',
+    participantId: 'contact:bob',
+    sourceThreadId: 'chat-123',
+    provider: 'codex-cli',
+    prompt: 'Count my tokens.',
+  })
 
   const usageEntries = await listPendingAssistantUsageRecords({
     vault: vaultRoot,

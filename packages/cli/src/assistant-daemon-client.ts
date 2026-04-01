@@ -59,6 +59,7 @@ export function canUseAssistantDaemonForMessage(
 
   return (
     input.abortSignal === undefined &&
+    input.executionContext === undefined &&
     input.onProviderEvent === undefined &&
     input.onTraceEvent === undefined &&
     input.sessionSnapshot === undefined &&
@@ -461,6 +462,7 @@ export async function maybeRunAssistantAutomationViaDaemon(
       allowSelfAuthored: input.allowSelfAuthored,
       deliveryDispatchMode: input.deliveryDispatchMode,
       drainOutbox: input.drainOutbox,
+      executionContext: input.executionContext,
       maxPerScan: input.maxPerScan,
       modelSpec: input.modelSpec,
       once: input.once,
