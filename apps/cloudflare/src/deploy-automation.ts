@@ -74,7 +74,6 @@ const DEFAULT_CONTAINER_MAX_INSTANCES = 50;
 const DEFAULT_CONTAINER_SLEEP_AFTER = "5m";
 const DEFAULT_LOG_HEAD_SAMPLING_RATE = 1;
 const DEFAULT_TRACE_HEAD_SAMPLING_RATE = 0.1;
-const HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS = new Set(["v1", "v2"]);
 const NAMED_CONTAINER_INSTANCE_TYPES = new Set([
   "basic",
   "dev",
@@ -127,27 +126,23 @@ export interface HostedDeployAutomationEnvironment {
   workerVars: Record<string, string>;
 }
 
-export interface HostedWorkerDeploymentVersionTraffic {
-  percentage: number;
-  versionId: string;
-}
-
-export interface HostedWorkerGradualDeploymentSupport {
-  directDeployRequiredReason: string | null;
-  gradualDeploymentsSupported: boolean;
-  migrationTags: string[];
-}
-
-export interface HostedContainerImageListing {
-  name: string;
-  tags: string[];
-}
-
-export interface HostedContainerImageTagReference {
-  image: string;
-  repository: string;
-  tag: string;
-}
+export type {
+  HostedContainerImageListing,
+  HostedContainerImageTagReference,
+} from "./deploy-automation/container-images.ts";
+export {
+  parseHostedContainerImageListOutput,
+  selectHostedContainerImageTagsForCleanup,
+} from "./deploy-automation/container-images.ts";
+export type {
+  HostedWorkerDeploymentVersionTraffic,
+  HostedWorkerGradualDeploymentSupport,
+} from "./deploy-automation/deployment-traffic.ts";
+export {
+  formatHostedWorkerDeploymentVersionSpecs,
+  resolveHostedWorkerDeploymentTraffic,
+  resolveHostedWorkerGradualDeploymentSupport,
+} from "./deploy-automation/deployment-traffic.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
@@ -311,123 +306,6 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
   return readPresentStringMap(normalized, HOSTED_WORKER_OPTIONAL_VAR_NAMES);
 }
 
-export function resolveHostedWorkerDeploymentTraffic(input: {
-  candidateVersionId: string;
-  currentDeploymentVersions: HostedWorkerDeploymentVersionTraffic[];
-  rolloutPercentage: number;
-}): HostedWorkerDeploymentVersionTraffic[] {
-  const rolloutPercentage = normalizeRolloutPercentage(input.rolloutPercentage);
-  const currentDeploymentVersions = input.currentDeploymentVersions.map((version) => ({
-    percentage: normalizeRolloutPercentage(version.percentage),
-    versionId: version.versionId,
-  }));
-
-  if (currentDeploymentVersions.length === 0) {
-    throw new Error(
-      "Gradual deployments require an existing deployment. Use a direct deploy for the first rollout.",
-    );
-  }
-
-  if (currentDeploymentVersions.length > 2) {
-    throw new Error("Cloudflare gradual deployments support at most two active versions.");
-  }
-
-  const candidateIndex = currentDeploymentVersions.findIndex(
-    ({ versionId }) => versionId === input.candidateVersionId,
-  );
-
-  if (currentDeploymentVersions.length === 1) {
-    const [currentVersion] = currentDeploymentVersions;
-
-    if (currentVersion.versionId === input.candidateVersionId) {
-      if (rolloutPercentage !== 100) {
-        throw new Error(
-          "The candidate version is already 100% deployed. Select a different candidate or use a 100% rollout.",
-        );
-      }
-
-      return [currentVersion];
-    }
-
-    if (rolloutPercentage === 100) {
-      return [
-        {
-          percentage: 100,
-          versionId: input.candidateVersionId,
-        },
-      ];
-    }
-
-    return [
-      {
-        percentage: 100 - rolloutPercentage,
-        versionId: currentVersion.versionId,
-      },
-      {
-        percentage: rolloutPercentage,
-        versionId: input.candidateVersionId,
-      },
-    ];
-  }
-
-  if (candidateIndex === -1) {
-    throw new Error(
-      "The current deployment already splits traffic between two versions. Finish or roll back that deployment before introducing a new candidate version.",
-    );
-  }
-
-  const remainingPercentage = 100 - rolloutPercentage;
-  const nextTraffic = currentDeploymentVersions.map((version, index) => ({
-    percentage: index === candidateIndex ? rolloutPercentage : remainingPercentage,
-    versionId: version.versionId,
-  }));
-
-  if (rolloutPercentage === 100) {
-    return [
-      {
-        percentage: 100,
-        versionId: input.candidateVersionId,
-      },
-    ];
-  }
-
-  return nextTraffic;
-}
-
-export function formatHostedWorkerDeploymentVersionSpecs(
-  traffic: HostedWorkerDeploymentVersionTraffic[],
-): string[] {
-  return traffic.map(({ percentage, versionId }) => `${versionId}@${percentage}`);
-}
-
-export function resolveHostedWorkerGradualDeploymentSupport(
-  config: Record<string, unknown>,
-): HostedWorkerGradualDeploymentSupport {
-  const migrationTags = readHostedWorkerMigrationTags(config);
-  const unsupportedMigrationTags = migrationTags.filter(
-    (tag) => !HOSTED_WORKER_GRADUAL_DEPLOYMENT_SAFE_MIGRATION_TAGS.has(tag),
-  );
-
-  if (unsupportedMigrationTags.length > 0) {
-    return {
-      directDeployRequiredReason: [
-        "Rendered Wrangler config includes unsupported Durable Object migration tag(s)",
-        unsupportedMigrationTags.map((tag) => `\`${tag}\``).join(", "),
-        "for gradual versions/deployments.",
-        "Use HOSTED_EXECUTION_DEPLOYMENT_MODE=direct for the migration rollout first.",
-      ].join(" "),
-      gradualDeploymentsSupported: false,
-      migrationTags,
-    };
-  }
-
-  return {
-    directDeployRequiredReason: null,
-    gradualDeploymentsSupported: true,
-    migrationTags,
-  };
-}
-
 export function buildHostedWorkerSecretsPayload(
   source: EnvSource = process.env,
 ): Record<string, string> {
@@ -449,67 +327,6 @@ export function resolveCloudflareDeployPaths(baseDir = DEFAULT_DEPLOY_ROOT): {
     workerSecretsPath: path.join(deployDir, "worker-secrets.json"),
     wranglerConfigPath: path.join(deployDir, "wrangler.generated.jsonc"),
   };
-}
-
-export function parseHostedContainerImageListOutput(
-  output: string,
-): HostedContainerImageListing[] {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(output) as unknown;
-  } catch (error) {
-    throw new Error(
-      `Cloudflare image list output must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  if (!Array.isArray(parsed)) {
-    throw new Error("Cloudflare image list output must be an array.");
-  }
-
-  return parsed.map((entry, index) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`Cloudflare image list entry ${index} must be an object.`);
-    }
-
-    const record = entry as Record<string, unknown>;
-    const name = requireString(
-      typeof record.name === "string" ? record.name : undefined,
-      `Cloudflare image list entry ${index} name`,
-    );
-    const tags = Array.isArray(record.tags)
-      ? record.tags
-        .filter((tag): tag is string => typeof tag === "string")
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0 && !tag.startsWith("sha256"))
-      : [];
-
-    return {
-      name,
-      tags,
-    };
-  });
-}
-
-export function selectHostedContainerImageTagsForCleanup(input: {
-  images: HostedContainerImageListing[];
-  keepPerRepository: number;
-}): HostedContainerImageTagReference[] {
-  if (!Number.isInteger(input.keepPerRepository) || input.keepPerRepository < 0) {
-    throw new Error("keepPerRepository must be a non-negative integer.");
-  }
-
-  return input.images.flatMap((image) => {
-    const sortedTags = [...new Set(image.tags)].sort((left, right) => right.localeCompare(left));
-    const tagsToDelete = sortedTags.slice(input.keepPerRepository);
-
-    return tagsToDelete.map((tag) => ({
-      image: `${image.name}:${tag}`,
-      repository: image.name,
-      tag,
-    }));
-  });
 }
 
 function normalizePositiveInteger(
@@ -621,14 +438,6 @@ function requirePositiveNumber(value: unknown, label: string): number {
   return value;
 }
 
-function normalizeRolloutPercentage(value: number): number {
-  if (!Number.isInteger(value) || value < 0 || value > 100) {
-    throw new Error("Hosted rollout percentages must be integers between 0 and 100.");
-  }
-
-  return value;
-}
-
 function normalizeString(value: string | undefined): string | null {
   if (typeof value !== "string") {
     return null;
@@ -646,23 +455,6 @@ function requireString(value: string | undefined, label: string): string {
   }
 
   return normalized;
-}
-
-function readHostedWorkerMigrationTags(config: Record<string, unknown>): string[] {
-  const migrations = config.migrations;
-
-  if (!Array.isArray(migrations)) {
-    return [];
-  }
-
-  return migrations.flatMap((entry) => {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      return [];
-    }
-
-    const tag = "tag" in entry ? normalizeString(String(entry.tag)) : null;
-    return tag ? [tag] : [];
-  });
 }
 
 function readPresentStringMap(

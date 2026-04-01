@@ -4,7 +4,7 @@ import {
   formatHostedWorkerDeploymentVersionSpecs,
   resolveHostedWorkerGradualDeploymentSupport,
   resolveHostedWorkerDeploymentTraffic,
-} from "../src/deploy-automation.js";
+} from "../src/deploy-automation/deployment-traffic.js";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
