@@ -4,7 +4,7 @@ import {
   restoreHostedExecutionContext,
 } from "@murphai/runtime-state/node";
 import type {
-  HostedExecutionBundleRef,
+  HostedExecutionBundleRefs,
   HostedExecutionDispatchRequest,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
@@ -13,10 +13,7 @@ import type {
 } from "@murphai/hosted-execution";
 
 export interface HostedExecutionCommitCallback {
-  bundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
+  bundleRefs: HostedExecutionBundleRefs;
 }
 
 export interface HostedAssistantRuntimeConfig {

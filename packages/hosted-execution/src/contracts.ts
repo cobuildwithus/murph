@@ -2,6 +2,10 @@ import type {
   HostedExecutionBundleKind as RuntimeHostedExecutionBundleKind,
   HostedExecutionBundleRef as RuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
+import type {
+  HostedExecutionBundlePayloads,
+  HostedExecutionBundleRefs,
+} from "./bundles.ts";
 import type { SharePack } from "@murphai/contracts";
 import type {
   HostedExecutionRunContext,
@@ -126,19 +130,13 @@ export interface HostedExecutionDispatchRequest {
 export type HostedExecutionBundleKind = RuntimeHostedExecutionBundleKind;
 
 export interface HostedExecutionRunnerRequest {
-  bundles: {
-    agentState: string | null;
-    vault: string | null;
-  };
+  bundles: HostedExecutionBundlePayloads;
   dispatch: HostedExecutionDispatchRequest;
   run?: HostedExecutionRunContext | null;
 }
 
 export interface HostedExecutionRunnerResult {
-  bundles: {
-    agentState: string | null;
-    vault: string | null;
-  };
+  bundles: HostedExecutionBundlePayloads;
   result: {
     eventsHandled: number;
     nextWakeAt?: string | null;
@@ -150,10 +148,7 @@ export type HostedExecutionBundleRef = RuntimeHostedExecutionBundleRef;
 
 export interface HostedExecutionUserStatus {
   backpressuredEventIds?: string[];
-  bundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
+  bundleRefs: HostedExecutionBundleRefs;
   inFlight: boolean;
   lastError: string | null;
   lastErrorAt?: string | null;

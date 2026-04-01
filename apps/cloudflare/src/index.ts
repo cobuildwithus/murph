@@ -10,6 +10,7 @@ import {
   readHostedEmailCapabilities,
   type HostedExecutionDispatchResult,
   type HostedExecutionDispatchRequest,
+  type HostedExecutionUserEnvStatus,
   type HostedExecutionUserStatus,
 } from "@murphai/hosted-execution";
 import {
@@ -92,14 +93,14 @@ import type {
 
 interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLike {
   bootstrapUser(userId: string): Promise<{ userId: string }>;
-  clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  clearUserEnv(): Promise<HostedExecutionUserEnvStatus>;
   dispatch(input: HostedExecutionDispatchRequest): Promise<HostedExecutionUserStatus>;
   dispatchWithOutcome(input: HostedExecutionDispatchRequest): Promise<HostedExecutionDispatchResult>;
-  getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus>;
   status(): Promise<HostedExecutionUserStatus>;
   updateUserEnv(
     update: HostedUserEnvUpdate,
-  ): Promise<{ configuredUserEnvKeys: string[]; userId: string }>;
+  ): Promise<HostedExecutionUserEnvStatus>;
 }
 
 interface WorkerEnvironmentSource extends WorkerEnvironmentContract<UserRunnerDurableObjectStubLike> {
@@ -303,15 +304,15 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
     return this.runner.status();
   }
 
-  async getUserEnvStatus(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  async getUserEnvStatus(): Promise<HostedExecutionUserEnvStatus> {
     return this.runner.getUserEnvStatus();
   }
 
-  async updateUserEnv(update: HostedUserEnvUpdate): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  async updateUserEnv(update: HostedUserEnvUpdate): Promise<HostedExecutionUserEnvStatus> {
     return this.runner.updateUserEnv(update);
   }
 
-  async clearUserEnv(): Promise<{ configuredUserEnvKeys: string[]; userId: string }> {
+  async clearUserEnv(): Promise<HostedExecutionUserEnvStatus> {
     return this.runner.clearUserEnv();
   }
 

@@ -25,6 +25,11 @@ import type {
   HostedExecutionUserStatus,
   HostedExecutionVaultShareAcceptedEvent,
 } from "./contracts.ts";
+import {
+  mapHostedExecutionBundleSlots,
+  type HostedExecutionBundlePayloads,
+  type HostedExecutionBundleRefs,
+} from "./bundles.ts";
 import type {
   HostedExecutionRunContext,
   HostedExecutionRunStatus,
@@ -47,19 +52,12 @@ export function parseHostedExecutionDispatchRequest(value: unknown): HostedExecu
 
 export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecutionRunnerRequest {
   const record = requireObject(value, "Hosted execution runner request");
-  const bundles = requireObject(record.bundles, "Hosted execution runner request bundles");
 
   return {
-    bundles: {
-      agentState: readNullableString(
-        bundles.agentState,
-        "Hosted execution runner request bundles.agentState",
-      ),
-      vault: readNullableString(
-        bundles.vault,
-        "Hosted execution runner request bundles.vault",
-      ),
-    },
+    bundles: parseHostedExecutionBundlePayloads(
+      record.bundles,
+      "Hosted execution runner request bundles",
+    ),
     dispatch: parseHostedExecutionDispatchRequest(record.dispatch),
     ...(record.run === undefined ? {} : {
       run: record.run === null ? null : parseHostedExecutionRunContext(record.run),
@@ -69,20 +67,13 @@ export function parseHostedExecutionRunnerRequest(value: unknown): HostedExecuti
 
 export function parseHostedExecutionRunnerResult(value: unknown): HostedExecutionRunnerResult {
   const record = requireObject(value, "Hosted execution runner result");
-  const bundles = requireObject(record.bundles, "Hosted execution runner result bundles");
   const result = requireObject(record.result, "Hosted execution runner result.result");
 
   return {
-    bundles: {
-      agentState: readNullableString(
-        bundles.agentState,
-        "Hosted execution runner result bundles.agentState",
-      ),
-      vault: readNullableString(
-        bundles.vault,
-        "Hosted execution runner result bundles.vault",
-      ),
-    },
+    bundles: parseHostedExecutionBundlePayloads(
+      record.bundles,
+      "Hosted execution runner result bundles",
+    ),
     result: {
       eventsHandled: requireNumber(result.eventsHandled, "Hosted execution runner result eventsHandled"),
       nextWakeAt: readOptionalNullableString(
@@ -114,17 +105,16 @@ export function parseHostedExecutionDispatchResult(value: unknown): HostedExecut
 
 export function parseHostedExecutionUserStatus(value: unknown): HostedExecutionUserStatus {
   const record = requireObject(value, "Hosted execution user status");
-  const bundleRefs = requireObject(record.bundleRefs, "Hosted execution user status bundleRefs");
 
   return {
     backpressuredEventIds: readOptionalStringArray(
       record.backpressuredEventIds,
       "Hosted execution user status backpressuredEventIds",
     ),
-    bundleRefs: {
-      agentState: parseHostedExecutionBundleRef(bundleRefs.agentState),
-      vault: parseHostedExecutionBundleRef(bundleRefs.vault),
-    },
+    bundleRefs: parseHostedExecutionBundleRefsRecord(
+      record.bundleRefs,
+      "Hosted execution user status bundleRefs",
+    ),
     inFlight: requireBoolean(record.inFlight, "Hosted execution user status inFlight"),
     lastError: readNullableString(record.lastError, "Hosted execution user status lastError"),
     ...(record.lastErrorAt === undefined ? {} : {
@@ -225,6 +215,28 @@ export function parseHostedExecutionTimelineEntries(value: unknown): HostedExecu
   });
 }
 
+export function parseHostedExecutionBundlePayloads(
+  value: unknown,
+  label = "Hosted execution bundles",
+): HostedExecutionBundlePayloads {
+  const record = requireObject(value, label);
+
+  return mapHostedExecutionBundleSlots((slot) =>
+    readNullableStringValue(record[slot], `${label}.${slot}`)
+  );
+}
+
+export function parseHostedExecutionBundleRefsRecord(
+  value: unknown,
+  label = "Hosted execution bundle refs",
+): HostedExecutionBundleRefs {
+  const record = requireObject(value, label);
+
+  return mapHostedExecutionBundleSlots((slot) =>
+    parseHostedExecutionBundleRef(record[slot], `${label}.${slot}`)
+  );
+}
+
 export function parseHostedExecutionUserEnvStatus(value: unknown): HostedExecutionUserEnvStatus {
   const record = requireObject(value, "Hosted execution user env status");
 
@@ -250,7 +262,7 @@ export function parseHostedExecutionUserEnvUpdate(value: unknown): HostedExecuti
     env: Object.fromEntries(
       Object.entries(env).map(([key, entry]) => [
         key,
-        entry === null ? null : requireString(entry, `Hosted execution user env update env.${key}`),
+        readNullableStringValue(entry, `Hosted execution user env update env.${key}`),
       ]),
     ),
     mode,
@@ -299,18 +311,21 @@ export function parseHostedExecutionDeviceSyncRuntimeApplyResponse(
   };
 }
 
-export function parseHostedExecutionBundleRef(value: unknown): HostedExecutionBundleRef | null {
+export function parseHostedExecutionBundleRef(
+  value: unknown,
+  label = "Hosted execution bundle ref",
+): HostedExecutionBundleRef | null {
   if (value === null || value === undefined) {
     return null;
   }
 
-  const record = requireObject(value, "Hosted execution bundle ref");
+  const record = requireObject(value, label);
 
   return {
-    hash: requireString(record.hash, "Hosted execution bundle ref hash"),
-    key: requireString(record.key, "Hosted execution bundle ref key"),
-    size: requireNumber(record.size, "Hosted execution bundle ref size"),
-    updatedAt: requireString(record.updatedAt, "Hosted execution bundle ref updatedAt"),
+    hash: requireString(record.hash, `${label}.hash`),
+    key: requireString(record.key, `${label}.key`),
+    size: requireNumber(record.size, `${label}.size`),
+    updatedAt: requireString(record.updatedAt, `${label}.updatedAt`),
   };
 }
 
@@ -800,6 +815,18 @@ function readNullableString(value: unknown, label: string): string | null {
   }
 
   return requireString(value, label);
+}
+
+function readNullableStringValue(value: unknown, label: string): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string or null.`);
+  }
+
+  return value;
 }
 
 function readOptionalNullableString(value: unknown, label: string): string | null | undefined {

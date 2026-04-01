@@ -4,6 +4,7 @@ import {
   applyHostedUserEnvUpdate,
   decodeHostedUserEnvPayload,
   encodeHostedUserEnvPayload,
+  parseHostedUserEnvUpdate,
 } from "../src/user-env.js";
 
 const REMOVED_HOSTED_USER_PREFIX_KEY = "HB_USER_SAMPLE_FLAG";
@@ -190,4 +191,55 @@ describe("hosted user env helpers", () => {
     expect(() => decodeHostedUserEnvPayload(payload)).toThrow("Hosted user env config is invalid.");
   });
 
+  it("accepts shorthand payloads and returns the canonical shared update shape", () => {
+    expect(parseHostedUserEnvUpdate({
+      OPENAI_API_KEY: "sk-test",
+      mode: "replace",
+    })).toEqual({
+      env: {
+        OPENAI_API_KEY: "sk-test",
+      },
+      mode: "replace",
+    });
+  });
+
+  it("preserves the explicit env wrapper and ignores top-level extras when env is present", () => {
+    expect(parseHostedUserEnvUpdate({
+      env: {
+        OPENAI_API_KEY: "sk-test",
+        REMOVE_ME: null,
+      },
+      EXTRA: "ignored",
+      mode: "merge",
+    })).toEqual({
+      env: {
+        OPENAI_API_KEY: "sk-test",
+        REMOVE_ME: null,
+      },
+      mode: "merge",
+    });
+  });
+
+  it("delegates value validation to the shared hosted-execution parser", () => {
+    expect(() => parseHostedUserEnvUpdate({
+      env: {
+        OPENAI_API_KEY: 123,
+      },
+    })).toThrow(
+      "Hosted execution user env update env.OPENAI_API_KEY must be a string or null.",
+    );
+  });
+
+  it("preserves blank strings so the apply step can still treat them as deletions", () => {
+    expect(applyHostedUserEnvUpdate({
+      current: {
+        OPENAI_API_KEY: "sk-user",
+      },
+      update: parseHostedUserEnvUpdate({
+        env: {
+          OPENAI_API_KEY: "",
+        },
+      }),
+    })).toEqual({});
+  });
 });

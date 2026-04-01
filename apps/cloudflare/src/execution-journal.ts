@@ -3,13 +3,18 @@ import {
   type GatewayProjectionSnapshot,
 } from "@murphai/gateway-core";
 import {
+  HOSTED_EXECUTION_BUNDLE_SLOTS,
+  mapHostedExecutionBundleSlots,
+  mapHostedExecutionBundleSlotsAsync,
   parseHostedExecutionSideEffects,
+  resolveHostedExecutionBundleKind,
+  type HostedExecutionBundleRefs,
+  type HostedExecutionBundleSlot,
   type HostedExecutionSideEffect,
   type HostedExecutionRunnerResult,
 } from "@murphai/hosted-execution";
 import {
   sameHostedBundlePayloadRef,
-  type HostedExecutionBundleRef,
   type HostedExecutionBundleRefIdentity,
 } from "@murphai/runtime-state";
 
@@ -22,17 +27,11 @@ import {
 import { readEncryptedR2Json, writeEncryptedR2Json } from "./crypto.js";
 
 export interface HostedExecutionRunnerCommitRequest {
-  bundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
+  bundleRefs: HostedExecutionBundleRefs;
 }
 
 export interface HostedExecutionCommittedResult {
-  bundleRefs: {
-    agentState: HostedExecutionBundleRef | null;
-    vault: HostedExecutionBundleRef | null;
-  };
+  bundleRefs: HostedExecutionBundleRefs;
   committedAt: string;
   eventId: string;
   finalizedAt: string | null;
@@ -126,20 +125,14 @@ export async function persistHostedExecutionCommit(input: {
   });
   const committedAt = new Date().toISOString();
   const committedResult: HostedExecutionCommittedResult = {
-    bundleRefs: {
-      agentState: await writeHostedBase64BundleIfChanged({
+    bundleRefs: await mapHostedExecutionBundleSlotsAsync((slot) =>
+      writeHostedBase64BundleIfChanged({
         bundleStore,
-        currentRef: input.currentBundleRefs.agentState,
-        kind: "agent-state",
-        value: input.payload.bundles.agentState,
-      }),
-      vault: await writeHostedBase64BundleIfChanged({
-        bundleStore,
-        currentRef: input.currentBundleRefs.vault,
-        kind: "vault",
-        value: input.payload.bundles.vault,
-      }),
-    },
+        currentRef: input.currentBundleRefs[slot],
+        kind: resolveHostedExecutionBundleKind(slot),
+        value: input.payload.bundles[slot],
+      })
+    ),
     committedAt,
     eventId: input.eventId,
     finalizedAt: null,
@@ -188,24 +181,19 @@ export async function persistHostedExecutionFinalBundles(input: {
     keyId: input.keyId,
     keysById: input.keysById,
   });
-  const nextBundleRefs = {
-    agentState: await writeHostedBase64BundleIfChanged({
+  const nextBundleRefs = await mapHostedExecutionBundleSlotsAsync((slot) =>
+    writeHostedBase64BundleIfChanged({
       bundleStore,
-      currentRef: existing.bundleRefs.agentState,
-      kind: "agent-state",
-      value: input.payload.bundles.agentState,
-    }),
-    vault: await writeHostedBase64BundleIfChanged({
-      bundleStore,
-      currentRef: existing.bundleRefs.vault,
-      kind: "vault",
-      value: input.payload.bundles.vault,
-    }),
-  };
+      currentRef: existing.bundleRefs[slot],
+      kind: resolveHostedExecutionBundleKind(slot),
+      value: input.payload.bundles[slot],
+    })
+  );
 
   if (
-    sameHostedBundlePayloadRef(nextBundleRefs.agentState, existing.bundleRefs.agentState)
-    && sameHostedBundlePayloadRef(nextBundleRefs.vault, existing.bundleRefs.vault)
+    HOSTED_EXECUTION_BUNDLE_SLOTS.every((slot) =>
+      sameHostedBundlePayloadRef(nextBundleRefs[slot], existing.bundleRefs[slot])
+    )
     && existing.finalizedAt !== null
   ) {
     return existing;
@@ -286,39 +274,32 @@ function assertEquivalentDuplicateCommit(
     );
   }
 
-  const expectedBundleRefs = {
-    agentState: resolveExpectedCommittedBundleRef(
-      "agent-state",
-      input.currentBundleRefs.agentState,
-      input.payload.bundles.agentState,
-    ),
-    vault: resolveExpectedCommittedBundleRef(
-      "vault",
-      input.currentBundleRefs.vault,
-      input.payload.bundles.vault,
-    ),
-  };
+  const expectedBundleRefs = mapHostedExecutionBundleSlots((slot) =>
+    resolveExpectedCommittedBundleRef(
+      slot,
+      input.currentBundleRefs[slot],
+      input.payload.bundles[slot],
+    )
+  );
 
-  if (!sameHostedBundlePayloadRef(existing.bundleRefs.agentState, expectedBundleRefs.agentState)) {
-    throw new Error(
-      `Hosted execution commit ${input.eventId} agent-state bundle ref does not match the existing durable commit.`,
-    );
-  }
+  for (const slot of HOSTED_EXECUTION_BUNDLE_SLOTS) {
+    if (sameHostedBundlePayloadRef(existing.bundleRefs[slot], expectedBundleRefs[slot])) {
+      continue;
+    }
 
-  if (!sameHostedBundlePayloadRef(existing.bundleRefs.vault, expectedBundleRefs.vault)) {
     throw new Error(
-      `Hosted execution commit ${input.eventId} vault bundle ref does not match the existing durable commit.`,
+      `Hosted execution commit ${input.eventId} ${resolveHostedExecutionBundleKind(slot)} bundle ref does not match the existing durable commit.`,
     );
   }
 }
 
 function resolveExpectedCommittedBundleRef(
-  kind: "agent-state" | "vault",
-  currentRef: HostedExecutionBundleRef | null,
+  slot: HostedExecutionBundleSlot,
+  currentRef: HostedExecutionBundleRefs[HostedExecutionBundleSlot],
   value: string | null,
 ): HostedExecutionBundleRefIdentity | null {
   const decoded = describeHostedBase64BundleRef({
-    kind,
+    kind: resolveHostedExecutionBundleKind(slot),
     value,
   });
 
