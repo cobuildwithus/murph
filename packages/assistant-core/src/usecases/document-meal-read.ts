@@ -64,15 +64,15 @@ function uniqueStrings(values: readonly string[]): string[] {
 }
 
 function resolveManifestArtifactPaths(record: QueryRecord): string[] {
-  const documentPath = firstString(record.data, ['documentPath', 'document_path'])
+  const documentPath = firstString(record.attributes, ['documentPath', 'document_path'])
 
   return uniqueStrings([
-    ...stringArray(record.data.rawRefs),
+    ...stringArray(record.attributes.rawRefs),
     ...(documentPath ? [documentPath] : []),
-    ...stringArray(record.data.photoPaths),
-    ...stringArray(record.data.photo_paths),
-    ...stringArray(record.data.audioPaths),
-    ...stringArray(record.data.audio_paths),
+    ...stringArray(record.attributes.photoPaths),
+    ...stringArray(record.attributes.photo_paths),
+    ...stringArray(record.attributes.audioPaths),
+    ...stringArray(record.attributes.audio_paths),
   ])
 }
 
@@ -82,7 +82,7 @@ function resolveManifestFile(record: QueryRecord, expectedKind: DocumentMealKind
   if (artifactPaths.length === 0) {
     throw new VaultCliError(
       'manifest_missing',
-      `No raw import manifest is associated with ${expectedKind} "${record.displayId}".`,
+      `No raw import manifest is associated with ${expectedKind} "${record.entityId}".`,
     )
   }
 
@@ -93,7 +93,7 @@ function resolveManifestFile(record: QueryRecord, expectedKind: DocumentMealKind
   if (directories.length !== 1) {
     throw new VaultCliError(
       'manifest_invalid',
-      `Raw artifacts for ${expectedKind} "${record.displayId}" do not resolve to a single manifest directory.`,
+      `Raw artifacts for ${expectedKind} "${record.entityId}" do not resolve to a single manifest directory.`,
       {
         artifactPaths,
       },
@@ -110,9 +110,9 @@ async function loadOwnedRecord(
 ): Promise<QueryRecord> {
   const query = await loadQueryRuntime('document/meal query reads')
   const readModel = await query.readVault(vault)
-  const record = query.lookupRecordById(readModel, lookup)
+  const record = query.lookupEntityById(readModel, lookup)
 
-  if (!record || record.recordType !== 'event' || record.kind !== expectedKind) {
+  if (!record || record.family !== 'event' || record.kind !== expectedKind) {
     throw new VaultCliError('not_found', `No ${expectedKind} found for "${lookup}".`)
   }
 
@@ -194,8 +194,8 @@ async function listOwnedRecords(input: {
   const query = await loadQueryRuntime('document/meal query reads')
   const readModel = await query.readVault(input.vault)
   const items = query
-    .listRecords(readModel, {
-      recordTypes: ['event'],
+    .listEntities(readModel, {
+      families: ['event'],
       kinds: [input.expectedKind],
       from: input.from,
       to: input.to,
@@ -222,7 +222,7 @@ async function showOwnedManifest(
 
   return {
     vault,
-    entityId: record.displayId,
+    entityId: record.entityId,
     lookupId: record.primaryLookupId,
     kind: expectedKind,
     manifestFile,

@@ -8,8 +8,9 @@ import type {
   ExportPackHistoryRecord,
   ExportPackProfileSnapshotRecord,
 } from "./export-pack-health-types.ts";
-import { getExperiment, listJournalEntries, listRecords } from "./model.ts";
-import type { VaultReadModel, VaultRecord } from "./model.ts";
+import type { CanonicalEntity } from "./canonical-entities.ts";
+import { getExperiment, listEntities, listJournalEntries } from "./model.ts";
+import type { VaultReadModel } from "./model.ts";
 import { summarizeDailySamples } from "./summaries.ts";
 import type { DailySampleSummary } from "./summaries.ts";
 
@@ -73,7 +74,7 @@ export interface QuestionPackTimelineRecord {
   id: string;
   when: string;
   kind: string;
-  recordType: VaultRecord["recordType"];
+  family: CanonicalEntity["family"];
   title: string | null;
   summary: string;
   tags: string[];
@@ -106,8 +107,8 @@ export interface ExportPack {
   generatedAt: string;
   filters: ExportPackFilters;
   manifest: ExportPackManifest;
-  records: VaultRecord[];
-  journalEntries: VaultRecord[];
+  entities: CanonicalEntity[];
+  journalEntries: CanonicalEntity[];
   dailySampleSummaries: DailySampleSummary[];
   health: ExportPackHealthContext;
   questionPack: QuestionPack;
@@ -126,10 +127,10 @@ interface QuestionPackBuildInput {
   packId: string;
   generatedAt: string;
   filters: ExportPackFilters;
-  records: VaultRecord[];
-  journalEntries: VaultRecord[];
+  entities: CanonicalEntity[];
+  journalEntries: CanonicalEntity[];
   dailySampleSummaries: DailySampleSummary[];
-  experimentRecord: VaultRecord | null;
+  experimentRecord: CanonicalEntity | null;
   health: ExportPackHealthContext;
 }
 
@@ -166,8 +167,8 @@ export function buildExportPack(
     experimentSlug: options.experimentSlug ?? null,
   };
 
-  const records = listRecords(vault, {
-    recordTypes: ["audit", "core", "event", "experiment", "history", "journal", "sample"],
+  const entities = listEntities(vault, {
+    families: ["audit", "core", "event", "experiment", "history", "journal", "sample"],
     from: filters.from ?? undefined,
     to: filters.to ?? undefined,
     experimentSlug: filters.experimentSlug ?? undefined,
@@ -188,7 +189,7 @@ export function buildExportPack(
     : null;
 
   const manifest: ExportPackManifest = {
-    recordCount: records.length,
+    recordCount: entities.length,
     experimentCount: experimentRecord ? 1 : vault.experiments.length,
     journalCount: journalEntries.length,
     sampleSummaryCount: dailySampleSummaries.length,
@@ -204,7 +205,7 @@ export function buildExportPack(
     packId,
     generatedAt,
     filters,
-    records,
+    entities,
     journalEntries,
     dailySampleSummaries,
     experimentRecord,
@@ -237,9 +238,9 @@ export function buildExportPack(
               role: "question-pack",
             },
             {
-              path: `${basePath}/records.json`,
+              path: `${basePath}/entities.json`,
               mediaType: "application/json",
-              role: "records",
+              role: "entities",
             },
             {
               path: `${basePath}/daily-samples.json`,
@@ -263,9 +264,9 @@ export function buildExportPack(
       contents: JSON.stringify(questionPack, null, 2),
     },
     {
-      path: `${basePath}/records.json`,
+      path: `${basePath}/entities.json`,
       mediaType: "application/json",
-      contents: JSON.stringify(records, null, 2),
+      contents: JSON.stringify(entities, null, 2),
     },
     {
       path: `${basePath}/daily-samples.json`,
@@ -286,7 +287,7 @@ export function buildExportPack(
     generatedAt,
     filters,
     manifest,
-    records,
+    entities,
     journalEntries,
     dailySampleSummaries,
     health,
@@ -298,8 +299,8 @@ export function buildExportPack(
 function renderAssistantContext(input: QuestionPack): string {
   const { packId, generatedAt, scope, instructions, questions, context } = input;
 
-  const recordLines = context.timeline.slice(0, 50).map((record) => {
-    return `- ${record.when} | ${record.kind} | ${record.id} | ${record.summary}`;
+  const entityLines = context.timeline.slice(0, 50).map((entity) => {
+    return `- ${entity.when} | ${entity.kind} | ${entity.id} | ${entity.summary}`;
   });
 
   const summaryLines = context.dailySampleSummaries.map((summary) => {
@@ -358,7 +359,7 @@ function renderAssistantContext(input: QuestionPack): string {
     lines.push("");
   }
 
-  lines.push("## Record Timeline", "", ...recordLines, "", "## Daily Sample Summaries", "");
+  lines.push("## Entity Timeline", "", ...entityLines, "", "## Daily Sample Summaries", "");
 
   if (summaryLines.length > 0) {
     lines.push(...summaryLines);
@@ -418,7 +419,7 @@ function buildQuestionPack(input: QuestionPackBuildInput): QuestionPack {
     packId,
     generatedAt,
     filters,
-    records,
+    entities,
     journalEntries,
     dailySampleSummaries,
     experimentRecord,
@@ -439,7 +440,7 @@ function buildQuestionPack(input: QuestionPackBuildInput): QuestionPack {
     },
     questions: buildPromptQuestions({
       filters,
-      records,
+      entities,
       journalEntries,
       dailySampleSummaries,
       experimentRecord,
@@ -448,7 +449,7 @@ function buildQuestionPack(input: QuestionPackBuildInput): QuestionPack {
     context: {
       experiment: experimentRecord ? summarizeExperiment(experimentRecord) : null,
       journals: journalEntries.map(summarizeJournalEntry),
-      timeline: records.map(summarizeTimelineRecord),
+      timeline: entities.map(summarizeTimelineRecord),
       dailySampleSummaries,
       health,
     },
@@ -457,16 +458,16 @@ function buildQuestionPack(input: QuestionPackBuildInput): QuestionPack {
 
 function buildPromptQuestions(input: {
   filters: ExportPackFilters;
-  records: VaultRecord[];
-  journalEntries: VaultRecord[];
+  entities: CanonicalEntity[];
+  journalEntries: CanonicalEntity[];
   dailySampleSummaries: DailySampleSummary[];
-  experimentRecord: VaultRecord | null;
+  experimentRecord: CanonicalEntity | null;
   health: ExportPackHealthContext;
 }): string[] {
-  const { filters, records, journalEntries, dailySampleSummaries, experimentRecord, health } = input;
+  const { filters, entities, journalEntries, dailySampleSummaries, experimentRecord, health } = input;
   const questions = [
     `What are the most important changes or events between ${filters.from ?? "the start"} and ${filters.to ?? "the end"}?`,
-    "Which records look most actionable for follow-up, and why?",
+    "Which entities look most actionable for follow-up, and why?",
   ];
 
   if (dailySampleSummaries.length > 0) {
@@ -475,7 +476,7 @@ function buildPromptQuestions(input: {
 
   if (journalEntries.length > 0) {
     questions.push(
-      "What do the journal notes add that is not obvious from the structured records alone?",
+      "What do the journal notes add that is not obvious from the structured entities alone?",
     );
   }
 
@@ -485,7 +486,7 @@ function buildPromptQuestions(input: {
     );
   }
 
-  if (records.some((record) => record.kind === "meal")) {
+  if (entities.some((entity) => entity.kind === "meal")) {
     questions.push(
       "Do meals or meal-adjacent notes appear to line up with any reported symptoms or measurements?",
     );
@@ -512,55 +513,55 @@ function buildPromptQuestions(input: {
   return questions;
 }
 
-function summarizeExperiment(record: VaultRecord): QuestionPackContextExperiment {
+function summarizeExperiment(entity: CanonicalEntity): QuestionPackContextExperiment {
   return {
-    id: record.displayId,
-    slug: record.experimentSlug,
-    title: record.title,
-    startedOn: record.date,
-    tags: record.tags,
-    body: record.body,
-    sourcePath: record.sourcePath,
+    id: entity.entityId,
+    slug: entity.experimentSlug,
+    title: entity.title,
+    startedOn: entity.date,
+    tags: entity.tags,
+    body: entity.body,
+    sourcePath: entity.path,
   };
 }
 
-function summarizeJournalEntry(record: VaultRecord): QuestionPackContextJournal {
+function summarizeJournalEntry(entity: CanonicalEntity): QuestionPackContextJournal {
   return {
-    id: record.displayId,
-    date: record.date,
-    title: record.title,
-    summary: record.body,
-    tags: record.tags,
-    eventIds: toStringArray(record.data.eventIds),
-    sampleStreams: toStringArray(record.data.sampleStreams),
-    sourcePath: record.sourcePath,
+    id: entity.entityId,
+    date: entity.date,
+    title: entity.title,
+    summary: entity.body,
+    tags: entity.tags,
+    eventIds: toStringArray(entity.attributes.eventIds),
+    sampleStreams: toStringArray(entity.attributes.sampleStreams),
+    sourcePath: entity.path,
   };
 }
 
-function summarizeTimelineRecord(record: VaultRecord): QuestionPackTimelineRecord {
+function summarizeTimelineRecord(entity: CanonicalEntity): QuestionPackTimelineRecord {
   return {
-    id: record.displayId,
-    when: record.occurredAt ?? record.date ?? "unknown-date",
-    kind: record.kind ?? record.recordType,
-    recordType: record.recordType,
-    title: record.title,
-    summary: summarizeRecord(record),
-    tags: record.tags,
-    experimentSlug: record.experimentSlug,
-    sourcePath: record.sourcePath,
+    id: entity.entityId,
+    when: entity.occurredAt ?? entity.date ?? "unknown-date",
+    kind: entity.kind || entity.family,
+    family: entity.family,
+    title: entity.title,
+    summary: summarizeEntity(entity),
+    tags: entity.tags,
+    experimentSlug: entity.experimentSlug,
+    sourcePath: entity.path,
   };
 }
 
-function summarizeRecord(record: VaultRecord): string {
-  if (record.title) {
-    return record.title;
+function summarizeEntity(entity: CanonicalEntity): string {
+  if (entity.title) {
+    return entity.title;
   }
 
-  if (typeof record.body === "string" && record.body.trim()) {
-    return record.body.trim().split("\n")[0] ?? "";
+  if (typeof entity.body === "string" && entity.body.trim()) {
+    return entity.body.trim().split("\n")[0] ?? "";
   }
 
-  return record.kind ?? record.recordType;
+  return entity.kind || entity.family;
 }
 
 function toStringArray(value: unknown): string[] {

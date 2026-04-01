@@ -35,7 +35,7 @@ export function searchVault(
   query: string,
   filters: SearchFilters = {},
 ): SearchResult {
-  const documents = materializeSearchDocuments(vault.records);
+  const documents = materializeSearchDocuments(vault.entities);
   return scoreSearchDocuments(documents, query, filters);
 }
 
@@ -44,7 +44,7 @@ export function searchVaultSafe(
   query: string,
   filters: SearchFilters = {},
 ): SafeSearchResult {
-  const documents = materializeSafeSearchDocuments(vault.records);
+  const documents = materializeSafeSearchDocuments(vault.entities);
   const result = scoreSearchDocuments(documents, query, filters);
 
   return {

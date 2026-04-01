@@ -58,9 +58,9 @@ export function buildOverviewMetrics(vault: VaultReadModel): OverviewMetric[] {
 
   return [
     {
-      label: "records",
+      label: "entities",
       note: "Canonical read model rows",
-      value: vault.records.length,
+      value: vault.entities.length,
     },
     {
       label: "events",
@@ -99,12 +99,12 @@ export function summarizeCurrentOverviewProfile(
   }
 
   const latestSnapshot = getLatestProfileSnapshot(vault);
-  const currentData = isRecord(current.data) ? current.data : null;
+  const currentData = isRecord(current.attributes) ? current.attributes : null;
   const currentProfileValue = getRecordField(currentData, "profile");
   const currentProfileData = isRecord(currentProfileValue)
     ? currentProfileValue
     : null;
-  const latestSnapshotProfileValue = getRecordField(latestSnapshot?.data, "profile");
+  const latestSnapshotProfileValue = getRecordField(latestSnapshot?.attributes, "profile");
   const latestSnapshotProfile = isRecord(latestSnapshotProfileValue)
     ? latestSnapshotProfileValue
     : null;
@@ -115,10 +115,10 @@ export function summarizeCurrentOverviewProfile(
   );
 
   return {
-    id: current.displayId,
+    id: current.entityId,
     recordedAt: current.occurredAt,
     summary: summarizeText(current.body),
-    title: current.title ?? current.displayId,
+    title: current.title ?? current.entityId,
     topGoals: resolveOverviewGoals(vault, topGoalIds),
   };
 }
@@ -134,10 +134,10 @@ export function summarizeRecentOverviewJournals(
     .slice(0, normalizeLimit(limit, 3))
     .map((entry) => ({
       date: entry.date ?? extractDate(entry.occurredAt),
-      id: entry.displayId,
+      id: entry.entityId,
       summary: summarizeText(entry.body),
       tags: compactStrings(entry.tags),
-      title: entry.title ?? entry.displayId,
+      title: entry.title ?? entry.entityId,
     }));
 }
 
@@ -155,12 +155,12 @@ export function buildOverviewWeeklyStats(
 
   for (const sample of vault.samples) {
     const sampleDate = sample.date ?? extractDate(sample.occurredAt);
-    const numericValue = getNumericSampleValue(sample.data?.value);
+    const numericValue = getNumericSampleValue(sample.attributes?.value);
     if (!sample.stream || numericValue === null) {
       continue;
     }
 
-    const unit = normalizeString(sample.data?.unit);
+    const unit = normalizeString(sample.attributes?.unit);
     let bucket: Map<string, { stream: string; unit: string | null; values: number[] }> | null = null;
 
     if (sampleDate >= thisWeekStart && sampleDate <= today.dayKey) {
@@ -240,13 +240,13 @@ export function summarizeOverviewExperiments(
   ];
 
   return prioritizedExperiments.slice(0, normalizeLimit(limit, 6)).map((entry) => ({
-    id: entry.displayId,
+    id: entry.entityId,
     slug: entry.experimentSlug,
     startedOn: entry.date ?? extractDate(entry.occurredAt),
     status: entry.status ?? null,
     summary: summarizeText(entry.body),
     tags: compactStrings(entry.tags),
-    title: entry.title ?? entry.displayId,
+    title: entry.title ?? entry.entityId,
   }));
 }
 
@@ -257,7 +257,7 @@ function resolveOverviewGoals(
   const goalLookup = new Map<string, VaultReadModel["goals"][number]>();
 
   for (const goal of vault.goals) {
-    for (const lookupId of [goal.displayId, goal.primaryLookupId, ...goal.lookupIds]) {
+    for (const lookupId of [goal.entityId, goal.primaryLookupId, ...goal.lookupIds]) {
       if (lookupId) {
         goalLookup.set(lookupId, goal);
       }

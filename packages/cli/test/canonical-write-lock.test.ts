@@ -234,20 +234,31 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
   const providerConflict = new VaultError("PROVIDER_CONFLICT", "Provider already exists.");
   const providerFrontmatter = new VaultError("PROVIDER_FRONTMATTER_INVALID", "Provider frontmatter is invalid.");
   const eventRecord = {
-    recordType: "event",
+    entityId: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
     primaryLookupId: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
-    displayId: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    lookupIds: ["event_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+    family: "event",
+    recordClass: "ledger",
+    path: "ledger/events/2026/2026-03.jsonl",
     kind: "note",
+    status: null,
     occurredAt: "2026-03-12T12:00:00.000Z",
     date: "2026-03-12",
+    stream: null,
+    experimentSlug: null,
     title: "Mock note",
-    data: {
+    tags: [],
+    attributes: {
       id: "event_01JNV422Y2M5ZBV64ZP4N1DRB1",
       kind: "note",
       occurredAt: "2026-03-12T12:00:00.000Z",
       title: "Mock note",
       note: "Existing note",
     },
+    body: null,
+    frontmatter: null,
+    links: [],
+    relatedIds: [],
   };
   const eventFailures = [
     {
@@ -380,7 +391,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           },
           queryRuntime: {
             readVault: async () => ({}),
-            lookupRecordById: () => eventRecord,
+            lookupEntityById: () => eventRecord,
           },
           run: async () => {
             const { editEventRecord } = await import("@murphai/assistant-core/usecases/event-record-mutations");
@@ -413,14 +424,21 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
 test.sequential("editEventRecord strips stored lifecycle metadata before calling core upsert", async () => {
   const capturedPayloads: Array<Record<string, unknown>> = [];
   const eventRecord = {
-    recordType: "event",
+    entityId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
     primaryLookupId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
-    displayId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
+    lookupIds: ["evt_01JNV422Y2M5ZBV64ZP4N1DRB1"],
+    family: "event",
+    recordClass: "ledger",
+    path: "ledger/events/2026/2026-03.jsonl",
     kind: "note",
+    status: null,
     occurredAt: "2026-03-12T12:00:00.000Z",
     date: "2026-03-12",
+    stream: null,
+    experimentSlug: null,
     title: "Mock note",
-    data: {
+    tags: [],
+    attributes: {
       id: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
       kind: "note",
       occurredAt: "2026-03-12T12:00:00.000Z",
@@ -430,6 +448,10 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
         revision: 7,
       },
     },
+    body: null,
+    frontmatter: null,
+    links: [],
+    relatedIds: [],
   };
 
   await withCliUsecaseMocks({
@@ -445,7 +467,7 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
     },
     queryRuntime: {
       readVault: async () => ({}),
-      lookupRecordById: () => eventRecord,
+      lookupEntityById: () => eventRecord,
     },
     run: async () => {
       const { editEventRecord } = await import("@murphai/assistant-core/usecases/event-record-mutations");

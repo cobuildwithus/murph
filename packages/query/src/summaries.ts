@@ -1,4 +1,5 @@
-import type { VaultReadModel, VaultRecord } from "./model.ts";
+import type { CanonicalEntity } from "./canonical-entities.ts";
+import type { VaultReadModel } from "./model.ts";
 
 export interface DailySampleSummary {
   date: string;
@@ -60,16 +61,16 @@ export function summarizeDailySamples(
     }
 
     const numericValue = getNumericValue(sample);
-    const unit = getString(sample.data.unit);
+    const unit = getString(sample.attributes.unit);
     const key = buildSummaryKey(date, stream, unit);
     const group = getOrCreateSummaryGroup(groups, key, date, stream, unit);
 
     const { summary, values, unitSet } = group;
     summary.sampleCount += 1;
-    summary.sampleIds.push(sample.displayId);
+    summary.sampleIds.push(sample.entityId);
 
-    if (!summary.sourcePaths.includes(sample.sourcePath)) {
-      summary.sourcePaths.push(sample.sourcePath);
+    if (!summary.sourcePaths.includes(sample.path)) {
+      summary.sourcePaths.push(sample.path);
     }
 
     if (sample.occurredAt) {
@@ -172,8 +173,8 @@ function compareDailySampleSummaries(
   return left.date.localeCompare(right.date);
 }
 
-function getNumericValue(sample: VaultRecord): number | null {
-  const rawValue = sample.data.value;
+function getNumericValue(sample: CanonicalEntity): number | null {
+  const rawValue = sample.attributes.value;
   return typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null;
 }
 

@@ -4,7 +4,6 @@ import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
   type QueryRuntimeModule,
-  type QueryVaultRecord,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -506,7 +505,7 @@ export async function showVaultSummary(vault: string) {
     title: stringOrNull(metadata?.title),
     timezone: stringOrNull(metadata?.timezone),
     createdAt: normalizeIsoTimestamp(stringOrNull(metadata?.createdAt)),
-    corePath: readModel.coreDocument?.sourcePath ?? null,
+    corePath: readModel.coreDocument?.path ?? null,
     coreTitle: readModel.coreDocument?.title ?? null,
     coreUpdatedAt: normalizeIsoTimestamp(readModel.coreDocument?.occurredAt),
   }
@@ -558,7 +557,7 @@ export async function showVaultStats(vault: string) {
   return {
     vault,
     counts: {
-      totalRecords: readModel.records.length,
+      totalRecords: readModel.entities.length,
       experiments: readModel.experiments.length,
       journalEntries: readModel.journalEntries.length,
       events: readModel.events.length,
@@ -739,7 +738,7 @@ async function loadExperimentJournalVaultCoreRuntime(): Promise<ExperimentJourna
   return loadRuntimeModule<ExperimentJournalVaultCoreRuntime>('@murphai/core')
 }
 
-function latestIsoTimestamp(records: readonly QueryVaultRecord[]) {
+function latestIsoTimestamp(records: readonly QueryCanonicalEntity[]) {
   const latest = [...records]
     .map((record) => normalizeIsoTimestamp(record.occurredAt))
     .filter((value): value is string => value !== null)
@@ -748,7 +747,7 @@ function latestIsoTimestamp(records: readonly QueryVaultRecord[]) {
   return latest ?? null
 }
 
-function latestDate(records: readonly QueryVaultRecord[]) {
+function latestDate(records: readonly QueryCanonicalEntity[]) {
   const latest = [...records]
     .map((record) => record.date)
     .filter((value): value is string => typeof value === 'string' && value.length > 0)

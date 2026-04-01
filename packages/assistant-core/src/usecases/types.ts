@@ -38,7 +38,6 @@ import type {
 import type {
   QueryCanonicalEntity,
   QueryRuntimeModule as SharedQueryRuntimeModule,
-  QueryVaultRecord,
 } from "../query-runtime.js"
 
 export type { CommandContext } from "../health-cli-method-types.js"
@@ -1005,9 +1004,8 @@ export interface ImportersRuntimeModule {
 
 export type ImportersFactoryRuntimeModule = Pick<ImportersRuntimeModule, "createImporters">
 
-export type QueryRecord = QueryVaultRecord
-
 export type QueryEntity = QueryCanonicalEntity
+export type QueryRecord = QueryCanonicalEntity
 
 export type QueryRuntimeModule =
   SharedQueryRuntimeModule &

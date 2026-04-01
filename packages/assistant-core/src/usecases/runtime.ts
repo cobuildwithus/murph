@@ -77,8 +77,6 @@ function isQueryRuntimeModule(value: unknown): value is QueryRuntimeModule {
       "readVaultTolerant",
       "lookupEntityById",
       "listEntities",
-      "lookupRecordById",
-      "listRecords",
       "buildExportPack",
       "showSupplement",
       "listSupplements",

@@ -90,7 +90,7 @@ const ID_FAMILY_REGISTRY = Object.freeze<IdFamilyDefinition[]>([
   },
 ])
 
-export const ALL_VAULT_RECORD_TYPES = [
+export const ALL_QUERY_ENTITY_FAMILIES = [
   'allergy',
   'assessment',
   'audit',
@@ -115,8 +115,7 @@ export const ALL_VAULT_RECORD_TYPES = [
 
 type QueryRecordClass = 'bank' | 'ledger' | 'sample' | 'snapshot'
 
-export type QueryVaultRecordType = typeof ALL_VAULT_RECORD_TYPES[number]
-export type QueryEntityFamily = QueryVaultRecordType
+export type QueryEntityFamily = typeof ALL_QUERY_ENTITY_FAMILIES[number]
 
 export interface QueryEntityLink {
   type: string
@@ -145,55 +144,36 @@ export interface QueryCanonicalEntity {
   tags: string[]
 }
 
-export interface QueryVaultRecord {
-  displayId: string
-  primaryLookupId: string
-  lookupIds: string[]
-  recordType: QueryVaultRecordType
-  recordClass: QueryRecordClass
-  sourcePath: string
-  sourceFile: string
-  occurredAt: string | null
-  date: string | null
-  kind: string | null
-  status?: string | null
-  stream: string | null
-  experimentSlug: string | null
-  title: string | null
-  tags: string[]
-  data: JsonObject
-  body: string | null
-  frontmatter: JsonObject | null
-  links: QueryEntityLink[]
-  relatedIds?: string[]
-}
+export type QueryEntity = QueryCanonicalEntity
+
+export type QueryEntitiesByFamily = Partial<Record<QueryEntityFamily, QueryCanonicalEntity[]>>
 
 export interface QueryVaultReadModel {
   format: string
   vaultRoot: string
   metadata: JsonObject | null
   entities: QueryCanonicalEntity[]
-  coreDocument: QueryVaultRecord | null
-  experiments: QueryVaultRecord[]
-  journalEntries: QueryVaultRecord[]
-  events: QueryVaultRecord[]
-  samples: QueryVaultRecord[]
-  audits: QueryVaultRecord[]
-  assessments: QueryVaultRecord[]
-  profileSnapshots: QueryVaultRecord[]
-  currentProfile: QueryVaultRecord | null
-  goals: QueryVaultRecord[]
-  conditions: QueryVaultRecord[]
-  allergies: QueryVaultRecord[]
-  protocols: QueryVaultRecord[]
-  history: QueryVaultRecord[]
-  familyMembers: QueryVaultRecord[]
-  geneticVariants: QueryVaultRecord[]
-  foods: QueryVaultRecord[]
-  recipes: QueryVaultRecord[]
-  providers: QueryVaultRecord[]
-  workoutFormats: QueryVaultRecord[]
-  records: QueryVaultRecord[]
+  byFamily: QueryEntitiesByFamily
+  coreDocument: QueryCanonicalEntity | null
+  experiments: QueryCanonicalEntity[]
+  journalEntries: QueryCanonicalEntity[]
+  events: QueryCanonicalEntity[]
+  samples: QueryCanonicalEntity[]
+  audits: QueryCanonicalEntity[]
+  assessments: QueryCanonicalEntity[]
+  profileSnapshots: QueryCanonicalEntity[]
+  currentProfile: QueryCanonicalEntity | null
+  goals: QueryCanonicalEntity[]
+  conditions: QueryCanonicalEntity[]
+  allergies: QueryCanonicalEntity[]
+  protocols: QueryCanonicalEntity[]
+  history: QueryCanonicalEntity[]
+  familyMembers: QueryCanonicalEntity[]
+  geneticVariants: QueryCanonicalEntity[]
+  foods: QueryCanonicalEntity[]
+  recipes: QueryCanonicalEntity[]
+  providers: QueryCanonicalEntity[]
+  workoutFormats: QueryCanonicalEntity[]
 }
 
 export interface QueryListEntityFilters {
@@ -202,20 +182,6 @@ export interface QueryListEntityFilters {
   recordClasses?: QueryRecordClass[]
   kinds?: string[]
   statuses?: string[]
-  streams?: string[]
-  experimentSlug?: string
-  date?: string
-  from?: string
-  to?: string
-  tags?: string[]
-  text?: string
-}
-
-export interface QueryListRecordFilters {
-  ids?: string[]
-  recordTypes?: QueryVaultRecordType[]
-  recordClasses?: QueryRecordClass[]
-  kinds?: string[]
   streams?: string[]
   experimentSlug?: string
   date?: string
@@ -234,7 +200,7 @@ export interface QuerySearchCitation {
 export interface QuerySearchHit {
   recordId: string
   aliasIds: string[]
-  recordType: QueryVaultRecordType
+  recordType: QueryEntityFamily
   kind: string | null
   stream: string | null
   title: string | null
@@ -250,7 +216,7 @@ export interface QuerySearchHit {
 }
 
 export interface QuerySearchFilters {
-  recordTypes?: QueryVaultRecordType[]
+  recordTypes?: QueryEntityFamily[]
   kinds?: string[]
   streams?: string[]
   experimentSlug?: string
@@ -350,7 +316,7 @@ export interface QueryExportPack {
 }
 
 export interface QueryRuntimeModule {
-  ALL_VAULT_RECORD_TYPES: readonly QueryVaultRecordType[]
+  ALL_QUERY_ENTITY_FAMILIES: readonly QueryEntityFamily[]
   buildExportPack(
     vault: QueryVaultReadModel,
     options?: QueryExportPackOptions,
@@ -367,18 +333,10 @@ export interface QueryRuntimeModule {
     vault: QueryVaultReadModel,
     filters?: QueryListEntityFilters,
   ): QueryCanonicalEntity[]
-  listRecords(
-    vault: QueryVaultReadModel,
-    filters?: QueryListRecordFilters,
-  ): QueryVaultRecord[]
   lookupEntityById(
     vault: QueryVaultReadModel,
     lookup: string,
   ): QueryCanonicalEntity | null
-  lookupRecordById(
-    vault: QueryVaultReadModel,
-    lookup: string,
-  ): QueryVaultRecord | null
   listSupplements(
     vaultRoot: string,
     options?: Record<string, unknown>,

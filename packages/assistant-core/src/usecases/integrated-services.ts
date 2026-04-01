@@ -566,7 +566,7 @@ function createIntegratedQueryServices(): QueryServices {
         normalizeRepeatableEnumFlagOption(
           recordType,
           "record-type",
-          query.ALL_VAULT_RECORD_TYPES,
+          query.ALL_QUERY_ENTITY_FAMILIES,
         ) ?? []
       const readModel = await query.readVault(vault)
       const streams = normalizeRepeatableFlagOption(stream, "stream") ?? []

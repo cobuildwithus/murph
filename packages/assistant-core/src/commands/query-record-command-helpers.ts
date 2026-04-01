@@ -4,7 +4,7 @@ import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
   type QueryVaultReadModel as QueryReadModel,
-  type QueryVaultRecord as QueryRecord,
+  type QueryCanonicalEntity as QueryRecord,
 } from '../query-runtime.js'
 import { createRuntimeUnavailableError as buildRuntimeUnavailableError } from '../runtime-errors.js'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -59,8 +59,8 @@ export async function loadQueryRuntime(
 
       if (
         typeof runtime.readVault !== 'function' ||
-        typeof runtime.lookupRecordById !== 'function' ||
-        typeof runtime.listRecords !== 'function'
+        typeof runtime.lookupEntityById !== 'function' ||
+        typeof runtime.listEntities !== 'function'
       ) {
         throw new TypeError('Query runtime package did not match the expected module shape.')
       }
@@ -95,7 +95,7 @@ export function toOwnedEventCommandShowEntity(
       extraLinkKeys,
       includeRelatedIds: false,
       seedIds:
-        record.displayId !== record.primaryLookupId
+        record.entityId !== record.primaryLookupId
           ? [record.primaryLookupId]
           : [],
       sort: false,
@@ -108,13 +108,13 @@ function toCommandShowEntityWithLinks(
   links: CommandEntityLink[],
 ): CommandShowEntity {
   return {
-    id: record.displayId || record.primaryLookupId,
-    kind: record.kind ?? record.recordType,
+    id: record.entityId || record.primaryLookupId,
+    kind: record.kind || record.family,
     title: record.title ?? null,
     occurredAt: record.occurredAt ?? null,
-    path: record.sourcePath ?? null,
+    path: record.path ?? null,
     markdown: record.body ?? null,
-    data: record.data,
+    data: record.attributes,
     links,
   }
 }
@@ -125,7 +125,7 @@ export function toSampleCommandListItem(
   return {
     ...toCommandShowEntity(record),
     data: {
-      ...record.data,
+      ...record.attributes,
       status: record.status ?? undefined,
       stream: record.stream ?? undefined,
     },
@@ -139,11 +139,11 @@ export function toAuditCommandListItem(
 ): AuditCommandListItem {
   return {
     ...toCommandShowEntity(record),
-    action: firstString(record.data, ['action']),
-    actor: firstString(record.data, ['actor']),
+    action: firstString(record.attributes, ['action']),
+    actor: firstString(record.attributes, ['actor']),
     status: record.status ?? null,
-    commandName: firstString(record.data, ['commandName', 'command_name']),
-    summary: firstString(record.data, ['summary']),
+    commandName: firstString(record.attributes, ['commandName', 'command_name']),
+    summary: firstString(record.attributes, ['summary']),
   }
 }
 
@@ -186,8 +186,8 @@ export function compareByLatest(
     return rightDate.localeCompare(leftDate)
   }
 
-  return (left.displayId || left.primaryLookupId).localeCompare(
-    right.displayId || right.primaryLookupId,
+  return (left.entityId || left.primaryLookupId).localeCompare(
+    right.entityId || right.primaryLookupId,
   )
 }
 
@@ -331,7 +331,7 @@ function toCommandEntityLinks(
   }
 
   for (const key of extraLinkKeys) {
-    for (const extraId of arrayOfStrings(record.data[key])) {
+    for (const extraId of arrayOfStrings(record.attributes[key])) {
       ids.add(extraId)
     }
   }

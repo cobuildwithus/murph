@@ -7,7 +7,7 @@ import { firstString } from '@murphai/assistant-core/command-helpers'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
-  type QueryVaultRecord as VaultRecord,
+  type QueryCanonicalEntity as AssessmentEntity,
 } from '@murphai/assistant-core/query-runtime'
 import { materializeExportPack } from '@murphai/assistant-core/usecases/shared'
 import { resolveVaultRelativePath } from '@murphai/assistant-core/usecases/vault-usecase-helpers'
@@ -140,9 +140,9 @@ async function loadQueryRuntime() {
 async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
   const query = await loadQueryRuntime()
   const readModel = await query.readVault(vaultRoot)
-  const record = query.lookupRecordById(readModel, assessmentId)
+  const record = query.lookupEntityById(readModel, assessmentId)
 
-  if (!record || record.recordType !== 'assessment') {
+  if (!record || record.family !== 'assessment') {
     throw new VaultCliError(
       'not_found',
       `No assessment found for "${assessmentId}".`,
@@ -152,20 +152,20 @@ async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
   return record
 }
 
-function resolveAssessmentRawFile(record: VaultRecord) {
-  const rawFile = firstString(record.data, ['rawPath', 'sourcePath'])
+function resolveAssessmentRawFile(record: AssessmentEntity) {
+  const rawFile = firstString(record.attributes, ['rawPath', 'sourcePath']) ?? record.path
 
   if (!rawFile) {
     throw new VaultCliError(
       'raw_missing',
-      `Assessment "${record.displayId}" does not declare a raw artifact path.`,
+      `Assessment "${record.entityId}" does not declare a raw artifact path.`,
     )
   }
 
   return rawFile
 }
 
-function resolveAssessmentManifestFile(record: VaultRecord) {
+function resolveAssessmentManifestFile(record: AssessmentEntity) {
   return path.posix.join(path.posix.dirname(resolveAssessmentRawFile(record)), 'manifest.json')
 }
 
@@ -434,7 +434,7 @@ export async function showAssessmentManifest(vaultRoot: string, assessmentId: st
 
   return {
     vault: vaultRoot,
-    entityId: record.displayId,
+    entityId: record.entityId,
     lookupId: record.primaryLookupId,
     kind: 'assessment' as const,
     manifestFile,
@@ -476,7 +476,7 @@ export async function showAssessmentRaw(vaultRoot: string, assessmentId: string)
 
   return {
     vault: vaultRoot,
-    entityId: record.displayId,
+    entityId: record.entityId,
     lookupId: record.primaryLookupId,
     kind: 'assessment' as const,
     rawFile,

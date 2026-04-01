@@ -25,11 +25,11 @@ import {
   getJournalEntry,
   getSqliteSearchStatus,
   listFamilyMembers,
+  listEntities,
   listGeneticVariants,
   listExperiments,
   listJournalEntries,
-  listRecords,
-  lookupRecordById,
+  lookupEntityById,
   readVault,
   rebuildSqliteSearchIndex,
   searchVault,
@@ -47,7 +47,7 @@ import {
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
 import { projectProfileSnapshotEntity } from "../src/health/projectors/profile.ts";
-import { ALL_VAULT_RECORD_TYPES } from "../src/model.ts";
+import { ALL_QUERY_ENTITY_FAMILIES } from "../src/model.ts";
 import { profileSnapshotRecordFromEntity } from "../src/health/projections.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
@@ -225,16 +225,16 @@ test("readVault collapses append-only event revisions to the latest active curre
     );
 
     const vault = await readVault(vaultRoot);
-    const matchingEvents = listRecords(vault, {
-      recordTypes: ["event"],
+    const matchingEvents = listEntities(vault, {
+      families: ["event"],
     }).filter((record) => record.primaryLookupId === eventId);
-    const revivedEvent = lookupRecordById(vault, eventId);
+    const revivedEvent = lookupEntityById(vault, eventId);
 
     assert.equal(matchingEvents.length, 1);
-    assert.equal(revivedEvent?.recordType, "event");
+    assert.equal(revivedEvent?.family, "event");
     assert.equal(revivedEvent?.title, "Revived note");
     assert.equal(revivedEvent?.occurredAt, "2026-05-01T09:30:00.000Z");
-    assert.deepEqual(revivedEvent?.data.lifecycle, { revision: 4 });
+    assert.deepEqual(revivedEvent?.attributes.lifecycle, { revision: 4 });
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -286,11 +286,11 @@ test("readVault ignores malformed event lifecycles instead of promoting them int
     );
 
     const vault = await readVault(vaultRoot);
-    const survivingEvent = lookupRecordById(vault, eventId);
+    const survivingEvent = lookupEntityById(vault, eventId);
 
     assert.equal(survivingEvent?.title, "Original note");
     assert.equal(survivingEvent?.occurredAt, "2026-03-12T08:15:00.000Z");
-    assert.deepEqual(survivingEvent?.data.lifecycle, { revision: 1 });
+    assert.deepEqual(survivingEvent?.attributes.lifecycle, { revision: 1 });
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -329,79 +329,79 @@ test(
 
       assert.equal(vault.format, "murph.query.v1");
       assert.equal(vault.metadata?.vaultId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
-      assert.equal(vault.coreDocument?.displayId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
+      assert.equal(vault.coreDocument?.entityId, "vault_01JNV40W8VFYQ2H7CMJY5A9R4K");
       assert.equal(vault.experiments.length, 1);
       assert.equal(vault.journalEntries.length, 2);
       assert.equal(vault.events.length, 3);
       assert.equal(vault.samples.length, 5);
       assert.equal(vault.audits.length, 1);
-      assert.deepEqual(vault.byFamily.core?.map((record) => record.displayId), [
-        vault.coreDocument?.displayId,
+      assert.deepEqual(vault.byFamily.core?.map((record) => record.entityId), [
+        vault.coreDocument?.entityId,
       ]);
       assert.deepEqual(
-        vault.byFamily.experiment?.map((record) => record.displayId),
-        vault.experiments.map((record) => record.displayId),
+        vault.byFamily.experiment?.map((record) => record.entityId),
+        vault.experiments.map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.journal?.map((record) => record.displayId),
-        vault.journalEntries.map((record) => record.displayId),
+        vault.byFamily.journal?.map((record) => record.entityId),
+        vault.journalEntries.map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.event?.map((record) => record.displayId),
-        vault.events.map((record) => record.displayId),
+        vault.byFamily.event?.map((record) => record.entityId),
+        vault.events.map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.sample?.map((record) => record.displayId),
-        vault.samples.map((record) => record.displayId),
+        vault.byFamily.sample?.map((record) => record.entityId),
+        vault.samples.map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.audit?.map((record) => record.displayId),
-        vault.audits.map((record) => record.displayId),
+        vault.byFamily.audit?.map((record) => record.entityId),
+        vault.audits.map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.family?.map((record) => record.displayId),
-        vault.records
-          .filter((record) => record.recordType === "family")
-          .map((record) => record.displayId),
+        vault.byFamily.family?.map((record) => record.entityId),
+        vault.entities
+          .filter((record) => record.family === "family")
+          .map((record) => record.entityId),
       );
       assert.deepEqual(
-        vault.byFamily.genetics?.map((record) => record.displayId),
-        vault.records
-          .filter((record) => record.recordType === "genetics")
-          .map((record) => record.displayId),
+        vault.byFamily.genetics?.map((record) => record.entityId),
+        vault.entities
+          .filter((record) => record.family === "genetics")
+          .map((record) => record.entityId),
       );
 
       const experiment = getExperiment(vault, "low-carb");
       assert.equal(experiment?.title, "Low Carb Trial");
-      assert.equal(experiment?.data.startedOn, "2026-03-01");
+      assert.equal(experiment?.attributes.startedOn, "2026-03-01");
 
       const journal = getJournalEntry(vault, "2026-03-10");
       assert.equal(journal?.title, "March 10");
 
-      const mealRecord = lookupRecordById(vault, "meal_01JNV4MEAL00000000000001");
-      assert.equal(mealRecord?.recordType, "event");
-      assert.equal(mealRecord?.displayId, "meal_01JNV4MEAL00000000000001");
+      const mealRecord = lookupEntityById(vault, "meal_01JNV4MEAL00000000000001");
+      assert.equal(mealRecord?.family, "event");
+      assert.equal(mealRecord?.entityId, "meal_01JNV4MEAL00000000000001");
       assert.equal(mealRecord?.primaryLookupId, "evt_01JNV4MEAL000000000000001");
-      assert.equal(mealRecord?.data.kind, "meal");
-      assert.deepEqual(mealRecord?.data.eventIds, ["evt_01JNV4MEAL000000000000001"]);
+      assert.equal(mealRecord?.attributes.kind, "meal");
+      assert.deepEqual(mealRecord?.attributes.eventIds, ["evt_01JNV4MEAL000000000000001"]);
 
-      const mealEventAlias = lookupRecordById(vault, "evt_01JNV4MEAL000000000000001");
-      assert.equal(mealEventAlias?.displayId, "meal_01JNV4MEAL00000000000001");
+      const mealEventAlias = lookupEntityById(vault, "evt_01JNV4MEAL000000000000001");
+      assert.equal(mealEventAlias?.entityId, "meal_01JNV4MEAL00000000000001");
       assert.equal(mealEventAlias?.primaryLookupId, "evt_01JNV4MEAL000000000000001");
 
-      const documentRecord = lookupRecordById(vault, "doc_01JNV4DOC0000000000000001");
-      assert.equal(documentRecord?.displayId, "doc_01JNV4DOC0000000000000001");
+      const documentRecord = lookupEntityById(vault, "doc_01JNV4DOC0000000000000001");
+      assert.equal(documentRecord?.entityId, "doc_01JNV4DOC0000000000000001");
       assert.equal(documentRecord?.primaryLookupId, "evt_01JNV4DOC000000000000001");
-      assert.equal(documentRecord?.data.documentId, "doc_01JNV4DOC0000000000000001");
+      assert.equal(documentRecord?.attributes.documentId, "doc_01JNV4DOC0000000000000001");
       assert.equal(
-        documentRecord?.data.documentPath,
+        documentRecord?.attributes.documentPath,
         "raw/documents/2026/03/doc_01JNV4DOC0000000000000001/lab-report.pdf",
       );
-      assert.equal(documentRecord?.data.mimeType, "application/pdf");
+      assert.equal(documentRecord?.attributes.mimeType, "application/pdf");
 
       const legacyJournal = getJournalEntry(vault, "2026-03-11");
-      assert.deepEqual(legacyJournal?.data.eventIds, ["evt_01JNV4NOTE000000000000001"]);
-      assert.deepEqual(legacyJournal?.data.sampleStreams, ["heart_rate"]);
+      assert.deepEqual(legacyJournal?.attributes.eventIds, ["evt_01JNV4NOTE000000000000001"]);
+      assert.deepEqual(legacyJournal?.attributes.sampleStreams, ["heart_rate"]);
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
@@ -435,12 +435,12 @@ test("list helpers apply date, tag, text, and kind filters against contract data
   try {
     const vault = await readVault(vaultRoot);
 
-    const marchRecords = listRecords(vault, {
+    const marchRecords = listEntities(vault, {
       from: "2026-03-10",
       to: "2026-03-10",
     });
     assert.deepEqual(
-      marchRecords.map((record) => record.displayId),
+      marchRecords.map((record) => record.entityId),
       [
         "journal:2026-03-10",
         "smp_01JNV4GLU000000000000001",
@@ -453,15 +453,15 @@ test("list helpers apply date, tag, text, and kind filters against contract data
       ],
     );
 
-    const mealRecords = listRecords(vault, { kinds: ["meal"] });
+    const mealRecords = listEntities(vault, { kinds: ["meal"] });
     assert.deepEqual(
-      mealRecords.map((record) => record.displayId),
+      mealRecords.map((record) => record.entityId),
       ["meal_01JNV4MEAL00000000000001"],
     );
 
-    const documentRecords = listRecords(vault, { ids: ["evt_01JNV4DOC000000000000001"] });
+    const documentRecords = listEntities(vault, { ids: ["evt_01JNV4DOC000000000000001"] });
     assert.deepEqual(
-      documentRecords.map((record) => record.displayId),
+      documentRecords.map((record) => record.entityId),
       ["doc_01JNV4DOC0000000000000001"],
     );
 
@@ -510,7 +510,7 @@ test("summarizeDailySamples groups by day and stream with stable numeric aggrega
   }
 });
 
-test("listRecords prefers stored local day keys over UTC-derived dates", () => {
+test("listEntities prefers stored local day keys over UTC-derived dates", () => {
   const vault = createEmptyReadModel();
   const sample = createSampleRecord({
     id: "smp_local_day_01",
@@ -524,21 +524,21 @@ test("listRecords prefers stored local day keys over UTC-derived dates", () => {
   });
 
   vault.samples = [sample];
-  vault.records = [sample];
+  vault.entities = [sample];
   syncVaultDerivedFields(vault);
 
   assert.deepEqual(
-    listRecords(vault, {
+    listEntities(vault, {
       from: "2026-03-27",
       to: "2026-03-27",
-    }).map((record) => record.displayId),
+    }).map((record) => record.entityId),
     ["smp_local_day_01"],
   );
   assert.deepEqual(
-    listRecords(vault, {
+    listEntities(vault, {
       from: "2026-03-26",
       to: "2026-03-26",
-    }).map((record) => record.displayId),
+    }).map((record) => record.entityId),
     [],
   );
 });
@@ -558,11 +558,11 @@ test("createVaultReadModel keeps manual query fixtures aligned with records and 
 
   vault.samples = [sample];
 
-  assert.deepEqual(vault.records.map((record) => record.displayId), ["smp_sync_01"]);
-  assert.deepEqual(vault.byFamily.sample?.map((record) => record.displayId), [
+  assert.deepEqual(vault.entities.map((record) => record.entityId), ["smp_sync_01"]);
+  assert.deepEqual(vault.byFamily.sample?.map((record) => record.entityId), [
     "smp_sync_01",
   ]);
-  assert.deepEqual(vault.samples.map((record) => record.displayId), ["smp_sync_01"]);
+  assert.deepEqual(vault.samples.map((record) => record.entityId), ["smp_sync_01"]);
 });
 
 test("createVaultReadModel accepts canonical entities as the authoritative read-model input", () => {
@@ -606,19 +606,18 @@ test("createVaultReadModel accepts canonical entities as the authoritative read-
   });
 
   assert.deepEqual(vault.entities.map((entry) => entry.entityId), ["goal_sleep_01"]);
-  assert.deepEqual(vault.records.map((record) => record.displayId), ["goal_sleep_01"]);
-  assert.deepEqual(vault.byFamily.goal?.map((record) => record.displayId), ["goal_sleep_01"]);
-  assert.deepEqual(vault.goals.map((record) => record.displayId), ["goal_sleep_01"]);
-  assert.equal(vault.records[0]?.primaryLookupId, "improve-sleep");
-  assert.equal(vault.records[0]?.sourceFile, path.join("/tmp/entity-vault", "bank/goals/improve-sleep.md"));
+  assert.deepEqual(vault.entities.map((record) => record.entityId), ["goal_sleep_01"]);
+  assert.deepEqual(vault.byFamily.goal?.map((record) => record.entityId), ["goal_sleep_01"]);
+  assert.deepEqual(vault.goals.map((record) => record.entityId), ["goal_sleep_01"]);
+  assert.equal(vault.entities[0]?.primaryLookupId, "improve-sleep");
+  assert.equal(vault.entities[0]?.path, "bank/goals/improve-sleep.md");
 });
 
-test("createVaultReadModel preserves manual sourceFile values on the VaultRecord compatibility surface", () => {
-  const record = createRecord({
+test("createVaultReadModel preserves manual entity paths", () => {
+  const entity = createRecord({
     id: "goal_manual_source_01",
     recordType: "goal",
     sourcePath: "bank/goals/manual-source.md",
-    sourceFile: "/custom/manual-fixture.md",
     primaryLookupId: "manual-source",
     title: "Manual source fixture",
     data: {},
@@ -627,11 +626,11 @@ test("createVaultReadModel preserves manual sourceFile values on the VaultRecord
   const vault = createVaultReadModel({
     vaultRoot: "/tmp/entity-vault",
     metadata: null,
-    records: [record],
+    entities: [entity],
   });
 
-  assert.equal(vault.records[0]?.sourceFile, "/custom/manual-fixture.md");
-  assert.equal(vault.goals[0]?.sourceFile, "/custom/manual-fixture.md");
+  assert.equal(vault.entities[0]?.path, "bank/goals/manual-source.md");
+  assert.equal(vault.goals[0]?.path, "bank/goals/manual-source.md");
 });
 
 test("buildExportPack produces derived exports payloads without touching the vault", async () => {
@@ -877,7 +876,7 @@ test("buildExportPack omits optional sections when the scoped vault is empty", (
 
   assert.deepEqual(questionPack.questions, [
     "What are the most important changes or events between the start and the end?",
-    "Which records look most actionable for follow-up, and why?",
+    "Which entities look most actionable for follow-up, and why?",
   ]);
   assert.equal(questionPack.context.experiment, null);
   assert.deepEqual(questionPack.context.journals, []);
@@ -982,7 +981,7 @@ test("buildExportPack renders experiment, journal, timeline, and meal prompts fo
   vault.journalEntries = [journal];
   vault.events = [meal, note];
   vault.samples = [sampleA, sampleB];
-  vault.records = [experiment, journal, sampleA, meal, sampleB, note];
+  vault.entities = [experiment, journal, sampleA, meal, sampleB, note];
   syncVaultDerivedFields(vault);
 
   const pack = buildExportPack(vault, {
@@ -1015,7 +1014,7 @@ test("buildExportPack renders experiment, journal, timeline, and meal prompts fo
   assert.ok(assistantFile);
   assert.match(assistantFile.contents, /## Experiment Focus/);
   assert.match(assistantFile.contents, /## Journal Highlights/);
-  assert.match(assistantFile.contents, /## Record Timeline/);
+  assert.match(assistantFile.contents, /## Entity Timeline/);
   assert.match(assistantFile.contents, /## Daily Sample Summaries/);
   assert.match(assistantFile.contents, /Meal detail/);
   assert.match(assistantFile.contents, /note \| evt_focus_note \| note/);
@@ -1054,7 +1053,7 @@ test("model helpers return null or empty results for unmatched ids and filters",
     sourcePath: "ledger/events/2026/2026-03.jsonl",
     occurredAt: null,
     date: null,
-    kind: null,
+    kind: "",
     stream: null,
     title: null,
     tags: [],
@@ -1065,16 +1064,16 @@ test("model helpers return null or empty results for unmatched ids and filters",
 
   vault.experiments = [experiment];
   vault.journalEntries = [journal];
-  vault.records = [experiment, journal, orphanEvent];
+  vault.entities = [experiment, journal, orphanEvent];
   syncVaultDerivedFields(vault);
 
-  assert.equal(lookupRecordById(vault, "unknown-id"), null);
+  assert.equal(lookupEntityById(vault, "unknown-id"), null);
   assert.equal(getExperiment(vault, "missing"), null);
   assert.equal(getJournalEntry(vault, "2026-03-13"), null);
   assert.deepEqual(listExperiments(vault, { slug: "missing" }), []);
   assert.deepEqual(listJournalEntries(vault, { from: "2026-03-13" }), []);
-  assert.deepEqual(listRecords(vault, { streams: ["glucose"] }), []);
-  assert.deepEqual(listRecords(vault, { from: "2026-03-10" }).map((record) => record.displayId), [
+  assert.deepEqual(listEntities(vault, { streams: ["glucose"] }), []);
+  assert.deepEqual(listEntities(vault, { from: "2026-03-10" }).map((record) => record.entityId), [
     "journal:2026-03-12",
   ]);
 });
@@ -1126,7 +1125,7 @@ test("searchVault ranks body and structured matches while excluding raw samples 
   vault.journalEntries = [journal];
   vault.events = [meal];
   vault.samples = [sample];
-  vault.records = [journal, meal, sample];
+  vault.entities = [journal, meal, sample];
   syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "afternoon crash pasta", {
@@ -1158,7 +1157,7 @@ test("searchVault includes sample rows when the caller scopes by sample record t
   });
 
   vault.samples = [sample];
-  vault.records = [sample];
+  vault.entities = [sample];
   syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "glucose spike", {
@@ -1247,7 +1246,7 @@ test("overview selectors move cleanly onto the query read model", () => {
   vault.goals = [goal];
   vault.journalEntries = [journalOlder, journalNewer];
   vault.experiments = [completedExperiment, activeExperiment];
-  vault.records = [
+  vault.entities = [
     goal,
     currentProfile,
     latestSnapshot,
@@ -1261,7 +1260,7 @@ test("overview selectors move cleanly onto the query read model", () => {
   assert.deepEqual(
     buildOverviewMetrics(vault).map((metric) => [metric.label, metric.value]),
     [
-      ["records", 7],
+      ["entities", 7],
       ["events", 0],
       ["samples", 0],
       ["journal days", 2],
@@ -1498,7 +1497,7 @@ test("searchVaultSafe omits raw path terms and path fields by construction", () 
   });
 
   vault.events = [pathOnly, visible];
-  vault.records = [pathOnly, visible];
+  vault.entities = [pathOnly, visible];
   syncVaultDerivedFields(vault);
 
   const fullSearch = searchVault(vault, "path-only-token-probe", {
@@ -1572,7 +1571,7 @@ test("buildTimeline merges journals, events, and daily sample summaries into a d
   vault.journalEntries = [journal];
   vault.events = [event];
   vault.samples = [sampleA, sampleB];
-  vault.records = [journal, sampleA, event, sampleB];
+  vault.entities = [journal, sampleA, event, sampleB];
   syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
@@ -1633,7 +1632,7 @@ test("searchVault supports blank queries, structured-only matches, and filter no
     sourcePath: "ledger/events/2026/2026-03.jsonl",
     occurredAt: "2026-03-11T08:00:00Z",
     date: "2026-03-11",
-    kind: null,
+    kind: "",
     experimentSlug: "iron-study",
     title: "Untyped report",
     tags: ["labs"],
@@ -1671,7 +1670,7 @@ test("searchVault supports blank queries, structured-only matches, and filter no
     wrongDate,
     missingTag,
   ];
-  vault.records = vault.events;
+  vault.entities = vault.events;
   syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "labcorp ferritin", {
@@ -1718,7 +1717,7 @@ test("searchVault orders equal scores by recency and trims long snippets around 
   });
 
   vault.events = [older, newer];
-  vault.records = [older, newer];
+  vault.entities = [older, newer];
   syncVaultDerivedFields(vault);
 
   const result = searchVault(vault, "caffeine");
@@ -1814,7 +1813,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     sourcePath: "journal/2026/2026-03-13.md",
     occurredAt: "2026-03-13T09:00:00Z",
     date: null,
-    kind: null,
+    kind: "",
     experimentSlug: "focus",
     title: null,
     data: {},
@@ -1827,7 +1826,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     sourcePath: "journal/2026/missing.md",
     occurredAt: null,
     date: null,
-    kind: null,
+    kind: "",
     title: "Skip me",
     data: {},
     frontmatter: {},
@@ -1839,7 +1838,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     sourcePath: "ledger/events/2026/2026-03.jsonl",
     occurredAt: null,
     date: "2026-03-13",
-    kind: null,
+    kind: "",
     stream: "glucose",
     experimentSlug: "focus",
     title: null,
@@ -1865,7 +1864,7 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     sourcePath: "ledger/events/2026/2026-03.jsonl",
     occurredAt: null,
     date: null,
-    kind: null,
+    kind: "",
     stream: "glucose",
     experimentSlug: "focus",
     title: "Skip me too",
@@ -1896,16 +1895,16 @@ test("buildTimeline applies toggles, fallback timestamps, and filter caps", () =
     },
   });
 
-  journalFallback.kind = null;
-  journalMissingDate.kind = null;
-  eventFallback.kind = null;
-  eventMissingDate.kind = null;
+  journalFallback.kind = "";
+  journalMissingDate.kind = "";
+  eventFallback.kind = "";
+  eventMissingDate.kind = "";
   sampleFallback.occurredAt = null;
 
   vault.journalEntries = [journalFallback, journalMissingDate];
   vault.events = [eventFallback, eventWrongStream, eventMissingDate];
   vault.samples = [sampleFallback, sampleOtherExperiment];
-  vault.records = [
+  vault.entities = [
     journalFallback,
     journalMissingDate,
     eventFallback,
@@ -1987,7 +1986,7 @@ test("buildTimeline breaks sort ties by date then id when timestamps match", () 
   });
 
   vault.events = [olderDate, laterId, earlierId];
-  vault.records = [olderDate, laterId, earlierId];
+  vault.entities = [olderDate, laterId, earlierId];
   syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
@@ -2043,7 +2042,7 @@ test("buildTimeline excludes records outside the requested date and experiment w
   vault.journalEntries = [journal];
   vault.events = [event];
   vault.samples = [sample];
-  vault.records = [journal, event, sample];
+  vault.entities = [journal, event, sample];
   syncVaultDerivedFields(vault);
 
   const timeline = buildTimeline(vault, {
@@ -2480,28 +2479,28 @@ Steady energy through the afternoon.
 }
 
 function createEmptyReadModel(): Awaited<ReturnType<typeof readVault>> {
-  return createReadModelFromRecords([]);
+  return createReadModelFromEntities([]);
 }
 
-function createReadModelFromRecords(
-  records: Awaited<ReturnType<typeof readVault>>["records"],
+function createReadModelFromEntities(
+  entities: Awaited<ReturnType<typeof readVault>>["entities"],
 ): Awaited<ReturnType<typeof readVault>> {
   return createVaultReadModel({
     vaultRoot: "/tmp/empty-vault",
     metadata: null,
-    records,
+    entities,
   });
 }
 
 function syncVaultDerivedFields(vault: Awaited<ReturnType<typeof readVault>>): void {
-  vault.records = vault.records.length > 0 ? vault.records.slice() : collectVaultRecords(vault);
+  vault.entities = vault.entities.length > 0 ? vault.entities.slice() : collectVaultEntities(vault);
 }
 
-function collectVaultRecords(
+function collectVaultEntities(
   vault: Awaited<ReturnType<typeof readVault>>,
-): Awaited<ReturnType<typeof readVault>>["records"] {
-  return ALL_VAULT_RECORD_TYPES.flatMap(
-    (recordType) => vault.byFamily[recordType]?.slice() ?? [],
+): Awaited<ReturnType<typeof readVault>>["entities"] {
+  return ALL_QUERY_ENTITY_FAMILIES.flatMap(
+    (family) => vault.byFamily[family]?.slice() ?? [],
   );
 }
 
@@ -2518,21 +2517,21 @@ function createSampleRecord(overrides: {
   const links = normalizeCanonicalLinks([]);
 
   return {
-    displayId: overrides.id,
+    entityId: overrides.id,
     primaryLookupId: overrides.id,
     lookupIds: [overrides.id],
-    recordType: "sample",
+    family: "sample",
     recordClass: "sample",
-    sourcePath: overrides.sourcePath,
-    sourceFile: path.join("/tmp", overrides.id),
+    path: overrides.sourcePath,
     occurredAt,
     date: overrides.date ?? (occurredAt ? occurredAt.split("T", 1)[0] ?? null : null),
     kind: "sample",
+    status: null,
     stream: overrides.stream ?? "glucose",
     experimentSlug: overrides.experimentSlug ?? null,
     title: "sample",
     tags: [],
-    data: overrides.data,
+    attributes: overrides.data,
     body: null,
     frontmatter: null,
     links,
@@ -2541,23 +2540,34 @@ function createSampleRecord(overrides: {
 }
 
 function createRecord(
-  overrides: Partial<Awaited<ReturnType<typeof readVault>>["records"][number]> & {
+  overrides: Omit<
+    Partial<Awaited<ReturnType<typeof readVault>>["entities"][number]>,
+    "kind" | "status"
+  > & {
     id: string;
-    recordType: Awaited<ReturnType<typeof readVault>>["records"][number]["recordType"];
+    recordType: Awaited<ReturnType<typeof readVault>>["entities"][number]["family"];
     sourcePath: string;
+    data?: Record<string, unknown>;
+    kind?: string | null;
+    status?: string | null;
+  } & {
+    entityId?: string;
+    family?: Awaited<ReturnType<typeof readVault>>["entities"][number]["family"];
+    path?: string;
+    attributes?: Record<string, unknown>;
   },
-): Awaited<ReturnType<typeof readVault>>["records"][number] {
-  const displayId = overrides.displayId ?? overrides.id;
+): Awaited<ReturnType<typeof readVault>>["entities"][number] {
+  const entityId = overrides.entityId ?? overrides.id;
   const lookupIds = Array.from(
     new Set(
       overrides.lookupIds ??
-        [overrides.primaryLookupId ?? displayId, displayId],
+        [overrides.primaryLookupId ?? entityId, entityId],
     ),
   );
   const primaryLookupId =
     overrides.primaryLookupId ??
-    lookupIds.find((lookupId) => lookupId !== displayId) ??
-    displayId;
+    lookupIds.find((lookupId) => lookupId !== entityId) ??
+    entityId;
   const links = normalizeCanonicalLinks(
     (overrides.relatedIds ?? []).map((targetId) => ({
       type: "related_to" as const,
@@ -2566,23 +2576,22 @@ function createRecord(
   );
 
   return {
-    displayId,
+    entityId,
     primaryLookupId,
     lookupIds,
-    recordType: overrides.recordType,
+    family: overrides.family ?? overrides.recordType,
     recordClass:
-      overrides.recordClass ?? resolveCanonicalRecordClass(overrides.recordType),
-    sourcePath: overrides.sourcePath,
-    sourceFile: overrides.sourceFile ?? path.join("/tmp", overrides.id),
+      overrides.recordClass ?? resolveCanonicalRecordClass(overrides.family ?? overrides.recordType),
+    path: overrides.path ?? overrides.sourcePath,
     occurredAt: overrides.occurredAt ?? null,
     date: overrides.date ?? null,
-    kind: overrides.kind ?? overrides.recordType,
+    kind: overrides.kind ?? overrides.family ?? overrides.recordType ?? "",
     status: overrides.status ?? null,
     stream: overrides.stream ?? null,
     experimentSlug: overrides.experimentSlug ?? null,
     title: overrides.title ?? null,
     tags: overrides.tags ?? [],
-    data: overrides.data ?? {},
+    attributes: overrides.attributes ?? overrides.data ?? {},
     body: overrides.body ?? null,
     frontmatter: overrides.frontmatter ?? null,
     links,
@@ -2603,8 +2612,8 @@ test("rebuildSqliteSearchIndex only materializes non-sample documents and search
     assert.equal(existsSync(runtimeDatabasePath), false);
 
     const vault = await readVault(vaultRoot);
-    const expectedDocumentCount = vault.records.filter(
-      (record) => record.recordType !== "sample",
+    const expectedDocumentCount = vault.entities.filter(
+      (record) => record.family !== "sample",
     ).length;
 
     const rebuilt = await rebuildSqliteSearchIndex(vaultRoot);
