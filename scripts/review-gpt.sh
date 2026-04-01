@@ -110,4 +110,8 @@ if [[ "$list_presets" == "1" ]]; then
   exit 0
 fi
 
-exec pnpm exec cobuild-review-gpt --config "$config_path" "${forward_args[@]}"
+if [[ "${#forward_args[@]}" -gt 0 ]]; then
+  exec pnpm exec cobuild-review-gpt --config "$config_path" "${forward_args[@]}"
+fi
+
+exec pnpm exec cobuild-review-gpt --config "$config_path"
