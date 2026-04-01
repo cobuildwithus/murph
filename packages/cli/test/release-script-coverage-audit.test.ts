@@ -87,10 +87,45 @@ describe('monorepo release flow coverage audit', () => {
       'cobuild-review-gpt --config scripts/review-gpt-full.config.sh',
     )
     expect(rootPackageJson.scripts?.['review:gpt:data']).toBe('bash scripts/review-gpt-data.sh')
+    expect(rootPackageJson.scripts?.['chatgpt:thread:export']).toBe(
+      'cobuild-review-gpt thread export --format json --filter-output exportPath',
+    )
+    expect(rootPackageJson.scripts?.['chatgpt:thread:download']).toBe(
+      'cobuild-review-gpt thread download --format json --filter-output downloadedFile',
+    )
+    expect(rootPackageJson.scripts?.['chatgpt:thread:watch']).toBe(
+      'cobuild-review-gpt thread wake --no-poll-until-complete --format json',
+    )
+    expect(rootPackageJson.scripts?.['chatgpt:thread:wake']).toBe(
+      'cobuild-review-gpt thread wake --no-poll-until-complete --format json',
+    )
     expect(rootPackageJson.scripts?.['verify:workspace-package-cycles']).toBe(
       'node scripts/check-workspace-package-cycles.mjs',
     )
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
+  })
+
+  it('keeps repo thread helpers routed through the packaged review-gpt commands and patch', () => {
+    const pnpmWorkspace = readFileSync(
+      path.join(repoRoot, 'pnpm-workspace.yaml'),
+      'utf8',
+    )
+    const reviewGptPatch = readFileSync(
+      path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.19.patch'),
+      'utf8',
+    )
+
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-export.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-download.mjs'))).toBe(false)
+    expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-wake.mjs'))).toBe(false)
+    expect(pnpmWorkspace).toContain('patchedDependencies:')
+    expect(pnpmWorkspace).toContain("@cobuild/review-gpt@0.5.19': patches/@cobuild__review-gpt@0.5.19.patch")
+    expect(reviewGptPatch).toContain('diff --git a/dist/chatgpt-thread-lib.mjs b/dist/chatgpt-thread-lib.mjs')
+    expect(reviewGptPatch).toContain('diff --git a/src/chatgpt-thread-lib.mts b/src/chatgpt-thread-lib.mts')
+    expect(reviewGptPatch).toContain('-        await refreshTargetPage(client);')
+    expect(reviewGptPatch).toContain('Keep the existing hydrated thread tab alive for attachment clicks.')
+    expect(reviewGptPatch).toContain('const tryFetchArtifactFallback = async')
+    expect(reviewGptPatch).toContain('const fallbackDownloadedFile = await tryFetchArtifactFallback();')
   })
 
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {
