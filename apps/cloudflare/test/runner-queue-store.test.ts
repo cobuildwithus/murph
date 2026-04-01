@@ -344,6 +344,36 @@ describe("RunnerQueueStore", () => {
       phase: "retry.scheduled",
     });
   });
+
+  it("clears the persisted last-error string when a later phase requests clearError", async () => {
+    const state = createState();
+    const store = new RunnerQueueStore(state as never);
+    await store.bootstrapUser("member_123");
+
+    state.storage.sql!.exec(
+      `UPDATE runner_meta
+        SET last_error = ?, last_error_at = ?, last_error_code = ?
+        WHERE singleton = 1`,
+      "Hosted execution runtime failed.",
+      "2026-03-29T10:00:00.000Z",
+      "type_error",
+    );
+
+    const record = await store.recordRunPhase({
+      attempt: 3,
+      clearError: true,
+      component: "runner",
+      eventId: "evt_cleared",
+      message: "run recovered",
+      phase: "dispatch.running",
+      runId: "run_recovered",
+      startedAt: "2026-03-29T10:00:00.000Z",
+    });
+
+    expect(record.lastError).toBeNull();
+    expect(record.lastErrorAt).toBeNull();
+    expect(record.lastErrorCode).toBeNull();
+  });
 });
 
 function createState() {

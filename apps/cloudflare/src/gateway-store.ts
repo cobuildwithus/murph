@@ -34,6 +34,8 @@ const GATEWAY_NEXT_CURSOR_KEY = "gateway.next-cursor";
 const GATEWAY_SNAPSHOT_KEY = "gateway.snapshot";
 
 export class HostedGatewayProjectionStore {
+  private mutationLock: Promise<void> | null = null;
+
   constructor(private readonly state: DurableObjectStateLike) {}
 
   async applySnapshot(snapshot: GatewayProjectionSnapshot | null): Promise<void> {
@@ -41,23 +43,25 @@ export class HostedGatewayProjectionStore {
       return;
     }
 
-    const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
-    const current = await this.readState();
-    if (
-      current.snapshot &&
-      current.snapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
-    ) {
-      return;
-    }
-    const nextState = applyGatewayProjectionSnapshotToEventLog(
-      current,
-      parsed,
-      DEFAULT_GATEWAY_EVENT_RETENTION,
-    );
-    if (nextState === current) {
-      return;
-    }
-    await this.writeState(nextState);
+    await this.withMutationLock(async () => {
+      const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
+      const current = await this.readState();
+      if (
+        current.snapshot &&
+        current.snapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
+      ) {
+        return;
+      }
+      const nextState = applyGatewayProjectionSnapshotToEventLog(
+        current,
+        parsed,
+        DEFAULT_GATEWAY_EVENT_RETENTION,
+      );
+      if (nextState === current) {
+        return;
+      }
+      await this.writeState(nextState);
+    });
   }
 
   async listConversations(
@@ -96,39 +100,42 @@ export class HostedGatewayProjectionStore {
   async respondToPermission(
     input: GatewayRespondToPermissionInput,
   ): Promise<GatewayPermissionRequest | null> {
-    const parsed = gatewayRespondToPermissionInputSchema.parse(input);
-    const snapshot = await this.readOrCreateSnapshot();
-    const index = snapshot.permissions.findIndex(
-      (permission) => permission.requestId === parsed.requestId,
-    );
-    if (index < 0) {
-      return null;
-    }
+    return this.withMutationLock(async () => {
+      const parsed = gatewayRespondToPermissionInputSchema.parse(input);
+      const current = await this.readState();
+      const snapshot = current.snapshot ?? createEmptyGatewaySnapshot();
+      const index = snapshot.permissions.findIndex(
+        (permission) => permission.requestId === parsed.requestId,
+      );
+      if (index < 0) {
+        return null;
+      }
 
-    const existing = snapshot.permissions[index]!;
-    const nextStatus = parsed.decision === "approve" ? "approved" : "denied";
-    const updated = gatewayPermissionRequestSchema.parse({
-      ...existing,
-      status: nextStatus,
-      resolvedAt: new Date().toISOString(),
-      note: parsed.note ?? null,
-    });
-    const nextSnapshot = gatewayProjectionSnapshotSchema.parse({
-      ...snapshot,
-      generatedAt: new Date().toISOString(),
-      permissions: snapshot.permissions.map((permission, permissionIndex) =>
-        permissionIndex === index ? updated : permission,
-      ),
-    });
+      const existing = snapshot.permissions[index]!;
+      const nextStatus = parsed.decision === "approve" ? "approved" : "denied";
+      const updated = gatewayPermissionRequestSchema.parse({
+        ...existing,
+        status: nextStatus,
+        resolvedAt: new Date().toISOString(),
+        note: parsed.note ?? null,
+      });
+      const nextSnapshot = gatewayProjectionSnapshotSchema.parse({
+        ...snapshot,
+        generatedAt: new Date().toISOString(),
+        permissions: snapshot.permissions.map((permission, permissionIndex) =>
+          permissionIndex === index ? updated : permission,
+        ),
+      });
 
-    await this.writeState(
-      applyGatewayProjectionSnapshotToEventLog(
-        await this.readState(),
-        nextSnapshot,
-        DEFAULT_GATEWAY_EVENT_RETENTION,
-      ),
-    );
-    return updated;
+      await this.writeState(
+        applyGatewayProjectionSnapshotToEventLog(
+          current,
+          nextSnapshot,
+          DEFAULT_GATEWAY_EVENT_RETENTION,
+        ),
+      );
+      return updated;
+    });
   }
 
   async pollEvents(
@@ -164,6 +171,26 @@ export class HostedGatewayProjectionStore {
       this.state.storage.put(GATEWAY_EVENTS_KEY, state.events),
       this.state.storage.put(GATEWAY_NEXT_CURSOR_KEY, state.nextCursor),
     ]);
+  }
+
+  private async withMutationLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.mutationLock ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.catch(() => {}).then(() => current);
+    this.mutationLock = chain;
+    await previous.catch(() => {});
+
+    try {
+      return await run();
+    } finally {
+      release();
+      if (this.mutationLock === chain) {
+        this.mutationLock = null;
+      }
+    }
   }
 }
 
