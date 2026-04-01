@@ -32,7 +32,6 @@ export async function createHostedSession(input: {
   inviteId: string | null;
   memberId: string;
   prisma?: PrismaClient;
-  userAgent?: string | null;
   now?: Date;
 }): Promise<{ expiresAt: Date; sessionId: string; token: string }> {
   const prisma = input.prisma ?? getPrisma();
@@ -74,7 +73,6 @@ export async function createHostedSession(input: {
       memberId: input.memberId,
       inviteId: input.inviteId,
       tokenHash,
-      userAgent: input.userAgent ?? null,
       expiresAt,
       lastSeenAt: now,
     },

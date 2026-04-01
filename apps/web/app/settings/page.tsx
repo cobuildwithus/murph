@@ -10,7 +10,6 @@ import {
   resolveHostedPrivyClientId,
 } from "@/src/lib/hosted-onboarding/landing";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
-import { maskPhoneNumber } from "@/src/lib/hosted-onboarding/shared";
 
 export const metadata: Metadata = {
   title: "Murph account settings",
@@ -59,7 +58,7 @@ export default async function SettingsPage() {
               <div className="space-y-1.5">
                 <p className="text-sm font-semibold uppercase tracking-[0.15em] text-olive">Hosted member</p>
                 <p className="text-lg font-semibold text-stone-900">
-                  {maskPhoneNumber(sessionRecord.member.normalizedPhoneNumber)}
+                  {sessionRecord.member.maskedPhoneNumberHint}
                 </p>
                 <p className="text-sm leading-relaxed text-stone-500">
                   This browser already has an active Murph hosted session.

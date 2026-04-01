@@ -61,7 +61,7 @@ beforeEach(() => {
   mocks.resolveHostedPrivyClientId.mockReturnValue("client_123");
   mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({
     member: {
-      normalizedPhoneNumber: "+14155552671",
+      maskedPhoneNumberHint: "*** 2671",
       privyUserId: "did:privy:user_123",
     },
   });
@@ -78,6 +78,7 @@ test("SettingsPage passes the hosted session's Privy user id into the client ema
   assert.match(markup, /data-telegram-expected-privy-user-id="did:privy:user_123"/);
   assert.match(markup, /Hosted Telegram settings/);
   assert.match(markup, /data-privy-provider="true"/);
+  assert.match(markup, /\*\*\* 2671/);
 });
 
 test("SettingsPage renders a sign-in requirement when there is no hosted session", async () => {

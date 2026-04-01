@@ -87,8 +87,8 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     encryptionKeyVersion: null,
     id: "member_123",
     linqChatId: null,
+    maskedPhoneNumberHint: "*** 4567",
     normalizedPhoneNumber: "+15551234567",
-    phoneNumber: "+15551234567",
     phoneNumberVerifiedAt: null,
     privyUserId: null,
     status: HostedMemberStatus.invited,
@@ -158,7 +158,6 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      userAgent: "test-agent",
     });
 
     expect(prisma.hostedMember.update).toHaveBeenCalledWith({
@@ -190,7 +189,6 @@ describe("completeHostedPrivyVerification", () => {
       memberId: "member_123",
       now: NOW,
       prisma,
-      userAgent: "test-agent",
     });
     expect(result).toEqual({
       expiresAt: new Date("2026-04-25T12:00:00.000Z"),
@@ -236,15 +234,14 @@ describe("completeHostedPrivyVerification", () => {
       identity: makeIdentity(),
       now: NOW,
       prisma,
-      userAgent: "public-agent",
     });
 
     expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     expect(prisma.hostedMember.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
+        maskedPhoneNumberHint: "*** 4567",
         normalizedPhoneNumber: "+15551234567",
-        phoneNumber: "+15551234567",
         phoneNumberVerifiedAt: NOW,
         privyUserId: "did:privy:user_123",
         status: HostedMemberStatus.registered,
@@ -278,7 +275,6 @@ describe("completeHostedPrivyVerification", () => {
       memberId: "member_new",
       now: NOW,
       prisma,
-      userAgent: "public-agent",
     });
     expect(result.joinUrl).toBe("https://join.example.test/join/public-invite-code");
     expect(result.inviteCode).toBe("public-invite-code");
@@ -318,7 +314,6 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      userAgent: "active-agent",
     });
 
     expect(prisma.hostedInvite.update).toHaveBeenCalledWith({
@@ -436,8 +431,8 @@ describe("completeHostedPrivyVerification", () => {
     const phoneMember = makeMember({ id: "member_phone" });
     const walletMember = makeMember({
       id: "member_wallet",
+      maskedPhoneNumberHint: "*** 4321",
       normalizedPhoneNumber: "+15557654321",
-      phoneNumber: "+15557654321",
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
     });
     const prisma: any = {

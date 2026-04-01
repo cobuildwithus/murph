@@ -197,7 +197,7 @@ enum ExecutionOutboxStatus {
 
 model HostedMember {
   id                           String              @id
-  phoneNumber                  String              @map("phone_number")
+  maskedPhoneNumberHint        String              @map("phone_number")
   normalizedPhoneNumber        String              @unique @map("normalized_phone_number")
   phoneNumberVerifiedAt        DateTime?           @map("phone_number_verified_at")
   privyUserId                  String?             @unique @map("privy_user_id")
