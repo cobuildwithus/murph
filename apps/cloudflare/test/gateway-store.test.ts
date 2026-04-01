@@ -334,4 +334,112 @@ describe("HostedGatewayProjectionStore", () => {
       summary: "approved after refresh",
     });
   });
+
+  it("keeps operator permission decisions applied across later runtime snapshots", async () => {
+    const store = new HostedGatewayProjectionStore(createState());
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-03-30T21:00:00.000Z",
+      conversations: [],
+      messages: [],
+      permissions: [{
+        schema: "murph.gateway-permission-request.v1",
+        requestId: "perm_overlay",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        action: "send-message",
+        description: "Need operator approval",
+        status: "open",
+        requestedAt: "2026-03-30T21:00:00.000Z",
+        resolvedAt: null,
+        note: null,
+      }],
+    });
+
+    const resolved = await store.respondToPermission({
+      requestId: "perm_overlay",
+      decision: "approve",
+      note: "approved once",
+    });
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-03-30T21:05:00.000Z",
+      conversations: [],
+      messages: [],
+      permissions: [{
+        schema: "murph.gateway-permission-request.v1",
+        requestId: "perm_overlay",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        action: "send-message",
+        description: "Need operator approval",
+        status: "open",
+        requestedAt: "2026-03-30T21:00:00.000Z",
+        resolvedAt: null,
+        note: null,
+      }],
+    });
+
+    const conversationPermissions = await store.listOpenPermissions({
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+    });
+    const events = await store.pollEvents({
+      cursor: 0,
+      kinds: ["permission.resolved"],
+      limit: 10,
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+    });
+
+    expect(resolved?.status).toBe("approved");
+    expect(conversationPermissions).toHaveLength(0);
+    expect(events.events).toHaveLength(1);
+    expect(events.events[0]).toMatchObject({
+      kind: "permission.resolved",
+      permissionRequestId: "perm_overlay",
+      summary: "approved once",
+    });
+  });
+
+  it("treats identical permission retries as idempotent and preserves the original resolved timestamp", async () => {
+    const store = new HostedGatewayProjectionStore(createState());
+
+    await store.applySnapshot({
+      schema: "murph.gateway-projection-snapshot.v1",
+      generatedAt: "2026-03-30T21:00:00.000Z",
+      conversations: [],
+      messages: [],
+      permissions: [{
+        schema: "murph.gateway-permission-request.v1",
+        requestId: "perm_idempotent",
+        sessionKey: EMAIL_THREAD_SESSION_KEY,
+        action: "send-message",
+        description: "Need operator approval",
+        status: "open",
+        requestedAt: "2026-03-30T21:00:00.000Z",
+        resolvedAt: null,
+        note: null,
+      }],
+    });
+
+    const firstResolution = await store.respondToPermission({
+      requestId: "perm_idempotent",
+      decision: "approve",
+      note: "same decision",
+    });
+    const secondResolution = await store.respondToPermission({
+      requestId: "perm_idempotent",
+      decision: "approve",
+      note: "same decision",
+    });
+    const events = await store.pollEvents({
+      cursor: 0,
+      kinds: ["permission.resolved"],
+      limit: 10,
+      sessionKey: EMAIL_THREAD_SESSION_KEY,
+    });
+
+    expect(firstResolution?.resolvedAt).toBeTruthy();
+    expect(secondResolution).toEqual(firstResolution);
+    expect(events.events).toHaveLength(1);
+  });
 });

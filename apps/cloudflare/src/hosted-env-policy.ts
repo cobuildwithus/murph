@@ -1,4 +1,7 @@
-import { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
+import {
+  hostedAssistantAutomationEnabledFromEnv,
+  readHostedEmailCapabilities,
+} from "@murphai/hosted-execution";
 
 const DEFAULT_ALLOWED_USER_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -253,6 +256,10 @@ export function buildHostedRunnerContainerEnv(
     values.NODE_ENV = "production";
   }
 
+  const emailCapabilities = readHostedEmailCapabilities(toStringEnvSource(source));
+  values.HOSTED_EMAIL_INGRESS_READY = emailCapabilities.ingressReady ? "true" : "false";
+  values.HOSTED_EMAIL_SEND_READY = emailCapabilities.sendReady ? "true" : "false";
+
   return values;
 }
 
@@ -309,4 +316,14 @@ function parseHostedEnvCsvList(value: string | undefined): string[] {
     .map((entry) => entry.trim())
     .filter(Boolean)
     .map((entry) => entry.toUpperCase());
+}
+
+function toStringEnvSource(source: UnknownEnvSource): StringEnvSource {
+  const values: Record<string, string | undefined> = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    values[key] = typeof value === "string" ? value : undefined;
+  }
+
+  return values;
 }

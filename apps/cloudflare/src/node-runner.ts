@@ -88,41 +88,76 @@ function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
   const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
-  const emailCapabilities = readHostedEmailCapabilities(
-    process.env as Readonly<Record<string, string | undefined>>,
-  );
-  const forwardedEnv = {
+  const callbackWebControlPlane = callbackBaseUrls?.webControlPlane ?? null;
+  const configuredWebControlPlane = requestedRuntime.webControlPlane ?? null;
+  const forwardedEnv: Record<string, string> = {
     ...buildHostedRunnerContainerEnv(process.env),
+    ...(requestedRuntime.forwardedEnv ?? {}),
+  };
+  const emailCapabilities = readHostedEmailCapabilities(forwardedEnv);
+  const resolvedForwardedEnv: Record<string, string> = {
+    ...forwardedEnv,
     HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
     HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
   };
+  const webControlPlaneFromEnv = readHostedExecutionWebControlPlaneEnvironment(
+    resolvedForwardedEnv,
+  );
 
   return {
     ...requestedRuntime,
-    ...(callbackBaseUrls?.artifactsBaseUrl === undefined ? {} : { artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl }),
-    ...(callbackBaseUrls?.commitBaseUrl === undefined ? {} : { commitBaseUrl: callbackBaseUrls.commitBaseUrl }),
-    ...(callbackBaseUrls?.emailBaseUrl === undefined ? {} : { emailBaseUrl: callbackBaseUrls.emailBaseUrl }),
-    ...(callbackBaseUrls?.sideEffectsBaseUrl === undefined ? {} : { sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl }),
-    commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
-      Number.parseInt(process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
-    ),
-    forwardedEnv,
+    ...(callbackBaseUrls?.artifactsBaseUrl === undefined
+      ? {}
+      : { artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl }),
+    ...(callbackBaseUrls?.commitBaseUrl === undefined
+      ? {}
+      : { commitBaseUrl: callbackBaseUrls.commitBaseUrl }),
+    ...(callbackBaseUrls?.emailBaseUrl === undefined
+      ? {}
+      : { emailBaseUrl: callbackBaseUrls.emailBaseUrl }),
+    ...(callbackBaseUrls?.sideEffectsBaseUrl === undefined
+      ? {}
+      : { sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl }),
+    commitTimeoutMs:
+      requestedRuntime.commitTimeoutMs
+      ?? readHostedRunnerCommitTimeoutMs(
+        Number.parseInt(
+          resolvedForwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
+          10,
+        ),
+      ),
+    forwardedEnv: resolvedForwardedEnv,
     internalWorkerProxyToken: requestedRuntime.internalWorkerProxyToken ?? null,
     userEnv: filterHostedRunnerUserEnv(
-      normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, process.env),
-      process.env,
+      normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, resolvedForwardedEnv),
+      resolvedForwardedEnv,
     ),
     webControlPlane: {
-      ...readHostedExecutionWebControlPlaneEnvironment(forwardedEnv),
-      deviceSyncRuntimeBaseUrl: HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
+      ...webControlPlaneFromEnv,
+      ...(configuredWebControlPlane ?? {}),
+      ...(callbackWebControlPlane ?? {}),
+      deviceSyncRuntimeBaseUrl:
+        callbackWebControlPlane?.deviceSyncRuntimeBaseUrl
+        ?? configuredWebControlPlane?.deviceSyncRuntimeBaseUrl
+        ?? webControlPlaneFromEnv.deviceSyncRuntimeBaseUrl
+        ?? HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
       shareBaseUrl:
         callbackBaseUrls?.sharePackBaseUrl
+        ?? callbackWebControlPlane?.shareBaseUrl
+        ?? configuredWebControlPlane?.shareBaseUrl
+        ?? webControlPlaneFromEnv.shareBaseUrl
         ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
       shareToken:
         callbackBaseUrls?.sharePackToken
+        ?? callbackWebControlPlane?.shareToken
+        ?? configuredWebControlPlane?.shareToken
+        ?? webControlPlaneFromEnv.shareToken
         ?? null,
-      usageBaseUrl: HOSTED_RUNNER_USAGE_BASE_URL,
-      ...(callbackBaseUrls?.webControlPlane ?? {}),
+      usageBaseUrl:
+        callbackWebControlPlane?.usageBaseUrl
+        ?? configuredWebControlPlane?.usageBaseUrl
+        ?? webControlPlaneFromEnv.usageBaseUrl
+        ?? HOSTED_RUNNER_USAGE_BASE_URL,
     },
   };
 }

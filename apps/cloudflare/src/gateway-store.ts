@@ -31,10 +31,26 @@ import type { DurableObjectStateLike } from "./user-runner/types.js";
 
 const GATEWAY_EVENTS_KEY = "gateway.events";
 const GATEWAY_NEXT_CURSOR_KEY = "gateway.next-cursor";
+const GATEWAY_PERMISSION_OVERRIDES_KEY = "gateway.permission-overrides";
 const GATEWAY_SNAPSHOT_KEY = "gateway.snapshot";
 
+interface GatewayPermissionResolutionOverride {
+  note: string | null;
+  requestId: string;
+  resolvedAt: string;
+  status: Exclude<GatewayPermissionRequest["status"], "open">;
+}
+
+interface StoredGatewayState {
+  baseSnapshot: GatewayProjectionSnapshot | null;
+  events: GatewayEvent[];
+  nextCursor: number;
+  permissionOverrides: GatewayPermissionResolutionOverride[];
+  snapshot: GatewayProjectionSnapshot | null;
+}
+
 export class HostedGatewayProjectionStore {
-  private mutationLock: Promise<void> | null = null;
+  private stateLock: Promise<void> | null = null;
 
   constructor(private readonly state: DurableObjectStateLike) {}
 
@@ -43,24 +59,43 @@ export class HostedGatewayProjectionStore {
       return;
     }
 
-    await this.withMutationLock(async () => {
-      const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
-      const current = await this.readState();
+    const parsed = gatewayProjectionSnapshotSchema.parse(snapshot);
+    await this.withStateLock(async () => {
+      const current = await this.readStoredState();
       if (
-        current.snapshot &&
-        current.snapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
+        current.baseSnapshot &&
+        current.baseSnapshot.generatedAt.localeCompare(parsed.generatedAt) > 0
       ) {
         return;
       }
-      const nextState = applyGatewayProjectionSnapshotToEventLog(
-        current,
+
+      const nextOverrides = pruneGatewayPermissionOverrides(
+        current.permissionOverrides,
         parsed,
+      );
+      const currentState: GatewayEventLogState = {
+        events: current.events,
+        nextCursor: current.nextCursor,
+        snapshot: current.snapshot,
+      };
+      const nextState = applyGatewayProjectionSnapshotToEventLog(
+        currentState,
+        mergeGatewayPermissionOverrides(parsed, nextOverrides) ?? parsed,
         DEFAULT_GATEWAY_EVENT_RETENTION,
       );
-      if (nextState === current) {
+      const baseSnapshotChanged = !sameStructuredValue(current.baseSnapshot, parsed);
+      const overridesChanged = !sameStructuredValue(current.permissionOverrides, nextOverrides);
+
+      if (nextState === currentState && !baseSnapshotChanged && !overridesChanged) {
         return;
       }
-      await this.writeState(nextState);
+
+      await this.writeStoredState({
+        baseSnapshot: parsed,
+        events: nextState.events,
+        nextCursor: nextState.nextCursor,
+        permissionOverrides: nextOverrides,
+      });
     });
   }
 
@@ -100,9 +135,9 @@ export class HostedGatewayProjectionStore {
   async respondToPermission(
     input: GatewayRespondToPermissionInput,
   ): Promise<GatewayPermissionRequest | null> {
-    return this.withMutationLock(async () => {
-      const parsed = gatewayRespondToPermissionInputSchema.parse(input);
-      const current = await this.readState();
+    const parsed = gatewayRespondToPermissionInputSchema.parse(input);
+    return this.withStateLock(async () => {
+      const current = await this.readStoredState();
       const snapshot = current.snapshot ?? createEmptyGatewaySnapshot();
       const index = snapshot.permissions.findIndex(
         (permission) => permission.requestId === parsed.requestId,
@@ -113,27 +148,46 @@ export class HostedGatewayProjectionStore {
 
       const existing = snapshot.permissions[index]!;
       const nextStatus = parsed.decision === "approve" ? "approved" : "denied";
+      const nextNote = parsed.note ?? null;
+      if (
+        existing.status === nextStatus
+        && existing.note === nextNote
+        && existing.resolvedAt
+      ) {
+        return existing;
+      }
+
       const updated = gatewayPermissionRequestSchema.parse({
         ...existing,
-        status: nextStatus,
+        note: nextNote,
         resolvedAt: new Date().toISOString(),
-        note: parsed.note ?? null,
+        status: nextStatus,
       });
-      const nextSnapshot = gatewayProjectionSnapshotSchema.parse({
-        ...snapshot,
-        generatedAt: new Date().toISOString(),
-        permissions: snapshot.permissions.map((permission, permissionIndex) =>
-          permissionIndex === index ? updated : permission,
-        ),
-      });
-
-      await this.writeState(
-        applyGatewayProjectionSnapshotToEventLog(
-          current,
-          nextSnapshot,
-          DEFAULT_GATEWAY_EVENT_RETENTION,
-        ),
+      const nextOverrides = upsertGatewayPermissionOverride(current.permissionOverrides, updated);
+      const currentState: GatewayEventLogState = {
+        events: current.events,
+        nextCursor: current.nextCursor,
+        snapshot: current.snapshot,
+      };
+      const nextState = applyGatewayProjectionSnapshotToEventLog(
+        currentState,
+        mergeGatewayPermissionOverrides(current.baseSnapshot, nextOverrides)
+          ?? createEmptyGatewaySnapshot(),
+        DEFAULT_GATEWAY_EVENT_RETENTION,
       );
+
+      if (
+        nextState !== currentState
+        || !sameStructuredValue(current.permissionOverrides, nextOverrides)
+      ) {
+        await this.writeStoredState({
+          baseSnapshot: current.baseSnapshot,
+          events: nextState.events,
+          nextCursor: nextState.nextCursor,
+          permissionOverrides: nextOverrides,
+        });
+      }
+
       return updated;
     });
   }
@@ -150,45 +204,66 @@ export class HostedGatewayProjectionStore {
   }
 
   private async readState(): Promise<GatewayEventLogState> {
-    const [snapshot, events, nextCursor] = await Promise.all([
-      this.state.storage.get<GatewayProjectionSnapshot>(GATEWAY_SNAPSHOT_KEY),
-      this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY),
-      this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY),
-    ]);
-
+    const state = await this.readStoredState();
     return {
-      events: events ?? [],
-      nextCursor: typeof nextCursor === "number" && Number.isFinite(nextCursor) && nextCursor >= 0
-        ? nextCursor
-        : 0,
-      snapshot: snapshot ? gatewayProjectionSnapshotSchema.parse(snapshot) : null,
+      events: state.events,
+      nextCursor: state.nextCursor,
+      snapshot: state.snapshot,
     };
   }
 
-  private async writeState(state: GatewayEventLogState): Promise<void> {
+  private async readStoredState(): Promise<StoredGatewayState> {
+    const [snapshot, events, nextCursor, permissionOverrides] = await Promise.all([
+      this.state.storage.get<GatewayProjectionSnapshot>(GATEWAY_SNAPSHOT_KEY),
+      this.state.storage.get<GatewayEvent[]>(GATEWAY_EVENTS_KEY),
+      this.state.storage.get<number>(GATEWAY_NEXT_CURSOR_KEY),
+      this.state.storage.get<GatewayPermissionResolutionOverride[]>(GATEWAY_PERMISSION_OVERRIDES_KEY),
+    ]);
+    const baseSnapshot = snapshot ? gatewayProjectionSnapshotSchema.parse(snapshot) : null;
+    const normalizedOverrides = parseGatewayPermissionOverrides(permissionOverrides);
+
+    return {
+      baseSnapshot,
+      events: events ?? [],
+      nextCursor:
+        typeof nextCursor === "number" && Number.isFinite(nextCursor) && nextCursor >= 0
+          ? nextCursor
+          : 0,
+      permissionOverrides: normalizedOverrides,
+      snapshot: mergeGatewayPermissionOverrides(baseSnapshot, normalizedOverrides),
+    };
+  }
+
+  private async writeStoredState(state: {
+    baseSnapshot: GatewayProjectionSnapshot | null;
+    events: GatewayEvent[];
+    nextCursor: number;
+    permissionOverrides: GatewayPermissionResolutionOverride[];
+  }): Promise<void> {
     await Promise.all([
-      this.state.storage.put(GATEWAY_SNAPSHOT_KEY, state.snapshot),
+      this.state.storage.put(GATEWAY_SNAPSHOT_KEY, state.baseSnapshot),
       this.state.storage.put(GATEWAY_EVENTS_KEY, state.events),
       this.state.storage.put(GATEWAY_NEXT_CURSOR_KEY, state.nextCursor),
+      this.state.storage.put(GATEWAY_PERMISSION_OVERRIDES_KEY, state.permissionOverrides),
     ]);
   }
 
-  private async withMutationLock<T>(run: () => Promise<T>): Promise<T> {
-    const previous = this.mutationLock ?? Promise.resolve();
+  private async withStateLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.stateLock ?? Promise.resolve();
     let release!: () => void;
     const current = new Promise<void>((resolve) => {
       release = resolve;
     });
     const chain = previous.catch(() => {}).then(() => current);
-    this.mutationLock = chain;
+    this.stateLock = chain;
     await previous.catch(() => {});
 
     try {
       return await run();
     } finally {
       release();
-      if (this.mutationLock === chain) {
-        this.mutationLock = null;
+      if (this.stateLock === chain) {
+        this.stateLock = null;
       }
     }
   }
@@ -202,4 +277,126 @@ function createEmptyGatewaySnapshot(): GatewayProjectionSnapshot {
     messages: [],
     permissions: [],
   };
+}
+
+function mergeGatewayPermissionOverrides(
+  snapshot: GatewayProjectionSnapshot | null,
+  overrides: readonly GatewayPermissionResolutionOverride[],
+): GatewayProjectionSnapshot | null {
+  if (!snapshot || overrides.length === 0) {
+    return snapshot;
+  }
+
+  const overridesByRequestId = new Map(overrides.map((override) => [override.requestId, override]));
+  let changed = false;
+  let generatedAt = snapshot.generatedAt;
+  const permissions = snapshot.permissions.map((permission) => {
+    const override = overridesByRequestId.get(permission.requestId);
+    if (!override) {
+      return permission;
+    }
+
+    if (override.resolvedAt.localeCompare(generatedAt) > 0) {
+      generatedAt = override.resolvedAt;
+    }
+
+    const merged = gatewayPermissionRequestSchema.parse({
+      ...permission,
+      note: override.note,
+      resolvedAt: override.resolvedAt,
+      status: override.status,
+    });
+    if (!sameStructuredValue(permission, merged)) {
+      changed = true;
+    }
+    return merged;
+  });
+
+  if (!changed && generatedAt === snapshot.generatedAt) {
+    return snapshot;
+  }
+
+  return gatewayProjectionSnapshotSchema.parse({
+    ...snapshot,
+    generatedAt,
+    permissions,
+  });
+}
+
+function parseGatewayPermissionOverrides(
+  value: unknown,
+): GatewayPermissionResolutionOverride[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const overrides: GatewayPermissionResolutionOverride[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      continue;
+    }
+
+    const record = entry as Record<string, unknown>;
+    if (typeof record.requestId !== "string" || record.requestId.length === 0) {
+      continue;
+    }
+
+    const status = record.status;
+    if (
+      status !== "approved"
+      && status !== "denied"
+      && status !== "expired"
+    ) {
+      continue;
+    }
+
+    if (typeof record.resolvedAt !== "string" || Number.isNaN(Date.parse(record.resolvedAt))) {
+      continue;
+    }
+
+    overrides.push({
+      note: typeof record.note === "string" && record.note.length > 0 ? record.note : null,
+      requestId: record.requestId,
+      resolvedAt: record.resolvedAt,
+      status,
+    });
+  }
+
+  return overrides.sort((left, right) => left.requestId.localeCompare(right.requestId));
+}
+
+function pruneGatewayPermissionOverrides(
+  overrides: readonly GatewayPermissionResolutionOverride[],
+  snapshot: GatewayProjectionSnapshot,
+): GatewayPermissionResolutionOverride[] {
+  if (overrides.length === 0) {
+    return [];
+  }
+
+  const requestIds = new Set(snapshot.permissions.map((permission) => permission.requestId));
+  return overrides.filter((override) => requestIds.has(override.requestId));
+}
+
+function sameStructuredValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function upsertGatewayPermissionOverride(
+  overrides: readonly GatewayPermissionResolutionOverride[],
+  permission: GatewayPermissionRequest,
+): GatewayPermissionResolutionOverride[] {
+  const status = permission.status;
+  if (status === "open") {
+    throw new TypeError("Gateway permission overrides must not store open permissions.");
+  }
+
+  const nextOverrides = overrides.filter((override) => override.requestId !== permission.requestId);
+  nextOverrides.push({
+    note: permission.note,
+    requestId: permission.requestId,
+    resolvedAt: permission.resolvedAt ?? new Date().toISOString(),
+    status,
+  });
+
+  return nextOverrides.sort((left, right) => left.requestId.localeCompare(right.requestId));
 }
