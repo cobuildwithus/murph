@@ -1,14 +1,8 @@
-import { createRequire } from "node:module";
-import path from "node:path";
 import { mkdirSync } from "node:fs";
-import type { DatabaseSync } from "node:sqlite";
+import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 export const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
-
-type DatabaseSyncConstructor = typeof import("node:sqlite").DatabaseSync;
-
-let databaseSyncConstructor: DatabaseSyncConstructor | null = null;
-let sqliteModuleRequire: ReturnType<typeof createRequire> | null = null;
 
 export interface OpenSqliteRuntimeDatabaseOptions {
   create?: boolean;
@@ -23,7 +17,6 @@ export function openSqliteRuntimeDatabase(
   databasePath: string,
   options: OpenSqliteRuntimeDatabaseOptions = {},
 ): DatabaseSync {
-  const DatabaseSync = resolveDatabaseSyncConstructor();
   const readOnly = options.readOnly ?? false;
 
   if (!readOnly && (options.create ?? true)) {
@@ -73,16 +66,4 @@ export function withImmediateTransaction<T>(database: DatabaseSync, operation: (
     database.exec("ROLLBACK");
     throw error;
   }
-}
-
-function resolveDatabaseSyncConstructor(): DatabaseSyncConstructor {
-  if (databaseSyncConstructor) {
-    return databaseSyncConstructor;
-  }
-
-  const require = sqliteModuleRequire ?? createRequire(import.meta.url);
-  sqliteModuleRequire = require;
-  const sqliteModule = require("node:sqlite") as typeof import("node:sqlite");
-  databaseSyncConstructor = sqliteModule.DatabaseSync;
-  return databaseSyncConstructor;
 }
