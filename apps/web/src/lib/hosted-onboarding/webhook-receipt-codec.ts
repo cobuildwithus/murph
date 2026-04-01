@@ -2,12 +2,10 @@ import { randomBytes } from "node:crypto";
 
 import {
   readHostedExecutionDispatchRef,
-  type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
 import { Prisma } from "@prisma/client";
 
 import type {
-  HostedWebhookDispatchSideEffect,
   HostedWebhookEventPayload,
   HostedWebhookReceiptClaim,
   HostedWebhookReceiptErrorState,
@@ -93,26 +91,6 @@ export function toHostedWebhookReceiptJsonInput(
   return value === null
     ? Prisma.JsonNull
     : value as Prisma.InputJsonValue;
-}
-
-export function readHostedWebhookDispatchPayloadDispatch(
-  payload: HostedWebhookDispatchSideEffect["payload"],
-): HostedExecutionDispatchRequest | null {
-  return "dispatch" in payload
-    ? payload.dispatch
-    : null;
-}
-
-export function requireHostedWebhookDispatchEffectDispatch(
-  effect: HostedWebhookDispatchSideEffect,
-): HostedExecutionDispatchRequest {
-  const dispatch = readHostedWebhookDispatchPayloadDispatch(effect.payload);
-
-  if (!dispatch) {
-    throw new Error(`Hosted webhook dispatch side effect ${effect.effectId} no longer carries a dispatch payload.`);
-  }
-
-  return dispatch;
 }
 
 function readHostedWebhookReceiptEventPayload(
@@ -262,24 +240,6 @@ function readHostedWebhookSideEffect(
 
   switch (kind) {
     case "hosted_execution_dispatch": {
-      const dispatchPayload = payload.dispatch;
-
-      if (dispatchPayload && typeof dispatchPayload === "object" && !Array.isArray(dispatchPayload)) {
-        return {
-          attemptCount,
-          effectId,
-          kind,
-          lastAttemptAt,
-          lastError,
-          payload: {
-            dispatch: dispatchPayload as unknown as HostedExecutionDispatchRequest,
-          },
-          result: result.dispatched === true ? { dispatched: true } : null,
-          sentAt,
-          status,
-        };
-      }
-
       const dispatchRef = readHostedExecutionDispatchRef(
         payload,
         {

@@ -1,7 +1,5 @@
 import {
-  HostedBillingMode,
   HostedBillingStatus,
-  HostedMemberStatus,
   Prisma,
 } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -2323,85 +2321,17 @@ function buildDispatchSideEffect(input: {
     kind: "hosted_execution_dispatch",
     lastAttemptAt: input.lastAttemptAt ?? null,
     lastError: input.lastError ?? null,
-    payload:
-      input.status === "sent"
-        ? {
-            storage: "reference",
-            schemaVersion: "murph.execution-outbox.v2",
-            dispatchRef: {
-              eventId: input.eventId,
-              eventKind: "linq.message.received",
-              occurredAt,
-              userId: "member_123",
-            },
-            linqEvent,
-          }
-        : {
-            dispatch: {
-              event: {
-                kind: "linq.message.received",
-                linqEvent,
-                normalizedPhoneNumber: "+15551234567",
-                userId: "member_123",
-              },
-              eventId: input.eventId,
-              occurredAt,
-            },
-          },
-    result: input.status === "sent" ? { dispatched: true } : null,
-    sentAt:
-      input.sentAt ??
-      (input.status === "sent" ? "2026-03-26T12:00:01.000Z" : null),
-    status: input.status,
-  };
-}
-
-function buildMemberActivationDispatchSideEffect(input: {
-  attemptCount?: number;
-  effectId?: unknown;
-  lastAttemptAt?: unknown;
-  lastError?: unknown;
-  memberId?: string;
-  occurredAt?: unknown;
-  sentAt?: unknown;
-  sourceEventId: string;
-  sourceType: string;
-  status: "pending" | "sent";
-}) {
-  const memberId = input.memberId ?? "member_123";
-  const eventId =
-    input.effectId ??
-    `dispatch:member.activated:${input.sourceType}:${memberId}:${input.sourceEventId}`;
-  const occurredAt = input.occurredAt ?? "2026-03-26T12:00:00.000Z";
-
-  return {
-    attemptCount: input.attemptCount ?? 0,
-    effectId: eventId,
-    kind: "hosted_execution_dispatch",
-    lastAttemptAt: input.lastAttemptAt ?? null,
-    lastError: input.lastError ?? null,
-    payload:
-      input.status === "sent"
-        ? {
-            storage: "reference",
-            schemaVersion: "murph.execution-outbox.v2",
-            dispatchRef: {
-              eventId: String(eventId).replace(/^dispatch:/u, ""),
-              eventKind: "member.activated",
-              occurredAt,
-              userId: memberId,
-            },
-          }
-        : {
-            dispatch: {
-              event: {
-                kind: "member.activated",
-                userId: memberId,
-              },
-              eventId: String(eventId).replace(/^dispatch:/u, ""),
-              occurredAt,
-            },
-          },
+    payload: {
+      storage: "reference",
+      schemaVersion: "murph.execution-outbox.v2",
+      dispatchRef: {
+        eventId: input.eventId,
+        eventKind: "linq.message.received",
+        occurredAt,
+        userId: "member_123",
+      },
+      linqEvent,
+    },
     result: input.status === "sent" ? { dispatched: true } : null,
     sentAt:
       input.sentAt ??

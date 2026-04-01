@@ -1,23 +1,6 @@
-import {
-  buildHostedExecutionDispatchRef,
-  type HostedExecutionDispatchRequest,
-} from "@murph/hosted-execution";
-import type {
-  LinqMessageReceivedEvent,
-} from "@murph/inboxd/linq-webhook";
-import type {
-  TelegramUpdateLike,
-} from "@murph/inboxd/telegram-webhook";
-
 import { isHostedOnboardingError } from "./errors";
 import {
-  minimizeHostedLinqMessageReceivedEvent,
-  minimizeHostedTelegramUpdate,
-} from "./webhook-event-snapshots";
-import { serializeHostedExecutionOutboxPayload } from "../hosted-execution/outbox-payload";
-import {
   generateHostedWebhookReceiptAttemptId,
-  readHostedWebhookDispatchPayloadDispatch,
   serializeHostedWebhookReceiptState,
 } from "./webhook-receipt-codec";
 import type {
@@ -353,18 +336,14 @@ function markHostedWebhookSideEffectSent(
   sentAt: string,
 ): HostedWebhookSideEffect {
   switch (effect.kind) {
-    case "hosted_execution_dispatch": {
-      const dispatch = readHostedWebhookDispatchPayloadDispatch(effect.payload);
-
+    case "hosted_execution_dispatch":
       return {
         ...effect,
         lastError: null,
-        payload: dispatch ? minimizeHostedWebhookDispatchPayload(dispatch) : effect.payload,
         result: result as HostedWebhookDispatchSideEffect["result"],
         sentAt,
         status: "sent",
       };
-    }
     case "linq_message_send":
       return {
         ...effect,
@@ -449,42 +428,4 @@ function readHostedWebhookSideEffectRetryable(error: Error): boolean | null {
   return "retryable" in error && typeof error.retryable === "boolean"
     ? error.retryable
     : null;
-}
-
-
-function minimizeHostedWebhookDispatchPayload(
-  dispatch: HostedExecutionDispatchRequest,
-): HostedWebhookDispatchSideEffect["payload"] {
-  const serializedDispatch = serializeHostedExecutionOutboxPayload(dispatch);
-  const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
-  const schemaVersion = serializedDispatch.schemaVersion as string;
-
-  if (dispatch.event.kind === "linq.message.received") {
-    return {
-      dispatchRef,
-      linqEvent: minimizeHostedLinqMessageReceivedEvent(
-        dispatch.event.linqEvent as unknown as LinqMessageReceivedEvent,
-      ),
-      schemaVersion,
-      storage: "reference",
-    };
-  }
-
-  if (dispatch.event.kind === "telegram.message.received") {
-    return {
-      botUserId: dispatch.event.botUserId,
-      dispatchRef,
-      schemaVersion,
-      storage: "reference",
-      telegramUpdate: minimizeHostedTelegramUpdate(
-        dispatch.event.telegramUpdate as unknown as TelegramUpdateLike,
-      ),
-    };
-  }
-
-  return {
-    dispatchRef,
-    schemaVersion,
-    storage: "reference",
-  };
 }

@@ -70,7 +70,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(nextEffect.lastError?.message, "Delivery confirmation timed out.");
   });
 
-  it("minimizes dispatch payloads after a dispatch side effect is marked sent", () => {
+  it("stores sparse Linq dispatch payloads from creation time and preserves them when sent", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
         eventId: "evt_123",
@@ -124,6 +124,10 @@ describe("hosted webhook receipt transitions", () => {
       }),
     });
 
+    if ("dispatch" in dispatchEffect.payload) {
+      throw new Error("Expected a sparse dispatch payload reference.");
+    }
+
     const nextState = markHostedWebhookReceiptSideEffectSent(
       buildReceiptState({ sideEffects: [dispatchEffect] }),
       dispatchEffect.effectId,
@@ -137,11 +141,11 @@ describe("hosted webhook receipt transitions", () => {
       throw new Error("Expected a hosted execution dispatch side effect.");
     }
 
-    assert.equal(nextEffect.status, "sent");
     if ("dispatch" in nextEffect.payload) {
-      throw new Error("Expected a minimized dispatch payload reference.");
+      throw new Error("Expected a sparse dispatch payload reference.");
     }
 
+    assert.equal(nextEffect.status, "sent");
     assert.equal(nextEffect.payload.storage, "reference");
     assert.deepEqual(nextEffect.payload.linqEvent, {
       api_version: "2026-03-26",
@@ -187,7 +191,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.deepEqual(nextEffect.result, { dispatched: true });
   });
 
-  it("stores sparse Telegram snapshots when minimizing dispatch payloads", () => {
+  it("stores sparse Telegram snapshots from creation time and preserves them when sent", () => {
     const dispatchEffect = createHostedWebhookDispatchSideEffect({
       dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
         botUserId: "999",
@@ -276,6 +280,10 @@ describe("hosted webhook receipt transitions", () => {
       }),
     });
 
+    if ("dispatch" in dispatchEffect.payload) {
+      throw new Error("Expected a sparse dispatch payload reference.");
+    }
+
     const nextState = markHostedWebhookReceiptSideEffectSent(
       buildReceiptState({ sideEffects: [dispatchEffect] }),
       dispatchEffect.effectId,
@@ -290,7 +298,7 @@ describe("hosted webhook receipt transitions", () => {
     }
 
     if ("dispatch" in nextEffect.payload) {
-      throw new Error("Expected a minimized dispatch payload reference.");
+      throw new Error("Expected a sparse dispatch payload reference.");
     }
 
     assert.deepEqual(nextEffect.payload.telegramUpdate, {
