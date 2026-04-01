@@ -307,19 +307,11 @@ async function readAssistantProviderRouteRecoveryAtPath(
   paths: AssistantStatePaths,
   filePath: string,
 ): Promise<AssistantProviderRouteRecovery | null> {
+  let recovery: AssistantProviderRouteRecovery
+
   try {
     const raw = await readFile(filePath, 'utf8')
-    const recovery = assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
-    let secrets: Awaited<ReturnType<typeof readAssistantProviderRouteRecoverySecrets>>
-    try {
-      secrets = await readAssistantProviderRouteRecoverySecrets({
-        paths,
-        sessionId: recovery.sessionId,
-      })
-    } catch {
-      return null
-    }
-    return mergeAssistantProviderRouteRecoverySecrets(recovery, secrets)
+    recovery = assistantProviderRouteRecoverySchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
     if (isMissingFileError(error)) {
       return null
@@ -333,6 +325,12 @@ async function readAssistantProviderRouteRecoveryAtPath(
     }).catch(() => undefined)
     return null
   }
+
+  const secrets = await readAssistantProviderRouteRecoverySecrets({
+    paths,
+    sessionId: recovery.sessionId,
+  })
+  return mergeAssistantProviderRouteRecoverySecrets(recovery, secrets)
 }
 
 function resolveAssistantProviderRouteRecoveryPath(

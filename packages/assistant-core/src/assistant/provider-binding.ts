@@ -16,7 +16,10 @@ import {
   writeAssistantProviderStateResumeRouteId,
   writeAssistantProviderStateResumeWorkspaceKey,
 } from './provider-state.js'
-import { shouldUseAssistantOpenAIResponsesApi } from './provider-config.js'
+import {
+  assistantProviderConfigsEqual,
+  shouldUseAssistantOpenAIResponsesApi,
+} from './provider-config.js'
 
 export function hashAssistantProviderWorkingDirectory(
   workingDirectory: string,
@@ -100,10 +103,7 @@ export function doesAssistantResumeBindingMatchRoute(input: {
   routeId: string
   workingDirectoryKey: string | null
 }): boolean {
-  if (
-    input.binding?.provider !== input.provider ||
-    input.workingDirectoryKey === null
-  ) {
+  if (input.binding?.provider !== input.provider) {
     return false
   }
 
@@ -124,7 +124,22 @@ export function doesAssistantResumeBindingMatchRoute(input: {
     })
 
   if (resumesOfficialOpenAIResponses) {
-    return true
+    return resumeRouteId
+      ? resumeRouteId === input.routeId
+      : assistantProviderConfigsEqual(
+          {
+            provider: input.provider,
+            ...input.providerOptions,
+          },
+          {
+            provider: input.binding.provider,
+            ...input.binding.providerOptions,
+          },
+        )
+  }
+
+  if (input.workingDirectoryKey === null) {
+    return false
   }
 
   return (

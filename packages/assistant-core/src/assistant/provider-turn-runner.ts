@@ -395,9 +395,7 @@ async function resolveAssistantRouteTurnPlan(input: {
       currentCodexPromptVersion: input.currentCodexPromptVersion,
       provider: input.route.provider,
     })
-  const resumeKeyBinding =
-    resumeProviderBinding ??
-    (usesOpenAIResponsesApi ? activeProviderBinding : null)
+  const resumeKeyBinding = resumeProviderBinding
   const resumeProviderSessionId =
     shouldResetCodexProviderSession
       ? null
