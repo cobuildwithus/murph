@@ -10,7 +10,7 @@ import {
   createHostedVerifiedEmailUserEnv,
   parseHostedEmailThreadTarget,
   type HostedExecutionDispatchRequest,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 import { createHostedUserEnvStore } from "../src/bundle-store.ts";
 import { writeEncryptedR2Json } from "../src/crypto.ts";
 import { createHostedExecutionJournalStore, persistHostedExecutionCommit } from "../src/execution-journal.ts";
@@ -40,8 +40,8 @@ describe("cloudflare worker routes", () => {
       "utf8",
     );
 
-    expect(workerSource).not.toMatch(/from "@murph\/inboxd";/u);
-    expect(workerSource).toMatch(/@murph\/inboxd\/connectors\/email\/parsed/u);
+    expect(workerSource).not.toMatch(/from "@murphai\/inboxd";/u);
+    expect(workerSource).toMatch(/@murphai\/inboxd\/connectors\/email\/parsed/u);
   });
 
   it("serves a health endpoint even before secrets are configured", async () => {

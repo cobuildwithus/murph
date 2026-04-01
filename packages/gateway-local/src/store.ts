@@ -11,8 +11,8 @@ import {
   type GatewayProjectionSnapshot,
   type GatewayRespondToPermissionInput,
   type GatewayWaitForEventsInput,
-} from '@murph/gateway-core'
-import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murph/runtime-state/node'
+} from '@murphai/gateway-core'
+import { openSqliteRuntimeDatabase, resolveGatewayRuntimePaths } from '@murphai/runtime-state/node'
 
 import {
   assistantGatewayLocalProjectionSourceReader,

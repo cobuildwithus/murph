@@ -1,11 +1,11 @@
 import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
-} from '@murph/assistant-core/assistant-state'
-import { resolveAgentmailApiKey } from '@murph/assistant-core/agentmail-runtime'
-import { getAssistantChannelAdapter } from '@murph/assistant-core/assistant/channel-adapters'
-import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murph/assistant-core/inbox-app/linq-endpoint'
-import type { InboxServices } from '@murph/assistant-core/inbox-services'
+} from '@murphai/assistant-core/assistant-state'
+import { resolveAgentmailApiKey } from '@murphai/assistant-core/agentmail-runtime'
+import { getAssistantChannelAdapter } from '@murphai/assistant-core/assistant/channel-adapters'
+import { describeLinqConnectorEndpoint as describeLinqEndpoint } from '@murphai/assistant-core/inbox-app/linq-endpoint'
+import type { InboxServices } from '@murphai/assistant-core/inbox-services'
 import type {
   SetupAgentmailInboxSelection,
   SetupAgentmailSelectionResolver,
@@ -13,15 +13,15 @@ import type {
 import {
   resolveSetupChannelMissingEnv,
   SETUP_RUNTIME_ENV_NOTICE,
-} from '@murph/assistant-core/setup-runtime-env'
+} from '@murphai/assistant-core/setup-runtime-env'
 import {
   type SetupChannel,
   type SetupConfiguredChannel,
   type SetupStepResult,
   setupChannelValues,
-} from '@murph/assistant-core/setup-cli-contracts'
-import { resolveTelegramBotToken } from '@murph/assistant-core/telegram-runtime'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-core/setup-cli-contracts'
+import { resolveTelegramBotToken } from '@murphai/assistant-core/telegram-runtime'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import { createStep } from './steps.js'
 
 const IMESSAGE_SETUP_CONNECTOR_ID = 'imessage:self'

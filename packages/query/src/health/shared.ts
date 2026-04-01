@@ -6,7 +6,7 @@ import {
   type FrontmatterScalar,
   type FrontmatterValue,
   type ParsedFrontmatterDocument,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import { z } from "zod";
 
 export type { FrontmatterObject, FrontmatterScalar, FrontmatterValue };

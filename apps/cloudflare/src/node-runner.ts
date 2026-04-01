@@ -4,7 +4,7 @@ import {
   runHostedAssistantRuntimeJobIsolated,
   type HostedAssistantRuntimeConfig,
   type HostedAssistantRuntimeJobInput,
-} from "@murph/assistant-runtime";
+} from "@murphai/assistant-runtime";
 import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
@@ -13,7 +13,7 @@ import {
   readHostedEmailCapabilities,
   type HostedExecutionRunnerResult,
   type HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import {
   buildHostedRunnerContainerEnv,

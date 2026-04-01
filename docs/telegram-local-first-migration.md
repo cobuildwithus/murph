@@ -4,7 +4,7 @@ Last verified: 2026-03-16
 
 ## Goal
 
-Add Telegram as a local-first inbox source without turning `@murph/inboxd` into a pile of per-channel special cases.
+Add Telegram as a local-first inbox source without turning `@murphai/inboxd` into a pile of per-channel special cases.
 
 This migration follows the same overall direction as OpenClaw's Telegram channel:
 
@@ -71,7 +71,7 @@ vault-cli inbox run --vault ./vault
 
 Instantiate a grammY `Api` object in app code and pass it to `createTelegramApiPollDriver({ api })`.
 
-That keeps grammY as the transport/runtime layer while `@murph/inboxd` stays the canonical sink.
+That keeps grammY as the transport/runtime layer while `@murphai/inboxd` stays the canonical sink.
 
 ## Current wiring status
 
@@ -105,6 +105,6 @@ For any new message source, prefer this shape:
 1. transport-specific driver
 2. normalize into `ChatMessage` / `InboundCapture`
 3. emit source-native checkpoint when needed
-4. let `@murph/inboxd` own persistence, dedupe, search, and attachment jobs
+4. let `@murphai/inboxd` own persistence, dedupe, search, and attachment jobs
 
 That keeps new channels thin and avoids duplicating vault-write logic across every connector.

@@ -5,8 +5,8 @@ import {
   type HostedExecutionRunnerResult,
   type HostedExecutionSideEffect,
   type HostedExecutionSideEffectRecord,
-} from "@murph/hosted-execution";
-import type { GatewayProjectionSnapshot } from "@murph/gateway-core";
+} from "@murphai/hosted-execution";
+import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   createHostedEmailChannelDependencies,
 } from "../hosted-email.ts";
@@ -16,7 +16,7 @@ import {
   shouldDispatchAssistantOutboxIntent,
   type AssistantChannelDelivery,
   type AssistantOutboxDispatchHooks,
-} from "@murph/assistant-core";
+} from "@murphai/assistant-core";
 
 import type {
   HostedCommittedExecutionState,

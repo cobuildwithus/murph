@@ -4,7 +4,7 @@ import { test } from 'vitest'
 import {
   buildAssistantCliGuidanceText,
   resolveAssistantCliAccessContext,
-} from '@murph/assistant-core/assistant-cli-access'
+} from '@murphai/assistant-core/assistant-cli-access'
 
 test('resolveAssistantCliAccessContext prepends the Murph shim directory to PATH once', () => {
   const homeRoot = path.join('/tmp', 'murph-assistant-cli-access-home')

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { resolveAssistantStatePaths } from "@murph/runtime-state/node";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import { test } from "vitest";
 
 import {
@@ -18,7 +18,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveAssistantSelfDeliveryTarget,
   saveDefaultVaultConfig,
-} from "@murph/assistant-core";
+} from "@murphai/assistant-core";
 
 interface PackageManifest {
   dependencies?: Record<string, string | undefined>;
@@ -29,7 +29,7 @@ interface TsConfigShape {
   references?: Array<{ path?: string }>;
 }
 
-test("assistant-runtime uses the dedicated @murph/assistant-core boundary instead of importing the CLI package", async () => {
+test("assistant-runtime uses the dedicated @murphai/assistant-core boundary instead of importing the CLI package", async () => {
   const runtimeManifest = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as PackageManifest;
@@ -73,13 +73,13 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
     new URL("../../../apps/cloudflare/test/node-runner.test.ts", import.meta.url),
     "utf8",
   );
-  const assistantCoreModule = await import("@murph/assistant-core");
-  const assistantRuntimeModule = await import("@murph/assistant-runtime");
+  const assistantCoreModule = await import("@murphai/assistant-core");
+  const assistantRuntimeModule = await import("@murphai/assistant-runtime");
   let sawAssistantCoreImport = false;
 
-  assert.equal(runtimeManifest.dependencies?.["@murph/assistant-core"], "workspace:*");
+  assert.equal(runtimeManifest.dependencies?.["@murphai/assistant-core"], "workspace:*");
   assert.equal(runtimeManifest.dependencies?.murph, undefined);
-  assert.equal(cloudflareManifest.dependencies?.["@murph/assistant-core"], "workspace:*");
+  assert.equal(cloudflareManifest.dependencies?.["@murphai/assistant-core"], "workspace:*");
   assert.equal(cloudflareManifest.dependencies?.murph, undefined);
   assert.equal(assistantCoreManifest.dependencies?.murph, undefined);
   assert.equal(existsSync(new URL("../../assistant-services/package.json", import.meta.url)), false);
@@ -101,14 +101,14 @@ test("assistant-runtime uses the dedicated @murph/assistant-core boundary instea
   );
   assert.doesNotMatch(assistantCoreTypesSource, /\bVaultCliServices\b/u);
   assert.doesNotMatch(runtimeIndexSource, /contracts\.ts/u);
-  assert.match(cloudflareNodeRunnerSource, /from ["']@murph\/assistant-core["']/u);
+  assert.match(cloudflareNodeRunnerSource, /from ["']@murphai\/assistant-core["']/u);
   assert.doesNotMatch(cloudflareNodeRunnerSource, /from ["']murph(\/|["'])/u);
 
   for (const fileUrl of runtimeSourceFiles) {
     const source = await readFile(fileUrl, "utf8");
-    assert.doesNotMatch(source, /@murph\/assistant-services/u);
+    assert.doesNotMatch(source, /@murphai\/assistant-services/u);
     assert.doesNotMatch(source, /\bfrom ["']murph(\/|["'])/u);
-    if (/from ["']@murph\/assistant-core["']/u.test(source)) {
+    if (/from ["']@murphai\/assistant-core["']/u.test(source)) {
       sawAssistantCoreImport = true;
     }
   }

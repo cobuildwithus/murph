@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   readHostedExecutionControlEnvironment: vi.fn(),
 }));
 
-vi.mock("@murph/hosted-execution", () => ({
+vi.mock("@murphai/hosted-execution", () => ({
   createHostedExecutionControlClient: mocks.createHostedExecutionControlClient,
   readHostedExecutionControlEnvironment: mocks.readHostedExecutionControlEnvironment,
 }));

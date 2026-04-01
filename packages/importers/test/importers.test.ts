@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import * as coreRuntime from "@murph/core";
+import * as coreRuntime from "@murphai/core";
 import type {
   DocumentImportPayload,
   MealImportPayload,

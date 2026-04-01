@@ -1,4 +1,4 @@
-import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId, type JsonObject } from '@murph/contracts'
+import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId, type JsonObject } from '@murphai/contracts'
 import { z } from 'incur'
 
 import {
@@ -622,7 +622,7 @@ async function readFoodEntries(vaultRoot: string) {
 }
 
 async function loadFoodCoreRuntime(): Promise<FoodCoreRuntime> {
-  return loadRuntimeModule<FoodCoreRuntime>('@murph/core')
+  return loadRuntimeModule<FoodCoreRuntime>('@murphai/core')
 }
 
 async function findFoodForDailyAdd(

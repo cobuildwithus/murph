@@ -6,19 +6,19 @@ import { test } from 'vitest'
 import {
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import {
   createIntegratedInboxServices,
   type InboxRunEvent,
-} from '@murph/assistant-core/inbox-services'
+} from '@murphai/assistant-core/inbox-services'
 import {
   UNSAFE_FOREGROUND_LOG_DETAILS_ENV,
   formatInboxRunEventForTerminal,
   resolveForegroundTerminalLogOptions,
 } from '../src/run-terminal-logging.js'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murph/assistant-core/vault-services'
+import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

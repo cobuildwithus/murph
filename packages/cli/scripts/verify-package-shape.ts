@@ -59,20 +59,20 @@ const rootTsconfigBase = JSON.parse(
 const packageLocalTsFiles = await listFiles(packageDir, ['src', 'scripts', 'test'])
 
 assert(
-  packageJson.name === 'murph',
-  'package.json must keep the published package name murph.',
+  packageJson.name === '@murphai/murph',
+  'package.json must keep the published package name @murphai/murph.',
 )
 assert(
   packageJson.private === false,
   'package.json must be marked publishable (private: false).',
 )
 assert(
-  packageJson.dependencies?.['@murph/device-syncd'] === 'workspace:*',
-  'package.json must depend on @murph/device-syncd so the published murph package installs the managed device daemon.',
+  packageJson.dependencies?.['@murphai/device-syncd'] === 'workspace:*',
+  'package.json must depend on @murphai/device-syncd so the published @murphai/murph package installs the managed device daemon.',
 )
 assert(
-  packageJson.dependencies?.['@murph/assistant-core'] === 'workspace:*',
-  'package.json must depend on @murph/assistant-core so the CLI can import the headless owner package directly.',
+  packageJson.dependencies?.['@murphai/assistant-core'] === 'workspace:*',
+  'package.json must depend on @murphai/assistant-core so the CLI can import the headless owner package directly.',
 )
 assert(
   packageJson.main === './dist/index.js',
@@ -165,8 +165,8 @@ assert(
   'package.json must not publish the removed gateway-core-local compatibility subpath.',
 )
 assert(
-  packageJson.dependencies?.['@murph/gateway-core'] === undefined,
-  'package.json must not keep a runtime dependency on @murph/gateway-core after the hard cut.',
+  packageJson.dependencies?.['@murphai/gateway-core'] === undefined,
+  'package.json must not keep a runtime dependency on @murphai/gateway-core after the hard cut.',
 )
 assert(
   packageJson.exports?.['./vault-services'] === undefined,
@@ -271,7 +271,7 @@ assert(
   'src/index.ts must stay import-safe and avoid serving the CLI on package import.',
 )
 assert(
-  !/@murph\/assistant-core\//u.test(libraryEntry),
+  !/@murph(?:ai)?\/assistant-core\//u.test(libraryEntry),
   'src/index.ts must not re-export headless assistant-core modules through the murph package root.',
 )
 assert(

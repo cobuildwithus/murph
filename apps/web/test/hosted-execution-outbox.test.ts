@@ -1,9 +1,9 @@
 import { ExecutionOutboxStatus } from "@prisma/client";
-import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murph/hosted-execution";
+import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExecutionOutbox, PrismaClient } from "@prisma/client";
-import type { HostedExecutionDispatchRequest, HostedExecutionDispatchResult } from "@murph/hosted-execution";
+import type { HostedExecutionDispatchRequest, HostedExecutionDispatchResult } from "@murphai/hosted-execution";
 
 const mocks = vi.hoisted(() => ({
   dispatchHostedExecutionStatus: vi.fn(),

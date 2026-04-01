@@ -1,11 +1,11 @@
-# @murph/cloudflare-runner
+# @murphai/cloudflare-runner
 
 Cloudflare-hosted execution plane for the hosted Murph path.
 
 This app is intentionally separate from `apps/web`:
 
 - `apps/web` stays the public onboarding, billing, OAuth, and webhook control plane.
-- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murph/assistant-runtime`.
+- `apps/cloudflare` handles signed internal dispatch, per-user coordination, encrypted hosted bundle storage, and one-shot execution through `@murphai/assistant-runtime`.
 
 ## Core responsibilities
 
@@ -15,7 +15,7 @@ This app is intentionally separate from `apps/web`:
 - perform durable hosted bootstrap explicitly on `member.activated` instead of mutating vault/assistant config during every run
 - restore a temporary execution context for one-shot runs
 - start the Durable Object's native Cloudflare container on demand for the runner process
-- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murph/assistant-runtime` package
+- run the existing Murph inbox, parser, assistant, device-sync, and hosted share-import seams for member activation, direct Linq messages, hosted share acceptance, hosted device-sync wake events, and periodic assistant ticks through the headless `@murphai/assistant-runtime` package
 
 ## Non-goals
 
@@ -161,7 +161,7 @@ The Cloudflare app now keeps two focused Vitest lanes:
 
 ## Runtime boundary
 
-`apps/cloudflare` should treat `@murph/assistant-runtime` as its hosted execution surface for runtime behavior and `@murph/hosted-execution` as the canonical owner of shared hosted execution contracts, callback hosts, env readers, and side-effect codecs. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless runtime package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
+`apps/cloudflare` should treat `@murphai/assistant-runtime` as its hosted execution surface for runtime behavior and `@murphai/hosted-execution` as the canonical owner of shared hosted execution contracts, callback hosts, env readers, and side-effect codecs. The worker/container app owns dispatch verification, bundle storage, control routes, and container lifecycle; the headless runtime package owns one-shot hosted execution behavior. The app-local no-emit typecheck now includes the Node runner and container entrypoint files.
 
 ## Known follow-ups
 

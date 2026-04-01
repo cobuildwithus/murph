@@ -136,6 +136,6 @@
     "changes"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/audit-record.schema.json",
+  "$id": "@murphai/contracts/audit-record.schema.json",
   "title": "Murph Audit Record"
 }

@@ -13,7 +13,7 @@ import {
   type HealthEntityDefinition,
   type HealthEntityDefinitionWithRegistry,
   type HealthEntityKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import { z } from "incur";
 import type {
   HealthCoreRuntimeMethodName,

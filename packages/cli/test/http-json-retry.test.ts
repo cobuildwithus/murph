@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 
 import { test } from 'vitest'
 
-import type { JsonFetchResponse } from '@murph/assistant-core/http-json-retry'
-import { readJsonErrorResponse } from '@murph/assistant-core/http-json-retry'
+import type { JsonFetchResponse } from '@murphai/assistant-core/http-json-retry'
+import { readJsonErrorResponse } from '@murphai/assistant-core/http-json-retry'
 
 function createSingleUseResponse(
   body: string,

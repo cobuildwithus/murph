@@ -49,7 +49,7 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@murph/assistant-core", () => ({
+vi.mock("@murphai/assistant-core", () => ({
   createIntegratedInboxServices: mocks.createIntegratedInboxServices,
   createIntegratedVaultServices: mocks.createIntegratedVaultServices,
   getAssistantCronStatus: mocks.getAssistantCronStatus,
@@ -58,18 +58,18 @@ vi.mock("@murph/assistant-core", () => ({
   saveAssistantAutomationState: mocks.saveAssistantAutomationState,
 }));
 
-vi.mock("@murph/device-syncd", () => ({
+vi.mock("@murphai/device-syncd", () => ({
   createConfiguredDeviceSyncProviders: mocks.createConfiguredDeviceSyncProviders,
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
   createDeviceSyncService: mocks.createDeviceSyncService,
 }));
 
-vi.mock("@murph/inboxd", () => ({
+vi.mock("@murphai/inboxd", () => ({
   openInboxRuntime: mocks.openInboxRuntime,
   rebuildRuntimeFromVault: mocks.rebuildRuntimeFromVault,
 }));
 
-vi.mock("@murph/parsers", () => ({
+vi.mock("@murphai/parsers", () => ({
   createConfiguredParserRegistry: mocks.createConfiguredParserRegistry,
   createInboxParserService: mocks.createInboxParserService,
 }));
@@ -262,11 +262,9 @@ test("non-device-sync maintenance continues when the hosted control-plane snapsh
     const result = await runHostedDeviceSyncPass(
       {
         event: {
-          envelopeTo: "assistant@mail.example.test",
           identityId: "assistant@mail.example.test",
           kind: "email.message.received",
           rawMessageKey: "raw_123",
-          threadTarget: null,
           userId: "member_123",
         },
         eventId: "evt_email",

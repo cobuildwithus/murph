@@ -1,7 +1,7 @@
 import type {
   LinqMessagePart,
   LinqMessageReceivedEvent,
-} from "@murph/inboxd/linq-webhook";
+} from "@murphai/inboxd/linq-webhook";
 import type {
   TelegramChat,
   TelegramFileBase,
@@ -9,7 +9,7 @@ import type {
   TelegramPhotoSize,
   TelegramUpdateLike,
   TelegramUser,
-} from "@murph/inboxd/telegram-webhook";
+} from "@murphai/inboxd/telegram-webhook";
 
 type HostedTelegramContact = Exclude<TelegramMessageLike["contact"], null | undefined>;
 type HostedTelegramDirectMessagesTopic = Exclude<

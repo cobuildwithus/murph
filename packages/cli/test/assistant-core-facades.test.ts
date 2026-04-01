@@ -34,7 +34,7 @@ test('cli imports assistant-core directly and removes facade-only package subpat
     await readFile(new URL('../../../tsconfig.base.json', import.meta.url), 'utf8'),
   ) as TsConfigShape
 
-  assert.equal(cliManifest.dependencies?.['@murph/assistant-core'], 'workspace:*')
+  assert.equal(cliManifest.dependencies?.['@murphai/assistant-core'], 'workspace:*')
   assert.deepEqual(assistantCoreManifest.exports?.['./*'], {
     default: './dist/*.js',
     types: './dist/*.d.ts',
@@ -47,7 +47,7 @@ test('cli imports assistant-core directly and removes facade-only package subpat
     cliTypecheckTsconfig.references?.some((reference) => reference.path === '../assistant-core'),
     true,
   )
-  assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murph/assistant-core/*'], [
+  assert.deepEqual(repoTsconfigBase.compilerOptions?.paths?.['@murphai/assistant-core/*'], [
     'packages/assistant-core/src/*.ts',
   ])
   assert.deepEqual(Object.keys(cliManifest.exports ?? {}).sort(), [
@@ -157,7 +157,7 @@ test('cli no longer keeps duplicated assistant-core headless source files', asyn
 
 test('cli package root no longer re-exports assistant-core compatibility shims', async () => {
   const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8')
-  assert.doesNotMatch(source, /@murph\/assistant-core\//u)
+  assert.doesNotMatch(source, /@murphai\/assistant-core\//u)
   assert.doesNotMatch(source, /vault-cli-services/u)
 })
 
@@ -173,7 +173,7 @@ test('cli keeps daemon-aware wrappers only where transport routing still belongs
 
   for (const relativePath of daemonWrapperFiles) {
     const source = await readFile(new URL(relativePath, import.meta.url), 'utf8')
-    assert.match(source, /@murph\/assistant-core\//u)
+    assert.match(source, /@murphai\/assistant-core\//u)
     assert.match(source, /assistant-daemon-client/u)
   }
 })

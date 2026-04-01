@@ -1,8 +1,8 @@
-import { importSharePackIntoVault } from "@murph/core";
-import type { GatewayProjectionSnapshot } from "@murph/gateway-core";
+import { importSharePackIntoVault } from "@murphai/core";
+import type { GatewayProjectionSnapshot } from "@murphai/gateway-core";
 import {
   restoreHostedExecutionContext,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionDispatchRequest,
@@ -10,7 +10,7 @@ import type {
   HostedExecutionRunnerResult,
   HostedExecutionSideEffect,
   HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 export interface HostedExecutionCommitCallback {
   bundleRefs: {

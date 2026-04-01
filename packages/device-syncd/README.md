@@ -1,4 +1,4 @@
-# @murph/device-syncd
+# @murphai/device-syncd
 
 Published local device sync runtime for Murph.
 
@@ -7,7 +7,7 @@ Murph's CLI can install, start, reuse, and stop this daemon for the selected vau
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
 The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook verification/dispatch. That shared ingress is the seam for a future hosted Vercel control plane while keeping the current local/tunneled callback flow alive.
-For non-daemon callers, `@murph/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers.
+For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers.
 
 What it does:
 - serves a provider-agnostic local control plane for CLI and web auth flows
@@ -17,7 +17,7 @@ What it does:
 - accepts provider webhooks when a provider supports them
 - runs background backfill and reconcile jobs
 - serializes active jobs per account so rotating refresh-token flows do not race
-- imports provider snapshots through `@murph/importers`
+- imports provider snapshots through `@murphai/importers`
 
 Current providers:
 - WHOOP
@@ -46,7 +46,7 @@ It does **not** own canonical health-data import. The local data plane should st
 - initial backfill
 - scheduled reconcile polling
 - optional webhook fan-in
-- normalized snapshot import through `@murph/importers`
+- normalized snapshot import through `@murphai/importers`
 
 WHOOP uses OAuth plus webhooks.
 
@@ -113,7 +113,7 @@ The published bin name is also `murph-device-syncd`.
 
 ## Control-plane clients
 
-- `@murph/device-syncd/client` is the canonical shared client/helper surface for device-sync control-plane callers
+- `@murphai/device-syncd/client` is the canonical shared client/helper surface for device-sync control-plane callers
 - `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `DEVICE_SYNC_BASE_URL`
 - `vault-cli` and `packages/local-web` authenticate local control routes with `DEVICE_SYNC_CONTROL_TOKEN`
 - `packages/local-web` can show provider/account status and redirect through this daemon for one-click auth

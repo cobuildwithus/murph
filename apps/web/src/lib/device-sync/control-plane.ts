@@ -1,7 +1,7 @@
 import type {
   PublicDeviceSyncAccount,
   PublicProviderDescriptor,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 
 import {
   assertBrowserMutationOrigin,

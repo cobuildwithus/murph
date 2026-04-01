@@ -5,13 +5,13 @@ import path from "node:path";
 
 import { beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
-import { createGatewayConversationSessionKey } from "@murph/gateway-core";
+import { createGatewayConversationSessionKey } from "@murphai/gateway-core";
 import {
   encodeHostedBundleBase64,
   listHostedBundleArtifacts,
   snapshotHostedBundleRoots,
   writeHostedBundleTextFile,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 
 import {
   artifactObjectKey,

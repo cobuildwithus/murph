@@ -9,19 +9,19 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murph/assistant-core/assistant/openai-compatible-provider-presets'
-import { normalizeNullableString } from '@murph/assistant-core/assistant/shared'
+} from '@murphai/assistant-core/assistant/openai-compatible-provider-presets'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
 import {
   createSetupAssistantAccountResolver,
   formatSetupAssistantAccountLabel,
   type SetupAssistantAccountResolver,
 } from './setup-assistant-account.js'
-import { prepareSetupPromptInput } from '@murph/assistant-core/setup-prompt-io'
+import { prepareSetupPromptInput } from '@murphai/assistant-core/setup-prompt-io'
 import {
   type SetupAssistantPreset,
   type SetupCommandOptions,
   type SetupConfiguredAssistant,
-} from '@murph/assistant-core/setup-cli-contracts'
+} from '@murphai/assistant-core/setup-cli-contracts'
 
 export const DEFAULT_SETUP_ASSISTANT_PRESET: SetupAssistantPreset = 'codex-cli'
 export const DEFAULT_SETUP_CODEX_MODEL = 'gpt-5.4'

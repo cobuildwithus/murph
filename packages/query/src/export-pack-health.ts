@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@murph/contracts";
+import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { type CanonicalEntity } from "./canonical-entities.ts";
 import type { ParseFailure } from "./health/loaders.ts";

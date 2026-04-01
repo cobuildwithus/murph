@@ -1,5 +1,5 @@
 {
-  "name": "@murph/core",
+  "name": "@murphai/core",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -29,7 +29,7 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/contracts": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/contracts": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   }
 }

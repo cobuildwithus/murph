@@ -4,7 +4,7 @@ import {
   createHostedEmailThreadTarget,
   parseHostedEmailThreadTarget,
   serializeHostedEmailThreadTarget,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 
 import {
   createAgentmailApiPollDriver,

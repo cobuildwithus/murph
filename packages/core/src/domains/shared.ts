@@ -1,5 +1,5 @@
-import type { ContractSchema } from "@murph/contracts";
-import { safeParseContract } from "@murph/contracts";
+import type { ContractSchema } from "@murphai/contracts";
+import { safeParseContract } from "@murphai/contracts";
 
 import { VaultError } from "../errors.ts";
 import { parseFrontmatterDocument } from "../frontmatter.ts";

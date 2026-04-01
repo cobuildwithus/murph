@@ -7,10 +7,10 @@ import {
   resolveAgentmailBaseUrl,
   type AgentmailApiClient,
   type AgentmailInbox,
-} from '@murph/assistant-core/agentmail-runtime'
-import { prepareSetupPromptInput } from '@murph/assistant-core/setup-prompt-io'
-import { normalizeNullableString } from '@murph/assistant-core/text/shared'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-core/agentmail-runtime'
+import { prepareSetupPromptInput } from '@murphai/assistant-core/setup-prompt-io'
+import { normalizeNullableString } from '@murphai/assistant-core/text/shared'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 export interface SetupAgentmailInboxSelection {
   accountId: string

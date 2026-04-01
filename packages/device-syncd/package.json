@@ -1,5 +1,5 @@
 {
-  "name": "@murph/device-syncd",
+  "name": "@murphai/device-syncd",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -40,8 +40,8 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/importers": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/importers": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   },
   "engines": {
     "node": ">=22.16.0"

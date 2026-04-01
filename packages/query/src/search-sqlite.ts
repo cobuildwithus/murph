@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
-import { extractIsoDatePrefix } from "@murph/contracts";
+import { extractIsoDatePrefix } from "@murphai/contracts";
 import {
   SEARCH_DB_RELATIVE_PATH,
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
   tableExists,
   withImmediateTransaction,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 
 import { readVault } from "./model.ts";
 import {

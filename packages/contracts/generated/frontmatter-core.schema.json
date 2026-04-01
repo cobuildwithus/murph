@@ -46,6 +46,6 @@
     "updatedAt"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-core.schema.json",
+  "$id": "@murphai/contracts/frontmatter-core.schema.json",
   "title": "Murph CORE Frontmatter"
 }

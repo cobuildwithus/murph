@@ -5,9 +5,9 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "vitest";
-import { resolveRuntimePaths } from "@murph/runtime-state/node";
+import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
-import { initializeVault, readJsonlRecords } from "@murph/core";
+import { initializeVault, readJsonlRecords } from "@murphai/core";
 
 import {
   createConnectorRegistry,

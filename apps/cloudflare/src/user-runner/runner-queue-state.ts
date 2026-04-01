@@ -11,11 +11,11 @@ import {
   summarizeHostedExecutionError,
   type HostedExecutionRunStatus,
   type HostedExecutionTimelineEntry,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   sameHostedBundlePayloadRef,
   type HostedExecutionBundleRef,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 
 import {
   CONSUMED_EVENT_EXACT_TTL_MS,

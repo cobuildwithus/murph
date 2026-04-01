@@ -7,7 +7,7 @@ import {
   readJsonlRecords,
   toMonthlyShardRelativePath,
   upsertFood,
-} from '@murph/core'
+} from '@murphai/core'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const cronServiceMocks = vi.hoisted(() => ({
@@ -43,8 +43,8 @@ import {
   setAssistantCronJobTarget,
   setAssistantCronJobEnabled,
 } from '../src/assistant/cron.ts'
-import { computeAssistantCronNextRunAt } from '@murph/assistant-core/assistant/cron/schedule'
-import { saveAssistantSelfDeliveryTarget } from '@murph/assistant-core/operator-config'
+import { computeAssistantCronNextRunAt } from '@murphai/assistant-core/assistant/cron/schedule'
+import { saveAssistantSelfDeliveryTarget } from '@murphai/assistant-core/operator-config'
 import { resolveAssistantStatePaths } from '../src/assistant/store.ts'
 
 const cleanupPaths: string[] = []

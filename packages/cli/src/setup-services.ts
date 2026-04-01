@@ -5,13 +5,13 @@ import { fileURLToPath } from 'node:url'
 import {
   createIntegratedInboxServices,
   type InboxServices,
-} from '@murph/assistant-core/inbox-services'
+} from '@murphai/assistant-core/inbox-services'
 import {
   createIntegratedVaultServices,
   type VaultServices,
-} from '@murph/assistant-core/vault-services'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
-import { resolveEffectiveTopLevelToken } from '@murph/assistant-core/command-helpers'
+} from '@murphai/assistant-core/vault-services'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { resolveEffectiveTopLevelToken } from '@murphai/assistant-core/command-helpers'
 import {
   buildAssistantProviderDefaultsPatch,
   normalizeVaultForConfig,
@@ -20,7 +20,7 @@ import {
   saveAssistantOperatorDefaultsPatch,
   saveDefaultVaultConfig,
   type AssistantOperatorDefaults,
-} from '@murph/assistant-core/operator-config'
+} from '@murphai/assistant-core/operator-config'
 import {
   type SetupChannel,
   type SetupConfiguredAssistant,
@@ -31,8 +31,8 @@ import {
   type SetupTools,
   type SetupWearable,
   type WhisperModel,
-} from '@murph/assistant-core/setup-cli-contracts'
-import type { InboxBootstrapResult } from '@murph/assistant-core/inbox-cli-contracts'
+} from '@murphai/assistant-core/setup-cli-contracts'
+import type { InboxBootstrapResult } from '@murphai/assistant-core/inbox-cli-contracts'
 import {
   configureSetupChannels,
   normalizeSetupChannels,
@@ -59,7 +59,7 @@ import {
 } from './setup-services/shell.js'
 import {
   assistantProviderConfigsEqual,
-} from '@murph/assistant-core/assistant/provider-config'
+} from '@murphai/assistant-core/assistant/provider-config'
 import {
   buildBaseFormulaSpecs,
   createStep,
@@ -75,7 +75,7 @@ import {
   ensureWhisperModel,
   resolveExecutablePath,
 } from './setup-services/toolchain.js'
-import { describeSelectedSetupWearables } from '@murph/assistant-core/setup-runtime-env'
+import { describeSelectedSetupWearables } from '@murphai/assistant-core/setup-runtime-env'
 
 interface SetupInput {
   vault: string

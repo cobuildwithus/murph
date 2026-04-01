@@ -2,7 +2,7 @@ import {
   buildPublicDeviceSyncErrorPayload,
   DeviceSyncError,
   isDeviceSyncError,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 import { NextResponse } from "next/server";
 
 import {

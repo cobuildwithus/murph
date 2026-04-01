@@ -1,4 +1,4 @@
-import { resolveSystemTimeZone } from "@murph/contracts"
+import { resolveSystemTimeZone } from "@murphai/contracts"
 import { VaultCliError } from "../vault-cli-errors.js"
 import {
   ensureManagedDeviceSyncControlPlane,

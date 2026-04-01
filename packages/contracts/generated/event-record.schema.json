@@ -2703,6 +2703,6 @@
       "additionalProperties": false
     }
   ],
-  "$id": "@murph/contracts/event-record.schema.json",
+  "$id": "@murphai/contracts/event-record.schema.json",
   "title": "Murph Event Record"
 }

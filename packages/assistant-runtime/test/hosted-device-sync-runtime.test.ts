@@ -12,8 +12,8 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@murph/hosted-execution", async () => {
-  const actual = await vi.importActual<typeof import("@murph/hosted-execution")>("@murph/hosted-execution");
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>("@murphai/hosted-execution");
   return {
     ...actual,
     resolveHostedExecutionDeviceSyncRuntimeClient: mocks.resolveHostedExecutionDeviceSyncRuntimeClient,
@@ -1100,7 +1100,7 @@ describe("hosted device-sync runtime", () => {
     expect(tokens?.accessToken).toBe("hosted-access-v5");
     expect(tokens?.refreshToken).toBe("hosted-refresh-v5");
 
-    const { createSecretCodec } = await import("@murph/device-syncd");
+    const { createSecretCodec } = await import("@murphai/device-syncd");
     const codec = createSecretCodec("secret-for-tests");
     expect(codec.decrypt(String(tokens?.accessTokenEncrypted))).toBe("hosted-access-v5");
     expect(codec.decrypt(String(tokens?.refreshTokenEncrypted))).toBe("hosted-refresh-v5");
@@ -1217,7 +1217,7 @@ describe("hosted device-sync runtime", () => {
 
   it("reconciles only forward-moving timestamps and clears stale hosted errors even outside active status", async () => {
     const { reconcileHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
-    const { createSecretCodec } = await import("@murph/device-syncd");
+    const { createSecretCodec } = await import("@murphai/device-syncd");
     const codec = createSecretCodec("secret-for-tests");
     const service = {
       store: {

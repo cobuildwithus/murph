@@ -2,7 +2,7 @@ import {
   formatTimeZoneDateTimeParts,
   normalizeIanaTimeZone,
   parseDailyTime,
-} from '@murph/contracts'
+} from '@murphai/contracts'
 import type {
   AssistantCronSchedule,
   AssistantCronScheduleInput,

@@ -41,8 +41,8 @@ import {
   workoutFormatFrontmatterSchema,
   parseFrontmatterMarkdown,
   parseFrontmatterDocument,
-} from "@murph/contracts";
-import { schemaCatalog } from "@murph/contracts/schemas";
+} from "@murphai/contracts";
+import { schemaCatalog } from "@murphai/contracts/schemas";
 
 interface PackageJsonShape {
   main?: string;

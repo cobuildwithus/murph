@@ -36,11 +36,11 @@
 ## Frozen Bootstrap Choices
 
 - Package names:
-  - `@murph/contracts`
-  - `@murph/core`
-  - `@murph/cli`
-  - `@murph/importers`
-  - `@murph/query`
+  - `@murphai/contracts`
+  - `@murphai/core`
+  - `@murphai/cli`
+  - `@murphai/importers`
+  - `@murphai/query`
 - Command namespace root: `vault-cli`
 - Recommended branch lanes:
   - `track/contracts`

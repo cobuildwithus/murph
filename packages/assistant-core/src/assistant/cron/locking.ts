@@ -1,7 +1,7 @@
 import {
   createAssistantStateWriteLock,
 } from '../state-write-lock.js'
-import type { AssistantStatePaths } from '@murph/runtime-state/node'
+import type { AssistantStatePaths } from '@murphai/runtime-state/node'
 
 const ASSISTANT_CRON_LOCK_DIRECTORY = '.locks/assistant-cron-write'
 const ASSISTANT_CRON_LOCK_METADATA_PATH = `${ASSISTANT_CRON_LOCK_DIRECTORY}/owner.json`

@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import type { AuditRecord, EventRecord, SampleRecord } from "@murph/contracts";
+import type { AuditRecord, EventRecord, SampleRecord } from "@murphai/contracts";
 
 import {
   importDeviceBatch,

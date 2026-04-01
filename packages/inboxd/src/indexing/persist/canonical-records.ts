@@ -7,11 +7,11 @@ import {
   type AuditRecord,
   type EventRecord,
   type InboxCaptureRecord as CanonicalInboxCaptureRecord,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import {
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
-} from "@murph/core";
+} from "@murphai/core";
 
 import type {
   InboundCapture,

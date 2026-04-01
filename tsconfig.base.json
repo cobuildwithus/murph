@@ -16,91 +16,91 @@
     "incremental": true,
     "skipLibCheck": true,
     "paths": {
-      "@murph/contracts": [
+      "@murphai/contracts": [
         "packages/contracts/src/index.ts"
       ],
-      "@murph/contracts/generated/*": [
+      "@murphai/contracts/generated/*": [
         "packages/contracts/generated/*"
       ],
-      "@murph/contracts/*": [
+      "@murphai/contracts/*": [
         "packages/contracts/src/*"
       ],
-      "@murph/hosted-execution": [
+      "@murphai/hosted-execution": [
         "packages/hosted-execution/src/index.ts"
       ],
-      "@murph/hosted-execution/*": [
+      "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
-      "@murph/runtime-state": [
+      "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
-      "@murph/runtime-state/node": [
+      "@murphai/runtime-state/node": [
         "packages/runtime-state/src/node/index.ts"
       ],
-      "@murph/runtime-state/*": [
+      "@murphai/runtime-state/*": [
         "packages/runtime-state/src/*"
       ],
-      "@murph/core": [
+      "@murphai/core": [
         "packages/core/src/index.ts"
       ],
-      "@murph/core/*": [
+      "@murphai/core/*": [
         "packages/core/src/*"
       ],
-      "@murph/importers": [
+      "@murphai/importers": [
         "packages/importers/src/index.ts"
       ],
-      "@murph/importers/*": [
+      "@murphai/importers/*": [
         "packages/importers/src/*"
       ],
-      "@murph/query": [
+      "@murphai/query": [
         "packages/query/src/index.ts"
       ],
-      "@murph/query/*": [
+      "@murphai/query/*": [
         "packages/query/src/*"
       ],
-      "@murph/inboxd": [
+      "@murphai/inboxd": [
         "packages/inboxd/src/index.ts"
       ],
-      "@murph/inboxd/connectors/email/normalize-parsed": [
+      "@murphai/inboxd/connectors/email/normalize-parsed": [
         "packages/inboxd/src/connectors/email/normalize-parsed.ts"
       ],
-      "@murph/inboxd/connectors/email/parsed": [
+      "@murphai/inboxd/connectors/email/parsed": [
         "packages/inboxd/src/connectors/email/parsed.ts"
       ],
-      "@murph/inboxd/*": [
+      "@murphai/inboxd/*": [
         "packages/inboxd/src/*"
       ],
-      "@murph/parsers": [
+      "@murphai/parsers": [
         "packages/parsers/src/index.ts"
       ],
-      "@murph/parsers/*": [
+      "@murphai/parsers/*": [
         "packages/parsers/src/*"
       ],
-      "@murph/assistant-runtime": [
+      "@murphai/assistant-runtime": [
         "packages/assistant-runtime/src/index.ts"
       ],
-      "@murph/assistant-runtime/*": [
+      "@murphai/assistant-runtime/*": [
         "packages/assistant-runtime/src/*"
       ],
-      "@murph/assistantd": [
+      "@murphai/assistantd": [
         "packages/assistantd/src/index.ts"
       ],
-      "@murph/assistantd/client": [
+      "@murphai/assistantd/client": [
         "packages/assistantd/src/client.ts"
       ],
-      "@murph/assistantd/*": [
+      "@murphai/assistantd/*": [
         "packages/assistantd/src/*"
       ],
-      "@murph/assistant-core": [
+      "@murphai/assistant-core": [
         "packages/assistant-core/src/index.ts"
       ],
-      "@murph/assistant-core/*": [
+      "@murphai/assistant-core/*": [
         "packages/assistant-core/src/*.ts"
       ],
-      "@murph/gateway-core": [
+      "@murphai/gateway-core": [
         "packages/gateway-core/src/index.ts"
       ],
-      "@murph/gateway-local": [
+      "@murphai/gateway-local": [
         "packages/gateway-local/src/index.ts"
       ],
       "murph": [
@@ -124,13 +124,13 @@
       "murph/assistant/store": [
         "packages/cli/src/assistant/store.ts"
       ],
-      "@murph/device-syncd": [
+      "@murphai/device-syncd": [
         "packages/device-syncd/src/index.ts"
       ],
-      "@murph/device-syncd/client": [
+      "@murphai/device-syncd/client": [
         "packages/device-syncd/src/client.ts"
       ],
-      "@murph/device-syncd/*": [
+      "@murphai/device-syncd/*": [
         "packages/device-syncd/src/*.ts"
       ]
     },

@@ -1,6 +1,6 @@
-import { assistantStopResultSchema } from '@murph/assistant-core/assistant-cli-contracts'
-import { tryKillProcess } from '@murph/assistant-core/process-kill'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { assistantStopResultSchema } from '@murphai/assistant-core/assistant-cli-contracts'
+import { tryKillProcess } from '@murphai/assistant-core/process-kill'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   redactAssistantDisplayPath,
   resolveAssistantStatePaths,
@@ -8,7 +8,7 @@ import {
 import {
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,
-} from '@murph/assistant-core/assistant/automation/runtime-lock'
+} from '@murphai/assistant-core/assistant/automation/runtime-lock'
 
 const ASSISTANT_AUTOMATION_STOP_TIMEOUT_MS = 5_000
 const ASSISTANT_AUTOMATION_FORCE_KILL_TIMEOUT_MS = 1_000

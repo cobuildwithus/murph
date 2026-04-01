@@ -8,7 +8,7 @@ import {
 import {
   isLoopbackHostname,
   writeTextFileAtomic,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 
 import {
   DEVICE_SYNC_BASE_URL_ENV,

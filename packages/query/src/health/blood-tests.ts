@@ -1,7 +1,7 @@
 import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import {
   applyLimit,
   asObject,

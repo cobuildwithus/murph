@@ -1,4 +1,4 @@
-import type { JsonObject } from '@murph/contracts'
+import type { JsonObject } from '@murphai/contracts'
 import { loadRuntimeModule } from './runtime-import.js'
 
 interface IdFamilyDefinition {
@@ -434,5 +434,5 @@ export function describeQueryLookupConstraint(id: string): string | null {
 }
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
-  return loadRuntimeModule<QueryRuntimeModule>('@murph/query')
+  return loadRuntimeModule<QueryRuntimeModule>('@murphai/query')
 }

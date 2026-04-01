@@ -1,7 +1,7 @@
 import {
   buildHostedExecutionMemberActivatedDispatch,
   type HostedExecutionDispatchRequest,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 export function buildHostedMemberActivationDispatch(input: {
   memberId: string;

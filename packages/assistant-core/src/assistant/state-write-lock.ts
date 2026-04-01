@@ -7,7 +7,7 @@ import {
   DirectoryLockHeldError,
   inspectDirectoryLock,
   isProcessRunning,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import { VaultCliError } from '../vault-cli-errors.js'
 
 export interface AssistantStateWriteLockMetadata {

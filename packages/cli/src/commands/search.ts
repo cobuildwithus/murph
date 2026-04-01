@@ -1,21 +1,21 @@
 import { Cli, z } from 'incur'
-import { emptyArgsSchema, withBaseOptions } from '@murph/assistant-core/command-helpers'
+import { emptyArgsSchema, withBaseOptions } from '@murphai/assistant-core/command-helpers'
 import {
   ALL_VAULT_RECORD_TYPES,
   loadQueryRuntime,
-} from '@murph/assistant-core/query-runtime'
+} from '@murphai/assistant-core/query-runtime'
 import {
   isoTimestampSchema,
   localDateSchema,
   pathSchema,
   slugSchema,
-} from '@murph/assistant-core/vault-cli-contracts'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-core/vault-cli-contracts'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   normalizeRepeatableEnumFlagOption,
   normalizeRepeatableFlagOption,
-} from '@murph/assistant-core/option-utils'
-import type { VaultServices } from '@murph/assistant-core/vault-services'
+} from '@murphai/assistant-core/option-utils'
+import type { VaultServices } from '@murphai/assistant-core/vault-services'
 
 const recordTypeValues = ALL_VAULT_RECORD_TYPES
 

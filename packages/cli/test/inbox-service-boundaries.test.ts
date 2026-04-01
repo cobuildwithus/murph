@@ -3,12 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { resolveRuntimePaths } from '@murph/runtime-state/node'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import { test } from 'vitest'
 
-import { instantiateConnector } from '@murph/assistant-core/inbox-services/connectors'
-import { normalizeDaemonState } from '@murph/assistant-core/inbox-services/daemon'
-import { readPromotionsByCapture } from '@murph/assistant-core/inbox-services/promotions'
+import { instantiateConnector } from '@murphai/assistant-core/inbox-services/connectors'
+import { normalizeDaemonState } from '@murphai/assistant-core/inbox-services/daemon'
+import { readPromotionsByCapture } from '@murphai/assistant-core/inbox-services/promotions'
 
 test('instantiateConnector delegates iMessage defaults through the connector factory', async () => {
   let received: {

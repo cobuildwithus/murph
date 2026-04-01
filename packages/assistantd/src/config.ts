@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { isLoopbackHostname } from '@murph/runtime-state'
+import { isLoopbackHostname } from '@murphai/runtime-state'
 
 export interface AssistantdEnvironment {
   controlToken: string

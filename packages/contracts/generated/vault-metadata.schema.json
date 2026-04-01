@@ -319,6 +319,6 @@
     "shards"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/vault-metadata.schema.json",
+  "$id": "@murphai/contracts/vault-metadata.schema.json",
   "title": "Murph Vault Metadata"
 }

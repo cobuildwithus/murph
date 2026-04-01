@@ -4,8 +4,8 @@ import {
   gatewayPermissionRequestSchema,
   type GatewayPermissionRequest,
   type GatewayRespondToPermissionInput,
-} from '@murph/gateway-core'
-import { sameGatewayConversationSession } from '@murph/gateway-core'
+} from '@murphai/gateway-core'
+import { sameGatewayConversationSession } from '@murphai/gateway-core'
 import { normalizeNullableString } from '../shared.js'
 import type { GatewaySnapshotState } from './snapshot-state.js'
 

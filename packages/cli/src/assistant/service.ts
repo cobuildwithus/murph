@@ -4,16 +4,16 @@ import {
   maybeSendAssistantMessageViaDaemon,
   maybeUpdateAssistantSessionOptionsViaDaemon,
 } from '../assistant-daemon-client.js'
-import type { AssistantSession } from '@murph/assistant-core/assistant-cli-contracts'
+import type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
 import {
   openAssistantConversationLocal,
   sendAssistantMessageLocal,
   updateAssistantSessionOptionsLocal,
   type AssistantMessageInput,
   type AssistantSessionResolutionFields,
-} from '@murph/assistant-core/assistant/service'
+} from '@murphai/assistant-core/assistant/service'
 
-export * from '@murph/assistant-core/assistant/service'
+export * from '@murphai/assistant-core/assistant/service'
 
 export async function openAssistantConversation(
   input: AssistantSessionResolutionFields,

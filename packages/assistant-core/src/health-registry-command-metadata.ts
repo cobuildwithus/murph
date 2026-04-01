@@ -1,7 +1,7 @@
 import {
   requireHealthEntityRegistryDefinition,
   type HealthEntityRegistryKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type {
   HealthCoreRuntimeMethodName,

@@ -65,7 +65,7 @@
     "responses"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/assessment-response.schema.json",
+  "$id": "@murphai/contracts/assessment-response.schema.json",
   "title": "Murph Assessment Response",
   "$defs": {
     "__schema0": {

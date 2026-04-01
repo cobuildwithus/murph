@@ -1,18 +1,18 @@
 import type { Dirent } from 'node:fs'
 import { readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
-import { rawImportManifestSchema } from '@murph/contracts'
+import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'incur'
-import { firstString } from '@murph/assistant-core/command-helpers'
+import { firstString } from '@murphai/assistant-core/command-helpers'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
   type QueryVaultRecord as VaultRecord,
-} from '@murph/assistant-core/query-runtime'
-import { materializeExportPack } from '@murph/assistant-core/usecases/shared'
-import { resolveVaultRelativePath } from '@murph/assistant-core/usecases/vault-usecase-helpers'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
-import { pathSchema } from '@murph/assistant-core/vault-cli-contracts'
+} from '@murphai/assistant-core/query-runtime'
+import { materializeExportPack } from '@murphai/assistant-core/usecases/shared'
+import { resolveVaultRelativePath } from '@murphai/assistant-core/usecases/vault-usecase-helpers'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
+import { pathSchema } from '@murphai/assistant-core/vault-cli-contracts'
 
 type JsonObject = Record<string, unknown>
 

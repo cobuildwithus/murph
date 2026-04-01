@@ -11,8 +11,8 @@ const mocks = vi.hoisted(() => ({
   resolveHostedExecutionDeviceSyncRuntimeClient: vi.fn(),
 }));
 
-vi.mock("@murph/hosted-execution", async () => {
-  const actual = await vi.importActual<typeof import("@murph/hosted-execution")>("@murph/hosted-execution");
+vi.mock("@murphai/hosted-execution", async () => {
+  const actual = await vi.importActual<typeof import("@murphai/hosted-execution")>("@murphai/hosted-execution");
   return {
     ...actual,
     normalizeHostedDeviceSyncJobHints: mocks.normalizeHostedDeviceSyncJobHints,

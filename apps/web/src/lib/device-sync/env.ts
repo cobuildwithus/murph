@@ -1,11 +1,11 @@
 import type {
   OuraDeviceSyncProviderConfig,
   WhoopDeviceSyncProviderConfig,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 import {
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 
 import { decodeHostedEncryptionKey } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";

@@ -6,7 +6,7 @@ import {
   fingerprintHost,
   inspectDirectoryLock,
   isProcessRunning,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 
 import { VaultError } from "../errors.ts";
 import { normalizeVaultRoot, resolveVaultPath } from "../path-safety.ts";

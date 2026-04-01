@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
-import { normalizeStrictIsoTimestamp } from "@murph/contracts";
+import { normalizeStrictIsoTimestamp } from "@murphai/contracts";
 import { z } from "zod";
 
 const MEDIA_TYPES: ReadonlyMap<string, string> = new Map([

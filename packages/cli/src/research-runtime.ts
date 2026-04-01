@@ -7,14 +7,14 @@ import { fileURLToPath } from 'node:url'
 import {
   resolveAssistantOperatorDefaults,
   type AssistantOperatorDefaults,
-} from '@murph/assistant-core/operator-config'
-import { loadIntegratedRuntime } from '@murph/assistant-core/usecases/runtime'
+} from '@murphai/assistant-core/operator-config'
+import { loadIntegratedRuntime } from '@murphai/assistant-core/usecases/runtime'
 import {
   type ResearchExecutionMode,
   type ResearchRunResult,
 } from './research-cli-contracts.js'
-import { normalizeNullableString as normalizeOptionalText } from '@murph/assistant-core/text/shared'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { normalizeNullableString as normalizeOptionalText } from '@murphai/assistant-core/text/shared'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 const DEFAULT_DEEPTHINK_MODEL = 'gpt-5.4-pro'
 const DEFAULT_DEEPTHINK_THINKING = 'extended'

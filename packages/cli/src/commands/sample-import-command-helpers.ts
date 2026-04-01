@@ -1,6 +1,6 @@
-import { loadRuntimeModule } from '@murph/assistant-core/runtime-import'
-import type { ImportersRuntimeModule } from '@murph/assistant-core/usecases/types'
-import { createRuntimeUnavailableError } from '@murph/assistant-core/commands/query-record-command-helpers'
+import { loadRuntimeModule } from '@murphai/assistant-core/runtime-import'
+import type { ImportersRuntimeModule } from '@murphai/assistant-core/usecases/types'
+import { createRuntimeUnavailableError } from '@murphai/assistant-core/commands/query-record-command-helpers'
 
 export interface ImportCsvSamplesOptions {
   delimiter?: string
@@ -51,7 +51,7 @@ export async function importCsvSamples(options: ImportCsvSamplesOptions) {
 async function loadImportersRuntime(): Promise<ImportersRuntimeModule> {
   importersRuntimePromise ??= (async () => {
     try {
-      const runtime = await loadRuntimeModule<ImportersRuntimeModule>('@murph/importers')
+      const runtime = await loadRuntimeModule<ImportersRuntimeModule>('@murphai/importers')
 
       if (
         typeof runtime.createImporters !== 'function' ||

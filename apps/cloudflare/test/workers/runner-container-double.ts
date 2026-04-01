@@ -1,9 +1,9 @@
-import type { HostedAssistantRuntimeJobInput } from "@murph/assistant-runtime";
+import type { HostedAssistantRuntimeJobInput } from "@murphai/assistant-runtime";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionRunnerRequest,
   HostedExecutionRunnerResult,
-} from "@murph/runtime-state";
+} from "@murphai/runtime-state";
 import { DurableObject } from "cloudflare:workers";
 
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";

@@ -8,7 +8,7 @@ Hosted execution is intentionally out of scope for this migration.
 
 ### 1. New local assistant daemon package
 
-A new published package now exists at `packages/assistantd` / `@murph/assistantd`.
+A new published package now exists at `packages/assistantd` / `@murphai/assistantd`.
 
 It exposes a localhost control plane for:
 

@@ -1,5 +1,5 @@
-import type { EventRecord, ExperimentEventRecord } from "@murph/contracts";
-import { CONTRACT_SCHEMA_VERSION, EVENT_KINDS, eventRecordSchema } from "@murph/contracts";
+import type { EventRecord, ExperimentEventRecord } from "@murphai/contracts";
+import { CONTRACT_SCHEMA_VERSION, EVENT_KINDS, eventRecordSchema } from "@murphai/contracts";
 
 import { ID_PREFIXES, VAULT_LAYOUT } from "../constants.ts";
 import { VaultError } from "../errors.ts";

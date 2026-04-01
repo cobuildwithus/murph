@@ -8,10 +8,10 @@ import {
   listWriteOperationMetadataPaths,
   parseFrontmatterDocument,
   readStoredWriteOperation,
-} from '@murph/core'
+} from '@murphai/core'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { registerWorkoutCommands } from '../src/commands/workout.js'
-import { createIntegratedVaultServices } from '@murph/assistant-core/vault-services'
+import { createIntegratedVaultServices } from '@murphai/assistant-core/vault-services'
 import type { CliEnvelope } from './cli-test-helpers.js'
 import { requireData, runCli } from './cli-test-helpers.js'
 

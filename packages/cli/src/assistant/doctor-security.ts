@@ -3,7 +3,7 @@ import path from 'node:path'
 import type {
   AssistantStatePaths,
   AssistantStatePermissionAudit,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import {
   assistantProviderRouteRecoverySchema,
   assistantProviderRouteRecoverySecretsSchema,
@@ -14,16 +14,16 @@ import {
   type AssistantProviderRouteRecoverySecrets,
   type AssistantSession,
   type AssistantSessionSecrets,
-} from '@murph/assistant-core/assistant-cli-contracts'
-import { serializeAssistantProviderSessionOptions } from '@murph/assistant-core/assistant/provider-config'
-import { normalizeAssistantSessionSnapshot } from '@murph/assistant-core/assistant/provider-state'
-import { mergeAssistantHeaders } from '@murph/assistant-core/assistant/redaction'
+} from '@murphai/assistant-core/assistant-cli-contracts'
+import { serializeAssistantProviderSessionOptions } from '@murphai/assistant-core/assistant/provider-config'
+import { normalizeAssistantSessionSnapshot } from '@murphai/assistant-core/assistant/provider-state'
+import { mergeAssistantHeaders } from '@murphai/assistant-core/assistant/redaction'
 import {
   auditAssistantStatePermissions,
   isMissingFileError,
   writeJsonFileAtomic,
-} from '@murph/assistant-core/assistant/shared'
-import { assertAssistantSessionId } from '@murph/assistant-core/assistant/state-ids'
+} from '@murphai/assistant-core/assistant/shared'
+import { assertAssistantSessionId } from '@murphai/assistant-core/assistant/state-ids'
 import {
   extractAssistantProviderRouteRecoverySecretsForPersistence,
   extractAssistantSessionSecretsForPersistence,
@@ -31,8 +31,8 @@ import {
   persistAssistantSessionSecrets,
   readAssistantProviderRouteRecoverySecrets,
   readAssistantSessionSecrets,
-} from '@murph/assistant-core/assistant/state-secrets'
-import { resolveAssistantSessionPath } from '@murph/assistant-core/assistant/store/persistence'
+} from '@murphai/assistant-core/assistant/state-secrets'
+import { resolveAssistantSessionPath } from '@murphai/assistant-core/assistant/store/persistence'
 
 export interface AssistantStateSecrecyAudit {
   malformedProviderRouteRecoverySecretSidecars: number

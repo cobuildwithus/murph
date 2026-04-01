@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@murph/contracts";
+import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
 import {

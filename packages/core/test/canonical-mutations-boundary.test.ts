@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test, vi } from "vitest";
 
-import type { EventRecord, ExperimentEventRecord } from "@murph/contracts";
+import type { EventRecord, ExperimentEventRecord } from "@murphai/contracts";
 
 vi.mock("../src/operations/canonical-write-lock.ts", () => ({
   acquireCanonicalWriteLock: async () => ({

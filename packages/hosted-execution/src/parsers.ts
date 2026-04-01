@@ -1,4 +1,4 @@
-import { assertContract, sharePackSchema } from "@murph/contracts";
+import { assertContract, sharePackSchema } from "@murphai/contracts";
 
 import type {
   HostedExecutionAssistantCronTickEvent,
@@ -452,9 +452,9 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
       return {
         kind,
         linqEvent: requireObject(record.linqEvent, "Hosted execution Linq message linqEvent"),
-        normalizedPhoneNumber: requireString(
-          record.normalizedPhoneNumber,
-          "Hosted execution Linq message normalizedPhoneNumber",
+        phoneLookupKey: requireString(
+          record.phoneLookupKey,
+          "Hosted execution Linq message phoneLookupKey",
         ),
         userId,
       };
@@ -476,23 +476,11 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
     }
     case "email.message.received":
       return {
-        envelopeFrom: readNullableString(
-          record.envelopeFrom,
-          "Hosted execution email message envelopeFrom",
-        ),
-        envelopeTo: readNullableString(
-          record.envelopeTo,
-          "Hosted execution email message envelopeTo",
-        ),
         identityId: requireString(record.identityId, "Hosted execution email message identityId"),
         kind,
         rawMessageKey: requireString(
           record.rawMessageKey,
           "Hosted execution email message rawMessageKey",
-        ),
-        threadTarget: readNullableString(
-          record.threadTarget,
-          "Hosted execution email message threadTarget",
         ),
         userId,
       } satisfies HostedExecutionEmailMessageReceivedEvent;

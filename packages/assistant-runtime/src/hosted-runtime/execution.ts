@@ -4,19 +4,19 @@ import {
   listHostedBundleArtifacts,
   snapshotHostedExecutionContext,
   type HostedBundleArtifactLocation,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionRunContext,
   HostedExecutionRunnerResult,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   refreshAssistantStatusSnapshot,
-} from "@murph/assistant-core";
-import { exportGatewayProjectionSnapshotLocal } from "@murph/gateway-local";
+} from "@murphai/assistant-core";
+import { exportGatewayProjectionSnapshotLocal } from "@murphai/gateway-local";
 
 import { reconcileHostedVerifiedEmailSelfTarget } from "../hosted-email-route.ts";
 import { createHostedArtifactUploadSink } from "./artifacts.ts";

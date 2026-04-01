@@ -1,8 +1,8 @@
 import {
   createHostedExecutionControlClient,
   readHostedExecutionControlEnvironment,
-} from "@murph/hosted-execution";
-import { createHostedVerifiedEmailUserEnv } from "@murph/runtime-state";
+} from "@murphai/hosted-execution";
+import { createHostedVerifiedEmailUserEnv } from "@murphai/runtime-state";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 

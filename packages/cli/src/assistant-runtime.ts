@@ -2,22 +2,22 @@ export type {
   AssistantConversationAudience,
   AssistantConversationDeliveryPolicy,
   AssistantConversationPolicy,
-} from '@murph/assistant-core/assistant/conversation-policy'
+} from '@murphai/assistant-core/assistant/conversation-policy'
 export {
   resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy,
   shouldExposeSensitiveHealthContext,
-} from '@murph/assistant-core/assistant/conversation-policy'
+} from '@murphai/assistant-core/assistant/conversation-policy'
 export type {
   AssistantRuntimeStateService,
-} from '@murph/assistant-core/assistant/runtime-state-service'
+} from '@murphai/assistant-core/assistant/runtime-state-service'
 export {
   createAssistantRuntimeStateService,
-} from '@murph/assistant-core/assistant/runtime-state-service'
+} from '@murphai/assistant-core/assistant/runtime-state-service'
 export type {
   AssistantTranscriptDistillation,
-} from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant-cli-contracts'
 export {
   appendAssistantTranscriptDistillation,
   buildAssistantTranscriptDistillationContinuityText,
@@ -25,7 +25,7 @@ export {
   maybeRefreshAssistantTranscriptDistillation,
   readLatestAssistantTranscriptDistillation,
   resolveAssistantTranscriptDistillationPath,
-} from '@murph/assistant-core/assistant/transcript-distillation'
+} from '@murphai/assistant-core/assistant/transcript-distillation'
 
 export type {
   AddAssistantCronJobInput,
@@ -62,7 +62,7 @@ export type {
 } from './assistant/service.js'
 export type {
   ConversationRef,
-} from '@murph/assistant-core/assistant/conversation-ref'
+} from '@murphai/assistant-core/assistant/conversation-ref'
 export {
   openAssistantConversation,
   sendAssistantMessage,
@@ -86,7 +86,7 @@ export type {
   AssistantMemoryTurnContextInput,
   AssistantMemoryUpsertInput,
   AssistantMemoryUpsertWriteResult,
-} from '@murph/assistant-core/assistant/memory'
+} from '@murphai/assistant-core/assistant/memory'
 export {
   assertAssistantMemoryTurnContextVault,
   createAssistantMemoryTurnContextEnv,
@@ -96,7 +96,7 @@ export {
   resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
   upsertAssistantMemory,
-} from '@murph/assistant-core/assistant/memory'
+} from '@murphai/assistant-core/assistant/memory'
 export type {
   AssistantAutoReplyScanResult,
   AssistantAutomationScanResult,
@@ -116,7 +116,7 @@ export type {
 } from './assistant/outbox.js'
 export type {
   AssistantOutboxIntent,
-} from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant-cli-contracts'
 export {
   dispatchAssistantOutboxIntent,
   drainAssistantOutbox,
@@ -131,7 +131,7 @@ export type {
   AssistantStateListDocumentsInput,
   AssistantStatePatchDocumentInput,
   AssistantStatePutDocumentInput,
-} from '@murph/assistant-core/assistant/state'
+} from '@murphai/assistant-core/assistant/state'
 export {
   buildDefaultAssistantCronStateDocId,
   deleteAssistantStateDocument,
@@ -140,11 +140,11 @@ export {
   patchAssistantStateDocument,
   putAssistantStateDocument,
   resolveAssistantStateDocumentPath,
-} from '@murph/assistant-core/assistant/state'
+} from '@murphai/assistant-core/assistant/state'
 
 export async function runAssistantChat(
   input: import('./assistant/service.js').AssistantChatInput,
-): Promise<import('@murph/assistant-core/assistant-cli-contracts').AssistantChatResult> {
+): Promise<import('@murphai/assistant-core/assistant-cli-contracts').AssistantChatResult> {
   const { runAssistantChatWithInk } = await import('./assistant-chat-ink.js')
   return runAssistantChatWithInk(input)
 }

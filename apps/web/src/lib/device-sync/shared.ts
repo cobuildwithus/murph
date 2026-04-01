@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 
-export { toIsoTimestamp } from "@murph/device-syncd";
+export { toIsoTimestamp } from "@murphai/device-syncd";
 
 export function normalizeNullableString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
@@ -38,7 +38,7 @@ export function generateHostedRandomPrefixedId(prefix: string): string {
 }
 
 // Keep this hosted-local on purpose. Importing the daemon helper would widen
-// the `@murph/device-syncd` public surface just to reuse a trivial primitive.
+// the `@murphai/device-syncd` public surface just to reuse a trivial primitive.
 export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }

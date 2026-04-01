@@ -1,4 +1,4 @@
-import { extractIsoDatePrefix } from "@murph/contracts";
+import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import { recordRelationTargetIds, type VaultRecord, type VaultRecordType } from "./model.ts";
 

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 
 import { PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
-import { deviceSyncError } from "@murph/device-syncd";
+import { deviceSyncError } from "@murphai/device-syncd";
 
 import type { AuthenticatedHostedUser } from "../auth";
 import { generateHostedRandomPrefixedId, maybeIsoTimestamp, toIsoTimestamp } from "../shared";

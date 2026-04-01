@@ -466,7 +466,7 @@ export const vaultMetadataSchema = withContractMetadata(
         .strict(),
     })
     .strict(),
-  "@murph/contracts/vault-metadata.schema.json",
+  "@murphai/contracts/vault-metadata.schema.json",
   "Murph Vault Metadata",
 );
 
@@ -566,7 +566,7 @@ export const eventRecordSchema = withContractMetadata(
       duration: boundedString(1, 120).optional(),
     }),
   ]),
-  "@murph/contracts/event-record.schema.json",
+  "@murphai/contracts/event-record.schema.json",
   "Murph Event Record",
 );
 
@@ -604,7 +604,7 @@ export const sampleRecordSchema = withContractMetadata(
       unit: z.literal("mg_dL"),
     }),
   ]),
-  "@murph/contracts/sample-record.schema.json",
+  "@murphai/contracts/sample-record.schema.json",
   "Murph Sample Record",
 );
 
@@ -631,7 +631,7 @@ export const auditRecordSchema = withContractMetadata(
       ),
     })
     .strict(),
-  "@murph/contracts/audit-record.schema.json",
+  "@murphai/contracts/audit-record.schema.json",
   "Murph Audit Record",
 );
 
@@ -695,7 +695,7 @@ export const inboxCaptureRecordSchema = withContractMetadata(
       attachments: z.array(inboxCaptureAttachmentSchema),
     })
     .strict(),
-  "@murph/contracts/inbox-capture-record.schema.json",
+  "@murphai/contracts/inbox-capture-record.schema.json",
   "Murph Inbox Capture Record",
 );
 
@@ -712,7 +712,7 @@ export const coreFrontmatterSchema = withContractMetadata(
       activeExperimentSlugs: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-core.schema.json",
+  "@murphai/contracts/frontmatter-core.schema.json",
   "Murph CORE Frontmatter",
 );
 
@@ -726,7 +726,7 @@ export const journalDayFrontmatterSchema = withContractMetadata(
       sampleStreams: uniqueArray(z.enum(SAMPLE_STREAMS), { uniqueItems: true }),
     })
     .strict(),
-  "@murph/contracts/frontmatter-journal-day.schema.json",
+  "@murphai/contracts/frontmatter-journal-day.schema.json",
   "Murph Journal Day Frontmatter",
 );
 
@@ -745,7 +745,7 @@ export const experimentFrontmatterSchema = withContractMetadata(
       tags: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-experiment.schema.json",
+  "@murphai/contracts/frontmatter-experiment.schema.json",
   "Murph Experiment Frontmatter",
 );
 
@@ -767,7 +767,7 @@ export const providerFrontmatterSchema = withContractMetadata(
       aliases: uniqueArray(boundedString(1, 160), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-provider.schema.json",
+  "@murphai/contracts/frontmatter-provider.schema.json",
   "Murph Provider Frontmatter",
 );
 
@@ -802,7 +802,7 @@ export const foodFrontmatterSchema = withContractMetadata(
         .optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-food.schema.json",
+  "@murphai/contracts/frontmatter-food.schema.json",
   "Murph Food Frontmatter",
 );
 
@@ -830,7 +830,7 @@ export const recipeFrontmatterSchema = withContractMetadata(
       relatedConditionIds: uniqueArray(idSchema(ID_PREFIXES.condition), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-recipe.schema.json",
+  "@murphai/contracts/frontmatter-recipe.schema.json",
   "Murph Recipe Frontmatter",
 );
 
@@ -853,7 +853,7 @@ export const workoutFormatFrontmatterSchema = withContractMetadata(
       templateText: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-workout-format.schema.json",
+  "@murphai/contracts/frontmatter-workout-format.schema.json",
   "Murph Workout Format Frontmatter",
 );
 
@@ -872,7 +872,7 @@ export const assessmentResponseSchema = withContractMetadata(
       relatedIds: uniqueArray(patternedString(GENERIC_CONTRACT_ID_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/assessment-response.schema.json",
+  "@murphai/contracts/assessment-response.schema.json",
   "Murph Assessment Response",
 );
 
@@ -933,7 +933,7 @@ export const profileSnapshotSchema = withContractMetadata(
       profile: profileSnapshotProfileSchema,
     })
     .strict(),
-  "@murph/contracts/profile-snapshot.schema.json",
+  "@murphai/contracts/profile-snapshot.schema.json",
   "Murph Profile Snapshot",
 );
 
@@ -949,7 +949,7 @@ export const profileCurrentFrontmatterSchema = withContractMetadata(
       topGoalIds: uniqueArray(idSchema(ID_PREFIXES.goal), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-profile-current.schema.json",
+  "@murphai/contracts/frontmatter-profile-current.schema.json",
   "Murph Profile Current Frontmatter",
 );
 
@@ -976,7 +976,7 @@ export const goalFrontmatterSchema = withContractMetadata(
       domains: uniqueArray(patternedString(SLUG_PATTERN), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-goal.schema.json",
+  "@murphai/contracts/frontmatter-goal.schema.json",
   "Murph Goal Frontmatter",
 );
 
@@ -999,7 +999,7 @@ export const conditionFrontmatterSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-condition.schema.json",
+  "@murphai/contracts/frontmatter-condition.schema.json",
   "Murph Condition Frontmatter",
 );
 
@@ -1020,7 +1020,7 @@ export const allergyFrontmatterSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-allergy.schema.json",
+  "@murphai/contracts/frontmatter-allergy.schema.json",
   "Murph Allergy Frontmatter",
 );
 
@@ -1061,7 +1061,7 @@ export const protocolFrontmatterSchema = withContractMetadata(
       })
       .strict();
   })(),
-  "@murph/contracts/frontmatter-protocol.schema.json",
+  "@murphai/contracts/frontmatter-protocol.schema.json",
   "Murph Protocol Frontmatter",
 );
 
@@ -1080,7 +1080,7 @@ export const familyMemberFrontmatterSchema = withContractMetadata(
       relatedVariantIds: uniqueArray(idSchema(ID_PREFIXES.variant), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-family-member.schema.json",
+  "@murphai/contracts/frontmatter-family-member.schema.json",
   "Murph Family Member Frontmatter",
 );
 
@@ -1100,7 +1100,7 @@ export const geneticVariantFrontmatterSchema = withContractMetadata(
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).optional(),
     })
     .strict(),
-  "@murph/contracts/frontmatter-genetic-variant.schema.json",
+  "@murphai/contracts/frontmatter-genetic-variant.schema.json",
   "Murph Genetic Variant Frontmatter",
 );
 

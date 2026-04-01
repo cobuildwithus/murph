@@ -1,5 +1,5 @@
-import { type ActivityStrengthExercise } from '@murph/contracts'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { type ActivityStrengthExercise } from '@murphai/contracts'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import {
   inferDurationMinutes,
   validateDurationMinutes,
@@ -7,15 +7,15 @@ import {
 import {
   deleteEventRecord,
   editEventRecord,
-} from '@murph/assistant-core/usecases/event-record-mutations'
+} from '@murphai/assistant-core/usecases/event-record-mutations'
 import {
   showEventRecord,
   upsertEventRecord,
-} from '@murph/assistant-core/usecases/provider-event'
+} from '@murphai/assistant-core/usecases/provider-event'
 import {
   compactObject,
   normalizeOptionalText,
-} from '@murph/assistant-core/usecases/vault-usecase-helpers'
+} from '@murphai/assistant-core/usecases/vault-usecase-helpers'
 
 const MILES_TO_KM = 1.609344
 

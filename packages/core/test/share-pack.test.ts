@@ -4,7 +4,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { test } from "vitest";
 
-import { assertContract, sharePackSchema } from "@murph/contracts";
+import { assertContract, sharePackSchema } from "@murphai/contracts";
 
 import {
   buildSharePackFromVault,

@@ -17,8 +17,8 @@ import {
 import {
   assistantChatResultSchema,
   type AssistantSession,
-} from '@murph/assistant-core/assistant-cli-contracts'
-import type { AssistantProviderProgressEvent } from '@murph/assistant-core/chat-provider'
+} from '@murphai/assistant-core/assistant-cli-contracts'
+import type { AssistantProviderProgressEvent } from '@murphai/assistant-core/chat-provider'
 import {
   discoverAssistantProviderModels,
   resolveAssistantCatalogReasoningOptions,
@@ -29,14 +29,14 @@ import {
 import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
-} from '@murph/assistant-core/assistant/provider-traces'
-import { resolveCodexDisplayOptions } from '@murph/assistant-core/assistant-codex'
+} from '@murphai/assistant-core/assistant/provider-traces'
+import { resolveCodexDisplayOptions } from '@murphai/assistant-core/assistant-codex'
 import {
   buildAssistantProviderDefaultsPatch,
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
   saveAssistantOperatorDefaultsPatch,
-} from '@murph/assistant-core/operator-config'
+} from '@murphai/assistant-core/operator-config'
 import {
   openAssistantConversation,
   sendAssistantMessage,
@@ -47,15 +47,15 @@ import {
   extractRecoveredAssistantSession,
   isAssistantProviderConnectionLostError,
   isAssistantProviderInterruptedError,
-} from '@murph/assistant-core/assistant/provider-turn-recovery'
+} from '@murphai/assistant-core/assistant/provider-turn-recovery'
 import {
   appendAssistantTranscriptEntries,
   isAssistantSessionNotFoundError,
   listAssistantTranscriptEntries,
   redactAssistantDisplayPath,
 } from '../store.js'
-import { normalizeNullableString } from '@murph/assistant-core/assistant/shared'
-import { redactAssistantSessionForDisplay } from '@murph/assistant-core/assistant/redaction'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
+import { redactAssistantSessionForDisplay } from '@murphai/assistant-core/assistant/redaction'
 import {
   CHAT_COMPOSER_HINT,
   CHAT_SLASH_COMMANDS,

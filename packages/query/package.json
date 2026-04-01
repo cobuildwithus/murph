@@ -1,5 +1,5 @@
 {
-  "name": "@murph/query",
+  "name": "@murphai/query",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -35,8 +35,8 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/contracts": "workspace:*",
-    "@murph/runtime-state": "workspace:*",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
     "zod": "^4.3.6"
   },
   "engines": {

@@ -1,4 +1,4 @@
-# @murph/assistant-core
+# @murphai/assistant-core
 
 Dedicated headless assistant boundary package for non-CLI consumers.
 

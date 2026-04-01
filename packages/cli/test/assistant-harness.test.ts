@@ -59,7 +59,7 @@ import {
   createAssistantToolCatalog,
   defineAssistantTool,
   resolveAssistantLanguageModel,
-} from '@murph/assistant-core/model-harness'
+} from '@murphai/assistant-core/model-harness'
 
 const TEST_API_KEY_ENV = 'ASSISTANT_TEST_KEY'
 

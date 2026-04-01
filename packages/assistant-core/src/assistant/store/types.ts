@@ -1,4 +1,4 @@
-import type { AssistantStatePaths } from '@murph/runtime-state/node'
+import type { AssistantStatePaths } from '@murphai/runtime-state/node'
 import type {
   AssistantApprovalPolicy,
   AssistantBindingDeliveryKind,

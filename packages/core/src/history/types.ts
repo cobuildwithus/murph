@@ -6,20 +6,20 @@ import {
   EVENT_SOURCES,
   HEALTH_HISTORY_EVENT_KINDS,
   TEST_RESULT_STATUSES as CONTRACT_TEST_RESULT_STATUSES,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
   EventSource,
   HealthHistoryEventKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import type { DateInput } from "../types.ts";
 
 export type {
   BloodTestReferenceRange,
   BloodTestResultRecord,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 export const HEALTH_HISTORY_KINDS = HEALTH_HISTORY_EVENT_KINDS;
 

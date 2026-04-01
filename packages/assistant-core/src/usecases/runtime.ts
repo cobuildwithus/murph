@@ -94,7 +94,7 @@ function isImportersRuntimeModule(value: unknown): value is ImportersFactoryRunt
 }
 
 export async function loadImportersRuntimeModule(): Promise<ImportersFactoryRuntimeModule> {
-  return loadRuntimeModule<ImportersFactoryRuntimeModule>("@murph/importers")
+  return loadRuntimeModule<ImportersFactoryRuntimeModule>("@murphai/importers")
 }
 
 export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
@@ -103,8 +103,8 @@ export async function loadIntegratedRuntime(): Promise<IntegratedRuntime> {
     (integratedRuntimePromise = (async () => {
       try {
         const [coreModule, queryModule] = await Promise.all([
-          loadRuntimeModule("@murph/core"),
-          loadRuntimeModule("@murph/query"),
+          loadRuntimeModule("@murphai/core"),
+          loadRuntimeModule("@murphai/query"),
         ])
 
         if (!isCoreRuntimeModule(coreModule) || !isQueryRuntimeModule(queryModule)) {

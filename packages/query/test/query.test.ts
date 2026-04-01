@@ -9,7 +9,7 @@ import { test, vi } from "vitest";
 import {
   INBOX_DB_RELATIVE_PATH,
   SEARCH_DB_RELATIVE_PATH,
-} from "@murph/runtime-state/node";
+} from "@murphai/runtime-state/node";
 
 import {
   ID_FAMILY_REGISTRY,

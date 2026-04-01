@@ -6,7 +6,7 @@ import {
   type AssistantStatePermissionAudit,
   writeJsonFileAtomic as writeRuntimeJsonFileAtomic,
   writeTextFileAtomic as writeRuntimeTextFileAtomic,
-} from '@murph/runtime-state/node'
+} from '@murphai/runtime-state/node'
 import {
   errorMessage,
   formatStructuredErrorMessage,

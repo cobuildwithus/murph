@@ -119,6 +119,6 @@
     "status"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-recipe.schema.json",
+  "$id": "@murphai/contracts/frontmatter-recipe.schema.json",
   "title": "Murph Recipe Frontmatter"
 }

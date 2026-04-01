@@ -16,7 +16,10 @@ import {
   ensureHostedMemberForPhone,
 } from "./member-identity-service";
 import { minimizeHostedLinqMessageReceivedEvent } from "./webhook-event-snapshots";
-import { normalizePhoneNumber } from "./shared";
+import {
+  createHostedPhoneLookupKey,
+  sanitizeHostedLinqEventForStorage,
+} from "./contact-privacy";
 import {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
@@ -25,7 +28,7 @@ import {
   type HostedWebhookPlan,
   type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
-import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murph/hosted-execution";
+import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murphai/hosted-execution";
 
 export type HostedOnboardingLinqWebhookResponse = {
   duplicate?: boolean;
@@ -51,15 +54,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return buildIgnoredLinqWebhookPlan("own-message");
   }
 
-  const normalizedPhoneNumber = normalizePhoneNumber(summary.phoneNumber);
-
-  if (!normalizedPhoneNumber) {
+  const phoneLookupKey = createHostedPhoneLookupKey(summary.phoneNumber);
+  if (!phoneLookupKey) {
     return buildIgnoredLinqWebhookPlan("invalid-phone");
   }
 
   const existingMember = await input.prisma.hostedMember.findUnique({
     where: {
-      normalizedPhoneNumber,
+      normalizedPhoneNumber: phoneLookupKey,
     },
   });
 
@@ -69,9 +71,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
         createHostedWebhookDispatchSideEffect({
           dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
             eventId: input.event.event_id,
-            linqEvent: minimizeHostedLinqMessageReceivedEvent(messageEvent),
-            normalizedPhoneNumber,
+            linqEvent: sanitizeHostedLinqEventForStorage(
+              minimizeHostedLinqMessageReceivedEvent(messageEvent),
+            ),
             occurredAt: resolveHostedLinqOccurredAt(messageEvent),
+            phoneLookupKey,
             userId: existingMember.id,
           }),
         }),
@@ -103,14 +107,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   const member = await ensureHostedMemberForPhone({
-    linqChatId: summary.chatId,
-    normalizedPhoneNumber,
+    phoneNumber: summary.phoneNumber,
     prisma: input.prisma,
   });
   const invite = await issueHostedInvite({
     channel: "linq",
-    linqChatId: summary.chatId,
-    linqEventId: input.event.event_id,
+    linqChatId: null,
+    linqEventId: null,
     memberId: member.id,
     prisma: input.prisma,
     triggerText: summary.text,

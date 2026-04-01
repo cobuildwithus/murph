@@ -1,7 +1,7 @@
 import type {
   AssistantSession,
   AssistantTranscriptEntry,
-} from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant-cli-contracts'
 import {
   findAssistantCatalogModelOptionIndex,
   findAssistantCatalogReasoningOptionIndex,
@@ -9,7 +9,7 @@ import {
   type AssistantModelOption,
   type AssistantReasoningOption,
 } from '../provider-catalog.js'
-import { normalizeNullableString } from '@murph/assistant-core/assistant/shared'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
 
 export type InkChatTraceKind =
   | 'command'

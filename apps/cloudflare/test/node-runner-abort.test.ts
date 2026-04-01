@@ -5,7 +5,7 @@ const assistantRuntimeMocks = vi.hoisted(() => ({
   runHostedAssistantRuntimeJobIsolated: vi.fn(),
 }));
 
-vi.mock("@murph/assistant-runtime", () => ({
+vi.mock("@murphai/assistant-runtime", () => ({
   readHostedRunnerCommitTimeoutMs: (timeoutMs: number | null) => timeoutMs ?? 30_000,
   runHostedAssistantRuntimeJobInProcess: assistantRuntimeMocks.runHostedAssistantRuntimeJobInProcess,
   runHostedAssistantRuntimeJobIsolated: assistantRuntimeMocks.runHostedAssistantRuntimeJobIsolated,

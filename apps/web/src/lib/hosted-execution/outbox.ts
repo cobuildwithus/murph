@@ -11,7 +11,7 @@ import {
   type HostedExecutionDispatchRequest,
   type HostedExecutionDispatchResult,
   resolveHostedExecutionDispatchLifecycle,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { finalizeHostedShareAcceptance } from "../hosted-share/shared";
 import { getPrisma } from "../prisma";

@@ -194,7 +194,7 @@ export const foodUpsertPayloadSchema = withContractMetadata(
       attachedProtocolIds: attachedProtocolIdsSchema,
     })
     .strict(),
-  "@murph/contracts/food-upsert-payload.schema.json",
+  "@murphai/contracts/food-upsert-payload.schema.json",
   "Murph Food Upsert Payload",
 );
 
@@ -220,7 +220,7 @@ export const recipeUpsertPayloadSchema = withContractMetadata(
       relatedConditionIds: uniqueArray(conditionIdSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/recipe-upsert-payload.schema.json",
+  "@murphai/contracts/recipe-upsert-payload.schema.json",
   "Murph Recipe Upsert Payload",
 );
 
@@ -243,7 +243,7 @@ export const workoutFormatUpsertPayloadSchema = withContractMetadata(
       templateText: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@murph/contracts/workout-format-upsert-payload.schema.json",
+  "@murphai/contracts/workout-format-upsert-payload.schema.json",
   "Murph Workout Format Upsert Payload",
 );
 
@@ -271,7 +271,7 @@ export const goalUpsertPayloadSchema = withContractMetadata(
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/goal-upsert-payload.schema.json",
+  "@murphai/contracts/goal-upsert-payload.schema.json",
   "Murph Goal Upsert Payload",
 );
 
@@ -299,7 +299,7 @@ export const goalUpsertPatchPayloadSchema = withContractMetadata(
       domains: uniqueArray(boundedString(1, 80), { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/goal-upsert-patch-payload.schema.json",
+  "@murphai/contracts/goal-upsert-patch-payload.schema.json",
   "Murph Goal Upsert Patch Payload",
 );
 
@@ -320,7 +320,7 @@ export const conditionUpsertPayloadSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@murph/contracts/condition-upsert-payload.schema.json",
+  "@murphai/contracts/condition-upsert-payload.schema.json",
   "Murph Condition Upsert Payload",
 );
 
@@ -341,7 +341,7 @@ export const conditionUpsertPatchPayloadSchema = withContractMetadata(
       note: boundedString(1, 4000).nullable().optional(),
     })
     .strict(),
-  "@murph/contracts/condition-upsert-patch-payload.schema.json",
+  "@murphai/contracts/condition-upsert-patch-payload.schema.json",
   "Murph Condition Upsert Patch Payload",
 );
 
@@ -360,7 +360,7 @@ export const allergyUpsertPayloadSchema = withContractMetadata(
       note: boundedString(1, 4000).optional(),
     })
     .strict(),
-  "@murph/contracts/allergy-upsert-payload.schema.json",
+  "@murphai/contracts/allergy-upsert-payload.schema.json",
   "Murph Allergy Upsert Payload",
 );
 
@@ -379,7 +379,7 @@ export const allergyUpsertPatchPayloadSchema = withContractMetadata(
       note: boundedString(1, 4000).nullable().optional(),
     })
     .strict(),
-  "@murph/contracts/allergy-upsert-patch-payload.schema.json",
+  "@murphai/contracts/allergy-upsert-patch-payload.schema.json",
   "Murph Allergy Upsert Patch Payload",
 );
 
@@ -398,7 +398,7 @@ export const familyMemberUpsertPayloadSchema = withContractMetadata(
       relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).optional(),
     })
     .strict(),
-  "@murph/contracts/family-member-upsert-payload.schema.json",
+  "@murphai/contracts/family-member-upsert-payload.schema.json",
   "Murph Family Member Upsert Payload",
 );
 
@@ -417,7 +417,7 @@ export const familyMemberUpsertPatchPayloadSchema = withContractMetadata(
       relatedVariantIds: uniqueArray(variantIdSchema, { uniqueItems: true }).nullable().optional(),
     })
     .strict(),
-  "@murph/contracts/family-member-upsert-patch-payload.schema.json",
+  "@murphai/contracts/family-member-upsert-patch-payload.schema.json",
   "Murph Family Member Upsert Patch Payload",
 );
 
@@ -435,7 +435,7 @@ export const geneticVariantUpsertPayloadSchema = withContractMetadata(
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).optional(),
     })
     .strict(),
-  "@murph/contracts/genetic-variant-upsert-payload.schema.json",
+  "@murphai/contracts/genetic-variant-upsert-payload.schema.json",
   "Murph Genetic Variant Upsert Payload",
 );
 
@@ -453,7 +453,7 @@ export const geneticVariantUpsertPatchPayloadSchema = withContractMetadata(
       note: boundedString(1, GENETIC_VARIANT_LIMITS.note).nullable().optional(),
     })
     .strict(),
-  "@murph/contracts/genetic-variant-upsert-patch-payload.schema.json",
+  "@murphai/contracts/genetic-variant-upsert-patch-payload.schema.json",
   "Murph Genetic Variant Upsert Patch Payload",
 );
 
@@ -480,7 +480,7 @@ export const protocolUpsertPayloadSchema = withContractMetadata(
       group: patternedString(GROUP_PATTERN, 1, 160).optional(),
     })
     .strict(),
-  "@murph/contracts/protocol-upsert-payload.schema.json",
+  "@murphai/contracts/protocol-upsert-payload.schema.json",
   "Murph Protocol Upsert Payload",
 );
 
@@ -497,19 +497,19 @@ export const sharePackFoodPayloadSchema = withContractMetadata(
       }).optional(),
     })
     .strict(),
-  "@murph/contracts/share-pack-food-payload.schema.json",
+  "@murphai/contracts/share-pack-food-payload.schema.json",
   "Murph Share Pack Food Payload",
 );
 
 export const sharePackRecipePayloadSchema = withContractMetadata(
   recipeUpsertPayloadSchema.omit({ recipeId: true }).strict(),
-  "@murph/contracts/share-pack-recipe-payload.schema.json",
+  "@murphai/contracts/share-pack-recipe-payload.schema.json",
   "Murph Share Pack Recipe Payload",
 );
 
 export const sharePackProtocolPayloadSchema = withContractMetadata(
   protocolUpsertPayloadSchema.omit({ protocolId: true }).strict(),
-  "@murph/contracts/share-pack-protocol-payload.schema.json",
+  "@murphai/contracts/share-pack-protocol-payload.schema.json",
   "Murph Share Pack Protocol Payload",
 );
 
@@ -537,7 +537,7 @@ export const sharePackEntitySchema = withContractMetadata(
       })
       .strict(),
   ]),
-  "@murph/contracts/share-pack-entity.schema.json",
+  "@murphai/contracts/share-pack-entity.schema.json",
   "Murph Share Pack Entity",
 );
 
@@ -624,7 +624,7 @@ export const sharePackSchema = withContractMetadata(
         }
       }
     }),
-  "@murph/contracts/share-pack.schema.json",
+  "@murphai/contracts/share-pack.schema.json",
   "Murph Share Pack",
 );
 

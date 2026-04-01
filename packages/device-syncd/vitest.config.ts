@@ -13,11 +13,11 @@ import {
 
 const packageDir = path.dirname(fileURLToPath(import.meta.url));
 const WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murph/contracts": "../contracts/src/index.ts",
-  "@murph/core": "../core/src/index.ts",
-  "@murph/device-syncd": "./src/index.ts",
-  "@murph/importers": "../importers/src/index.ts",
-  "@murph/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/contracts": "../contracts/src/index.ts",
+  "@murphai/core": "../core/src/index.ts",
+  "@murphai/device-syncd": "./src/index.ts",
+  "@murphai/importers": "../importers/src/index.ts",
+  "@murphai/runtime-state": "../runtime-state/src/index.ts",
 } as const;
 
 export default defineProject({

@@ -1,5 +1,5 @@
 {
-  "name": "@murph/hosted-execution",
+  "name": "@murphai/hosted-execution",
   "version": "0.0.0",
   "private": false,
   "type": "module",
@@ -32,7 +32,7 @@
     "node": ">=22.16.0"
   },
   "dependencies": {
-    "@murph/contracts": "workspace:*",
-    "@murph/runtime-state": "workspace:*"
+    "@murphai/contracts": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
   }
 }

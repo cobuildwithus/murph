@@ -7,7 +7,7 @@ import {
   assertAssistantOutboxIntentId,
   assertAssistantSessionId,
   isAssistantSessionNotFoundError,
-} from '@murph/assistant-core'
+} from '@murphai/assistant-core'
 import {
   gatewayFetchAttachmentsInputSchema,
   gatewayGetConversationInputSchema,
@@ -27,8 +27,8 @@ import {
   type GatewayRespondToPermissionInput,
   type GatewaySendMessageInput,
   type GatewayWaitForEventsInput,
-} from '@murph/gateway-core'
-import { isLoopbackRemoteAddress } from '@murph/runtime-state/node'
+} from '@murphai/gateway-core'
+import { isLoopbackRemoteAddress } from '@murphai/runtime-state/node'
 import type { AssistantLocalService } from './service.js'
 
 const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024

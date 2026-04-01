@@ -1,10 +1,10 @@
 import {
   importSharePackIntoVault,
-} from "@murph/core";
+} from "@murphai/core";
 import {
   parseHostedExecutionSharePackResponse,
   resolveHostedExecutionSharePackClient,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import type {
   HostedDispatchEffect,

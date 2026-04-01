@@ -9,7 +9,7 @@ import {
   safeParseContract,
   type JsonObject,
   type HealthEntityDefinitionWithRegistry,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 import { VaultCliError } from "../vault-cli-errors.js";
 import type {
   CommandContext,

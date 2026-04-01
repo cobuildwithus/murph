@@ -2,7 +2,7 @@ import {
   deriveProtocolGroupFromRelativePath,
   type BankEntityKind,
   type HealthEntityRegistryKind,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 export type BankEntitySortBehavior = "gene-title" | "priority-title" | "title";
 

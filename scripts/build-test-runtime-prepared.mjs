@@ -61,16 +61,23 @@ function collectAssistantCoreFacadeSmokeImportPaths() {
   const cliSourceRoot = path.join(repoRoot, "packages/cli/src");
   const distRoot = path.join(repoRoot, "packages/assistant-core/dist");
   const subpaths = new Set();
+  const assistantCoreFacadeImportPattern = /["'`]@murph(?:ai)?\/assistant-core\/([^"'`\s]+)["'`]/g;
 
   for (const filePath of walkTypeScriptFiles(cliSourceRoot)) {
     const source = readFileSync(filePath, "utf8");
-    for (const match of source.matchAll(/["'`]@murph\/assistant-core\/([^"'`\s]+)["'`]/g)) {
+    for (const match of source.matchAll(assistantCoreFacadeImportPattern)) {
       const subpath = match[1];
       if (!subpath) {
         continue;
       }
       subpaths.add(subpath);
     }
+  }
+
+  if (subpaths.size === 0) {
+    throw new Error(
+      "Expected packages/cli/src to import at least one @murphai/assistant-core subpath for prepared-runtime verification.",
+    );
   }
 
   return [...subpaths]

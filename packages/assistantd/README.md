@@ -1,8 +1,8 @@
-# @murph/assistantd
+# @murphai/assistantd
 
 Published local assistant runtime control plane for Murph.
 
-`assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status through the explicit `@murph/assistant-core` headless surface.
+`assistantd` is the local daemon boundary for the personal assistant runtime. It keeps the canonical vault write surface in Murph core/CLI while giving the assistant runtime a single loopback-owned control plane for chat turns, session access, outbox draining, cron processing, automation scans, diagnostics, and status through the explicit `@murphai/assistant-core` headless surface.
 
 Like `device-syncd`, the daemon binds the control plane to localhost by default and requires a bearer token for every control-plane request. It is meant to run one daemon per selected vault.
 
@@ -11,7 +11,7 @@ What it does:
 - owns assistant session execution through one runtime authority per vault
 - keeps assistant runtime state in sibling `assistant-state/**`, not in canonical vault files
 - exposes status, session, outbox, cron, and automation control routes for local clients
-- publishes `@murph/assistantd/client` as the loopback-only HTTP client surface for daemon-routed callers
+- publishes `@murphai/assistantd/client` as the loopback-only HTTP client surface for daemon-routed callers
 - lets the CLI operate as an HTTP client when `MURPH_ASSISTANTD_BASE_URL` and `MURPH_ASSISTANTD_CONTROL_TOKEN` are configured
 
 What it does not do:
@@ -76,6 +76,6 @@ assistantd now also serves the local derived gateway plane over loopback-only au
 
 These routes serve the operational conversation/message gateway surface for local MCP or other transport adapters without turning assistantd into a second canonical write owner.
 
-Local gateway helpers now honor the same assistantd base-url/token environment variables as the assistant client path, so consumers can route steady-state gateway reads/sends through the daemon whenever it is configured. The transport-neutral gateway contracts stay in `@murph/gateway-core`; the vault-backed local runtime now lives in `@murph/gateway-local`.
+Local gateway helpers now honor the same assistantd base-url/token environment variables as the assistant client path, so consumers can route steady-state gateway reads/sends through the daemon whenever it is configured. The transport-neutral gateway contracts stay in `@murphai/gateway-core`; the vault-backed local runtime now lives in `@murphai/gateway-local`.
 
-The published `@murph/assistantd/client` subpath now owns that loopback client config plus the gateway daemon client helpers. CLI-only assistant routing helpers may still wrap it where they need package-local assistant contracts, but the daemon transport substrate itself no longer lives in `packages/cli`.
+The published `@murphai/assistantd/client` subpath now owns that loopback client config plus the gateway daemon client helpers. CLI-only assistant routing helpers may still wrap it where they need package-local assistant contracts, but the daemon transport substrate itself no longer lives in `packages/cli`.

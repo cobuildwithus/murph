@@ -1,4 +1,4 @@
-import type { JsonObject } from "@murph/contracts"
+import type { JsonObject } from "@murphai/contracts"
 
 import type { ReadEntity } from "./vault-cli-contracts.js"
 

@@ -9,7 +9,7 @@ import {
   type JsonObject,
   type RawImportKind,
   type RawImportManifestArtifact,
-} from "@murph/contracts";
+} from "@murphai/contracts";
 
 import type { WriteBatch } from "./write-batch.ts";
 import { normalizeRelativeVaultPath } from "../path-safety.ts";

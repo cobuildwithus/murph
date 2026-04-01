@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
-import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murph/core'
+import { normalizeOpaquePathSegment, normalizeRelativeVaultPath } from '@murphai/core'
 import {
   resolveAssistantInboxArtifactPath,
   resolveAssistantVaultPath,

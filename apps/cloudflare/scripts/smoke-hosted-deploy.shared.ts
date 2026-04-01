@@ -2,7 +2,7 @@ import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
   type HostedExecutionBundleRef,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 

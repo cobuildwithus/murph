@@ -1,69 +1,69 @@
 {
   "repositoryUrl": "https://github.com/cobuildwithus/murph",
-  "primaryPackage": "murph",
+  "primaryPackage": "@murphai/murph",
   "releaseArtifacts": {
     "changelogPath": "packages/cli/CHANGELOG.md",
     "releaseNotesDir": "packages/cli/release-notes"
   },
   "packages": [
     {
-      "name": "@murph/contracts",
+      "name": "@murphai/contracts",
       "path": "packages/contracts"
     },
     {
-      "name": "@murph/hosted-execution",
+      "name": "@murphai/hosted-execution",
       "path": "packages/hosted-execution"
     },
     {
-      "name": "@murph/runtime-state",
+      "name": "@murphai/runtime-state",
       "path": "packages/runtime-state"
     },
     {
-      "name": "@murph/assistant-core",
+      "name": "@murphai/assistant-core",
       "path": "packages/assistant-core"
     },
     {
-      "name": "@murph/gateway-core",
+      "name": "@murphai/gateway-core",
       "path": "packages/gateway-core"
     },
     {
-      "name": "@murph/gateway-local",
+      "name": "@murphai/gateway-local",
       "path": "packages/gateway-local"
     },
     {
-      "name": "@murph/core",
+      "name": "@murphai/core",
       "path": "packages/core"
     },
     {
-      "name": "@murph/query",
+      "name": "@murphai/query",
       "path": "packages/query"
     },
     {
-      "name": "@murph/importers",
+      "name": "@murphai/importers",
       "path": "packages/importers"
     },
     {
-      "name": "@murph/device-syncd",
+      "name": "@murphai/device-syncd",
       "path": "packages/device-syncd"
     },
     {
-      "name": "@murph/inboxd",
+      "name": "@murphai/inboxd",
       "path": "packages/inboxd"
     },
     {
-      "name": "@murph/parsers",
+      "name": "@murphai/parsers",
       "path": "packages/parsers"
     },
     {
-      "name": "murph",
+      "name": "@murphai/murph",
       "path": "packages/cli"
     },
     {
-      "name": "@murph/assistant-runtime",
+      "name": "@murphai/assistant-runtime",
       "path": "packages/assistant-runtime"
     },
     {
-      "name": "@murph/assistantd",
+      "name": "@murphai/assistantd",
       "path": "packages/assistantd"
     }
   ]

@@ -2,7 +2,7 @@ import {
   buildHostedExecutionDeviceSyncWakeDispatch,
   type HostedExecutionDeviceSyncWakeEvent,
   type HostedExecutionDispatchRequest,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { toJsonRecord } from "./shared";
 

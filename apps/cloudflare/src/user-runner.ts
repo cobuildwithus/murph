@@ -6,8 +6,8 @@ import type {
   HostedExecutionRunContext,
   HostedExecutionRunPhase,
   HostedExecutionUserStatus,
-} from "@murph/hosted-execution";
-import type { HostedAssistantRuntimeJobInput } from "@murph/assistant-runtime";
+} from "@murphai/hosted-execution";
+import type { HostedAssistantRuntimeJobInput } from "@murphai/assistant-runtime";
 import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
@@ -20,11 +20,11 @@ import type {
   GatewayReadMessagesInput,
   GatewayReadMessagesResult,
   GatewayRespondToPermissionInput,
-} from "@murph/gateway-core";
+} from "@murphai/gateway-core";
 import {
   emitHostedExecutionStructuredLog,
   resolveHostedExecutionDispatchOutcomeState,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import type { R2BucketLike } from "./bundle-store.js";
 import { HostedGatewayProjectionStore } from "./gateway-store.js";

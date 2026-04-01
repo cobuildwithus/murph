@@ -1,5 +1,5 @@
-import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
-import { sendGatewayMessageLocal } from "@murph/gateway-local";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
+import { sendGatewayMessageLocal } from "@murphai/gateway-local";
 
 import { prepareHostedDispatchContext } from "./context.ts";
 import { ingestHostedEmailMessage } from "./events/email.ts";

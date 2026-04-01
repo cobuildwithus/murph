@@ -2,20 +2,20 @@ import {
   createConfiguredDeviceSyncProviders,
   createDeviceSyncRegistry,
   createDeviceSyncService,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 import {
   openInboxRuntime,
   rebuildRuntimeFromVault,
-} from "@murph/inboxd";
+} from "@murphai/inboxd";
 import {
   createConfiguredParserRegistry,
   createInboxParserService,
-} from "@murph/parsers";
+} from "@murphai/parsers";
 import {
   createIntegratedInboxServices,
   getAssistantCronStatus,
   runAssistantAutomation,
-} from "@murph/assistant-core";
+} from "@murphai/assistant-core";
 
 import type {
   HostedMaintenanceMetrics,
@@ -30,11 +30,11 @@ import {
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 20;
 const HOSTED_MAX_PARSER_JOBS = 50;

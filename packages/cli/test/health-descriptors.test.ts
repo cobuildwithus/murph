@@ -3,19 +3,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { healthEntityDefinitions, protocolRegistryEntityDefinition } from "@murph/contracts";
+import { healthEntityDefinitions, protocolRegistryEntityDefinition } from "@murphai/contracts";
 import { test } from "vitest";
 
 import {
   findHealthDescriptorForLookup,
   healthEntityDescriptorByKind,
   inferHealthEntityKind,
-} from "@murph/assistant-core/health-cli-descriptors";
-import { getHealthRegistryCommandMetadata } from "@murph/assistant-core/health-registry-command-metadata";
+} from "@murphai/assistant-core/health-cli-descriptors";
+import { getHealthRegistryCommandMetadata } from "@murphai/assistant-core/health-registry-command-metadata";
 import {
   createExplicitHealthCoreServices,
   createExplicitHealthQueryServices,
-} from "@murph/assistant-core/usecases/explicit-health-family-services";
+} from "@murphai/assistant-core/usecases/explicit-health-family-services";
 
 test("CLI health descriptors inherit shared taxonomy lookup metadata and scaffold templates", () => {
   for (const definition of healthEntityDefinitions) {

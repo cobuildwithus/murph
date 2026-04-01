@@ -7,7 +7,7 @@ import {
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
   type HostedExecutionRunStatus,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
 import { ensureRunnerQueueSchema } from "./runner-queue-schema.js";

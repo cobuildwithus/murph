@@ -1,4 +1,4 @@
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 export const MAX_DURATION_MINUTES = 24 * 60
 

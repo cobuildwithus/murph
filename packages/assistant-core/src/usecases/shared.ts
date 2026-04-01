@@ -6,7 +6,7 @@ import {
   BLOOD_TEST_SPECIMEN_TYPES,
   healthEntityDefinitions,
   type JsonObject,
-} from "@murph/contracts"
+} from "@murphai/contracts"
 
 import { VaultCliError } from "../vault-cli-errors.js"
 import {

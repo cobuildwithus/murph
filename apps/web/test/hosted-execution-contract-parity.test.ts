@@ -16,7 +16,7 @@ import {
   readHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionEventKind,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { serializeHostedExecutionOutboxPayload } from "@/src/lib/hosted-execution/outbox-payload";
 
@@ -52,13 +52,10 @@ describe("hosted execution contract parity", () => {
         userId: "member_123",
       }),
       "email.message.received": () => buildHostedExecutionEmailMessageReceivedDispatch({
-        envelopeFrom: "alice@example.test",
-        envelopeTo: "assistant@example.test",
         eventId: "evt_email",
         identityId: "assistant@example.test",
         occurredAt: "2026-03-26T12:02:00.000Z",
         rawMessageKey: "raw_email_123",
-        threadTarget: null,
         userId: "member_123",
       }),
       "linq.message.received": () => buildHostedExecutionLinqMessageReceivedDispatch({
@@ -70,8 +67,8 @@ describe("hosted execution contract parity", () => {
           event_id: "evt_linq",
           event_type: "message.received",
         },
-        normalizedPhoneNumber: "+15551234567",
         occurredAt: "2026-03-26T12:03:00.000Z",
+        phoneLookupKey: "hbidx:phone:v1:test",
         userId: "member_123",
       }),
       "member.activated": () => buildHostedExecutionMemberActivatedDispatch({

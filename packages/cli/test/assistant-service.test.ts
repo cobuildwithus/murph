@@ -10,11 +10,11 @@ import {
   listWriteOperationMetadataPaths,
   readJsonlRecords,
   updateVaultSummary,
-} from '@murph/core'
+} from '@murphai/core'
 import {
   createInboxPipeline,
   openInboxRuntime,
-} from '@murph/inboxd'
+} from '@murphai/inboxd'
 import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const serviceMocks = vi.hoisted(() => ({
@@ -22,9 +22,9 @@ const serviceMocks = vi.hoisted(() => ({
   executeAssistantProviderTurn: vi.fn(),
 }))
 
-vi.mock('@murph/assistant-core/outbound-channel', async () => {
-  const actual = await vi.importActual<typeof import('@murph/assistant-core/outbound-channel')>(
-    '@murph/assistant-core/outbound-channel',
+vi.mock('@murphai/assistant-core/outbound-channel', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-core/outbound-channel')>(
+    '@murphai/assistant-core/outbound-channel',
   )
 
   return {
@@ -34,9 +34,9 @@ vi.mock('@murph/assistant-core/outbound-channel', async () => {
   }
 })
 
-vi.mock('@murph/assistant-core/assistant-provider', async () => {
-  const actual = await vi.importActual<typeof import('@murph/assistant-core/assistant-provider')>(
-    '@murph/assistant-core/assistant-provider',
+vi.mock('@murphai/assistant-core/assistant-provider', async () => {
+  const actual = await vi.importActual<typeof import('@murphai/assistant-core/assistant-provider')>(
+    '@murphai/assistant-core/assistant-provider',
   )
 
   return {
@@ -53,26 +53,26 @@ import {
 import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
-} from '@murph/assistant-core/assistant/memory'
-import { resolveAssistantConversationPolicy } from '@murph/assistant-core/assistant/conversation-policy'
-import { sanitizeAssistantOutboundReply } from '@murph/assistant-core/assistant/reply-sanitizer'
+} from '@murphai/assistant-core/assistant/memory'
+import { resolveAssistantConversationPolicy } from '@murphai/assistant-core/assistant/conversation-policy'
+import { sanitizeAssistantOutboundReply } from '@murphai/assistant-core/assistant/reply-sanitizer'
 import {
   VAULT_ENV,
   saveAssistantOperatorDefaultsPatch,
-} from '@murph/assistant-core/operator-config'
-import { buildAssistantFailoverRoutes } from '@murph/assistant-core/assistant/failover'
+} from '@murphai/assistant-core/operator-config'
+import { buildAssistantFailoverRoutes } from '@murphai/assistant-core/assistant/failover'
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   resolveAssistantStatePaths,
   saveAssistantSession,
-} from '@murph/assistant-core/assistant-state'
-import { readAssistantProviderRouteRecovery } from '@murph/assistant-core/assistant/provider-turn-recovery'
+} from '@murphai/assistant-core/assistant-state'
+import { readAssistantProviderRouteRecovery } from '@murphai/assistant-core/assistant/provider-turn-recovery'
 import {
   attachOpenAiCompatibleProviderToolExecutionState,
-} from '@murph/assistant-core/assistant/providers/openai-compatible'
-import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
+} from '@murphai/assistant-core/assistant/providers/openai-compatible'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 const cleanupPaths: string[] = []
 const CANONICAL_WRITE_GUARD_RECEIPT_DIRECTORY_ENV =

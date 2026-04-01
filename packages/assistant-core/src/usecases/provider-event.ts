@@ -1,4 +1,4 @@
-import { EVENT_KINDS, type JsonObject } from '@murph/contracts'
+import { EVENT_KINDS, type JsonObject } from '@murphai/contracts'
 import { z } from 'incur'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
@@ -827,7 +827,7 @@ async function loadProviderEventQueryRuntime(): Promise<QueryRuntimeModule> {
 }
 
 async function loadProviderEventCoreRuntime(): Promise<ProviderEventCoreRuntime> {
-  return loadRuntimeModule<ProviderEventCoreRuntime>('@murph/core')
+  return loadRuntimeModule<ProviderEventCoreRuntime>('@murphai/core')
 }
 
 function buildProviderData(provider: ProviderReadModel) {

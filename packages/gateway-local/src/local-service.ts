@@ -17,13 +17,13 @@ import {
   type GatewayReadMessagesResult,
   type GatewayService,
   type GatewayWaitForEventsInput,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   fetchGatewayAttachmentsFromSnapshot,
   getGatewayConversationFromSnapshot,
   listGatewayConversationsFromSnapshot,
   readGatewayMessagesFromSnapshot,
-} from '@murph/gateway-core'
+} from '@murphai/gateway-core'
 import {
   exportGatewayProjectionSnapshotLocal,
   listGatewayOpenPermissionsLocal,

@@ -7,21 +7,21 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 >;
 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murph/contracts": "../../packages/contracts/src/index.ts",
-  "@murph/hosted-execution": "../../packages/hosted-execution/src/index.ts",
-  "@murph/runtime-state": "../../packages/runtime-state/src/index.ts",
-  "@murph/core": "../../packages/core/src/index.ts",
-  "@murph/importers": "../../packages/importers/src/index.ts",
-  "@murph/inboxd": "../../packages/inboxd/src/index.ts",
-  "@murph/device-syncd": "../../packages/device-syncd/src/index.ts",
+  "@murphai/contracts": "../../packages/contracts/src/index.ts",
+  "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
+  "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
+  "@murphai/core": "../../packages/core/src/index.ts",
+  "@murphai/importers": "../../packages/importers/src/index.ts",
+  "@murphai/inboxd": "../../packages/inboxd/src/index.ts",
+  "@murphai/device-syncd": "../../packages/device-syncd/src/index.ts",
 } as const satisfies WorkspaceSourceEntryRelativePaths;
 
 export const LOCAL_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
-  "@murph/contracts": "../contracts/src/index.ts",
-  "@murph/device-syncd": "../device-syncd/src/index.ts",
-  "@murph/hosted-execution": "../hosted-execution/src/index.ts",
-  "@murph/runtime-state": "../runtime-state/src/index.ts",
-  "@murph/query": "../query/src/index.ts",
+  "@murphai/contracts": "../contracts/src/index.ts",
+  "@murphai/device-syncd": "../device-syncd/src/index.ts",
+  "@murphai/hosted-execution": "../hosted-execution/src/index.ts",
+  "@murphai/runtime-state": "../runtime-state/src/index.ts",
+  "@murphai/query": "../query/src/index.ts",
 } as const satisfies WorkspaceSourceEntryRelativePaths;
 
 type VitestAlias = {

@@ -148,6 +148,6 @@
     "startedOn"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-protocol.schema.json",
+  "$id": "@murphai/contracts/frontmatter-protocol.schema.json",
   "title": "Murph Protocol Frontmatter"
 }

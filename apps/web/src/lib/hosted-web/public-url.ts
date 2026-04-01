@@ -1,7 +1,7 @@
 import {
   normalizeHostedExecutionBaseUrl,
   readHostedExecutionVercelProductionBaseUrl,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import { normalizeNullableString } from "../device-sync/shared";
 

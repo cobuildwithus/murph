@@ -47,6 +47,6 @@
     "sampleStreams"
   ],
   "additionalProperties": false,
-  "$id": "@murph/contracts/frontmatter-journal-day.schema.json",
+  "$id": "@murphai/contracts/frontmatter-journal-day.schema.json",
   "title": "Murph Journal Day Frontmatter"
 }

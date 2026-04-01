@@ -1,5 +1,5 @@
 {
-  "name": "@murph/inboxd",
+  "name": "@murphai/inboxd",
   "version": "0.0.0",
   "private": false,
   "description": "Local inbox ingestion runtime for Murph.",
@@ -57,9 +57,9 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },
   "dependencies": {
-    "@murph/contracts": "workspace:*",
-    "@murph/core": "workspace:*",
-    "@murph/runtime-state": "workspace:*",
+    "@murphai/contracts": "workspace:*",
+    "@murphai/core": "workspace:*",
+    "@murphai/runtime-state": "workspace:*",
     "@photon-ai/imessage-kit": "2.1.2",
     "grammy": "1.41.1"
   }

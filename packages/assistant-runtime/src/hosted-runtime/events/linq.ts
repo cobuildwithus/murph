@@ -1,8 +1,8 @@
 import {
   normalizeLinqWebhookEvent,
   parseLinqWebhookEvent,
-} from "@murph/inboxd";
-import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+} from "@murphai/inboxd";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";
 
@@ -14,7 +14,7 @@ export async function ingestHostedLinqMessage(
 ): Promise<void> {
   const event = parseLinqWebhookEvent(JSON.stringify(dispatch.event.linqEvent));
   const capture = await normalizeLinqWebhookEvent({
-    defaultAccountId: dispatch.event.normalizedPhoneNumber,
+    defaultAccountId: dispatch.event.phoneLookupKey,
     event,
   });
 

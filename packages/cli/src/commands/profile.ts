@@ -1,7 +1,7 @@
 import { Cli, z } from "incur";
-import { requestIdFromOptions, withBaseOptions } from "@murph/assistant-core/command-helpers";
-import { pathSchema } from "@murph/assistant-core/vault-cli-contracts";
-import type { VaultServices } from "@murph/assistant-core/vault-services";
+import { requestIdFromOptions, withBaseOptions } from "@murphai/assistant-core/command-helpers";
+import { pathSchema } from "@murphai/assistant-core/vault-cli-contracts";
+import type { VaultServices } from "@murphai/assistant-core/vault-services";
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";

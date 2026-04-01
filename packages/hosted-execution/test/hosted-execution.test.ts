@@ -52,11 +52,11 @@ import {
   resolveHostedExecutionDispatchOutcomeState,
   resolveHostedExecutionSharePackClient,
   verifyHostedExecutionSignature,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 const describe = baseDescribe.sequential;
 
-describe("@murph/hosted-execution", () => {
+describe("@murphai/hosted-execution", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -722,23 +722,17 @@ describe("@murph/hosted-execution", () => {
   it("round-trips hosted email dispatches through the shared builder and parser", () => {
     expect(parseHostedExecutionDispatchRequest(
       buildHostedExecutionEmailMessageReceivedDispatch({
-        envelopeFrom: "alice@example.test",
-        envelopeTo: "assistant+u-member@mail.example.test",
         eventId: "email:raw_email_123",
         identityId: "assistant@mail.example.test",
         occurredAt: "2026-03-28T09:00:00.000Z",
         rawMessageKey: "raw_email_123",
-        threadTarget: null,
         userId: "member_123",
       }),
     )).toEqual({
       event: {
-        envelopeFrom: "alice@example.test",
-        envelopeTo: "assistant+u-member@mail.example.test",
         identityId: "assistant@mail.example.test",
         kind: "email.message.received",
         rawMessageKey: "raw_email_123",
-        threadTarget: null,
         userId: "member_123",
       },
       eventId: "email:raw_email_123",
@@ -824,13 +818,10 @@ describe("@murph/hosted-execution", () => {
 
   it("builds minimized dispatch refs and only reads current-schema refs when storage is explicit", () => {
     const dispatch = buildHostedExecutionEmailMessageReceivedDispatch({
-      envelopeFrom: "alice@example.test",
-      envelopeTo: "assistant+u-member@mail.example.test",
       eventId: "email:raw_email_123",
       identityId: "assistant@mail.example.test",
       occurredAt: "2026-03-28T09:00:00.000Z",
       rawMessageKey: "raw_email_123",
-      threadTarget: null,
       userId: "member_123",
     });
     const dispatchRef = buildHostedExecutionDispatchRef(dispatch);
@@ -876,13 +867,10 @@ describe("@murph/hosted-execution", () => {
       userId: "member_123",
     });
     const referenceDispatch = buildHostedExecutionEmailMessageReceivedDispatch({
-      envelopeFrom: "alice@example.test",
-      envelopeTo: "assistant+u-member@mail.example.test",
       eventId: "email:raw_email_456",
       identityId: "assistant@mail.example.test",
       occurredAt: "2026-03-28T09:15:00.000Z",
       rawMessageKey: "raw_email_456",
-      threadTarget: null,
       userId: "member_123",
     });
 

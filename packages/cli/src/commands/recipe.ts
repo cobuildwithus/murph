@@ -1,16 +1,16 @@
-import { RECIPE_STATUSES } from '@murph/contracts'
+import { RECIPE_STATUSES } from '@murphai/contracts'
 import { Cli, z } from 'incur'
 
 import {
   listItemSchema,
   pathSchema,
   showResultSchema,
-} from '@murph/assistant-core/vault-cli-contracts'
-import type { VaultServices } from '@murph/assistant-core/vault-services'
+} from '@murphai/assistant-core/vault-cli-contracts'
+import type { VaultServices } from '@murphai/assistant-core/vault-services'
 import {
   deleteRecipeRecord,
   editRecipeRecord,
-} from '@murph/assistant-core/usecases/recipe'
+} from '@murphai/assistant-core/usecases/recipe'
 import { registerRegistryDocEntityGroup } from './health-command-factory.js'
 import {
   createEntityDeleteCommandConfig,

@@ -1,4 +1,4 @@
-import type { HostedExecutionDispatchRequest } from "@murph/hosted-execution";
+import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import type {
   HostedBootstrapResult,

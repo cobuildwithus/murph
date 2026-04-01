@@ -4,7 +4,7 @@ import {
   parseHostedExecutionSideEffects,
   type HostedExecutionRunnerResult,
   type HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 import type {
   HostedAssistantRuntimeConfig,

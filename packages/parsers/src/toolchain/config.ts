@@ -1,7 +1,7 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { resolveRuntimePaths } from "@murph/runtime-state/node";
+import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 
 import { ensureDirectory, fileExists, readUtf8IfExists } from "../shared.js";
 

@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'vitest'
-import { openSqliteRuntimeDatabase } from '@murph/runtime-state/node'
-import { createIntegratedInboxServices } from '@murph/assistant-core/inbox-services'
+import { openSqliteRuntimeDatabase } from '@murphai/runtime-state/node'
+import { createIntegratedInboxServices } from '@murphai/assistant-core/inbox-services'
 import { createVaultCli } from '../src/vault-cli.js'
-import { createUnwiredVaultServices } from '@murph/assistant-core/vault-services'
+import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
 import { requireData, type CliEnvelope } from './cli-test-helpers.js'
 
 const builtCoreRuntimeUrl = new URL('../../core/dist/index.js', import.meta.url).href

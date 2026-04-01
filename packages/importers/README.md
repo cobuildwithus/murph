@@ -1,6 +1,6 @@
-# `@murph/importers`
+# `@murphai/importers`
 
-Owns ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murph/core`.
+Owns ingestion adapters for documents, meals, and sample streams. Importers may parse inputs and prepare metadata, but they must route all canonical writes through `@murphai/core`.
 
 ## Baseline Scope
 

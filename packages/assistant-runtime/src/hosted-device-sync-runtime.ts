@@ -3,12 +3,12 @@ import {
   type DeviceSyncJobInput,
   type DeviceSyncService,
   type StoredDeviceSyncAccount,
-} from "@murph/device-syncd";
+} from "@murphai/device-syncd";
 import type {
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDispatchRequest,
   HostedExecutionWebControlPlaneEnvironment,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 import {
   normalizeHostedDeviceSyncJobHints,
   resolveHostedExecutionDeviceSyncRuntimeClient,
@@ -17,7 +17,7 @@ import {
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
-} from "@murph/hosted-execution";
+} from "@murphai/hosted-execution";
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;

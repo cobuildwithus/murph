@@ -1,4 +1,4 @@
-import type { RecipeUpsertPayload } from "@murph/contracts";
+import type { RecipeUpsertPayload } from "@murphai/contracts";
 
 import { generateRecordId } from "../ids.ts";
 import { createMarkdownRegistryApi } from "../registry/api.ts";

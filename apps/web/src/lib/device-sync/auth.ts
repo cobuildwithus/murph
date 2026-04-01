@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { deviceSyncError } from "@murph/device-syncd";
+import { deviceSyncError } from "@murphai/device-syncd";
 
 import type { HostedDeviceSyncEnvironment } from "./env";
 import { isRecord, normalizeNullableString, sha256Hex, toIsoTimestamp } from "./shared";

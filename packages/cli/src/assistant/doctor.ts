@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { AssistantStatePaths } from '@murph/runtime-state/node'
+import type { AssistantStatePaths } from '@murphai/runtime-state/node'
 import {
   assistantAutomationStateSchema,
   assistantDiagnosticEventSchema,
@@ -20,19 +20,19 @@ import {
   type AssistantDoctorResult,
   type AssistantOutboxIntent,
   type AssistantTurnReceipt,
-} from '@murph/assistant-core/assistant-cli-contracts'
+} from '@murphai/assistant-core/assistant-cli-contracts'
 import {
   inspectAndRepairAssistantStateSecrecy,
   type AssistantStateSecrecyAudit,
 } from './doctor-security.js'
-import { summarizeAssistantQuarantines } from '@murph/assistant-core/assistant/quarantine'
-import { withAssistantRuntimeWriteLock } from '@murph/assistant-core/assistant/runtime-write-lock'
+import { summarizeAssistantQuarantines } from '@murphai/assistant-core/assistant/quarantine'
+import { withAssistantRuntimeWriteLock } from '@murphai/assistant-core/assistant/runtime-write-lock'
 import {
   isMissingFileError,
   parseAssistantJsonLinesWithTailSalvage,
-} from '@murph/assistant-core/assistant/shared'
+} from '@murphai/assistant-core/assistant/shared'
 import { redactAssistantDisplayPath } from './store.js'
-import { resolveAssistantStatePaths } from '@murph/assistant-core/assistant/store/paths'
+import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant/store/paths'
 
 const STALE_OUTBOX_INTENT_MS = 15 * 60 * 1000
 

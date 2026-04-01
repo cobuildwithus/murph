@@ -3,11 +3,11 @@ import {
   readAssistantAutomationState,
   saveAssistantAutomationState,
   saveAssistantSelfDeliveryTarget,
-} from "@murph/assistant-core";
+} from "@murphai/assistant-core";
 import {
   readHostedVerifiedEmailFromEnv,
-} from "@murph/runtime-state";
-import { resolveHostedEmailSenderIdentity } from "@murph/hosted-execution";
+} from "@murphai/runtime-state";
+import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution";
 
 type HostedEmailSelfTargetStatus =
   | "missing-sender-identity"

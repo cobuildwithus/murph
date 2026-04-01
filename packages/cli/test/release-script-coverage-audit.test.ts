@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { resolveAssistantStatePaths } from '@murph/assistant-core/assistant-state'
+import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import {
   detectWorkspacePackageCycles,
   formatWorkspacePackageCycles,
@@ -199,23 +199,23 @@ describe('monorepo release flow coverage audit', () => {
     }
 
     expect(summary.version).toBe('0.0.0')
-    expect(summary.primaryPackage?.name).toBe('murph')
+    expect(summary.primaryPackage?.name).toBe('@murphai/murph')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
-      '@murph/contracts',
-      '@murph/runtime-state',
-      '@murph/gateway-core',
-      '@murph/core',
-      '@murph/query',
-      '@murph/importers',
-      '@murph/device-syncd',
-      '@murph/inboxd',
-      '@murph/parsers',
-      '@murph/hosted-execution',
-      '@murph/assistant-core',
-      '@murph/gateway-local',
-      '@murph/assistant-runtime',
-      '@murph/assistantd',
-      'murph',
+      '@murphai/contracts',
+      '@murphai/runtime-state',
+      '@murphai/gateway-core',
+      '@murphai/core',
+      '@murphai/query',
+      '@murphai/importers',
+      '@murphai/device-syncd',
+      '@murphai/inboxd',
+      '@murphai/parsers',
+      '@murphai/hosted-execution',
+      '@murphai/assistant-core',
+      '@murphai/gateway-local',
+      '@murphai/assistant-runtime',
+      '@murphai/assistantd',
+      '@murphai/murph',
     ])
   })
 
@@ -314,12 +314,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(publishEmptyString.stderr).toContain('Missing value for --npm-tag.')
   })
 
-  it('keeps packages/cli publish-ready as murph without package-local release scripts', () => {
-    expect(cliPackageJson.name).toBe('murph')
+  it('keeps packages/cli publish-ready as @murphai/murph without package-local release scripts', () => {
+    expect(cliPackageJson.name).toBe('@murphai/murph')
     expect(cliPackageJson.files).toContain('CHANGELOG.md')
     expect(cliPackageJson.bin?.murph).toBe('dist/bin.js')
     expect(cliPackageJson.bin?.['vault-cli']).toBe('dist/bin.js')
-    expect(cliPackageJson.dependencies?.['@murph/device-syncd']).toBe('workspace:*')
+    expect(cliPackageJson.dependencies?.['@murphai/device-syncd']).toBe('workspace:*')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
@@ -355,39 +355,39 @@ describe('monorepo release flow coverage audit', () => {
   it('detects and formats workspace package dependency cycles without duplicate reports', () => {
     const cycles = detectWorkspacePackageCycles([
       {
-        name: '@murph/a',
+        name: '@murphai/a',
         packageJsonPath: path.join(repoRoot, 'packages', 'a', 'package.json'),
-        internalDependencies: [{ name: '@murph/b', fields: ['dependencies'] }],
+        internalDependencies: [{ name: '@murphai/b', fields: ['dependencies'] }],
       },
       {
-        name: '@murph/b',
+        name: '@murphai/b',
         packageJsonPath: path.join(repoRoot, 'packages', 'b', 'package.json'),
-        internalDependencies: [{ name: '@murph/c', fields: ['devDependencies'] }],
+        internalDependencies: [{ name: '@murphai/c', fields: ['devDependencies'] }],
       },
       {
-        name: '@murph/c',
+        name: '@murphai/c',
         packageJsonPath: path.join(repoRoot, 'packages', 'c', 'package.json'),
-        internalDependencies: [{ name: '@murph/a', fields: ['peerDependencies'] }],
+        internalDependencies: [{ name: '@murphai/a', fields: ['peerDependencies'] }],
       },
       {
-        name: '@murph/d',
+        name: '@murphai/d',
         packageJsonPath: path.join(repoRoot, 'packages', 'd', 'package.json'),
-        internalDependencies: [{ name: '@murph/a', fields: ['optionalDependencies'] }],
+        internalDependencies: [{ name: '@murphai/a', fields: ['optionalDependencies'] }],
       },
     ])
 
     expect(cycles).toHaveLength(1)
     expect(cycles[0]?.packageNames).toEqual([
-      '@murph/a',
-      '@murph/b',
-      '@murph/c',
-      '@murph/a',
+      '@murphai/a',
+      '@murphai/b',
+      '@murphai/c',
+      '@murphai/a',
     ])
     expect(formatWorkspacePackageCycles(cycles, repoRoot)).toBe(
-      '@murph/a -> @murph/b -> @murph/c -> @murph/a '
-        + '[packages/a/package.json (dependencies) -> @murph/b | '
-        + 'packages/b/package.json (devDependencies) -> @murph/c | '
-        + 'packages/c/package.json (peerDependencies) -> @murph/a]',
+      '@murphai/a -> @murphai/b -> @murphai/c -> @murphai/a '
+        + '[packages/a/package.json (dependencies) -> @murphai/b | '
+        + 'packages/b/package.json (devDependencies) -> @murphai/c | '
+        + 'packages/c/package.json (peerDependencies) -> @murphai/a]',
     )
   })
 
