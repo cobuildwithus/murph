@@ -1,4 +1,15 @@
 export {
+  buildTelegramThreadId,
+  buildTelegramThreadTarget,
+  extractTelegramMessage,
+  minimizeTelegramUpdate,
+  parseTelegramThreadTarget,
+  parseTelegramWebhookUpdate,
+  serializeTelegramThreadTarget,
+  summarizeTelegramMessage,
+  summarizeTelegramUpdate,
+} from "@murphai/messaging-ingress/telegram-webhook";
+export {
   DEFAULT_TELEGRAM_ALLOWED_UPDATES,
   createTelegramApiPollDriver,
   createTelegramBotApiPollDriver,
@@ -14,8 +25,6 @@ export type {
   TelegramPollDriver,
 } from "./connectors/telegram/connector.ts";
 export {
-  buildTelegramThreadId,
-  extractTelegramMessage,
   normalizeTelegramMessage,
   normalizeTelegramUpdate,
   toTelegramChatMessage,
@@ -25,20 +34,22 @@ export type {
   NormalizeTelegramUpdateInput,
   TelegramAttachmentDownloadDriver,
 } from "./connectors/telegram/normalize.ts";
-export {
-  parseTelegramThreadTarget,
-  serializeTelegramThreadTarget,
-} from "./connectors/telegram/target.ts";
 export type {
   TelegramThreadTarget,
-} from "./connectors/telegram/target.ts";
+} from "@murphai/messaging-ingress/telegram-webhook";
 export type {
   TelegramChat,
+  TelegramContact,
+  TelegramDirectMessagesTopic,
   TelegramFile,
   TelegramFileBase,
+  TelegramLocation,
   TelegramMessageLike,
+  TelegramPoll,
   TelegramPhotoSize,
+  TelegramTextQuote,
   TelegramUpdateLike,
   TelegramUser,
+  TelegramVenue,
   TelegramWebhookInfo,
-} from "./connectors/telegram/types.ts";
+} from "@murphai/messaging-ingress/telegram-webhook";

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+
 import { test } from "vitest";
 
 import {
@@ -6,14 +7,13 @@ import {
   serializeTelegramThreadTarget,
 } from "../src/index.ts";
 
-test("Telegram thread targets round-trip business and direct-message topic routing", () => {
+test("Telegram thread targets round-trip business and DM topic metadata", () => {
   const target = parseTelegramThreadTarget("-1001234567890:business:biz-42:dm-topic:9");
 
   assert.deepEqual(target, {
     businessConnectionId: "biz-42",
     chatId: "-1001234567890",
     directMessagesTopicId: 9,
-    messageThreadId: null,
   });
   assert.equal(
     serializeTelegramThreadTarget(target!),
@@ -21,7 +21,7 @@ test("Telegram thread targets round-trip business and direct-message topic routi
   );
 });
 
-test("Telegram thread targets reject malformed routing fragments", () => {
+test("Telegram thread target parser rejects malformed values", () => {
   assert.equal(parseTelegramThreadTarget(""), null);
   assert.equal(parseTelegramThreadTarget(":topic:42"), null);
   assert.equal(parseTelegramThreadTarget("123:topic:0"), null);

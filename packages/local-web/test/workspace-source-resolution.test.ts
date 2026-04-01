@@ -31,6 +31,7 @@ test("workspace source resolution keeps the hosted and local web package allowli
   assert.deepEqual(HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES, [
     "@murphai/contracts",
     "@murphai/hosted-execution",
+    "@murphai/messaging-ingress",
     "@murphai/runtime-state",
     "@murphai/core",
     "@murphai/importers",

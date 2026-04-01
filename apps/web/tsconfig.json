@@ -37,6 +37,12 @@
       "@murphai/hosted-execution/*": [
         "packages/hosted-execution/src/*"
       ],
+      "@murphai/messaging-ingress": [
+        "packages/messaging-ingress/src/index.ts"
+      ],
+      "@murphai/messaging-ingress/*": [
+        "packages/messaging-ingress/src/*"
+      ],
       "@murphai/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],

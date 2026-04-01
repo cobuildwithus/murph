@@ -6,6 +6,11 @@ This package keeps canonical inbox evidence in the vault and uses a local SQLite
 runtime database for source cursors, a durable local capture mutation cursor, transient dedupe caches, capture-local search
 tables, and attachment job state.
 
+Stateless provider ingress semantics that need to be shared with hosted callers
+now live in `@murphai/messaging-ingress`. `@murphai/inboxd` consumes that package
+for provider webhook parsing/minimization and keeps ownership of polling
+drivers, runtime state, and capture persistence.
+
 ## Runtime expectations
 
 - Run on Node.js `>=22.16.0`.

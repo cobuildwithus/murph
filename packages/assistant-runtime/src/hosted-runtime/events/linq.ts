@@ -1,7 +1,7 @@
 import {
   normalizeLinqWebhookEvent,
-  parseLinqWebhookEvent,
 } from "@murphai/inboxd";
+import { parseLinqWebhookEvent } from "@murphai/messaging-ingress/linq-webhook";
 import type { HostedExecutionDispatchRequest } from "@murphai/hosted-execution";
 
 import { withHostedInboxPipeline } from "./inbox-pipeline.ts";

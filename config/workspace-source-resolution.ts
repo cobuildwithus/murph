@@ -9,6 +9,7 @@ export type WorkspaceSourceEntries<T extends WorkspaceSourceEntryRelativePaths> 
 export const HOSTED_WEB_WORKSPACE_SOURCE_ENTRY_RELATIVE_PATHS = {
   "@murphai/contracts": "../../packages/contracts/src/index.ts",
   "@murphai/hosted-execution": "../../packages/hosted-execution/src/index.ts",
+  "@murphai/messaging-ingress": "../../packages/messaging-ingress/src/index.ts",
   "@murphai/runtime-state": "../../packages/runtime-state/src/index.ts",
   "@murphai/core": "../../packages/core/src/index.ts",
   "@murphai/importers": "../../packages/importers/src/index.ts",

@@ -5,6 +5,7 @@ import deviceSyncdProject from "./packages/device-syncd/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
+import messagingIngressProject from "./packages/messaging-ingress/vitest.config.ts";
 import {
   cliVitestProjectSpecs,
   createCliVitestProject,
@@ -120,6 +121,14 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: hostedExecutionProject,
     include: ["packages/hosted-execution/test/hosted-execution.test.ts"],
+  },
+  {
+    config: messagingIngressProject,
+    include: [
+      "packages/messaging-ingress/test/linq-webhook.test.ts",
+      "packages/messaging-ingress/test/telegram-target.test.ts",
+      "packages/messaging-ingress/test/telegram-webhook.test.ts",
+    ],
   },
   {
     config: importersProject,
