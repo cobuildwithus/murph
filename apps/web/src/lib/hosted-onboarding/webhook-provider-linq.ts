@@ -1,4 +1,4 @@
-import { HostedBillingStatus, HostedInviteStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedInviteStatus, HostedMemberStatus } from "@prisma/client";
 
 import {
   buildHostedGetStartedReply,
@@ -23,8 +23,6 @@ import {
 import {
   createHostedWebhookDispatchSideEffect,
   createHostedWebhookLinqMessageSideEffect,
-  type HostedWebhookDispatchSideEffect,
-  type HostedWebhookLinqMessageSideEffect,
   type HostedWebhookPlan,
   type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
@@ -65,6 +63,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     },
   });
 
+  if (existingMember?.status === HostedMemberStatus.suspended) {
+    return buildIgnoredLinqWebhookPlan("suspended-member");
+  }
+
   if (existingMember?.billingStatus === HostedBillingStatus.active) {
     return {
       desiredSideEffects: [
@@ -73,6 +75,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
             eventId: input.event.event_id,
             linqEvent: sanitizeHostedLinqEventForStorage(
               minimizeHostedLinqMessageReceivedEvent(messageEvent),
+              {
+                omitRecipientPhone: true,
+              },
             ),
             occurredAt: resolveHostedLinqOccurredAt(messageEvent),
             phoneLookupKey,
@@ -112,11 +117,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
   });
   const invite = await issueHostedInvite({
     channel: "linq",
-    linqChatId: null,
-    linqEventId: null,
     memberId: member.id,
     prisma: input.prisma,
-    triggerText: null,
   });
 
   if (invite.sentAt) {
