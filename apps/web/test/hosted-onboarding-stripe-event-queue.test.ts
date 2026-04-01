@@ -1532,6 +1532,167 @@ describe("hosted Stripe event queue", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
+  it("retries invoice.paid billing updates after a member CAS miss and still activates the member", async () => {
+    const harness = createStripeQueueHarness({
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          status: HostedMemberStatus.registered,
+        }),
+      ],
+    });
+    const baseMemberFindUnique = harness.prisma.hostedMember.findUnique.getMockImplementation();
+    const baseMemberUpdateMany = harness.prisma.hostedMember.updateMany.getMockImplementation();
+    let hostedMemberUpdateManyCalls = 0;
+    harness.prisma.hostedMember.findUnique.mockImplementation(async (args: { where: Record<string, unknown> }) => {
+      const member = await baseMemberFindUnique?.(args);
+      return member ? { ...member } : null;
+    });
+    harness.prisma.hostedMember.updateMany.mockImplementation(async (args: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
+      hostedMemberUpdateManyCalls += 1;
+
+      if (hostedMemberUpdateManyCalls <= 4) {
+        Object.assign(harness.members[0], {
+          stripeLatestBillingEventCreatedAt: new Date(`2026-03-28T10:3${5 + hostedMemberUpdateManyCalls}:00.000Z`),
+          stripeLatestBillingEventId: `evt_midstream_positive_${hostedMemberUpdateManyCalls}`,
+        });
+        return { count: 0 };
+      }
+
+      return baseMemberUpdateMany?.(args) ?? { count: 0 };
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:40:00.000Z",
+        id: "evt_invoice_paid_retry_billing_cas",
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_retry_billing_cas",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+          payment_intent: "pi_retry_billing_cas",
+        },
+        type: "invoice.paid",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.members[0]).toMatchObject({
+      billingStatus: HostedBillingStatus.active,
+      status: HostedMemberStatus.active,
+      stripeLatestBillingEventId: "evt_invoice_paid_retry_billing_cas",
+    });
+    expect(harness.invites[0]).toMatchObject({
+      paidAt: expect.any(Date),
+      status: HostedInviteStatus.paid,
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            kind: "member.activated",
+            userId: "member_123",
+          }),
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_invoice_paid_retry_billing_cas",
+        }),
+      }),
+    );
+  });
+
+  it("retries invoice.paid activation after a member CAS miss when the refreshed member is still eligible", async () => {
+    const harness = createStripeQueueHarness({
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.past_due,
+          status: HostedMemberStatus.registered,
+        }),
+      ],
+    });
+    const baseMemberFindUnique = harness.prisma.hostedMember.findUnique.getMockImplementation();
+    const baseMemberUpdateMany = harness.prisma.hostedMember.updateMany.getMockImplementation();
+    let hostedMemberUpdateManyCalls = 0;
+    harness.prisma.hostedMember.findUnique.mockImplementation(async (args: { where: Record<string, unknown> }) => {
+      const member = await baseMemberFindUnique?.(args);
+      return member ? { ...member } : null;
+    });
+    harness.prisma.hostedMember.updateMany.mockImplementation(async (args: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
+      hostedMemberUpdateManyCalls += 1;
+
+      if (hostedMemberUpdateManyCalls >= 2 && hostedMemberUpdateManyCalls <= 5) {
+        Object.assign(harness.members[0], {
+          billingStatus: HostedBillingStatus.active,
+          stripeLatestBillingEventCreatedAt: new Date(`2026-03-28T10:4${hostedMemberUpdateManyCalls - 1}:00.000Z`),
+          stripeLatestBillingEventId: `evt_later_positive_${hostedMemberUpdateManyCalls - 1}`,
+        });
+        return { count: 0 };
+      }
+
+      return baseMemberUpdateMany?.(args) ?? { count: 0 };
+    });
+
+    await recordAndDrainStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:40:00.000Z",
+        id: "evt_invoice_paid_retry_activation_cas",
+        object: {
+          amount_paid: 500,
+          currency: "usd",
+          customer: "cus_123",
+          id: "in_retry_activation_cas",
+          parent: {
+            subscription_details: {
+              subscription: "sub_123",
+            },
+          },
+          payment_intent: "pi_retry_activation_cas",
+        },
+        type: "invoice.paid",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.members[0]).toMatchObject({
+      billingStatus: HostedBillingStatus.active,
+      status: HostedMemberStatus.active,
+      stripeLatestBillingEventId: "evt_later_positive_4",
+    });
+    expect(harness.invites[0]).toMatchObject({
+      paidAt: expect.any(Date),
+      status: HostedInviteStatus.paid,
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatch: expect.objectContaining({
+          event: expect.objectContaining({
+            kind: "member.activated",
+            userId: "member_123",
+          }),
+          eventId: "member.activated:stripe.invoice.paid:member_123:evt_invoice_paid_retry_activation_cas",
+        }),
+      }),
+    );
+  });
+
   it("suspends refund reversals using Stripe API lookups without checkout config", async () => {
     const harness = createStripeQueueHarness({
       invites: [
