@@ -39,6 +39,7 @@ import {
   mergeAssistantProviderConfigsForProvider,
   serializeAssistantProviderSessionOptions,
 } from './provider-config.js'
+import { normalizeAssistantExecutionContext } from './execution-context.js'
 import {
   extractRecoveredAssistantSession,
 } from './provider-turn-recovery.js'
@@ -167,6 +168,7 @@ export async function openAssistantConversationLocal(
 export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
+  const executionContext = normalizeAssistantExecutionContext(input.executionContext)
   const defaults = await resolveAssistantOperatorDefaults()
   return withAssistantTurnLock({
     abortSignal: input.abortSignal,
@@ -233,6 +235,7 @@ export async function sendAssistantMessageLocal(
         const providerResult = providerOutcome.providerTurn
         responseText = providerResult.response
         await persistPendingAssistantUsageEvent({
+          executionContext,
           providerResult,
           turnId: userTurn.turnId,
           vault: input.vault,

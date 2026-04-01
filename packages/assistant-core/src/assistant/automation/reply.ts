@@ -7,6 +7,7 @@ import {
   resolveAcceptedInboundMessageOperatorAuthority,
   type AssistantOperatorAuthority,
 } from '../operator-authority.js'
+import type { AssistantExecutionContext } from '../execution-context.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
   isAssistantProviderConnectionLostError,
@@ -339,6 +340,7 @@ export async function processAssistantAutoReplyGroup(input: {
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
+  executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   providerHeartbeatMs?: number | null
@@ -363,6 +365,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   context: AssistantAutoReplyGroupContext
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
+  executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
   onEvent?: (event: AssistantRunEvent) => void
   providerHeartbeatMs?: number | null
@@ -401,6 +404,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       captureIds: input.context.captureIds,
       deliveryDispatchMode: input.deliveryDispatchMode,
       deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
+      executionContext: input.executionContext,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:
         input.providerLongRunningCommandStallTimeoutMs,
@@ -830,6 +834,7 @@ async function executeAssistantAutoReply(input: {
   captureIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryReplyToMessageId: string | null
+  executionContext?: AssistantExecutionContext | null
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -850,6 +855,7 @@ async function executeAssistantAutoReply(input: {
       conversation: conversationRefFromCapture(input.primaryCapture),
       abortSignal: watchdog.signal,
       enableFirstTurnOnboarding: true,
+      executionContext: input.executionContext,
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,

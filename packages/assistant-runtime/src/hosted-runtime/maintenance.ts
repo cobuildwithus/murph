@@ -16,6 +16,7 @@ import {
   getAssistantCronStatus,
   runAssistantAutomation,
 } from "@murphai/assistant-core";
+import type { AssistantExecutionContext } from "@murphai/assistant-core";
 
 import type {
   HostedMaintenanceMetrics,
@@ -42,6 +43,7 @@ const HOSTED_MAX_PARSER_JOBS = 50;
 export async function runHostedMaintenanceLoop(input: {
   artifactMaterializer?: HostedWorkspaceArtifactMaterializer | null;
   dispatch: HostedExecutionDispatchRequest;
+  executionContext: AssistantExecutionContext;
   internalWorkerFetch?: typeof fetch;
   requestId: string;
   timeoutMs: number | null;
@@ -56,7 +58,11 @@ export async function runHostedMaintenanceLoop(input: {
     vaultRoot: input.vaultRoot,
   });
   if (hostedAssistantAutomationEnabledFromEnv(input.runtimeEnv)) {
-    await runHostedAssistantAutomation(input.vaultRoot, input.requestId);
+    await runHostedAssistantAutomation(
+      input.vaultRoot,
+      input.requestId,
+      input.executionContext,
+    );
   }
   const assistantCronStatus = await getAssistantCronStatus(input.vaultRoot);
   const deviceSyncResult = await runHostedDeviceSyncPass(
@@ -148,6 +154,7 @@ async function hydratePendingHostedParserArtifacts(input: {
 export async function runHostedAssistantAutomation(
   vaultRoot: string,
   requestId: string,
+  executionContext: AssistantExecutionContext,
 ): Promise<void> {
   const inboxServices = createIntegratedInboxServices();
 
@@ -155,6 +162,7 @@ export async function runHostedAssistantAutomation(
     await runAssistantAutomation({
       deliveryDispatchMode: "queue-only",
       drainOutbox: false,
+      executionContext,
       inboxServices,
       once: true,
       requestId,

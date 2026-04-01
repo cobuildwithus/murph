@@ -19,6 +19,7 @@ import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const serviceMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
+  executeAssistantProviderTurnAttempt: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
 }))
 
@@ -41,6 +42,8 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
 
   return {
     ...actual,
+    executeAssistantProviderTurnAttempt:
+      serviceMocks.executeAssistantProviderTurnAttempt,
     executeAssistantProviderTurn: serviceMocks.executeAssistantProviderTurn,
   }
 })
@@ -77,9 +80,6 @@ import {
   saveAssistantSession,
 } from '@murphai/assistant-core/assistant-state'
 import { readAssistantProviderRouteRecovery } from '@murphai/assistant-core/assistant/provider-turn-recovery'
-import {
-  attachOpenAiCompatibleProviderToolExecutionState,
-} from '@murphai/assistant-core/assistant/providers/openai-compatible'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 
 const cleanupPaths: string[] = []
@@ -100,7 +100,31 @@ afterEach(async () => {
 
 beforeEach(() => {
   serviceMocks.deliverAssistantMessageOverBinding.mockReset()
+  serviceMocks.executeAssistantProviderTurnAttempt.mockReset()
   serviceMocks.executeAssistantProviderTurn.mockReset()
+  serviceMocks.executeAssistantProviderTurnAttempt.mockImplementation(
+    async (...args: Parameters<typeof serviceMocks.executeAssistantProviderTurn>) => {
+      try {
+        return {
+          metadata: {
+            executedToolCount: 0,
+            rawToolEvents: [],
+          },
+          ok: true,
+          result: await serviceMocks.executeAssistantProviderTurn(...args),
+        }
+      } catch (error) {
+        return {
+          error,
+          metadata: {
+            executedToolCount: 0,
+            rawToolEvents: [],
+          },
+          ok: false,
+        }
+      }
+    },
+  )
 })
 
 function buildWorkingDirectoryKey(workingDirectory: string): string {
@@ -4446,6 +4470,7 @@ test('sendAssistantMessage does not reuse an OpenAI Responses session on a coole
     {
       name: 'backup',
       provider: 'openai-compatible' as const,
+      codexCommand: null,
       model: 'gpt-5-mini',
       reasoningEffort: null,
       sandbox: null,
@@ -4914,28 +4939,32 @@ test('sendAssistantMessage preserves the primary provider error for tool-bound o
 
   await mkdir(vaultRoot, { recursive: true })
 
-  serviceMocks.executeAssistantProviderTurn
-    .mockRejectedValueOnce(
-      attachOpenAiCompatibleProviderToolExecutionState(
-        new VaultCliError('ASSISTANT_PRIMARY_FAILED', 'Primary route failed.', {
-          retryable: true,
-        }),
-        {
-          executedToolCount: 1,
-          rawEvents: [
-            {
-              type: 'assistant.tool.started',
-              tool: 'assistant.memory.search',
-            },
-          ],
-        },
-      ),
-    )
-    .mockRejectedValueOnce(
-      new VaultCliError('ASSISTANT_BACKUP_FAILED', 'Backup route failed.', {
+  serviceMocks.executeAssistantProviderTurnAttempt
+    .mockResolvedValueOnce({
+      error: new VaultCliError('ASSISTANT_PRIMARY_FAILED', 'Primary route failed.', {
         retryable: true,
       }),
-    )
+      metadata: {
+        executedToolCount: 1,
+        rawToolEvents: [
+          {
+            type: 'assistant.tool.started',
+            tool: 'assistant.memory.search',
+          },
+        ],
+      },
+      ok: false,
+    })
+    .mockResolvedValueOnce({
+      error: new VaultCliError('ASSISTANT_BACKUP_FAILED', 'Backup route failed.', {
+        retryable: true,
+      }),
+      metadata: {
+        executedToolCount: 0,
+        rawToolEvents: [],
+      },
+      ok: false,
+    })
 
   await assert.rejects(
     sendAssistantMessage({
@@ -4971,7 +5000,7 @@ test('sendAssistantMessage preserves the primary provider error for tool-bound o
     },
   )
 
-  assert.equal(serviceMocks.executeAssistantProviderTurn.mock.calls.length, 1)
+  assert.equal(serviceMocks.executeAssistantProviderTurnAttempt.mock.calls.length, 1)
 })
 
 test('sendAssistantMessage restores a missing local transcript snapshot for openai-compatible sessions before retrying the turn', async () => {

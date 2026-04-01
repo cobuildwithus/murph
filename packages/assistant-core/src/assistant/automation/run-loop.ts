@@ -11,6 +11,7 @@ import type { VaultServices } from '../../vault-services.js'
 import { createIntegratedVaultServices } from '../../vault-services.js'
 import { processDueAssistantCronJobsLocal as processDueAssistantCronJobs } from '../cron.js'
 import { recordAssistantDiagnosticEvent } from '../diagnostics.js'
+import type { AssistantExecutionContext } from '../execution-context.js'
 import { maybeThrowInjectedAssistantFault } from '../fault-injection.js'
 import {
   drainAssistantOutboxLocal as drainAssistantOutbox,
@@ -44,6 +45,7 @@ export interface RunAssistantAutomationInput {
   allowSelfAuthored?: boolean
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   drainOutbox?: boolean
+  executionContext?: AssistantExecutionContext | null
   inboxServices?: InboxServices
   maxPerScan?: number
   modelSpec?: AssistantModelSpec
@@ -151,6 +153,7 @@ export async function runAssistantAutomation(
       }
       await processDueAssistantCronJobs({
         deliveryDispatchMode: input.deliveryDispatchMode,
+        executionContext: input.executionContext,
         vault: input.vault,
         signal: controller.signal,
         limit: input.maxPerScan,
@@ -160,6 +163,7 @@ export async function runAssistantAutomation(
       const scanResult = await scanAssistantAutomationOnce({
         allowSelfAuthored: input.allowSelfAuthored ?? false,
         deliveryDispatchMode: input.deliveryDispatchMode,
+        executionContext: input.executionContext,
         inboxServices,
         maxPerScan: input.maxPerScan,
         modelSpec: input.modelSpec,

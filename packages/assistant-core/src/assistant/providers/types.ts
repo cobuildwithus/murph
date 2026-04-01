@@ -151,6 +151,23 @@ export interface AssistantProviderTurnExecutionResult {
   usage?: AssistantProviderUsage | null
 }
 
+export interface AssistantProviderAttemptMetadata {
+  executedToolCount: number
+  rawToolEvents: readonly unknown[]
+}
+
+export type AssistantProviderTurnAttemptResult =
+  | {
+      ok: true
+      metadata: AssistantProviderAttemptMetadata
+      result: AssistantProviderTurnExecutionResult
+    }
+  | {
+      error: unknown
+      metadata: AssistantProviderAttemptMetadata
+      ok: false
+    }
+
 export interface AssistantProviderDefinition {
   capabilities: AssistantProviderCapabilities
   traits: AssistantProviderTraits
@@ -160,7 +177,7 @@ export interface AssistantProviderDefinition {
   }): Promise<AssistantModelDiscoveryResult>
   executeTurn(
     input: AssistantProviderTurnExecutionInput,
-  ): Promise<AssistantProviderTurnExecutionResult>
+  ): Promise<AssistantProviderTurnAttemptResult>
   resolveLabel(config: AssistantProviderConfig): string
   resolveStaticModels(config: AssistantProviderConfig): readonly AssistantCatalogModel[]
 }

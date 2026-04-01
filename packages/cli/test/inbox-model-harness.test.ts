@@ -1500,6 +1500,98 @@ test('createDefaultAssistantToolCatalog share-link tool exports attached protoco
   }
 })
 
+test('createDefaultAssistantToolCatalog share-link tool uses hosted sender identity from execution context', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-hosted-'))
+  const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL
+  const originalToken = process.env.HOSTED_SHARE_INTERNAL_TOKEN
+  const originalFetch = global.fetch
+  let recordedRequest:
+    | {
+        body: Record<string, unknown>
+        headers: Headers
+        url: string
+      }
+    | undefined
+
+  process.env.HOSTED_SHARE_API_BASE_URL = 'https://share.example.test'
+  process.env.HOSTED_SHARE_INTERNAL_TOKEN = 'share-token'
+  global.fetch = vi.fn(async (input, init) => {
+    recordedRequest = {
+      body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      headers: new Headers(init?.headers),
+      url: String(input),
+    }
+
+    return new Response(
+      JSON.stringify({
+        shareCode: 'share_456',
+        shareUrl: 'https://share.example.test/share/share_456',
+        url: 'https://share.example.test/share/share_456',
+      }),
+      {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 200,
+      },
+    )
+  }) as typeof global.fetch
+
+  try {
+    await initializeVault({ vaultRoot })
+    await upsertFood({
+      vaultRoot,
+      title: 'Morning Smoothie',
+      kind: 'smoothie',
+    })
+
+    const catalog = createDefaultAssistantToolCatalog(
+      {
+        executionContext: {
+          hosted: {
+            memberId: 'member_123',
+            userEnvKeys: ['OPENAI_API_KEY'],
+          },
+        },
+        requestId: 'req_share_hosted',
+        vault: vaultRoot,
+        vaultServices: createStubVaultServices(),
+      },
+      { includeQueryTools: false },
+    )
+
+    const results = await catalog.executeCalls({
+      calls: [
+        {
+          tool: 'vault.share.createLink',
+          input: {
+            foods: [{ slug: 'morning-smoothie' }],
+          },
+        },
+      ],
+      mode: 'apply',
+    })
+
+    assert.equal(results[0]?.status, 'succeeded')
+    assert.equal(recordedRequest?.body.senderMemberId, 'member_123')
+  } finally {
+    if (originalBaseUrl === undefined) {
+      delete process.env.HOSTED_SHARE_API_BASE_URL
+    } else {
+      process.env.HOSTED_SHARE_API_BASE_URL = originalBaseUrl
+    }
+
+    if (originalToken === undefined) {
+      delete process.env.HOSTED_SHARE_INTERNAL_TOKEN
+    } else {
+      process.env.HOSTED_SHARE_INTERNAL_TOKEN = originalToken
+    }
+
+    global.fetch = originalFetch
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('createDefaultAssistantToolCatalog share-link tool surfaces hosted API errors', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-assistant-share-tools-error-'))
   const originalBaseUrl = process.env.HOSTED_SHARE_API_BASE_URL

@@ -29,68 +29,6 @@ const OPENAI_COMPATIBLE_PROVIDER_TIMEOUT_MS = 10 * 60 * 1000
 const OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES = 2
 const OPENAI_COMPATIBLE_PROVIDER_MAX_TOOL_STEPS = 8
 const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
-const OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE = Symbol(
-  'openai-compatible-provider-tool-execution-state',
-)
-
-interface OpenAiCompatibleProviderToolExecutionState {
-  executedToolCount: number
-  rawEvents: unknown[]
-}
-
-export function attachOpenAiCompatibleProviderToolExecutionState(
-  error: unknown,
-  input: OpenAiCompatibleProviderToolExecutionState,
-): unknown {
-  if (error && typeof error === 'object') {
-    Object.defineProperty(error, OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE, {
-      configurable: true,
-      enumerable: false,
-      value: {
-        executedToolCount: Math.max(0, input.executedToolCount),
-        rawEvents: input.rawEvents,
-      } satisfies OpenAiCompatibleProviderToolExecutionState,
-      writable: true,
-    })
-  }
-
-  return error
-}
-
-export function readOpenAiCompatibleProviderToolExecutionState(
-  error: unknown,
-): OpenAiCompatibleProviderToolExecutionState | null {
-  if (!error || typeof error !== 'object') {
-    return null
-  }
-
-  const value = (
-    error as {
-      [OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE]?: unknown
-    }
-  )[OPENAI_COMPATIBLE_PROVIDER_TOOL_EXECUTION_STATE]
-
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null
-  }
-
-  const state = value as {
-    executedToolCount?: unknown
-    rawEvents?: unknown
-  }
-
-  return {
-    executedToolCount:
-      typeof state.executedToolCount === 'number' && state.executedToolCount >= 0
-        ? state.executedToolCount
-        : 0,
-    rawEvents: Array.isArray(state.rawEvents) ? state.rawEvents : [],
-  }
-}
-
-export function didOpenAiCompatibleProviderExecuteTool(error: unknown): boolean {
-  return (readOpenAiCompatibleProviderToolExecutionState(error)?.executedToolCount ?? 0) > 0
-}
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
@@ -276,28 +214,39 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
       })
 
       return {
-        provider: providerConfig.provider,
-        providerSessionId:
-          usesOpenAIResponsesApi
-            ? (
-                extractOpenAICompatibleProviderSessionId(result) ??
-                normalizeNullableString(input.resumeProviderSessionId)
-              )
-            : null,
-        response: result.text,
-        stderr: '',
-        stdout: '',
-        rawEvents: toolEvents,
-        usage: extractOpenAICompatibleAssistantProviderUsage({
-          providerConfig,
-          result,
-        }),
+        metadata: {
+          executedToolCount,
+          rawToolEvents: toolEvents,
+        },
+        ok: true,
+        result: {
+          provider: providerConfig.provider,
+          providerSessionId:
+            usesOpenAIResponsesApi
+              ? (
+                  extractOpenAICompatibleProviderSessionId(result) ??
+                  normalizeNullableString(input.resumeProviderSessionId)
+                )
+              : null,
+          response: result.text,
+          stderr: '',
+          stdout: '',
+          rawEvents: toolEvents,
+          usage: extractOpenAICompatibleAssistantProviderUsage({
+            providerConfig,
+            result,
+          }),
+        },
       }
     } catch (error) {
-      throw attachOpenAiCompatibleProviderToolExecutionState(error, {
-        executedToolCount,
-        rawEvents: toolEvents,
-      })
+      return {
+        error,
+        metadata: {
+          executedToolCount,
+          rawToolEvents: toolEvents,
+        },
+        ok: false,
+      }
     }
   },
   resolveLabel(config) {

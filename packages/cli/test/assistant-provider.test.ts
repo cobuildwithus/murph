@@ -53,6 +53,7 @@ vi.mock('node:readline/promises', () => ({
 }))
 
 import {
+  executeAssistantProviderTurnAttempt,
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderTraits,
@@ -842,6 +843,61 @@ test('executeAssistantProviderTurn records tool raw-events and trace updates for
   assert.equal(onTraceEvent.mock.calls.length, 2)
   assert.equal(onTraceEvent.mock.calls[0]?.[0]?.updates[0]?.text, 'Running assistant.memory.search…')
   assert.equal(onTraceEvent.mock.calls[1]?.[0]?.updates[0]?.text, 'Finished assistant.memory.search.')
+})
+
+test('executeAssistantProviderTurnAttempt reports provider-agnostic tool execution metadata on OpenAI-compatible failures', async () => {
+  const languageModel = { provider: 'mock-model' }
+  const createAiSdkTools = vi.fn((mode?: string, options?: { onToolEvent?: Function }) => {
+    assert.equal(mode, 'apply')
+    options?.onToolEvent?.({
+      kind: 'started',
+      mode: 'apply',
+      tool: 'assistant.memory.search',
+      input: { text: 'tone' },
+    })
+
+    return {
+      'assistant.memory.search': { description: 'memory' },
+    } as any
+  })
+
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockRejectedValue(
+    new Error('provider timed out after tool execution'),
+  )
+
+  const result = await executeAssistantProviderTurnAttempt({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'gpt-oss:20b',
+    userPrompt: 'hello',
+    toolRuntime: {
+      requestId: 'turn_789',
+      vault: '/tmp/vault',
+      toolCatalog: {
+        createAiSdkTools,
+        executeCalls: vi.fn(),
+        hasTool: vi.fn(() => true),
+        listTools: vi.fn(() => []),
+      } as any,
+    },
+  })
+
+  assert.equal(result.ok, false)
+  if (result.ok) {
+    assert.fail('expected the provider attempt to fail')
+  }
+  assert.equal(result.metadata.executedToolCount, 1)
+  assert.deepEqual(result.metadata.rawToolEvents, [
+    {
+      type: 'assistant.tool.started',
+      sequence: 1,
+      mode: 'apply',
+      tool: 'assistant.memory.search',
+      input: { text: 'tone' },
+    },
+  ])
 })
 
 test('executeAssistantProviderTurn keeps explicit OpenAI-compatible prompts as the final user message', async () => {

@@ -10,6 +10,7 @@ export async function runAssistantAutomation(
   input: RunAssistantAutomationInput,
 ) {
   const canUseDaemonClient =
+    input.executionContext === undefined &&
     input.inboxServices === undefined &&
     input.onEvent === undefined &&
     input.onInboxEvent === undefined &&

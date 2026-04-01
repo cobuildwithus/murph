@@ -19,7 +19,9 @@ export {
 } from './local-service.js'
 export type {
   AssistantChatInput,
+  AssistantExecutionContext,
   AssistantMessageInput,
+  AssistantHostedExecutionContext,
   AssistantSessionResolutionFields,
 } from './service-contracts.js'
 

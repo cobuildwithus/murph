@@ -1650,13 +1650,11 @@ describe("runHostedExecutionJob", () => {
     const previousAllowedUserEnvKeys = process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS;
     const previousCustomApiKey = process.env.CUSTOM_API_KEY;
     const previousHome = process.env.HOME;
-    const previousHostedMemberId = process.env.HOSTED_MEMBER_ID;
     const previousVault = process.env.VAULT;
 
     process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS = "CUSTOM_API_KEY";
     process.env.CUSTOM_API_KEY = "custom-original-key";
     process.env.HOME = "/tmp/original-home";
-    process.env.HOSTED_MEMBER_ID = "original-member";
     process.env.VAULT = "/tmp/original-vault";
 
     try {
@@ -1681,13 +1679,11 @@ describe("runHostedExecutionJob", () => {
       expect(process.env.HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS).toBe("CUSTOM_API_KEY");
       expect(process.env.CUSTOM_API_KEY).toBe("custom-original-key");
       expect(process.env.HOME).toBe("/tmp/original-home");
-      expect(process.env.HOSTED_MEMBER_ID).toBe("original-member");
       expect(process.env.VAULT).toBe("/tmp/original-vault");
 
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
       restoreEnvVar("CUSTOM_API_KEY", previousCustomApiKey);
       restoreEnvVar("HOME", previousHome);
-      restoreEnvVar("HOSTED_MEMBER_ID", previousHostedMemberId);
       restoreEnvVar("VAULT", previousVault);
     }
   });

@@ -99,7 +99,9 @@ export {
   openAssistantConversation,
   sendAssistantMessage,
   updateAssistantSessionOptions,
+  type AssistantExecutionContext,
   type AssistantMessageInput,
+  type AssistantHostedExecutionContext,
 } from './assistant/service.js'
 
 export {

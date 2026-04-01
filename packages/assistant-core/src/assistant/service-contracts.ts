@@ -27,6 +27,7 @@ import type {
   AssistantOperatorAuthority,
 } from './operator-authority.js'
 import type { ConversationRef } from './conversation-ref.js'
+import type { AssistantExecutionContext } from './execution-context.js'
 import type {
   ResolvedAssistantFailoverRoute,
   readAssistantFailoverState,
@@ -70,6 +71,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryReplyToMessageId?: string | null
   deliveryTarget?: string | null
   enableFirstTurnOnboarding?: boolean
+  executionContext?: AssistantExecutionContext | null
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
@@ -231,3 +233,4 @@ export interface AssistantTurnDeliveryFinalizationPlan {
 }
 
 export type { ResolvedAssistantSession }
+export type { AssistantExecutionContext, AssistantHostedExecutionContext } from './execution-context.js'

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, test, vi } from 'vitest'
 
 const robustnessMocks = vi.hoisted(() => ({
   deliverAssistantMessageOverBinding: vi.fn(),
+  executeAssistantProviderTurnAttempt: vi.fn(),
   executeAssistantProviderTurn: vi.fn(),
   resolveAssistantProviderTraits: vi.fn((provider: string) =>
     provider === 'openai-compatible'
@@ -42,6 +43,8 @@ vi.mock('@murphai/assistant-core/assistant-provider', async () => {
 
   return {
     ...actual,
+    executeAssistantProviderTurnAttempt:
+      robustnessMocks.executeAssistantProviderTurnAttempt,
     executeAssistantProviderTurn: robustnessMocks.executeAssistantProviderTurn,
     resolveAssistantProviderTraits: robustnessMocks.resolveAssistantProviderTraits,
   }
@@ -68,14 +71,12 @@ import {
 } from '../src/assistant/outbox.js'
 import { listRecentAssistantTurnReceipts } from '@murphai/assistant-core/assistant/turns'
 import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
-import {
-  attachOpenAiCompatibleProviderToolExecutionState,
-} from '@murphai/assistant-core/assistant/providers/openai-compatible'
 
 const cleanupPaths: string[] = []
 
 beforeEach(() => {
   robustnessMocks.deliverAssistantMessageOverBinding.mockReset()
+  robustnessMocks.executeAssistantProviderTurnAttempt.mockReset()
   robustnessMocks.executeAssistantProviderTurn.mockReset()
   robustnessMocks.resolveAssistantProviderTraits.mockReset()
   robustnessMocks.resolveAssistantProviderTraits.mockImplementation((provider: string) =>
@@ -92,6 +93,29 @@ beforeEach(() => {
           transcriptContextMode: 'provider-session',
           workspaceMode: 'direct-cli',
         })
+  robustnessMocks.executeAssistantProviderTurnAttempt.mockImplementation(
+    async (...args: Parameters<typeof robustnessMocks.executeAssistantProviderTurn>) => {
+      try {
+        return {
+          metadata: {
+            executedToolCount: 0,
+            rawToolEvents: [],
+          },
+          ok: true,
+          result: await robustnessMocks.executeAssistantProviderTurn(...args),
+        }
+      } catch (error) {
+        return {
+          error,
+          metadata: {
+            executedToolCount: 0,
+            rawToolEvents: [],
+          },
+          ok: false,
+        }
+      }
+    },
+  )
   resetInjectedAssistantFaults()
 })
 
@@ -917,35 +941,43 @@ test('sendAssistantMessage does not fail over a tool-bound OpenAI-compatible tur
   const originalHome = process.env.HOME
   process.env.HOME = homeRoot
 
-  robustnessMocks.executeAssistantProviderTurn.mockImplementation(async (input: any) => {
+  robustnessMocks.executeAssistantProviderTurnAttempt.mockImplementation(async (input: any) => {
     if (input.provider === 'openai-compatible') {
-      throw attachOpenAiCompatibleProviderToolExecutionState(
-        new VaultCliError(
+      return {
+        error: new VaultCliError(
           'ASSISTANT_PROVIDER_TIMEOUT',
           'Primary provider timed out after a tool-enabled attempt.',
           {
             retryable: true,
           },
         ),
-        {
+        metadata: {
           executedToolCount: 1,
-          rawEvents: [
+          rawToolEvents: [
             {
               type: 'assistant.tool.started',
               tool: 'assistant.memory.search',
             },
           ],
         },
-      )
+        ok: false,
+      }
     }
 
     return {
-      provider: 'codex-cli',
-      providerSessionId: 'backup-thread',
-      response: 'backup reply',
-      stderr: '',
-      stdout: '',
-      rawEvents: [],
+      metadata: {
+        executedToolCount: 0,
+        rawToolEvents: [],
+      },
+      ok: true,
+      result: {
+        provider: 'codex-cli',
+        providerSessionId: 'backup-thread',
+        response: 'backup reply',
+        stderr: '',
+        stdout: '',
+        rawEvents: [],
+      },
     }
   })
 
@@ -981,8 +1013,8 @@ test('sendAssistantMessage does not fail over a tool-bound OpenAI-compatible tur
         error.code === 'ASSISTANT_PROVIDER_TIMEOUT',
     )
 
-    assert.equal(robustnessMocks.executeAssistantProviderTurn.mock.calls.length, 1)
-    const primaryCall = robustnessMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+    assert.equal(robustnessMocks.executeAssistantProviderTurnAttempt.mock.calls.length, 1)
+    const primaryCall = robustnessMocks.executeAssistantProviderTurnAttempt.mock.calls[0]?.[0]
     assert.equal(primaryCall?.provider, 'openai-compatible')
     assert.equal(primaryCall?.toolRuntime?.vault, vaultRoot)
     assert.equal(typeof primaryCall?.toolRuntime?.requestId, 'string')
