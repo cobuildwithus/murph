@@ -1,0 +1,121 @@
+import { describe, expect, it } from "vitest";
+
+import { parseHostedDeviceSyncRuntimeApplyRequest } from "@/src/lib/device-sync/internal-runtime";
+import { sanitizeHostedLinqEventForStorage } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { minimizeHostedLinqMessageReceivedEvent } from "@/src/lib/hosted-onboarding/webhook-event-snapshots";
+
+describe("hosted contact privacy", () => {
+  it("omits Linq attachment URLs from minimized webhook snapshots", () => {
+    const minimized = minimizeHostedLinqMessageReceivedEvent({
+      api_version: "2026-04-01",
+      created_at: "2026-04-01T00:00:00.000Z",
+      data: {
+        chat_id: "chat_123",
+        from: "+15551230000",
+        is_from_me: false,
+        message: {
+          effect: null,
+          id: "msg_123",
+          parts: [
+            {
+              attachment_id: "att_123",
+              filename: "lab-results.pdf",
+              mime_type: "application/pdf",
+              size: 1234,
+              type: "media",
+              url: "https://files.example/signed?token=secret",
+            },
+          ],
+          reply_to: null,
+        },
+        received_at: "2026-04-01T00:00:00.000Z",
+        recipient_phone: "+15557654321",
+        service: "imessage",
+      },
+      event_id: "evt_123",
+      event_type: "message.received",
+      partner_id: "partner_123",
+      trace_id: "trace_123",
+    } as never);
+
+    expect(minimized.data).toMatchObject({
+      message: {
+        parts: [
+          {
+            attachment_id: "att_123",
+            filename: "lab-results.pdf",
+            mime_type: "application/pdf",
+            size: 1234,
+            type: "media",
+          },
+        ],
+      },
+    });
+    expect((minimized.data as { message: { parts: Array<Record<string, unknown>> } }).message.parts[0])
+      .not.toHaveProperty("url");
+  });
+
+  it("scrubs Linq attachment URLs before storage while preserving id redaction", () => {
+    const sanitized = sanitizeHostedLinqEventForStorage({
+      data: {
+        chat_id: "chat_123",
+        from: "+15551230000",
+        message: {
+          id: "msg_123",
+          parts: [
+            {
+              attachment_id: "att_123",
+              filename: "lab-results.pdf",
+              mime_type: "application/pdf",
+              size: 1234,
+              type: "media",
+              url: "https://files.example/signed?token=secret",
+            },
+          ],
+          reply_to: {
+            message_id: "msg_122",
+          },
+        },
+        recipient_phone: "+15557654321",
+      },
+    });
+
+    expect(sanitized.data).toMatchObject({
+      from: expect.stringMatching(/^hbid:linq\.from:/u),
+      message: {
+        id: expect.stringMatching(/^hbid:linq\.message:/u),
+        parts: [
+          {
+            attachment_id: "att_123",
+            filename: "lab-results.pdf",
+            mime_type: "application/pdf",
+            size: 1234,
+            type: "media",
+          },
+        ],
+        reply_to: {
+          message_id: expect.stringMatching(/^hbid:linq\.message:/u),
+        },
+      },
+      recipient_phone: expect.stringMatching(/^hbid:linq\.recipient:/u),
+    });
+    expect((sanitized.data as { message: { parts: Array<Record<string, unknown>> } }).message.parts[0])
+      .not.toHaveProperty("url");
+  });
+
+  it("rejects duplicate connection updates in a single runtime apply request", () => {
+    expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
+      updates: [
+        {
+          clearError: true,
+          connectionId: "conn_123",
+        },
+        {
+          connectionId: "conn_123",
+          status: "active",
+        },
+      ],
+      userId: "user_123",
+    })).toThrow(/connectionId must be unique/i);
+  });
+});

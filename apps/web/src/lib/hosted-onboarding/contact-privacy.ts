@@ -49,17 +49,6 @@ export function createHostedOpaqueIdentifier(
   return `${HOSTED_OPAQUE_ID_PREFIX}:${kind}:${HOSTED_PRIVACY_KEY_VERSION}:${digestHostedPrivacyValue(kind, normalized)}`;
 }
 
-export function isHostedBlindIndex(value: string | null | undefined, kind?: string): boolean {
-  const normalized = normalizeHostedOpaqueInput(value);
-  if (!normalized) {
-    return false;
-  }
-
-  return kind
-    ? normalized.startsWith(`${HOSTED_BLIND_INDEX_PREFIX}:${kind}:${HOSTED_PRIVACY_KEY_VERSION}:`)
-    : normalized.startsWith(`${HOSTED_BLIND_INDEX_PREFIX}:`);
-}
-
 export function readHostedPhoneHint(value: string | null | undefined): string {
   const normalized = normalizeHostedOpaqueInput(value);
   if (normalized && MASKED_PHONE_HINT_PATTERN.test(normalized)) {
@@ -97,6 +86,10 @@ export function sanitizeHostedLinqEventForStorage(
     const messageId = normalizeHostedOpaqueInput(message.id);
     if (messageId) {
       message.id = createHostedOpaqueIdentifier("linq.message", messageId);
+    }
+
+    if (Array.isArray(message.parts)) {
+      message.parts = message.parts.map((part) => sanitizeHostedLinqMessagePart(part));
     }
 
     const replyTo = toHostedRecord(message.reply_to);
@@ -246,6 +239,17 @@ function looksLikeHostedTelegramContactRecord(record: Record<string, unknown>): 
       || Object.prototype.hasOwnProperty.call(record, "first_name")
       || Object.prototype.hasOwnProperty.call(record, "last_name")
     );
+}
+
+function sanitizeHostedLinqMessagePart(value: unknown): unknown {
+  const record = toHostedRecord(value);
+
+  if (!record) {
+    return value;
+  }
+
+  delete record.url;
+  return record;
 }
 
 function createHostedBlindIndex(kind: string, value: string): string {

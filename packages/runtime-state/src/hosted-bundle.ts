@@ -6,6 +6,11 @@ import type { HostedExecutionBundleKind } from "./hosted-bundle-ref.ts";
 
 export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v2";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
+const MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES = 64 * 1024 * 1024;
+const MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
+const MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT = 50_000;
+const MAX_HOSTED_BUNDLE_PATH_LENGTH = 4_096;
+const MAX_HOSTED_BUNDLE_ROOT_LENGTH = 256;
 
 export interface HostedBundleArtifactRef {
   byteSize: number;
@@ -180,9 +185,24 @@ export function sha256HostedBundleHex(bytes: Uint8Array | ArrayBuffer): string {
 
 export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundleArchive {
   const buffer = Buffer.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
-  const parsed = JSON.parse(gunzipSync(buffer).toString("utf8")) as Partial<HostedBundleArchive> & {
+
+  if (buffer.byteLength > MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_COMPRESSED_BYTES} byte compressed size limit.`,
+    );
+  }
+
+  let parsed: Partial<HostedBundleArchive> & {
     schema?: string;
   };
+
+  try {
+    parsed = JSON.parse(
+      gunzipSync(buffer, { maxOutputLength: MAX_HOSTED_BUNDLE_ARCHIVE_UNCOMPRESSED_BYTES }).toString("utf8"),
+    ) as Partial<HostedBundleArchive> & { schema?: string };
+  } catch {
+    throw new Error("Hosted bundle archive is invalid.");
+  }
 
   if (
     parsed.schema !== HOSTED_BUNDLE_SCHEMA
@@ -195,20 +215,39 @@ export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): Hoste
     throw new Error("Hosted bundle archive kind is invalid.");
   }
 
+  if (parsed.files.length > MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT} file entry limit.`,
+    );
+  }
+
+  const files = parsed.files.map((file) => parseHostedBundleArchiveFile(file));
+  assertUniqueHostedBundleArchiveEntries(files);
+
   return {
-    files: sortHostedBundleFiles(parsed.files.map((file) => parseHostedBundleArchiveFile(file))),
+    files: sortHostedBundleFiles(files),
     kind: parsed.kind,
     schema: HOSTED_BUNDLE_SCHEMA,
   };
 }
 
 export function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array {
+  const files = archive.files.map((file) => parseHostedBundleArchiveFile(file));
+
+  if (files.length > MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT) {
+    throw new Error(
+      `Hosted bundle archive exceeds the ${MAX_HOSTED_BUNDLE_ARCHIVE_FILE_COUNT} file entry limit.`,
+    );
+  }
+
+  assertUniqueHostedBundleArchiveEntries(files);
+
   return Uint8Array.from(
     gzipSync(
       Buffer.from(
         JSON.stringify({
           ...archive,
-          files: sortHostedBundleFiles(archive.files),
+          files: sortHostedBundleFiles(files),
         }),
         "utf8",
       ),
@@ -228,7 +267,7 @@ function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
 
   const normalized = {
     path: normalizeBundlePath(record.path),
-    root: record.root,
+    root: normalizeHostedBundleRoot(record.root),
   };
 
   if (typeof record.contentsBase64 === "string") {
@@ -276,6 +315,7 @@ export function normalizeBundlePath(value: string): string {
     || normalized === ".."
     || normalized.startsWith("../")
     || normalized.includes("/../")
+    || normalized.length > MAX_HOSTED_BUNDLE_PATH_LENGTH
   ) {
     throw new Error(`Hosted bundle path is invalid: ${value}`);
   }
@@ -341,4 +381,32 @@ export function assertHostedBundleArtifactIntegrity(input: {
 
 export function toHostedBundleBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value);
+}
+
+function normalizeHostedBundleRoot(value: string): string {
+  const normalized = value.trim();
+
+  if (
+    normalized.length === 0
+    || normalized.length > MAX_HOSTED_BUNDLE_ROOT_LENGTH
+    || normalized.includes("\u0000")
+  ) {
+    throw new Error(`Hosted bundle root is invalid: ${value}`);
+  }
+
+  return normalized;
+}
+
+function assertUniqueHostedBundleArchiveEntries(files: readonly HostedBundleArchiveFile[]): void {
+  const seen = new Set<string>();
+
+  for (const file of files) {
+    const key = `${file.root}:${file.path}`;
+
+    if (seen.has(key)) {
+      throw new Error(`Hosted bundle archive contains duplicate file entry: ${key}.`);
+    }
+
+    seen.add(key);
+  }
 }

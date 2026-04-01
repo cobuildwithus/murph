@@ -336,13 +336,16 @@ export function parseHostedDeviceSyncRuntimeApplyRequest(
   value: Record<string, unknown>,
   trustedUserId: string | null = null,
 ): HostedDeviceSyncRuntimeApplyRequest {
+  const updates = requireArray(value.updates, "updates").map((entry, index) =>
+    parseHostedDeviceSyncRuntimeConnectionUpdate(entry, index)
+  );
+  assertUniqueHostedDeviceSyncRuntimeApplyConnectionIds(updates);
+
   return {
     ...(value.occurredAt === undefined
       ? {}
       : { occurredAt: readNullableIsoTimestamp(value.occurredAt, "occurredAt") }),
-    updates: requireArray(value.updates, "updates").map((entry, index) =>
-      parseHostedDeviceSyncRuntimeConnectionUpdate(entry, index)
-    ),
+    updates,
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(value.userId, trustedUserId),
   };
 }
@@ -468,6 +471,22 @@ function parseHostedDeviceSyncRuntimeTokenBundle(
     refreshToken: readNullableString(record.refreshToken, `${label}.refreshToken`),
     tokenVersion: requireNumber(record.tokenVersion, `${label}.tokenVersion`),
   };
+}
+
+function assertUniqueHostedDeviceSyncRuntimeApplyConnectionIds(
+  updates: readonly HostedDeviceSyncRuntimeConnectionUpdate[],
+): void {
+  const seen = new Set<string>();
+
+  for (const [index, update] of updates.entries()) {
+    if (seen.has(update.connectionId)) {
+      throw new TypeError(
+        `updates[${index}].connectionId must be unique within a single runtime apply request.`,
+      );
+    }
+
+    seen.add(update.connectionId);
+  }
 }
 
 function parseDeviceSyncStatus(value: unknown, label: string): DeviceSyncAccountStatus {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
@@ -10,6 +10,7 @@ import {
   sameHostedExecutionBundleRef,
   type HostedExecutionBundleRef,
 } from "../src/index.ts";
+import { serializeHostedBundleArchive } from "../src/hosted-bundle.ts";
 import {
   decodeHostedBundleBase64,
   encodeHostedBundleBase64,
@@ -548,6 +549,113 @@ test("hosted bundle restore rejects backslash and drive-style traversal archive 
     }
 
     await assert.rejects(readFile(outsidePath, "utf8"));
+  } finally {
+    await rm(workspaceRoot, { force: true, recursive: true });
+  }
+});
+
+test("hosted bundle restore rejects duplicate root and path entries", () => {
+  expect(() => writeHostedBundleTextFile({
+    bytes: serializeHostedBundleArchive({
+      files: [
+        {
+          contentsBase64: Buffer.from("first", "utf8").toString("base64"),
+          path: "notes/today.md",
+          root: "vault",
+        },
+      ],
+      kind: "vault",
+      schema: HOSTED_BUNDLE_SCHEMA,
+    }),
+    kind: "vault",
+    path: "notes/today.md",
+    root: "vault",
+    text: "second",
+  })).not.toThrow();
+
+  expect(() => serializeHostedBundleArchive({
+    files: [
+      {
+        contentsBase64: Buffer.from("first", "utf8").toString("base64"),
+        path: "notes/today.md",
+        root: "vault",
+      },
+      {
+        contentsBase64: Buffer.from("second", "utf8").toString("base64"),
+        path: "notes/today.md",
+        root: "vault",
+      },
+    ],
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  })).toThrow(/duplicate file entry/i);
+});
+
+test("hosted bundle restore rejects duplicate entries when parsing untrusted bundle bytes", () => {
+  const bundleBytes = Uint8Array.from(gzipSync(Buffer.from(JSON.stringify({
+    files: [
+      {
+        contentsBase64: Buffer.from("first", "utf8").toString("base64"),
+        path: "notes/today.md",
+        root: "vault",
+      },
+      {
+        contentsBase64: Buffer.from("second", "utf8").toString("base64"),
+        path: "notes/today.md",
+        root: "vault",
+      },
+    ],
+    kind: "vault",
+    schema: HOSTED_BUNDLE_SCHEMA,
+  }), "utf8")));
+
+  expect(() => readHostedBundleTextFile({
+    bytes: bundleBytes,
+    expectedKind: "vault",
+    path: "notes/today.md",
+    root: "vault",
+  })).toThrow(/duplicate file entry/i);
+});
+
+test("hosted bundle restore rejects restore paths that traverse pre-existing symbolic links", async () => {
+  const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-runner-bundle-symlink-"));
+
+  try {
+    const restoreRoot = path.join(workspaceRoot, "vault");
+    const escapedRoot = path.join(workspaceRoot, "escaped");
+
+    await mkdir(restoreRoot, { recursive: true });
+    await mkdir(escapedRoot, { recursive: true });
+    await symlink(escapedRoot, path.join(restoreRoot, "linked"), "dir");
+
+    await expect(
+      restoreHostedBundleRoots({
+        bytes: Uint8Array.from(
+          gzipSync(
+            Buffer.from(
+              JSON.stringify({
+                files: [
+                  {
+                    contentsBase64: Buffer.from("unexpected", "utf8").toString("base64"),
+                    path: "linked/outside.txt",
+                    root: "vault",
+                  },
+                ],
+                kind: "vault",
+                schema: HOSTED_BUNDLE_SCHEMA,
+              }),
+              "utf8",
+            ),
+          ),
+        ),
+        expectedKind: "vault",
+        roots: {
+          vault: restoreRoot,
+        },
+      }),
+    ).rejects.toThrow(/symbolic links/i);
+
+    await assert.rejects(readFile(path.join(escapedRoot, "outside.txt"), "utf8"));
   } finally {
     await rm(workspaceRoot, { force: true, recursive: true });
   }
