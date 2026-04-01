@@ -29,7 +29,7 @@
   ],
   "scripts": {
     "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "tsc -b tsconfig.typecheck.json --pretty false"
   },
   "engines": {
     "node": ">=22.16.0"
