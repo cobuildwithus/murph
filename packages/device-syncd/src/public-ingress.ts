@@ -244,48 +244,6 @@ export class DeviceSyncPublicIngress {
       now,
     });
 
-    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
-
-    if (!account) {
-      this.logger.warn?.("Ignoring webhook for unknown device sync account.", {
-        provider: provider.provider,
-        externalAccountId: parsed.externalAccountId,
-        eventType: parsed.eventType,
-      });
-
-      await this.hooks.onUnknownWebhook?.({
-        provider,
-        webhook: parsed,
-        externalAccountId: parsed.externalAccountId,
-        now,
-      });
-
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
-    }
-
-    if (account.status !== "active") {
-      this.logger.warn?.("Ignoring webhook side effects for non-active device sync account.", {
-        provider: provider.provider,
-        accountId: account.id,
-        status: account.status,
-        eventType: parsed.eventType,
-      });
-
-      return {
-        accepted: true,
-        duplicate: false,
-        provider: provider.provider,
-        eventType: parsed.eventType,
-        traceId: parsed.traceId,
-      };
-    }
-
     const traceClaim = await this.store.claimWebhookTrace({
       provider: provider.provider,
       traceId: parsed.traceId,
@@ -313,6 +271,57 @@ export class DeviceSyncPublicIngress {
         retryable: true,
         httpStatus: 503,
       });
+    }
+
+    const account = await this.store.getConnectionByExternalAccount(provider.provider, parsed.externalAccountId);
+
+    if (!account) {
+      this.logger.warn?.("Ignoring webhook for unknown device sync account.", {
+        provider: provider.provider,
+        externalAccountId: parsed.externalAccountId,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+      });
+
+      try {
+        await this.hooks.onUnknownWebhook?.({
+          provider,
+          webhook: parsed,
+          externalAccountId: parsed.externalAccountId,
+          now,
+        });
+        await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+      } catch (error) {
+        await this.store.releaseWebhookTrace(provider.provider, parsed.traceId);
+        throw error;
+      }
+
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+      };
+    }
+
+    if (account.status !== "active") {
+      this.logger.warn?.("Ignoring webhook side effects for non-active device sync account.", {
+        provider: provider.provider,
+        accountId: account.id,
+        status: account.status,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+      });
+      await this.store.completeWebhookTrace(provider.provider, parsed.traceId);
+
+      return {
+        accepted: true,
+        duplicate: false,
+        provider: provider.provider,
+        eventType: parsed.eventType,
+        traceId: parsed.traceId,
+      };
     }
 
     try {
