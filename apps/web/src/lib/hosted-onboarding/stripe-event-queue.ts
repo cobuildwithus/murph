@@ -7,7 +7,6 @@ import {
 import type Stripe from "stripe";
 
 import {
-  activateHostedMemberFromConfirmedRevnetIssuance,
   applyStripeCheckoutCompleted,
   applyStripeCheckoutExpired,
   applyStripeDisputeUpdated,
@@ -15,6 +14,9 @@ import {
   applyStripeInvoicePaymentFailed,
   applyStripeRefundCreated,
   applyStripeSubscriptionUpdated,
+} from "./stripe-billing-events";
+import {
+  activateHostedMemberFromConfirmedRevnetIssuance,
   requireHostedStripeEventPayload,
   resolveStripeCustomerContext,
   type HostedStripeDispatchContext,
