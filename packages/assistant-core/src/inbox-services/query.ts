@@ -59,6 +59,7 @@ export function summarizeCapture(
     externalId: capture.externalId,
     threadId: capture.thread.id,
     threadTitle: capture.thread.title ?? null,
+    threadIsDirect: capture.thread.isDirect ?? false,
     actorId: capture.actor.id ?? null,
     actorName: capture.actor.displayName ?? null,
     actorIsSelf: capture.actor.isSelf,
@@ -79,7 +80,6 @@ export function detailCapture(
   return {
     ...summarizeCapture(capture, promotions),
     createdAt: capture.createdAt,
-    threadIsDirect: capture.thread.isDirect ?? false,
     attachments: capture.attachments.map(toCliAttachment),
   }
 }

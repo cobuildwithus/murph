@@ -97,8 +97,20 @@ export function createTelegramPollConnector({
       return;
     }
 
-    if (effectiveTransportMode === "take-over-webhook" && driver.deleteWebhook) {
-      await driver.deleteWebhook({ dropPendingUpdates: false });
+    const activeWebhookUrl = await readActiveTelegramWebhookUrl(driver);
+
+    if (effectiveTransportMode === "take-over-webhook") {
+      if (driver.deleteWebhook) {
+        await driver.deleteWebhook({ dropPendingUpdates: false });
+      } else if (activeWebhookUrl) {
+        throw new Error(
+          'Telegram polling transportMode "take-over-webhook" requires deleteWebhook support when an active webhook is configured.',
+        );
+      }
+    } else if (activeWebhookUrl) {
+      throw new Error(
+        'Telegram polling transportMode "require-no-webhook" cannot run while Telegram still has an active webhook. Delete the webhook first or use transportMode "take-over-webhook".',
+      );
     }
 
     pollingPrepared = true;
@@ -398,6 +410,21 @@ function rewritePollingConflict(error: unknown): unknown {
   }
 
   return error;
+}
+
+async function readActiveTelegramWebhookUrl(
+  driver: Pick<TelegramPollDriver, "getWebhookInfo">,
+): Promise<string | null> {
+  if (!driver.getWebhookInfo) {
+    return null;
+  }
+
+  const webhookInfo = await driver.getWebhookInfo();
+  const webhookUrl = webhookInfo?.url;
+
+  return typeof webhookUrl === "string" && webhookUrl.trim().length > 0
+    ? webhookUrl.trim()
+    : null;
 }
 
 function resolveTelegramPollTransportMode(input: {

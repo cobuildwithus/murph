@@ -662,6 +662,7 @@ function pickTelegramReplyMessage(
     message_id: message.message_id,
     date: message.date,
     business_connection_id: message.business_connection_id,
+    direct_messages_topic: pickTelegramDirectMessagesTopic(message.direct_messages_topic),
     media_group_id: message.media_group_id,
     message_thread_id: message.message_thread_id,
     text: message.text,

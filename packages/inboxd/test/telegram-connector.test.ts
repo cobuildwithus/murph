@@ -132,6 +132,11 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
         reply_to_message: {
           message_id: 17,
           text: "Earlier message",
+          direct_messages_topic: {
+            topic_id: 7,
+            title: "Nested topic",
+            secret: "<NESTED_SECRET>",
+          },
           chat: {
             id: 42,
             type: "private",
@@ -189,6 +194,10 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
   assert.deepEqual(messageRaw.reply_to_message, {
     message_id: 17,
     text: "Earlier message",
+    direct_messages_topic: {
+      topic_id: 7,
+      title: "Nested topic",
+    },
     chat: {
       id: 42,
       type: "private",
@@ -889,6 +898,82 @@ test("createTelegramPollConnector surfaces async polling failures from the watch
     ),
     /watch loop failed/u,
   );
+});
+
+test("createTelegramPollConnector rejects require-no-webhook mode when Telegram still has an active webhook", async () => {
+  let getMessagesCalls = 0;
+
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "murph_bot" };
+      },
+      async getMessages() {
+        getMessagesCalls += 1;
+        return { messages: [] };
+      },
+      async startWatching() {
+        throw new Error("watch should not start when webhook preflight fails");
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+      async getWebhookInfo() {
+        return {
+          url: "https://example.invalid/webhook",
+        };
+      },
+    },
+    downloadAttachments: false,
+    transportMode: "require-no-webhook",
+  });
+
+  await assert.rejects(
+    connector.backfill(null, async (capture) => createPersistedCapture(capture)),
+    /require-no-webhook/u,
+  );
+  assert.equal(getMessagesCalls, 0);
+});
+
+test("createTelegramPollConnector rejects take-over-webhook mode when deleteWebhook support is unavailable", async () => {
+  let getMessagesCalls = 0;
+
+  const connector = createTelegramPollConnector({
+    driver: {
+      async getMe() {
+        return { id: 999, username: "murph_bot" };
+      },
+      async getMessages() {
+        getMessagesCalls += 1;
+        return { messages: [] };
+      },
+      async startWatching() {
+        throw new Error("watch should not start when webhook takeover cannot run");
+      },
+      async getFile() {
+        throw new Error("getFile should not be called in this test");
+      },
+      async downloadFile() {
+        throw new Error("downloadFile should not be called in this test");
+      },
+      async getWebhookInfo() {
+        return {
+          url: "https://example.invalid/webhook",
+        };
+      },
+    },
+    downloadAttachments: false,
+    transportMode: "take-over-webhook",
+  });
+
+  await assert.rejects(
+    connector.backfill(null, async (capture) => createPersistedCapture(capture)),
+    /requires deleteWebhook support/u,
+  );
+  assert.equal(getMessagesCalls, 0);
 });
 
 test("createTelegramApiPollDriver reads local Bot API file paths directly", async () => {

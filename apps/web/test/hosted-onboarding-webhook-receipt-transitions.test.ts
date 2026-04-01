@@ -200,8 +200,7 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(linqData.chat_id, "chat_123");
     assert.equal(typeof linqData.from, "string");
     assert.match(linqData.from as string, /^hbid:linq\.from:v1:/);
-    assert.equal(typeof linqData.recipient_phone, "string");
-    assert.match(linqData.recipient_phone as string, /^hbid:linq\.recipient:v1:/);
+    assert.equal(linqData.recipient_phone, undefined);
     assert.equal(typeof linqMessage.id, "string");
     assert.match(linqMessage.id as string, /^hbid:linq\.message:v1:/);
     assert.equal(typeof linqReply.message_id, "string");
@@ -384,6 +383,10 @@ describe("hosted webhook receipt transitions", () => {
                 type: "private",
               },
               date: 1711454300,
+              direct_messages_topic: {
+                title: "Priority thread",
+                topic_id: 9,
+              },
               from: {
                 first_name: "Bot",
                 id: 999,
@@ -435,6 +438,7 @@ describe("hosted webhook receipt transitions", () => {
         from: Record<string, unknown>;
         reply_to_message: {
           chat: Record<string, unknown>;
+          direct_messages_topic: Record<string, unknown>;
           from: Record<string, unknown>;
         };
         sender_business_bot: Record<string, unknown>;
@@ -460,6 +464,13 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(
       telegramUpdate.message.reply_to_message.from.id,
       createHostedOpaqueIdentifier("telegram.user", 999),
+    );
+    assert.deepEqual(
+      telegramUpdate.message.reply_to_message.direct_messages_topic,
+      {
+        topic_id: 9,
+        title: "Priority thread",
+      },
     );
     assert.equal(
       telegramUpdate.message.sender_business_bot.id,

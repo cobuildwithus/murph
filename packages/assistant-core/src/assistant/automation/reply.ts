@@ -67,6 +67,7 @@ export interface AssistantAutoReplyGroupContext {
 }
 
 interface AssistantAutoReplyReplyDecision {
+  deliveryReplyToMessageId: string | null
   kind: 'reply'
   operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
@@ -399,6 +400,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     const result = await executeAssistantAutoReply({
       captureIds: input.context.captureIds,
       deliveryDispatchMode: input.deliveryDispatchMode,
+      deliveryReplyToMessageId: decision.deliveryReplyToMessageId,
       providerHeartbeatMs: input.providerHeartbeatMs,
       providerLongRunningCommandStallTimeoutMs:
         input.providerLongRunningCommandStallTimeoutMs,
@@ -796,6 +798,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
   }
 
   return {
+    deliveryReplyToMessageId: readAutoReplyDeliveryReplyToMessageId(shownGroup),
     kind: 'reply',
     operatorAuthority: resolveAcceptedInboundMessageOperatorAuthority(),
     primaryCapture,
@@ -826,6 +829,7 @@ async function loadAssistantAutoReplyCaptures(input: {
 async function executeAssistantAutoReply(input: {
   captureIds: readonly string[]
   deliveryDispatchMode?: AssistantOutboxDispatchMode
+  deliveryReplyToMessageId: string | null
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -851,7 +855,7 @@ async function executeAssistantAutoReply(input: {
       prompt: input.prompt,
       deliverResponse: true,
       deliveryDispatchMode: input.deliveryDispatchMode,
-      deliveryReplyToMessageId: readLinqReplyToMessageId(input.primaryCapture),
+      deliveryReplyToMessageId: input.deliveryReplyToMessageId,
       receiptMetadata: {
         [AUTO_REPLY_RECEIPT_CAPTURE_ID_KEY]: input.replyCaptureId,
         [AUTO_REPLY_RECEIPT_CAPTURE_IDS_KEY]: input.captureIds.join(','),
@@ -870,6 +874,34 @@ async function executeAssistantAutoReply(input: {
   } finally {
     watchdog.dispose()
   }
+}
+
+function readAutoReplyDeliveryReplyToMessageId(
+  captures: readonly AssistantAutoReplyPromptCapture[],
+): string | null {
+  const primaryCapture = captures[0]?.capture
+  if (!primaryCapture) {
+    return null
+  }
+
+  if (primaryCapture.source === 'linq') {
+    return readLinqReplyToMessageId(primaryCapture)
+  }
+
+  if (primaryCapture.source !== 'telegram') {
+    return null
+  }
+
+  for (let index = captures.length - 1; index >= 0; index -= 1) {
+    const messageId = normalizeNullableString(
+      captures[index]?.telegramMetadata?.messageId,
+    )
+    if (messageId) {
+      return messageId
+    }
+  }
+
+  return null
 }
 
 function readLinqReplyToMessageId(capture: InboxShowResult['capture']): string | null {
