@@ -68,14 +68,6 @@ export function parseHostedAssistantRuntimeConfig(
                   "Hosted assistant runtime config.commitTimeoutMs",
                 ),
         }),
-    ...(record.emailBaseUrl === undefined
-      ? {}
-      : {
-          emailBaseUrl: readNullableString(
-            record.emailBaseUrl,
-            "Hosted assistant runtime config.emailBaseUrl",
-          ),
-        }),
     ...(record.forwardedEnv === undefined
       ? {}
       : {

@@ -12,10 +12,11 @@ import {
   DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
+  HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
+  normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
   readHostedExecutionWebControlPlaneEnvironment,
-  type HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
 
 export { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
@@ -35,6 +36,14 @@ const HOSTED_RUNTIME_CHILD_AMBIENT_ENV_KEYS = [
   "SSL_CERT_FILE",
   "TZ",
 ] as const;
+const HOSTED_RUNTIME_TEST_ARTIFACTS_BASE_URL_ENV =
+  "HOSTED_EXECUTION_TEST_ARTIFACTS_BASE_URL";
+const HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV =
+  "HOSTED_EXECUTION_TEST_COMMIT_BASE_URL";
+const HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV =
+  "HOSTED_EXECUTION_TEST_EMAIL_BASE_URL";
+const HOSTED_RUNTIME_TEST_SIDE_EFFECTS_BASE_URL_ENV =
+  "HOSTED_EXECUTION_TEST_SIDE_EFFECTS_BASE_URL";
 
 export interface HostedRuntimeChildLauncherDirectories {
   cacheRoot: string;
@@ -47,19 +56,20 @@ export function normalizeHostedAssistantRuntimeConfig(
   input: HostedAssistantRuntimeConfig | undefined,
 ): NormalizedHostedAssistantRuntimeConfig {
   const forwardedEnv = { ...(input?.forwardedEnv ?? {}) };
+  const callbackBaseUrls = resolveHostedRuntimeCallbackBaseUrls(forwardedEnv);
   const webControlPlane = readHostedExecutionWebControlPlaneEnvironment(forwardedEnv, {
     allowHttpHosts: Object.values(HOSTED_EXECUTION_PROXY_HOSTS),
     allowHttpLocalhost: true,
   });
 
   return {
-    artifactsBaseUrl: DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
-    commitBaseUrl: DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+    artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl,
+    commitBaseUrl: callbackBaseUrls.commitBaseUrl,
     commitTimeoutMs: input?.commitTimeoutMs ?? null,
-    emailBaseUrl: DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+    emailBaseUrl: callbackBaseUrls.emailBaseUrl,
     internalWorkerProxyToken: normalizeHostedExecutionString(input?.internalWorkerProxyToken),
     forwardedEnv,
-    sideEffectsBaseUrl: DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
+    sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl,
     userEnv: { ...(input?.userEnv ?? {}) },
     webControlPlane: {
       ...webControlPlane,
@@ -96,6 +106,53 @@ export function resolveHostedRuntimeTsxImportSpecifier(): string {
   } catch {
     return "tsx";
   }
+}
+
+function resolveHostedRuntimeCallbackBaseUrls(
+  forwardedEnv: Readonly<Record<string, string>>,
+): Pick<
+  NormalizedHostedAssistantRuntimeConfig,
+  "artifactsBaseUrl" | "commitBaseUrl" | "emailBaseUrl" | "sideEffectsBaseUrl"
+> {
+  return {
+    artifactsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
+      forwardedEnv[HOSTED_RUNTIME_TEST_ARTIFACTS_BASE_URL_ENV],
+      DEFAULT_HOSTED_EXECUTION_ARTIFACTS_BASE_URL,
+      HOSTED_EXECUTION_CALLBACK_HOSTS.artifacts,
+    ),
+    commitBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
+      forwardedEnv[HOSTED_RUNTIME_TEST_COMMIT_BASE_URL_ENV],
+      DEFAULT_HOSTED_EXECUTION_COMMIT_BASE_URL,
+      HOSTED_EXECUTION_CALLBACK_HOSTS.commit,
+    ),
+    emailBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
+      forwardedEnv[HOSTED_RUNTIME_TEST_EMAIL_BASE_URL_ENV],
+      DEFAULT_HOSTED_EXECUTION_EMAIL_BASE_URL,
+      HOSTED_EXECUTION_CALLBACK_HOSTS.email,
+    ),
+    sideEffectsBaseUrl: normalizeHostedRuntimeCallbackBaseUrl(
+      forwardedEnv[HOSTED_RUNTIME_TEST_SIDE_EFFECTS_BASE_URL_ENV],
+      DEFAULT_HOSTED_EXECUTION_SIDE_EFFECTS_BASE_URL,
+      HOSTED_EXECUTION_CALLBACK_HOSTS.sideEffects,
+    ),
+  };
+}
+
+function normalizeHostedRuntimeCallbackBaseUrl(
+  value: string | undefined,
+  fallback: string,
+  host: string,
+): string {
+  const normalized = normalizeHostedExecutionBaseUrl(value ?? fallback, {
+    allowHttpHosts: [host],
+    allowHttpLocalhost: true,
+  });
+
+  if (!normalized) {
+    throw new TypeError("Hosted assistant runtime callback baseUrl must be configured.");
+  }
+
+  return normalized;
 }
 
 export async function createHostedRuntimeChildLauncherDirectories(

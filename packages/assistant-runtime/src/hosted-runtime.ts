@@ -206,7 +206,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
     signal?: AbortSignal;
   },
 ): Promise<HostedExecutionRunnerResult> {
-  const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime);
+  const runtime = input.runtime;
   const childEntry = resolveHostedRuntimeChildEntry();
   const isTypeScriptChild = childEntry.endsWith(".ts");
   const childArgs = isTypeScriptChild
@@ -227,7 +227,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
         cwd: launcherRoot,
         detached: process.platform !== "win32",
         env: createHostedRuntimeChildProcessEnv({
-          forwardedEnv: runtime.forwardedEnv,
+          forwardedEnv: { ...(runtime?.forwardedEnv ?? {}) },
           isTypeScriptChild,
           launcherDirectories,
         }),
@@ -311,7 +311,7 @@ export async function runHostedAssistantRuntimeJobIsolated(
       });
 
       child.stdin.on("error", () => {});
-      child.stdin.end(JSON.stringify({ request: input.request, runtime }));
+      child.stdin.end(JSON.stringify(input));
     });
   } finally {
     await rm(launcherRoot, { force: true, recursive: true });
