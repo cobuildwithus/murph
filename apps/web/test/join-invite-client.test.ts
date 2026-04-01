@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 
 vi.mock("@/src/components/hosted-onboarding/hosted-phone-auth", () => ({
   HostedPhoneAuth(input: { mode: string; privyAppId: string; privyClientId?: string | null }) {
@@ -92,6 +92,44 @@ test("share status only resolves to completed after the async import is consumed
     resolveJoinInviteShareStateFromStatus(createShareStatus("consumed")),
     "completed",
   );
+});
+
+test("requestHostedOnboardingJson fails cleanly when a successful response has an empty body", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("", {
+    status: 200,
+  }));
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { requestHostedOnboardingJson } = await import(
+    "@/src/components/hosted-onboarding/client-api"
+  );
+
+  await expect(requestHostedOnboardingJson<{ ok: true }>({
+    url: "/api/hosted-onboarding/example",
+  })).rejects.toMatchObject({
+    code: null,
+    message: "Request returned an unexpected response.",
+    name: "HostedOnboardingApiError",
+  });
+});
+
+test("requestHostedOnboardingJson falls back to a controlled failure for malformed error bodies", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("{", {
+    status: 503,
+  }));
+
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { requestHostedOnboardingJson } = await import("@/src/components/hosted-onboarding/client-api");
+
+  await expect(requestHostedOnboardingJson<{ ok: true }>({
+    url: "/api/hosted-onboarding/example",
+  })).rejects.toMatchObject({
+    code: null,
+    message: "Request failed.",
+    retryable: false,
+  });
 });
 
 function createStatus(

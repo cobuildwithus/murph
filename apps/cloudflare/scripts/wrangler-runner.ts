@@ -43,15 +43,23 @@ export async function runWranglerJson(
       stdio: ["inherit", "pipe", "pipe"],
     });
 
+    const stdoutStream = child.stdout;
+    const stderrStream = child.stderr;
+
+    if (!stdoutStream || !stderrStream) {
+      reject(new Error("wrangler json runner requires piped stdout and stderr streams."));
+      return;
+    }
+
     let stdout = "";
     let stderr = "";
 
-    child.stdout!.setEncoding("utf8");
-    child.stdout!.on("data", (chunk) => {
+    stdoutStream.setEncoding("utf8");
+    stdoutStream.on("data", (chunk) => {
       stdout += chunk;
     });
-    child.stderr!.setEncoding("utf8");
-    child.stderr!.on("data", (chunk) => {
+    stderrStream.setEncoding("utf8");
+    stderrStream.on("data", (chunk) => {
       stderr += chunk;
     });
 

@@ -131,7 +131,7 @@ async function readCurrentDeployment(
 
     return JSON.parse(stdout) as DeploymentStatusPayload;
   } catch (error) {
-    if (error instanceof Error && error.message.includes("has no deployments")) {
+    if (isWranglerNoDeploymentsError(error)) {
       return null;
     }
 
@@ -141,19 +141,20 @@ async function readCurrentDeployment(
 
 async function readWranglerOutputFile(
   outputFilePath: string,
-  type: string,
+  entryType: string,
 ): Promise<Record<string, unknown> | null> {
-  const content = await readFile(outputFilePath, "utf8");
-  const entries = content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Record<string, unknown>);
+  const lines = (await readFile(outputFilePath, "utf8")).split("\n");
 
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]?.trim();
 
-    if (entry.type === type) {
+    if (!line) {
+      continue;
+    }
+
+    const entry = JSON.parse(line) as Record<string, unknown>;
+
+    if (entry.type === entryType) {
       return entry;
     }
   }
@@ -171,6 +172,10 @@ async function readRenderedDeployConfig(configFilePath: string): Promise<Record<
       `Expected a rendered JSON deploy config at ${configFilePath}. Re-run deploy:config:render before deploying.`,
     );
   }
+}
+
+function isWranglerNoDeploymentsError(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("has no deployments");
 }
 
 function requireEnv(name: string, env: Readonly<Record<string, string | undefined>>): string {

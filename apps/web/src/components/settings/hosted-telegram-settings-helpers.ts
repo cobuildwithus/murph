@@ -6,6 +6,7 @@ import {
 
 import {
   isRecord,
+  readJsonErrorDetails,
   readOptionalJsonObject,
   retrySyncOperation,
   toErrorMessage,
@@ -120,13 +121,11 @@ async function syncHostedTelegramConnection(
   const payload = await readOptionalJsonObject(response);
 
   if (!response.ok) {
-    const errorPayload = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
+    const errorDetails = readJsonErrorDetails(payload);
 
     throw new HostedTelegramSyncError(
-      typeof errorPayload?.code === "string" ? errorPayload.code : null,
-      typeof errorPayload?.message === "string"
-        ? errorPayload.message
-        : "We could not sync Telegram to the hosted assistant yet.",
+      errorDetails.code,
+      errorDetails.message ?? "We could not sync Telegram to the hosted assistant yet.",
     );
   }
 

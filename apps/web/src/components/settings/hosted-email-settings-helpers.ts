@@ -8,6 +8,7 @@ import {
 
 import {
   isRecord,
+  readJsonErrorDetails,
   readOptionalJsonObject,
   retrySyncOperation,
   toErrorMessage,
@@ -151,13 +152,11 @@ async function syncHostedEmailConnection(
   const payload = await readOptionalJsonObject(response);
 
   if (!response.ok) {
-    const errorPayload = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
+    const errorDetails = readJsonErrorDetails(payload);
 
     throw new HostedEmailSyncError(
-      typeof errorPayload?.code === "string" ? errorPayload.code : null,
-      typeof errorPayload?.message === "string"
-        ? errorPayload.message
-        : "We could not sync your verified email to the hosted assistant yet.",
+      errorDetails.code,
+      errorDetails.message ?? "We could not sync your verified email to the hosted assistant yet.",
     );
   }
 
