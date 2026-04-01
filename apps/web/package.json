@@ -7,8 +7,10 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts",
+    "dev:turbopack": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-local.ts --turbopack",
     "build": "prisma generate && next build",
+    "lint": "eslint .",
     "start": "next start",
     "dev:smoke": "pnpm --dir ../.. exec tsx apps/web/scripts/dev-smoke.ts",
     "typecheck": "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && prisma generate && tsc -p tsconfig.json --pretty false",
@@ -50,6 +52,8 @@
     "@tailwindcss/postcss": "^4.2.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.1",
     "prisma": "^7.5.0",
     "tailwindcss": "^4.2.1"
   }

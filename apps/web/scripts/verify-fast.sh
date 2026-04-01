@@ -29,6 +29,7 @@ wait_for_background_jobs() {
 
 pnpm prisma:generate
 pnpm typecheck:prepared
+pnpm lint
 
 if [[ "$verify_step_parallel" == "1" ]]; then
   pnpm test &

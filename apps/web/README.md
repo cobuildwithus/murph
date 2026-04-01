@@ -149,9 +149,10 @@ pnpm --dir apps/web prisma:migrate:deploy
 
 ## Local verification
 
+- `pnpm --dir apps/web lint` runs the explicit ESLint CLI with `eslint-config-next`.
 - `pnpm --dir apps/web dev` now keeps interactive Next dev artifacts under `apps/web/.next-dev`.
 - `pnpm --dir apps/web build` and `pnpm --dir apps/web start` keep using `apps/web/.next`.
-- `pnpm --dir apps/web test` is the fast hosted-web Vitest lane. `pnpm --dir apps/web verify` adds the app-local typecheck, a cold-boot `next dev` smoke under `apps/web/.next-smoke`, and the production build so the heavier preflight checks stay out of the default unit-test loop.
+- `pnpm --dir apps/web test` is the fast hosted-web Vitest lane. `pnpm --dir apps/web verify` adds the app-local typecheck, lint, a cold-boot `next dev` smoke under `apps/web/.next-smoke`, and the production build so the heavier preflight checks stay out of the default unit-test loop.
 - Treat `apps/web/.next`, `apps/web/.next-dev`, and `apps/web/.next-smoke` as generated local artifacts that must stay out of commits and raw source bundles.
 - Hosted execution outbox draining is wired through `apps/web/vercel.json` as a 1-minute Vercel cron targeting `/api/internal/hosted-execution/outbox/cron`.
 - Hosted AI usage metering is wired through `apps/web/vercel.json` as a 5-minute Vercel cron targeting `/api/internal/hosted-execution/usage/cron`.
@@ -211,8 +212,11 @@ This repo now also includes a hosted onboarding lane for phone-bound invites and
 
 - `GET /`
 - `GET /join/:inviteCode`
+- route-local loading UI at `app/join/[inviteCode]/loading.tsx`
 - `GET /join/:inviteCode/success`
 - `GET /join/:inviteCode/cancel`
+- `GET /share/:shareCode`
+- route-local loading UI at `app/share/[shareCode]/loading.tsx`
 - `GET /api/hosted-onboarding/invites/:inviteCode/status`
 - `POST /api/hosted-onboarding/privy/complete`
 - `POST /api/hosted-onboarding/billing/checkout`

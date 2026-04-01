@@ -22,6 +22,7 @@ wait_for_background_jobs() {
 }
 
 pnpm typecheck
+pnpm lint
 
 if [[ "$verify_step_parallel" == "1" ]]; then
   pnpm test &
