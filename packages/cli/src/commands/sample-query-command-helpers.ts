@@ -24,9 +24,9 @@ export async function showSample(
 ): Promise<CommandShowEntity> {
   const query = await loadQueryRuntime()
   const vault = await query.readVault(vaultRoot)
-  const record = query.lookupRecordById(vault, sampleId)
+  const record = query.lookupEntityById(vault, sampleId)
 
-  if (!record || record.recordType !== 'sample') {
+  if (!record || record.family !== 'sample') {
     throw new VaultCliError('not_found', `No sample found for "${sampleId}".`)
   }
 
@@ -40,9 +40,9 @@ export async function listSamples(
   const query = await loadQueryRuntime()
   const vault = await query.readVault(vaultRoot)
   const items = query
-    .listRecords(vault, {
+    .listEntities(vault, {
       from: options.from,
-      recordTypes: ['sample'],
+      families: ['sample'],
       streams: options.stream ? [options.stream] : undefined,
       to: options.to,
     })

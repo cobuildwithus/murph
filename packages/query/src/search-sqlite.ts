@@ -72,7 +72,7 @@ export async function rebuildSqliteSearchIndex(
   vaultRoot: string,
 ): Promise<RebuildSqliteSearchIndexResult> {
   const vault = await readVault(vaultRoot);
-  const indexedDocuments = materializeSearchDocuments(vault.records).filter(
+  const indexedDocuments = materializeSearchDocuments(vault.entities).filter(
     (document) => document.recordType !== "sample",
   );
   const searchDatabase = currentSearchDatabaseLocation(vaultRoot);
@@ -173,7 +173,7 @@ export async function searchVaultRuntime(
 
   if (backend === "scan") {
     const vault = await readVault(vaultRoot);
-    return scoreSearchDocuments(materializeSearchDocuments(vault.records), query, filters);
+    return scoreSearchDocuments(materializeSearchDocuments(vault.entities), query, filters);
   }
 
   if (backend === "sqlite") {
@@ -186,7 +186,7 @@ export async function searchVaultRuntime(
   }
 
   const vault = await readVault(vaultRoot);
-  return scoreSearchDocuments(materializeSearchDocuments(vault.records), query, filters);
+  return scoreSearchDocuments(materializeSearchDocuments(vault.entities), query, filters);
 }
 
 export async function searchVaultSqlite(

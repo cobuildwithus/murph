@@ -1,7 +1,7 @@
 import { Cli, z } from 'incur'
 import { emptyArgsSchema, withBaseOptions } from '@murphai/assistant-core/command-helpers'
 import {
-  ALL_VAULT_RECORD_TYPES,
+  ALL_QUERY_ENTITY_FAMILIES,
   loadQueryRuntime,
 } from '@murphai/assistant-core/query-runtime'
 import {
@@ -17,7 +17,7 @@ import {
 } from '@murphai/assistant-core/option-utils'
 import type { VaultServices } from '@murphai/assistant-core/vault-services'
 
-const recordTypeValues = ALL_VAULT_RECORD_TYPES
+const recordTypeValues = ALL_QUERY_ENTITY_FAMILIES
 
 const timelineEntryTypeValues = [
   'assessment',

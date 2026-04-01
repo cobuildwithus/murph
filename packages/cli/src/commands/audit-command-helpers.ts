@@ -32,9 +32,9 @@ export async function showAudit(
 ): Promise<CommandShowEntity> {
   const query = await loadQueryRuntime()
   const vault = await query.readVault(vaultRoot)
-  const record = query.lookupRecordById(vault, auditId)
+  const record = query.lookupEntityById(vault, auditId)
 
-  if (!record || record.recordType !== 'audit') {
+  if (!record || record.family !== 'audit') {
     throw new VaultCliError('not_found', `No audit record found for "${auditId}".`)
   }
 
@@ -48,8 +48,8 @@ export async function listAudits(
   const query = await loadQueryRuntime()
   const vault = await query.readVault(vaultRoot)
   const sorted = [...vault.audits]
-    .filter((record) => matchesOptionalString(firstString(record.data, ['action']), options.action))
-    .filter((record) => matchesOptionalString(firstString(record.data, ['actor']), options.actor))
+    .filter((record) => matchesOptionalString(firstString(record.attributes, ['action']), options.action))
+    .filter((record) => matchesOptionalString(firstString(record.attributes, ['actor']), options.actor))
     .filter((record) => matchesOptionalString(record.status ?? null, options.status))
     .filter((record) => matchesDateRange(record.occurredAt, options.from, options.to))
     .sort(compareByLatest)

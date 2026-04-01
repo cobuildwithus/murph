@@ -4,7 +4,7 @@ import {
 } from '@murphai/contracts'
 import {
   loadQueryRuntime,
-  type QueryVaultRecord,
+  type QueryCanonicalEntity,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -57,7 +57,7 @@ function isJsonObject(value: unknown): value is JsonObject {
 }
 
 function ensureExpectedEventKind(
-  record: QueryVaultRecord,
+  entity: QueryCanonicalEntity,
   entityLabel: string,
   expectedKinds: readonly string[] | undefined,
 ) {
@@ -65,24 +65,24 @@ function ensureExpectedEventKind(
     return
   }
 
-  if (record.kind && expectedKinds.includes(record.kind)) {
+  if (entity.kind && expectedKinds.includes(entity.kind)) {
     return
   }
 
   throw new VaultCliError(
     'not_found',
-    `No ${entityLabel} found for "${record.displayId}".`,
+    `No ${entityLabel} found for "${entity.entityId}".`,
   )
 }
 
 async function requireEventRecord(
   input: EventRecordMutationLookupInput,
-): Promise<QueryVaultRecord> {
+): Promise<QueryCanonicalEntity> {
   const query = await loadQueryRuntime()
   const readModel = await query.readVault(input.vault)
-  const record = query.lookupRecordById(readModel, input.lookup)
+  const record = query.lookupEntityById(readModel, input.lookup)
 
-  if (!record || record.recordType !== 'event') {
+  if (!record || record.family !== 'event') {
     throw new VaultCliError(
       'not_found',
       `No ${input.entityLabel} found for "${input.lookup}".`,
@@ -93,9 +93,9 @@ async function requireEventRecord(
   return record
 }
 
-function buildMutableEventPayload(record: QueryVaultRecord): JsonObject {
-  const base = isJsonObject(record.data)
-    ? structuredClone(record.data)
+function buildMutableEventPayload(record: QueryCanonicalEntity): JsonObject {
+  const base = isJsonObject(record.attributes)
+    ? structuredClone(record.attributes)
     : {}
 
   delete base.entityId
@@ -386,7 +386,7 @@ export async function deleteEventRecord(
 
     return {
       vault: input.vault,
-      entityId: record.displayId,
+      entityId: record.entityId,
       lookupId: record.primaryLookupId,
       kind: result.kind,
       deleted: true as const,

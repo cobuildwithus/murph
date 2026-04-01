@@ -1,15 +1,14 @@
 export {
-  ALL_VAULT_RECORD_TYPES,
+  ALL_QUERY_ENTITY_FAMILIES,
   createVaultReadModel,
+  entityRelationTargetIds,
   getExperiment,
   getVaultEntities,
   getJournalEntry,
   listEntities,
   listExperiments,
   listJournalEntries,
-  listRecords,
   lookupEntityById,
-  lookupRecordById,
   readVault,
   readVaultTolerant,
 } from "./model.ts";
@@ -17,10 +16,8 @@ export type {
   EntityFilter,
   ExperimentFilter,
   JournalFilter,
-  RecordFilter,
+  VaultEntitiesByFamily,
   VaultReadModel,
-  VaultRecord,
-  VaultRecordType,
 } from "./model.ts";
 export type { CanonicalEntity, CanonicalEntityFamily, CanonicalRecordClass } from "./canonical-entities.ts";
 export {

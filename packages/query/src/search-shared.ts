@@ -1,12 +1,13 @@
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
-import { recordRelationTargetIds, type VaultRecord, type VaultRecordType } from "./model.ts";
+import type { CanonicalEntity, CanonicalEntityFamily } from "./canonical-entities.ts";
+import { entityRelationTargetIds } from "./model.ts";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 200;
 
 export interface SearchFilters {
-  recordTypes?: VaultRecordType[];
+  recordTypes?: CanonicalEntityFamily[];
   kinds?: string[];
   streams?: string[];
   experimentSlug?: string;
@@ -26,7 +27,7 @@ export interface SearchCitation {
 export interface SearchHit {
   recordId: string;
   aliasIds: string[];
-  recordType: VaultRecordType;
+  recordType: CanonicalEntityFamily;
   kind: string | null;
   stream: string | null;
   title: string | null;
@@ -51,7 +52,7 @@ export interface SearchResult {
 export interface SearchableDocument {
   recordId: string;
   aliasIds: string[];
-  recordType: VaultRecordType;
+  recordType: CanonicalEntityFamily;
   kind: string | null;
   stream: string | null;
   title: string | null;
@@ -70,16 +71,16 @@ export interface SearchDocument extends SearchableDocument {
   path: string;
 }
 
-export function materializeSearchDocument(record: VaultRecord): SearchDocument {
-  return buildSearchDocument(record, {
+export function materializeSearchDocument(entity: CanonicalEntity): SearchDocument {
+  return buildSearchDocument(entity, {
     includeStructuredPayload: true,
     includeSourcePathTerms: true,
-    path: record.sourcePath,
+    path: entity.path,
   }) as SearchDocument;
 }
 
-export function materializeSafeSearchDocument(record: VaultRecord): SearchableDocument {
-  return buildSearchDocument(record, {
+export function materializeSafeSearchDocument(entity: CanonicalEntity): SearchableDocument {
+  return buildSearchDocument(entity, {
     includeStructuredPayload: false,
     includeSourcePathTerms: false,
     path: null,
@@ -87,19 +88,19 @@ export function materializeSafeSearchDocument(record: VaultRecord): SearchableDo
 }
 
 export function materializeSearchDocuments(
-  records: readonly VaultRecord[],
+  entities: readonly CanonicalEntity[],
 ): SearchDocument[] {
-  return records.map(materializeSearchDocument);
+  return entities.map(materializeSearchDocument);
 }
 
 export function materializeSafeSearchDocuments(
-  records: readonly VaultRecord[],
+  entities: readonly CanonicalEntity[],
 ): SearchableDocument[] {
-  return records.map(materializeSafeSearchDocument);
+  return entities.map(materializeSafeSearchDocument);
 }
 
 function buildSearchDocument(
-  record: VaultRecord,
+  entity: CanonicalEntity,
   options: {
     includeStructuredPayload: boolean;
     includeSourcePathTerms: boolean;
@@ -107,39 +108,39 @@ function buildSearchDocument(
   },
 ): SearchableDocument {
   const titleText = compactStrings([
-    record.title,
-    record.kind,
-    record.status ?? null,
-    record.stream,
-    record.experimentSlug,
+    entity.title,
+    entity.kind,
+    entity.status ?? null,
+    entity.stream,
+    entity.experimentSlug,
   ]).join(" · ");
-  const bodyText = compactStrings([record.body]).join("\n").trim();
-  const tagsText = compactStrings(record.tags).join(" ");
+  const bodyText = compactStrings([entity.body]).join("\n").trim();
+  const tagsText = compactStrings(entity.tags).join(" ");
   const structuredText = compactStrings([
-    record.displayId,
-    record.primaryLookupId,
-    ...(options.includeSourcePathTerms ? [record.sourcePath, record.sourceFile] : []),
-    ...record.lookupIds,
-    ...recordRelationTargetIds(record),
+    entity.entityId,
+    entity.primaryLookupId,
+    ...(options.includeSourcePathTerms ? [entity.path] : []),
+    ...entity.lookupIds,
+    ...entityRelationTargetIds(entity),
     ...(options.includeStructuredPayload
       ? [
-          safeJsonStringify(record.data),
-          record.frontmatter ? safeJsonStringify(record.frontmatter) : null,
+          safeJsonStringify(entity.attributes),
+          entity.frontmatter ? safeJsonStringify(entity.frontmatter) : null,
         ]
       : []),
   ]).join("\n");
 
   return {
-    recordId: record.displayId,
-    aliasIds: record.lookupIds,
-    recordType: record.recordType,
-    kind: record.kind,
-    stream: record.stream,
-    title: record.title,
-    occurredAt: record.occurredAt,
-    date: record.date,
-    experimentSlug: record.experimentSlug,
-    tags: record.tags,
+    recordId: entity.entityId,
+    aliasIds: entity.lookupIds,
+    recordType: entity.family,
+    kind: entity.kind || null,
+    stream: entity.stream,
+    title: entity.title,
+    occurredAt: entity.occurredAt,
+    date: entity.date,
+    experimentSlug: entity.experimentSlug,
+    tags: entity.tags,
     path: options.path,
     titleText,
     bodyText,

@@ -1,10 +1,9 @@
 import { extractIsoDatePrefix } from "@murphai/contracts";
 
 import {
-  listRecords,
-  recordRelationTargetIds,
+  entityRelationTargetIds,
+  listEntities,
   type VaultReadModel,
-  type VaultRecord,
 } from "./model.ts";
 import {
   summarizeDailySamples,
@@ -67,13 +66,13 @@ export function buildTimeline(
   const entries: TimelineEntry[] = [];
 
   if (includeJournal) {
-    for (const journal of listRecords(vault, {
-      recordTypes: ["journal"],
+    for (const journal of listEntities(vault, {
+      families: ["journal"],
       experimentSlug: filters.experimentSlug,
       from: filters.from,
       to: filters.to,
     })) {
-      const journalKind = journal.kind ?? "journal_day";
+      const journalKind = journal.kind || "journal_day";
       if (kindSet && !kindSet.has(journalKind)) {
         continue;
       }
@@ -84,25 +83,25 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: journal.displayId,
+        id: journal.entityId,
         entryType: "journal",
         occurredAt: journal.occurredAt ?? `${date}T12:00:00Z`,
         date,
-        title: journal.title ?? journal.displayId,
+        title: journal.title ?? journal.entityId,
         kind: journalKind,
         stream: null,
         experimentSlug: journal.experimentSlug,
-        path: journal.sourcePath,
+        path: journal.path,
         relatedIds: timelineRelatedIds(journal),
         tags: journal.tags,
-        data: journal.data,
+        data: journal.attributes,
       });
     }
   }
 
   if (includeEvents) {
-    for (const event of listRecords(vault, {
-      recordTypes: ["event"],
+    for (const event of listEntities(vault, {
+      families: ["event"],
       experimentSlug: filters.experimentSlug,
       from: filters.from,
       to: filters.to,
@@ -111,7 +110,7 @@ export function buildTimeline(
         continue;
       }
 
-      const eventKind = event.kind ?? "event";
+      const eventKind = event.kind || "event";
       if (kindSet && !kindSet.has(eventKind)) {
         continue;
       }
@@ -124,7 +123,7 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: event.displayId,
+        id: event.entityId,
         entryType: "event",
         occurredAt,
         date,
@@ -132,21 +131,21 @@ export function buildTimeline(
         kind: eventKind,
         stream: event.stream,
         experimentSlug: event.experimentSlug,
-        path: event.sourcePath,
+        path: event.path,
         relatedIds: timelineRelatedIds(event),
         tags: event.tags,
-        data: event.data,
+        data: event.attributes,
       });
     }
   }
 
   if (includeAssessments) {
-    for (const assessment of listRecords(vault, {
-      recordTypes: ["assessment"],
+    for (const assessment of listEntities(vault, {
+      families: ["assessment"],
       from: filters.from,
       to: filters.to,
     })) {
-      const assessmentKind = assessment.kind ?? "assessment";
+      const assessmentKind = assessment.kind || "assessment";
       if (kindSet && !kindSet.has(assessmentKind)) {
         continue;
       }
@@ -159,32 +158,32 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: assessment.displayId,
+        id: assessment.entityId,
         entryType: "assessment",
         occurredAt,
         date,
         title:
           assessment.title ??
-          stringData(assessment.data.assessmentType) ??
-          assessment.displayId,
+          stringData(assessment.attributes.assessmentType) ??
+          assessment.entityId,
         kind: assessmentKind,
         stream: null,
         experimentSlug: null,
-        path: assessment.sourcePath,
+        path: assessment.path,
         relatedIds: timelineRelatedIds(assessment),
         tags: assessment.tags,
-        data: assessment.data,
+        data: assessment.attributes,
       });
     }
   }
 
   if (includeHistory) {
-    for (const history of listRecords(vault, {
-      recordTypes: ["history"],
+    for (const history of listEntities(vault, {
+      families: ["history"],
       from: filters.from,
       to: filters.to,
     })) {
-      const historyKind = history.kind ?? "history";
+      const historyKind = history.kind || "history";
       if (kindSet && !kindSet.has(historyKind)) {
         continue;
       }
@@ -197,7 +196,7 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: history.displayId,
+        id: history.entityId,
         entryType: "history",
         occurredAt,
         date,
@@ -205,21 +204,21 @@ export function buildTimeline(
         kind: historyKind,
         stream: null,
         experimentSlug: null,
-        path: history.sourcePath,
+        path: history.path,
         relatedIds: timelineRelatedIds(history),
         tags: history.tags,
-        data: history.data,
+        data: history.attributes,
       });
     }
   }
 
   if (includeProfileSnapshots) {
-    for (const snapshot of listRecords(vault, {
-      recordTypes: ["profile_snapshot"],
+    for (const snapshot of listEntities(vault, {
+      families: ["profile_snapshot"],
       from: filters.from,
       to: filters.to,
     })) {
-      const snapshotKind = snapshot.kind ?? "profile_snapshot";
+      const snapshotKind = snapshot.kind || "profile_snapshot";
       if (kindSet && !kindSet.has(snapshotKind)) {
         continue;
       }
@@ -232,18 +231,18 @@ export function buildTimeline(
       }
 
       entries.push({
-        id: snapshot.displayId,
+        id: snapshot.entityId,
         entryType: "profile_snapshot",
         occurredAt,
         date,
-        title: snapshot.title ?? snapshot.displayId,
+        title: snapshot.title ?? snapshot.entityId,
         kind: snapshotKind,
         stream: null,
         experimentSlug: null,
-        path: snapshot.sourcePath,
+        path: snapshot.path,
         relatedIds: timelineRelatedIds(snapshot),
         tags: snapshot.tags,
-        data: snapshot.data,
+        data: snapshot.attributes,
       });
     }
   }
@@ -274,8 +273,8 @@ export function buildTimeline(
     .slice(0, normalizeLimit(filters.limit));
 }
 
-function timelineRelatedIds(record: VaultRecord): string[] {
-  return recordRelationTargetIds(record);
+function timelineRelatedIds(entity: Parameters<typeof entityRelationTargetIds>[0]): string[] {
+  return entityRelationTargetIds(entity);
 }
 
 function summaryToTimelineEntry(summary: DailySampleSummary): TimelineEntry {

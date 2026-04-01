@@ -4,7 +4,7 @@ import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
   loadQueryRuntime,
   type QueryRuntimeModule,
-  type QueryVaultRecord as QueryRecord,
+  type QueryCanonicalEntity as QueryRecord,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '../vault-cli-errors.js'
@@ -555,9 +555,9 @@ export async function upsertEventRecordFromInput(input: {
 export async function showEventRecord(vault: string, eventId: string) {
   const query = await loadProviderEventQueryRuntime()
   const readModel = await query.readVault(vault)
-  const record = query.lookupRecordById(readModel, eventId)
+  const record = query.lookupEntityById(readModel, eventId)
 
-  if (!record || record.recordType !== 'event') {
+  if (!record || record.family !== 'event') {
     throw new VaultCliError('not_found', `No event found for "${eventId}".`)
   }
 
@@ -580,8 +580,8 @@ export async function listEventRecords(input: {
   const query = await loadProviderEventQueryRuntime()
   const readModel = await query.readVault(input.vault)
   const items = query
-    .listRecords(readModel, {
-      recordTypes: ['event'],
+    .listEntities(readModel, {
+      families: ['event'],
       kinds: input.kind ? [input.kind] : undefined,
       experimentSlug: input.experiment,
       from: input.from,
@@ -775,14 +775,14 @@ async function readProviderEntries(vaultRoot: string) {
 
 function toCommandShowEntity(record: QueryRecord) {
   return {
-    id: record.displayId,
+    id: record.entityId,
     kind: record.kind ?? 'event',
     title: record.title ?? null,
     occurredAt: normalizeIsoTimestamp(record.occurredAt),
-    path: record.sourcePath ?? null,
+    path: record.path ?? null,
     markdown: record.body ?? null,
     data: compactObject({
-      ...record.data,
+      ...record.attributes,
       status: record.status ?? undefined,
       stream: record.stream ?? undefined,
       experimentSlug: record.experimentSlug ?? undefined,
@@ -797,9 +797,9 @@ function toCommandListItem(record: QueryRecord) {
 
 function buildRecordLinks(record: QueryRecord) {
   const links = uniqueStrings([
-    ...(Array.isArray(record.relatedIds) ? record.relatedIds : []),
-    ...stringArray(record.data.relatedIds),
-    ...stringArray(record.data.eventIds),
+    ...record.relatedIds,
+    ...stringArray(record.attributes.relatedIds),
+    ...stringArray(record.attributes.eventIds),
   ])
 
   return links.map((id) => ({

@@ -7,6 +7,7 @@ import {
   linkTargetIds,
   normalizeCanonicalDate,
   normalizeUniqueStringArray,
+  relatedToLinks,
   resolveCanonicalRecordClass,
   uniqueStrings,
   type CanonicalEntity,
@@ -20,61 +21,36 @@ import {
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";
-import {
-  canonicalEntityToVaultRecord,
-  relatedIdsToLinks,
-  type VaultRecord,
-  type VaultRecordType,
-  type VaultRecordsByFamily,
-  vaultRecordToCanonicalEntity,
-} from "./vault-record-adapter.ts";
-
-export { recordRelationTargetIds } from "./vault-record-adapter.ts";
-export type { VaultRecord, VaultRecordType, VaultRecordsByFamily } from "./vault-record-adapter.ts";
 
 type QueryRecordData = Record<string, unknown>;
 type FrontmatterRecordType = "core" | "experiment" | "journal";
 type JsonRecordType = "audit" | "event" | "sample";
 
 type VaultReadModelFamilyViews = {
-  [K in VaultManyViewKey]: VaultRecord[];
+  [K in VaultManyViewKey]: CanonicalEntity[];
 } & {
-  [K in VaultSingleViewKey]: VaultRecord | null;
+  [K in VaultSingleViewKey]: CanonicalEntity | null;
 };
+
+export type VaultEntitiesByFamily = Partial<Record<CanonicalEntityFamily, CanonicalEntity[]>>;
 
 export interface VaultReadModel extends VaultReadModelFamilyViews {
   format: "murph.query.v1";
   vaultRoot: string;
   metadata: QueryRecordData | null;
   entities: CanonicalEntity[];
-  byFamily: VaultRecordsByFamily;
-  records: VaultRecord[];
+  byFamily: VaultEntitiesByFamily;
 }
 
-interface CreateVaultReadModelBaseInput {
+export interface CreateVaultReadModelInput {
   metadata?: QueryRecordData | null;
   vaultRoot: string;
+  entities: readonly CanonicalEntity[];
 }
 
-export type CreateVaultReadModelInput =
-  | (CreateVaultReadModelBaseInput & {
-      entities: readonly CanonicalEntity[];
-      records?: never;
-    })
-  | (CreateVaultReadModelBaseInput & {
-      entities?: never;
-      records: readonly VaultRecord[];
-    });
-
 type VaultReadModelDerivedViews = {
-  records: VaultRecord[];
-  byFamily: VaultRecordsByFamily;
+  byFamily: VaultEntitiesByFamily;
 } & VaultReadModelFamilyViews;
-
-type VaultRecordProjectionMetadata = {
-  path: string;
-  sourceFile: string;
-};
 
 export interface EntityFilter {
   ids?: string[];
@@ -82,20 +58,6 @@ export interface EntityFilter {
   recordClasses?: CanonicalRecordClass[];
   kinds?: string[];
   statuses?: string[];
-  streams?: string[];
-  experimentSlug?: string;
-  date?: string;
-  from?: string;
-  to?: string;
-  tags?: string[];
-  text?: string;
-}
-
-export interface RecordFilter {
-  ids?: string[];
-  recordTypes?: VaultRecordType[];
-  recordClasses?: CanonicalRecordClass[];
-  kinds?: string[];
   streams?: string[];
   experimentSlug?: string;
   date?: string;
@@ -159,7 +121,7 @@ interface RecordLikeFilterSource {
   tags: readonly string[];
 }
 
-export const ALL_VAULT_RECORD_TYPES = [
+export const ALL_QUERY_ENTITY_FAMILIES = [
   "allergy",
   "assessment",
   "audit",
@@ -180,36 +142,36 @@ export const ALL_VAULT_RECORD_TYPES = [
   "recipe",
   "sample",
   "workout_format",
-] as const satisfies readonly VaultRecordType[];
+] as const satisfies readonly CanonicalEntityFamily[];
 
 
-// Legacy convenience views stay derived from the authoritative records array.
+// Convenience views stay derived from the authoritative canonical entity array.
 const VAULT_FAMILY_VIEW_SPECS = {
-  coreDocument: { recordType: "core", mode: "single" },
-  experiments: { recordType: "experiment", mode: "many" },
-  journalEntries: { recordType: "journal", mode: "many" },
-  events: { recordType: "event", mode: "many" },
-  samples: { recordType: "sample", mode: "many" },
-  audits: { recordType: "audit", mode: "many" },
-  assessments: { recordType: "assessment", mode: "many" },
-  profileSnapshots: { recordType: "profile_snapshot", mode: "many" },
-  currentProfile: { recordType: "current_profile", mode: "single" },
-  goals: { recordType: "goal", mode: "many" },
-  conditions: { recordType: "condition", mode: "many" },
-  allergies: { recordType: "allergy", mode: "many" },
-  protocols: { recordType: "protocol", mode: "many" },
-  history: { recordType: "history", mode: "many" },
-  familyMembers: { recordType: "family", mode: "many" },
-  geneticVariants: { recordType: "genetics", mode: "many" },
-  foods: { recordType: "food", mode: "many" },
-  recipes: { recordType: "recipe", mode: "many" },
-  providers: { recordType: "provider", mode: "many" },
-  workoutFormats: { recordType: "workout_format", mode: "many" },
+  coreDocument: { family: "core", mode: "single" },
+  experiments: { family: "experiment", mode: "many" },
+  journalEntries: { family: "journal", mode: "many" },
+  events: { family: "event", mode: "many" },
+  samples: { family: "sample", mode: "many" },
+  audits: { family: "audit", mode: "many" },
+  assessments: { family: "assessment", mode: "many" },
+  profileSnapshots: { family: "profile_snapshot", mode: "many" },
+  currentProfile: { family: "current_profile", mode: "single" },
+  goals: { family: "goal", mode: "many" },
+  conditions: { family: "condition", mode: "many" },
+  allergies: { family: "allergy", mode: "many" },
+  protocols: { family: "protocol", mode: "many" },
+  history: { family: "history", mode: "many" },
+  familyMembers: { family: "family", mode: "many" },
+  geneticVariants: { family: "genetics", mode: "many" },
+  foods: { family: "food", mode: "many" },
+  recipes: { family: "recipe", mode: "many" },
+  providers: { family: "provider", mode: "many" },
+  workoutFormats: { family: "workout_format", mode: "many" },
 } as const satisfies Record<
   string,
   {
     readonly mode: "many" | "single";
-    readonly recordType: VaultRecordType;
+    readonly family: CanonicalEntityFamily;
   }
 >;
 
@@ -225,12 +187,13 @@ type VaultManyViewKey = Exclude<VaultFamilyViewKey, VaultSingleViewKey>;
 const VAULT_FAMILY_VIEW_ENTRIES = Object.entries(
   VAULT_FAMILY_VIEW_SPECS,
 ) as ReadonlyArray<[VaultFamilyViewKey, VaultFamilyViewSpec]>;
-function toCanonicalEntity(record: VaultRecord): CanonicalEntity {
-  return vaultRecordToCanonicalEntity(record);
+
+function relatedIdsToLinks(...groups: readonly unknown[]) {
+  return relatedToLinks(groups.flatMap((group) => normalizeUniqueStringArray(group)));
 }
 
 function deriveVaultFamilyViews(
-  byFamily: VaultRecordsByFamily,
+  byFamily: VaultEntitiesByFamily,
 ): VaultReadModelFamilyViews {
   const views = {} as VaultReadModelFamilyViews;
 
@@ -240,8 +203,8 @@ function deriveVaultFamilyViews(
       VaultReadModelFamilyViews[VaultFamilyViewKey]
     >)[propertyName] =
       spec.mode === "single"
-        ? firstRecordOfType(byFamily, spec.recordType)
-        : recordsOfType(byFamily, spec.recordType);
+        ? firstEntityOfFamily(byFamily, spec.family)
+        : entitiesOfFamily(byFamily, spec.family);
   }
 
   return views;
@@ -249,109 +212,72 @@ function deriveVaultFamilyViews(
 
 function deriveVaultReadModelViews(
   entities: readonly CanonicalEntity[],
-  vaultRoot: string,
-  sourceFileByEntityId: ReadonlyMap<string, VaultRecordProjectionMetadata>,
 ): VaultReadModelDerivedViews {
-  const records = entities.map((entity) =>
-    canonicalEntityToVaultRecord(
-      entity,
-      vaultRoot,
-      resolveVaultRecordSourceFile(entity, vaultRoot, sourceFileByEntityId),
-    ),
-  );
-  const byFamily = groupRecordsByFamily(records);
+  const byFamily = groupEntitiesByFamily(entities);
 
   return {
-    records,
     byFamily,
     ...deriveVaultFamilyViews(byFamily),
   };
 }
 
-function flattenVaultRecordsByFamily(
-  byFamily: VaultRecordsByFamily,
-): VaultRecord[] {
-  return ALL_VAULT_RECORD_TYPES.flatMap((recordType) => byFamily[recordType]?.slice() ?? []);
+function flattenVaultEntitiesByFamily(
+  byFamily: VaultEntitiesByFamily,
+): CanonicalEntity[] {
+  return ALL_QUERY_ENTITY_FAMILIES.flatMap((family) => byFamily[family]?.slice() ?? []);
 }
 
-function replaceVaultRecordFamily(
-  records: readonly VaultRecord[],
-  recordType: VaultRecordType,
-  nextRecords: readonly VaultRecord[],
-): VaultRecord[] {
-  const byFamily = groupRecordsByFamily(records);
+function replaceVaultEntityFamily(
+  entities: readonly CanonicalEntity[],
+  family: CanonicalEntityFamily,
+  nextEntities: readonly CanonicalEntity[],
+): CanonicalEntity[] {
+  const byFamily = groupEntitiesByFamily(entities);
 
-  if (nextRecords.length > 0) {
-    byFamily[recordType] = nextRecords.slice();
+  if (nextEntities.length > 0) {
+    byFamily[family] = nextEntities.slice();
   } else {
-    delete byFamily[recordType];
+    delete byFamily[family];
   }
 
-  return flattenVaultRecordsByFamily(byFamily);
+  return flattenVaultEntitiesByFamily(byFamily);
 }
 
-function normalizeVaultFamilyViewRecords(
+function normalizeVaultFamilyViewEntities(
   spec: VaultFamilyViewSpec,
   value: VaultReadModelFamilyViews[VaultFamilyViewKey],
-): VaultRecord[] {
+): CanonicalEntity[] {
   if (spec.mode === "single") {
-    return value ? [value as VaultRecord] : [];
+    return value ? [value as CanonicalEntity] : [];
   }
 
-  return (value as VaultRecord[]).slice();
+  return (value as CanonicalEntity[]).slice();
 }
 
 export function createVaultReadModel(
   input: CreateVaultReadModelInput,
 ): VaultReadModel {
-  let entityState = readModelInputEntities(input);
-  let sourceFileByEntityId = readModelInputSourceFiles(input);
+  let entityState = input.entities.slice();
   let cachedViews: VaultReadModelDerivedViews | null = null;
 
   const readViews = (): VaultReadModelDerivedViews => {
     if (cachedViews === null) {
-      cachedViews = deriveVaultReadModelViews(
-        entityState,
-        input.vaultRoot,
-        sourceFileByEntityId,
-      );
+      cachedViews = deriveVaultReadModelViews(entityState);
     }
 
     return cachedViews;
   };
 
-  const replaceState = (
-    nextEntities: readonly CanonicalEntity[],
-    nextSourceFiles: ReadonlyMap<string, VaultRecordProjectionMetadata>,
-  ): void => {
+  const updateEntities = (nextEntities: readonly CanonicalEntity[]): void => {
     entityState = nextEntities.slice();
-    sourceFileByEntityId = new Map(nextSourceFiles);
     cachedViews = null;
   };
 
-  const updateEntities = (nextEntities: readonly CanonicalEntity[]): void => {
-    replaceState(
-      nextEntities,
-      buildVaultRecordProjectionMetadata(
-        nextEntities,
-        input.vaultRoot,
-        sourceFileByEntityId,
-      ),
-    );
-  };
-
-  const updateRecords = (nextRecords: readonly VaultRecord[]): void => {
-    replaceState(
-      nextRecords.map((record) => toCanonicalEntity(record)),
-      recordProjectionMetadataFromRecords(nextRecords),
-    );
-  };
-
-  const updateRecordFamily = (
-    recordType: VaultRecordType,
-    nextRecords: readonly VaultRecord[],
+  const updateEntityFamily = (
+    family: CanonicalEntityFamily,
+    nextEntities: readonly CanonicalEntity[],
   ): void => {
-    updateRecords(replaceVaultRecordFamily(readViews().records, recordType, nextRecords));
+    updateEntities(replaceVaultEntityFamily(entityState, family, nextEntities));
   };
 
   const model = {
@@ -361,15 +287,6 @@ export function createVaultReadModel(
   } as VaultReadModel;
 
   const descriptors: PropertyDescriptorMap = {
-    records: {
-      enumerable: true,
-      get() {
-        return readViews().records;
-      },
-      set(value: VaultRecord[]) {
-        updateRecords(value);
-      },
-    },
     entities: {
       enumerable: true,
       get() {
@@ -384,8 +301,8 @@ export function createVaultReadModel(
       get() {
         return readViews().byFamily;
       },
-      set(value: VaultRecordsByFamily) {
-        updateRecords(flattenVaultRecordsByFamily(value));
+      set(value: VaultEntitiesByFamily) {
+        updateEntities(flattenVaultEntitiesByFamily(value));
       },
     },
   };
@@ -397,9 +314,9 @@ export function createVaultReadModel(
         return readViews()[propertyName];
       },
       set(value: VaultReadModelFamilyViews[typeof propertyName]) {
-        updateRecordFamily(
-          spec.recordType,
-          normalizeVaultFamilyViewRecords(spec, value),
+        updateEntityFamily(
+          spec.family,
+          normalizeVaultFamilyViewEntities(spec, value),
         );
       },
     };
@@ -408,75 +325,6 @@ export function createVaultReadModel(
   Object.defineProperties(model, descriptors);
 
   return model;
-}
-
-function readModelInputEntities(
-  input: CreateVaultReadModelInput,
-): CanonicalEntity[] {
-  if ("entities" in input && input.entities !== undefined) {
-    return input.entities.slice();
-  }
-
-  return input.records.map((record) => toCanonicalEntity(record));
-}
-
-function readModelInputSourceFiles(
-  input: CreateVaultReadModelInput,
-): ReadonlyMap<string, VaultRecordProjectionMetadata> {
-  if ("entities" in input && input.entities !== undefined) {
-    return buildVaultRecordProjectionMetadata(input.entities, input.vaultRoot);
-  }
-
-  return recordProjectionMetadataFromRecords(input.records);
-}
-
-function buildVaultRecordProjectionMetadata(
-  entities: readonly CanonicalEntity[],
-  vaultRoot: string,
-  previous: ReadonlyMap<string, VaultRecordProjectionMetadata> = new Map(),
-): ReadonlyMap<string, VaultRecordProjectionMetadata> {
-  const metadata = new Map<string, VaultRecordProjectionMetadata>();
-
-  for (const entity of entities) {
-    const prior = previous.get(entity.entityId);
-    metadata.set(entity.entityId, {
-      path: entity.path,
-      sourceFile:
-        prior && prior.path === entity.path
-          ? prior.sourceFile
-          : path.join(vaultRoot, ...entity.path.split("/")),
-    });
-  }
-
-  return metadata;
-}
-
-function recordProjectionMetadataFromRecords(
-  records: readonly VaultRecord[],
-): ReadonlyMap<string, VaultRecordProjectionMetadata> {
-  const metadata = new Map<string, VaultRecordProjectionMetadata>();
-
-  for (const record of records) {
-    metadata.set(record.displayId, {
-      path: record.sourcePath,
-      sourceFile: record.sourceFile,
-    });
-  }
-
-  return metadata;
-}
-
-function resolveVaultRecordSourceFile(
-  entity: CanonicalEntity,
-  vaultRoot: string,
-  metadata: ReadonlyMap<string, VaultRecordProjectionMetadata>,
-): string {
-  const existing = metadata.get(entity.entityId);
-  if (existing && existing.path === entity.path) {
-    return existing.sourceFile;
-  }
-
-  return path.join(vaultRoot, ...entity.path.split("/"));
 }
 
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
@@ -514,6 +362,16 @@ async function readVaultWithHealthMode(
 
 export function getVaultEntities(vault: VaultReadModel): CanonicalEntity[] {
   return vault.entities;
+}
+
+export function entityRelationTargetIds(
+  entity: Pick<CanonicalEntity, "links" | "relatedIds" | "lookupIds">,
+): string[] {
+  return entity.links.length > 0
+    ? linkTargetIds(entity.links)
+    : entity.relatedIds.length > 0
+      ? entity.relatedIds
+      : entity.lookupIds;
 }
 
 export function lookupEntityById(
@@ -561,49 +419,10 @@ export function listEntities(
   });
 }
 
-export function lookupRecordById(
-  vault: VaultReadModel,
-  recordId: string,
-): VaultRecord | null {
-  return lookupById(vault.records, recordId, (record) => record.displayId);
-}
-
-export function listRecords(
-  vault: VaultReadModel,
-  filters: RecordFilter = {},
-): VaultRecord[] {
-  const { recordTypes } = filters;
-  const recordLikeFilter = prepareRecordLikeFilter(filters);
-  const typeSet = new Set(recordTypes ?? ALL_VAULT_RECORD_TYPES);
-
-  return vault.records.filter((record) => {
-    if (!matchesRequiredSet(record.recordType, typeSet)) {
-      return false;
-    }
-
-    return matchesRecordLikeFilter(
-      record,
-      recordLikeFilter,
-      [
-        record.displayId,
-        record.primaryLookupId,
-        ...record.lookupIds,
-        record.kind,
-        record.status,
-        record.stream,
-        record.experimentSlug,
-        record.title,
-        record.body,
-        JSON.stringify(record.data),
-      ],
-    );
-  });
-}
-
 export function listExperiments(
   vault: VaultReadModel,
   filters: ExperimentFilter = {},
-): VaultRecord[] {
+): CanonicalEntity[] {
   const { slug } = filters;
   const tagAndTextFilter = prepareTagAndTextFilter(filters);
 
@@ -623,14 +442,14 @@ export function listExperiments(
 export function getExperiment(
   vault: VaultReadModel,
   slug: string,
-): VaultRecord | null {
+): CanonicalEntity | null {
   return vault.experiments.find((record) => record.experimentSlug === slug) ?? null;
 }
 
 export function listJournalEntries(
   vault: VaultReadModel,
   filters: JournalFilter = {},
-): VaultRecord[] {
+): CanonicalEntity[] {
   const { from, to, experimentSlug } = filters;
   const tagAndTextFilter = prepareTagAndTextFilter(filters);
 
@@ -654,7 +473,7 @@ export function listJournalEntries(
 export function getJournalEntry(
   vault: VaultReadModel,
   date: string,
-): VaultRecord | null {
+): CanonicalEntity | null {
   return vault.journalEntries.find((record) => record.date === date) ?? null;
 }
 
@@ -1086,36 +905,36 @@ async function walkFiles(directoryPath: string): Promise<string[]> {
   }
 }
 
-function groupRecordsByFamily(
-  records: readonly VaultRecord[],
-): VaultRecordsByFamily {
-  const byFamily: VaultRecordsByFamily = {};
+function groupEntitiesByFamily(
+  entities: readonly CanonicalEntity[],
+): VaultEntitiesByFamily {
+  const byFamily: VaultEntitiesByFamily = {};
 
-  for (const record of records) {
-    const familyRecords = byFamily[record.recordType];
-    if (familyRecords) {
-      familyRecords.push(record);
+  for (const entity of entities) {
+    const familyEntities = byFamily[entity.family];
+    if (familyEntities) {
+      familyEntities.push(entity);
       continue;
     }
 
-    byFamily[record.recordType] = [record];
+    byFamily[entity.family] = [entity];
   }
 
   return byFamily;
 }
 
-function firstRecordOfType(
-  byFamily: VaultRecordsByFamily,
-  recordType: VaultRecordType,
-): VaultRecord | null {
-  return byFamily[recordType]?.[0] ?? null;
+function firstEntityOfFamily(
+  byFamily: VaultEntitiesByFamily,
+  family: CanonicalEntityFamily,
+): CanonicalEntity | null {
+  return byFamily[family]?.[0] ?? null;
 }
 
-function recordsOfType(
-  byFamily: VaultRecordsByFamily,
-  recordType: VaultRecordType,
-): VaultRecord[] {
-  return byFamily[recordType]?.slice() ?? [];
+function entitiesOfFamily(
+  byFamily: VaultEntitiesByFamily,
+  family: CanonicalEntityFamily,
+): CanonicalEntity[] {
+  return byFamily[family]?.slice() ?? [];
 }
 
 function compareDateStrings(

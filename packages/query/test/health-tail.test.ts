@@ -12,7 +12,6 @@ import {
   listEntities,
   listHistoryEvents,
   listProfileSnapshots,
-  listRecords,
   listSupplementCompounds,
   listSupplements,
   readCurrentProfile,
@@ -25,13 +24,14 @@ import {
   showProfile,
 } from "../src/index.ts";
 import {
+  type CanonicalEntity,
   linkTargetIds,
   normalizeCanonicalLinks,
   resolveCanonicalRecordClass,
 } from "../src/canonical-entities.ts";
 import { collectCanonicalEntities } from "../src/health/canonical-collector.ts";
 import { fallbackCurrentProfileEntityFromSnapshotRecord } from "../src/health/current-profile-resolution.ts";
-import { ALL_VAULT_RECORD_TYPES, createVaultReadModel } from "../src/model.ts";
+import { ALL_QUERY_ENTITY_FAMILIES, createVaultReadModel } from "../src/model.ts";
 import { readHealthContext } from "../src/export-pack-health.ts";
 import { listAssessments } from "../src/health/assessments.ts";
 import {
@@ -41,7 +41,7 @@ import {
   selectProfileSnapshotRecords,
 } from "../src/health/projections.ts";
 import { materializeSearchDocument } from "../src/search-shared.ts";
-import type { VaultReadModel, VaultRecord } from "../src/model.ts";
+import type { VaultReadModel } from "../src/model.ts";
 
 async function writeVaultFile(
   vaultRoot: string,
@@ -483,7 +483,17 @@ ingredients:
   }
 });
 
-function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displayId" | "recordType">): VaultRecord {
+function createRecord(
+  overrides: Omit<Partial<CanonicalEntity>, "kind" | "status"> & {
+    entityId: string;
+    recordType?: CanonicalEntity["family"];
+    family?: CanonicalEntity["family"];
+    sourcePath?: string;
+    data?: Record<string, unknown>;
+    kind?: string | null;
+    status?: string | null;
+  },
+): CanonicalEntity {
   const hasTitle = Object.prototype.hasOwnProperty.call(overrides, "title");
   const hasKind = Object.prototype.hasOwnProperty.call(overrides, "kind");
   const hasStatus = Object.prototype.hasOwnProperty.call(overrides, "status");
@@ -497,23 +507,22 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
   );
 
   return {
-    displayId: overrides.displayId,
-    primaryLookupId: overrides.primaryLookupId ?? overrides.displayId,
-    lookupIds: overrides.lookupIds ?? [overrides.displayId],
-    recordType: overrides.recordType,
+    entityId: overrides.entityId,
+    primaryLookupId: overrides.primaryLookupId ?? overrides.entityId,
+    lookupIds: overrides.lookupIds ?? [overrides.entityId],
+    family: overrides.family ?? overrides.recordType ?? "event",
     recordClass:
-      overrides.recordClass ?? resolveCanonicalRecordClass(overrides.recordType),
-    sourcePath: overrides.sourcePath ?? `${overrides.recordType}/${overrides.displayId}`,
-    sourceFile: overrides.sourceFile ?? `${overrides.recordType}/${overrides.displayId}`,
+      overrides.recordClass ?? resolveCanonicalRecordClass(overrides.family ?? overrides.recordType ?? "event"),
+    path: overrides.path ?? overrides.sourcePath ?? `${overrides.family ?? overrides.recordType ?? "event"}/${overrides.entityId}`,
     occurredAt: overrides.occurredAt ?? null,
     date: overrides.date ?? null,
-    kind: hasKind ? overrides.kind ?? null : overrides.recordType,
+    kind: hasKind ? overrides.kind ?? "" : overrides.family ?? overrides.recordType ?? "event",
     status: hasStatus ? overrides.status ?? null : null,
     stream: hasStream ? overrides.stream ?? null : null,
     experimentSlug: hasExperimentSlug ? overrides.experimentSlug ?? null : null,
-    title: hasTitle ? overrides.title ?? null : overrides.displayId,
+    title: hasTitle ? overrides.title ?? null : overrides.entityId,
     tags: overrides.tags ?? [],
-    data: overrides.data ?? {},
+    attributes: overrides.attributes ?? overrides.data ?? {},
     body: overrides.body ?? null,
     frontmatter: overrides.frontmatter ?? null,
     links,
@@ -521,17 +530,17 @@ function createRecord(overrides: Partial<VaultRecord> & Pick<VaultRecord, "displ
   };
 }
 
-function createManualVault(records: VaultRecord[]): VaultReadModel {
+function createManualVault(entities: CanonicalEntity[]): VaultReadModel {
   return createVaultReadModel({
     vaultRoot: "manual-vault",
     metadata: null,
-    records,
+    entities,
   });
 }
 
 test("manual record fixtures derive normalized links from compatibility relatedIds", () => {
   const record = createRecord({
-    displayId: "goal_manual_01",
+    entityId: "goal_manual_01",
     recordType: "goal",
     relatedIds: ["cond_manual_01", "prot_manual_01"],
   });
@@ -930,7 +939,7 @@ test("readVault promotes health families into the shared search and timeline pro
     });
 
     assert.deepEqual(
-      new Set(vault.records.map((record) => record.recordType)),
+      new Set(vault.entities.map((record) => record.family)),
       new Set([
         "allergy",
         "assessment",
@@ -959,104 +968,104 @@ test("readVault promotes health families into the shared search and timeline pro
         "protocol",
       ]),
     );
-    assert.deepEqual(vault.byFamily.goal?.map((record) => record.displayId), [
+    assert.deepEqual(vault.byFamily.goal?.map((record) => record.entityId), [
       "goal_sleep_01",
     ]);
-    assert.equal(vault.byFamily.current_profile?.[0]?.displayId, "current");
+    assert.equal(vault.byFamily.current_profile?.[0]?.entityId, "current");
     assert.deepEqual(
-      vault.assessments.map((record) => record.displayId),
-      vault.byFamily.assessment?.map((record) => record.displayId),
+      vault.assessments.map((record) => record.entityId),
+      vault.byFamily.assessment?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.profileSnapshots.map((record) => record.displayId),
-      vault.byFamily.profile_snapshot?.map((record) => record.displayId),
+      vault.profileSnapshots.map((record) => record.entityId),
+      vault.byFamily.profile_snapshot?.map((record) => record.entityId),
     );
-    assert.equal(vault.currentProfile?.displayId, vault.byFamily.current_profile?.[0]?.displayId);
+    assert.equal(vault.currentProfile?.entityId, vault.byFamily.current_profile?.[0]?.entityId);
     assert.deepEqual(
-      vault.goals.map((record) => record.displayId),
-      vault.byFamily.goal?.map((record) => record.displayId),
-    );
-    assert.deepEqual(
-      vault.conditions.map((record) => record.displayId),
-      vault.byFamily.condition?.map((record) => record.displayId),
+      vault.goals.map((record) => record.entityId),
+      vault.byFamily.goal?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.allergies.map((record) => record.displayId),
-      vault.byFamily.allergy?.map((record) => record.displayId),
+      vault.conditions.map((record) => record.entityId),
+      vault.byFamily.condition?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.protocols.map((record) => record.displayId),
-      vault.byFamily.protocol?.map((record) => record.displayId),
+      vault.allergies.map((record) => record.entityId),
+      vault.byFamily.allergy?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.history.map((record) => record.displayId),
-      vault.byFamily.history?.map((record) => record.displayId),
+      vault.protocols.map((record) => record.entityId),
+      vault.byFamily.protocol?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.familyMembers.map((record) => record.displayId),
-      vault.byFamily.family?.map((record) => record.displayId),
+      vault.history.map((record) => record.entityId),
+      vault.byFamily.history?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.geneticVariants.map((record) => record.displayId),
-      vault.byFamily.genetics?.map((record) => record.displayId),
+      vault.familyMembers.map((record) => record.entityId),
+      vault.byFamily.family?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.assessments.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "assessment")
-        .map((record) => record.displayId),
+      vault.geneticVariants.map((record) => record.entityId),
+      vault.byFamily.genetics?.map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.profileSnapshots.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "profile_snapshot")
-        .map((record) => record.displayId),
+      vault.assessments.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "assessment")
+        .map((record) => record.entityId),
+    );
+    assert.deepEqual(
+      vault.profileSnapshots.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "profile_snapshot")
+        .map((record) => record.entityId),
     );
     assert.equal(
-      vault.currentProfile?.displayId ?? null,
-      vault.records.find((record) => record.recordType === "current_profile")?.displayId ?? null,
+      vault.currentProfile?.entityId ?? null,
+      vault.entities.find((record) => record.family === "current_profile")?.entityId ?? null,
     );
     assert.deepEqual(
-      vault.goals.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "goal")
-        .map((record) => record.displayId),
+      vault.goals.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "goal")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.conditions.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "condition")
-        .map((record) => record.displayId),
+      vault.conditions.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "condition")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.allergies.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "allergy")
-        .map((record) => record.displayId),
+      vault.allergies.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "allergy")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.protocols.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "protocol")
-        .map((record) => record.displayId),
+      vault.protocols.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "protocol")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.history.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "history")
-        .map((record) => record.displayId),
+      vault.history.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "history")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.familyMembers.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "family")
-        .map((record) => record.displayId),
+      vault.familyMembers.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "family")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
-      vault.geneticVariants.map((record) => record.displayId),
-      vault.records
-        .filter((record) => record.recordType === "genetics")
-        .map((record) => record.displayId),
+      vault.geneticVariants.map((record) => record.entityId),
+      vault.entities
+        .filter((record) => record.family === "genetics")
+        .map((record) => record.entityId),
     );
     assert.deepEqual(
       new Set(searchResult.hits.map((hit) => hit.recordType)),
@@ -1074,7 +1083,7 @@ test("readVault promotes health families into the shared search and timeline pro
 test("canonical entity helpers filter projected health families and preserve legacy record defaults", () => {
   const records = [
     createRecord({
-      displayId: "asmt_manual_01",
+      entityId: "asmt_manual_01",
       recordType: "assessment",
       occurredAt: "2026-03-12T09:00:00Z",
       date: "2026-03-12",
@@ -1088,7 +1097,7 @@ test("canonical entity helpers filter projected health families and preserve leg
       },
     }),
     createRecord({
-      displayId: "goal_manual_01",
+      entityId: "goal_manual_01",
       recordType: "goal",
       lookupIds: ["goal_manual_01", "improve-sleep"],
       date: "2026-03-12",
@@ -1101,7 +1110,7 @@ test("canonical entity helpers filter projected health families and preserve leg
       },
     }),
     createRecord({
-      displayId: "sample_manual_01",
+      entityId: "sample_manual_01",
       recordType: "sample",
       occurredAt: "2026-03-12T07:00:00Z",
       date: "2026-03-12",
@@ -1143,20 +1152,20 @@ test("canonical entity helpers filter projected health families and preserve leg
     ["sample_manual_01"],
   );
   assert.deepEqual(
-    listRecords(vault).map((record) => record.recordType),
+    listEntities(vault).map((record) => record.family),
     ["assessment", "goal", "sample"],
   );
   assert.deepEqual(
-    listRecords(vault, {
-      recordTypes: [...ALL_VAULT_RECORD_TYPES],
-    }).map((record) => record.recordType),
+    listEntities(vault, {
+      families: [...ALL_QUERY_ENTITY_FAMILIES],
+    }).map((record) => record.family),
     ["assessment", "goal", "sample"],
   );
   assert.deepEqual(
-    listRecords(vault, {
-      recordTypes: ["assessment", "goal"],
+    listEntities(vault, {
+      families: ["assessment", "goal"],
       text: "sleep",
-    }).map((record) => record.displayId),
+    }).map((record) => record.entityId),
     ["goal_manual_01"],
   );
 });
@@ -1220,14 +1229,14 @@ conditionId cond_broken
 
     const vault = await readVaultTolerant(vaultRoot);
 
-    assert.equal(vault.currentProfile?.displayId, "current");
-    assert.equal(vault.currentProfile?.data.snapshotId, "psnap_health_01");
+    assert.equal(vault.currentProfile?.entityId, "current");
+    assert.equal(vault.currentProfile?.attributes.snapshotId, "psnap_health_01");
     assert.deepEqual(
-      vault.profileSnapshots.map((record) => record.displayId),
+      vault.profileSnapshots.map((record) => record.entityId),
       ["psnap_health_00", "psnap_health_01", "psnap_health_missing_date"],
     );
     assert.deepEqual(
-      vault.conditions.map((record) => record.displayId),
+      vault.conditions.map((record) => record.entityId),
       ["cond_sleep_01"],
     );
   } finally {
@@ -1288,26 +1297,26 @@ conditionId cond_broken
 test("buildTimeline applies health-specific fallbacks, related-id defaults, and toggles", () => {
   const vault = createManualVault([
     createRecord({
-      displayId: "journal_manual_01",
+      entityId: "journal_manual_01",
       recordType: "journal",
       occurredAt: "2026-03-12T21:00:00Z",
       date: "2026-03-12",
       title: "Daily journal",
     }),
     createRecord({
-      displayId: "event_manual_01",
+      entityId: "event_manual_01",
       recordType: "event",
       date: "2026-03-12",
-      kind: null,
+      kind: "",
       stream: "glucose",
       title: null,
       lookupIds: ["event_manual_01", "evt_lookup"],
     }),
     createRecord({
-      displayId: "assessment_manual_01",
+      entityId: "assessment_manual_01",
       recordType: "assessment",
       date: "2026-03-12",
-      kind: null,
+      kind: "",
       title: null,
       lookupIds: ["assessment_manual_01", "goal_manual_01"],
       data: {
@@ -1315,44 +1324,44 @@ test("buildTimeline applies health-specific fallbacks, related-id defaults, and 
       },
     }),
     createRecord({
-      displayId: "assessment_skip",
+      entityId: "assessment_skip",
       recordType: "assessment",
       occurredAt: null,
       date: null,
       title: "Skipped assessment",
     }),
     createRecord({
-      displayId: "history_manual_01",
+      entityId: "history_manual_01",
       recordType: "history",
       date: "2026-03-12",
-      kind: null,
+      kind: "",
       title: null,
       lookupIds: ["history_manual_01", "evt_health_lookup"],
     }),
     createRecord({
-      displayId: "history_skip",
+      entityId: "history_skip",
       recordType: "history",
       occurredAt: null,
       date: null,
       title: "Skipped history",
     }),
     createRecord({
-      displayId: "snapshot_manual_01",
+      entityId: "snapshot_manual_01",
       recordType: "profile_snapshot",
       date: "2026-03-12",
-      kind: null,
+      kind: "",
       title: null,
       lookupIds: ["snapshot_manual_01", "psnap_lookup"],
     }),
     createRecord({
-      displayId: "snapshot_skip",
+      entityId: "snapshot_skip",
       recordType: "profile_snapshot",
       occurredAt: null,
       date: null,
       title: "Skipped snapshot",
     }),
     createRecord({
-      displayId: "sample_manual_01",
+      entityId: "sample_manual_01",
       recordType: "sample",
       occurredAt: "2026-03-12T06:00:00Z",
       date: "2026-03-12",
@@ -1363,7 +1372,7 @@ test("buildTimeline applies health-specific fallbacks, related-id defaults, and 
       },
     }),
     createRecord({
-      displayId: "sample_skip",
+      entityId: "sample_skip",
       recordType: "sample",
       occurredAt: null,
       date: null,
@@ -1402,7 +1411,7 @@ test("buildTimeline applies health-specific fallbacks, related-id defaults, and 
 
 test("buildTimeline and search fall back to lookupIds when a record has no links or relatedIds", () => {
   const assessmentRecord = createRecord({
-    displayId: "assessment_lookup_fallback_01",
+    entityId: "assessment_lookup_fallback_01",
     recordType: "assessment",
     occurredAt: "2026-03-13T08:00:00Z",
     date: "2026-03-13",
@@ -1492,11 +1501,11 @@ test("buildExportPack preserves the five-file pack while embedding health contex
     assert.equal(narrowPack.health.currentProfile?.snapshotId, "psnap_health_01");
 
     const questionPackFile = pack.files.find((file) => file.path.endsWith("question-pack.json"));
-    const recordsFile = pack.files.find((file) => file.path.endsWith("records.json"));
+    const entitiesFile = pack.files.find((file) => file.path.endsWith("entities.json"));
     const assistantFile = pack.files.find((file) => file.path.endsWith("assistant-context.md"));
 
     assert.ok(questionPackFile);
-    assert.ok(recordsFile);
+    assert.ok(entitiesFile);
     assert.ok(assistantFile);
 
     const questionPackPayload = JSON.parse(questionPackFile.contents) as {
@@ -1530,9 +1539,9 @@ test("buildExportPack preserves the five-file pack while embedding health contex
       ),
     );
 
-    const recordsPayload = JSON.parse(recordsFile.contents) as Array<{ displayId: string }>;
-    assert.ok(Array.isArray(recordsPayload));
-    assert.deepEqual(recordsPayload.map((entry) => entry.displayId), ["evt_health_01"]);
+    const entitiesPayload = JSON.parse(entitiesFile.contents) as Array<{ entityId: string }>;
+    assert.ok(Array.isArray(entitiesPayload));
+    assert.deepEqual(entitiesPayload.map((entry) => entry.entityId), ["evt_health_01"]);
     assert.match(assistantFile.contents, /## Intake Assessments/);
     assert.match(assistantFile.contents, /## Current Profile/);
     assert.match(assistantFile.contents, /## Health History/);
