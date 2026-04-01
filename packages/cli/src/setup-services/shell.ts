@@ -398,33 +398,12 @@ fi
 
 cli_package_root="$repo_root/packages/cli"
 cli_bin_path="$cli_package_root/dist/bin.js"
-required_cli_dist_files=(
-  "$cli_bin_path"
-  "$cli_package_root/dist/index.js"
-  "$cli_package_root/dist/vault-cli-contracts.js"
-  "$cli_package_root/dist/inbox-cli-contracts.js"
-  "$cli_package_root/dist/setup-cli.js"
-  "$cli_package_root/dist/setup-agentmail.js"
-  "$cli_package_root/dist/setup-assistant.js"
-  "$cli_package_root/dist/setup-assistant-account.js"
-  "$cli_package_root/dist/setup-services.js"
-  "$cli_package_root/dist/setup-wizard.js"
-  "$cli_package_root/dist/assistant/provider-catalog.js"
-  "$cli_package_root/dist/setup-services/channels.js"
-  "$cli_package_root/dist/setup-services/process.js"
-  "$cli_package_root/dist/setup-services/scheduled-updates.js"
-  "$cli_package_root/dist/setup-services/shell.js"
-  "$cli_package_root/dist/setup-services/steps.js"
-  "$cli_package_root/dist/setup-services/toolchain.js"
-)
-
-cli_dist_ready=true
-for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
-  if [ ! -f "$required_cli_dist_file" ]; then
-    cli_dist_ready=false
-    break
-  fi
-done
+# Only gate on the built CLI entrypoint. The package/root build commands own
+# transitive artifact completeness, and hard-coding every emitted file here is brittle.
+cli_dist_ready=false
+if [ -f "$cli_bin_path" ]; then
+  cli_dist_ready=true
+fi
 
 is_discovery_invocation() {
   for arg in "$@"; do
@@ -515,14 +494,8 @@ if [ "\${#missing_packages[@]}" -gt 0 ]; then
   fi
 fi
 
-cli_dist_ready=true
-if [ "$build_failed" = false ]; then
-  for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
-    if [ ! -f "$required_cli_dist_file" ]; then
-      cli_dist_ready=false
-      break
-    fi
-  done
+if [ "$build_failed" = false ] && [ -f "$cli_bin_path" ]; then
+  cli_dist_ready=true
 else
   cli_dist_ready=false
 fi

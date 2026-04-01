@@ -34,6 +34,12 @@
       "@murphai/messaging-ingress": [
         "packages/messaging-ingress/src/index.ts"
       ],
+      "@murphai/messaging-ingress/linq-webhook": [
+        "packages/messaging-ingress/src/linq-webhook.ts"
+      ],
+      "@murphai/messaging-ingress/telegram-webhook": [
+        "packages/messaging-ingress/src/telegram-webhook.ts"
+      ],
       "@murphai/messaging-ingress/*": [
         "packages/messaging-ingress/src/*"
       ],
