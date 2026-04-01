@@ -336,10 +336,8 @@ export async function destroyHostedExecutionContainer(input: {
 }
 
 function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): string {
-  const configured = typeof source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER === "string"
-    ? source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER.trim()
-    : "";
-  return configured.length > 0 ? configured : DEFAULT_CONTAINER_SLEEP_AFTER;
+  return readOptionalString(source.HOSTED_EXECUTION_CONTAINER_SLEEP_AFTER)
+    ?? DEFAULT_CONTAINER_SLEEP_AFTER;
 }
 
 function parseHostedExecutionContainerInvokeInput<

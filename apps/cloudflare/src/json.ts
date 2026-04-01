@@ -8,8 +8,20 @@ export function json(body: unknown, status = 200): Response {
 }
 
 export async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const parsed = await request.json();
+  return requireJsonObject((await request.json()) as unknown);
+}
 
+export async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
+  const payload = await request.text();
+
+  if (!payload.trim()) {
+    return {};
+  }
+
+  return requireJsonObject(JSON.parse(payload) as unknown);
+}
+
+export function requireJsonObject(parsed: unknown): Record<string, unknown> {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new TypeError("Request body must be a JSON object.");
   }

@@ -1,8 +1,7 @@
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     const rawBody = await request.text();
     return jsonOk(
       await handleHostedStripeWebhook({
@@ -10,7 +9,4 @@ export async function POST(request: Request) {
         signature: request.headers.get("stripe-signature"),
       }),
     );
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

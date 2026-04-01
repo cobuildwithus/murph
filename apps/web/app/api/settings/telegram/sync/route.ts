@@ -4,14 +4,13 @@ import { cookies } from "next/headers";
 import { getPrisma } from "@/src/lib/prisma";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const cookieStore = await cookies();
     const hostedSession = await resolveHostedSessionFromCookieStore(cookieStore);
@@ -26,7 +25,7 @@ export async function POST(request: Request) {
 
     const body = await readOptionalJsonObject(request);
     const expectedTelegramUserId = normalizeComparableTelegramUserId(
-      body && typeof body.expectedTelegramUserId === "string" ? body.expectedTelegramUserId : null,
+      typeof body.expectedTelegramUserId === "string" ? body.expectedTelegramUserId : null,
     );
 
     if (!expectedTelegramUserId) {
@@ -91,10 +90,7 @@ export async function POST(request: Request) {
       telegramUserId: telegramAccount.telegramUserId,
       telegramUsername: telegramAccount.username,
     });
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});
 
 function normalizeComparableTelegramUserId(value: string | null | undefined): string | null {
   if (typeof value !== "string") {

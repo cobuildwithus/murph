@@ -1,12 +1,11 @@
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/member-service";
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedSessionFromRequest } from "@/src/lib/hosted-onboarding/session";
 
-export async function GET(
+export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ inviteCode: string }> },
-) {
-  try {
+) => {
     const { inviteCode } = await context.params;
     const sessionRecord = await resolveHostedSessionFromRequest(request);
     return jsonOk(
@@ -15,7 +14,4 @@ export async function GET(
         sessionRecord,
       }),
     );
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

@@ -1,139 +1,142 @@
-import type { HealthEntityKind } from "@murph/contracts";
+import {
+  requireHealthEntityRegistryDefinition,
+  type HealthEntityRegistryKind,
+} from "@murph/contracts";
+
+import type {
+  HealthCoreRuntimeMethodName,
+  HealthCoreScaffoldServiceMethodName,
+  HealthCoreUpsertServiceMethodName,
+  HealthQueryListServiceMethodName,
+  HealthQueryRuntimeListMethodName,
+  HealthQueryRuntimeShowMethodName,
+  HealthQueryShowServiceMethodName,
+} from "./health-cli-method-types.js";
 
 export interface HealthRegistryCommandMetadata {
-  commandName: string;
+  commandName: HealthRegistryCommandKind;
   commandDescription: string;
-  listServiceMethod: string;
+  listServiceMethod: HealthQueryListServiceMethodName;
   listStatusDescription?: string;
   payloadFile: string;
-  runtimeListMethod: string;
-  runtimeMethod: string;
-  runtimeShowMethod: string;
-  scaffoldServiceMethod: string;
+  runtimeListMethod: HealthQueryRuntimeListMethodName;
+  runtimeMethod: HealthCoreRuntimeMethodName;
+  runtimeShowMethod: HealthQueryRuntimeShowMethodName;
+  scaffoldServiceMethod: HealthCoreScaffoldServiceMethodName;
   showId: {
     description: string;
     example: string;
   };
-  showServiceMethod: string;
-  upsertServiceMethod: string;
+  showServiceMethod: HealthQueryShowServiceMethodName;
+  upsertServiceMethod: HealthCoreUpsertServiceMethodName;
 }
 
-export type HealthRegistryCommandKind = Extract<
-  HealthEntityKind,
-  "goal" | "condition" | "allergy" | "protocol" | "family" | "genetics"
->;
+export type HealthRegistryCommandKind = HealthEntityRegistryKind;
 
-const healthRegistryCommandMetadataByKind: Record<
+interface HealthRegistryCommandDerivation {
+  commandDescription: string;
+  methodStemPlural: string;
+  methodStemSingular: string;
+  runtimeMethod?: HealthCoreRuntimeMethodName;
+  statusLabel?: string;
+}
+
+const healthRegistryCommandDerivationByKind: Record<
   HealthRegistryCommandKind,
-  HealthRegistryCommandMetadata
+  HealthRegistryCommandDerivation
 > = {
   goal: {
     commandDescription: "Goal registry commands for the health extension surface.",
-    commandName: "goal",
-    listServiceMethod: "listGoals",
-    listStatusDescription: "Optional goal status to filter by.",
-    payloadFile: "goal.json",
-    runtimeListMethod: "listGoals",
-    runtimeMethod: "upsertGoal",
-    runtimeShowMethod: "showGoal",
-    scaffoldServiceMethod: "scaffoldGoal",
-    showId: {
-      description: "Goal id or slug to show.",
-      example: "<goal-id>",
-    },
-    showServiceMethod: "showGoal",
-    upsertServiceMethod: "upsertGoal",
+    methodStemPlural: "Goals",
+    methodStemSingular: "Goal",
+    statusLabel: "goal",
   },
   condition: {
     commandDescription: "Condition registry commands for the health extension surface.",
-    commandName: "condition",
-    listServiceMethod: "listConditions",
-    listStatusDescription: "Optional condition status to filter by.",
-    payloadFile: "condition.json",
-    runtimeListMethod: "listConditions",
-    runtimeMethod: "upsertCondition",
-    runtimeShowMethod: "showCondition",
-    scaffoldServiceMethod: "scaffoldCondition",
-    showId: {
-      description: "Condition id or slug to show.",
-      example: "<condition-id>",
-    },
-    showServiceMethod: "showCondition",
-    upsertServiceMethod: "upsertCondition",
+    methodStemPlural: "Conditions",
+    methodStemSingular: "Condition",
+    statusLabel: "condition",
   },
   allergy: {
     commandDescription: "Allergy registry commands for the health extension surface.",
-    commandName: "allergy",
-    listServiceMethod: "listAllergies",
-    listStatusDescription: "Optional allergy status to filter by.",
-    payloadFile: "allergy.json",
-    runtimeListMethod: "listAllergies",
-    runtimeMethod: "upsertAllergy",
-    runtimeShowMethod: "showAllergy",
-    scaffoldServiceMethod: "scaffoldAllergy",
-    showId: {
-      description: "Allergy id or slug to show.",
-      example: "<allergy-id>",
-    },
-    showServiceMethod: "showAllergy",
-    upsertServiceMethod: "upsertAllergy",
+    methodStemPlural: "Allergies",
+    methodStemSingular: "Allergy",
+    statusLabel: "allergy",
   },
   protocol: {
     commandDescription: "Protocol registry commands for the health extension surface.",
-    commandName: "protocol",
-    listServiceMethod: "listProtocols",
-    listStatusDescription: "Optional protocol status to filter by.",
-    payloadFile: "protocol.json",
-    runtimeListMethod: "listProtocols",
+    methodStemPlural: "Protocols",
+    methodStemSingular: "Protocol",
     runtimeMethod: "upsertProtocolItem",
-    runtimeShowMethod: "showProtocol",
-    scaffoldServiceMethod: "scaffoldProtocol",
-    showId: {
-      description: "Protocol id or slug to show.",
-      example: "<protocol-id>",
-    },
-    showServiceMethod: "showProtocol",
-    upsertServiceMethod: "upsertProtocol",
+    statusLabel: "protocol",
   },
   family: {
     commandDescription: "Family registry commands for the health extension surface.",
-    commandName: "family",
-    listServiceMethod: "listFamilyMembers",
-    payloadFile: "family.json",
-    runtimeListMethod: "listFamilyMembers",
-    runtimeMethod: "upsertFamilyMember",
-    runtimeShowMethod: "showFamilyMember",
-    scaffoldServiceMethod: "scaffoldFamilyMember",
-    showId: {
-      description: "Family member id or slug to show.",
-      example: "<family-member-id>",
-    },
-    showServiceMethod: "showFamilyMember",
-    upsertServiceMethod: "upsertFamilyMember",
+    methodStemPlural: "FamilyMembers",
+    methodStemSingular: "FamilyMember",
   },
   genetics: {
     commandDescription: "Genetic variant commands for the health extension surface.",
-    commandName: "genetics",
-    listServiceMethod: "listGeneticVariants",
-    listStatusDescription: "Optional genetic-variant status to filter by.",
-    payloadFile: "genetics.json",
-    runtimeListMethod: "listGeneticVariants",
-    runtimeMethod: "upsertGeneticVariant",
-    runtimeShowMethod: "showGeneticVariant",
-    scaffoldServiceMethod: "scaffoldGeneticVariant",
-    showId: {
-      description: "Genetic variant id or slug to show.",
-      example: "<genetic-variant-id>",
-    },
-    showServiceMethod: "showGeneticVariant",
-    upsertServiceMethod: "upsertGeneticVariant",
+    methodStemPlural: "GeneticVariants",
+    methodStemSingular: "GeneticVariant",
+    statusLabel: "genetic-variant",
   },
 };
+
+const healthRegistryCommandMetadataByKind = {
+  goal: buildHealthRegistryCommandMetadata("goal"),
+  condition: buildHealthRegistryCommandMetadata("condition"),
+  allergy: buildHealthRegistryCommandMetadata("allergy"),
+  protocol: buildHealthRegistryCommandMetadata("protocol"),
+  family: buildHealthRegistryCommandMetadata("family"),
+  genetics: buildHealthRegistryCommandMetadata("genetics"),
+} as const satisfies Record<HealthRegistryCommandKind, HealthRegistryCommandMetadata>;
 
 export function getHealthRegistryCommandMetadata(
   kind: HealthRegistryCommandKind,
 ): HealthRegistryCommandMetadata {
   return healthRegistryCommandMetadataByKind[kind];
+}
+
+function buildHealthRegistryCommandMetadata(
+  kind: HealthRegistryCommandKind,
+): HealthRegistryCommandMetadata {
+  const definition = requireHealthEntityRegistryDefinition(kind);
+  const derivation = healthRegistryCommandDerivationByKind[kind];
+  const singularMethodStem = derivation.methodStemSingular;
+  const pluralMethodStem = derivation.methodStemPlural;
+
+  return {
+    commandDescription: derivation.commandDescription,
+    commandName: kind,
+    listServiceMethod: `list${pluralMethodStem}` as HealthQueryListServiceMethodName,
+    ...(definition.registry.statusKeys.length > 0 && derivation.statusLabel
+      ? {
+          listStatusDescription: `Optional ${derivation.statusLabel} status to filter by.`,
+        }
+      : {}),
+    payloadFile: `${kind}.json`,
+    runtimeListMethod: `list${pluralMethodStem}` as HealthQueryRuntimeListMethodName,
+    runtimeMethod:
+      derivation.runtimeMethod
+      ?? (`upsert${singularMethodStem}` as HealthCoreRuntimeMethodName),
+    runtimeShowMethod: `show${singularMethodStem}` as HealthQueryRuntimeShowMethodName,
+    scaffoldServiceMethod: `scaffold${singularMethodStem}` as HealthCoreScaffoldServiceMethodName,
+    showId: {
+      description: `${capitalize(definition.noun)} id or slug to show.`,
+      example: `<${toCommandIdExample(definition.noun)}-id>`,
+    },
+    showServiceMethod: `show${singularMethodStem}` as HealthQueryShowServiceMethodName,
+    upsertServiceMethod: `upsert${singularMethodStem}` as HealthCoreUpsertServiceMethodName,
+  };
+}
+
+function capitalize(value: string): string {
+  return value.length > 0 ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
+}
+
+function toCommandIdExample(noun: string): string {
+  return noun.trim().replace(/\s+/gu, "-");
 }
 
 export { healthRegistryCommandMetadataByKind };

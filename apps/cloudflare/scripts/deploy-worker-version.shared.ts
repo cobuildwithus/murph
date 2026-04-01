@@ -110,7 +110,6 @@ export async function runHostedWorkerDeployment(input: {
         dependencies: input.dependencies,
         deploymentMessage,
         includeSecrets,
-        mode,
         secretsFilePath: input.secretsFilePath,
         versionTag,
         workerName: input.workerName,
@@ -119,10 +118,8 @@ export async function runHostedWorkerDeployment(input: {
         configPath: input.configPath,
         dependencies: input.dependencies,
         deploymentMessage,
-        env,
         existingVersionId,
         includeSecrets,
-        mode,
         rolloutPercentage,
         secretsFilePath: input.secretsFilePath,
         versionMessage,
@@ -144,7 +141,6 @@ async function runDirectDeployment(input: {
   dependencies: HostedWorkerDeploymentDependencies;
   deploymentMessage: string;
   includeSecrets: boolean;
-  mode: DeploymentMode;
   secretsFilePath: string;
   versionTag: string;
   workerName: string;
@@ -169,7 +165,7 @@ async function runDirectDeployment(input: {
     candidateVersionId: finalDeploymentVersions[0]?.versionId ?? null,
     currentDeploymentVersions: null,
     finalDeploymentVersions,
-    mode: input.mode,
+    mode: "direct",
     rolloutPercentage: null,
     smokeVersionId: null,
     uploadedVersionId: null,
@@ -181,10 +177,8 @@ async function runGradualDeployment(input: {
   configPath: string;
   dependencies: HostedWorkerDeploymentDependencies;
   deploymentMessage: string;
-  env: EnvSource;
   existingVersionId: string | null;
   includeSecrets: boolean;
-  mode: DeploymentMode;
   rolloutPercentage: number | null;
   secretsFilePath: string;
   versionMessage: string;
@@ -257,7 +251,7 @@ async function runGradualDeployment(input: {
     candidateVersionId,
     currentDeploymentVersions: mapDeploymentVersions(currentDeployment),
     finalDeploymentVersions: mapDeploymentVersions(finalDeployment),
-    mode: input.mode,
+    mode: "gradual",
     rolloutPercentage: input.rolloutPercentage,
     smokeVersionId: candidateVersionId,
     uploadedVersionId,

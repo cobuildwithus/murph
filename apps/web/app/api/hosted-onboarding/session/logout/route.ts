@@ -1,15 +1,11 @@
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { clearHostedSessionCookie, revokeHostedSessionFromRequest } from "@/src/lib/hosted-onboarding/session";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     await revokeHostedSessionFromRequest(request);
     const response = jsonOk({ ok: true });
     clearHostedSessionCookie(response);
     return response;
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

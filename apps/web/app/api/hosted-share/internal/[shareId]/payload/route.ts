@@ -3,13 +3,12 @@ import {
 } from "@/src/lib/hosted-share/service";
 import { authorizeHostedExecutionInternalRequest } from "@/src/lib/hosted-execution/internal";
 import { getPrisma } from "@/src/lib/prisma";
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-export async function GET(
+export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ shareId: string }> },
-) {
-  try {
+) => {
     const { trustedUserId } = authorizeHostedExecutionInternalRequest({
       acceptedToken: "share",
       request,
@@ -25,7 +24,4 @@ export async function GET(
       shareCode,
       shareId,
     }));
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

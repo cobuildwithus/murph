@@ -6,6 +6,7 @@ import {
   mergeJsonHeaders,
   readOptionalJsonObject,
   readJsonObject,
+  withJsonErrorHandling,
 } from "../http";
 import { isHostedOnboardingError } from "./errors";
 
@@ -32,6 +33,12 @@ export function jsonError(error: unknown, headers?: HeadersInit): NextResponse {
     logMessage: "Hosted onboarding route failed.",
     matchers: [mapHostedOnboardingError],
   });
+}
+
+export function withJsonError<TArgs extends unknown[]>(
+  handler: (...args: TArgs) => Promise<Response>,
+): (...args: TArgs) => Promise<Response> {
+  return withJsonErrorHandling(handler, jsonError);
 }
 
 export { readJsonObject, readOptionalJsonObject };

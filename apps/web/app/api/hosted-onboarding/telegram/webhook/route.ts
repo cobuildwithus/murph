@@ -1,4 +1,4 @@
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 
 export async function GET() {
@@ -8,18 +8,14 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
-  try {
-    const rawBody = await request.text();
+export const POST = withJsonError(async (request: Request) => {
+  const rawBody = await request.text();
 
-    return jsonOk(
-      await handleHostedOnboardingTelegramWebhook({
-        rawBody,
-        secretToken: request.headers.get("x-telegram-bot-api-secret-token"),
-      }),
-      202,
-    );
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+  return jsonOk(
+    await handleHostedOnboardingTelegramWebhook({
+      rawBody,
+      secretToken: request.headers.get("x-telegram-bot-api-secret-token"),
+    }),
+    202,
+  );
+});

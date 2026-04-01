@@ -31,7 +31,10 @@ import {
   pathSchema,
   showResultSchema,
 } from "./vault-cli-contracts.js";
-import { getHealthRegistryCommandMetadata } from "./health-registry-command-metadata.js";
+import {
+  getHealthRegistryCommandMetadata,
+  type HealthRegistryCommandKind,
+} from "./health-registry-command-metadata.js";
 
 export type { JsonObject } from "./health-cli-method-types.js";
 
@@ -149,10 +152,7 @@ export const healthListResultSchema = z.object({
   nextCursor: z.string().min(1).nullable(),
 });
 
-type StatusFilteredRegistryDescriptorCommandName = Extract<
-  HealthEntityKind,
-  "goal" | "condition" | "allergy" | "protocol" | "family" | "genetics"
->;
+type StatusFilteredRegistryDescriptorCommandName = HealthRegistryCommandKind;
 
 interface StatusFilteredRegistryDescriptorInput {
   commandDescription: string;
@@ -225,20 +225,20 @@ function buildSharedStatusFilteredRegistryDescriptorExtension(
 
   const extension = buildStatusFilteredRegistryDescriptorExtension({
     commandDescription: command.commandDescription,
-    commandName: command.commandName as StatusFilteredRegistryDescriptorCommandName,
-    listServiceMethod: command.listServiceMethod as HealthQueryListServiceMethodName,
+    commandName: command.commandName,
+    listServiceMethod: command.listServiceMethod,
     listStatusDescription: supportsStatusFilter ? command.listStatusDescription : undefined,
     noun: definition.noun,
     payloadFile: command.payloadFile,
     pluralNoun: definition.plural,
     resultIdField,
-    runtimeListMethod: command.runtimeListMethod as HealthQueryRuntimeListMethodName,
-    runtimeMethod: command.runtimeMethod as HealthCoreRuntimeMethodName,
-    runtimeShowMethod: command.runtimeShowMethod as HealthQueryRuntimeShowMethodName,
-    scaffoldServiceMethod: command.scaffoldServiceMethod as HealthCoreScaffoldServiceMethodName,
+    runtimeListMethod: command.runtimeListMethod,
+    runtimeMethod: command.runtimeMethod,
+    runtimeShowMethod: command.runtimeShowMethod,
+    scaffoldServiceMethod: command.scaffoldServiceMethod,
     showId: command.showId,
-    showServiceMethod: command.showServiceMethod as HealthQueryShowServiceMethodName,
-    upsertServiceMethod: command.upsertServiceMethod as HealthCoreUpsertServiceMethodName,
+    showServiceMethod: command.showServiceMethod,
+    upsertServiceMethod: command.upsertServiceMethod,
   });
 
   if (supportsStatusFilter) {

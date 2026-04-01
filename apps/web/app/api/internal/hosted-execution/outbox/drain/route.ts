@@ -1,9 +1,8 @@
 import { drainHostedExecutionOutbox } from "@/src/lib/hosted-execution/outbox";
 import { requireHostedExecutionInternalToken } from "@/src/lib/hosted-execution/internal";
-import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     requireHostedExecutionInternalToken(request);
     const body = await readOptionalJsonObject(request);
     const eventIds = Array.isArray(body.eventIds)
@@ -23,7 +22,4 @@ export async function POST(request: Request) {
         status: record.status,
       })),
     });
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});
