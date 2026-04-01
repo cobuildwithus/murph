@@ -300,8 +300,8 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   }
 }
 
-function providerSupportsBoundAssistantTools(provider: AssistantChatProvider): boolean {
-  return resolveAssistantProviderCapabilities(provider).supportsBoundTools
+function providerSupportsHostToolRuntime(provider: AssistantChatProvider): boolean {
+  return resolveAssistantProviderCapabilities(provider).supportsHostToolRuntime
 }
 
 async function resolveAssistantProviderAttemptPlan(input: {
@@ -466,15 +466,15 @@ async function resolveAssistantRouteTurnPlan(input: {
   const cronMcpConfig = buildAssistantCronMcpConfig(
     workingDirectory,
   )
-  const exposesBoundAssistantTools = providerSupportsBoundAssistantTools(input.route.provider)
+  const exposesHostToolRuntime = providerSupportsHostToolRuntime(input.route.provider)
   const assistantStateToolsAvailable =
-    (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.state.show')) ||
+    (exposesHostToolRuntime && input.toolCatalog.hasTool('assistant.state.show')) ||
     (supportsDirectCliExecution && stateMcpConfig !== null)
   const assistantMemoryToolsAvailable =
-    (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.memory.search')) ||
+    (exposesHostToolRuntime && input.toolCatalog.hasTool('assistant.memory.search')) ||
     (supportsDirectCliExecution && memoryMcpConfig !== null)
   const assistantCronToolsAvailable =
-    (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.cron.status')) ||
+    (exposesHostToolRuntime && input.toolCatalog.hasTool('assistant.cron.status')) ||
     (supportsDirectCliExecution && cronMcpConfig !== null)
   const configOverrides = supportsDirectCliExecution
     ? [
@@ -551,7 +551,7 @@ async function executeAssistantProviderAttempt(input: {
     const routeTraits = resolveAssistantProviderTraits(attemptPlan.route.provider)
     const toolCatalog = executionPlan.toolCatalog
     const toolRuntime =
-      providerSupportsBoundAssistantTools(attemptPlan.route.provider)
+      providerSupportsHostToolRuntime(attemptPlan.route.provider)
         ? {
             allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
             requestId: executionPlan.turnId,
@@ -1204,30 +1204,28 @@ function buildAssistantStateGuidanceText(
     supportsDirectCliExecution: boolean
   },
 ): string {
-  if (input.assistantStateToolsAvailable) {
-    return [
+  return buildAssistantToolAccessGuidanceText({
+    directCliAvailable: input.supportsDirectCliExecution,
+    preferredAccessAvailable: input.assistantStateToolsAvailable,
+    preferredAccessLines: [
       'Assistant state tools are exposed in this session. Prefer the bound assistant-state tools over shelling out, and do not edit `assistant-state/state/` files directly.',
       'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
       'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
       'Use `assistant state show` and `assistant state list` to inspect scratch state before repeating a question or suggestion, and use `assistant state patch` for incremental updates.',
       `Use \`${input.rawCommand} assistant state ...\` only as a fallback when the bound assistant-state tools are unavailable in this session.`,
-    ].join('\n\n')
-  }
-
-  if (input.supportsDirectCliExecution) {
-    return [
+    ],
+    directCliLines: [
       'Assistant state tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant state list|show|put|patch|delete\` for small runtime scratchpads, and do not edit \`assistant-state/state/\` files directly.`,
       'Use assistant state only for small non-canonical runtime scratchpads such as cron cooldowns, unresolved follow-ups, pending hypotheses, or delivery policy decisions.',
       'Assistant state is not long-term memory and not canonical vault data. Do not store durable confirmed facts there when they belong in assistant memory or the vault.',
-    ].join('\n\n')
-  }
-
-  return [
-    'This provider path does not expose Murph assistant-state tools or direct shell access.',
-    `If the user needs assistant scratch state inspected or changed here, give them the exact \`${input.rawCommand} assistant state ...\` command to run or switch to a Codex-backed Murph chat session.`,
-    'Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.',
-  ].join('\n\n')
+    ],
+    unavailableLines: [
+      'This provider path does not expose Murph assistant-state tools or direct shell access.',
+      `If the user needs assistant scratch state inspected or changed here, give them the exact \`${input.rawCommand} assistant state ...\` command to run or switch to a Codex-backed Murph chat session.`,
+      'Do not claim you inspected or updated assistant scratch state in this session unless a real tool call happened.',
+    ],
+  })
 }
 
 function buildAssistantVaultEvidenceFormattingGuidance(
@@ -1306,8 +1304,10 @@ function buildAssistantMemoryGuidanceText(
     supportsDirectCliExecution: boolean
   },
 ): string {
-  if (input.assistantMemoryToolsAvailable) {
-    return [
+  return buildAssistantToolAccessGuidanceText({
+    directCliAvailable: input.supportsDirectCliExecution,
+    preferredAccessAvailable: input.assistantMemoryToolsAvailable,
+    preferredAccessLines: [
       'Assistant memory tools are exposed in this session. Prefer the bound assistant-memory tools over shelling out, and do not edit `assistant-state/` files directly.',
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
       'The active vault is already bound in this session. Do not switch vaults unless the user explicitly targets a different vault.',
@@ -1317,11 +1317,8 @@ function buildAssistantMemoryGuidanceText(
       'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
       'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
       'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
-    ].join('\n\n')
-  }
-
-  if (input.supportsDirectCliExecution) {
-    return [
+    ],
+    directCliLines: [
       'Assistant memory tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant memory search|get|upsert|forget\` when you need stored memory, and do not edit \`assistant-state/\` files directly.`,
       'When the current request depends on prior preferences, ongoing goals, recurring health context, or earlier plans, search assistant memory before answering.',
@@ -1330,16 +1327,15 @@ function buildAssistantMemoryGuidanceText(
       'When manually upserting durable memory outside a live assistant turn, phrase `text` as the exact stored sentence you want committed, such as `Call the user Alex.`, `User prefers the default assistant tone.`, or `Keep responses brief.`',
       'Use `assistant memory forget` to remove mistaken or obsolete memory instead of appending a contradiction.',
       'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
-    ].join('\n\n')
-  }
-
-  return [
-    'This provider path does not expose Murph assistant-memory tools or direct shell access.',
-    'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
-    `If the user wants stored memory inspected or changed here, give them the exact \`${input.rawCommand} assistant memory ...\` command to run or switch to a Codex-backed Murph chat session.`,
-    'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
-    'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
-  ].join('\n\n')
+    ],
+    unavailableLines: [
+      'This provider path does not expose Murph assistant-memory tools or direct shell access.',
+      'Use the injected core memory block if present, but do not claim you searched, updated, or forgot assistant memory unless a real tool call happened.',
+      `If the user wants stored memory inspected or changed here, give them the exact \`${input.rawCommand} assistant memory ...\` command to run or switch to a Codex-backed Murph chat session.`,
+      'When prior continuity would matter and you cannot search memory in this session, ask a brief clarifying question instead of inventing recall.',
+      'Health memory is stricter: only store durable health context when the user explicitly asks you to remember it, and only in private assistant contexts.',
+    ],
+  })
 }
 
 function buildAssistantCronGuidanceText(
@@ -1349,8 +1345,10 @@ function buildAssistantCronGuidanceText(
     supportsDirectCliExecution: boolean
   },
 ): string {
-  if (input.assistantCronToolsAvailable) {
-    return [
+  return buildAssistantToolAccessGuidanceText({
+    directCliAvailable: input.supportsDirectCliExecution,
+    preferredAccessAvailable: input.assistantCronToolsAvailable,
+    preferredAccessLines: [
       'Scheduled assistant automation tools are exposed in this session. Prefer the bound assistant-cron tools over shelling out, and do not edit `assistant-state/cron/` files directly.',
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
       'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
@@ -1366,11 +1364,8 @@ function buildAssistantCronGuidanceText(
       'Cron prompts may explicitly tell you to use the research tool. In that case, run `research` for Deep Research or `deepthink` for GPT Pro before composing the final cron reply.',
       'Both research commands wait for completion and save a markdown note under `research/` inside the vault.',
       `Use \`${input.rawCommand} assistant cron ...\` only as a fallback when the bound assistant-cron tools are unavailable in this session.`,
-    ].join('\n\n')
-  }
-
-  if (input.supportsDirectCliExecution) {
-    return [
+    ],
+    directCliLines: [
       'Scheduled assistant automation tools are not exposed in this session, but direct Murph CLI execution is available.',
       `Use \`${input.rawCommand} assistant cron ...\` when you need to inspect or change scheduled automation, and do not edit \`assistant-state/cron/\` files directly.`,
       'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
@@ -1381,17 +1376,34 @@ function buildAssistantCronGuidanceText(
       'Inspect the scheduler with `assistant cron status`, `assistant cron list`, `assistant cron show`, `assistant cron target show`, and `assistant cron runs` before changing an existing job.',
       'When the user wants to retarget an existing cron job without recreating it, use `assistant cron target set`.',
       'Cron schedules execute while `assistant run` is active for the vault.',
-    ].join('\n\n')
+    ],
+    unavailableLines: [
+      'This provider path does not expose Murph cron tools or direct shell access.',
+      `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Murph chat session.`,
+      'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
+      'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
+      'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
+      'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
+      'Do not claim you created, changed, or inspected a cron job in this session unless a real tool call happened.',
+      'Cron schedules execute while `assistant run` is active for the vault.',
+    ],
+  })
+}
+
+function buildAssistantToolAccessGuidanceText(input: {
+  directCliAvailable: boolean
+  preferredAccessAvailable: boolean
+  preferredAccessLines: readonly string[]
+  directCliLines: readonly string[]
+  unavailableLines: readonly string[]
+}): string {
+  if (input.preferredAccessAvailable) {
+    return input.preferredAccessLines.join('\n\n')
   }
 
-  return [
-    'This provider path does not expose Murph cron tools or direct shell access.',
-    `If the user wants automation here, explain the relevant \`${input.rawCommand} assistant cron ...\` command or suggest switching to a Codex-backed Murph chat session.`,
-    'Built-in cron presets are available through `assistant cron preset list`, `assistant cron preset show`, and `assistant cron preset install`.',
-    'When a user is onboarding or asks for automation ideas, offer the relevant preset first, then customize its variables, schedule, and outbound channel settings for them.',
-    'Prefer digest-style or summary-style automation over nagging coaching. Default to weekly or daily summaries unless the user clearly asks for a higher-frequency nudge.',
-    'Before asking the user to repeat phone, Telegram, or email routing details for an outbound cron job, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.',
-    'Do not claim you created, changed, or inspected a cron job in this session unless a real tool call happened.',
-    'Cron schedules execute while `assistant run` is active for the vault.',
-  ].join('\n\n')
+  if (input.directCliAvailable) {
+    return input.directCliLines.join('\n\n')
+  }
+
+  return input.unavailableLines.join('\n\n')
 }

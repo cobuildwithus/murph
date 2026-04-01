@@ -250,12 +250,14 @@ test('resolveAssistantProviderDefaults can read inactive saved provider entries'
 test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
     supportsBoundTools: false,
+    supportsHostToolRuntime: false,
     supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
     supportsReasoningEffort: true,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
     supportsBoundTools: true,
+    supportsHostToolRuntime: true,
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
     supportsReasoningEffort: false,

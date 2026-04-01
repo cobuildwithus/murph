@@ -48,7 +48,8 @@ const runtimeMocks = vi.hoisted(() => ({
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
   resolveAssistantProviderCapabilities: vi.fn((provider: string) => ({
-    supportsBoundTools: provider === 'openai-compatible' || provider === 'codex-cli',
+    supportsBoundTools: provider === 'openai-compatible',
+    supportsHostToolRuntime: provider === 'openai-compatible',
     supportsDirectCliExecution: provider !== 'openai-compatible',
     supportsModelDiscovery: provider === 'openai-compatible',
     supportsReasoningEffort: provider !== 'openai-compatible',
@@ -224,7 +225,8 @@ beforeEach(() => {
   runtimeMocks.resolveAssistantProviderCapabilities.mockReset()
   runtimeMocks.resolveAssistantProviderTraits.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockImplementation((provider: string) => ({
-    supportsBoundTools: provider === 'openai-compatible' || provider === 'codex-cli',
+    supportsBoundTools: provider === 'openai-compatible',
+    supportsHostToolRuntime: provider === 'openai-compatible',
     supportsDirectCliExecution: provider !== 'openai-compatible',
     supportsModelDiscovery: provider === 'openai-compatible',
     supportsReasoningEffort: provider !== 'openai-compatible',
