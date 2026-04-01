@@ -869,29 +869,33 @@ test("sqlite store hosted hydration replaces mirrored metadata and clears local 
   );
 
   const hydrated = store.hydrateHostedAccount({
-    connectedAt: "2026-03-20T10:00:00.000Z",
-    displayName: "Hosted Account",
-    externalAccountId: "demo-seeded",
+    connection: {
+      connectedAt: "2026-03-20T10:00:00.000Z",
+      displayName: "Hosted Account",
+      externalAccountId: "demo-seeded",
+      metadata: {
+        fresh: true,
+        nested: {
+          drop: "me",
+        },
+        oversized: "x".repeat(300),
+      },
+      provider: "demo",
+      scopes: ["heartrate"],
+      status: "disconnected",
+      updatedAt: "2026-03-27T08:00:00.000Z",
+    },
     hostedObservedTokenVersion: null,
     hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
-    lastErrorCode: null,
-    lastErrorMessage: null,
-    lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
-    lastSyncErrorAt: null,
-    lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
-    lastWebhookAt: "2026-03-27T07:50:00.000Z",
-    metadata: {
-      fresh: true,
-      nested: {
-        drop: "me",
-      },
-      oversized: "x".repeat(300),
+    localState: {
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
+      lastWebhookAt: "2026-03-27T07:50:00.000Z",
+      nextReconcileAt: null,
     },
-    nextReconcileAt: null,
-    provider: "demo",
-    scopes: ["heartrate"],
-    status: "disconnected",
-    updatedAt: "2026-03-27T08:00:00.000Z",
   });
 
   assert.ok(hydrated);

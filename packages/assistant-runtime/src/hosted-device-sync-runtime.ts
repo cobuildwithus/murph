@@ -12,9 +12,12 @@ import type {
 import {
   normalizeHostedDeviceSyncJobHints,
   resolveHostedExecutionDeviceSyncRuntimeClient,
+  type HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as HostedDeviceSyncRuntimeConnectionStateSnapshot,
   resolveHostedDeviceSyncWakeContext,
   type HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
   type HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
+  type HostedExecutionDeviceSyncRuntimeLocalStateSnapshot as HostedDeviceSyncRuntimeLocalStateSnapshot,
+  type HostedExecutionDeviceSyncRuntimeLocalStateUpdate as HostedDeviceSyncRuntimeLocalStateUpdate,
   type HostedExecutionDeviceSyncRuntimeSnapshotResponse as HostedDeviceSyncRuntimeSnapshotResponse,
   type HostedExecutionDeviceSyncRuntimeTokenBundle as HostedDeviceSyncRuntimeTokenBundle,
 } from "@murphai/hosted-execution";
@@ -269,6 +272,9 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
   observedTokenVersion: number | null;
 }): HostedDeviceSyncRuntimeConnectionUpdate | null {
   const baselineConnection = input.baseline?.connection ?? null;
+  const baselineLocalState = input.baseline
+    ? resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.baseline)
+    : null;
   const baselineTokenBundle = input.baseline?.tokenBundle ?? null;
   const tokenBundle = input.account.status === "disconnected"
     ? null
@@ -290,46 +296,63 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
 
   if (input.account.status === "disconnected") {
     if (baselineConnection?.status !== "disconnected") {
-      update.status = "disconnected";
+      update.connection = {
+        ...(update.connection ?? {}),
+        status: "disconnected",
+      };
     }
 
-    assignErrorFieldUpdate(update, input.account, baselineConnection);
+    assignErrorFieldUpdate(update, input.account, baselineLocalState);
 
     return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
   }
 
   if (input.account.status !== baselineConnection?.status) {
-    update.status = input.account.status;
+    update.connection = {
+      ...(update.connection ?? {}),
+      status: input.account.status,
+    };
   }
 
   if (input.account.displayName !== (baselineConnection?.displayName ?? null)) {
-    update.displayName = input.account.displayName ?? null;
+    update.connection = {
+      ...(update.connection ?? {}),
+      displayName: input.account.displayName ?? null,
+    };
   }
 
   if (!equalStringArrays(input.account.scopes, baselineConnection?.scopes ?? [])) {
-    update.scopes = [...input.account.scopes];
+    update.connection = {
+      ...(update.connection ?? {}),
+      scopes: [...input.account.scopes],
+    };
   }
 
   if (!equalJsonRecords(input.account.metadata, baselineConnection?.metadata ?? {})) {
-    update.metadata = { ...input.account.metadata };
+    update.connection = {
+      ...(update.connection ?? {}),
+      metadata: { ...input.account.metadata },
+    };
   }
 
-  if (input.account.nextReconcileAt !== (baselineConnection?.nextReconcileAt ?? null)) {
-    update.nextReconcileAt = input.account.nextReconcileAt ?? null;
+  if (input.account.nextReconcileAt !== (baselineLocalState?.nextReconcileAt ?? null)) {
+    update.localState = {
+      ...(update.localState ?? {}),
+      nextReconcileAt: input.account.nextReconcileAt ?? null,
+    };
   }
 
   if (!equalHostedDeviceSyncRuntimeTokenBundles(tokenBundle, baselineTokenBundle)) {
-    update.accessTokenExpiresAt = input.account.accessTokenExpiresAt ?? null;
     update.observedTokenVersion = input.observedTokenVersion;
     update.tokenBundle = tokenBundle;
   }
 
-  assignErrorFieldUpdate(update, input.account, baselineConnection);
+  assignErrorFieldUpdate(update, input.account, baselineLocalState);
 
-  assignMonotonicTimestampUpdate(update, "lastWebhookAt", input.account.lastWebhookAt, baselineConnection?.lastWebhookAt ?? null);
-  assignMonotonicTimestampUpdate(update, "lastSyncStartedAt", input.account.lastSyncStartedAt, baselineConnection?.lastSyncStartedAt ?? null);
-  assignMonotonicTimestampUpdate(update, "lastSyncCompletedAt", input.account.lastSyncCompletedAt, baselineConnection?.lastSyncCompletedAt ?? null);
-  assignMonotonicTimestampUpdate(update, "lastSyncErrorAt", input.account.lastSyncErrorAt, baselineConnection?.lastSyncErrorAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastWebhookAt", input.account.lastWebhookAt, baselineLocalState?.lastWebhookAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastSyncStartedAt", input.account.lastSyncStartedAt, baselineLocalState?.lastSyncStartedAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastSyncCompletedAt", input.account.lastSyncCompletedAt, baselineLocalState?.lastSyncCompletedAt ?? null);
+  assignMonotonicTimestampUpdate(update, "lastSyncErrorAt", input.account.lastSyncErrorAt, baselineLocalState?.lastSyncErrorAt ?? null);
 
   return hasHostedDeviceSyncRuntimeConnectionUpdateChanges(update) ? update : null;
 }
@@ -337,7 +360,10 @@ function buildHostedDeviceSyncRuntimeConnectionUpdate(input: {
 function hasHostedDeviceSyncRuntimeConnectionUpdateChanges(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
 ): boolean {
-  return Object.keys(update).some((key) => key !== "connectionId" && key !== "observedUpdatedAt");
+  return update.connection !== undefined
+    || update.localState !== undefined
+    || update.tokenBundle !== undefined
+    || update.observedTokenVersion !== undefined;
 }
 
 function equalHostedDeviceSyncRuntimeTokenBundles(
@@ -363,9 +389,10 @@ function buildHostedAccountHydrationInput(input: {
   existing: StoredDeviceSyncAccount | null;
 }): HostedAccountHydrationInput {
   const hostedConnection = input.entry.connection;
+  const hostedLocalState = resolveHostedDeviceSyncRuntimeLocalStateSnapshot(input.entry);
   const hostedTokenVersion = input.entry.tokenBundle?.tokenVersion ?? null;
   const hostedUpdatedAt = hostedConnection.updatedAt ?? null;
-  const localHasPendingHostedChanges = hasLocalPendingHostedChanges({
+  const localHasPendingHostedConnectionChanges = hasLocalPendingHostedConnectionChanges({
     account: input.existing,
     codec: input.codec,
     hostedConnection,
@@ -373,11 +400,12 @@ function buildHostedAccountHydrationInput(input: {
   });
   const hostedConnectionAdvanced = hasHostedConnectionAdvanced(input.existing, hostedUpdatedAt);
   const hostedTokenAdvanced = hasHostedTokenAdvanced(input.existing, hostedTokenVersion);
-  const useHostedConnectionState = !input.existing || !localHasPendingHostedChanges || hostedConnectionAdvanced;
+  const useHostedConnectionState =
+    !input.existing || !localHasPendingHostedConnectionChanges || hostedConnectionAdvanced;
   const useHostedTokens =
     hostedConnection.status === "disconnected"
       ? useHostedConnectionState
-      : !input.existing || !localHasPendingHostedChanges || hostedTokenAdvanced;
+      : !input.existing || !localHasPendingHostedConnectionChanges || hostedTokenAdvanced;
   const nextHostedObservedUpdatedAt = useHostedConnectionState
     ? latestIsoTimestamp(input.existing?.hostedObservedUpdatedAt ?? null, hostedUpdatedAt)
     : input.existing?.hostedObservedUpdatedAt ?? null;
@@ -386,66 +414,34 @@ function buildHostedAccountHydrationInput(input: {
     : input.existing?.hostedObservedTokenVersion ?? null;
 
   return {
-    connectedAt: hostedConnection.connectedAt,
-    displayName: useHostedConnectionState
-      ? hostedConnection.displayName ?? null
-      : input.existing?.displayName ?? null,
-    externalAccountId: hostedConnection.externalAccountId,
     hostedObservedTokenVersion: nextHostedObservedTokenVersion,
     hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
-    lastErrorCode: useHostedConnectionState
-      ? hostedConnection.lastErrorCode ?? null
-      : input.existing?.lastErrorCode ?? null,
-    lastErrorMessage: useHostedConnectionState
-      ? hostedConnection.lastErrorMessage ?? null
-      : input.existing?.lastErrorMessage ?? null,
-    lastSyncCompletedAt: mergeMonotonicTimestamp(
-      input.existing?.lastSyncCompletedAt ?? null,
-      hostedConnection.lastSyncCompletedAt ?? null,
-      localHasPendingHostedChanges,
-    ),
-    lastSyncErrorAt:
-      useHostedConnectionState
-      && hostedConnection.lastErrorCode === null
-      && hostedConnection.lastErrorMessage === null
-      && hostedConnection.lastSyncErrorAt === null
-        ? null
-        : mergeMonotonicTimestamp(
-            input.existing?.lastSyncErrorAt ?? null,
-            hostedConnection.lastSyncErrorAt ?? null,
-            localHasPendingHostedChanges,
-          ),
-    lastSyncStartedAt: mergeMonotonicTimestamp(
-      input.existing?.lastSyncStartedAt ?? null,
-      hostedConnection.lastSyncStartedAt ?? null,
-      localHasPendingHostedChanges,
-    ),
-    lastWebhookAt: mergeMonotonicTimestamp(
-      input.existing?.lastWebhookAt ?? null,
-      hostedConnection.lastWebhookAt ?? null,
-      localHasPendingHostedChanges,
-    ),
-    metadata: useHostedConnectionState
-      ? { ...hostedConnection.metadata }
-      : { ...(input.existing?.metadata ?? {}) },
-    nextReconcileAt: mergeMonotonicTimestamp(
-      input.existing?.nextReconcileAt ?? null,
-      hostedConnection.nextReconcileAt ?? null,
-      localHasPendingHostedChanges && !hostedConnectionAdvanced,
-    ),
-    provider: hostedConnection.provider,
-    scopes: useHostedConnectionState
-      ? [...hostedConnection.scopes]
-      : [...(input.existing?.scopes ?? [])],
-    status: useHostedConnectionState
-      ? hostedConnection.status
-      : input.existing?.status ?? hostedConnection.status,
-    // Hosted only overwrites token/schedule state once the hosted snapshot advances past
-    // the last hosted state acknowledged by the local mirror.
-    updatedAt: resolveHydratedHostedAccountUpdatedAt({
+    connection: {
       connectedAt: hostedConnection.connectedAt,
+      displayName: useHostedConnectionState
+        ? hostedConnection.displayName ?? null
+        : input.existing?.displayName ?? null,
+      externalAccountId: hostedConnection.externalAccountId,
+      metadata: useHostedConnectionState
+        ? { ...hostedConnection.metadata }
+        : { ...(input.existing?.metadata ?? {}) },
+      provider: hostedConnection.provider,
+      scopes: useHostedConnectionState
+        ? [...hostedConnection.scopes]
+        : [...(input.existing?.scopes ?? [])],
+      status: useHostedConnectionState
+        ? hostedConnection.status
+        : input.existing?.status ?? hostedConnection.status,
+      updatedAt: resolveHydratedHostedAccountUpdatedAt({
+        connectedAt: hostedConnection.connectedAt,
+        existing: input.existing,
+        hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
+        useHostedConnectionState,
+      }),
+    },
+    localState: resolveHydratedHostedLocalState({
       existing: input.existing,
-      hostedObservedUpdatedAt: nextHostedObservedUpdatedAt,
+      hostedLocalState,
       useHostedConnectionState,
     }),
     ...(useHostedTokens && input.entry.tokenBundle
@@ -474,40 +470,172 @@ function equalJsonRecords(
 function assignErrorFieldUpdate(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
   account: StoredDeviceSyncAccount,
-  baselineConnection: HostedDeviceSyncRuntimeConnectionSnapshot["connection"] | null,
+  baselineLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot | null,
 ): void {
   const localLastErrorCode = account.lastErrorCode ?? null;
   const localLastErrorMessage = account.lastErrorMessage ?? null;
-  const baselineLastErrorCode = baselineConnection?.lastErrorCode ?? null;
-  const baselineLastErrorMessage = baselineConnection?.lastErrorMessage ?? null;
+  const baselineLastErrorCode = baselineLocalState?.lastErrorCode ?? null;
+  const baselineLastErrorMessage = baselineLocalState?.lastErrorMessage ?? null;
 
   if (
     localLastErrorCode === null
     && localLastErrorMessage === null
     && (baselineLastErrorCode !== null || baselineLastErrorMessage !== null)
   ) {
-    update.clearError = true;
+    update.localState = {
+      ...(update.localState ?? {}),
+      clearError: true,
+    };
 
-    if ((baselineConnection?.lastSyncErrorAt ?? null) !== null) {
-      update.lastSyncErrorAt = null;
+    if ((baselineLocalState?.lastSyncErrorAt ?? null) !== null) {
+      update.localState = {
+        ...(update.localState ?? {}),
+        lastSyncErrorAt: null,
+      };
     }
 
     return;
   }
 
   if (localLastErrorCode !== baselineLastErrorCode) {
-    update.lastErrorCode = localLastErrorCode;
+    update.localState = {
+      ...(update.localState ?? {}),
+      lastErrorCode: localLastErrorCode,
+    };
   }
 
   if (localLastErrorMessage !== baselineLastErrorMessage) {
-    update.lastErrorMessage = localLastErrorMessage;
+    update.localState = {
+      ...(update.localState ?? {}),
+      lastErrorMessage: localLastErrorMessage,
+    };
   }
 }
 
-function hasLocalPendingHostedChanges(input: {
+function resolveHostedDeviceSyncRuntimeLocalStateSnapshot(
+  entry: HostedDeviceSyncRuntimeConnectionSnapshot,
+): HostedDeviceSyncRuntimeLocalStateSnapshot {
+  if (entry.localState) {
+    return entry.localState;
+  }
+
+  const legacyConnection = entry.connection as HostedDeviceSyncRuntimeConnectionStateSnapshot & {
+    lastErrorCode?: string | null;
+    lastErrorMessage?: string | null;
+    lastSyncCompletedAt?: string | null;
+    lastSyncErrorAt?: string | null;
+    lastSyncStartedAt?: string | null;
+    lastWebhookAt?: string | null;
+    nextReconcileAt?: string | null;
+  };
+
+  return {
+    lastErrorCode: legacyConnection.lastErrorCode ?? null,
+    lastErrorMessage: legacyConnection.lastErrorMessage ?? null,
+    lastSyncCompletedAt: legacyConnection.lastSyncCompletedAt ?? null,
+    lastSyncErrorAt: legacyConnection.lastSyncErrorAt ?? null,
+    lastSyncStartedAt: legacyConnection.lastSyncStartedAt ?? null,
+    lastWebhookAt: legacyConnection.lastWebhookAt ?? null,
+    nextReconcileAt: legacyConnection.nextReconcileAt ?? null,
+  };
+}
+
+function resolveHydratedHostedLocalState(input: {
+  existing: StoredDeviceSyncAccount | null;
+  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
+  useHostedConnectionState: boolean;
+}): {
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncCompletedAt: string | null;
+  lastSyncErrorAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastWebhookAt: string | null;
+  nextReconcileAt: string | null;
+} {
+  const errorState = resolveHydratedHostedLocalErrorState(input);
+
+  return {
+    lastErrorCode: errorState.lastErrorCode,
+    lastErrorMessage: errorState.lastErrorMessage,
+    lastSyncCompletedAt: latestIsoTimestamp(
+      input.existing?.lastSyncCompletedAt ?? null,
+      input.hostedLocalState.lastSyncCompletedAt ?? null,
+    ),
+    lastSyncErrorAt: errorState.lastSyncErrorAt,
+    lastSyncStartedAt: latestIsoTimestamp(
+      input.existing?.lastSyncStartedAt ?? null,
+      input.hostedLocalState.lastSyncStartedAt ?? null,
+    ),
+    lastWebhookAt: latestIsoTimestamp(
+      input.existing?.lastWebhookAt ?? null,
+      input.hostedLocalState.lastWebhookAt ?? null,
+    ),
+    nextReconcileAt: resolveHydratedNextReconcileAt(input),
+  };
+}
+
+function resolveHydratedHostedLocalErrorState(input: {
+  existing: StoredDeviceSyncAccount | null;
+  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
+}): {
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncErrorAt: string | null;
+} {
+  const localErrorAt = input.existing?.lastSyncErrorAt ?? null;
+  const hostedErrorAt = input.hostedLocalState.lastSyncErrorAt ?? null;
+
+  if (hostedErrorAt) {
+    const latestErrorAt = latestIsoTimestamp(localErrorAt, hostedErrorAt);
+
+    if (latestErrorAt === hostedErrorAt) {
+      return {
+        lastErrorCode: input.hostedLocalState.lastErrorCode ?? null,
+        lastErrorMessage: input.hostedLocalState.lastErrorMessage ?? null,
+        lastSyncErrorAt: hostedErrorAt,
+      };
+    }
+  }
+
+  const hostedClearedError = input.hostedLocalState.lastErrorCode === null
+    && input.hostedLocalState.lastErrorMessage === null
+    && hostedErrorAt === null;
+
+  if (hostedClearedError) {
+    if (!localErrorAt) {
+      return {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncErrorAt: null,
+      };
+    }
+
+    const hostedCompletedAtMs = input.hostedLocalState.lastSyncCompletedAt
+      ? parseIsoMs(input.hostedLocalState.lastSyncCompletedAt)
+      : null;
+    const localErrorAtMs = parseIsoMs(localErrorAt);
+
+    if (hostedCompletedAtMs !== null && localErrorAtMs !== null && hostedCompletedAtMs > localErrorAtMs) {
+      return {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncErrorAt: null,
+      };
+    }
+  }
+
+  return {
+    lastErrorCode: input.existing?.lastErrorCode ?? null,
+    lastErrorMessage: input.existing?.lastErrorMessage ?? null,
+    lastSyncErrorAt: localErrorAt,
+  };
+}
+
+function hasLocalPendingHostedConnectionChanges(input: {
   account: StoredDeviceSyncAccount | null;
   codec: ReturnType<typeof createSecretCodec>;
-  hostedConnection: HostedDeviceSyncRuntimeConnectionSnapshot["connection"];
+  hostedConnection: HostedDeviceSyncRuntimeConnectionStateSnapshot;
   tokenBundle: HostedDeviceSyncRuntimeTokenBundle | null;
 }): boolean {
   if (!input.account) {
@@ -591,19 +719,12 @@ function hasHostedTokenAdvanced(
 
 function hostedConnectionStateDiffers(
   account: StoredDeviceSyncAccount,
-  hostedConnection: HostedDeviceSyncRuntimeConnectionSnapshot["connection"],
+  hostedConnection: HostedDeviceSyncRuntimeConnectionStateSnapshot,
 ): boolean {
   return account.displayName !== (hostedConnection.displayName ?? null)
     || account.status !== hostedConnection.status
     || !equalStringArrays(account.scopes, hostedConnection.scopes)
-    || !equalJsonRecords(account.metadata, hostedConnection.metadata)
-    || account.nextReconcileAt !== (hostedConnection.nextReconcileAt ?? null)
-    || account.lastErrorCode !== (hostedConnection.lastErrorCode ?? null)
-    || account.lastErrorMessage !== (hostedConnection.lastErrorMessage ?? null)
-    || account.lastSyncCompletedAt !== (hostedConnection.lastSyncCompletedAt ?? null)
-    || account.lastSyncErrorAt !== (hostedConnection.lastSyncErrorAt ?? null)
-    || account.lastSyncStartedAt !== (hostedConnection.lastSyncStartedAt ?? null)
-    || account.lastWebhookAt !== (hostedConnection.lastWebhookAt ?? null);
+    || !equalJsonRecords(account.metadata, hostedConnection.metadata);
 }
 
 function hostedTokenBundleDiffers(input: {
@@ -648,7 +769,7 @@ function safeDecryptHostedAccountToken(
 
 function shouldPreserveLocalWhenObservedUpdatedAtMissing(input: {
   connectionDiffers: boolean;
-  hostedStatus: HostedDeviceSyncRuntimeConnectionSnapshot["connection"]["status"];
+  hostedStatus: HostedDeviceSyncRuntimeConnectionStateSnapshot["status"];
   tokenMarkerUnacknowledgedAndDiffers: boolean;
 }): boolean {
   if (input.hostedStatus === "disconnected") {
@@ -656,18 +777,6 @@ function shouldPreserveLocalWhenObservedUpdatedAtMissing(input: {
   }
 
   return input.connectionDiffers || input.tokenMarkerUnacknowledgedAndDiffers;
-}
-
-function mergeMonotonicTimestamp(
-  localValue: string | null,
-  hostedValue: string | null,
-  preserveLocalAheadState: boolean,
-): string | null {
-  if (!preserveLocalAheadState) {
-    return hostedValue;
-  }
-
-  return latestIsoTimestamp(localValue, hostedValue);
 }
 
 function latestIsoTimestamp(left: string | null, right: string | null): string | null {
@@ -718,6 +827,18 @@ function resolveHydratedHostedAccountUpdatedAt(input: {
   return input.existing?.updatedAt ?? input.hostedObservedUpdatedAt ?? input.connectedAt;
 }
 
+function resolveHydratedNextReconcileAt(input: {
+  existing: StoredDeviceSyncAccount | null;
+  hostedLocalState: HostedDeviceSyncRuntimeLocalStateSnapshot;
+  useHostedConnectionState: boolean;
+}): string | null {
+  if (input.useHostedConnectionState) {
+    return input.hostedLocalState.nextReconcileAt ?? null;
+  }
+
+  return input.existing?.nextReconcileAt ?? input.hostedLocalState.nextReconcileAt ?? null;
+}
+
 function parseIsoMs(value: string): number | null {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? null : parsed;
@@ -737,7 +858,10 @@ function assignMonotonicTimestampUpdate(
     return;
   }
 
-  update[key] = localValue;
+  update.localState = {
+    ...(update.localState ?? {}),
+    [key]: localValue,
+  } satisfies HostedDeviceSyncRuntimeLocalStateUpdate;
 }
 
 function hostedJobHintToDeviceSyncJobInput(

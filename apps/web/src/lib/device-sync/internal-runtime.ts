@@ -43,6 +43,9 @@ export async function buildHostedDeviceSyncRuntimeSnapshot(
       connection: normalizeHostedDeviceSyncRuntimeConnection(
         mapHostedInternalAccountRecord(record),
       ),
+      localState: normalizeHostedDeviceSyncRuntimeLocalState(
+        mapHostedInternalAccountRecord(record),
+      ),
       tokenBundle: record.secret
         ? (() => {
             const bundle = requireHostedConnectionBundleRecord(record, store.codec);
@@ -87,13 +90,10 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         } satisfies HostedDeviceSyncRuntimeApplyEntry;
       }
 
-      const requestedAccessTokenExpiresAt = update.tokenBundle
-        ? update.tokenBundle.accessTokenExpiresAt
-        : Object.prototype.hasOwnProperty.call(update, "accessTokenExpiresAt")
-          ? update.accessTokenExpiresAt ?? null
-          : undefined;
+      const requestedAccessTokenExpiresAt = update.tokenBundle?.accessTokenExpiresAt;
       const connectionMutationRequested = hasHostedDeviceSyncRuntimeConnectionMutation(update);
-      const tokenMutationRequested = update.tokenBundle !== undefined || requestedAccessTokenExpiresAt !== undefined;
+      const localStateMutationRequested = hasHostedDeviceSyncRuntimeLocalStateMutation(update);
+      const tokenMutationRequested = update.tokenBundle !== undefined;
       const connectionVersionMismatch = hasHostedDeviceSyncRuntimeConnectionVersionMismatch(
         existing.updatedAt,
         update.observedUpdatedAt,
@@ -108,10 +108,10 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       );
       const tokenBlockedByDisconnectedStatus = Boolean(
         update.tokenBundle
-        && (existing.status === "disconnected" || update.status === "disconnected"),
+        && (existing.status === "disconnected" || update.connection?.status === "disconnected"),
       );
 
-      if (connectionVersionMismatch) {
+      if (connectionVersionMismatch && !localStateMutationRequested) {
         return {
           connection: normalizeHostedDeviceSyncRuntimeConnection(
             mapHostedInternalAccountRecord(existing),
@@ -122,13 +122,13 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         } satisfies HostedDeviceSyncRuntimeApplyEntry;
       }
 
-      if (update.status === "disconnected") {
+      if (update.connection?.status === "disconnected" && !connectionVersionMismatch) {
         const disconnected = await store.markConnectionDisconnected({
           connectionId: update.connectionId,
           userId: request.userId,
           now: appliedAt,
-          errorCode: update.lastErrorCode ?? null,
-          errorMessage: update.lastErrorMessage ?? null,
+          errorCode: update.localState?.lastErrorCode ?? null,
+          errorMessage: update.localState?.lastErrorMessage ?? null,
           tx,
         });
 
@@ -141,8 +141,8 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
             payload: {
               occurredAt: appliedAt,
               reason: "hosted_runtime",
-              ...(update.lastErrorCode ? { lastErrorCode: update.lastErrorCode } : {}),
-              ...(update.lastErrorMessage ? { lastErrorMessage: update.lastErrorMessage } : {}),
+              ...(update.localState?.lastErrorCode ? { lastErrorCode: update.localState.lastErrorCode } : {}),
+              ...(update.localState?.lastErrorMessage ? { lastErrorMessage: update.localState.lastErrorMessage } : {}),
             },
             createdAt: appliedAt,
             tx,
@@ -158,70 +158,28 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       }
 
       const nextData: Record<string, unknown> = {
-        ...(update.status ? { status: update.status } : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "displayName")
-          ? { displayName: update.displayName ?? null }
+        ...(!connectionVersionMismatch && update.connection?.status
+          ? { status: update.connection.status }
           : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "scopes")
-          ? { scopes: update.scopes ?? [] }
+        ...(!connectionVersionMismatch && Object.prototype.hasOwnProperty.call(update.connection ?? {}, "displayName")
+          ? { displayName: update.connection?.displayName ?? null }
           : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "metadata")
-          ? { metadataJson: sanitizeStoredDeviceSyncMetadata(update.metadata ?? {}) }
+        ...(!connectionVersionMismatch && Object.prototype.hasOwnProperty.call(update.connection ?? {}, "scopes")
+          ? { scopes: update.connection?.scopes ?? [] }
           : {}),
-        ...(requestedAccessTokenExpiresAt !== undefined && !tokenVersionMismatch && !tokenBlockedByDisconnectedStatus
+        ...(!connectionVersionMismatch && Object.prototype.hasOwnProperty.call(update.connection ?? {}, "metadata")
+          ? {
+              metadataJson: sanitizeStoredDeviceSyncMetadata(update.connection?.metadata ?? {}),
+            }
+          : {}),
+        ...(requestedAccessTokenExpiresAt !== undefined && !connectionVersionMismatch && !tokenVersionMismatch && !tokenBlockedByDisconnectedStatus
           ? {
               accessTokenExpiresAt: requestedAccessTokenExpiresAt
                 ? new Date(requestedAccessTokenExpiresAt)
                 : null,
             }
           : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "nextReconcileAt")
-          ? {
-              nextReconcileAt: update.nextReconcileAt
-                ? new Date(update.nextReconcileAt)
-                : null,
-            }
-          : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "lastWebhookAt")
-          ? {
-              lastWebhookAt: update.lastWebhookAt ? new Date(update.lastWebhookAt) : null,
-            }
-          : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "lastSyncStartedAt")
-          ? {
-              lastSyncStartedAt: update.lastSyncStartedAt
-                ? new Date(update.lastSyncStartedAt)
-                : null,
-            }
-          : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "lastSyncCompletedAt")
-          ? {
-              lastSyncCompletedAt: update.lastSyncCompletedAt
-                ? new Date(update.lastSyncCompletedAt)
-                : null,
-            }
-          : {}),
-        ...(Object.prototype.hasOwnProperty.call(update, "lastSyncErrorAt")
-          ? {
-              lastSyncErrorAt: update.lastSyncErrorAt
-                ? new Date(update.lastSyncErrorAt)
-                : null,
-            }
-          : {}),
-        ...(update.clearError
-          ? {
-              lastSyncErrorAt: null,
-              lastErrorCode: null,
-              lastErrorMessage: null,
-            }
-          : {
-              ...(Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
-                ? { lastErrorCode: update.lastErrorCode ?? null }
-                : {}),
-              ...(Object.prototype.hasOwnProperty.call(update, "lastErrorMessage")
-                ? { lastErrorMessage: update.lastErrorMessage ?? null }
-                : {}),
-            }),
+        ...buildHostedDeviceSyncRuntimeLocalStateData(existing, update.localState ?? null),
       };
 
       const updatedRecord = Object.keys(nextData).length === 0
@@ -282,7 +240,11 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
         }
       }
 
-      if (update.status === "reauthorization_required" && existing.status !== "reauthorization_required") {
+      if (
+        update.connection?.status === "reauthorization_required"
+        && !connectionVersionMismatch
+        && existing.status !== "reauthorization_required"
+      ) {
         await store.createSignal({
           userId: request.userId,
           connectionId: update.connectionId,
@@ -291,8 +253,8 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
           payload: {
             occurredAt: appliedAt,
             reason: "hosted_runtime",
-            ...(update.lastErrorCode ? { lastErrorCode: update.lastErrorCode } : {}),
-            ...(update.lastErrorMessage ? { lastErrorMessage: update.lastErrorMessage } : {}),
+            ...(update.localState?.lastErrorCode ? { lastErrorCode: update.localState.lastErrorCode } : {}),
+            ...(update.localState?.lastErrorMessage ? { lastErrorMessage: update.localState.lastErrorMessage } : {}),
           },
           createdAt: appliedAt,
           tx,
@@ -332,18 +294,31 @@ function normalizeNullableIsoTimestamp(
 function hasHostedDeviceSyncRuntimeConnectionMutation(
   update: HostedDeviceSyncRuntimeConnectionUpdate,
 ): boolean {
-  return update.status !== undefined
-    || Object.prototype.hasOwnProperty.call(update, "displayName")
-    || Object.prototype.hasOwnProperty.call(update, "scopes")
-    || Object.prototype.hasOwnProperty.call(update, "metadata")
-    || Object.prototype.hasOwnProperty.call(update, "nextReconcileAt")
-    || Object.prototype.hasOwnProperty.call(update, "lastWebhookAt")
-    || Object.prototype.hasOwnProperty.call(update, "lastSyncStartedAt")
-    || Object.prototype.hasOwnProperty.call(update, "lastSyncCompletedAt")
-    || Object.prototype.hasOwnProperty.call(update, "lastSyncErrorAt")
-    || Object.prototype.hasOwnProperty.call(update, "lastErrorCode")
-    || Object.prototype.hasOwnProperty.call(update, "lastErrorMessage")
-    || update.clearError === true;
+  if (!update.connection) {
+    return false;
+  }
+
+  return update.connection.status !== undefined
+    || Object.prototype.hasOwnProperty.call(update.connection, "displayName")
+    || Object.prototype.hasOwnProperty.call(update.connection, "scopes")
+    || Object.prototype.hasOwnProperty.call(update.connection, "metadata");
+}
+
+function hasHostedDeviceSyncRuntimeLocalStateMutation(
+  update: HostedDeviceSyncRuntimeConnectionUpdate,
+): boolean {
+  if (!update.localState) {
+    return false;
+  }
+
+  return Object.prototype.hasOwnProperty.call(update.localState, "lastWebhookAt")
+    || Object.prototype.hasOwnProperty.call(update.localState, "lastSyncStartedAt")
+    || Object.prototype.hasOwnProperty.call(update.localState, "lastSyncCompletedAt")
+    || Object.prototype.hasOwnProperty.call(update.localState, "lastSyncErrorAt")
+    || Object.prototype.hasOwnProperty.call(update.localState, "lastErrorCode")
+    || Object.prototype.hasOwnProperty.call(update.localState, "lastErrorMessage")
+    || Object.prototype.hasOwnProperty.call(update.localState, "nextReconcileAt")
+    || update.localState.clearError === true;
 }
 
 function hasHostedDeviceSyncRuntimeConnectionVersionMismatch(
@@ -362,7 +337,114 @@ function normalizeHostedDeviceSyncRuntimeConnection(
   connection: PublicDeviceSyncAccount,
 ): HostedDeviceSyncRuntimeConnectionSnapshot["connection"] {
   return {
-    ...connection,
     accessTokenExpiresAt: connection.accessTokenExpiresAt ?? null,
+    connectedAt: connection.connectedAt,
+    createdAt: connection.createdAt,
+    displayName: connection.displayName,
+    externalAccountId: connection.externalAccountId,
+    id: connection.id,
+    metadata: connection.metadata,
+    provider: connection.provider,
+    scopes: connection.scopes,
+    status: connection.status,
+    updatedAt: connection.updatedAt,
   };
+}
+
+function normalizeHostedDeviceSyncRuntimeLocalState(
+  connection: PublicDeviceSyncAccount,
+): HostedDeviceSyncRuntimeConnectionSnapshot["localState"] {
+  return {
+    lastErrorCode: connection.lastErrorCode,
+    lastErrorMessage: connection.lastErrorMessage,
+    lastSyncCompletedAt: connection.lastSyncCompletedAt,
+    lastSyncErrorAt: connection.lastSyncErrorAt,
+    lastSyncStartedAt: connection.lastSyncStartedAt,
+    lastWebhookAt: connection.lastWebhookAt,
+    nextReconcileAt: connection.nextReconcileAt,
+  };
+}
+
+function buildHostedDeviceSyncRuntimeLocalStateData(
+  existing: {
+    lastWebhookAt?: Date | string | null;
+    lastSyncStartedAt?: Date | string | null;
+    lastSyncCompletedAt?: Date | string | null;
+    lastSyncErrorAt?: Date | string | null;
+  },
+  patch: HostedDeviceSyncRuntimeConnectionUpdate["localState"] | null,
+): Record<string, unknown> {
+  if (!patch) {
+    return {};
+  }
+
+  const data: Record<string, unknown> = {};
+
+  assignMonotonicRuntimeLocalStateDate(
+    data,
+    "lastWebhookAt",
+    normalizeNullableIsoTimestamp(existing.lastWebhookAt),
+    patch.lastWebhookAt,
+  );
+  assignMonotonicRuntimeLocalStateDate(
+    data,
+    "lastSyncStartedAt",
+    normalizeNullableIsoTimestamp(existing.lastSyncStartedAt),
+    patch.lastSyncStartedAt,
+  );
+  assignMonotonicRuntimeLocalStateDate(
+    data,
+    "lastSyncCompletedAt",
+    normalizeNullableIsoTimestamp(existing.lastSyncCompletedAt),
+    patch.lastSyncCompletedAt,
+  );
+
+  if (patch.clearError) {
+    data.lastSyncErrorAt = null;
+    data.lastErrorCode = null;
+    data.lastErrorMessage = null;
+  } else {
+    assignMonotonicRuntimeLocalStateDate(
+      data,
+      "lastSyncErrorAt",
+      normalizeNullableIsoTimestamp(existing.lastSyncErrorAt),
+      patch.lastSyncErrorAt,
+    );
+
+    if (Object.prototype.hasOwnProperty.call(patch, "lastErrorCode")) {
+      data.lastErrorCode = patch.lastErrorCode ?? null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(patch, "lastErrorMessage")) {
+      data.lastErrorMessage = patch.lastErrorMessage ?? null;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, "nextReconcileAt")) {
+    data.nextReconcileAt = patch.nextReconcileAt ? new Date(patch.nextReconcileAt) : null;
+  }
+
+  return data;
+}
+
+function assignMonotonicRuntimeLocalStateDate(
+  data: Record<string, unknown>,
+  key: "lastWebhookAt" | "lastSyncStartedAt" | "lastSyncCompletedAt" | "lastSyncErrorAt",
+  existingValue: string | null,
+  nextValue: string | null | undefined,
+): void {
+  if (nextValue === undefined) {
+    return;
+  }
+
+  if (nextValue === null) {
+    data[key] = null;
+    return;
+  }
+
+  if (existingValue && Date.parse(nextValue) <= Date.parse(existingValue)) {
+    return;
+  }
+
+  data[key] = new Date(nextValue);
 }

@@ -5,7 +5,9 @@ import type {
   HostedExecutionBundleRef,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeApplyResponse,
+  HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot,
+  HostedExecutionDeviceSyncRuntimeLocalStateSnapshot,
   HostedExecutionDeviceSyncRuntimeTokenBundle,
   HostedExecutionDeviceSyncRuntimeSnapshotResponse,
   HostedExecutionDeviceSyncWakeEvent,
@@ -343,6 +345,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSnapshot(
       record.connection,
       `Hosted device-sync runtime snapshot response connections[${index}].connection`,
     ),
+    localState: parseHostedExecutionDeviceSyncRuntimeLocalState(
+      record.localState,
+      `Hosted device-sync runtime snapshot response connections[${index}].localState`,
+    ),
     tokenBundle: parseHostedExecutionDeviceSyncRuntimeTokenBundle(
       record.tokenBundle,
       `Hosted device-sync runtime snapshot response connections[${index}].tokenBundle`,
@@ -401,7 +407,7 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
 function parseHostedExecutionDeviceSyncRuntimeConnection(
   value: unknown,
   label: string,
-): HostedExecutionDeviceSyncRuntimeConnectionSnapshot["connection"] {
+): HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
   const record = requireObject(value, label);
   const status = requireString(record.status, `${label}.status`);
 
@@ -416,20 +422,30 @@ function parseHostedExecutionDeviceSyncRuntimeConnection(
     displayName: readNullableString(record.displayName, `${label}.displayName`),
     externalAccountId: requireString(record.externalAccountId, `${label}.externalAccountId`),
     id: requireString(record.id, `${label}.id`),
-    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
-    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
-    lastSyncCompletedAt: readNullableString(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
-    lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
-    lastSyncStartedAt: readNullableString(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
-    lastWebhookAt: readNullableString(record.lastWebhookAt, `${label}.lastWebhookAt`),
     metadata: requireObject(record.metadata, `${label}.metadata`),
-    nextReconcileAt: readNullableString(record.nextReconcileAt, `${label}.nextReconcileAt`),
     provider: requireString(record.provider, `${label}.provider`),
     scopes: requireStringArray(record.scopes, `${label}.scopes`),
     status,
     ...(record.updatedAt === undefined
       ? {}
       : { updatedAt: readNullableString(record.updatedAt, `${label}.updatedAt`) ?? undefined }),
+  };
+}
+
+function parseHostedExecutionDeviceSyncRuntimeLocalState(
+  value: unknown,
+  label: string,
+): HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
+  const record = requireObject(value, label);
+
+  return {
+    lastErrorCode: readNullableString(record.lastErrorCode, `${label}.lastErrorCode`),
+    lastErrorMessage: readNullableString(record.lastErrorMessage, `${label}.lastErrorMessage`),
+    lastSyncCompletedAt: readNullableString(record.lastSyncCompletedAt, `${label}.lastSyncCompletedAt`),
+    lastSyncErrorAt: readNullableString(record.lastSyncErrorAt, `${label}.lastSyncErrorAt`),
+    lastSyncStartedAt: readNullableString(record.lastSyncStartedAt, `${label}.lastSyncStartedAt`),
+    lastWebhookAt: readNullableString(record.lastWebhookAt, `${label}.lastWebhookAt`),
+    nextReconcileAt: readNullableString(record.nextReconcileAt, `${label}.nextReconcileAt`),
   };
 }
 

@@ -62,55 +62,13 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
   const record = requireObject(value, `updates[${index}]`);
 
   return {
-    ...(record.accessTokenExpiresAt === undefined
-      ? {}
-      : {
-          accessTokenExpiresAt: readNullableIsoTimestamp(
-            record.accessTokenExpiresAt,
-            `updates[${index}].accessTokenExpiresAt`,
-          ),
-        }),
-    ...(record.clearError === undefined
-      ? {}
-      : { clearError: requireBoolean(record.clearError, `updates[${index}].clearError`) }),
     connectionId: requireString(record.connectionId, `updates[${index}].connectionId`),
-    ...(record.displayName === undefined
+    ...(record.connection === undefined
       ? {}
-      : { displayName: readNullableString(record.displayName, `updates[${index}].displayName`) }),
-    ...(record.lastErrorCode === undefined
+      : { connection: parseHostedDeviceSyncRuntimeConnectionStateUpdate(record.connection, index) }),
+    ...(record.localState === undefined
       ? {}
-      : { lastErrorCode: readNullableString(record.lastErrorCode, `updates[${index}].lastErrorCode`) }),
-    ...(record.lastErrorMessage === undefined
-      ? {}
-      : { lastErrorMessage: readNullableString(record.lastErrorMessage, `updates[${index}].lastErrorMessage`) }),
-    ...(record.lastSyncCompletedAt === undefined
-      ? {}
-      : {
-          lastSyncCompletedAt: readNullableIsoTimestamp(
-            record.lastSyncCompletedAt,
-            `updates[${index}].lastSyncCompletedAt`,
-          ),
-        }),
-    ...(record.lastSyncErrorAt === undefined
-      ? {}
-      : { lastSyncErrorAt: readNullableIsoTimestamp(record.lastSyncErrorAt, `updates[${index}].lastSyncErrorAt`) }),
-    ...(record.lastSyncStartedAt === undefined
-      ? {}
-      : {
-          lastSyncStartedAt: readNullableIsoTimestamp(
-            record.lastSyncStartedAt,
-            `updates[${index}].lastSyncStartedAt`,
-          ),
-        }),
-    ...(record.lastWebhookAt === undefined
-      ? {}
-      : { lastWebhookAt: readNullableIsoTimestamp(record.lastWebhookAt, `updates[${index}].lastWebhookAt`) }),
-    ...(record.metadata === undefined
-      ? {}
-      : { metadata: sanitizeStoredDeviceSyncMetadata(requireObject(record.metadata, `updates[${index}].metadata`)) }),
-    ...(record.nextReconcileAt === undefined
-      ? {}
-      : { nextReconcileAt: readNullableIsoTimestamp(record.nextReconcileAt, `updates[${index}].nextReconcileAt`) }),
+      : { localState: parseHostedDeviceSyncRuntimeLocalStateUpdate(record.localState, index) }),
     ...(record.observedUpdatedAt === undefined
       ? {}
       : {
@@ -127,18 +85,107 @@ function parseHostedDeviceSyncRuntimeConnectionUpdate(
             `updates[${index}].observedTokenVersion`,
           ),
         }),
-    ...(record.scopes === undefined
-      ? {}
-      : { scopes: requireStringArray(record.scopes, `updates[${index}].scopes`) }),
-    ...(record.status === undefined
-      ? {}
-      : { status: parseDeviceSyncStatus(record.status, `updates[${index}].status`) }),
     ...(record.tokenBundle === undefined
       ? {}
       : {
           tokenBundle: parseHostedDeviceSyncRuntimeTokenBundle(
             record.tokenBundle,
             `updates[${index}].tokenBundle`,
+          ),
+        }),
+  };
+}
+
+function parseHostedDeviceSyncRuntimeConnectionStateUpdate(
+  value: unknown,
+  index: number,
+): NonNullable<HostedDeviceSyncRuntimeConnectionUpdate["connection"]> {
+  const record = requireObject(value, `updates[${index}].connection`);
+
+  return {
+    ...(record.displayName === undefined
+      ? {}
+      : { displayName: readNullableString(record.displayName, `updates[${index}].connection.displayName`) }),
+    ...(record.metadata === undefined
+      ? {}
+      : {
+          metadata: sanitizeStoredDeviceSyncMetadata(
+            requireObject(record.metadata, `updates[${index}].connection.metadata`),
+          ),
+        }),
+    ...(record.scopes === undefined
+      ? {}
+      : { scopes: requireStringArray(record.scopes, `updates[${index}].connection.scopes`) }),
+    ...(record.status === undefined
+      ? {}
+      : { status: parseDeviceSyncStatus(record.status, `updates[${index}].connection.status`) }),
+  };
+}
+
+function parseHostedDeviceSyncRuntimeLocalStateUpdate(
+  value: unknown,
+  index: number,
+): NonNullable<HostedDeviceSyncRuntimeConnectionUpdate["localState"]> {
+  const record = requireObject(value, `updates[${index}].localState`);
+
+  return {
+    ...(record.clearError === undefined
+      ? {}
+      : { clearError: requireBoolean(record.clearError, `updates[${index}].localState.clearError`) }),
+    ...(record.lastErrorCode === undefined
+      ? {}
+      : {
+          lastErrorCode: readNullableString(
+            record.lastErrorCode,
+            `updates[${index}].localState.lastErrorCode`,
+          ),
+        }),
+    ...(record.lastErrorMessage === undefined
+      ? {}
+      : {
+          lastErrorMessage: readNullableString(
+            record.lastErrorMessage,
+            `updates[${index}].localState.lastErrorMessage`,
+          ),
+        }),
+    ...(record.lastSyncCompletedAt === undefined
+      ? {}
+      : {
+          lastSyncCompletedAt: readNullableIsoTimestamp(
+            record.lastSyncCompletedAt,
+            `updates[${index}].localState.lastSyncCompletedAt`,
+          ),
+        }),
+    ...(record.lastSyncErrorAt === undefined
+      ? {}
+      : {
+          lastSyncErrorAt: readNullableIsoTimestamp(
+            record.lastSyncErrorAt,
+            `updates[${index}].localState.lastSyncErrorAt`,
+          ),
+        }),
+    ...(record.lastSyncStartedAt === undefined
+      ? {}
+      : {
+          lastSyncStartedAt: readNullableIsoTimestamp(
+            record.lastSyncStartedAt,
+            `updates[${index}].localState.lastSyncStartedAt`,
+          ),
+        }),
+    ...(record.lastWebhookAt === undefined
+      ? {}
+      : {
+          lastWebhookAt: readNullableIsoTimestamp(
+            record.lastWebhookAt,
+            `updates[${index}].localState.lastWebhookAt`,
+          ),
+        }),
+    ...(record.nextReconcileAt === undefined
+      ? {}
+      : {
+          nextReconcileAt: readNullableIsoTimestamp(
+            record.nextReconcileAt,
+            `updates[${index}].localState.nextReconcileAt`,
           ),
         }),
   };

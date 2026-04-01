@@ -44,23 +44,27 @@ interface AccountPatchInput {
 }
 
 interface HostedAccountHydrationInput {
-  connectedAt: string;
-  displayName: string | null;
-  externalAccountId: string;
+  connection: {
+    connectedAt: string;
+    displayName: string | null;
+    externalAccountId: string;
+    metadata: Record<string, unknown>;
+    provider: string;
+    scopes: string[];
+    status: DeviceSyncAccountStatus;
+    updatedAt: string;
+  };
   hostedObservedTokenVersion: number | null;
   hostedObservedUpdatedAt: string | null;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  lastSyncCompletedAt: string | null;
-  lastSyncErrorAt: string | null;
-  lastSyncStartedAt: string | null;
-  lastWebhookAt: string | null;
-  metadata: Record<string, unknown>;
-  nextReconcileAt: string | null;
-  provider: string;
-  scopes: string[];
-  status: DeviceSyncAccountStatus;
-  updatedAt: string;
+  localState: {
+    lastErrorCode: string | null;
+    lastErrorMessage: string | null;
+    lastSyncCompletedAt: string | null;
+    lastSyncErrorAt: string | null;
+    lastSyncStartedAt: string | null;
+    lastWebhookAt: string | null;
+    nextReconcileAt: string | null;
+  };
   tokens?: ProviderAuthTokens & {
     accessTokenEncrypted: string;
     refreshTokenEncrypted?: string | null;
@@ -634,13 +638,16 @@ export class SqliteDeviceSyncStore {
 
   hydrateHostedAccount(input: HostedAccountHydrationInput): StoredDeviceSyncAccount | null {
     return withImmediateTransaction(this.database, () => {
-      const existing = this.getAccountByExternalAccount(input.provider, input.externalAccountId);
+      const existing = this.getAccountByExternalAccount(
+        input.connection.provider,
+        input.connection.externalAccountId,
+      );
 
       if (!existing && input.tokens === undefined) {
         return null;
       }
 
-      const shouldClearTokens = input.status === "disconnected" && input.tokens === undefined;
+      const shouldClearTokens = input.connection.status === "disconnected" && input.tokens === undefined;
       const { accessTokenEncrypted, refreshTokenEncrypted, accessTokenExpiresAt } = resolveHydratedHostedAccountTokens({
         existing,
         inputTokens: input.tokens,
@@ -648,12 +655,12 @@ export class SqliteDeviceSyncStore {
       });
       const hostedObservedUpdatedAt = input.hostedObservedUpdatedAt ?? existing?.hostedObservedUpdatedAt ?? null;
       const hostedObservedTokenVersion = input.hostedObservedTokenVersion ?? existing?.hostedObservedTokenVersion ?? null;
-      const metadata = sanitizeStoredDeviceSyncMetadata(input.metadata);
+      const metadata = sanitizeStoredDeviceSyncMetadata(input.connection.metadata);
       const disconnectGeneration = existing
-        ? input.status === "disconnected" && existing.status !== "disconnected"
+        ? input.connection.status === "disconnected" && existing.status !== "disconnected"
           ? existing.disconnectGeneration + 1
           : existing.disconnectGeneration
-        : input.status === "disconnected"
+        : input.connection.status === "disconnected"
           ? 1
           : 0;
 
@@ -681,9 +688,9 @@ export class SqliteDeviceSyncStore {
               updated_at = ?
           where id = ?
         `).run(
-          input.displayName,
-          input.status,
-          stringifyJson(input.scopes),
+          input.connection.displayName,
+          input.connection.status,
+          stringifyJson(input.connection.scopes),
           disconnectGeneration,
           accessTokenEncrypted,
           refreshTokenEncrypted,
@@ -691,15 +698,15 @@ export class SqliteDeviceSyncStore {
           hostedObservedUpdatedAt,
           hostedObservedTokenVersion,
           stringifyJson(metadata),
-          input.connectedAt,
-          input.lastWebhookAt,
-          input.lastSyncStartedAt,
-          input.lastSyncCompletedAt,
-          input.lastSyncErrorAt,
-          input.lastErrorCode,
-          input.lastErrorMessage,
-          input.nextReconcileAt,
-          input.updatedAt,
+          input.connection.connectedAt,
+          input.localState.lastWebhookAt,
+          input.localState.lastSyncStartedAt,
+          input.localState.lastSyncCompletedAt,
+          input.localState.lastSyncErrorAt,
+          input.localState.lastErrorCode,
+          input.localState.lastErrorMessage,
+          input.localState.nextReconcileAt,
+          input.connection.updatedAt,
           existing.id,
         );
 
@@ -735,11 +742,11 @@ export class SqliteDeviceSyncStore {
         ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         id,
-        input.provider,
-        input.externalAccountId,
-        input.displayName,
-        input.status,
-        stringifyJson(input.scopes),
+        input.connection.provider,
+        input.connection.externalAccountId,
+        input.connection.displayName,
+        input.connection.status,
+        stringifyJson(input.connection.scopes),
         disconnectGeneration,
         accessTokenEncrypted,
         refreshTokenEncrypted,
@@ -747,16 +754,16 @@ export class SqliteDeviceSyncStore {
         hostedObservedUpdatedAt,
         hostedObservedTokenVersion,
         stringifyJson(metadata),
-        input.connectedAt,
-        input.lastWebhookAt,
-        input.lastSyncStartedAt,
-        input.lastSyncCompletedAt,
-        input.lastSyncErrorAt,
-        input.lastErrorCode,
-        input.lastErrorMessage,
-        input.nextReconcileAt,
-        input.updatedAt,
-        input.updatedAt,
+        input.connection.connectedAt,
+        input.localState.lastWebhookAt,
+        input.localState.lastSyncStartedAt,
+        input.localState.lastSyncCompletedAt,
+        input.localState.lastSyncErrorAt,
+        input.localState.lastErrorCode,
+        input.localState.lastErrorMessage,
+        input.localState.nextReconcileAt,
+        input.connection.updatedAt,
+        input.connection.updatedAt,
       );
 
       return this.getAccountById(id)!;
