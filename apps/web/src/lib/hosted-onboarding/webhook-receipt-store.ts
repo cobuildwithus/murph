@@ -3,9 +3,9 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { hostedOnboardingError } from "./errors";
 import {
   readHostedWebhookReceiptState,
-  requireHostedWebhookDispatchEffectDispatch,
   toHostedWebhookReceiptJsonInput,
 } from "./webhook-receipt-codec";
+import { buildHostedWebhookDispatchFromPayload } from "./webhook-receipt-dispatch";
 import {
   claimHostedWebhookReceipt,
   completeHostedWebhookReceipt,
@@ -168,6 +168,12 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
   sentAt: string;
   source: string;
 }): Promise<HostedWebhookReceiptClaim> {
+  const dispatch = buildHostedWebhookDispatchFromPayload(input.dispatchEffect.payload);
+
+  if (!dispatch) {
+    throw buildHostedWebhookDispatchPayloadError(input.dispatchEffect.effectId);
+  }
+
   return compareAndSwapHostedWebhookReceiptClaim({
     claimedReceipt: input.claimedReceipt,
     decide: (currentClaim) => {
@@ -193,7 +199,7 @@ export async function markHostedWebhookDispatchEffectQueued(input: {
     source: input.source,
     updateReceipt: ({ currentClaim, nextClaim }) =>
       input.enqueueDispatchEffect({
-        dispatch: requireHostedWebhookDispatchEffectDispatch(input.dispatchEffect),
+        dispatch,
         eventId: input.eventId,
         nextPayloadJson: toHostedWebhookReceiptJsonInput(nextClaim.payloadJson),
         nextStatus: nextClaim.state.status,
@@ -501,6 +507,14 @@ function buildHostedWebhookReceiptUpdateError(): Error {
     message: "Hosted webhook receipt could not be updated safely.",
     httpStatus: 503,
     retryable: true,
+  });
+}
+
+function buildHostedWebhookDispatchPayloadError(effectId: string): Error {
+  return hostedOnboardingError({
+    code: "WEBHOOK_DISPATCH_PAYLOAD_INVALID",
+    message: `Hosted webhook dispatch side effect ${effectId} does not retain enough data to rebuild its dispatch.`,
+    httpStatus: 500,
   });
 }
 

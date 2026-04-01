@@ -13,14 +13,16 @@ import {
 import { normalizePhoneNumber } from "./phone";
 import type { HostedWebhookDispatchSideEffect } from "./webhook-receipt-types";
 
+const EMPTY_DISPATCH_REF_FALLBACK = {
+  eventId: "",
+  eventKind: "",
+  occurredAt: null,
+  userId: "",
+} as const;
+
 export function readHostedWebhookReceiptDispatchByEventId(
   payloadJson: Prisma.InputJsonValue | Prisma.JsonValue | null,
   eventId: string,
-  fallback?: {
-    eventKind: string;
-    occurredAt: string;
-    userId: string;
-  },
 ): HostedExecutionDispatchRequest | null {
   const receiptState = readHostedWebhookReceiptState(payloadJson);
 
@@ -29,78 +31,73 @@ export function readHostedWebhookReceiptDispatchByEventId(
       continue;
     }
 
-    if ("dispatch" in sideEffect.payload) {
-      if (sideEffect.payload.dispatch.eventId === eventId) {
-        return sideEffect.payload.dispatch;
-      }
-      continue;
+    const dispatch = buildHostedWebhookDispatchFromPayload(sideEffect.payload);
+    if (dispatch?.eventId === eventId) {
+      return dispatch;
     }
+  }
 
-    if (!fallback) {
-      continue;
-    }
+  return null;
+}
 
-    const dispatchRef = readHostedExecutionDispatchRef(
-      sideEffect.payload,
-      {
-        eventId,
-        eventKind: fallback.eventKind,
-        occurredAt: fallback.occurredAt,
-        userId: fallback.userId,
+export function buildHostedWebhookDispatchFromPayload(
+  payload: HostedWebhookDispatchSideEffect["payload"],
+): HostedExecutionDispatchRequest | null {
+  const dispatchRef = readHostedExecutionDispatchRef(
+    payload as unknown as Prisma.InputJsonValue | Prisma.JsonValue,
+    EMPTY_DISPATCH_REF_FALLBACK,
+  );
+
+  if (!dispatchRef) {
+    return null;
+  }
+
+  if (dispatchRef.eventKind === "member.activated") {
+    return {
+      event: {
+        kind: "member.activated",
+        userId: dispatchRef.userId,
       },
+      eventId: dispatchRef.eventId,
+      occurredAt: dispatchRef.occurredAt,
+    };
+  }
+
+  if (dispatchRef.eventKind === "linq.message.received") {
+    const linqEvent = toHostedWebhookReceiptRecord(
+      payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
+    );
+    const normalizedPhoneNumber = readHostedWebhookReceiptNormalizedPhoneNumber(linqEvent);
+
+    if (!linqEvent || !normalizedPhoneNumber) {
+      return null;
+    }
+
+    return buildHostedExecutionLinqMessageReceivedDispatch({
+      eventId: dispatchRef.eventId,
+      linqEvent,
+      normalizedPhoneNumber,
+      occurredAt: dispatchRef.occurredAt,
+      userId: dispatchRef.userId,
+    });
+  }
+
+  if (dispatchRef.eventKind === "telegram.message.received") {
+    const telegramUpdate = toHostedWebhookReceiptRecord(
+      payload.telegramUpdate as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
     );
 
-    if (!dispatchRef || dispatchRef.eventId !== eventId) {
-      continue;
+    if (!telegramUpdate) {
+      return null;
     }
 
-    if (dispatchRef.eventKind === "member.activated") {
-      return {
-        event: {
-          kind: "member.activated",
-          userId: dispatchRef.userId,
-        },
-        eventId: dispatchRef.eventId,
-        occurredAt: dispatchRef.occurredAt,
-      };
-    }
-
-    if (dispatchRef.eventKind === "linq.message.received") {
-      const linqEvent = toHostedWebhookReceiptRecord(
-        sideEffect.payload.linqEvent as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-      );
-      const normalizedPhoneNumber = readHostedWebhookReceiptNormalizedPhoneNumber(linqEvent);
-
-      if (!linqEvent || !normalizedPhoneNumber) {
-        return null;
-      }
-
-      return buildHostedExecutionLinqMessageReceivedDispatch({
-        eventId: dispatchRef.eventId,
-        linqEvent,
-        normalizedPhoneNumber,
-        occurredAt: dispatchRef.occurredAt,
-        userId: dispatchRef.userId,
-      });
-    }
-
-    if (dispatchRef.eventKind === "telegram.message.received") {
-      const telegramUpdate = toHostedWebhookReceiptRecord(
-        sideEffect.payload.telegramUpdate as Prisma.InputJsonValue | Prisma.JsonValue | null | undefined,
-      );
-
-      if (!telegramUpdate) {
-        return null;
-      }
-
-      return buildHostedExecutionTelegramMessageReceivedDispatch({
-        botUserId: readHostedWebhookReceiptBotUserId(sideEffect.payload),
-        eventId: dispatchRef.eventId,
-        occurredAt: dispatchRef.occurredAt,
-        telegramUpdate,
-        userId: dispatchRef.userId,
-      });
-    }
+    return buildHostedExecutionTelegramMessageReceivedDispatch({
+      botUserId: readHostedWebhookReceiptBotUserId(payload),
+      eventId: dispatchRef.eventId,
+      occurredAt: dispatchRef.occurredAt,
+      telegramUpdate,
+      userId: dispatchRef.userId,
+    });
   }
 
   return null;
@@ -109,10 +106,6 @@ export function readHostedWebhookReceiptDispatchByEventId(
 function readHostedWebhookReceiptBotUserId(
   payload: HostedWebhookDispatchSideEffect["payload"],
 ): string | null {
-  if ("dispatch" in payload) {
-    return null;
-  }
-
   if (typeof payload.botUserId === "string") {
     const normalized = payload.botUserId.trim();
     if (normalized.length > 0) {

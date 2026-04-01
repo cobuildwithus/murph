@@ -86,11 +86,6 @@ async function hydrateHostedExecutionDispatchFromWebhookReceipt(
   const dispatch = readHostedWebhookReceiptDispatchByEventId(
     receipt?.payloadJson ?? null,
     record.eventId,
-    {
-      eventKind: record.eventKind,
-      occurredAt,
-      userId: record.userId,
-    },
   );
 
   if (!dispatch) {

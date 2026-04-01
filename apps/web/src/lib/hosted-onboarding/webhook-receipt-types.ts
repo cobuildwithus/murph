@@ -2,7 +2,16 @@ import type {
   HostedExecutionDispatchRequest,
   HostedExecutionDispatchRef,
 } from "@murph/hosted-execution";
+import {
+  HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+  buildHostedExecutionDispatchRef,
+} from "@murph/hosted-execution";
 import { Prisma, type PrismaClient } from "@prisma/client";
+
+import {
+  minimizeHostedLinqMessageReceivedEvent,
+  minimizeHostedTelegramUpdate,
+} from "./webhook-event-snapshots";
 
 export type HostedWebhookEventPayload = Prisma.InputJsonObject;
 export type HostedWebhookResponsePayload = Prisma.InputJsonObject;
@@ -23,18 +32,14 @@ export type HostedWebhookSideEffectErrorState = {
 
 export type HostedWebhookSideEffectStatus = "pending" | "sent" | "sent_unconfirmed";
 
-export type HostedWebhookDispatchSideEffectPayload =
-  | {
-      dispatch: HostedExecutionDispatchRequest;
-    }
-    | {
-      schemaVersion: string;
-      botUserId?: string | null;
-      dispatchRef: HostedExecutionDispatchRef;
-      storage?: "reference";
-      linqEvent?: Record<string, unknown> | null;
-      telegramUpdate?: Record<string, unknown> | null;
-    };
+export type HostedWebhookDispatchSideEffectPayload = {
+  schemaVersion: string;
+  botUserId?: string | null;
+  dispatchRef: HostedExecutionDispatchRef;
+  storage: "reference";
+  linqEvent?: Record<string, unknown> | null;
+  telegramUpdate?: Record<string, unknown> | null;
+};
 
 export type HostedWebhookDispatchSideEffect = {
   attemptCount: number;
@@ -174,13 +179,41 @@ export function createHostedWebhookDispatchSideEffect(input: {
     kind: "hosted_execution_dispatch",
     lastAttemptAt: null,
     lastError: null,
-    payload: {
-      dispatch: input.dispatch,
-    },
+    payload: buildHostedWebhookDispatchSideEffectPayload(input.dispatch),
     result: null,
     sentAt: null,
     status: "pending",
   };
+}
+
+function buildHostedWebhookDispatchSideEffectPayload(
+  dispatch: HostedExecutionDispatchRequest,
+): HostedWebhookDispatchSideEffectPayload {
+  const basePayload = {
+    dispatchRef: buildHostedExecutionDispatchRef(dispatch),
+    schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+    storage: "reference",
+  } satisfies HostedWebhookDispatchSideEffectPayload;
+
+  switch (dispatch.event.kind) {
+    case "linq.message.received":
+      return {
+        ...basePayload,
+        linqEvent: minimizeHostedLinqMessageReceivedEvent(
+          dispatch.event.linqEvent as never,
+        ),
+      };
+    case "telegram.message.received":
+      return {
+        ...basePayload,
+        botUserId: dispatch.event.botUserId,
+        telegramUpdate: minimizeHostedTelegramUpdate(
+          dispatch.event.telegramUpdate as never,
+        ),
+      };
+    default:
+      return basePayload;
+  }
 }
 
 export function createHostedWebhookLinqMessageSideEffect(input: {
