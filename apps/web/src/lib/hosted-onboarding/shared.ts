@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { normalizeNullableString as normalizeDeviceSyncNullableString, sha256Hex } from "../device-sync/shared";
-import { maskPhoneNumber, normalizePhoneNumber } from "./phone";
+import { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
 const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
   /\bi\s*want\s*to\s*get\s*healthy\b/iu,
@@ -14,7 +14,7 @@ const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
   /\bstart\s+(healthy\s*bob|get\s*healthy)\b/iu,
 ] as const;
 
-export { maskPhoneNumber, normalizePhoneNumber } from "./phone";
+export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {
