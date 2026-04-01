@@ -6,7 +6,10 @@ import type { NextConfig } from "next";
 import {
   HOSTED_WEB_WORKSPACE_SOURCE_PACKAGE_NAMES,
 } from "../../config/workspace-source-resolution";
-import { resolveHostedWebDistDir } from "./next-artifacts";
+import {
+  isHostedWebDevFileSystemCacheEnabled,
+  resolveHostedWebDistDir,
+} from "./next-artifacts";
 
 interface StaticHeader {
   key: string;
@@ -160,6 +163,9 @@ export function buildHostedWebTurbopackConfig(): NextConfig["turbopack"] {
 export function buildHostedWebNextConfig(phase: string): NextConfig {
   return {
     distDir: resolveHostedWebDistDir(phase, process.env),
+    experimental: {
+      turbopackFileSystemCacheForDev: isHostedWebDevFileSystemCacheEnabled(process.env),
+    },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
     transpilePackages: [...WORKSPACE_SOURCE_PACKAGE_NAMES],
     turbopack: buildHostedWebTurbopackConfig(),

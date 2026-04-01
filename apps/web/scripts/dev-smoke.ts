@@ -1,14 +1,22 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { access, readdir, rm } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
-import { HOSTED_WEB_SMOKE_DIST_DIR, createHostedWebSmokeEnvironment } from "../next-artifacts";
+import {
+  HOSTED_WEB_SMOKE_DIST_DIR,
+  createHostedWebSmokeEnvironment,
+  isHostedWebDevFileSystemCacheEnabled,
+} from "../next-artifacts";
 
 const requestTimeoutMs = 30_000;
 const serverReadyTimeoutMs = 90_000;
 const serverReadyPollIntervalMs = 250;
+const childShutdownTimeoutMs = 5_000;
+
+type HostedWebSmokeChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 async function main(): Promise<void> {
   const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -16,9 +24,9 @@ async function main(): Promise<void> {
   const repoRoot = path.resolve(packageDir, "../..");
   const distDir = path.join(packageDir, HOSTED_WEB_SMOKE_DIST_DIR);
   const port = await reserveTcpPort();
-  await rm(distDir, { force: true, recursive: true });
+  await pruneTurbopackCache(distDir);
   const child = spawn(
-    "pnpm",
+    resolvePnpmCommand(),
     [
       "--dir",
       packageDir,
@@ -30,10 +38,16 @@ async function main(): Promise<void> {
     ],
     {
       cwd: repoRoot,
+      detached: process.platform !== "win32",
       env: createHostedWebSmokeEnvironment(process.env),
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+
+  const removeExitCleanup = installProcessExitCleanup(() => {
+    terminateChildProcess(child, "SIGKILL");
+  });
+  const removeSignalCleanup = installProcessTerminationCleanup(child);
 
   let combinedOutput = "";
   const captureChunk = (chunk: Buffer | string) => {
@@ -53,16 +67,15 @@ async function main(): Promise<void> {
     await assertRequestStatus(port, "GET", "/");
     await assertDevArtifacts(distDir);
   } finally {
-    child.kill("SIGINT");
-    await waitForChildExit(child).catch(() => {
-      child.kill("SIGKILL");
-    });
+    removeSignalCleanup();
+    removeExitCleanup();
+    await shutdownChildProcess(child);
   }
 }
 
 async function waitForHealthyServer(
   port: number,
-  child: ReturnType<typeof spawn>,
+  child: HostedWebSmokeChildProcess,
   readOutput: () => string,
 ): Promise<void> {
   const startedAt = Date.now();
@@ -109,7 +122,7 @@ async function assertDevArtifacts(distDir: string): Promise<void> {
     throw new Error(`apps/web dev smoke did not materialize route types under ${distDir}`);
   }
 
-  if (!hasTurbopackCache) {
+  if (isHostedWebDevFileSystemCacheEnabled(process.env) && !hasTurbopackCache) {
     throw new Error(`apps/web dev smoke did not materialize a Turbopack cache under ${distDir}`);
   }
 }
@@ -183,15 +196,132 @@ async function reserveTcpPort(): Promise<number> {
   });
 }
 
-async function waitForChildExit(child: ReturnType<typeof spawn>): Promise<void> {
+function installProcessTerminationCleanup(
+  child: HostedWebSmokeChildProcess,
+): () => void {
+  const listeners: Array<readonly [NodeJS.Signals, () => void]> = [];
+
+  for (const signal of resolveTerminationSignals()) {
+    const listener = () => {
+      void shutdownChildProcess(child).finally(() => {
+        removeListeners();
+        process.exitCode = signal === "SIGINT" ? 130 : 143;
+        process.exit();
+      });
+    };
+
+    listeners.push([signal, listener]);
+    process.once(signal, listener);
+  }
+
+  const removeListeners = () => {
+    for (const [signal, listener] of listeners) {
+      process.removeListener(signal, listener);
+    }
+  };
+
+  return removeListeners;
+}
+
+function installProcessExitCleanup(cleanup: () => void): () => void {
+  const handleExit = () => {
+    cleanup();
+  };
+
+  process.once("exit", handleExit);
+  return () => {
+    process.removeListener("exit", handleExit);
+  };
+}
+
+async function shutdownChildProcess(child: HostedWebSmokeChildProcess): Promise<void> {
+  if (child.exitCode !== null) {
+    return;
+  }
+
+  terminateChildProcess(child, "SIGINT");
+
+  try {
+    await waitForChildExit(child, childShutdownTimeoutMs);
+    return;
+  } catch {
+    terminateChildProcess(child, "SIGKILL");
+    await waitForChildExit(child, childShutdownTimeoutMs).catch(() => {
+      // Best-effort cleanup only.
+    });
+  }
+}
+
+function terminateChildProcess(
+  child: HostedWebSmokeChildProcess,
+  signal: NodeJS.Signals,
+): void {
+  const pid = typeof child.pid === "number" && child.pid > 0 ? child.pid : null;
+
+  if (pid !== null && process.platform !== "win32") {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      // Fall back to the direct child below.
+    }
+  }
+
+  try {
+    child.kill(signal);
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
+async function waitForChildExit(
+  child: HostedWebSmokeChildProcess,
+  timeoutMs: number,
+): Promise<void> {
   if (child.exitCode !== null) {
     return;
   }
 
   return new Promise((resolve, reject) => {
-    child.once("exit", () => resolve());
-    child.once("error", reject);
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting ${timeoutMs}ms for apps/web dev smoke child to exit.`));
+    }, timeoutMs);
+
+    const handleExit = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.removeListener("exit", handleExit);
+      child.removeListener("error", handleError);
+    };
+
+    child.once("exit", handleExit);
+    child.once("error", handleError);
   });
+}
+
+function resolveTerminationSignals(): NodeJS.Signals[] {
+  return process.platform === "win32"
+    ? ["SIGINT", "SIGTERM"]
+    : ["SIGINT", "SIGTERM", "SIGHUP"];
+}
+
+function resolvePnpmCommand(): string {
+  return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+}
+
+async function pruneTurbopackCache(distDir: string): Promise<void> {
+  await Promise.all([
+    rm(path.join(distDir, "cache", "turbopack"), { force: true, recursive: true }),
+    rm(path.join(distDir, "dev", "cache", "turbopack"), { force: true, recursive: true }),
+  ]);
 }
 
 async function sleep(durationMs: number): Promise<void> {

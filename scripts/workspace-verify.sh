@@ -68,6 +68,67 @@ readonly app_verify_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly app_verify_parallel="${MURPH_APP_VERIFY_PARALLEL:-$app_verify_parallel_default}"
 readonly test_lane_parallel_default="$([[ -n "${CI:-}" ]] && echo 0 || echo 1)"
 readonly test_lane_parallel="${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}"
+tracked_background_pids=("")
+
+register_background_pid() {
+  tracked_background_pids+=("$1")
+}
+
+unregister_background_pid() {
+  local target_pid="$1"
+  local remaining_pids=("")
+  local pid
+
+  for pid in "${tracked_background_pids[@]}"; do
+    if [[ -z "$pid" ]]; then
+      continue
+    fi
+    if [[ "$pid" != "$target_pid" ]]; then
+      remaining_pids+=("$pid")
+    fi
+  done
+
+  tracked_background_pids=("${remaining_pids[@]}")
+}
+
+terminate_background_pid() {
+  local pid="$1"
+
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+  fi
+}
+
+cleanup_background_jobs() {
+  local pid
+
+  for pid in "${tracked_background_pids[@]}"; do
+    if [[ -z "$pid" ]]; then
+      continue
+    fi
+    terminate_background_pid "$pid"
+  done
+}
+
+handle_termination_signal() {
+  local signal="$1"
+
+  cleanup_background_jobs
+
+  case "$signal" in
+    INT)
+      exit 130
+      ;;
+    *)
+      exit 143
+      ;;
+  esac
+}
+
+trap cleanup_background_jobs EXIT
+trap 'handle_termination_signal INT' INT
+trap 'handle_termination_signal TERM' TERM
+trap 'handle_termination_signal HUP' HUP
 
 readonly cli_verify_test_files=(
   "packages/cli/test/runtime.test.ts"
@@ -163,11 +224,19 @@ run_package_command_with_retry() {
 wait_for_background_jobs() {
   local failed=0
   local pid
+  local other_pid
 
   for pid in "$@"; do
     if ! wait "$pid"; then
       failed=1
+      for other_pid in "$@"; do
+        if [[ "$other_pid" != "$pid" ]]; then
+          terminate_background_pid "$other_pid"
+        fi
+      done
     fi
+
+    unregister_background_pid "$pid"
   done
 
   if [[ "$failed" -ne 0 ]]; then
@@ -182,9 +251,13 @@ run_test_packages_common() {
     local pids=()
 
     pnpm no-js &
-    pids+=("$!")
+    local no_js_pid="$!"
+    pids+=("$no_js_pid")
+    register_background_pid "$no_js_pid"
     pnpm --dir "packages/contracts" test &
-    pids+=("$!")
+    local contracts_test_pid="$!"
+    pids+=("$contracts_test_pid")
+    register_background_pid "$contracts_test_pid"
 
     if ! wait_for_background_jobs "${pids[@]}"; then
       return 1
@@ -202,11 +275,17 @@ run_test_apps() {
     local pids=()
 
     run_package_command_with_retry "packages/local-web" verify &
-    pids+=("$!")
+    local local_web_verify_pid="$!"
+    pids+=("$local_web_verify_pid")
+    register_background_pid "$local_web_verify_pid"
     run_package_command_with_retry "apps/web" verify &
-    pids+=("$!")
+    local hosted_web_verify_pid="$!"
+    pids+=("$hosted_web_verify_pid")
+    register_background_pid "$hosted_web_verify_pid"
     run_package_command_with_retry "apps/cloudflare" verify &
-    pids+=("$!")
+    local cloudflare_verify_pid="$!"
+    pids+=("$cloudflare_verify_pid")
+    register_background_pid "$cloudflare_verify_pid"
 
     if ! wait_for_background_jobs "${pids[@]}"; then
       return 1
@@ -253,10 +332,13 @@ run_test() {
 
     (prepare_repo_vitest_runtime_artifacts && run_repo_vitest --no-coverage) &
     test_packages_pid="$!"
+    register_background_pid "$test_packages_pid"
     run_test_apps &
     test_apps_pid="$!"
+    register_background_pid "$test_apps_pid"
     pnpm exec tsx "e2e/smoke/verify-fixtures.ts" &
     smoke_pid="$!"
+    register_background_pid "$smoke_pid"
 
     wait_for_background_jobs "$test_packages_pid" "$test_apps_pid" "$smoke_pid"
   else
@@ -290,10 +372,13 @@ run_test_coverage() {
 
     run_test_packages_coverage &
     coverage_pid="$!"
+    register_background_pid "$coverage_pid"
     run_test_apps &
     test_apps_pid="$!"
+    register_background_pid "$test_apps_pid"
     pnpm exec tsx "e2e/smoke/verify-fixtures.ts" --coverage &
     smoke_pid="$!"
+    register_background_pid "$smoke_pid"
 
     wait_for_background_jobs "$coverage_pid" "$test_apps_pid" "$smoke_pid"
   else
