@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from 'node:fs/promises'
@@ -719,6 +720,38 @@ is_discovery_invocation() {
   return 1
 }
 
+resolve_command_token() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --)
+        if [ "$#" -gt 1 ]; then
+          printf '%s\n' "$2"
+          return 0
+        fi
+        return 1
+        ;;
+      --filter-output|--format|--token-limit|--token-offset)
+        if [ "$#" -lt 2 ]; then
+          return 1
+        fi
+        shift 2
+        continue
+        ;;
+      -*)
+        ;;
+      *)
+        printf '%s\n' "$1"
+        return 0
+        ;;
+    esac
+    shift
+  done
+
+  return 1
+}
+
+command_token="$(resolve_command_token "$@" || true)"
+
 if is_discovery_invocation "$@"; then
   if [ "$cli_dist_ready" = true ]; then
     run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
@@ -735,20 +768,32 @@ ${workspaceCheckLines}
 
 build_failed=false
 if [ "\${#missing_packages[@]}" -gt 0 ]; then
-  if command -v pnpm >/dev/null 2>&1; then
-    for package_dir in "\${missing_packages[@]}"; do
-      if ! pnpm --dir "$package_dir" build >/dev/null; then
+  if [ "$command_token" = "onboard" ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      if ! pnpm --dir "$repo_root" build:test-runtime:prepared >/dev/null; then
         build_failed=true
-        break
       fi
-    done
-  elif command -v corepack >/dev/null 2>&1; then
-    for package_dir in "\${missing_packages[@]}"; do
-      if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
+    elif command -v corepack >/dev/null 2>&1; then
+      if ! corepack pnpm --dir "$repo_root" build:test-runtime:prepared >/dev/null; then
         build_failed=true
-        break
       fi
-    done
+    fi
+  else
+    if command -v pnpm >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        if ! pnpm --dir "$package_dir" build >/dev/null; then
+          build_failed=true
+          break
+        fi
+      done
+    elif command -v corepack >/dev/null 2>&1; then
+      for package_dir in "\${missing_packages[@]}"; do
+        if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
+          build_failed=true
+          break
+        fi
+      done
+    fi
   fi
 fi
 
@@ -3392,6 +3437,8 @@ test.sequential('CLI shim rebuilds when onboard transitive setup dist artifacts 
   const rebuiltMarkerPath = path.join(tempRoot, 'setup-cli-rebuilt.txt')
 
   try {
+    await mkdir(repoRoot, { recursive: true })
+    const canonicalRepoRoot = await realpath(repoRoot)
     await mkdir(cliDistRoot, { recursive: true })
     for (const packageName of [
       'contracts',
@@ -3426,9 +3473,9 @@ test.sequential('CLI shim rebuilds when onboard transitive setup dist artifacts 
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
-  mkdir -p "$2/dist/setup-services"
-  printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-agentmail.js"
+if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
+  mkdir -p "$2/packages/cli/dist/setup-services"
+  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/setup-agentmail.js"
   printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   exit 0
 fi
@@ -3437,7 +3484,7 @@ exit 1
     )
     await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
 
-    const result = await execFileAsync(shimPath, ['onboard', '--help'], {
+    const result = await execFileAsync(shimPath, ['--format', 'json', 'onboard', '--help'], {
       env: withoutNodeV8Coverage({
         ...process.env,
         PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
@@ -3445,6 +3492,84 @@ exit 1
     })
 
     assert.equal(result.stdout.trim(), 'onboard-built-ok')
+    assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim rebuilds onboard dist artifacts through corepack when pnpm is unavailable', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-onboard-corepack-repair-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliBinPath = path.join(cliDistRoot, 'bin.js')
+  const shimPath = path.join(tempRoot, 'murph')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const rebuiltMarkerPath = path.join(tempRoot, 'setup-cli-corepack-rebuilt.txt')
+
+  try {
+    await mkdir(repoRoot, { recursive: true })
+    const canonicalRepoRoot = await realpath(repoRoot)
+    await mkdir(cliDistRoot, { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeRequiredCliDistSupportFiles(cliPackageRoot)
+    await rm(path.join(cliDistRoot, 'setup-agentmail.js'), { force: true })
+    await writeFile(
+      cliBinPath,
+      `require('./setup-agentmail.js')\nconsole.log('onboard-corepack-built-ok')\n`,
+      'utf8',
+    )
+
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'corepack'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "pnpm" ] && [ "$2" = "--dir" ] && [ "$3" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$4" = "build:test-runtime:prepared" ]; then
+  mkdir -p "$3/packages/cli/dist/setup-services"
+  printf '%s\\n' 'module.exports = {}' > "$3/packages/cli/dist/setup-agentmail.js"
+  printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
+  exit 0
+fi
+exit 1
+`,
+    )
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'node'),
+      `#!/usr/bin/env bash
+exec ${JSON.stringify(process.execPath)} "$@"
+`,
+    )
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
+
+    const result = await execFileAsync(shimPath, ['--format', 'json', 'onboard', '--help'], {
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}/usr/bin${path.delimiter}/bin`,
+      }),
+    })
+
+    assert.equal(result.stdout.trim(), 'onboard-corepack-built-ok')
     assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -3461,6 +3586,8 @@ test.sequential('CLI shim fails loudly when auto-build repair fails', async () =
   const fakeBinDirectory = path.join(tempRoot, 'bin')
 
   try {
+    await mkdir(repoRoot, { recursive: true })
+    const canonicalRepoRoot = await realpath(repoRoot)
     await mkdir(cliDistRoot, { recursive: true })
     await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
     await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
@@ -3489,7 +3616,7 @@ test.sequential('CLI shim fails loudly when auto-build repair fails', async () =
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
+if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
   exit 23
 fi
 exit 1
@@ -3524,6 +3651,8 @@ test.sequential('CLI shim fails loudly when repair succeeds but leaves onboardin
   const fakeBinDirectory = path.join(tempRoot, 'bin')
 
   try {
+    await mkdir(repoRoot, { recursive: true })
+    const canonicalRepoRoot = await realpath(repoRoot)
     await mkdir(cliDistRoot, { recursive: true })
     await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
     await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
@@ -3552,12 +3681,12 @@ test.sequential('CLI shim fails loudly when repair succeeds but leaves onboardin
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
-if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
-  mkdir -p "$2/dist"
-  printf '%s\\n' 'module.exports = {}' > "$2/dist/index.js"
-  printf '%s\\n' 'module.exports = {}' > "$2/dist/vault-cli-contracts.js"
-  printf '%s\\n' 'module.exports = {}' > "$2/dist/inbox-cli-contracts.js"
-  printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-cli.js"
+if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
+  mkdir -p "$2/packages/cli/dist"
+  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/index.js"
+  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/vault-cli-contracts.js"
+  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/inbox-cli-contracts.js"
+  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/setup-cli.js"
   exit 0
 fi
 exit 1
