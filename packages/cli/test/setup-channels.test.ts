@@ -654,7 +654,7 @@ test('configureSetupChannels treats an empty but reachable AgentMail inbox as co
   }
 })
 
-test('configureSetupChannels disables stale setup connectors that were not selected in onboarding', async () => {
+test('configureSetupChannels disables stale setup connectors that were not selected in onboarding on supported platforms', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-setup-channel-reconcile-'))
 
   try {
@@ -751,6 +751,7 @@ test('configureSetupChannels disables stale setup connectors that were not selec
           }
         },
       },
+      platform: 'darwin',
       requestId: null,
       steps: [],
       vault,
