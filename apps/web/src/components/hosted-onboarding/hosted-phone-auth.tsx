@@ -22,6 +22,7 @@ import {
   HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
   readHostedPrivyClientSessionState,
   resolveHostedPrivyClientSessionIssue,
+  shouldSuppressHostedPrivyAutoContinueAfterError,
   shouldResetHostedPrivyClientSessionToSms,
   shouldAutoContinueHostedPrivyClientSession,
   type HostedPrivyClientPendingAction,
@@ -78,6 +79,7 @@ function HostedPhoneAuthInner({
   const { loginWithCode, sendCode } = useLoginWithSms();
   const { refreshUser, user } = useUser();
   const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<HostedPrivyClientSessionIssue | null>(null);
+  const [autoContinueSuppressed, setAutoContinueSuppressed] = useState(false);
   const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -128,9 +130,16 @@ function HostedPhoneAuthInner({
   }, [authenticated, ready]);
 
   useEffect(() => {
+    if (!authenticated) {
+      setAutoContinueSuppressed(false);
+    }
+  }, [authenticated]);
+
+  useEffect(() => {
     if (
       !shouldAutoContinueHostedPrivyClientSession({
         authenticated,
+        autoContinueSuppressed,
         autoContinueTriggered: autoContinueTriggered.current,
         checkingAuthenticatedSession,
         issue: authenticatedSessionIssue,
@@ -143,7 +152,7 @@ function HostedPhoneAuthInner({
 
     autoContinueTriggered.current = true;
     void handleContinueAuthenticated();
-  }, [authenticated, authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
+  }, [authenticated, authenticatedSessionIssue, autoContinueSuppressed, checkingAuthenticatedSession, pendingAction]);
 
   useEffect(() => {
     if (!authenticated || authenticatedSessionIssue !== "missing-phone") {
@@ -226,6 +235,9 @@ function HostedPhoneAuthInner({
         user,
       });
     } catch (error) {
+      if (shouldSuppressHostedPrivyAutoContinueAfterError(error)) {
+        setAutoContinueSuppressed(true);
+      }
       setErrorMessage(toErrorMessage(error, "We could not continue with your Privy session."));
     } finally {
       setPendingAction(null);
