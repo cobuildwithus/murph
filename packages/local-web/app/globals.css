@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
-
 @source "../app";
 @source "../src";
 
@@ -61,30 +59,32 @@
   --bg-glow: rgba(163, 92, 58, 0.08);
 }
 
-.dark {
-  color-scheme: dark;
-  --bg: #11151a;
-  --foreground: #f2ecdf;
-  --card: rgba(28, 33, 39, 0.9);
-  --card-strong: rgba(36, 41, 47, 0.96);
-  --ink: #06090d;
-  --muted: rgba(242, 236, 223, 0.72);
-  --line: rgba(242, 236, 223, 0.12);
-  --accent: #93c2d1;
-  --accent-soft: rgba(147, 194, 209, 0.16);
-  --warm: #f0a27d;
-  --paper: rgba(18, 23, 28, 0.86);
-  --rhr-ink: #070a0d;
-  --rhr-muted: rgba(242, 236, 223, 0.66);
-  --rhr-line: rgba(242, 236, 223, 0.1);
-  --rhr-accent: #79c9a7;
-  --rhr-accent-soft: rgba(121, 201, 167, 0.16);
-  --rhr-warm: #ee9c73;
-  --rhr-paper: rgba(18, 23, 28, 0.82);
-  --surface-shadow: 0 20px 56px rgba(0, 0, 0, 0.38);
-  --grid-line-horizontal: rgba(242, 236, 223, 0.05);
-  --grid-line-vertical: rgba(242, 236, 223, 0.04);
-  --bg-glow: rgba(147, 194, 209, 0.14);
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #11151a;
+    --foreground: #f2ecdf;
+    --card: rgba(28, 33, 39, 0.9);
+    --card-strong: rgba(36, 41, 47, 0.96);
+    --ink: #06090d;
+    --muted: rgba(242, 236, 223, 0.72);
+    --line: rgba(242, 236, 223, 0.12);
+    --accent: #93c2d1;
+    --accent-soft: rgba(147, 194, 209, 0.16);
+    --warm: #f0a27d;
+    --paper: rgba(18, 23, 28, 0.86);
+    --rhr-ink: #070a0d;
+    --rhr-muted: rgba(242, 236, 223, 0.66);
+    --rhr-line: rgba(242, 236, 223, 0.1);
+    --rhr-accent: #79c9a7;
+    --rhr-accent-soft: rgba(121, 201, 167, 0.16);
+    --rhr-warm: #ee9c73;
+    --rhr-paper: rgba(18, 23, 28, 0.82);
+    --surface-shadow: 0 20px 56px rgba(0, 0, 0, 0.38);
+    --grid-line-horizontal: rgba(242, 236, 223, 0.05);
+    --grid-line-vertical: rgba(242, 236, 223, 0.04);
+    --bg-glow: rgba(147, 194, 209, 0.14);
+  }
 }
 
 @keyframes settle {

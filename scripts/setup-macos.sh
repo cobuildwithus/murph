@@ -144,7 +144,7 @@ print_dry_run_plan() {
   printf '%s\n' '1. Ensure Homebrew is available.'
   printf '2. Ensure Node >= %s is available.\n' "$required_node"
   printf '3. Activate pnpm@%s through corepack.\n' "$pnpm_version"
-  printf '%s\n' '4. Install workspace dependencies with `corepack pnpm install`.'
+  printf '%s\n' '4. Install workspace dependencies with `corepack pnpm install --frozen-lockfile`.'
   printf '%s\n' '5. Build the workspace with `corepack pnpm build`.'
   if [ -n "$delegated_args" ]; then
     printf '6. Delegate to `node packages/cli/dist/bin.js onboard %s`.\n' "$delegated_args"
@@ -267,8 +267,8 @@ ensure_node
 ensure_pnpm
 
 ui_stage 2 4 'Installing workspace dependencies'
-ui_info 'Running corepack pnpm install'
-corepack pnpm install
+ui_info 'Running corepack pnpm install --frozen-lockfile'
+corepack pnpm install --frozen-lockfile
 ui_success 'Workspace dependencies installed'
 
 ui_stage 3 4 'Building Murph'

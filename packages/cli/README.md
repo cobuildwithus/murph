@@ -35,7 +35,7 @@ Setup also installs user-level `murph` and `vault-cli` shims into `~/.local/bin`
 
 Useful flags include `--dry-run` and `--whisperModel small.en`.
 
-From a checkout, the supported onboarding path is the repo-local `scripts/setup-host.sh` wrapper. On macOS it delegates to the existing Homebrew-based bootstrap path; on Linux it can reuse or download Node locally, activate pnpm through corepack, install dependencies, build the workspace, and then run the same CLI setup flow. `./scripts/setup-host.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `murph` and `vault-cli` commands for future shells via those user-level shims. iMessage remains macOS-only even though the rest of the host setup now supports Linux.
+From a checkout, the supported onboarding path is the repo-local `scripts/setup-host.sh` wrapper. On macOS it delegates to the existing Homebrew-based bootstrap path; on Linux it can reuse or download Node locally, activate pnpm through corepack, install dependencies with the frozen lockfile, build the workspace, and then run the same CLI setup flow. `./scripts/setup-host.sh --dry-run ...` now prints the wrapper bootstrap plan without mutating Homebrew, Node, pnpm, dependencies, or the workspace build. A successful non-dry-run setup now leaves behind working `murph` and `vault-cli` commands for future shells via those user-level shims. iMessage remains macOS-only even though the rest of the host setup now supports Linux.
 
 ## Release Flow
 

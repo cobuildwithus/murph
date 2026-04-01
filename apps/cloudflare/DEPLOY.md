@@ -173,7 +173,7 @@ Add whichever hosted features you actually want the containerized runner to supp
 From the repo root:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm --dir apps/cloudflare verify
 ```
 
