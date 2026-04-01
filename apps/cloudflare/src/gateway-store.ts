@@ -220,7 +220,7 @@ export class HostedGatewayProjectionStore {
       this.state.storage.get<GatewayPermissionResolutionOverride[]>(GATEWAY_PERMISSION_OVERRIDES_KEY),
     ]);
     const baseSnapshot = snapshot ? gatewayProjectionSnapshotSchema.parse(snapshot) : null;
-    const normalizedOverrides = parseGatewayPermissionOverrides(permissionOverrides);
+    const normalizedOverrides = readGatewayPermissionOverrides(permissionOverrides);
 
     return {
       baseSnapshot,
@@ -323,22 +323,25 @@ function mergeGatewayPermissionOverrides(
   });
 }
 
-function parseGatewayPermissionOverrides(
+function readGatewayPermissionOverrides(
   value: unknown,
 ): GatewayPermissionResolutionOverride[] {
-  if (!Array.isArray(value)) {
+  if (value === undefined) {
     return [];
   }
 
-  const overrides: GatewayPermissionResolutionOverride[] = [];
-  for (const entry of value) {
+  if (!Array.isArray(value)) {
+    throw new TypeError("gateway.permission-overrides storage is invalid.");
+  }
+
+  return value.map((entry): GatewayPermissionResolutionOverride => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      continue;
+      throw new TypeError("gateway.permission-overrides storage is invalid.");
     }
 
     const record = entry as Record<string, unknown>;
     if (typeof record.requestId !== "string" || record.requestId.length === 0) {
-      continue;
+      throw new TypeError("gateway.permission-overrides storage is invalid.");
     }
 
     const status = record.status;
@@ -347,22 +350,24 @@ function parseGatewayPermissionOverrides(
       && status !== "denied"
       && status !== "expired"
     ) {
-      continue;
+      throw new TypeError("gateway.permission-overrides storage is invalid.");
     }
 
     if (typeof record.resolvedAt !== "string" || Number.isNaN(Date.parse(record.resolvedAt))) {
-      continue;
+      throw new TypeError("gateway.permission-overrides storage is invalid.");
     }
 
-    overrides.push({
+    if (record.note !== null && record.note !== undefined && typeof record.note !== "string") {
+      throw new TypeError("gateway.permission-overrides storage is invalid.");
+    }
+
+    return {
       note: typeof record.note === "string" && record.note.length > 0 ? record.note : null,
       requestId: record.requestId,
       resolvedAt: record.resolvedAt,
       status,
-    });
-  }
-
-  return overrides.sort((left, right) => left.requestId.localeCompare(right.requestId));
+    };
+  }).sort((left, right) => left.requestId.localeCompare(right.requestId));
 }
 
 function pruneGatewayPermissionOverrides(

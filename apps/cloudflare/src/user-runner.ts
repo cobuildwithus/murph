@@ -42,7 +42,10 @@ import {
   type HostedExecutionContainerNamespaceLike,
   invokeHostedExecutionContainerRunner,
 } from "./runner-container.js";
-import { buildHostedRunnerJobRuntimeConfig } from "./runner-env.ts";
+import {
+  buildHostedRunnerContainerEnv,
+  buildHostedRunnerJobRuntimeConfig,
+} from "./runner-env.ts";
 import { listHostedUserEnvKeys, type HostedUserEnvUpdate } from "./user-env.js";
 import {
   createRunnerCommitRecovery,
@@ -77,7 +80,7 @@ export class HostedUserRunner {
     private readonly state: DurableObjectStateLike,
     private readonly env: HostedExecutionEnvironment,
     private readonly bucket: R2BucketLike,
-    private readonly runnerContainerEnvironment: Readonly<Record<string, string>> = {},
+    private readonly runnerRuntimeEnvSource: Readonly<Record<string, unknown>> = {},
     runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null = (
       state as {
         runnerContainerNamespace?: HostedExecutionContainerNamespaceLike;
@@ -524,6 +527,7 @@ export class HostedUserRunner {
       this.queueStore.readBundleMetaState(),
       this.bundleSync.readUserEnv(userId),
     ]);
+    const forwardedEnv = buildHostedRunnerContainerEnv(this.runnerRuntimeEnvSource);
     const job: HostedAssistantRuntimeJobInput = {
       request: {
         bundles: await this.bundleSync.readBundlesForRunner(),
@@ -535,7 +539,7 @@ export class HostedUserRunner {
         ...(resume ? { resume } : {}),
       },
       runtime: buildHostedRunnerJobRuntimeConfig({
-        forwardedEnv: this.runnerContainerEnvironment,
+        forwardedEnv,
         userEnv,
       }),
     };

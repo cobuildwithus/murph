@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 
 import worker from "../../src/index.ts";
 import { readHostedExecutionEnvironment } from "../../src/env.ts";
-import { buildHostedRunnerContainerEnv } from "../../src/runner-env.ts";
 import { HostedUserRunner } from "../../src/user-runner.ts";
 import { parseHostedUserEnvUpdate } from "../../src/user-env.ts";
 
@@ -27,7 +26,7 @@ export class VitestUserRunnerDurableObject extends DurableObject {
       ctx,
       readHostedExecutionEnvironment(env),
       env.BUNDLES,
-      buildHostedRunnerContainerEnv(env),
+      env,
       env.RUNNER_CONTAINER,
     );
   }

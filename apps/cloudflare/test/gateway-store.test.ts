@@ -6,9 +6,12 @@ const EMAIL_THREAD_SESSION_KEY =
   "gwcs_eyJraW5kIjoiY29udmVyc2F0aW9uIiwicm91dGVUb2tlbiI6ImQ3ZTZiMDU4Y2MzZWZmMWQ5NzNjZGM5YTM0ZjVjNGJjYWU3YzQxNjBlNzRjY2MwZmIyZDU5NGU3ZGEyYjkzNmQiLCJ2ZXJzaW9uIjoyfQ";
 
 function createState(options?: {
+  initialValues?: Record<string, unknown>;
   onPut?: (key: string, value: unknown) => Promise<void> | void;
 }) {
-  const values = new Map<string, unknown>();
+  const values = new Map<string, unknown>(
+    Object.entries(options?.initialValues ?? {}),
+  );
 
   return {
     storage: {
@@ -441,5 +444,20 @@ describe("HostedGatewayProjectionStore", () => {
     expect(firstResolution?.resolvedAt).toBeTruthy();
     expect(secondResolution).toEqual(firstResolution);
     expect(events.events).toHaveLength(1);
+  });
+
+  it("fails closed when stored permission overrides are malformed", async () => {
+    const store = new HostedGatewayProjectionStore(createState({
+      initialValues: {
+        "gateway.permission-overrides": [{
+          requestId: "perm_invalid",
+          status: "approved",
+        }],
+      },
+    }));
+
+    await expect(store.listOpenPermissions()).rejects.toThrow(
+      "gateway.permission-overrides storage is invalid.",
+    );
   });
 });
