@@ -163,13 +163,6 @@ export async function openInboxRuntime({
     );
   `);
 
-  ensureColumn(database, "capture", "mutation_cursor", "integer not null default 0");
-  ensureColumn(database, "capture_attachment", "attachment_id", "text");
-  ensureColumn(database, "capture_attachment", "derived_path", "text");
-  ensureColumn(database, "capture_attachment", "parser_provider_id", "text");
-  ensureColumn(database, "capture_attachment", "parser_state", "text");
-  ensureColumn(database, "capture_attachment", "parse_updated_at", "text");
-
   database.exec(`
     insert into capture_mutation_counter (singleton, next_cursor)
     values (1, 0)
@@ -1467,20 +1460,6 @@ function readAttachmentParseJob(database: DatabaseSync, jobId: string): Attachme
   }
 
   return decodeAttachmentParseJobRow(row);
-}
-
-function ensureColumn(
-  database: DatabaseSync,
-  table: string,
-  column: string,
-  columnDefinition: string,
-): void {
-  const rows = database.prepare(`pragma table_info(${table})`).all() as Array<{ name?: string }>;
-  if (rows.some((row) => row.name === column)) {
-    return;
-  }
-
-  database.exec(`alter table ${table} add column ${column} ${columnDefinition}`);
 }
 
 function normalizeNullable<T>(value: T | null | undefined): T | null {

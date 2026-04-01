@@ -13,7 +13,10 @@ import type {
 import type {
   AssistantProviderConfig,
 } from '../provider-config.js'
-import type { AssistantToolCatalog } from '../../model-harness.js'
+import type {
+  AssistantUserMessageContentPart,
+  AssistantToolCatalog,
+} from '../../model-harness.js'
 
 export interface AssistantModelCapabilities {
   images: boolean
@@ -38,10 +41,6 @@ export interface AssistantModelDiscoveryResult {
 }
 
 export interface AssistantProviderCapabilities {
-  /**
-   * @deprecated Use `supportsHostToolRuntime` instead.
-   */
-  supportsBoundTools: boolean
   supportsHostToolRuntime: boolean
   supportsDirectCliExecution: boolean
   supportsModelDiscovery: boolean
@@ -74,7 +73,7 @@ export interface AssistantProviderTurnInput {
   configOverrides?: readonly string[]
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
-    content: string
+    content: string | AssistantUserMessageContentPart[]
     role: 'assistant' | 'user'
   }>
   env?: NodeJS.ProcessEnv
@@ -97,6 +96,7 @@ export interface AssistantProviderTurnInput {
   systemPrompt?: string | null
   toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
+  userMessageContent?: AssistantUserMessageContentPart[] | null
   workingDirectory: string
 }
 
@@ -105,7 +105,7 @@ export interface AssistantProviderTurnExecutionInput {
   configOverrides?: readonly string[]
   continuityContext?: string | null
   conversationMessages?: ReadonlyArray<{
-    content: string
+    content: string | AssistantUserMessageContentPart[]
     role: 'assistant' | 'user'
   }>
   env?: NodeJS.ProcessEnv
@@ -121,6 +121,7 @@ export interface AssistantProviderTurnExecutionInput {
   systemPrompt?: string | null
   toolRuntime?: AssistantProviderToolRuntime | null
   userPrompt?: string | null
+  userMessageContent?: AssistantUserMessageContentPart[] | null
   workingDirectory: string
 }
 

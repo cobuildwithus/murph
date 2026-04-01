@@ -32,7 +32,6 @@ const MODEL_DISCOVERY_TIMEOUT_MS = 2_500
 
 export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
   capabilities: {
-    supportsBoundTools: true,
     supportsHostToolRuntime: true,
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
@@ -182,10 +181,11 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     }) ?? null
 
     try {
+      const messages = buildAssistantProviderMessages(input)
       const result = await generateText({
         abortSignal: input.abortSignal,
         maxRetries: tools ? 0 : OPENAI_COMPATIBLE_PROVIDER_MAX_RETRIES,
-        messages: buildAssistantProviderMessages(input),
+        messages,
         model: resolveAssistantLanguageModel(languageModelSpec),
         ...(tools
           ? {

@@ -250,14 +250,12 @@ test('resolveAssistantProviderDefaults can read inactive saved provider entries'
 
 test('resolveAssistantProviderCapabilities keeps prompt-only providers from claiming direct CLI execution', () => {
   assert.deepEqual(resolveAssistantProviderCapabilities('codex-cli'), {
-    supportsBoundTools: false,
     supportsHostToolRuntime: false,
     supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
     supportsReasoningEffort: true,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
-    supportsBoundTools: true,
     supportsHostToolRuntime: true,
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
@@ -686,6 +684,65 @@ test('executeAssistantProviderTurn dispatches to the OpenAI-compatible adapter w
       totalTokens: null,
     },
   })
+})
+
+test('executeAssistantProviderTurn forwards rich user message content to the OpenAI-compatible adapter', async () => {
+  const languageModel = { provider: 'mock-model' }
+  const imageBytes = Buffer.from([0xff, 0xd8, 0xff])
+  providerMocks.resolveAssistantLanguageModel.mockReturnValue(languageModel)
+  providerMocks.generateText.mockResolvedValue({
+    text: 'assistant reply',
+  })
+
+  await executeAssistantProviderTurn({
+    provider: 'openai-compatible',
+    workingDirectory: '/tmp/vault',
+    baseUrl: 'http://127.0.0.1:11434/v1',
+    model: 'gpt-oss:20b',
+    userPrompt: 'fallback text prompt',
+    userMessageContent: [
+      {
+        type: 'text',
+        text: 'Photo-only capture from Telegram.',
+      },
+      {
+        type: 'image',
+        image: imageBytes,
+        mediaType: 'image/jpeg',
+        mimeType: 'image/jpeg',
+      },
+    ],
+    sessionContext: {
+      binding: {
+        conversationKey: 'channel:telegram|thread:chat-55',
+        channel: 'telegram',
+        identityId: null,
+        actorId: 'contact:alice',
+        threadId: 'chat-55',
+        threadIsDirect: true,
+        delivery: {
+          kind: 'thread',
+          target: 'chat-55',
+        },
+      },
+    },
+  })
+
+  const generateCall = providerMocks.generateText.mock.calls[0]?.[0]
+  const messageContent = generateCall?.messages?.[0]?.content
+  assert.equal(Array.isArray(messageContent), true)
+  assert.match(messageContent?.[0]?.text ?? '', /Conversation context:/u)
+  assert.deepEqual(messageContent?.[1], {
+    type: 'text',
+    text: 'Photo-only capture from Telegram.',
+  })
+  assert.deepEqual(messageContent?.[2], {
+    type: 'image',
+    image: imageBytes,
+    mediaType: 'image/jpeg',
+    mimeType: 'image/jpeg',
+  })
+  assert.doesNotMatch(messageContent?.[0]?.text ?? '', /fallback text prompt/u)
 })
 
 test('executeAssistantProviderTurn chains official OpenAI responses and stores the response id', async () => {
