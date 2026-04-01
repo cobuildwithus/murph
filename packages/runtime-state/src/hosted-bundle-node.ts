@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 
 import {
   assertHostedBundleArtifactIntegrity,
@@ -157,6 +157,7 @@ async function restoreHostedBundleArchiveFiles(input: {
     }
 
     const absolutePath = resolveHostedBundleRestorePath(root, file.path);
+    await assertHostedBundleRestorePathHasNoSymlinks(root, absolutePath, file.path);
 
     if (isHostedBundleArtifactEntry(file)) {
       const shouldRestore = input.shouldRestoreArtifact
@@ -177,6 +178,7 @@ async function restoreHostedBundleArchiveFiles(input: {
       }
 
       await mkdir(path.dirname(absolutePath), { recursive: true });
+      await assertHostedBundleRestorePathHasNoSymlinks(root, absolutePath, file.path);
       const resolved = await input.artifactResolver({
         path: file.path,
         ref: file.artifact,
@@ -197,6 +199,7 @@ async function restoreHostedBundleArchiveFiles(input: {
     }
 
     await mkdir(path.dirname(absolutePath), { recursive: true });
+    await assertHostedBundleRestorePathHasNoSymlinks(root, absolutePath, file.path);
     await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
   }
 }
@@ -274,4 +277,54 @@ async function directoryExists(directoryPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function assertHostedBundleRestorePathHasNoSymlinks(
+  root: string,
+  absolutePath: string,
+  relativePath: string,
+): Promise<void> {
+  const absoluteRoot = path.resolve(root);
+  const relative = path.relative(absoluteRoot, absolutePath);
+
+  if (!relative || relative === ".") {
+    return;
+  }
+
+  const segments = relative.split(path.sep).filter(Boolean);
+  let currentPath = absoluteRoot;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const nextPath = path.join(currentPath, segment);
+
+    try {
+      const entry = await lstat(nextPath);
+
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Hosted bundle restore path may not traverse symbolic links: ${relativePath}`);
+      }
+
+      if (index < segments.length - 1 && !entry.isDirectory()) {
+        throw new Error(`Hosted bundle restore parent is not a directory: ${relativePath}`);
+      }
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return;
+      }
+
+      throw error;
+    }
+
+    currentPath = nextPath;
+  }
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && "code" in error
+    && error.code === "ENOENT",
+  );
 }

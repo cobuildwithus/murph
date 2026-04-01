@@ -72,7 +72,6 @@ function pickHostedLinqMessagePart(part: LinqMessagePart): Record<string, unknow
     mime_type: part.mime_type,
     size: part.size,
     type: part.type,
-    url: part.url,
   });
 }
 
