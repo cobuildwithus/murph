@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  createHostedPhoneLookupKey,
+  readHostedPhoneHint,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 import { PrismaLinqControlPlaneStore } from "@/src/lib/linq/prisma-store";
 
 type MutableBindingRecord = {
@@ -7,6 +11,7 @@ type MutableBindingRecord = {
   id: string;
   label: string | null;
   recipientPhone: string;
+  recipientPhoneMask: string | null;
   updatedAt: Date;
   userId: string;
 };
@@ -38,13 +43,13 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       expect.objectContaining({
         id: "linqb_alpha",
         label: "Alpha",
-        recipientPhone: "+15551230001",
+        recipientPhone: readHostedPhoneHint("+15551230001"),
         userId: "user-123",
       }),
       expect.objectContaining({
         id: "linqb_beta",
         label: "Beta",
-        recipientPhone: "+15551230002",
+        recipientPhone: readHostedPhoneHint("+15551230002"),
         userId: "user-123",
       }),
     ]);
@@ -71,13 +76,13 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       expect.objectContaining({
         id: "linqb_found",
         label: "Primary",
-        recipientPhone: "+15557654321",
+        recipientPhone: readHostedPhoneHint("+15557654321"),
         userId: "user-123",
       }),
     );
     expect(findUnique).toHaveBeenCalledWith({
       where: {
-        recipientPhone: "+15557654321",
+        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
       },
     });
   });
@@ -117,10 +122,11 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       },
       data: {
         label: "Primary",
-        recipientPhone: "+15557654321",
+        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
+        recipientPhoneMask: readHostedPhoneHint("+15557654321"),
       },
     });
-    expect(binding.recipientPhone).toBe("+15557654321");
+    expect(binding.recipientPhone).toBe(readHostedPhoneHint("+15557654321"));
   });
 
   it("rejects canonical phone conflicts across different users", async () => {
@@ -183,19 +189,19 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
     })).resolves.toEqual(expect.objectContaining({
       id: "linqb_race",
       label: "Primary",
-      recipientPhone: "+15557654321",
+      recipientPhone: readHostedPhoneHint("+15557654321"),
       userId: "user-123",
     }));
 
     expect(create).toHaveBeenCalledTimes(1);
     expect(findUnique).toHaveBeenNthCalledWith(1, {
       where: {
-        recipientPhone: "+15557654321",
+        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
       },
     });
     expect(findUnique).toHaveBeenNthCalledWith(2, {
       where: {
-        recipientPhone: "+15557654321",
+        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
       },
     });
     expect(update).toHaveBeenCalledWith({
@@ -204,7 +210,8 @@ describe("PrismaLinqControlPlaneStore hosted Linq bindings", () => {
       },
       data: {
         label: "Primary",
-        recipientPhone: "+15557654321",
+        recipientPhone: createHostedPhoneLookupKey("+15557654321"),
+        recipientPhoneMask: readHostedPhoneHint("+15557654321"),
       },
     });
   });
@@ -221,6 +228,7 @@ function createBindingRecord(input: {
     id: input.id,
     label: input.label ?? null,
     recipientPhone: input.recipientPhone,
+    recipientPhoneMask: readHostedPhoneHint(input.recipientPhone),
     updatedAt: new Date("2026-03-28T12:00:00.000Z"),
     userId: input.userId,
   };

@@ -478,16 +478,18 @@ model HostedAiUsage {
 }
 
 model LinqRecipientBinding {
-  id             String             @id
-  userId         String             @map("user_id")
-  recipientPhone String             @map("recipient_phone")
-  label          String?
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
-  events         LinqWebhookEvent[]
+  id                 String             @id
+  userId             String             @map("user_id")
+  recipientPhone     String             @map("recipient_phone")
+  recipientPhoneMask String?            @map("recipient_phone_mask")
+  label              String?
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  events             LinqWebhookEvent[]
 
   @@unique([recipientPhone])
   @@index([userId, recipientPhone])
+  @@index([userId, recipientPhoneMask])
   @@map("linq_recipient_binding")
 }
 

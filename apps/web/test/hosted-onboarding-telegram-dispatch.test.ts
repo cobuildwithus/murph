@@ -488,6 +488,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
                 }),
                 direct_messages_topic: expect.objectContaining({
                   topic_id: 9,
+                  title: "Priority",
                 }),
               }),
             }),

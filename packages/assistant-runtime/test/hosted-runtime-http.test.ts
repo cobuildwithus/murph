@@ -5,6 +5,17 @@ import path from "node:path";
 
 import { afterEach, test as baseTest, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({
+  withHostedInboxPipeline: vi.fn(async (_vaultRoot: string, callback: (pipeline: { processCapture: (capture: unknown) => Promise<void> }) => Promise<void>) =>
+    callback({
+      processCapture: async () => undefined,
+    })),
+}));
+
+vi.mock("../src/hosted-runtime/events/inbox-pipeline.ts", () => ({
+  withHostedInboxPipeline: mocks.withHostedInboxPipeline,
+}));
+
 import {
   createHostedExecutionServerDeviceSyncRuntimeClient,
   createHostedExecutionServerSharePackClient,
@@ -22,6 +33,7 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  mocks.withHostedInboxPipeline.mockClear();
 
   if (originalFetch) {
     global.fetch = originalFetch;
@@ -400,4 +412,5 @@ test("hosted email message ingestion no longer relies on stored envelope metadat
         },
       ),
   );
+  assert.equal(mocks.withHostedInboxPipeline.mock.calls.length, 1);
 });
