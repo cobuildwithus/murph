@@ -305,7 +305,7 @@ describe("hosted onboarding routes", () => {
       hostedOnboardingError({
         code: "PRIVY_WALLET_NOT_READY",
         httpStatus: 409,
-        message: "Your rewards wallet has not reached the server-side Privy session yet. Wait a moment and try again.",
+        message: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
         retryable: true,
       }),
     );
@@ -328,7 +328,7 @@ describe("hosted onboarding routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "PRIVY_WALLET_NOT_READY",
-        message: "Your rewards wallet has not reached the server-side Privy session yet. Wait a moment and try again.",
+        message: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
         retryable: true,
       },
     });

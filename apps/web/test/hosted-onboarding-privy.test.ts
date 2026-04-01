@@ -335,6 +335,7 @@ describe("hosted Privy verification", () => {
 
     await expect(requireHostedPrivyCompletionIdentityFromCookies()).rejects.toMatchObject({
       code: "PRIVY_WALLET_NOT_READY",
+      message: "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
       httpStatus: 409,
       retryable: true,
     });
@@ -398,6 +399,7 @@ describe("hosted Privy verification", () => {
 
     await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_WALLET_REQUIRED",
+      message: "Finish setup before continuing.",
       httpStatus: 400,
     });
   });
@@ -428,6 +430,7 @@ describe("hosted Privy verification", () => {
 
     await expect(requireHostedPrivyIdentity("signed-identity-token")).rejects.toMatchObject({
       code: "PRIVY_WALLET_REQUIRED",
+      message: "Finish setup before continuing.",
       httpStatus: 400,
     });
   });

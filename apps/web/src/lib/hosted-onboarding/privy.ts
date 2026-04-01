@@ -50,7 +50,7 @@ export async function requireHostedPrivyIdentity(identityToken: string): Promise
   if (!wallet) {
     throw hostedOnboardingError({
       code: "PRIVY_WALLET_REQUIRED",
-      message: "Create your rewards wallet before continuing.",
+      message: "Finish setup before continuing.",
       httpStatus: 400,
     });
   }
@@ -208,7 +208,7 @@ function remapHostedPrivyCompletionLagError(error: unknown): unknown {
     return hostedOnboardingError({
       code: "PRIVY_WALLET_NOT_READY",
       message:
-        "Your rewards wallet has not reached the server-side Privy session yet. Wait a moment and try again.",
+        "Your setup has not reached the server-side Privy session yet. Wait a moment and try again.",
       httpStatus: 409,
       retryable: true,
     });

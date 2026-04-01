@@ -1,17 +1,24 @@
 "use client";
 
 import {
+  useCreateWallet,
   useLoginWithSms,
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
-  type HostedPrivyLinkedAccountState,
-  resolveHostedPrivyLinkedAccountState,
-} from "@/src/lib/hosted-onboarding/privy-shared";
+  describeHostedPrivyClientSessionIssue,
+  ensureHostedPrivyPhoneAndWalletReady,
+  HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
+  readHostedPrivyClientSessionState,
+  resolveHostedPrivyClientSessionIssue,
+  shouldAutoContinueHostedPrivyClientSession,
+  type HostedPrivyClientPendingAction,
+  type HostedPrivyClientSessionIssue,
+} from "@/src/lib/hosted-onboarding/privy-client";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 
 import {
@@ -45,17 +52,17 @@ function HostedPhoneAuthInner({
   phoneHint,
 }: Omit<HostedPhoneAuthProps, "privyAppId">) {
   const { authenticated, logout, ready } = usePrivy();
+  const { createWallet } = useCreateWallet();
   const { loginWithCode, sendCode } = useLoginWithSms();
   const { refreshUser, user } = useUser();
-  const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<string | null>(null);
+  const [authenticatedSessionIssue, setAuthenticatedSessionIssue] = useState<HostedPrivyClientSessionIssue | null>(null);
   const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<
-    "continue" | "logout" | "send-code" | "verify-code" | null
-  >(null);
+  const [pendingAction, setPendingAction] = useState<HostedPrivyClientPendingAction>(null);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
+  const autoContinueTriggered = useRef(false);
 
   const normalizedPhoneNumber = useMemo(() => normalizePhoneNumber(phoneNumber), [phoneNumber]);
 
@@ -73,7 +80,7 @@ function HostedPhoneAuthInner({
 
       const sessionState = await readHostedPrivyClientSessionState({ refreshUser, user });
       if (!cancelled) {
-        setAuthenticatedSessionIssue(describeHostedPrivySessionIssue(sessionState));
+        setAuthenticatedSessionIssue(resolveHostedPrivyClientSessionIssue(sessionState));
       }
       if (!cancelled) {
         setCheckingAuthenticatedSession(false);
@@ -86,6 +93,39 @@ function HostedPhoneAuthInner({
       cancelled = true;
     };
   }, [authenticated, ready]);
+
+  useEffect(() => {
+    if (
+      !shouldAutoContinueHostedPrivyClientSession({
+        authenticated,
+        autoContinueTriggered: autoContinueTriggered.current,
+        checkingAuthenticatedSession,
+        issue: authenticatedSessionIssue,
+        pendingAction,
+      })
+    ) {
+      autoContinueTriggered.current = false;
+      return;
+    }
+
+    autoContinueTriggered.current = true;
+    void handleContinueAuthenticated();
+  }, [authenticated, authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
+
+  const authenticatedSessionDescription = useMemo(() => {
+    if (checkingAuthenticatedSession) {
+      return "Checking the current Privy session for a verified phone number and setup status.";
+    }
+
+    if (pendingAction === "continue") {
+      return "Finishing setup with your current verified phone number now.";
+    }
+
+    return (
+      describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
+      ?? "You're already verified. Finishing setup with your current phone number now, or sign out and use a different number."
+    );
+  }, [authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
 
   async function handleSendCode() {
     setErrorMessage(null);
@@ -120,6 +160,7 @@ function HostedPhoneAuthInner({
     try {
       await loginWithCode({ code: code.trim() });
       await finalizeHostedPrivyVerification({
+        createWallet,
         inviteCode,
         onCompleted,
         refreshUser,
@@ -138,6 +179,7 @@ function HostedPhoneAuthInner({
 
     try {
       await finalizeHostedPrivyVerification({
+        createWallet,
         inviteCode,
         onCompleted,
         refreshUser,
@@ -178,12 +220,7 @@ function HostedPhoneAuthInner({
       {authenticated ? (
         <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
           <strong className="text-stone-900">Verified Privy session found.</strong>
-          <p className="mt-1">
-            {checkingAuthenticatedSession
-              ? "Checking the current Privy session for a verified phone number and rewards wallet."
-              : authenticatedSessionIssue ??
-                "Continue with your current verified phone session, or sign out and use a different number."}
-          </p>
+          <p className="mt-1">{authenticatedSessionDescription}</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -228,20 +265,6 @@ function HostedPhoneAuthInner({
       <div className="flex flex-wrap gap-3">
         {authenticated ? (
           <>
-            {!checkingAuthenticatedSession && !authenticatedSessionIssue ? (
-              <button
-                type="button"
-                onClick={handleContinueAuthenticated}
-                disabled={!ready || pendingAction !== null}
-                className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {pendingAction === "continue"
-                  ? mode === "invite"
-                    ? "Verifying phone and wallet..."
-                    : "Creating account..."
-                  : "Continue with verified phone"}
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={handleLogout}
@@ -266,12 +289,10 @@ function HostedPhoneAuthInner({
               type="button"
               onClick={handleVerifyCode}
               disabled={!ready || pendingAction !== null}
-              className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {pendingAction === "verify-code"
-                ? mode === "invite"
-                  ? "Verifying phone and wallet..."
-                  : "Verifying and creating account..."
+            className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {pendingAction === "verify-code"
+                ? "Finishing setup..."
                 : mode === "invite"
                   ? "Verify phone and continue"
                   : "Verify phone and create account"}
@@ -296,12 +317,13 @@ function HostedPhoneAuthInner({
 }
 
 async function finalizeHostedPrivyVerification(input: {
+  createWallet: () => Promise<unknown>;
   inviteCode?: string | null;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
   user: { linkedAccounts?: unknown } | null;
 }) {
-  await requireHostedPrivyPhoneAndWalletReady(input);
+  await ensureHostedPrivyPhoneAndWalletReady(input);
   const payload = await requestHostedPrivyCompletionWithRetry(input.inviteCode);
 
   if (input.onCompleted) {
@@ -329,10 +351,9 @@ async function finalizeHostedPrivyVerification(input: {
 async function requestHostedPrivyCompletionWithRetry(
   inviteCode?: string | null,
 ): Promise<HostedPrivyCompletionPayload> {
-  const retryDelaysMs = [0, 250, 500, 1_000] as const;
   let lastError: unknown = null;
 
-  for (const delayMs of retryDelaysMs) {
+  for (const delayMs of HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS) {
     if (delayMs > 0) {
       await sleep(delayMs);
     }
@@ -352,38 +373,6 @@ async function requestHostedPrivyCompletionWithRetry(
   }
 
   throw lastError instanceof Error ? lastError : new Error("We could not verify your Privy session.");
-}
-
-async function requireHostedPrivyPhoneAndWalletReady(input: {
-  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
-  user: { linkedAccounts?: unknown } | null;
-}): Promise<void> {
-  const sessionState = await readHostedPrivyClientSessionState(input);
-
-  if (!sessionState.phone) {
-    throw new Error("This Privy session is missing a verified phone number.");
-  }
-
-  if (!sessionState.wallet) {
-    throw new Error("We could not finish preparing your rewards wallet. Sign out and try the SMS flow again.");
-  }
-}
-
-async function readHostedPrivyClientSessionState(input: {
-  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
-  user: { linkedAccounts?: unknown } | null;
-}): Promise<HostedPrivyLinkedAccountState> {
-  const currentState = resolveHostedPrivyLinkedAccountState(input.user);
-
-  if (currentState.phone && currentState.wallet) {
-    return currentState;
-  }
-
-  try {
-    return resolveHostedPrivyLinkedAccountState(await input.refreshUser());
-  } catch {
-    return currentState;
-  }
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -406,15 +395,3 @@ function sleep(delayMs: number): Promise<void> {
 
 const inputClasses =
   "w-full rounded border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-olive-light focus:outline-none focus:ring-2 focus:ring-olive-light/20";
-
-function describeHostedPrivySessionIssue(sessionState: HostedPrivyLinkedAccountState): string | null {
-  if (!sessionState.phone) {
-    return "Your current Privy session is missing a verified phone number. Sign out and continue with SMS.";
-  }
-
-  if (!sessionState.wallet) {
-    return "Your current Privy session does not have a rewards wallet yet. Sign out and continue with SMS to finish setup.";
-  }
-
-  return null;
-}
