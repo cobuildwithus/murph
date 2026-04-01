@@ -1,4 +1,5 @@
 import type { ZodTypeAny } from "zod";
+import type { JsonObject } from "./zod.ts";
 
 import { HEALTH_HISTORY_EVENT_KINDS, ID_PREFIXES } from "./constants.ts";
 import {
@@ -74,7 +75,7 @@ export interface HealthEntityDefinition {
   prefixes?: readonly string[];
   lookupAliases?: readonly string[];
   listKinds?: readonly string[];
-  scaffoldTemplate?: Record<string, unknown>;
+  scaffoldTemplate?: JsonObject;
   registry?: HealthEntityRegistryMetadata;
 }
 

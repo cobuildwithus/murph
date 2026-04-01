@@ -7,6 +7,7 @@ import {
   goalRegistryEntityDefinition,
   healthEntityDefinitions,
   protocolRegistryEntityDefinition,
+  type JsonObject,
   type CommandCapability,
   type CommandCapabilityBundleId,
   type HealthEntityDefinition,
@@ -23,7 +24,6 @@ import type {
   HealthQueryRuntimeListMethodName,
   HealthQueryRuntimeShowMethodName,
   HealthQueryShowServiceMethodName,
-  JsonObject,
 } from "./health-cli-method-types.js";
 import {
   listItemSchema,

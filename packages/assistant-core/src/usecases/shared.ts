@@ -5,6 +5,7 @@ import {
   BLOOD_TEST_CATEGORY,
   BLOOD_TEST_SPECIMEN_TYPES,
   healthEntityDefinitions,
+  type JsonObject,
 } from "@murph/contracts"
 
 import { VaultCliError } from "../vault-cli-errors.js"
@@ -25,7 +26,6 @@ import {
 
 import type {
   HealthEntityEnvelope,
-  JsonObject,
 } from "../health-cli-method-types.js"
 import type { VaultValidateResult } from "../vault-cli-contracts.js"
 import type {

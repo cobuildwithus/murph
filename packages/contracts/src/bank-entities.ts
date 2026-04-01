@@ -1,4 +1,5 @@
 import type { ZodTypeAny } from "zod";
+import type { JsonObject } from "./zod.ts";
 
 import { ID_PREFIXES } from "./constants.ts";
 import {
@@ -56,7 +57,7 @@ export interface BankEntityDefinition {
   prefixes?: readonly string[];
   lookupAliases?: readonly string[];
   listKinds?: readonly string[];
-  scaffoldTemplate?: Record<string, unknown>;
+  scaffoldTemplate?: JsonObject;
   registry: BankEntityRegistryMetadata;
 }
 

@@ -1,6 +1,8 @@
+import type { JsonObject } from "@murph/contracts"
+
 import type { ReadEntity } from "./vault-cli-contracts.js"
 
-export type JsonObject = Record<string, unknown>
+export type { JsonObject }
 
 export interface CommandContext {
   vault: string

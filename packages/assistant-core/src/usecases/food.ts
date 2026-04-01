@@ -1,4 +1,4 @@
-import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId } from '@murph/contracts'
+import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId, type JsonObject } from '@murph/contracts'
 import { z } from 'incur'
 
 import {
@@ -35,6 +35,8 @@ interface FoodReadModel {
   slug: string
   title: string
   status: string
+  schemaVersion?: string
+  docType?: string
   summary?: string
   kind?: string
   brand?: string
@@ -49,7 +51,6 @@ interface FoodReadModel {
   autoLogDaily?: FoodAutoLogDailyReadModel | null
   relativePath: string
   markdown: string
-  [key: string]: unknown
 }
 
 interface FoodCoreRuntime {
@@ -703,9 +704,7 @@ function mergeFoodAliases(
   return merged.length > 0 ? merged : undefined
 }
 
-function buildFoodData(food: FoodReadModel) {
+function buildFoodData(food: FoodReadModel): JsonObject {
   const { relativePath: _relativePath, markdown: _markdown, ...data } = food
-  return {
-    ...data,
-  }
+  return structuredClone(data) as JsonObject
 }
