@@ -9,8 +9,8 @@ import {
   resolveOpenAICompatibleProviderPreset,
   resolveOpenAICompatibleProviderPresetFromId,
   type OpenAICompatibleProviderPreset,
-} from '@murphai/assistant-core/assistant/openai-compatible-provider-presets'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
+} from '@murphai/assistant-core/assistant-provider'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
 import {
   createSetupAssistantAccountResolver,
   formatSetupAssistantAccountLabel,

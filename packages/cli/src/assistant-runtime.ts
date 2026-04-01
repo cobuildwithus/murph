@@ -2,19 +2,19 @@ export type {
   AssistantConversationAudience,
   AssistantConversationDeliveryPolicy,
   AssistantConversationPolicy,
-} from '@murphai/assistant-core/assistant/conversation-policy'
+} from '@murphai/assistant-core/assistant-runtime'
 export {
   resolveAssistantConversationAutoReplyEligibility,
   resolveAssistantConversationAudience,
   resolveAssistantConversationPolicy,
   shouldExposeSensitiveHealthContext,
-} from '@murphai/assistant-core/assistant/conversation-policy'
+} from '@murphai/assistant-core/assistant-runtime'
 export type {
   AssistantRuntimeStateService,
-} from '@murphai/assistant-core/assistant/runtime-state-service'
+} from '@murphai/assistant-core/assistant-state'
 export {
   createAssistantRuntimeStateService,
-} from '@murphai/assistant-core/assistant/runtime-state-service'
+} from '@murphai/assistant-core/assistant-state'
 export type {
   AssistantTranscriptDistillation,
 } from '@murphai/assistant-core/assistant-cli-contracts'
@@ -25,7 +25,7 @@ export {
   maybeRefreshAssistantTranscriptDistillation,
   readLatestAssistantTranscriptDistillation,
   resolveAssistantTranscriptDistillationPath,
-} from '@murphai/assistant-core/assistant/transcript-distillation'
+} from '@murphai/assistant-core/assistant-runtime'
 
 export type {
   AddAssistantCronJobInput,
@@ -62,7 +62,7 @@ export type {
 } from './assistant/service.js'
 export type {
   ConversationRef,
-} from '@murphai/assistant-core/assistant/conversation-ref'
+} from '@murphai/assistant-core/assistant-runtime'
 export {
   openAssistantConversation,
   sendAssistantMessage,
@@ -86,7 +86,7 @@ export type {
   AssistantMemoryTurnContextInput,
   AssistantMemoryUpsertInput,
   AssistantMemoryUpsertWriteResult,
-} from '@murphai/assistant-core/assistant/memory'
+} from '@murphai/assistant-core/assistant-runtime'
 export {
   assertAssistantMemoryTurnContextVault,
   createAssistantMemoryTurnContextEnv,
@@ -96,7 +96,7 @@ export {
   resolveAssistantMemoryTurnContext,
   searchAssistantMemory,
   upsertAssistantMemory,
-} from '@murphai/assistant-core/assistant/memory'
+} from '@murphai/assistant-core/assistant-runtime'
 export type {
   AssistantAutoReplyScanResult,
   AssistantAutomationScanResult,
@@ -131,7 +131,7 @@ export type {
   AssistantStateListDocumentsInput,
   AssistantStatePatchDocumentInput,
   AssistantStatePutDocumentInput,
-} from '@murphai/assistant-core/assistant/state'
+} from '@murphai/assistant-core/assistant-state'
 export {
   buildDefaultAssistantCronStateDocId,
   deleteAssistantStateDocument,
@@ -140,7 +140,7 @@ export {
   patchAssistantStateDocument,
   putAssistantStateDocument,
   resolveAssistantStateDocumentPath,
-} from '@murphai/assistant-core/assistant/state'
+} from '@murphai/assistant-core/assistant-state'
 
 export async function runAssistantChat(
   input: import('./assistant/service.js').AssistantChatInput,

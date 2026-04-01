@@ -5,10 +5,10 @@ import {
 import {
   getAssistantSessionLocal,
   listAssistantSessionsLocal,
-} from '@murphai/assistant-core/assistant/store'
+} from '@murphai/assistant-core/assistant-store'
 import type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
 
-export * from '@murphai/assistant-core/assistant/store'
+export * from '@murphai/assistant-core/assistant-store'
 export type { AssistantSession } from '@murphai/assistant-core/assistant-cli-contracts'
 
 export async function listAssistantSessions(

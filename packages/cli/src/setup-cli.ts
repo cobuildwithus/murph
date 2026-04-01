@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { Cli, z } from 'incur'
 import { assistantAutomationStateSchema } from '@murphai/assistant-core/assistant-cli-contracts'
-import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant/store/paths'
+import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import {
   type SetupAssistantPreset,
   type SetupAssistantProviderPreset,

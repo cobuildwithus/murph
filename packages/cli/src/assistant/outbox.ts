@@ -7,10 +7,10 @@ import {
   drainAssistantOutboxLocal,
   listAssistantOutboxIntentsLocal,
   readAssistantOutboxIntent as readAssistantOutboxIntentLocal,
-} from '@murphai/assistant-core/assistant/outbox'
+} from '@murphai/assistant-core/assistant-outbox'
 import type { AssistantOutboxIntent } from '@murphai/assistant-core/assistant-cli-contracts'
 
-export * from '@murphai/assistant-core/assistant/outbox'
+export * from '@murphai/assistant-core/assistant-outbox'
 export type { AssistantOutboxIntent } from '@murphai/assistant-core/assistant-cli-contracts'
 
 export async function readAssistantOutboxIntent(

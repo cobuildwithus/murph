@@ -3,7 +3,7 @@ import {
   normalizeAssistantProviderConfig,
   type AssistantProviderConfig,
   type AssistantProviderConfigInput,
-} from '@murphai/assistant-core/assistant/provider-config'
+} from '@murphai/assistant-core/assistant-provider'
 import {
   createCatalogModel,
   discoverAssistantProviderModels as discoverAssistantProviderModelsWithRegistry,
@@ -13,13 +13,13 @@ import {
   type AssistantCatalogModel,
   type AssistantModelDiscoveryResult,
   type AssistantProviderCapabilities,
-} from '@murphai/assistant-core/assistant/provider-registry'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
+} from '@murphai/assistant-core/assistant-provider'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
 
 export type {
   AssistantCatalogModel,
   AssistantModelDiscoveryResult,
-} from '@murphai/assistant-core/assistant/provider-registry'
+} from '@murphai/assistant-core/assistant-provider'
 
 export interface AssistantModelOption {
   description: string

@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
-import { normalizeNullableString } from '@murphai/assistant-core/assistant/shared'
+import { normalizeNullableString } from '@murphai/assistant-core/assistant-runtime'
 import type {
   SetupAssistantAccount,
   SetupAssistantQuotaWindow,

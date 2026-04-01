@@ -8,7 +8,7 @@ import {
 import {
   clearAssistantAutomationRunLock,
   inspectAssistantAutomationRunLock,
-} from '@murphai/assistant-core/assistant/automation/runtime-lock'
+} from '@murphai/assistant-core/assistant-automation'
 
 const ASSISTANT_AUTOMATION_STOP_TIMEOUT_MS = 5_000
 const ASSISTANT_AUTOMATION_FORCE_KILL_TIMEOUT_MS = 1_000
