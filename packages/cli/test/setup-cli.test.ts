@@ -520,13 +520,7 @@ function buildExpectedCliShimScript(
   cliBinPath: string,
   shimName: 'murph' | 'vault-cli' = 'murph',
 ): string {
-  const cliSourceBinPath = path.resolve(path.dirname(cliBinPath), '..', 'src', 'bin.ts')
-  const cliPackageRoot = path.resolve(path.dirname(cliBinPath), '..')
-  const repoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
-  const cliRequiredDistPaths = [
-    cliBinPath,
-    path.join(cliPackageRoot, 'dist', 'index.js'),
-  ]
+  const generatedRepoRoot = path.resolve(path.dirname(cliBinPath), '..', '..', '..')
   const workspacePackageNames = [
     'contracts',
     'core',
@@ -539,23 +533,71 @@ function buildExpectedCliShimScript(
   ]
   const workspaceCheckLines = workspacePackageNames
     .map((packageName) => {
-      const packageRoot = path.join(repoRoot, 'packages', packageName)
-      const packageDistIndexPath = path.join(packageRoot, 'dist', 'index.js')
-      return `  if [ ! -f '${packageDistIndexPath}' ]; then
-    missing_packages+=('${packageRoot}')
+      return `  if [ ! -f "\${repo_root}/packages/${packageName}/dist/index.js" ]; then
+    missing_packages+=("\${repo_root}/packages/${packageName}")
   fi`
-    })
-    .join('\n')
-  const cliDistCheckLines = cliRequiredDistPaths
-    .map((requiredPath) => {
-      return `if [ ! -f '${requiredPath}' ]; then
-  cli_dist_ready=false
-fi`
     })
     .join('\n')
 
   return `#!/usr/bin/env bash
 set -euo pipefail
+
+repo_root_exists() {
+  local candidate="\${1:-}"
+  if [ -z "$candidate" ] || [ ! -d "$candidate" ]; then
+    return 1
+  fi
+
+  if [ -f "$candidate/packages/cli/src/bin.ts" ]; then
+    return 0
+  fi
+
+  if [ -f "$candidate/packages/cli/dist/bin.js" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
+canonicalize_repo_root() {
+  (
+    cd "\${1:-}" >/dev/null 2>&1 && pwd -P
+  )
+}
+
+find_repo_root_from_pwd() {
+  local candidate
+  if ! candidate="$(pwd -P 2>/dev/null)"; then
+    return 1
+  fi
+
+  while true; do
+    if repo_root_exists "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+
+    if [ "$candidate" = "/" ]; then
+      return 1
+    fi
+
+    candidate="$(dirname "$candidate")"
+  done
+}
+
+resolve_repo_root() {
+  if repo_root_exists "\${MURPH_REPO_ROOT:-}"; then
+    canonicalize_repo_root "\${MURPH_REPO_ROOT}"
+    return 0
+  fi
+
+  if repo_root_exists '${generatedRepoRoot}'; then
+    canonicalize_repo_root '${generatedRepoRoot}'
+    return 0
+  fi
+
+  find_repo_root_from_pwd
+}
 
 run_supervised() {
   if [[ -t 0 && -t 2 ]]; then
@@ -600,8 +642,29 @@ run_supervised() {
   return "$exit_code"
 }
 
+repo_root="$(resolve_repo_root || true)"
+if [ -z "$repo_root" ]; then
+  printf '%s\n' 'Murph CLI shim could not locate the repo checkout. Run \`pnpm exec tsx packages/cli/src/bin.ts setup\` or \`./scripts/setup-host.sh\` from the repo checkout to refresh the shims, or set \`MURPH_REPO_ROOT\`.' >&2
+  exit 1
+fi
+
+cli_package_root="$repo_root/packages/cli"
+cli_bin_path="$cli_package_root/dist/bin.js"
+cli_source_bin_path="$cli_package_root/src/bin.ts"
+
 cli_dist_ready=true
-${cliDistCheckLines}
+if [ ! -f "$cli_bin_path" ]; then
+  cli_dist_ready=false
+fi
+if [ ! -f "$cli_package_root/dist/index.js" ]; then
+  cli_dist_ready=false
+fi
+if [ ! -f "$cli_package_root/dist/vault-cli-contracts.js" ]; then
+  cli_dist_ready=false
+fi
+if [ ! -f "$cli_package_root/dist/inbox-cli-contracts.js" ]; then
+  cli_dist_ready=false
+fi
 
 is_discovery_invocation() {
   for arg in "$@"; do
@@ -617,18 +680,18 @@ is_discovery_invocation() {
 
 if is_discovery_invocation "$@"; then
   if [ "$cli_dist_ready" = true ]; then
-    run_supervised env SETUP_PROGRAM_NAME='${shimName}' node '${cliBinPath}' "$@"
+    run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
     exit $?
   fi
 
-  if [ -f '${cliSourceBinPath}' ]; then
+  if [ -f "$cli_source_bin_path" ]; then
     if command -v pnpm >/dev/null 2>&1; then
-      run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+      run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
       exit $?
     fi
 
     if command -v corepack >/dev/null 2>&1; then
-      run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+      run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
       exit $?
     fi
   fi
@@ -636,7 +699,7 @@ fi
 
 missing_packages=()
 if [ "$cli_dist_ready" != true ]; then
-  missing_packages+=('${cliPackageRoot}')
+  missing_packages+=("$cli_package_root")
 fi
 
 ${workspaceCheckLines}
@@ -654,21 +717,32 @@ if [ "\${#missing_packages[@]}" -gt 0 ]; then
 fi
 
 cli_dist_ready=true
-${cliDistCheckLines}
+if [ ! -f "$cli_bin_path" ]; then
+  cli_dist_ready=false
+fi
+if [ ! -f "$cli_package_root/dist/index.js" ]; then
+  cli_dist_ready=false
+fi
+if [ ! -f "$cli_package_root/dist/vault-cli-contracts.js" ]; then
+  cli_dist_ready=false
+fi
+if [ ! -f "$cli_package_root/dist/inbox-cli-contracts.js" ]; then
+  cli_dist_ready=false
+fi
 
 if [ "$cli_dist_ready" = true ]; then
-  run_supervised env SETUP_PROGRAM_NAME='${shimName}' node '${cliBinPath}' "$@"
+  run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
   exit $?
 fi
 
-if [ -f '${cliSourceBinPath}' ]; then
+if [ -f "$cli_source_bin_path" ]; then
   if command -v pnpm >/dev/null 2>&1; then
-    run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
     exit $?
   fi
 
   if command -v corepack >/dev/null 2>&1; then
-    run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir '${repoRoot}' exec tsx '${cliSourceBinPath}' "$@"
+    run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
     exit $?
   fi
 fi
@@ -3166,6 +3240,54 @@ exit 23
   }
 })
 
+test.sequential('CLI shim recovers from a moved repo checkout when invoked inside the new checkout', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-moved-checkout-'))
+  const staleRepoRoot = path.join(tempRoot, 'old-repo')
+  const liveRepoRoot = path.join(tempRoot, 'renamed-repo')
+  const liveCliDistRoot = path.join(liveRepoRoot, 'packages', 'cli', 'dist')
+  const staleCliBinPath = path.join(staleRepoRoot, 'packages', 'cli', 'dist', 'bin.js')
+  const shimPath = path.join(tempRoot, 'murph')
+
+  try {
+    await mkdir(liveCliDistRoot, { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        liveRepoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeFile(path.join(liveCliDistRoot, 'bin.js'), `console.log('moved-ok')\n`, 'utf8')
+    await writeFile(path.join(liveCliDistRoot, 'index.js'), 'export {}\n', 'utf8')
+    await writeFile(path.join(liveCliDistRoot, 'vault-cli-contracts.js'), 'export {}\n', 'utf8')
+    await writeFile(path.join(liveCliDistRoot, 'inbox-cli-contracts.js'), 'export {}\n', 'utf8')
+    await writeExecutable(shimPath, buildExpectedCliShimScript(staleCliBinPath, 'murph'))
+
+    const result = await execFileAsync(shimPath, [], {
+      cwd: path.join(liveRepoRoot, 'packages', 'cli'),
+      env: withoutNodeV8Coverage(process.env),
+    })
+
+    assert.equal(result.stdout.trim(), 'moved-ok')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('CLI shim rebuilds missing cli dist artifacts before launching the built CLI', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-cli-repair-'))
   const repoRoot = path.join(tempRoot, 'repo')
@@ -3199,7 +3321,7 @@ test.sequential('CLI shim rebuilds missing cli dist artifacts before launching t
       await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
     }
 
-    await writeFile(cliBinPath, `import './index.js'\n`, 'utf8')
+    await writeFile(cliBinPath, `require('./index.js')\n`, 'utf8')
 
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
@@ -3207,8 +3329,10 @@ test.sequential('CLI shim rebuilds missing cli dist artifacts before launching t
 set -euo pipefail
 if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
   mkdir -p "$2/dist"
-  if [ "$2" = ${JSON.stringify(cliPackageRoot)} ]; then
+  if [ -f "$2/dist/bin.js" ]; then
     printf '%s\\n' "console.log('built-ok')" > "$2/dist/index.js"
+    printf '%s\\n' 'export {}' > "$2/dist/vault-cli-contracts.js"
+    printf '%s\\n' 'export {}' > "$2/dist/inbox-cli-contracts.js"
     printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   else
     printf '%s\\n' 'export {}' > "$2/dist/index.js"
