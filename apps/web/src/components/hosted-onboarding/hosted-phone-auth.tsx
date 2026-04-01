@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Combobox,
   ComboboxContent,
+  ComboboxInput,
   ComboboxItem,
   ComboboxList,
   ComboboxTrigger,
@@ -53,9 +54,6 @@ interface HostedPhoneCountryOption {
 const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
   { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
-  { code: "GB", dialCode: "+44", label: "United Kingdom", placeholder: "07700 900123" },
-  { code: "AU", dialCode: "+61", label: "Australia", placeholder: "0400 111 222" },
-  { code: "NZ", dialCode: "+64", label: "New Zealand", placeholder: "021 123 4567" },
 ];
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
@@ -278,16 +276,17 @@ function HostedPhoneAuthInner({
             >
               <ComboboxTrigger
                 aria-label={`Country or region, ${selectedPhoneCountry.label} ${selectedPhoneCountry.dialCode}`}
-                className="flex h-12 w-full items-center justify-between rounded border border-stone-200 bg-white px-4 text-left text-sm font-medium text-stone-900 focus-visible:border-olive-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-olive-light/20 sm:w-28"
+                className="flex h-12 w-auto shrink-0 items-center justify-between rounded border border-stone-200 bg-white px-4 text-left text-sm font-medium text-stone-900 focus-visible:border-olive-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-olive-light/20"
               >
                 {selectedPhoneCountry.dialCode}
               </ComboboxTrigger>
-              <ComboboxContent>
+              <ComboboxContent className="w-64">
+                <ComboboxInput placeholder="Search countries..." />
                 <ComboboxList>
                   {(option) => (
                     <ComboboxItem key={option.code} value={option}>
                       <span className="flex min-w-0 items-center justify-between gap-3">
-                        <span className="truncate">{option.label}</span>
+                        <span>{option.label}</span>
                         <span className="text-xs text-stone-500">{option.dialCode}</span>
                       </span>
                     </ComboboxItem>
