@@ -168,17 +168,21 @@ export function resolveWorkoutCapture(
 export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   const capture = resolveWorkoutCapture(input)
   const occurredAt = input.occurredAt ?? new Date().toISOString()
-  const payload = compactObject({
+  const payload = {
     kind: 'activity_session',
     occurredAt,
     source: input.source ?? 'manual',
     title: capture.title,
     activityType: capture.activityType,
     durationMinutes: capture.durationMinutes,
-    distanceKm: capture.distanceKm ?? undefined,
-    strengthExercises: capture.strengthExercises ?? undefined,
+    ...(typeof capture.distanceKm === 'number'
+      ? { distanceKm: capture.distanceKm }
+      : {}),
+    ...(capture.strengthExercises
+      ? { strengthExercises: capture.strengthExercises }
+      : {}),
     note: capture.note,
-  })
+  }
 
   const result = await upsertEventRecord({
     vault: input.vault,

@@ -11,10 +11,7 @@ import {
   showEventRecord,
   upsertEventRecord,
 } from '@murph/assistant-core/usecases/provider-event'
-import {
-  compactObject,
-  normalizeOptionalText,
-} from '@murph/assistant-core/usecases/vault-usecase-helpers'
+import { normalizeOptionalText } from '@murph/assistant-core/usecases/vault-usecase-helpers'
 
 interface InterventionDescriptor {
   interventionType: string
@@ -113,17 +110,21 @@ export async function addInterventionRecord(
   const durationMinutes = resolveDurationMinutes(note, input.durationMinutes)
   const protocolId = normalizeOptionalText(input.protocolId)
   const occurredAt = input.occurredAt ?? new Date().toISOString()
-  const payload = compactObject({
+  const payload = {
     kind: 'intervention_session',
     occurredAt,
     source: input.source ?? 'manual',
     title: buildInterventionTitle(intervention.label, durationMinutes),
     interventionType: intervention.interventionType,
-    durationMinutes: durationMinutes ?? undefined,
-    protocolId: protocolId ?? undefined,
-    relatedIds: protocolId ? [protocolId] : undefined,
+    ...(typeof durationMinutes === 'number' ? { durationMinutes } : {}),
+    ...(protocolId
+      ? {
+          protocolId,
+          relatedIds: [protocolId],
+        }
+      : {}),
     note,
-  })
+  }
 
   const result = await upsertEventRecord({
     vault: input.vault,
