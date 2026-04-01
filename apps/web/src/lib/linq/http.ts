@@ -1,4 +1,4 @@
-import { isDeviceSyncError } from "@murphai/device-syncd";
+import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { isLinqWebhookPayloadError, isLinqWebhookVerificationError } from "@murphai/inboxd/linq-webhook";
 import { NextResponse } from "next/server";
 

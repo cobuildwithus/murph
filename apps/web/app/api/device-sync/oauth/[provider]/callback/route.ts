@@ -1,4 +1,4 @@
-import { isDeviceSyncError } from "@murphai/device-syncd";
+import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 
 import { createHostedDeviceSyncControlPlane } from "../../../../../../src/lib/device-sync/control-plane";
 import {

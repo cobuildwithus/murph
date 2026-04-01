@@ -1,11 +1,11 @@
 import type {
   OuraDeviceSyncProviderConfig,
   WhoopDeviceSyncProviderConfig,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 import {
   readConfiguredOuraDeviceSyncProviderConfig,
   readConfiguredWhoopDeviceSyncProviderConfig,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 
 import { decodeHostedEncryptionKey } from "./crypto";
 import { normalizeNullableString, parseCommaSeparatedList } from "./shared";

@@ -6,7 +6,7 @@ import {
   type HandleWebhookResult,
   type PublicDeviceSyncAccount,
   type PublicProviderDescriptor,
-} from "@murphai/device-syncd";
+} from "@murphai/device-syncd/public-ingress";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {

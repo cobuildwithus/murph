@@ -110,6 +110,16 @@ async function verifyWorkspaceImports(failures) {
     const sourceMember = findWorkspaceMember(filePath);
 
     for (const specifier of extractModuleSpecifiers(source)) {
+      const importPolicyFailure = verifyWorkspaceImportPolicy({
+        filePath,
+        sourceMember,
+        specifier,
+      });
+
+      if (importPolicyFailure) {
+        failures.push(importPolicyFailure);
+      }
+
       if (specifier.startsWith(".")) {
         const resolvedTarget = path.resolve(path.dirname(filePath), specifier);
         const targetMember = findWorkspaceMember(resolvedTarget);
@@ -176,6 +186,18 @@ async function buildExportedSpecifiersByPackage() {
   }
 
   return exportedSpecifiersByPackage;
+}
+
+function verifyWorkspaceImportPolicy({
+  filePath,
+  sourceMember,
+  specifier,
+}) {
+  if (sourceMember === "apps/web" && specifier === "@murphai/device-syncd") {
+    return `${path.relative(repoRoot, filePath)} imports ${JSON.stringify(specifier)} from the device-sync daemon root; hosted web must use @murphai/device-syncd/public-ingress or another explicit subpath so callback/webhook code does not depend on daemon/server exports.`;
+  }
+
+  return null;
 }
 
 function extractModuleSpecifiers(source) {

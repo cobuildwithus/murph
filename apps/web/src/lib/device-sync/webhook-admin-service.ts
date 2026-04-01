@@ -1,4 +1,4 @@
-import type { DeviceSyncProvider, PublicDeviceSyncAccount } from "@murphai/device-syncd";
+import type { DeviceSyncProvider, PublicDeviceSyncAccount } from "@murphai/device-syncd/public-ingress";
 import {
   normalizeHostedExecutionErrorMessage,
   normalizeHostedExecutionOperatorMessage,

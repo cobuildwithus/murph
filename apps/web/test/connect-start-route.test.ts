@@ -1,4 +1,4 @@
-import { deviceSyncError } from "@murphai/device-syncd";
+import { deviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({

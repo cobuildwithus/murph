@@ -6,7 +6,7 @@ Murph's CLI can install, start, reuse, and stop this daemon for the selected vau
 
 The daemon binds the control plane to localhost by default. CLI and web clients must authenticate that control plane with a bearer token. If provider callbacks or webhooks need public reachability, expose only the public callback/webhook routes through a separate listener or reverse proxy instead of widening `/accounts/*` and `/providers/*/connect`.
 
-The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook verification/dispatch. That shared ingress is the seam for a future hosted Vercel control plane while keeping the current local/tunneled callback flow alive.
+The package now also exports a reusable `DeviceSyncPublicIngress` layer that encapsulates provider-agnostic OAuth state, callback handling, and webhook verification/dispatch. Hosted or alternate HTTP surfaces should import that seam from `@murphai/device-syncd/public-ingress` so they do not couple themselves to the daemon root export. That shared ingress is the seam for a future hosted Vercel control plane while keeping the current local/tunneled callback flow alive.
 For non-daemon callers, `@murphai/device-syncd/client` is the canonical shared control-plane client surface for base-url/token resolution, loopback safety checks, and JSON request helpers.
 
 What it does:
@@ -114,6 +114,7 @@ The published bin name is also `murph-device-syncd`.
 ## Control-plane clients
 
 - `@murphai/device-syncd/client` is the canonical shared client/helper surface for device-sync control-plane callers
+- `@murphai/device-syncd/public-ingress` is the canonical shared callback/webhook ingress surface for hosted or alternate HTTP adapters
 - `vault-cli device ...` can auto-start and reuse this daemon for the selected vault, or it can target an explicit control plane through `DEVICE_SYNC_BASE_URL`
 - `vault-cli` and `packages/local-web` authenticate local control routes with `DEVICE_SYNC_CONTROL_TOKEN`
 - `packages/local-web` can show provider/account status and redirect through this daemon for one-click auth

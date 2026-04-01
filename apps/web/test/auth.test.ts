@@ -1,4 +1,4 @@
-import { DeviceSyncError } from "@murphai/device-syncd";
+import { DeviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { describe, expect, it } from "vitest";
 
 import {
