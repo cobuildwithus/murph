@@ -3131,10 +3131,12 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
     throw new Error('Expected persisted inbox capture result.')
   }
   const persisted = persistedCapture as {
+    createdAt: string
     eventId: string
     auditId?: string
     envelopePath: string
   }
+  const auditRelativePath = `audit/${persisted.createdAt.slice(0, 4)}/${persisted.createdAt.slice(0, 7)}.jsonl`
 
   const eventRecords = await readJsonlRecords({
     vaultRoot,
@@ -3142,7 +3144,7 @@ test('sendAssistantMessage allows concurrent inbox canonical writes that go thro
   })
   const auditRecords = await readJsonlRecords({
     vaultRoot,
-    relativePath: 'audit/2026/2026-03.jsonl',
+    relativePath: auditRelativePath,
   })
   assert.equal(eventRecords.filter((record) => record.id === persisted.eventId).length, 1)
   assert.equal(auditRecords.filter((record) => record.id === persisted.auditId).length, 1)

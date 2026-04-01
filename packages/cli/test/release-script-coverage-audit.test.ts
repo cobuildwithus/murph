@@ -202,8 +202,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(summary.primaryPackage?.name).toBe('murph')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
       '@murph/contracts',
-      '@murph/hosted-execution',
-      '@murph/runtime-state/node',
+      '@murph/runtime-state',
       '@murph/gateway-core',
       '@murph/core',
       '@murph/query',
@@ -211,6 +210,7 @@ describe('monorepo release flow coverage audit', () => {
       '@murph/device-syncd',
       '@murph/inboxd',
       '@murph/parsers',
+      '@murph/hosted-execution',
       '@murph/assistant-core',
       '@murph/gateway-local',
       '@murph/assistant-runtime',

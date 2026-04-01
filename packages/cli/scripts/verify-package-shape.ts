@@ -201,8 +201,10 @@ assert(
   'package.json package-local scripts must call tsx or vitest directly instead of node --import=tsx.',
 )
 assert(
-  !Object.values(packageJson.scripts ?? {}).some((script) => script?.includes('.mjs')),
-  'package.json package-local scripts must not point at legacy .mjs files.',
+  !Object.values(packageJson.scripts ?? {}).some((script) =>
+    script ? referencesPackageLocalLegacyMjs(script, packageDir) : false
+  ),
+  'package.json package-local scripts must not point at package-local legacy .mjs files.',
 )
 assert(
   !packageLocalTsFiles.some((filePath) => path.basename(filePath) === 'require-cli-toolchain.ts'),
@@ -320,4 +322,26 @@ async function listFilesRecursive(directoryPath: string): Promise<string[]> {
   }
 
   return files
+}
+
+function referencesPackageLocalLegacyMjs(
+  script: string,
+  packageRoot: string,
+): boolean {
+  const matches = script.match(/(?:"([^"]+)"|'([^']+)'|`([^`]+)`|(\S+))/gu) ?? []
+
+  return matches.some((token) => {
+    const raw = token.replace(/^['"`]|['"`]$/gu, '')
+
+    if (!raw.endsWith('.mjs')) {
+      return false
+    }
+
+    if (!raw.startsWith('./') && !raw.startsWith('../')) {
+      return false
+    }
+
+    const resolved = path.resolve(packageRoot, raw)
+    return resolved.startsWith(packageRoot + path.sep)
+  })
 }

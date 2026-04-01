@@ -1,20 +1,21 @@
 import assert from "node:assert/strict";
 import { generateUlid } from "@murph/runtime-state";
-import { test, vi } from "vitest";
-
-const { randomBytesMock } = vi.hoisted(() => ({
-  randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
-}));
-
-vi.mock("node:crypto", async () => {
-  const actual = await vi.importActual<typeof import("node:crypto")>("node:crypto");
-  return {
-    ...actual,
-    randomBytes: randomBytesMock,
-  };
-});
+import { afterEach, beforeEach, test, vi } from "vitest";
 
 import { generatePrefixedId, generateStateCode, normalizeString, sanitizeKey } from "../src/shared.ts";
+
+beforeEach(() => {
+  vi.stubGlobal("crypto", {
+    getRandomValues(target: Uint8Array) {
+      target.set(Uint8Array.from(Array.from({ length: target.length }, (_, index) => index)));
+      return target;
+    },
+  } as Crypto);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 test("device-syncd id helpers preserve dash sanitation and state-code format", () => {
   assert.equal(generateUlid(0), "00000000000123456789ABCDEF");

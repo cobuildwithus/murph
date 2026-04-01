@@ -4184,6 +4184,13 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
   const stubBin = path.join(tempRoot, 'bin')
   const callLog = path.join(tempRoot, 'calls.log')
   const pathValue = `${stubBin}${path.delimiter}${process.env.PATH ?? ''}`
+  const workspacePackageJson = JSON.parse(
+    await readFile(path.join(repoRoot, 'package.json'), 'utf8'),
+  ) as {
+    packageManager?: string
+  }
+  const pnpmVersion =
+    workspacePackageJson.packageManager?.match(/^pnpm@([^+]+)/u)?.[1] ?? 'UNCONFIRMED'
 
   await writeExecutable(path.join(stubBin, 'uname'), '#!/usr/bin/env bash\necho Darwin\n')
   await writeExecutable(
@@ -4210,7 +4217,10 @@ test.sequential('setup-macos wrapper dry-run prints a plan without mutating the 
     assert.match(result.stdout, /Install plan/u)
     assert.match(result.stdout, /Dry run requested/u)
     assert.match(result.stdout, /Node requirement: >= 22\.16\.0/u)
-    assert.match(result.stdout, /pnpm: 9\.15\.9 via corepack/u)
+    assert.match(
+      result.stdout,
+      new RegExp(`pnpm: ${pnpmVersion.replaceAll('.', '\\.')} via corepack`, 'u'),
+    )
     assert.match(
       result.stdout,
       /ffmpeg, poppler\/pdftotext, whisper\.cpp, and a local Whisper model/u,
