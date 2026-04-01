@@ -104,6 +104,7 @@ export function canContinueHostedPrivyClientSession(issue: HostedPrivyClientSess
 
 export function shouldAutoContinueHostedPrivyClientSession(input: {
   authenticated: boolean;
+  autoContinueSuppressed: boolean;
   autoContinueTriggered: boolean;
   checkingAuthenticatedSession: boolean;
   issue: HostedPrivyClientSessionIssue | null;
@@ -117,11 +118,25 @@ export function shouldAutoContinueHostedPrivyClientSession(input: {
     return false;
   }
 
-  if (input.checkingAuthenticatedSession || input.pendingAction !== null || input.autoContinueTriggered) {
+  if (
+    input.autoContinueSuppressed
+    || input.checkingAuthenticatedSession
+    || input.pendingAction !== null
+    || input.autoContinueTriggered
+  ) {
     return false;
   }
 
   return true;
+}
+
+export function shouldSuppressHostedPrivyAutoContinueAfterError(error: unknown): boolean {
+  return Boolean(
+    error instanceof Error
+    && error.name === "HostedOnboardingApiError"
+    && "retryable" in error
+    && (error as { retryable?: unknown }).retryable === false,
+  );
 }
 
 export function shouldResetHostedPrivyClientSessionToSms(input: {

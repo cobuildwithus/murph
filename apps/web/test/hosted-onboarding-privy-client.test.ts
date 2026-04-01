@@ -5,9 +5,11 @@ import {
   describeHostedPrivyClientSessionIssue,
   ensureHostedPrivyPhoneAndWalletReady,
   resolveHostedPrivyClientSessionIssue,
+  shouldSuppressHostedPrivyAutoContinueAfterError,
   shouldAutoContinueHostedPrivyClientSession,
   shouldResetHostedPrivyClientSessionToSms,
 } from "@/src/lib/hosted-onboarding/privy-client";
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 
 describe("hosted Privy client wallet readiness", () => {
   it("treats a missing wallet as continuable but a missing phone as blocking", () => {
@@ -39,6 +41,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       shouldAutoContinueHostedPrivyClientSession({
         authenticated: true,
+        autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
         issue: null,
@@ -49,6 +52,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       shouldAutoContinueHostedPrivyClientSession({
         authenticated: true,
+        autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
         issue: "missing-wallet",
@@ -59,6 +63,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       shouldAutoContinueHostedPrivyClientSession({
         authenticated: true,
+        autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
         issue: "missing-phone",
@@ -69,6 +74,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       shouldAutoContinueHostedPrivyClientSession({
         authenticated: true,
+        autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: true,
         issue: null,
@@ -79,6 +85,7 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       shouldAutoContinueHostedPrivyClientSession({
         authenticated: true,
+        autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
         issue: null,
@@ -89,12 +96,48 @@ describe("hosted Privy client wallet readiness", () => {
     expect(
       shouldAutoContinueHostedPrivyClientSession({
         authenticated: true,
+        autoContinueSuppressed: false,
         autoContinueTriggered: true,
         checkingAuthenticatedSession: false,
         issue: null,
         pendingAction: null,
       }),
     ).toBe(false);
+
+    expect(
+      shouldAutoContinueHostedPrivyClientSession({
+        authenticated: true,
+        autoContinueSuppressed: true,
+        autoContinueTriggered: false,
+        checkingAuthenticatedSession: false,
+        issue: null,
+        pendingAction: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("suppresses further auto-continue attempts after a terminal completion API error", () => {
+    expect(
+      shouldSuppressHostedPrivyAutoContinueAfterError(
+        new HostedOnboardingApiError({
+          code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+          message: "A Privy identity cookie is required to continue.",
+          retryable: false,
+        }),
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldSuppressHostedPrivyAutoContinueAfterError(
+        new HostedOnboardingApiError({
+          code: "PRIVY_WALLET_NOT_READY",
+          message: "Wait a moment and try again.",
+          retryable: true,
+        }),
+      ),
+    ).toBe(false);
+
+    expect(shouldSuppressHostedPrivyAutoContinueAfterError(new Error("network"))).toBe(false);
   });
 
   it("silently restarts authenticated sessions that are missing a verified phone number", () => {
