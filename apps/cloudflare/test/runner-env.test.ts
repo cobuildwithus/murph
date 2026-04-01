@@ -195,14 +195,6 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         OPENAI_API_KEY: "sk-user",
         VENICE_API_KEY: "venice-user",
       },
-      webControlPlane: {
-        deviceSyncRuntimeBaseUrl: "http://device-sync.worker",
-        internalToken: null,
-        schedulerToken: null,
-        shareBaseUrl: "http://share-pack.worker",
-        shareToken: null,
-        usageBaseUrl: "http://usage.worker",
-      },
     });
   });
 });
