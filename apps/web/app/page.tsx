@@ -4,6 +4,7 @@ import { HostedPhoneAuth } from "@/src/components/hosted-onboarding/hosted-phone
 import {
   resolveHostedInstallScriptUrl,
   resolveHostedPrivyClientAppId,
+  resolveHostedPrivyClientId,
   resolveHostedSignupPhoneNumber,
 } from "@/src/lib/hosted-onboarding/landing";
 import { hasHostedPrivyPhoneAuthConfig } from "@/src/lib/hosted-onboarding/privy";
@@ -94,6 +95,7 @@ export default function HomePage() {
   const installScriptUrl = resolveHostedInstallScriptUrl();
   const installCommandUrl = installScriptUrl ?? "https://YOUR_DOMAIN/install.sh";
   const privyAppId = resolveHostedPrivyClientAppId();
+  const privyClientId = resolveHostedPrivyClientId();
   const signupPhone = resolveHostedSignupPhoneNumber();
   const signupHref = signupPhone ? `sms:${signupPhone.smsValue}` : null;
   const phoneAuthReady = hasHostedPrivyPhoneAuthConfig() && Boolean(privyAppId);
@@ -159,7 +161,7 @@ export default function HomePage() {
 
               <div className="mt-5 rounded bg-white p-4 text-stone-900">
                 {phoneAuthReady && privyAppId ? (
-                  <HostedPhoneAuth mode="public" privyAppId={privyAppId} />
+                  <HostedPhoneAuth mode="public" privyAppId={privyAppId} privyClientId={privyClientId} />
                 ) : (
                   <p className="text-sm leading-relaxed text-stone-500">
                     Phone signup is not configured for this environment yet.

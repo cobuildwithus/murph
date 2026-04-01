@@ -57,6 +57,7 @@ describe("HostedPhoneAuth", () => {
       React.createElement(HostedPhoneAuth, {
         mode: "public",
         privyAppId: "privy-app-id",
+        privyClientId: "privy-client-id",
       }),
     );
 
@@ -79,6 +80,7 @@ describe("HostedPhoneAuth", () => {
         mode: "invite",
         phoneHint: "+1 (415) 555-2671",
         privyAppId: "privy-app-id",
+        privyClientId: "privy-client-id",
       }),
     );
 

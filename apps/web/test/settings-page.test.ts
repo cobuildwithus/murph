@@ -7,6 +7,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   cookies: vi.fn(),
   resolveHostedPrivyClientAppId: vi.fn(),
+  resolveHostedPrivyClientId: vi.fn(),
   resolveHostedSessionFromCookieStore: vi.fn(),
 }));
 
@@ -46,6 +47,7 @@ vi.mock("@/src/components/hosted-onboarding/privy-provider", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedPrivyClientAppId: mocks.resolveHostedPrivyClientAppId,
+  resolveHostedPrivyClientId: mocks.resolveHostedPrivyClientId,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/session", () => ({
@@ -56,6 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.cookies.mockResolvedValue({ get: vi.fn() });
   mocks.resolveHostedPrivyClientAppId.mockReturnValue("cm_app_123");
+  mocks.resolveHostedPrivyClientId.mockReturnValue("client_123");
   mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({
     member: {
       normalizedPhoneNumber: "+14155552671",

@@ -16,6 +16,7 @@ interface JoinInviteClientProps {
   initialStatus: HostedInviteStatusPayload;
   inviteCode: string;
   privyAppId: string | null;
+  privyClientId?: string | null;
   shareCode: string | null;
   sharePreview: HostedSharePreview | null;
 }
@@ -26,6 +27,7 @@ export function JoinInviteClient({
   initialStatus,
   inviteCode,
   privyAppId,
+  privyClientId,
   shareCode,
   sharePreview,
 }: JoinInviteClientProps) {
@@ -243,6 +245,7 @@ export function JoinInviteClient({
                   onCompleted={handlePhoneVerified}
                   phoneHint={status.invite?.phoneHint ?? status.member?.phoneHint ?? null}
                   privyAppId={privyAppId}
+                  privyClientId={privyClientId}
                 />
               </div>
             ) : (

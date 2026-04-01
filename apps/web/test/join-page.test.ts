@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedSharePageData: vi.fn(),
   cookies: vi.fn(),
   resolveHostedPrivyClientAppId: vi.fn(),
+  resolveHostedPrivyClientId: vi.fn(),
   resolveHostedSessionFromCookieStore: vi.fn(),
 }));
 
@@ -21,6 +22,7 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
     initialStatus: unknown;
     inviteCode: string;
     privyAppId: string | null;
+    privyClientId: string | null;
     shareCode: string | null;
     sharePreview: unknown;
   }) {
@@ -29,6 +31,7 @@ vi.mock("@/src/components/hosted-onboarding/join-invite-client", () => ({
       {
         "data-invite-code": input.inviteCode,
         "data-privy-app-id": input.privyAppId ?? "",
+        "data-privy-client-id": input.privyClientId ?? "",
         "data-share-code": input.shareCode ?? "",
       },
       "Join invite client",
@@ -42,6 +45,7 @@ vi.mock("@/src/lib/hosted-share/service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedPrivyClientAppId: mocks.resolveHostedPrivyClientAppId,
+  resolveHostedPrivyClientId: mocks.resolveHostedPrivyClientId,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
@@ -57,6 +61,7 @@ beforeEach(() => {
   mocks.cookies.mockResolvedValue({ get: vi.fn() });
   mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({ member: { id: "member_123" } });
   mocks.resolveHostedPrivyClientAppId.mockReturnValue("cm_app_123");
+  mocks.resolveHostedPrivyClientId.mockReturnValue("client_123");
   mocks.buildHostedInvitePageData.mockResolvedValue({
     capabilities: {
       billingReady: true,
@@ -102,5 +107,6 @@ test("JoinInvitePage passes the server-resolved Privy app id into the client tre
   });
   assert.match(markup, /data-invite-code="invite-code"/);
   assert.match(markup, /data-privy-app-id="cm_app_123"/);
+  assert.match(markup, /data-privy-client-id="client_123"/);
   assert.match(markup, /data-share-code="share-code"/);
 });
