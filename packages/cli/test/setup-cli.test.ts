@@ -679,7 +679,6 @@ fi
 
 cli_package_root="$repo_root/packages/cli"
 cli_bin_path="$cli_package_root/dist/bin.js"
-cli_source_bin_path="$cli_package_root/src/bin.ts"
 required_cli_dist_files=(
   "$cli_bin_path"
   "$cli_package_root/dist/index.js"
@@ -725,18 +724,6 @@ if is_discovery_invocation "$@"; then
     run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
     exit $?
   fi
-
-  if [ -f "$cli_source_bin_path" ]; then
-    if command -v pnpm >/dev/null 2>&1; then
-      run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-      exit $?
-    fi
-
-    if command -v corepack >/dev/null 2>&1; then
-      run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-      exit $?
-    fi
-  fi
 fi
 
 missing_packages=()
@@ -777,28 +764,12 @@ else
   cli_dist_ready=false
 fi
 
-if [ "$cli_dist_ready" != true ]; then
-  printf '%s\n' 'Murph CLI shim could not refresh build artifacts; falling back to the source CLI.' >&2
-fi
-
 if [ "$cli_dist_ready" = true ]; then
   run_supervised env SETUP_PROGRAM_NAME='${shimName}' node "$cli_bin_path" "$@"
   exit $?
 fi
 
-if [ -f "$cli_source_bin_path" ]; then
-  if command -v pnpm >/dev/null 2>&1; then
-    run_supervised env SETUP_PROGRAM_NAME='${shimName}' pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-    exit $?
-  fi
-
-  if command -v corepack >/dev/null 2>&1; then
-    run_supervised env SETUP_PROGRAM_NAME='${shimName}' corepack pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-    exit $?
-  fi
-fi
-
-printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
+printf '%s\n' 'Murph CLI build output is unavailable or incomplete. Run \`pnpm --dir <repo> build:test-runtime:prepared\` (preferred) or \`pnpm --dir <repo> build\` from the repo checkout.' >&2
 exit 1
 `
 }
@@ -3480,7 +3451,7 @@ exit 1
   }
 })
 
-test.sequential('CLI shim falls back to the source CLI when auto-build repair fails', async () => {
+test.sequential('CLI shim fails loudly when auto-build repair fails', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-source-fallback-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
@@ -3521,10 +3492,6 @@ set -euo pipefail
 if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
   exit 23
 fi
-if [ "$1" = "--dir" ] && [ "$3" = "exec" ] && [ "$4" = "tsx" ]; then
-  printf '%s\\n' 'source-fallback-ok'
-  exit 0
-fi
 exit 1
 `,
     )
@@ -3533,24 +3500,21 @@ exit 1
       buildExpectedCliShimScript(path.join(cliDistRoot, 'bin.js'), 'murph'),
     )
 
-    const result = await execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+    await assert.rejects(
+      execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        }),
       }),
-    })
-
-    assert.match(
-      result.stderr,
-      /Murph CLI shim could not refresh build artifacts; falling back to the source CLI\./u,
+      /Murph CLI build output is unavailable or incomplete\./u,
     )
-    assert.equal(result.stdout.trim(), 'source-fallback-ok')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
 })
 
-test.sequential('CLI shim warns and falls back to the source CLI when repair succeeds but leaves onboarding dist incomplete', async () => {
+test.sequential('CLI shim fails loudly when repair succeeds but leaves onboarding dist incomplete', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-incomplete-repair-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
@@ -3596,10 +3560,6 @@ if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
   printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-cli.js"
   exit 0
 fi
-if [ "$1" = "--dir" ] && [ "$3" = "exec" ] && [ "$4" = "tsx" ]; then
-  printf '%s\\n' 'source-incomplete-fallback-ok'
-  exit 0
-fi
 exit 1
 `,
     )
@@ -3608,18 +3568,15 @@ exit 1
       buildExpectedCliShimScript(path.join(cliDistRoot, 'bin.js'), 'murph'),
     )
 
-    const result = await execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
-      env: withoutNodeV8Coverage({
-        ...process.env,
-        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+    await assert.rejects(
+      execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+        }),
       }),
-    })
-
-    assert.match(
-      result.stderr,
-      /Murph CLI shim could not refresh build artifacts; falling back to the source CLI\./u,
+      /Murph CLI build output is unavailable or incomplete\./u,
     )
-    assert.equal(result.stdout.trim(), 'source-incomplete-fallback-ok')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }

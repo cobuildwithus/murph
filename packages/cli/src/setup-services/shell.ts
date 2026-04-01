@@ -398,7 +398,6 @@ fi
 
 cli_package_root="$repo_root/packages/cli"
 cli_bin_path="$cli_package_root/dist/bin.js"
-cli_source_bin_path="$cli_package_root/src/bin.ts"
 required_cli_dist_files=(
   "$cli_bin_path"
   "$cli_package_root/dist/index.js"
@@ -444,18 +443,6 @@ if is_discovery_invocation "$@"; then
     run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node "$cli_bin_path" "$@"
     exit $?
   fi
-
-  if [ -f "$cli_source_bin_path" ]; then
-    if command -v pnpm >/dev/null 2>&1; then
-      run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-      exit $?
-    fi
-
-    if command -v corepack >/dev/null 2>&1; then
-      run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} corepack pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-      exit $?
-    fi
-  fi
 fi
 
 missing_packages=()
@@ -496,28 +483,12 @@ else
   cli_dist_ready=false
 fi
 
-if [ "$cli_dist_ready" != true ]; then
-  printf '%s\n' 'Murph CLI shim could not refresh build artifacts; falling back to the source CLI.' >&2
-fi
-
 if [ "$cli_dist_ready" = true ]; then
   run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} node "$cli_bin_path" "$@"
   exit $?
 fi
 
-if [ -f "$cli_source_bin_path" ]; then
-  if command -v pnpm >/dev/null 2>&1; then
-    run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-    exit $?
-  fi
-
-  if command -v corepack >/dev/null 2>&1; then
-    run_supervised env SETUP_PROGRAM_NAME=${quoteShellArgument(shimName)} corepack pnpm --dir "$repo_root" exec tsx "$cli_source_bin_path" "$@"
-    exit $?
-  fi
-fi
-
-printf '%s\n' 'Murph CLI build output is unavailable. Run \`pnpm --dir <repo> build\` or \`pnpm --dir <repo> chat\` from the repo checkout.' >&2
+printf '%s\n' 'Murph CLI build output is unavailable or incomplete. Run \`pnpm --dir <repo> build:test-runtime:prepared\` (preferred) or \`pnpm --dir <repo> build\` from the repo checkout.' >&2
 exit 1
 `
 }
