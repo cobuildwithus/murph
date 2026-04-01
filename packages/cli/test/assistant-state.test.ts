@@ -162,7 +162,7 @@ test('assistant sessions live outside the vault, omit redundant path metadata, a
   assert.equal(statePaths.cronJobsPath, path.join(statePaths.cronDirectory, 'jobs.json'))
   assert.equal(statePaths.cronRunsDirectory, path.join(statePaths.cronDirectory, 'runs'))
   assert.equal(statePaths.stateDirectory, path.join(statePaths.assistantStateRoot, 'state'))
-  assert.equal(statePaths.receiptsDirectory, path.join(statePaths.assistantStateRoot, 'receipts'))
+  assert.equal(statePaths.turnsDirectory, path.join(statePaths.assistantStateRoot, 'receipts'))
   assert.equal(statePaths.outboxDirectory, path.join(statePaths.assistantStateRoot, 'outbox'))
   assert.equal(statePaths.distillationsDirectory, path.join(statePaths.assistantStateRoot, 'distillations'))
 

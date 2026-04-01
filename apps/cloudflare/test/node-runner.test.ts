@@ -51,15 +51,15 @@ import {
 
 const describe = baseDescribe.sequential;
 
-type LegacyHostedExecutionJobInput =
+type NodeRunnerTestInput =
   HostedAssistantRuntimeJobInput["request"] &
   Pick<
     HostedAssistantRuntimeConfig,
-    "forwardedEnv" | "internalWorkerProxyToken" | "userEnv" | "webControlPlane"
+    "forwardedEnv" | "internalWorkerProxyToken" | "userEnv"
   >;
 
 async function runHostedExecutionJob(
-  input: LegacyHostedExecutionJobInput,
+  input: NodeRunnerTestInput,
   options?: {
     signal?: AbortSignal;
   },
@@ -68,14 +68,12 @@ async function runHostedExecutionJob(
     forwardedEnv,
     internalWorkerProxyToken,
     userEnv,
-    webControlPlane,
     ...request
   } = input;
   const runtime: HostedAssistantRuntimeConfig = {
     ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
     ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
     ...(userEnv === undefined ? {} : { userEnv }),
-    ...(webControlPlane === undefined ? {} : { webControlPlane }),
   };
 
   return runHostedExecutionJobInternal({

@@ -26,7 +26,6 @@ export interface AssistantStatePaths {
   providerRouteRecoveryDirectory: string;
   providerRouteRecoverySecretsDirectory: string;
   quarantineDirectory: string;
-  receiptsDirectory: string;
   secretsDirectory: string;
   sessionSecretsDirectory: string;
   resourceBudgetPath: string;
@@ -50,7 +49,7 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
   const distillationsDirectory = path.join(rootPath, "distillations");
   const journalsDirectory = path.join(rootPath, "journals");
   const outboxDirectory = path.join(rootPath, "outbox");
-  const receiptsDirectory = path.join(rootPath, "receipts");
+  const turnsDirectory = path.join(rootPath, "receipts");
   const secretsDirectory = path.join(rootPath, "secrets");
   const sessionSecretsDirectory = path.join(secretsDirectory, "sessions");
   const providerRouteRecoverySecretsDirectory = path.join(
@@ -80,7 +79,6 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     providerRouteRecoveryDirectory: path.join(rootPath, "provider-route-recovery"),
     providerRouteRecoverySecretsDirectory,
     quarantineDirectory: path.join(rootPath, "quarantine"),
-    receiptsDirectory,
     secretsDirectory,
     sessionSecretsDirectory,
     resourceBudgetPath: path.join(rootPath, "runtime-budgets.json"),
@@ -89,9 +87,7 @@ export function resolveAssistantStatePaths(vaultRoot: string): AssistantStatePat
     stateDirectory: path.join(rootPath, "state"),
     statusPath: path.join(rootPath, "status.json"),
     transcriptsDirectory: path.join(rootPath, "transcripts"),
-    // Keep the newer timeline-oriented helper name aligned with the existing
-    // receipts directory so in-flight receipt-based tooling stays compatible.
-    turnsDirectory: receiptsDirectory,
+    turnsDirectory,
     usageDirectory,
     usagePendingDirectory: path.join(usageDirectory, "pending"),
   };

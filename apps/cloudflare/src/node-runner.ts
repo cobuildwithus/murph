@@ -89,7 +89,6 @@ function buildHostedExecutionJobRuntime(
 ): HostedAssistantRuntimeConfig {
   const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
   const callbackWebControlPlane = callbackBaseUrls?.webControlPlane ?? null;
-  const configuredWebControlPlane = requestedRuntime.webControlPlane ?? null;
   const forwardedEnv: Record<string, string> = {
     ...buildHostedRunnerContainerEnv(process.env),
     ...(requestedRuntime.forwardedEnv ?? {}),
@@ -105,7 +104,6 @@ function buildHostedExecutionJobRuntime(
   );
 
   return {
-    ...requestedRuntime,
     ...(callbackBaseUrls?.artifactsBaseUrl === undefined
       ? {}
       : { artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl }),
@@ -118,14 +116,12 @@ function buildHostedExecutionJobRuntime(
     ...(callbackBaseUrls?.sideEffectsBaseUrl === undefined
       ? {}
       : { sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl }),
-    commitTimeoutMs:
-      requestedRuntime.commitTimeoutMs
-      ?? readHostedRunnerCommitTimeoutMs(
-        Number.parseInt(
-          resolvedForwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
-          10,
-        ),
+    commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
+      Number.parseInt(
+        resolvedForwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
+        10,
       ),
+    ),
     forwardedEnv: resolvedForwardedEnv,
     internalWorkerProxyToken: requestedRuntime.internalWorkerProxyToken ?? null,
     userEnv: filterHostedRunnerUserEnv(
@@ -134,28 +130,23 @@ function buildHostedExecutionJobRuntime(
     ),
     webControlPlane: {
       ...webControlPlaneFromEnv,
-      ...(configuredWebControlPlane ?? {}),
       ...(callbackWebControlPlane ?? {}),
       deviceSyncRuntimeBaseUrl:
         callbackWebControlPlane?.deviceSyncRuntimeBaseUrl
-        ?? configuredWebControlPlane?.deviceSyncRuntimeBaseUrl
         ?? webControlPlaneFromEnv.deviceSyncRuntimeBaseUrl
         ?? HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
       shareBaseUrl:
         callbackBaseUrls?.sharePackBaseUrl
         ?? callbackWebControlPlane?.shareBaseUrl
-        ?? configuredWebControlPlane?.shareBaseUrl
         ?? webControlPlaneFromEnv.shareBaseUrl
         ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
       shareToken:
         callbackBaseUrls?.sharePackToken
         ?? callbackWebControlPlane?.shareToken
-        ?? configuredWebControlPlane?.shareToken
         ?? webControlPlaneFromEnv.shareToken
         ?? null,
       usageBaseUrl:
         callbackWebControlPlane?.usageBaseUrl
-        ?? configuredWebControlPlane?.usageBaseUrl
         ?? webControlPlaneFromEnv.usageBaseUrl
         ?? HOSTED_RUNNER_USAGE_BASE_URL,
     },

@@ -61,7 +61,6 @@ import {
   unauthorized,
 } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
-import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import {
   createHostedEmailUserAddress,
   type HostedEmailInboundRoute,
@@ -247,7 +246,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
         env as unknown as Readonly<Record<string, string | undefined>>,
       ),
       env.BUNDLES,
-      buildHostedRunnerContainerEnv(env),
+      env,
       env.RUNNER_CONTAINER,
     );
   }
