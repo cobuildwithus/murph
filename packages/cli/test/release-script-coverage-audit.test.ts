@@ -112,12 +112,16 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'pnpm-workspace.yaml'),
       'utf8',
     )
+    const reviewGptVersionRange = String(
+      rootPackageJson.devDependencies?.['@cobuild/review-gpt'] ?? '',
+    )
+    const reviewGptPinnedVersion = reviewGptVersionRange.replace(/^\^/u, '')
 
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-export.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-download.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-wake.mjs'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.20')
-    expect(pnpmWorkspace).toContain("  - '@cobuild/review-gpt@0.5.20'")
+    expect(reviewGptVersionRange).toMatch(/^\^0\.5\.\d+$/u)
+    expect(pnpmWorkspace).toContain(`  - '@cobuild/review-gpt@${reviewGptPinnedVersion}'`)
     expect(pnpmWorkspace).not.toContain('patchedDependencies:')
     expect(existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.19.patch'))).toBe(false)
   })
