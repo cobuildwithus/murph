@@ -121,6 +121,19 @@ export function createJsonErrorResponse(
   );
 }
 
+export function withJsonErrorHandling<TArgs extends unknown[], TResponse extends Response>(
+  handler: (...args: TArgs) => Promise<TResponse>,
+  mapError: (error: unknown) => TResponse,
+): (...args: TArgs) => Promise<TResponse> {
+  return async (...args) => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      return mapError(error);
+    }
+  };
+}
+
 export function mergeJsonHeaders(
   defaultHeaders?: HeadersInit,
   headers?: HeadersInit,

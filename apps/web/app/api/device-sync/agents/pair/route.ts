@@ -1,15 +1,11 @@
 import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
-import { jsonError, jsonOk, readOptionalJsonObject } from "../../../../../src/lib/device-sync/http";
+import { jsonOk, readOptionalJsonObject, withJsonError } from "../../../../../src/lib/device-sync/http";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     const controlPlane = createHostedDeviceSyncControlPlane(request);
     controlPlane.assertBrowserMutationOrigin();
     const user = await controlPlane.requireAuthenticatedUser();
     const body = await readOptionalJsonObject(request);
     const label = typeof body.label === "string" ? body.label : null;
     return jsonOk(await controlPlane.pairAgent(user.id, label));
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

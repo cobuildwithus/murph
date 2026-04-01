@@ -4,10 +4,9 @@ import {
 } from "@/src/lib/device-sync/internal-runtime";
 import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/control-plane";
 import { authorizeHostedExecutionInternalRequest } from "@/src/lib/hosted-execution/internal";
-import { jsonError, jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readJsonObject } from "@/src/lib/hosted-onboarding/http";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     const body = await readJsonObject(request);
     const { trustedUserId } = authorizeHostedExecutionInternalRequest({
       acceptedToken: "internal",
@@ -23,7 +22,4 @@ export async function POST(request: Request) {
     await controlPlane.ensureHostedWebhookAdminUpkeepForRuntimeSnapshot(snapshotRequest);
     const snapshot = await buildHostedDeviceSyncRuntimeSnapshot(controlPlane.store, snapshotRequest);
     return jsonOk(snapshot);
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

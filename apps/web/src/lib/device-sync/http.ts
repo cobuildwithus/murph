@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import {
   createJsonErrorResponse,
   type JsonErrorMatcher,
+  withJsonErrorHandling,
 } from "../http";
 
 export { jsonOk, readJsonObject, readOptionalJsonObject, readRawBodyBuffer, resolveRouteParams } from "../http";
@@ -23,13 +24,7 @@ export function jsonError(error: unknown): NextResponse {
 export function withJsonError<TArgs extends unknown[]>(
   handler: (...args: TArgs) => Promise<Response>,
 ): (...args: TArgs) => Promise<Response> {
-  return async (...args) => {
-    try {
-      return await handler(...args);
-    } catch (error) {
-      return jsonError(error);
-    }
-  };
+  return withJsonErrorHandling(handler, jsonError);
 }
 
 export function callbackHtml(title: string, body: string, status = 200): NextResponse {

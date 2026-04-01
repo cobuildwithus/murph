@@ -2,10 +2,9 @@ import { importHostedAiUsageRecords } from "@/src/lib/hosted-execution/usage";
 import {
   authorizeHostedExecutionInternalRequest,
 } from "@/src/lib/hosted-execution/internal";
-import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     const body = await readOptionalJsonObject(request);
     const usage = Array.isArray(body.usage) ? body.usage : [];
     const { trustedUserId } = authorizeHostedExecutionInternalRequest({
@@ -28,7 +27,4 @@ export async function POST(request: Request) {
       recorded: imported.recordedIds.length,
       usageIds: imported.recordedIds,
     });
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

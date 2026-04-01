@@ -6,8 +6,15 @@ import {
   createJsonErrorResponse,
   mapDomainJsonError,
   type JsonErrorMapping,
+  withJsonErrorHandling,
 } from "../http";
 import { isHostedLinqError } from "./errors";
+
+export function withJsonError<TArgs extends unknown[]>(
+  handler: (...args: TArgs) => Promise<Response>,
+): (...args: TArgs) => Promise<Response> {
+  return withJsonErrorHandling(handler, jsonError);
+}
 
 export function jsonError(error: unknown): NextResponse {
   return createJsonErrorResponse(error, {

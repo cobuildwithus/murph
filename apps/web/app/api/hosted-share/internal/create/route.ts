@@ -1,10 +1,9 @@
 import { assertContract, sharePackSchema } from "@murph/contracts";
 
 import { createHostedShareLink, requireHostedShareInternalToken } from "@/src/lib/hosted-share/service";
-import { jsonError, jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readJsonObject } from "@/src/lib/hosted-onboarding/http";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     requireHostedShareInternalToken(request);
     const body = await readJsonObject(request);
     return jsonOk(
@@ -16,7 +15,4 @@ export async function POST(request: Request) {
         expiresInHours: typeof body.expiresInHours === "number" ? body.expiresInHours : undefined,
       }),
     );
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

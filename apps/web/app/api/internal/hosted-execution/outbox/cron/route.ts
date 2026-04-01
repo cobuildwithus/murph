@@ -1,9 +1,8 @@
 import { drainHostedExecutionOutbox } from "@/src/lib/hosted-execution/outbox";
 import { requireHostedExecutionSchedulerToken } from "@/src/lib/hosted-execution/internal";
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-export async function GET(request: Request) {
-  try {
+export const GET = withJsonError(async (request: Request) => {
     requireHostedExecutionSchedulerToken(request);
     const records = await drainHostedExecutionOutbox();
 
@@ -15,7 +14,4 @@ export async function GET(request: Request) {
         status: record.status,
       })),
     });
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

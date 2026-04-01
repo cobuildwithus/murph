@@ -1,4 +1,8 @@
-import type { BankEntityKind } from "@murph/contracts";
+import {
+  deriveProtocolGroupFromRelativePath,
+  type BankEntityKind,
+  type HealthEntityRegistryKind,
+} from "@murph/contracts";
 
 export type BankEntitySortBehavior = "gene-title" | "priority-title" | "title";
 
@@ -38,16 +42,7 @@ export interface BankRegistryQueryMetadata {
   ): Record<string, unknown>;
 }
 
-export type HealthRegistryProjectionKind = Extract<
-  BankEntityKind,
-  "goal" | "condition" | "allergy" | "protocol" | "family" | "genetics"
->;
-
-function deriveProtocolGroupFromRelativePath(relativePath: string): string | null {
-  const directories = relativePath.split("/").slice(0, -1);
-
-  return directories.length > 2 ? directories.slice(2).join("/") : null;
-}
+export type HealthRegistryProjectionKind = HealthEntityRegistryKind;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

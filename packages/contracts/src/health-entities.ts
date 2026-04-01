@@ -393,6 +393,11 @@ const checkedHealthEntityDefinitions = [
 export const healthEntityDefinitions: readonly HealthEntityDefinition[] =
   checkedHealthEntityDefinitions;
 
+export type HealthEntityRegistryKind = Extract<
+  HealthEntityKind,
+  "goal" | "condition" | "allergy" | "protocol" | "family" | "genetics"
+>;
+
 export type HealthEntityDefinitionWithRegistry = HealthEntityDefinition & {
   registry: HealthEntityRegistryMetadata;
 };
@@ -434,6 +439,37 @@ export function extractHealthEntityRegistryRelatedIds(
   attributes: Record<string, unknown>,
 ): string[] {
   return extractRegistryRelatedIds(extractHealthEntityRegistryLinks(kind, attributes));
+}
+
+export function deriveProtocolGroupFromRelativePath(
+  relativePath: string,
+  rootDirectory = "bank/protocols",
+): string | null {
+  const normalizedRelativePath = normalizeHealthEntityRelativePath(relativePath);
+  const normalizedRootDirectory = normalizeHealthEntityRelativePath(rootDirectory);
+  const rootPrefix = `${normalizedRootDirectory}/`;
+
+  if (!normalizedRelativePath.startsWith(rootPrefix)) {
+    return null;
+  }
+
+  const relativeToRoot = normalizedRelativePath.slice(rootPrefix.length);
+  const lastSeparatorIndex = relativeToRoot.lastIndexOf("/");
+
+  if (lastSeparatorIndex <= 0) {
+    return null;
+  }
+
+  const group = relativeToRoot.slice(0, lastSeparatorIndex).replace(/^\/+|\/+$/gu, "");
+  return group.length > 0 ? group : null;
+}
+
+function normalizeHealthEntityRelativePath(value: string): string {
+  return value
+    .replace(/\\/gu, "/")
+    .replace(/\/+/gu, "/")
+    .replace(/^\.\//u, "")
+    .replace(/^\/+|\/+$/gu, "");
 }
 
 export const goalRegistryEntityDefinition = requireHealthEntityRegistryDefinition("goal");

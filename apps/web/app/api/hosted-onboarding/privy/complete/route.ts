@@ -1,11 +1,10 @@
-import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 import { requireHostedPrivyCompletionIdentityFromCookies } from "@/src/lib/hosted-onboarding/privy";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { applyHostedSessionCookie } from "@/src/lib/hosted-onboarding/session";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const identity = await requireHostedPrivyCompletionIdentityFromCookies();
     const body = await readOptionalJsonObject(request);
@@ -24,7 +23,4 @@ export async function POST(request: Request) {
     applyHostedSessionCookie(response, result.token, result.expiresAt);
 
     return response;
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

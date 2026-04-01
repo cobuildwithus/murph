@@ -1,4 +1,7 @@
-import type { ProtocolUpsertPayload } from "@murph/contracts";
+import {
+  deriveProtocolGroupFromRelativePath,
+  type ProtocolUpsertPayload,
+} from "@murph/contracts";
 
 import { VaultError } from "../errors.ts";
 import { generateRecordId } from "../ids.ts";
@@ -20,7 +23,6 @@ import {
 import {
   buildMarkdownBody,
   detailList,
-  groupFromProtocolPath,
   requireObject,
   listSection,
   normalizeGroupPath,
@@ -164,6 +166,16 @@ function buildBody(record: ProtocolItemEntity): string {
   );
 }
 
+function requireProtocolGroupFromRelativePath(relativePath: string): string {
+  const group = deriveProtocolGroupFromRelativePath(relativePath, PROTOCOLS_DIRECTORY);
+
+  if (!group) {
+    throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol path is missing a group directory.");
+  }
+
+  return group;
+}
+
 function parseProtocolItemRecord(
   attributes: FrontmatterObject,
   relativePath: string,
@@ -202,7 +214,7 @@ function parseProtocolItemRecord(
     ingredients: normalizeSupplementIngredients(attributes.ingredients),
     relatedGoalIds: normalizeRecordIdList(attributes.relatedGoalIds, "relatedGoalIds", "goal"),
     relatedConditionIds: normalizeRecordIdList(attributes.relatedConditionIds, "relatedConditionIds", "cond"),
-    group: groupFromProtocolPath(relativePath, PROTOCOLS_DIRECTORY),
+    group: requireProtocolGroupFromRelativePath(relativePath),
   }) as ProtocolItemEntity;
 
   return {

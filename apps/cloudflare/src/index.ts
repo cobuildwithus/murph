@@ -51,7 +51,7 @@ import { readHostedExecutionEnvironment } from "./env.ts";
 import type {
   HostedExecutionCommittedResult,
 } from "./execution-journal.ts";
-import { json, readJsonObject } from "./json.ts";
+import { json, readJsonObject, readOptionalJsonObject } from "./json.ts";
 export { RunnerContainer } from "./runner-container.ts";
 import { buildHostedRunnerContainerEnv } from "./runner-env.ts";
 import {
@@ -877,20 +877,4 @@ function requireBearerAuthorization(
   return request.headers.get("authorization") === `Bearer ${token}`
     ? null
     : json({ error: "Unauthorized" }, 401);
-}
-
-async function readOptionalJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const payload = await request.text();
-
-  if (!payload.trim()) {
-    return {};
-  }
-
-  const parsed = JSON.parse(payload) as unknown;
-
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError("Request body must be a JSON object.");
-  }
-
-  return parsed as Record<string, unknown>;
 }

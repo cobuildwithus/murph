@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import { VaultError } from "../errors.ts";
 import { sanitizePathSegment } from "../path-safety.ts";
 import { toDateOnly } from "../time.ts";
@@ -179,17 +177,6 @@ export function normalizeGroupPath(value: string | undefined, fallback: string):
   }
 
   return segments.join("/");
-}
-
-export function groupFromProtocolPath(relativePath: string, rootDirectory: string): string {
-  const relativeToRoot = path.posix.relative(rootDirectory, relativePath);
-  const directoryName = path.posix.dirname(relativeToRoot);
-
-  if (!directoryName || directoryName === ".") {
-    throw new VaultError("VAULT_INVALID_PROTOCOL", "Protocol path is missing a group directory.");
-  }
-
-  return directoryName;
 }
 
 export function section(title: string, body: string): string {

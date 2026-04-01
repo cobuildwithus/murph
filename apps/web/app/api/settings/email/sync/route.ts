@@ -3,15 +3,14 @@ import { cookies } from "next/headers";
 import { syncHostedVerifiedEmailToHostedExecution } from "@/src/lib/hosted-execution/control";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { jsonError, jsonOk, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedPrivyUserForSession } from "@/src/lib/hosted-onboarding/privy";
 import {
   extractHostedPrivyVerifiedEmailAccount,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 import { resolveHostedSessionFromCookieStore } from "@/src/lib/hosted-onboarding/session";
 
-export async function POST(request: Request) {
-  try {
+export const POST = withJsonError(async (request: Request) => {
     assertHostedOnboardingMutationOrigin(request);
     const cookieStore = await cookies();
     const hostedSession = await resolveHostedSessionFromCookieStore(cookieStore);
@@ -26,7 +25,7 @@ export async function POST(request: Request) {
 
     const body = await readOptionalJsonObject(request);
     const expectedEmailAddress = normalizeComparableEmail(
-      body && typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,
+      typeof body.expectedEmailAddress === "string" ? body.expectedEmailAddress : null,
     );
     const { linkedAccounts } = await requireHostedPrivyUserForSession(cookieStore, hostedSession);
     const verifiedEmail = extractHostedPrivyVerifiedEmailAccount(linkedAccounts);
@@ -55,10 +54,7 @@ export async function POST(request: Request) {
       runTriggered: syncResult.runTriggered,
       verifiedAt: syncResult.verifiedAt,
     });
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});
 
 function normalizeComparableEmail(value: string | null | undefined): string | null {
   if (typeof value !== "string") {

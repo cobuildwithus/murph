@@ -1,5 +1,5 @@
 import { requireHostedExecutionSchedulerToken } from "@/src/lib/hosted-execution/internal";
-import { jsonError, jsonOk } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   drainHostedStripeEventQueue,
   reconcileSubmittedHostedRevnetIssuances,
@@ -7,8 +7,7 @@ import {
 import { drainHostedRevnetIssuanceSubmissionQueue } from "@/src/lib/hosted-onboarding/stripe-revnet-issuance";
 import { getPrisma } from "@/src/lib/prisma";
 
-export async function GET(request: Request) {
-  try {
+export const GET = withJsonError(async (request: Request) => {
     requireHostedExecutionSchedulerToken(request);
     const prisma = getPrisma();
     const drainedEventIds = await drainHostedStripeEventQueue({
@@ -26,7 +25,4 @@ export async function GET(request: Request) {
       drainedEventIds,
       submittedIssuanceIds,
     });
-  } catch (error) {
-    return jsonError(error);
-  }
-}
+});

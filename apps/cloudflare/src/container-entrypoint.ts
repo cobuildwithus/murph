@@ -6,6 +6,7 @@ import {
   parseHostedExecutionRunnerRequest,
 } from "@murph/hosted-execution";
 
+import { requireJsonObject } from "./json.ts";
 import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
 
 export async function startHostedContainerEntrypoint(input: {
@@ -65,7 +66,7 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       try {
-        job = parseHostedExecutionRunnerJobRequest(Buffer.concat(chunks));
+        job = parseHostedExecutionRunnerJobPayload(Buffer.concat(chunks));
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -142,7 +143,7 @@ function writeJsonResponse(
   response.end(JSON.stringify(payload));
 }
 
-function parseHostedExecutionRunnerJobRequest(payload: Uint8Array): HostedExecutionRunnerJobRequest {
+function parseHostedExecutionRunnerJobPayload(payload: Uint8Array): HostedExecutionRunnerJobRequest {
   const record = requireJsonObject(
     JSON.parse(Buffer.from(payload).toString("utf8")),
   );
@@ -154,15 +155,6 @@ function parseHostedExecutionRunnerJobRequest(payload: Uint8Array): HostedExecut
 
   return record as unknown as HostedExecutionRunnerJobRequest;
 }
-
-function requireJsonObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Request body must be a JSON object.");
-  }
-
-  return value as Record<string, unknown>;
-}
-
 function createRequestAbortController(
   request: IncomingMessage,
   response: ServerResponse,
