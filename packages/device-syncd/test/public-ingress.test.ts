@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
@@ -475,6 +475,88 @@ test("public ingress leaves the webhook trace retryable when the durable accepta
   assert.equal(duplicate.duplicate, true);
   assert.equal(attempts, 2);
   assert.equal(successes, 1);
+});
+
+test("public ingress does not stamp lastWebhookAt when durable acceptance fails", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-no-stamp",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted() {
+        throw new Error("transient enqueue failure");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  const connected = await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  await assert.rejects(() => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")), /transient enqueue failure/u);
+  assert.equal(store.lastRecordedWebhookTrace, null);
+  assert.equal(store.getConnectionByExternalAccount("demo", connected.account.externalAccountId)?.lastWebhookAt, null);
+});
+
+test("public ingress keeps accepted webhook traces when only receipt timestamp persistence fails", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const warn = vi.fn();
+  store.markWebhookReceived = () => {
+    throw new Error("mark failed");
+  };
+
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            externalAccountId: "demo-abc",
+            eventType: "demo.updated",
+            traceId: "trace-mark-failure",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    log: { warn },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.deepEqual(result, {
+    accepted: true,
+    duplicate: false,
+    provider: "demo",
+    eventType: "demo.updated",
+    traceId: "trace-mark-failure",
+  });
+  assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-mark-failure");
+  assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(warn.mock.calls.length, 1);
 });
 
 test("public ingress rejects overlapping active webhook deliveries until the first claim finishes", async () => {
