@@ -17,81 +17,25 @@ export function resolveHostedWorkerDeploymentTraffic(input: {
   rolloutPercentage: number;
 }): HostedWorkerDeploymentVersionTraffic[] {
   const rolloutPercentage = normalizeRolloutPercentage(input.rolloutPercentage);
-  const currentDeploymentVersions = input.currentDeploymentVersions.map((version) => ({
-    percentage: normalizeRolloutPercentage(version.percentage),
-    versionId: version.versionId,
-  }));
-
-  if (currentDeploymentVersions.length === 0) {
-    throw new Error(
-      "Gradual deployments require an existing deployment. Use a direct deploy for the first rollout.",
-    );
-  }
-
-  if (currentDeploymentVersions.length > 2) {
-    throw new Error("Cloudflare gradual deployments support at most two active versions.");
-  }
-
-  const candidateIndex = currentDeploymentVersions.findIndex(
-    ({ versionId }) => versionId === input.candidateVersionId,
+  const currentDeploymentVersions = normalizeCurrentDeploymentVersions(
+    input.currentDeploymentVersions,
   );
 
+  assertSupportedHostedWorkerDeploymentTraffic(currentDeploymentVersions);
+
   if (currentDeploymentVersions.length === 1) {
-    const [currentVersion] = currentDeploymentVersions;
-
-    if (currentVersion.versionId === input.candidateVersionId) {
-      if (rolloutPercentage !== 100) {
-        throw new Error(
-          "The candidate version is already 100% deployed. Select a different candidate or use a 100% rollout.",
-        );
-      }
-
-      return [currentVersion];
-    }
-
-    if (rolloutPercentage === 100) {
-      return [
-        {
-          percentage: 100,
-          versionId: input.candidateVersionId,
-        },
-      ];
-    }
-
-    return [
-      {
-        percentage: 100 - rolloutPercentage,
-        versionId: currentVersion.versionId,
-      },
-      {
-        percentage: rolloutPercentage,
-        versionId: input.candidateVersionId,
-      },
-    ];
+    return resolveSingleVersionDeploymentTraffic({
+      candidateVersionId: input.candidateVersionId,
+      currentVersion: currentDeploymentVersions[0],
+      rolloutPercentage,
+    });
   }
 
-  if (candidateIndex === -1) {
-    throw new Error(
-      "The current deployment already splits traffic between two versions. Finish or roll back that deployment before introducing a new candidate version.",
-    );
-  }
-
-  const remainingPercentage = 100 - rolloutPercentage;
-  const nextTraffic = currentDeploymentVersions.map((version, index) => ({
-    percentage: index === candidateIndex ? rolloutPercentage : remainingPercentage,
-    versionId: version.versionId,
-  }));
-
-  if (rolloutPercentage === 100) {
-    return [
-      {
-        percentage: 100,
-        versionId: input.candidateVersionId,
-      },
-    ];
-  }
-
-  return nextTraffic;
+  return resolveSplitDeploymentTraffic({
+    candidateVersionId: input.candidateVersionId,
+    currentDeploymentVersions,
+    rolloutPercentage,
+  });
 }
 
 export function formatHostedWorkerDeploymentVersionSpecs(
@@ -126,6 +70,95 @@ export function resolveHostedWorkerGradualDeploymentSupport(
     gradualDeploymentsSupported: true,
     migrationTags,
   };
+}
+
+function normalizeCurrentDeploymentVersions(
+  versions: HostedWorkerDeploymentVersionTraffic[],
+): HostedWorkerDeploymentVersionTraffic[] {
+  return versions.map((version) => ({
+    percentage: normalizeRolloutPercentage(version.percentage),
+    versionId: version.versionId,
+  }));
+}
+
+function assertSupportedHostedWorkerDeploymentTraffic(
+  currentDeploymentVersions: HostedWorkerDeploymentVersionTraffic[],
+): void {
+  if (currentDeploymentVersions.length === 0) {
+    throw new Error([
+      "Gradual deployments require an existing deployment.",
+      "Use a direct deploy for the first rollout.",
+    ].join(" "));
+  }
+
+  if (currentDeploymentVersions.length > 2) {
+    throw new Error("Cloudflare gradual deployments support at most two active versions.");
+  }
+}
+
+function resolveSingleVersionDeploymentTraffic(input: {
+  candidateVersionId: string;
+  currentVersion: HostedWorkerDeploymentVersionTraffic;
+  rolloutPercentage: number;
+}): HostedWorkerDeploymentVersionTraffic[] {
+  if (input.currentVersion.versionId === input.candidateVersionId) {
+    if (input.rolloutPercentage !== 100) {
+      throw new Error([
+        "The candidate version is already 100% deployed.",
+        "Select a different candidate or use a 100% rollout.",
+      ].join(" "));
+    }
+
+    return [input.currentVersion];
+  }
+
+  if (input.rolloutPercentage === 100) {
+    return [{
+      percentage: 100,
+      versionId: input.candidateVersionId,
+    }];
+  }
+
+  return [
+    {
+      percentage: 100 - input.rolloutPercentage,
+      versionId: input.currentVersion.versionId,
+    },
+    {
+      percentage: input.rolloutPercentage,
+      versionId: input.candidateVersionId,
+    },
+  ];
+}
+
+function resolveSplitDeploymentTraffic(input: {
+  candidateVersionId: string;
+  currentDeploymentVersions: HostedWorkerDeploymentVersionTraffic[];
+  rolloutPercentage: number;
+}): HostedWorkerDeploymentVersionTraffic[] {
+  const candidateIndex = input.currentDeploymentVersions.findIndex(
+    ({ versionId }) => versionId === input.candidateVersionId,
+  );
+
+  if (candidateIndex === -1) {
+    throw new Error([
+      "The current deployment already splits traffic between two versions.",
+      "Finish or roll back that deployment before introducing a new candidate version.",
+    ].join(" "));
+  }
+
+  if (input.rolloutPercentage === 100) {
+    return [{
+      percentage: 100,
+      versionId: input.candidateVersionId,
+    }];
+  }
+
+  const remainingPercentage = 100 - input.rolloutPercentage;
+  return input.currentDeploymentVersions.map((version, index) => ({
+    percentage: index === candidateIndex ? input.rolloutPercentage : remainingPercentage,
+    versionId: version.versionId,
+  }));
 }
 
 function normalizeRolloutPercentage(value: number): number {

@@ -43,7 +43,7 @@ export function applyHostedUserEnvUpdate(input: {
   source?: Readonly<Record<string, string | undefined>>;
   update: HostedUserEnvUpdate;
 }): Record<string, string> {
-  const base = input.update.mode === "replace"
+  const nextEnv = input.update.mode === "replace"
     ? {}
     : { ...input.current };
 
@@ -55,21 +55,21 @@ export function applyHostedUserEnvUpdate(input: {
     }
 
     if (rawValue === null) {
-      delete base[normalizedKey];
+      delete nextEnv[normalizedKey];
       continue;
     }
 
     const normalizedValue = normalizeHostedUserEnvValue(rawValue, normalizedKey);
 
     if (normalizedValue === null) {
-      delete base[normalizedKey];
+      delete nextEnv[normalizedKey];
       continue;
     }
 
-    base[normalizedKey] = normalizedValue;
+    nextEnv[normalizedKey] = normalizedValue;
   }
 
-  return sortHostedUserEnv(base);
+  return sortHostedUserEnv(nextEnv);
 }
 
 export function listHostedUserEnvKeys(env: Record<string, string>): string[] {
@@ -101,17 +101,16 @@ export function normalizeHostedUserEnv(
 }
 
 export function parseHostedUserEnvUpdate(value: unknown): HostedUserEnvUpdate {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted user env request body must be a JSON object.");
-  }
-
-  const payload = value as {
-    env?: unknown;
-    mode?: unknown;
-  } & Record<string, unknown>;
-  const rawEnv = payload.env && typeof payload.env === "object" && !Array.isArray(payload.env)
-    ? payload.env as Record<string, unknown>
-    : payload as Record<string, unknown>;
+  const payload = requireHostedUserEnvObject(
+    value,
+    "Hosted user env request body must be a JSON object.",
+  );
+  const rawEnv = Object.hasOwn(payload, "env")
+    ? requireHostedUserEnvObject(
+        payload.env,
+        "Hosted user env request body field `env` must be a JSON object.",
+      )
+    : payload;
   const mode = payload.mode === "replace" ? "replace" : "merge";
   const env: Record<string, string | null> = {};
 
@@ -155,24 +154,11 @@ function parseHostedUserEnvConfig(
 ): HostedUserEnvConfig {
   const parsed = JSON.parse(text) as Partial<HostedUserEnvConfig>;
 
-  if (
-    parsed.schema !== HOSTED_USER_ENV_SCHEMA
-    || !parsed.env
-    || typeof parsed.env !== "object"
-  ) {
+  if (parsed.schema !== HOSTED_USER_ENV_SCHEMA || !isHostedUserEnvObject(parsed.env)) {
     throw new Error("Hosted user env config is invalid.");
   }
 
-  const env = normalizeHostedUserEnv(
-    Object.fromEntries(Object.entries(parsed.env).map(([key, value]) => {
-      if (typeof value !== "string") {
-        throw new TypeError(`Hosted user env value for ${key} must be a string.`);
-      }
-
-      return [key, value] as const;
-    })),
-    source,
-  );
+  const env = normalizeHostedUserEnv(readHostedUserEnvStringRecord(parsed.env), source);
 
   return {
     env,
@@ -203,6 +189,28 @@ function normalizeHostedUserEnvValue(value: string, key: string): string | null 
   }
 
   return normalized;
+}
+
+function requireHostedUserEnvObject(value: unknown, message: string): Record<string, unknown> {
+  if (!isHostedUserEnvObject(value)) {
+    throw new TypeError(message);
+  }
+
+  return value;
+}
+
+function readHostedUserEnvStringRecord(value: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(Object.entries(value).map(([key, rawValue]) => {
+    if (typeof rawValue !== "string") {
+      throw new TypeError(`Hosted user env value for ${key} must be a string.`);
+    }
+
+    return [key, rawValue] as const;
+  }));
+}
+
+function isHostedUserEnvObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function sortHostedUserEnv(env: Record<string, string>): Record<string, string> {

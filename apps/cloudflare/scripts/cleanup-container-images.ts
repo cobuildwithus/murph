@@ -74,47 +74,40 @@ function parseCliArgs(argv: string[]): {
 
   for (let index = 0; index < argv.length; index += 1) {
     const current = argv[index];
-    const next = argv[index + 1];
 
-    if (current === "--") {
-      continue;
-    }
+    switch (current) {
+      case "--":
+        continue;
+      case "--help":
+      case "-h":
+        showHelp = true;
+        continue;
+      case "--apply":
+        apply = true;
+        continue;
+      case "--config":
+      case "-c":
+        configPath = path.resolve(process.cwd(), requireCliValue(argv, index, current));
+        index += 1;
+        continue;
+      case "--filter":
+        filter = requireCliValue(argv, index, current);
+        index += 1;
+        continue;
+      case "--keep": {
+        const parsed = Number.parseInt(requireCliValue(argv, index, current), 10);
 
-    if (current === "--help" || current === "-h") {
-      showHelp = true;
-      continue;
-    }
+        if (!Number.isInteger(parsed) || parsed < 0) {
+          throw new Error("--keep must be a non-negative integer.");
+        }
 
-    if (current === "--apply") {
-      apply = true;
-      continue;
-    }
-
-    if ((current === "--config" || current === "-c") && next) {
-      configPath = path.resolve(process.cwd(), next);
-      index += 1;
-      continue;
-    }
-
-    if (current === "--filter" && next) {
-      filter = next;
-      index += 1;
-      continue;
-    }
-
-    if (current === "--keep" && next) {
-      const parsed = Number.parseInt(next, 10);
-
-      if (!Number.isInteger(parsed) || parsed < 0) {
-        throw new Error("--keep must be a non-negative integer.");
+        keepPerRepository = parsed;
+        index += 1;
+        continue;
       }
-
-      keepPerRepository = parsed;
-      index += 1;
-      continue;
+      default:
+        throw new Error(`Unknown argument: ${current}`);
     }
-
-    throw new Error(`Unknown argument: ${current}`);
   }
 
   return {
@@ -124,6 +117,16 @@ function parseCliArgs(argv: string[]): {
     keepPerRepository,
     showHelp,
   };
+}
+
+function requireCliValue(argv: string[], index: number, flag: string): string {
+  const value = argv[index + 1];
+
+  if (!value || value === "--") {
+    throw new Error(`${flag} requires a value.`);
+  }
+
+  return value;
 }
 
 function printUsage(): void {
