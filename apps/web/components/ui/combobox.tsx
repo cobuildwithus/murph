@@ -22,6 +22,22 @@ function ComboboxTrigger({
   );
 }
 
+function ComboboxInput({
+  className,
+  ...props
+}: ComboboxPrimitive.Input.Props) {
+  return (
+    <ComboboxPrimitive.Input
+      data-slot="combobox-input"
+      className={cn(
+        "w-full border-b border-stone-200 bg-transparent px-4 py-2.5 text-sm text-stone-900 outline-hidden placeholder:text-stone-400",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 function ComboboxContent({
   className,
   side = "bottom",
@@ -97,6 +113,7 @@ function ComboboxItem({
 export {
   Combobox,
   ComboboxContent,
+  ComboboxInput,
   ComboboxItem,
   ComboboxList,
   ComboboxTrigger,
