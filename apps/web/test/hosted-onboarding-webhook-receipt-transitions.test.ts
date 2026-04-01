@@ -4,6 +4,7 @@ import {
   buildHostedExecutionLinqMessageReceivedDispatch,
   buildHostedExecutionTelegramMessageReceivedDispatch,
 } from "@murphai/hosted-execution";
+import type { Prisma } from "@prisma/client";
 import { beforeEach, describe, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -44,6 +45,7 @@ import {
   createHostedOpaqueIdentifier,
   readHostedPhoneHint,
 } from "../src/lib/hosted-onboarding/contact-privacy";
+import { isHostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import {
   readHostedWebhookReceiptState,
   serializeHostedWebhookReceiptState,
@@ -258,6 +260,60 @@ describe("hosted webhook receipt transitions", () => {
     assert.equal(rebuiltDispatch?.event.kind, "linq.message.received");
     if (rebuiltDispatch?.event.kind === "linq.message.received") {
       assert.equal(rebuiltDispatch.event.phoneLookupKey, "hbidx:phone:v1:test");
+    }
+  });
+
+  it("fails closed when a persisted Linq side effect still uses the removed plaintext payload shape", () => {
+    const sideEffect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat_123",
+      inviteId: "invite_123",
+      message: "Welcome aboard",
+      replyToMessageId: "msg_123",
+      sourceEventId: "evt_123",
+    });
+    const payloadJson = {
+      eventPayload: {},
+      receiptState: {
+        attemptCount: 1,
+        attemptId: "attempt_123",
+        completedAt: null,
+        lastError: null,
+        lastReceivedAt: null,
+        plannedAt: null,
+        response: null,
+        sideEffects: [
+          {
+            attemptCount: sideEffect.attemptCount,
+            effectId: sideEffect.effectId,
+            kind: sideEffect.kind,
+            lastAttemptAt: sideEffect.lastAttemptAt,
+            lastError: sideEffect.lastError,
+            payload: {
+              chatId: "chat_123",
+              inviteId: "invite_123",
+              message: "Welcome aboard",
+              replyToMessageId: "msg_123",
+            },
+            result: null,
+            sentAt: sideEffect.sentAt,
+            status: sideEffect.status,
+          },
+        ],
+        status: "processing",
+      },
+    } satisfies Prisma.InputJsonValue;
+
+    try {
+      readHostedWebhookReceiptState(payloadJson);
+      assert.fail("Expected plaintext Linq payloads to fail closed.");
+    } catch (error) {
+      assert.equal(isHostedOnboardingError(error), true);
+      if (!isHostedOnboardingError(error)) {
+        throw error;
+      }
+
+      assert.equal(error.code, "WEBHOOK_SIDE_EFFECT_PAYLOAD_INVALID");
+      assert.match(error.message, /invalid or legacy payload shape/u);
     }
   });
 

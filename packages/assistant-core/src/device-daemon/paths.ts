@@ -57,6 +57,10 @@ export function buildManagedDeviceSyncEnvironment(input: {
   env: NodeJS.ProcessEnv
   paths: DeviceDaemonPaths
 }): NodeJS.ProcessEnv {
+  const {
+    VAULT_ROOT: _legacyVaultRoot,
+    ...childEnv
+  } = input.env
   const normalizedBaseUrl = new URL(input.baseUrl)
   const effectivePort =
     normalizedBaseUrl.port.length > 0
@@ -69,8 +73,7 @@ export function buildManagedDeviceSyncEnvironment(input: {
     normalizedBaseUrl.hostname
 
   return {
-    ...input.env,
-    VAULT_ROOT: input.vault,
+    ...childEnv,
     DEVICE_SYNC_VAULT_ROOT: input.vault,
     [DEVICE_SYNC_PUBLIC_BASE_URL_ENV]:
       readEnvValue(input.env, DEVICE_SYNC_PUBLIC_BASE_URL_ENV_KEYS) ||

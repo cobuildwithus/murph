@@ -168,7 +168,6 @@ Browser-authenticated routes:
 - `GET /api/device-sync/connections/:connectionId/status`
 - `POST /api/device-sync/connections/:connectionId/disconnect`
 - `POST /api/device-sync/providers/:provider/connect`
-- `POST /api/device-sync/oauth/:provider/start`
 - `POST /api/device-sync/agents/pair`
 - `GET /api/linq/bindings`
 - `POST /api/linq/bindings`

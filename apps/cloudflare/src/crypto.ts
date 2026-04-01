@@ -115,15 +115,6 @@ export async function readEncryptedR2Payload(input: {
     keysById: input.cryptoKeysById,
   });
 
-  await migrateEncryptedPayloadIfNeeded({
-    bucket: input.bucket,
-    cryptoKey: input.cryptoKey,
-    envelope,
-    expectedKeyId: input.expectedKeyId,
-    key: input.key,
-    plaintext,
-  });
-
   return plaintext;
 }
 
@@ -192,29 +183,4 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 function isSupportedHostedCipherSchema(value: string): value is HostedCipherSchema {
   return value === HOSTED_CIPHER_SCHEMA;
-}
-
-async function migrateEncryptedPayloadIfNeeded(input: {
-  bucket: EncryptedR2BucketLike;
-  cryptoKey: Uint8Array;
-  envelope: HostedCipherEnvelope;
-  expectedKeyId?: string;
-  key: string;
-  plaintext: Uint8Array;
-}): Promise<void> {
-  if (!input.expectedKeyId || input.envelope.keyId === input.expectedKeyId) {
-    return;
-  }
-
-  try {
-    await writeEncryptedR2Payload({
-      bucket: input.bucket,
-      cryptoKey: input.cryptoKey,
-      key: input.key,
-      keyId: input.expectedKeyId,
-      plaintext: input.plaintext,
-    });
-  } catch {
-    // Best-effort migration only. Successful reads should not fail closed on rewrite.
-  }
 }

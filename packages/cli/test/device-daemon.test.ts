@@ -49,6 +49,7 @@ test.sequential(
         vault: vaultRoot,
         env: {
           DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+          VAULT_ROOT: '/legacy-vault-root',
         },
         dependencies: {
           fetchImpl: async (input, init) => {
@@ -91,7 +92,11 @@ test.sequential(
       const spawnedProcess = spawned as unknown as SpawnProcessInput
       assert.equal(spawnedProcess.command, process.execPath)
       assert.deepEqual(spawnedProcess.args, ['/virtual/device-syncd/dist/bin.js'])
-      assert.equal(spawnedProcess.env.VAULT_ROOT, vaultRoot)
+      assert.equal(
+        spawnedProcess.env.DEVICE_SYNC_VAULT_ROOT,
+        vaultRoot,
+      )
+      assert.equal(spawnedProcess.env.VAULT_ROOT, undefined)
       assert.equal(
         spawnedProcess.env.DEVICE_SYNC_PUBLIC_BASE_URL,
         'http://localhost:8788',
