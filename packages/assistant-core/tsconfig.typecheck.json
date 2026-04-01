@@ -15,7 +15,7 @@
       "path": "../runtime-state"
     },
     {
-      "path": "../assistant-core"
+      "path": "../device-syncd"
     },
     {
       "path": "../core/tsconfig.build.json"
@@ -30,16 +30,11 @@
       "path": "../query"
     },
     {
-      "path": "../gateway-core"
-    },
-    {
-      "path": "../assistantd"
+      "path": "../parsers"
     }
   ],
   "include": [
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "test/**/*.ts"
+    "src/**/*.ts"
   ],
   "exclude": [
     "dist"

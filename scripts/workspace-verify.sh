@@ -221,6 +221,15 @@ run_package_command_with_retry() {
     pnpm --dir "$package_dir" "$command"
 }
 
+run_package_command_without_node_v8_coverage_with_retry() {
+  local package_dir="$1"
+  local command="$2"
+
+  run_command_with_retry \
+    "Package command for ${package_dir} (${command})" \
+    env -u NODE_V8_COVERAGE pnpm --dir "$package_dir" "$command"
+}
+
 wait_for_background_jobs() {
   local failed=0
   local pid
@@ -274,15 +283,16 @@ run_test_apps() {
   if [[ "$app_verify_parallel" == "1" ]]; then
     local pids=()
 
-    run_package_command_with_retry "packages/local-web" verify &
+    # App verification should not emit V8 coverage into the repo coverage workspace.
+    run_package_command_without_node_v8_coverage_with_retry "packages/local-web" verify &
     local local_web_verify_pid="$!"
     pids+=("$local_web_verify_pid")
     register_background_pid "$local_web_verify_pid"
-    run_package_command_with_retry "apps/web" verify &
+    run_package_command_without_node_v8_coverage_with_retry "apps/web" verify &
     local hosted_web_verify_pid="$!"
     pids+=("$hosted_web_verify_pid")
     register_background_pid "$hosted_web_verify_pid"
-    run_package_command_with_retry "apps/cloudflare" verify &
+    run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify &
     local cloudflare_verify_pid="$!"
     pids+=("$cloudflare_verify_pid")
     register_background_pid "$cloudflare_verify_pid"
@@ -294,9 +304,9 @@ run_test_apps() {
     return 0
   fi
 
-  run_package_command_with_retry "packages/local-web" verify
-  run_package_command_with_retry "apps/web" verify
-  run_package_command_with_retry "apps/cloudflare" verify
+  run_package_command_without_node_v8_coverage_with_retry "packages/local-web" verify
+  run_package_command_without_node_v8_coverage_with_retry "apps/web" verify
+  run_package_command_without_node_v8_coverage_with_retry "apps/cloudflare" verify
 }
 
 prepare_repo_vitest_runtime_artifacts() {

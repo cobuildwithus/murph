@@ -77,6 +77,8 @@
     "react": "^19.2.4"
   },
   "devDependencies": {
+    "@murphai/gateway-core": "workspace:*",
+    "@murphai/gateway-local": "workspace:*",
     "@types/react": "^19.2.14",
     "ai": "^6.0.116",
     "zod": "^4.1.8"
