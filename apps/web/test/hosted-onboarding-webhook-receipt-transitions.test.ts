@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { buildHostedExecutionLinqMessageReceivedDispatch } from "@murph/hosted-execution";
+import {
+  buildHostedExecutionLinqMessageReceivedDispatch,
+  buildHostedExecutionTelegramMessageReceivedDispatch,
+} from "@murph/hosted-execution";
 import { describe, it } from "vitest";
 
 import {
@@ -72,9 +75,48 @@ describe("hosted webhook receipt transitions", () => {
       dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
         eventId: "evt_123",
         linqEvent: {
-          chat_id: "chat_123",
+          api_version: "2026-03-26",
+          created_at: "2026-03-26T12:00:00.000Z",
+          data: {
+            chat_id: "chat_123",
+            from: "+15551234567",
+            is_from_me: false,
+            message: {
+              effect: {
+                ignored: "value",
+                name: "confetti",
+                type: "animation",
+              },
+              id: "msg_123",
+              parts: [
+                {
+                  type: "text",
+                  value: "hello",
+                },
+                {
+                  attachment_id: "att_123",
+                  filename: "photo.jpg",
+                  mime_type: "image/jpeg",
+                  size: 123,
+                  type: "image",
+                  url: "https://example.test/photo.jpg",
+                },
+              ],
+              reply_to: {
+                message_id: "msg_parent",
+                part_index: 1,
+                unused: true,
+              },
+            },
+            received_at: "2026-03-26T12:00:00.000Z",
+            recipient_phone: "+15550000000",
+            service: "imessage",
+          },
           event_id: "evt_123",
           event_type: "message.received",
+          partner_id: "partner_123",
+          trace_id: "trace_123",
+          unused: "discard-me",
         },
         normalizedPhoneNumber: "+15551234567",
         occurredAt: "2026-03-26T12:00:00.000Z",
@@ -101,7 +143,246 @@ describe("hosted webhook receipt transitions", () => {
     }
 
     assert.equal(nextEffect.payload.storage, "reference");
+    assert.deepEqual(nextEffect.payload.linqEvent, {
+      api_version: "2026-03-26",
+      created_at: "2026-03-26T12:00:00.000Z",
+      data: {
+        chat_id: "chat_123",
+        from: "+15551234567",
+        is_from_me: false,
+        message: {
+          effect: {
+            name: "confetti",
+            type: "animation",
+          },
+          id: "msg_123",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+            {
+              attachment_id: "att_123",
+              filename: "photo.jpg",
+              mime_type: "image/jpeg",
+              size: 123,
+              type: "image",
+              url: "https://example.test/photo.jpg",
+            },
+          ],
+          reply_to: {
+            message_id: "msg_parent",
+            part_index: 1,
+          },
+        },
+        received_at: "2026-03-26T12:00:00.000Z",
+        recipient_phone: "+15550000000",
+        service: "imessage",
+      },
+      event_id: "evt_123",
+      event_type: "message.received",
+      partner_id: "partner_123",
+      trace_id: "trace_123",
+    });
     assert.deepEqual(nextEffect.result, { dispatched: true });
+  });
+
+  it("stores sparse Telegram snapshots when minimizing dispatch payloads", () => {
+    const dispatchEffect = createHostedWebhookDispatchSideEffect({
+      dispatch: buildHostedExecutionTelegramMessageReceivedDispatch({
+        botUserId: "999",
+        eventId: "evt_tg_123",
+        occurredAt: "2026-03-26T12:00:00.000Z",
+        telegramUpdate: {
+          update_id: 123,
+          message: {
+            animation: {
+              file_id: "anim_123",
+              file_name: "anim.gif",
+              file_size: 10,
+              file_unique_id: "uniq_anim_123",
+              mime_type: "image/gif",
+              secret: "drop",
+            },
+            caption: "hello",
+            chat: {
+              first_name: "Jane",
+              id: 456,
+              type: "private",
+              username: "jane",
+              unused: "drop",
+            },
+            contact: {
+              first_name: "Jane",
+              phone_number: "+15551234567",
+              secret: "drop",
+              user_id: 456,
+              vcard: "BEGIN:VCARD",
+            },
+            date: 1711454400,
+            document: {
+              file_id: "doc_123",
+              file_name: "file.pdf",
+              file_size: 42,
+              file_unique_id: "uniq_doc_123",
+              mime_type: "application/pdf",
+              secret: "drop",
+            },
+            from: {
+              first_name: "Jane",
+              id: 456,
+              is_bot: false,
+              username: "jane",
+              unused: true,
+            },
+            message_id: 789,
+            photo: [
+              {
+                file_id: "photo_123",
+                file_name: "photo.jpg",
+                file_size: 12,
+                file_unique_id: "uniq_photo_123",
+                height: 100,
+                mime_type: "image/jpeg",
+                width: 200,
+                unused: "drop",
+              },
+            ],
+            reply_to_message: {
+              chat: {
+                id: 456,
+                type: "private",
+              },
+              date: 1711454300,
+              from: {
+                first_name: "Bot",
+                id: 999,
+                is_bot: true,
+              },
+              message_id: 700,
+              text: "prior",
+              unused: "drop",
+            },
+            sender_business_bot: {
+              first_name: "Bot",
+              id: 999,
+              is_bot: true,
+            },
+            text: "hello",
+            unknown_field: "drop",
+          },
+        },
+        userId: "member_123",
+      }),
+    });
+
+    const nextState = markHostedWebhookReceiptSideEffectSent(
+      buildReceiptState({ sideEffects: [dispatchEffect] }),
+      dispatchEffect.effectId,
+      { dispatched: true },
+      "2026-03-26T12:00:30.000Z",
+    );
+    const nextEffect = getHostedWebhookSideEffect(nextState, dispatchEffect.effectId);
+
+    assert.equal(nextEffect.kind, "hosted_execution_dispatch");
+    if (nextEffect.kind !== "hosted_execution_dispatch") {
+      throw new Error("Expected a hosted execution dispatch side effect.");
+    }
+
+    if ("dispatch" in nextEffect.payload) {
+      throw new Error("Expected a minimized dispatch payload reference.");
+    }
+
+    assert.deepEqual(nextEffect.payload.telegramUpdate, {
+      business_message: null,
+      message: {
+        animation: {
+          file_id: "anim_123",
+          file_name: "anim.gif",
+          file_size: 10,
+          file_unique_id: "uniq_anim_123",
+          mime_type: "image/gif",
+        },
+        audio: null,
+        caption: "hello",
+        chat: {
+          first_name: "Jane",
+          id: 456,
+          type: "private",
+          username: "jane",
+        },
+        contact: {
+          first_name: "Jane",
+          phone_number: "+15551234567",
+          user_id: 456,
+          vcard: "BEGIN:VCARD",
+        },
+        date: 1711454400,
+        direct_messages_topic: null,
+        document: {
+          file_id: "doc_123",
+          file_name: "file.pdf",
+          file_size: 42,
+          file_unique_id: "uniq_doc_123",
+          mime_type: "application/pdf",
+        },
+        from: {
+          first_name: "Jane",
+          id: 456,
+          is_bot: false,
+          username: "jane",
+        },
+        location: null,
+        message_id: 789,
+        photo: [
+          {
+            file_id: "photo_123",
+            file_name: "photo.jpg",
+            file_size: 12,
+            file_unique_id: "uniq_photo_123",
+            height: 100,
+            mime_type: "image/jpeg",
+            width: 200,
+          },
+        ],
+        poll: null,
+        quote: null,
+        reply_to_message: {
+          chat: {
+            id: 456,
+            type: "private",
+          },
+          contact: null,
+          date: 1711454300,
+          from: {
+            first_name: "Bot",
+            id: 999,
+            is_bot: true,
+          },
+          location: null,
+          message_id: 700,
+          poll: null,
+          quote: null,
+          sender_business_bot: null,
+          sender_chat: null,
+          text: "prior",
+          venue: null,
+        },
+        sender_business_bot: {
+          first_name: "Bot",
+          id: 999,
+          is_bot: true,
+        },
+        sender_chat: null,
+        sticker: null,
+        text: "hello",
+        venue: null,
+        video: null,
+        video_note: null,
+        voice: null,
+      },
+      update_id: 123,
+    });
   });
 });
 

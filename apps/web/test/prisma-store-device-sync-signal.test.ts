@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -332,6 +333,7 @@ describe("PrismaDeviceSyncControlPlaneStore webhook traces", () => {
     expect(traces.get("oura:trace-new")).toMatchObject({
       status: "processed",
       processingExpiresAt: null,
+      payloadJson: null,
     });
     expect(traces.get("oura:trace-expired")).toBeUndefined();
     expect(traces.get("oura:trace-processing")).toMatchObject({
@@ -420,7 +422,7 @@ function normalizeWebhookTraceRecord(data: Record<string, unknown>): MutableWebh
     || typeof data.status !== "string"
     || !(data.receivedAt instanceof Date)
     || (data.processingExpiresAt !== null && !(data.processingExpiresAt instanceof Date))
-    || (data.payloadJson !== null && data.payloadJson !== undefined && !isRecord(data.payloadJson))
+    || (!isPrismaNullSentinel(data.payloadJson) && data.payloadJson !== null && data.payloadJson !== undefined && !isRecord(data.payloadJson))
   ) {
     throw new TypeError("Invalid webhook trace record.");
   }
@@ -433,7 +435,7 @@ function normalizeWebhookTraceRecord(data: Record<string, unknown>): MutableWebh
     status: data.status,
     processingExpiresAt: cloneDate(data.processingExpiresAt),
     receivedAt: new Date(data.receivedAt),
-    payloadJson: data.payloadJson ? { ...data.payloadJson } : null,
+    payloadJson: normalizeWebhookTracePayloadJson(data.payloadJson),
   };
 }
 
@@ -489,7 +491,7 @@ function applyWebhookTraceUpdate(trace: MutableWebhookTrace, data: Record<string
   }
 
   if ("payloadJson" in data) {
-    trace.payloadJson = isRecord(data.payloadJson) ? { ...data.payloadJson } : null;
+    trace.payloadJson = normalizeWebhookTracePayloadJson(data.payloadJson);
   }
 
   if ("processingExpiresAt" in data) {
@@ -525,4 +527,21 @@ function cloneDate(value: Date | null): Date | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPrismaNullSentinel(value: unknown): boolean {
+  return (
+    value === Prisma.DbNull
+    || value === Prisma.JsonNull
+    || value === Prisma.AnyNull
+    || (
+      typeof value === "object"
+      && value !== null
+      && Object.getOwnPropertySymbols(value).some((symbol) => String(symbol) === "Symbol(prisma.objectEnumValue)")
+    )
+  );
+}
+
+function normalizeWebhookTracePayloadJson(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) && !isPrismaNullSentinel(value) ? { ...value } : null;
 }

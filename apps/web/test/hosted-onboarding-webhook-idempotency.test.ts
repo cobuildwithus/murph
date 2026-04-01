@@ -2299,7 +2299,6 @@ function buildDispatchSideEffect(input: {
       from: "+15551234567",
       is_from_me: false,
       message: {
-        effect: null,
         id: "msg_123",
         parts: [
           {
@@ -2307,7 +2306,6 @@ function buildDispatchSideEffect(input: {
             value: "hello",
           },
         ],
-        reply_to: null,
       },
       received_at: "2026-03-26T12:00:00.000Z",
       recipient_phone: "+15550000000",

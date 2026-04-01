@@ -10,9 +10,12 @@ import {
 } from "./linq";
 import {
   buildHostedInviteUrl,
-  ensureHostedMemberForPhone,
   issueHostedInvite,
-} from "./member-service";
+} from "./invite-service";
+import {
+  ensureHostedMemberForPhone,
+} from "./member-identity-service";
+import { minimizeHostedLinqMessageReceivedEvent } from "./webhook-event-snapshots";
 import { normalizePhoneNumber } from "./shared";
 import {
   createHostedWebhookDispatchSideEffect,
@@ -66,7 +69,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
         createHostedWebhookDispatchSideEffect({
           dispatch: buildHostedExecutionLinqMessageReceivedDispatch({
             eventId: input.event.event_id,
-            linqEvent: messageEvent as unknown as Record<string, unknown>,
+            linqEvent: minimizeHostedLinqMessageReceivedEvent(messageEvent),
             normalizedPhoneNumber,
             occurredAt: resolveHostedLinqOccurredAt(messageEvent),
             userId: existingMember.id,
@@ -102,7 +105,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const member = await ensureHostedMemberForPhone({
     linqChatId: summary.chatId,
     normalizedPhoneNumber,
-    originalPhoneNumber: summary.phoneNumber,
     prisma: input.prisma,
   });
   const invite = await issueHostedInvite({

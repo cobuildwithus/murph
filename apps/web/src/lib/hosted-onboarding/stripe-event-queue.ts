@@ -146,6 +146,7 @@ export async function drainHostedStripeEventQueue(input: {
             claimExpiresAt: null,
             lastErrorCode: null,
             lastErrorMessage: null,
+            payloadJson: Prisma.JsonNull,
             processedAt: new Date(),
             status: HostedStripeEventStatus.completed,
           },
@@ -287,13 +288,102 @@ function normalizeHostedStripeEventFact(event: Stripe.Event): {
     customerId: readHostedStripeEventCustomerId(type, object),
     invoiceId: type.startsWith("invoice.") ? coerceStripeObjectId(object.id as never) : null,
     paymentIntentId: readHostedStripeEventPaymentIntentId(type, object),
-    payloadJson: {
-      object: object as unknown as Prisma.InputJsonValue,
-      type,
-    } satisfies Prisma.InputJsonValue,
+    payloadJson: buildHostedStripeEventPayload(type, object),
     stripeCreatedAt,
     subscriptionId: readHostedStripeEventSubscriptionId(type, object),
   };
+}
+
+function buildHostedStripeEventPayload(
+  type: string,
+  object: Record<string, unknown>,
+): Prisma.InputJsonObject {
+  return {
+    object: minimizeHostedStripeEventObject(type, object),
+    type,
+  } satisfies Prisma.InputJsonObject;
+}
+
+function minimizeHostedStripeEventObject(
+  type: string,
+  object: Record<string, unknown>,
+): Prisma.InputJsonObject {
+  switch (type) {
+    case "checkout.session.completed":
+    case "checkout.session.expired":
+      return compactHostedStripeRecord({
+        amount_total: object.amount_total,
+        client_reference_id: object.client_reference_id,
+        currency: object.currency,
+        customer: coerceStripeObjectId(object.customer as never),
+        id: coerceStripeObjectId(object.id as never),
+        metadata: pickHostedStripeMetadata(object.metadata),
+        mode: object.mode,
+        payment_status: object.payment_status,
+        subscription: coerceStripeSubscriptionId(object.subscription as never),
+      });
+    case "customer.subscription.created":
+    case "customer.subscription.updated":
+    case "customer.subscription.deleted":
+      return compactHostedStripeRecord({
+        customer: coerceStripeObjectId(object.customer as never),
+        id: coerceStripeSubscriptionId(object.id as never),
+        metadata: pickHostedStripeMetadata(object.metadata),
+        status: object.status,
+      });
+    case "invoice.paid":
+    case "invoice.payment_failed":
+      return compactHostedStripeRecord({
+        amount_paid: object.amount_paid,
+        charge: coerceStripeObjectId(object.charge as never),
+        currency: object.currency,
+        customer: coerceStripeObjectId(object.customer as never),
+        id: coerceStripeObjectId(object.id as never),
+        payment_intent: coerceStripeObjectId(object.payment_intent as never),
+        subscription: coerceStripeInvoiceSubscriptionId(object as never),
+      });
+    case "refund.created":
+      return compactHostedStripeRecord({
+        charge: coerceStripeObjectId(object.charge as never),
+        id: coerceStripeObjectId(object.id as never),
+        payment_intent: coerceStripeObjectId(object.payment_intent as never),
+      });
+    case "charge.dispute.created":
+    case "charge.dispute.closed":
+    case "charge.dispute.funds_reinstated":
+    case "charge.dispute.funds_withdrawn":
+      return compactHostedStripeRecord({
+        charge: coerceStripeObjectId(object.charge as never),
+        id: coerceStripeObjectId(object.id as never),
+        payment_intent: coerceStripeObjectId(object.payment_intent as never),
+      });
+    default:
+      return compactHostedStripeRecord({
+        id: coerceStripeObjectId(object.id as never),
+      });
+  }
+}
+
+function pickHostedStripeMetadata(value: unknown): Prisma.InputJsonObject | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const metadata = value as Record<string, unknown>;
+
+  if (!("memberId" in metadata)) {
+    return undefined;
+  }
+
+  return compactHostedStripeRecord({
+    memberId: metadata.memberId,
+  });
+}
+
+function compactHostedStripeRecord(fields: Record<string, unknown>): Prisma.InputJsonObject {
+  return Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== undefined),
+  ) as Prisma.InputJsonObject;
 }
 
 async function claimHostedStripeEvent(input: {

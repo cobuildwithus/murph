@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 
 import type {
   ClaimDeviceSyncWebhookTraceInput,
@@ -6,7 +6,6 @@ import type {
 } from "@murph/device-syncd";
 
 import { isUniqueViolation } from "./prisma-errors";
-import { toNullablePrismaJsonValue } from "./prisma-json";
 import type { HostedPrismaTransactionClient } from "./types";
 
 export class PrismaHostedWebhookTraceStore {
@@ -30,7 +29,7 @@ export class PrismaHostedWebhookTraceStore {
             eventType: input.eventType,
             processingExpiresAt,
             receivedAt: claimedAt,
-            payloadJson: toNullablePrismaJsonValue(input.payload),
+            payloadJson: Prisma.DbNull,
             status: "processing",
           },
         });
@@ -85,7 +84,7 @@ export class PrismaHostedWebhookTraceStore {
         data: {
           externalAccountId: input.externalAccountId,
           eventType: input.eventType,
-          payloadJson: toNullablePrismaJsonValue(input.payload),
+          payloadJson: Prisma.DbNull,
           processingExpiresAt,
           receivedAt: claimedAt,
           status: "processing",

@@ -2,8 +2,18 @@ import {
   buildHostedExecutionDispatchRef,
   type HostedExecutionDispatchRequest,
 } from "@murph/hosted-execution";
+import type {
+  LinqMessageReceivedEvent,
+} from "@murph/inboxd/linq-webhook";
+import type {
+  TelegramUpdateLike,
+} from "@murph/inboxd/telegram-webhook";
 
 import { isHostedOnboardingError } from "./errors";
+import {
+  minimizeHostedLinqMessageReceivedEvent,
+  minimizeHostedTelegramUpdate,
+} from "./webhook-event-snapshots";
 import { serializeHostedExecutionOutboxPayload } from "../hosted-execution/outbox-payload";
 import {
   generateHostedWebhookReceiptAttemptId,
@@ -452,7 +462,9 @@ function minimizeHostedWebhookDispatchPayload(
   if (dispatch.event.kind === "linq.message.received") {
     return {
       dispatchRef,
-      linqEvent: { ...dispatch.event.linqEvent },
+      linqEvent: minimizeHostedLinqMessageReceivedEvent(
+        dispatch.event.linqEvent as unknown as LinqMessageReceivedEvent,
+      ),
       schemaVersion,
       storage: "reference",
     };
@@ -464,7 +476,9 @@ function minimizeHostedWebhookDispatchPayload(
       dispatchRef,
       schemaVersion,
       storage: "reference",
-      telegramUpdate: { ...dispatch.event.telegramUpdate },
+      telegramUpdate: minimizeHostedTelegramUpdate(
+        dispatch.event.telegramUpdate as unknown as TelegramUpdateLike,
+      ),
     };
   }
 
