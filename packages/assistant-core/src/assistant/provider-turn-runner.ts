@@ -519,6 +519,10 @@ async function executeAssistantProviderAttempt(input: {
   providerRecovery: AssistantProviderRouteRecoveryState
 }): Promise<AssistantProviderAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
+  let attemptMetadata = {
+    executedToolCount: 0,
+    rawToolEvents: [] as readonly unknown[],
+  }
 
   if (attemptPlan.primaryRouteCooldownFailover && executionPlan.primaryRoute) {
     await recordProviderCooldownFailoverApplied({
@@ -600,11 +604,9 @@ async function executeAssistantProviderAttempt(input: {
           onTraceEvent: executionPlan.input.onTraceEvent,
           showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
         })
+        attemptMetadata = attemptResult.metadata
         if (!attemptResult.ok) {
-          throw attachAssistantProviderAttemptMetadata(
-            attemptResult.error,
-            attemptResult.metadata,
-          )
+          throw attemptResult.error
         }
 
         return attemptResult.result
@@ -704,8 +706,7 @@ async function executeAssistantProviderAttempt(input: {
     const outcomeKind = classifyAssistantProviderAttemptFailure({
       abortSignal: executionPlan.input.abortSignal,
       error,
-      executedBoundAssistantTool:
-        readAssistantProviderAttemptMetadata(error).executedToolCount > 0,
+      executedBoundAssistantTool: attemptMetadata.executedToolCount > 0,
       nextRoute,
     })
 
@@ -763,80 +764,6 @@ function classifyAssistantProviderAttemptFailure(input: {
   }
 
   return 'retry_next_route'
-}
-
-const ASSISTANT_PROVIDER_ATTEMPT_METADATA = Symbol('assistant-provider-attempt-metadata')
-
-function attachAssistantProviderAttemptMetadata(
-  error: unknown,
-  metadata: {
-    executedToolCount: number
-    rawToolEvents: readonly unknown[]
-  },
-): unknown {
-  const normalized = {
-    executedToolCount: Math.max(0, metadata.executedToolCount),
-    rawToolEvents: [...metadata.rawToolEvents],
-  }
-
-  if (error && typeof error === 'object') {
-    Object.defineProperty(error, ASSISTANT_PROVIDER_ATTEMPT_METADATA, {
-      configurable: true,
-      enumerable: false,
-      value: normalized,
-      writable: false,
-    })
-    return error
-  }
-
-  const wrapped = new Error(errorMessage(error), {
-    cause: error,
-  }) as Error & {
-    [ASSISTANT_PROVIDER_ATTEMPT_METADATA]?: typeof normalized
-  }
-  Object.defineProperty(wrapped, ASSISTANT_PROVIDER_ATTEMPT_METADATA, {
-    configurable: true,
-    enumerable: false,
-    value: normalized,
-    writable: false,
-  })
-  return wrapped
-}
-
-function readAssistantProviderAttemptMetadata(error: unknown): {
-  executedToolCount: number
-  rawToolEvents: readonly unknown[]
-} {
-  if (!error || typeof error !== 'object') {
-    return {
-      executedToolCount: 0,
-      rawToolEvents: [],
-    }
-  }
-
-  const metadata = (
-    error as {
-      [ASSISTANT_PROVIDER_ATTEMPT_METADATA]?: unknown
-    }
-  )[ASSISTANT_PROVIDER_ATTEMPT_METADATA]
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return {
-      executedToolCount: 0,
-      rawToolEvents: [],
-    }
-  }
-
-  const candidate = metadata as {
-    executedToolCount?: unknown
-    rawToolEvents?: unknown
-  }
-  return {
-    executedToolCount:
-      typeof candidate.executedToolCount === 'number' && candidate.executedToolCount >= 0
-        ? candidate.executedToolCount
-        : 0,
-    rawToolEvents: Array.isArray(candidate.rawToolEvents) ? candidate.rawToolEvents : [],
-  }
 }
 
 async function recordProviderCooldownFailoverApplied(input: {
