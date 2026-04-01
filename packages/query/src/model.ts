@@ -7,11 +7,9 @@ import {
   linkTargetIds,
   normalizeCanonicalDate,
   normalizeUniqueStringArray,
-  relatedToLinks,
   resolveCanonicalRecordClass,
   uniqueStrings,
   type CanonicalEntity,
-  type CanonicalEntityLink,
   type CanonicalEntityFamily,
   type CanonicalRecordClass,
 } from "./canonical-entities.ts";
@@ -22,36 +20,21 @@ import {
 import { collectCanonicalEntities } from "./health/canonical-collector.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";
+import {
+  canonicalEntityToVaultRecord,
+  relatedIdsToLinks,
+  type VaultRecord,
+  type VaultRecordType,
+  type VaultRecordsByFamily,
+  vaultRecordToCanonicalEntity,
+} from "./vault-record-adapter.ts";
+
+export { recordRelationTargetIds } from "./vault-record-adapter.ts";
+export type { VaultRecord, VaultRecordType, VaultRecordsByFamily } from "./vault-record-adapter.ts";
 
 type QueryRecordData = Record<string, unknown>;
 type FrontmatterRecordType = "core" | "experiment" | "journal";
 type JsonRecordType = "audit" | "event" | "sample";
-
-export type VaultRecordType = CanonicalEntityFamily;
-export type VaultRecordsByFamily = Partial<Record<VaultRecordType, VaultRecord[]>>;
-
-export interface VaultRecord {
-  displayId: string;
-  primaryLookupId: string;
-  lookupIds: string[];
-  recordType: VaultRecordType;
-  recordClass: CanonicalRecordClass;
-  sourcePath: string;
-  sourceFile: string;
-  occurredAt: string | null;
-  date: string | null;
-  kind: string | null;
-  status?: string | null;
-  stream: string | null;
-  experimentSlug: string | null;
-  title: string | null;
-  tags: string[];
-  data: QueryRecordData;
-  body: string | null;
-  frontmatter: QueryRecordData | null;
-  links: CanonicalEntityLink[];
-  relatedIds?: string[];
-}
 
 type VaultReadModelFamilyViews = {
   [K in VaultManyViewKey]: VaultRecord[];
@@ -68,16 +51,30 @@ export interface VaultReadModel extends VaultReadModelFamilyViews {
   records: VaultRecord[];
 }
 
-export interface CreateVaultReadModelInput {
+interface CreateVaultReadModelBaseInput {
   metadata?: QueryRecordData | null;
-  records: readonly VaultRecord[];
   vaultRoot: string;
 }
 
+export type CreateVaultReadModelInput =
+  | (CreateVaultReadModelBaseInput & {
+      entities: readonly CanonicalEntity[];
+      records?: never;
+    })
+  | (CreateVaultReadModelBaseInput & {
+      entities?: never;
+      records: readonly VaultRecord[];
+    });
+
 type VaultReadModelDerivedViews = {
-  entities: CanonicalEntity[];
+  records: VaultRecord[];
   byFamily: VaultRecordsByFamily;
 } & VaultReadModelFamilyViews;
+
+type VaultRecordProjectionMetadata = {
+  path: string;
+  sourceFile: string;
+};
 
 export interface EntityFilter {
   ids?: string[];
@@ -149,10 +146,6 @@ interface PreparedRecordLikeFilter extends PreparedTagAndTextFilter {
   date?: string;
   from?: string;
   to?: string;
-}
-
-function relatedIdsToLinks(...groups: readonly unknown[]): CanonicalEntityLink[] {
-  return relatedToLinks(groups.flatMap((group) => normalizeUniqueStringArray(group)));
 }
 
 interface RecordLikeFilterSource {
@@ -232,30 +225,8 @@ type VaultManyViewKey = Exclude<VaultFamilyViewKey, VaultSingleViewKey>;
 const VAULT_FAMILY_VIEW_ENTRIES = Object.entries(
   VAULT_FAMILY_VIEW_SPECS,
 ) as ReadonlyArray<[VaultFamilyViewKey, VaultFamilyViewSpec]>;
-
-
 function toCanonicalEntity(record: VaultRecord): CanonicalEntity {
-  return {
-    entityId: record.displayId,
-    primaryLookupId: record.primaryLookupId,
-    lookupIds: [...record.lookupIds],
-    family: record.recordType,
-    recordClass: record.recordClass,
-    kind: record.kind ?? '',
-    status: record.status ?? null,
-    occurredAt: record.occurredAt,
-    date: record.date,
-    path: record.sourcePath,
-    title: record.title,
-    body: record.body,
-    attributes: record.data,
-    frontmatter: record.frontmatter,
-    links: record.links,
-    relatedIds: record.relatedIds ?? [],
-    stream: record.stream,
-    experimentSlug: record.experimentSlug,
-    tags: [...record.tags],
-  };
+  return vaultRecordToCanonicalEntity(record);
 }
 
 function deriveVaultFamilyViews(
@@ -277,12 +248,21 @@ function deriveVaultFamilyViews(
 }
 
 function deriveVaultReadModelViews(
-  records: readonly VaultRecord[],
+  entities: readonly CanonicalEntity[],
+  vaultRoot: string,
+  sourceFileByEntityId: ReadonlyMap<string, VaultRecordProjectionMetadata>,
 ): VaultReadModelDerivedViews {
+  const records = entities.map((entity) =>
+    canonicalEntityToVaultRecord(
+      entity,
+      vaultRoot,
+      resolveVaultRecordSourceFile(entity, vaultRoot, sourceFileByEntityId),
+    ),
+  );
   const byFamily = groupRecordsByFamily(records);
 
   return {
-    entities: records.map((record) => toCanonicalEntity(record)),
+    records,
     byFamily,
     ...deriveVaultFamilyViews(byFamily),
   };
@@ -324,27 +304,54 @@ function normalizeVaultFamilyViewRecords(
 export function createVaultReadModel(
   input: CreateVaultReadModelInput,
 ): VaultReadModel {
-  let recordState = input.records.slice();
+  let entityState = readModelInputEntities(input);
+  let sourceFileByEntityId = readModelInputSourceFiles(input);
   let cachedViews: VaultReadModelDerivedViews | null = null;
 
   const readViews = (): VaultReadModelDerivedViews => {
     if (cachedViews === null) {
-      cachedViews = deriveVaultReadModelViews(recordState);
+      cachedViews = deriveVaultReadModelViews(
+        entityState,
+        input.vaultRoot,
+        sourceFileByEntityId,
+      );
     }
 
     return cachedViews;
   };
 
-  const updateRecords = (nextRecords: readonly VaultRecord[]): void => {
-    recordState = nextRecords.slice();
+  const replaceState = (
+    nextEntities: readonly CanonicalEntity[],
+    nextSourceFiles: ReadonlyMap<string, VaultRecordProjectionMetadata>,
+  ): void => {
+    entityState = nextEntities.slice();
+    sourceFileByEntityId = new Map(nextSourceFiles);
     cachedViews = null;
+  };
+
+  const updateEntities = (nextEntities: readonly CanonicalEntity[]): void => {
+    replaceState(
+      nextEntities,
+      buildVaultRecordProjectionMetadata(
+        nextEntities,
+        input.vaultRoot,
+        sourceFileByEntityId,
+      ),
+    );
+  };
+
+  const updateRecords = (nextRecords: readonly VaultRecord[]): void => {
+    replaceState(
+      nextRecords.map((record) => toCanonicalEntity(record)),
+      recordProjectionMetadataFromRecords(nextRecords),
+    );
   };
 
   const updateRecordFamily = (
     recordType: VaultRecordType,
     nextRecords: readonly VaultRecord[],
   ): void => {
-    updateRecords(replaceVaultRecordFamily(recordState, recordType, nextRecords));
+    updateRecords(replaceVaultRecordFamily(readViews().records, recordType, nextRecords));
   };
 
   const model = {
@@ -357,7 +364,7 @@ export function createVaultReadModel(
     records: {
       enumerable: true,
       get() {
-        return recordState;
+        return readViews().records;
       },
       set(value: VaultRecord[]) {
         updateRecords(value);
@@ -366,10 +373,10 @@ export function createVaultReadModel(
     entities: {
       enumerable: true,
       get() {
-        return readViews().entities;
+        return entityState;
       },
       set(value: CanonicalEntity[]) {
-        updateRecords(value.map((entity) => toVaultRecord(entity, input.vaultRoot)));
+        updateEntities(value);
       },
     },
     byFamily: {
@@ -403,6 +410,75 @@ export function createVaultReadModel(
   return model;
 }
 
+function readModelInputEntities(
+  input: CreateVaultReadModelInput,
+): CanonicalEntity[] {
+  if ("entities" in input && input.entities !== undefined) {
+    return input.entities.slice();
+  }
+
+  return input.records.map((record) => toCanonicalEntity(record));
+}
+
+function readModelInputSourceFiles(
+  input: CreateVaultReadModelInput,
+): ReadonlyMap<string, VaultRecordProjectionMetadata> {
+  if ("entities" in input && input.entities !== undefined) {
+    return buildVaultRecordProjectionMetadata(input.entities, input.vaultRoot);
+  }
+
+  return recordProjectionMetadataFromRecords(input.records);
+}
+
+function buildVaultRecordProjectionMetadata(
+  entities: readonly CanonicalEntity[],
+  vaultRoot: string,
+  previous: ReadonlyMap<string, VaultRecordProjectionMetadata> = new Map(),
+): ReadonlyMap<string, VaultRecordProjectionMetadata> {
+  const metadata = new Map<string, VaultRecordProjectionMetadata>();
+
+  for (const entity of entities) {
+    const prior = previous.get(entity.entityId);
+    metadata.set(entity.entityId, {
+      path: entity.path,
+      sourceFile:
+        prior && prior.path === entity.path
+          ? prior.sourceFile
+          : path.join(vaultRoot, ...entity.path.split("/")),
+    });
+  }
+
+  return metadata;
+}
+
+function recordProjectionMetadataFromRecords(
+  records: readonly VaultRecord[],
+): ReadonlyMap<string, VaultRecordProjectionMetadata> {
+  const metadata = new Map<string, VaultRecordProjectionMetadata>();
+
+  for (const record of records) {
+    metadata.set(record.displayId, {
+      path: record.sourcePath,
+      sourceFile: record.sourceFile,
+    });
+  }
+
+  return metadata;
+}
+
+function resolveVaultRecordSourceFile(
+  entity: CanonicalEntity,
+  vaultRoot: string,
+  metadata: ReadonlyMap<string, VaultRecordProjectionMetadata>,
+): string {
+  const existing = metadata.get(entity.entityId);
+  if (existing && existing.path === entity.path) {
+    return existing.sourceFile;
+  }
+
+  return path.join(vaultRoot, ...entity.path.split("/"));
+}
+
 export async function readVault(vaultRoot: string): Promise<VaultReadModel> {
   return readVaultWithHealthMode(vaultRoot, "strict-async");
 }
@@ -432,7 +508,7 @@ async function readVaultWithHealthMode(
   return createVaultReadModel({
     vaultRoot,
     metadata,
-    records: entities.map((entity) => toVaultRecord(entity, vaultRoot)),
+    entities,
   });
 }
 
@@ -1008,41 +1084,6 @@ async function walkFiles(directoryPath: string): Promise<string[]> {
 
     throw error;
   }
-}
-
-function toVaultRecord(entity: CanonicalEntity, vaultRoot: string): VaultRecord {
-  return {
-    displayId: entity.entityId,
-    primaryLookupId: entity.primaryLookupId,
-    lookupIds: entity.lookupIds,
-    recordType: entity.family,
-    recordClass: entity.recordClass,
-    sourcePath: entity.path,
-    sourceFile: path.join(vaultRoot, ...entity.path.split("/")),
-    occurredAt: entity.occurredAt,
-    date: entity.date,
-    kind: entity.kind,
-    status: entity.status,
-    stream: entity.stream,
-    experimentSlug: entity.experimentSlug,
-    title: entity.title,
-    tags: entity.tags,
-    data: entity.attributes,
-    body: entity.body,
-    frontmatter: entity.frontmatter,
-    links: entity.links,
-    relatedIds: entity.relatedIds,
-  };
-}
-
-export function recordRelationTargetIds(
-  record: Pick<VaultRecord, "links" | "relatedIds" | "lookupIds">,
-): string[] {
-  return record.links.length > 0
-    ? linkTargetIds(record.links)
-    : record.relatedIds && record.relatedIds.length > 0
-      ? record.relatedIds
-      : record.lookupIds;
 }
 
 function groupRecordsByFamily(
