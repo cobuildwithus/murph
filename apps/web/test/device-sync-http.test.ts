@@ -67,11 +67,13 @@ vi.mock("next/server", () => {
     }
 
     static json(body: unknown, init?: ResponseInit) {
+      const headers = Object.fromEntries(new Headers(init?.headers).entries());
+
       return new MockNextResponse(JSON.stringify(body), {
         ...init,
         headers: {
           "content-type": "application/json",
-          ...(init?.headers ?? {}),
+          ...headers,
         },
       });
     }
@@ -126,6 +128,7 @@ describe("device sync callback redirect helpers", () => {
         retryable: true,
       },
     });
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {
@@ -233,6 +236,14 @@ describe("device sync callback redirect helpers", () => {
     await expect(response.text()).resolves.toBe("ok:demo");
   });
 
+  it("marks device-sync json success responses as no-store", async () => {
+    const response = httpModule.jsonOk({ ok: true });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
   it("resolves and decodes route params through the shared helper", async () => {
     await expect(
       httpModule.resolveDecodedRouteParam(
@@ -287,6 +298,7 @@ describe("device sync callback redirect helpers", () => {
     );
 
     expect(response.status).toBe(201);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
 
     const html = await response.text();
@@ -310,6 +322,7 @@ describe("device sync callback redirect helpers", () => {
     const location = response?.headers.get("location");
 
     expect(location).toBeTruthy();
+    expect(response?.headers.get("Cache-Control")).toBe("no-store");
 
     const destination = new URL(location!);
     expect(destination.origin).toBe("https://app.example.test");
@@ -337,6 +350,7 @@ describe("device sync callback redirect helpers", () => {
     const location = response?.headers.get("location");
 
     expect(location).toBeTruthy();
+    expect(response?.headers.get("Cache-Control")).toBe("no-store");
 
     const destination = new URL(location!);
     expect(destination.origin).toBe("https://app.example.test");

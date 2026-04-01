@@ -9,6 +9,6 @@ export { acceptHostedShareLink } from "./acceptance-service";
 export {
   buildHostedSharePageData,
   createHostedShareLink,
-  requireHostedShareInternalToken,
 } from "./link-service";
+export { requireHostedShareInternalToken } from "../hosted-execution/internal";
 export { readHostedSharePackByReference } from "./shared";

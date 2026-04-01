@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
 
-import { Prisma } from "@prisma/client";
 import {
   buildHostedExecutionVaultShareAcceptedDispatch,
   type HostedExecutionDispatchRequest,
@@ -231,26 +230,6 @@ export function normalizeOptionalString(value: string | null | undefined): strin
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : undefined;
-}
-
-export function requireHostedShareInternalToken(request: Request): void {
-  const token = normalizeOptionalString(process.env.HOSTED_SHARE_INTERNAL_TOKEN);
-
-  if (!token) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_INTERNAL_TOKEN_REQUIRED",
-      message: "HOSTED_SHARE_INTERNAL_TOKEN must be configured for internal hosted share creation.",
-      httpStatus: 500,
-    });
-  }
-
-  if (request.headers.get("authorization") !== `Bearer ${token}`) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_UNAUTHORIZED",
-      message: "Unauthorized hosted share request.",
-      httpStatus: 401,
-    });
-  }
 }
 
 export function requireHostedSharePublicBaseUrl(): string {

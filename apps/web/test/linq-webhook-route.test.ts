@@ -48,6 +48,7 @@ describe("hosted Linq webhook route", () => {
     );
 
     expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "LINQ_WEBHOOK_SIGNATURE_INVALID",
@@ -69,11 +70,26 @@ describe("hosted Linq webhook route", () => {
     );
 
     expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "LINQ_WEBHOOK_PAYLOAD_INVALID",
         message: "Linq webhook payload must be an object.",
       },
+    });
+  });
+
+  it("marks Linq info responses as no-store", async () => {
+    const response = await linqWebhookRoute.GET(
+      new Request("https://example.test/api/linq/webhook"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      webhookPath: "/api/linq/webhook",
+      webhookUrl: "https://example.test/api/linq/webhook",
     });
   });
 });

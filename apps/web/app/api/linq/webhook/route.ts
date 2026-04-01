@@ -1,6 +1,5 @@
 import { createHostedLinqControlPlane } from "../../../../src/lib/linq/control-plane";
-import { jsonOk } from "../../../../src/lib/http";
-import { withJsonError } from "../../../../src/lib/linq/http";
+import { jsonOk, withJsonError } from "../../../../src/lib/linq/http";
 
 export const GET = withJsonError(async (request: Request) => {
     const controlPlane = createHostedLinqControlPlane(request);
