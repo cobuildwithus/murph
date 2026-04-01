@@ -366,10 +366,11 @@ export function createSetupServices(
     const scheduledUpdates =
       input.scheduledUpdatePresetIds == null
         ? []
-        : configureSetupScheduledUpdates({
+        : await configureSetupScheduledUpdates({
             dryRun,
             presetIds: input.scheduledUpdatePresetIds,
             steps,
+            vault,
           })
 
     return {

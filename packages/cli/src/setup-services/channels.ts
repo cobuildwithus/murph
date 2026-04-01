@@ -972,6 +972,7 @@ async function updateAssistantChannelState(input: {
         : autoReplyChanged
           ? false
           : state.autoReplyPrimed,
+    preferredScheduledUpdates: state.preferredScheduledUpdates,
     updatedAt: new Date().toISOString(),
   })
 }

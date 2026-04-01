@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { Cli, z } from 'incur'
+import { listAssistantCronPresets } from '@murphai/assistant-core/assistant-cron'
 import { assistantAutomationStateSchema } from '@murphai/assistant-core/assistant-cli-contracts'
 import { resolveAssistantStatePaths } from '@murphai/assistant-core/assistant-state'
 import {
@@ -151,7 +152,9 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
           context.options.vault,
           getPlatform(),
         ),
-        initialScheduledUpdates: getDefaultSetupWizardScheduledUpdates(),
+        initialScheduledUpdates: await resolveInitialSetupWizardScheduledUpdates(
+          context.options.vault,
+        ),
         initialWearables: getDefaultSetupWizardWearables(),
         linqLocalWebhookUrl: resolveSetupWizardLinqLocalWebhookUrl(),
         platform: getPlatform(),
@@ -327,21 +330,56 @@ export async function resolveInitialSetupWizardChannels(
   vault: string,
   platform: NodeJS.Platform = process.platform,
 ): Promise<SetupChannel[]> {
+  const state = await readInitialSetupWizardAutomationState(vault)
+
+  if (state === null) {
+    return getDefaultSetupWizardChannels(platform)
+  }
+
+  const preferredChannels = setupChannelValues.filter((channel) =>
+    state.preferredChannels.includes(channel),
+  )
+  const savedChannels =
+    preferredChannels.length > 0
+      ? preferredChannels
+      : setupChannelValues.filter((channel) => state.autoReplyChannels.includes(channel))
+  return savedChannels.length > 0
+    ? savedChannels
+    : getDefaultSetupWizardChannels(platform)
+}
+
+export async function resolveInitialSetupWizardScheduledUpdates(
+  vault: string,
+): Promise<string[]> {
+  const state = await readInitialSetupWizardAutomationState(vault)
+
+  if (state?.preferredScheduledUpdates === undefined) {
+    return getDefaultSetupWizardScheduledUpdates()
+  }
+
+  if (state.preferredScheduledUpdates.length === 0) {
+    return []
+  }
+
+  const available = new Set(
+    listAssistantCronPresets().map((preset) => preset.id),
+  )
+
+  const savedScheduledUpdates = state.preferredScheduledUpdates.filter((presetId) =>
+    available.has(presetId),
+  )
+
+  return savedScheduledUpdates.length > 0
+    ? savedScheduledUpdates
+    : getDefaultSetupWizardScheduledUpdates()
+}
+
+async function readInitialSetupWizardAutomationState(vault: string) {
   const automationPath = resolveAssistantStatePaths(vault).automationPath
 
   try {
     const raw = await readFile(automationPath, 'utf8')
-    const state = assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
-    const preferredChannels = setupChannelValues.filter((channel) =>
-      state.preferredChannels.includes(channel),
-    )
-    const savedChannels =
-      preferredChannels.length > 0
-        ? preferredChannels
-        : setupChannelValues.filter((channel) => state.autoReplyChannels.includes(channel))
-    return savedChannels.length > 0
-      ? savedChannels
-      : getDefaultSetupWizardChannels(platform)
+    return assistantAutomationStateSchema.parse(JSON.parse(raw) as unknown)
   } catch (error) {
     if (
       typeof error === 'object' &&
@@ -349,7 +387,7 @@ export async function resolveInitialSetupWizardChannels(
       'code' in error &&
       error.code === 'ENOENT'
     ) {
-      return getDefaultSetupWizardChannels(platform)
+      return null
     }
 
     throw error
