@@ -106,27 +106,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(rootPackageJson.scripts?.['zip:src:full']).toBe('bash scripts/package-audit-context-full.sh --zip')
   })
 
-  it('keeps repo thread helpers routed through the packaged review-gpt commands and patch', () => {
+  it('keeps repo thread helpers routed through the packaged review-gpt commands without a local patch fork', () => {
+    const rootPackageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const pnpmWorkspace = readFileSync(
       path.join(repoRoot, 'pnpm-workspace.yaml'),
-      'utf8',
-    )
-    const reviewGptPatch = readFileSync(
-      path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.19.patch'),
       'utf8',
     )
 
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-export.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-download.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-thread-wake.mjs'))).toBe(false)
-    expect(pnpmWorkspace).toContain('patchedDependencies:')
-    expect(pnpmWorkspace).toContain("@cobuild/review-gpt@0.5.19': patches/@cobuild__review-gpt@0.5.19.patch")
-    expect(reviewGptPatch).toContain('diff --git a/dist/chatgpt-thread-lib.mjs b/dist/chatgpt-thread-lib.mjs')
-    expect(reviewGptPatch).toContain('diff --git a/src/chatgpt-thread-lib.mts b/src/chatgpt-thread-lib.mts')
-    expect(reviewGptPatch).toContain('-        await refreshTargetPage(client);')
-    expect(reviewGptPatch).toContain('Keep the existing hydrated thread tab alive for attachment clicks.')
-    expect(reviewGptPatch).toContain('const tryFetchArtifactFallback = async')
-    expect(reviewGptPatch).toContain('const fallbackDownloadedFile = await tryFetchArtifactFallback();')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.20')
+    expect(pnpmWorkspace).toContain("  - '@cobuild/review-gpt@0.5.20'")
+    expect(pnpmWorkspace).not.toContain('patchedDependencies:')
+    expect(existsSync(path.join(repoRoot, 'patches', '@cobuild__review-gpt@0.5.19.patch'))).toBe(false)
   })
 
   it('keeps the lean and full review-gpt wrappers wired to the expected package scripts', () => {

@@ -9,6 +9,7 @@ managePackageManagerVersions: true
 verifyDepsBeforeRun: error
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
+  - '@cobuild/review-gpt@0.5.20'
   - next@16.2.2
   - '@next/env@16.2.2'
   - '@next/swc-darwin-arm64@16.2.2'
@@ -19,8 +20,6 @@ minimumReleaseAgeExclude:
   - '@next/swc-linux-x64-musl@16.2.2'
   - '@next/swc-win32-arm64-msvc@16.2.2'
   - '@next/swc-win32-x64-msvc@16.2.2'
-patchedDependencies:
-  '@cobuild/review-gpt@0.5.19': patches/@cobuild__review-gpt@0.5.19.patch
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.
 trustPolicyIgnoreAfter: 259200
