@@ -1,9 +1,19 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
 import { usePrivy, useUpdateEmail, useUser } from "@privy-io/react-auth";
 import { useEffect, useState } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   isHostedPrivyEmailAccountVerified,
   type HostedPrivyEmailAccount,
@@ -227,85 +237,91 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
   return (
     <div className="space-y-5">
       {successMessage ? (
-        <div className="rounded border border-green-200 bg-green-50 p-4 text-sm leading-snug text-green-700">
-          {successMessage}
-        </div>
+        <Alert className="border-green-200 bg-green-50 text-green-700">
+          <AlertTitle>Email updated</AlertTitle>
+          <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {errorMessage ? (
-        <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
-          {errorMessage}
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>Unable to update email</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {isSyncingEmailRoute ? (
-        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          Finishing the hosted email connection and updating your assistant.
-        </div>
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>Finishing email sync</AlertTitle>
+          <AlertDescription>
+            Finishing the hosted email connection and updating your assistant.
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       {!ready || isLoadingAuthenticatedUser ? (
-        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          Checking your Privy session before we show email settings.
-        </div>
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>Checking your session</AlertTitle>
+          <AlertDescription>
+            Checking your Privy session before we show email settings.
+          </AlertDescription>
+        </Alert>
       ) : !authenticated ? (
-        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-800">
-          Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
-          before we can verify an email on your hosted account.
-        </div>
+        <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+          <AlertTitle>Sign in first</AlertTitle>
+          <AlertDescription>
+            Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
+            before we can verify an email on your hosted account.
+          </AlertDescription>
+        </Alert>
       ) : !canManageEmail ? (
-        <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-800">
-          <p>
+        <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+          <AlertTitle>Wrong Privy account</AlertTitle>
+          <AlertDescription>
             This browser is signed in to a different Privy account than the active hosted session. Sign out here, then
             reopen the correct Murph invite before linking an email address.
-          </p>
-          <button
-            type="button"
-            onClick={handleLogout}
-            disabled={loggingOut}
-            className={secondaryButtonClasses}
-          >
-            {loggingOut ? "Signing out..." : "Sign out of Privy"}
-          </button>
-        </div>
+          </AlertDescription>
+          <div className="mt-3">
+            <Button type="button" onClick={handleLogout} disabled={loggingOut} variant="outline" size="lg">
+              {loggingOut ? "Signing out..." : "Sign out of Privy"}
+            </Button>
+          </div>
+        </Alert>
       ) : (
         <>
-          <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-            <strong className="text-stone-900">
+          <Alert className="border-stone-200 bg-stone-50">
+            <AlertTitle className="text-stone-900">
               {!effectiveCurrentEmail
                 ? "No email linked yet"
                 : isHostedPrivyEmailAccountVerified(effectiveCurrentEmail)
                   ? "Current verified email"
                   : "Current email"}
-            </strong>
-            <p className="mt-1">
+            </AlertTitle>
+            <AlertDescription className="mt-1">
               {effectiveCurrentEmail?.address
                 ?? "Add an email address and we will verify it with a one-time code before saving it."}
-            </p>
-          </div>
+            </AlertDescription>
+          </Alert>
 
           {effectiveVerifiedEmail ? (
-            <div className="flex flex-wrap items-center gap-3 rounded border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-600">
-              <span>
-                Use this to retry the hosted assistant sync without requesting another verification code.
-              </span>
-              <button
-                type="button"
-                onClick={handleSyncVerifiedEmail}
-                disabled={isBusy}
-                className={secondaryButtonClasses}
-              >
-                {isSyncingEmailRoute ? "Syncing..." : "Sync current verified email"}
-              </button>
-            </div>
+            <Alert className="border-stone-200 bg-white">
+              <AlertDescription className="flex flex-wrap items-center gap-3">
+                <span>
+                  Use this to retry the hosted assistant sync without requesting another verification code.
+                </span>
+                <Button type="button" onClick={handleSyncVerifiedEmail} disabled={isBusy} variant="outline">
+                  {isSyncingEmailRoute ? "Syncing..." : "Sync current verified email"}
+                </Button>
+              </AlertDescription>
+            </Alert>
           ) : null}
 
           <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
             <div className="space-y-2">
-              <label className="text-sm font-semibold text-stone-900" htmlFor="settings-email-address">
+              <Label htmlFor="settings-email-address">
                 Email address
-              </label>
-              <input
+              </Label>
+              <Input
                 id="settings-email-address"
                 autoComplete="email"
                 inputMode="email"
@@ -313,19 +329,14 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
                 type="email"
                 value={emailAddress}
                 onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                className={inputClasses}
+                className="h-12 px-4 text-base md:text-sm"
               />
               <p className="text-sm text-stone-500">
                 We&apos;ll send a one-time code through Privy, then you&apos;ll confirm it in the verification dialog.
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleSendCode}
-              disabled={isBusy}
-              className={primaryButtonClasses}
-            >
+            <Button type="button" onClick={handleSendCode} disabled={isBusy} size="lg">
               {isSyncingEmailRoute
                 ? "Syncing..."
                 : isSendingCode
@@ -333,36 +344,28 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
                   : effectiveCurrentEmail
                     ? "Send new code"
                     : "Send code"}
-            </button>
+            </Button>
           </div>
 
           {pendingEmailAddress ? (
-            <div className="flex flex-wrap items-center gap-3 rounded border border-stone-200 bg-white p-4 text-sm leading-relaxed text-stone-600">
-              <span>
-                We sent a verification code to <strong className="text-stone-900">{pendingEmailAddress}</strong>.
-              </span>
-              <button
-                type="button"
-                onClick={() => setDialogOpen(true)}
-                disabled={isBusy}
-                className={secondaryButtonClasses}
-              >
-                Enter code
-              </button>
-              <button
-                type="button"
-                onClick={handleResendCode}
-                disabled={isBusy}
-                className={secondaryButtonClasses}
-              >
-                {isSendingCode ? "Sending code..." : "Resend code"}
-              </button>
-            </div>
+            <Alert className="border-stone-200 bg-white">
+              <AlertDescription className="flex flex-wrap items-center gap-3">
+                <span>
+                  We sent a verification code to <strong className="text-stone-900">{pendingEmailAddress}</strong>.
+                </span>
+                <Button type="button" onClick={() => setDialogOpen(true)} disabled={isBusy} variant="outline">
+                  Enter code
+                </Button>
+                <Button type="button" onClick={handleResendCode} disabled={isBusy} variant="outline">
+                  {isSendingCode ? "Sending code..." : "Resend code"}
+                </Button>
+              </AlertDescription>
+            </Alert>
           ) : null}
         </>
       )}
 
-      <Dialog.Root
+      <Dialog
         open={dialogOpen}
         onOpenChange={(nextOpen) => {
           if (!isSubmittingCode) {
@@ -370,72 +373,46 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
           }
         }}
       >
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 bg-stone-900/45 backdrop-blur-[2px]" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-2xl focus:outline-none md:p-7">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <Dialog.Title className="text-xl font-bold tracking-tight text-stone-900">
-                  Enter your verification code
-                </Dialog.Title>
-                <Dialog.Description className="text-sm leading-relaxed text-stone-500">
-                  {pendingEmailAddress
-                    ? `We emailed a one-time code to ${pendingEmailAddress}. Enter it here to finish updating your account.`
-                    : "Enter the one-time code Privy emailed you to finish updating your account."}
-                </Dialog.Description>
-              </div>
+        <DialogContent className="max-w-md p-6 md:p-7" showCloseButton={!isSubmittingCode}>
+          <DialogHeader className="pr-10">
+            <DialogTitle className="text-xl font-bold tracking-tight text-stone-900">
+              Enter your verification code
+            </DialogTitle>
+            <DialogDescription>
+              {pendingEmailAddress
+                ? `We emailed a one-time code to ${pendingEmailAddress}. Enter it here to finish updating your account.`
+                : "Enter the one-time code Privy emailed you to finish updating your account."}
+            </DialogDescription>
+          </DialogHeader>
 
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  aria-label="Close verification dialog"
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 text-stone-500 transition-colors hover:bg-stone-50 hover:text-stone-700 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isSubmittingCode}
-                >
-                  <span aria-hidden="true">x</span>
-                </button>
-              </Dialog.Close>
-            </div>
+          <div className="flex flex-col gap-3">
+            <Label htmlFor="settings-email-code">
+              Verification code
+            </Label>
+            <Input
+              id="settings-email-code"
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              placeholder="123456"
+              value={code}
+              onChange={(event) => setCode(event.currentTarget.value)}
+              className="h-12 px-4 text-base md:text-sm"
+            />
+            <p className="text-sm text-stone-500">
+              Codes typically expire quickly, so use the newest email if you request another one.
+            </p>
+          </div>
 
-            <div className="mt-6 space-y-3">
-              <label className="text-sm font-semibold text-stone-900" htmlFor="settings-email-code">
-                Verification code
-              </label>
-              <input
-                id="settings-email-code"
-                autoComplete="one-time-code"
-                inputMode="numeric"
-                placeholder="123456"
-                value={code}
-                onChange={(event) => setCode(event.currentTarget.value)}
-                className={inputClasses}
-              />
-              <p className="text-sm text-stone-500">
-                Codes typically expire quickly, so use the newest email if you request another one.
-              </p>
-            </div>
-
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={handleVerifyCode}
-                disabled={isBusy}
-                className={primaryButtonClasses}
-              >
-                {isSubmittingCode ? "Verifying..." : "Verify email"}
-              </button>
-              <button
-                type="button"
-                onClick={handleResendCode}
-                disabled={isBusy}
-                className={secondaryButtonClasses}
-              >
-                {isSendingCode ? "Sending code..." : "Resend code"}
-              </button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" onClick={handleVerifyCode} disabled={isBusy} size="lg">
+              {isSubmittingCode ? "Verifying..." : "Verify email"}
+            </Button>
+            <Button type="button" onClick={handleResendCode} disabled={isBusy} variant="outline" size="lg">
+              {isSendingCode ? "Sending code..." : "Resend code"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -451,12 +428,3 @@ function toErrorMessage(error: unknown, fallback: string): string {
 
   return fallback;
 }
-
-const inputClasses =
-  "w-full rounded border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-olive-light focus:outline-none focus:ring-2 focus:ring-olive-light/20";
-
-const primaryButtonClasses =
-  "inline-flex items-center justify-center rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50";
-
-const secondaryButtonClasses =
-  "inline-flex items-center justify-center rounded border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50";

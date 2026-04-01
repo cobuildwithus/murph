@@ -72,7 +72,7 @@ test("HomePage renders the fallback copy when hosted phone auth is not ready", a
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
-  assert.match(markup, /curl -fsSL --proto &#x27;=https&#x27; --tlsv1\.2 https:\/\/YOUR_DOMAIN\/install\.sh \| bash/u);
+  assert.match(markup, /curl -fsSL https:\/\/YOUR_DOMAIN\/install\.sh \| bash/u);
   assert.match(markup, /View the raw installer/);
   assert.doesNotMatch(markup, /Your health data stays on your device\./);
   assert.doesNotMatch(markup, /Your data is encrypted and stays on your device\./);
@@ -114,7 +114,7 @@ test("HomePage renders the hosted phone auth UI when hosted phone auth is ready"
   assert.match(markup, /Local mode keeps your data on your device\. Hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Local mode keeps your data on your device, and hosted runs use encrypted cloud snapshots\./);
   assert.match(markup, /Encrypted cloud snapshots for hosted runs/);
-  assert.match(markup, /curl -fsSL --proto &#x27;=https&#x27; --tlsv1\.2 https:\/\/murph\.example\.test\/install\.sh \| bash/u);
+  assert.match(markup, /curl -fsSL https:\/\/murph\.example\.test\/install\.sh \| bash/u);
   assert.doesNotMatch(markup, /Your health data stays on your device\./);
   assert.doesNotMatch(markup, /Your data is encrypted and stays on your device\./);
   assert.doesNotMatch(markup, /--no-onboard/u);

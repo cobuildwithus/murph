@@ -6,6 +6,7 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { readHostedPhoneHint } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { type HostedPrivyIdentity } from "./privy";
 import {
@@ -32,7 +33,8 @@ export async function completeHostedPrivyVerification(input: {
     : null;
   const member = invite
     ? await reconcileHostedPrivyIdentityOnMember({
-        expectedPhoneNumber: invite.member.normalizedPhoneNumber,
+        expectedPhoneHint: readHostedPhoneHint(invite.member.maskedPhoneNumberHint),
+        expectedPhoneLookupKey: invite.member.normalizedPhoneNumber,
         identity: input.identity,
         member: invite.member,
         prisma,

@@ -10,6 +10,7 @@ import {
 import type { HostedInviteStatusPayload } from "./types";
 
 import { getPrisma } from "../prisma";
+import { readHostedPhoneHint } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import { ensureHostedMemberForPhone } from "./member-identity-service";
 import { hasHostedPrivyPhoneAuthConfig } from "./privy";
@@ -22,7 +23,6 @@ import {
   generateHostedInviteCode,
   generateHostedInviteId,
   inviteExpiresAt,
-  normalizePhoneNumber,
 } from "./shared";
 
 export async function getHostedInviteStatus(input: {
@@ -105,11 +105,11 @@ export async function getHostedInviteStatus(input: {
     invite: {
       code: invite.inviteCode,
       expiresAt: invite.expiresAt.toISOString(),
-      phoneHint: invite.member.maskedPhoneNumberHint,
+      phoneHint: readHostedPhoneHint(invite.member.maskedPhoneNumberHint),
       status: inviteStatus,
     },
     member: {
-      phoneHint: invite.member.maskedPhoneNumberHint,
+      phoneHint: readHostedPhoneHint(invite.member.maskedPhoneNumberHint),
       status: invite.member.status,
     },
     session: {
@@ -135,24 +135,14 @@ export async function issueHostedInviteForPhone(input: {
   prisma?: PrismaClient;
 }): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMember }> {
   const prisma = input.prisma ?? getPrisma();
-  const normalizedPhoneNumber = normalizePhoneNumber(input.phoneNumber);
-
-  if (!normalizedPhoneNumber) {
-    throw hostedOnboardingError({
-      code: "PHONE_NUMBER_INVALID",
-      message: "A valid phone number is required to issue a hosted invite.",
-      httpStatus: 400,
-    });
-  }
 
   const member = await ensureHostedMemberForPhone({
-    linqChatId: null,
-    normalizedPhoneNumber,
+    phoneNumber: input.phoneNumber,
     prisma,
   });
   const invite = await issueHostedInvite({
     channel: input.channel ?? "share",
-    linqChatId: member.linqChatId,
+    linqChatId: null,
     linqEventId: null,
     memberId: member.id,
     prisma,
@@ -202,9 +192,9 @@ export async function issueHostedInvite(input: {
       },
       data: {
         channel: input.channel,
-        linqChatId: input.linqChatId,
-        linqEventId: input.linqEventId,
-        triggerText: input.triggerText,
+        linqChatId: null,
+        linqEventId: null,
+        triggerText: null,
       },
     });
   }
@@ -216,9 +206,9 @@ export async function issueHostedInvite(input: {
       inviteCode: generateHostedInviteCode(),
       status: HostedInviteStatus.pending,
       channel: input.channel,
-      triggerText: input.triggerText,
-      linqChatId: input.linqChatId,
-      linqEventId: input.linqEventId,
+      triggerText: null,
+      linqChatId: null,
+      linqEventId: null,
       expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
     },
   });
