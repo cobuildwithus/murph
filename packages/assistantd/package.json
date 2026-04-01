@@ -31,7 +31,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.json --force",
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.json --force",
     "typecheck": "tsc -b tsconfig.typecheck.json --pretty false",
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage"
   },

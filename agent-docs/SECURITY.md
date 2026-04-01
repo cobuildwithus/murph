@@ -11,6 +11,13 @@ Last verified: 2026-04-01
 - Do not echo model API keys, base headers, or other provider credentials in CLI output, fixtures, or persisted artifacts.
 - Treat AgentMail inbox ids, message metadata, attachment download URLs, and outbound email thread bindings as high-sensitivity operator data; never log or fixture real mailbox details or API keys.
 
+## Dependency Supply Chain Rules
+
+- Keep `pnpm-lock.yaml` committed and update it in the same change as every manifest edit; setup, onboarding, deploy, and reproducibility docs/scripts should install with `pnpm install --frozen-lockfile` unless the task is intentionally editing dependencies.
+- Do not introduce third-party dependencies via `git:`, `git+`, `github:`, `http:`, `https:`, `file:`, `link:`, `portal:`, or `npm:` alias specs. Internal workspace packages must use the `workspace:` protocol.
+- Prefer repo-local helpers or built-in platform APIs over one-off utility packages when the replacement is small, stable, and auditable.
+- When adding or updating dependencies, review the manifest and lockfile together, run `pnpm deps:guard`, and run `pnpm deps:audit` before handoff.
+
 ## Bootstrap Security Posture
 
 - No runtime trust boundary is implemented yet.

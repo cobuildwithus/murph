@@ -39,6 +39,8 @@ readonly node_syntax_check_scripts=(
   "scripts/pack-publishables.mjs"
   "scripts/publish-publishables.mjs"
   "scripts/verify-workspace-boundaries.mjs"
+  "scripts/verify-dependency-policy.mjs"
+  "scripts/rm-paths.mjs"
 )
 
 readonly typecheck_package_dirs=(
@@ -104,6 +106,10 @@ check_node_syntax() {
   for script_path in "${node_syntax_check_scripts[@]}"; do
     node --check "$script_path"
   done
+}
+
+run_dependency_policy_check() {
+  node "scripts/verify-dependency-policy.mjs"
 }
 
 run_workspace_boundary_check() {
@@ -226,6 +232,7 @@ run_repo_vitest() {
 run_typecheck() {
   check_shell_syntax
   check_node_syntax
+  run_dependency_policy_check
   run_workspace_boundary_check
   tsc -p "tsconfig.tools.json" --pretty false
   pnpm --dir "packages/contracts" build
@@ -235,6 +242,7 @@ run_typecheck() {
 
 run_test() {
   bash "scripts/check-agent-docs-drift.sh"
+  run_dependency_policy_check
   run_workspace_boundary_check
   run_test_packages_common
 
@@ -266,7 +274,7 @@ run_test_packages() {
 }
 
 run_test_packages_coverage() {
-  rimraf "coverage"
+  node "scripts/rm-paths.mjs" "coverage"
   run_test_packages_common
   prepare_repo_vitest_runtime_artifacts
   run_repo_vitest --coverage

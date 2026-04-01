@@ -274,7 +274,7 @@ print_linux_dry_run_plan() {
   printf '%s\n' 'Planned wrapper steps:'
   printf '1. Reuse Node >= %s from PATH when available, or download Node %s under ~/.murph/bootstrap.\n' "$required_node" "$required_node"
   printf '2. Activate pnpm@%s through corepack.\n' "$pnpm_version"
-  printf '%s\n' '3. Install workspace dependencies with `corepack pnpm install`.'
+  printf '%s\n' '3. Install workspace dependencies with `corepack pnpm install --frozen-lockfile`.'
   printf '%s\n' '4. Build the workspace with `corepack pnpm build`.'
   if [ -n "$delegated_args" ]; then
     printf '5. Delegate to `node packages/cli/dist/bin.js onboard %s`.\n' "$delegated_args"
@@ -304,8 +304,8 @@ case "$host_os" in
     ensure_pnpm
 
     ui_stage 2 4 'Installing workspace dependencies'
-    ui_info 'Running corepack pnpm install'
-    corepack pnpm install
+    ui_info 'Running corepack pnpm install --frozen-lockfile'
+    corepack pnpm install --frozen-lockfile
     ui_success 'Workspace dependencies installed'
 
     ui_stage 3 4 'Building Murph'

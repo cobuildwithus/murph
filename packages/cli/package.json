@@ -53,14 +53,12 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.build.json",
+    "build": "node ../../scripts/rm-paths.mjs dist && tsc -b tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.typecheck.json --pretty false",
     "test": "pnpm --dir ../.. build:test-runtime:prepared && tsx ./scripts/verify-package-shape.ts && MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm --dir ../.. exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage",
     "prepack": "pnpm build"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^2.0.35",
-    "@ai-sdk/openai-compatible": "^2.0.35",
     "@murph/assistant-core": "workspace:*",
     "@murph/assistantd": "workspace:*",
     "@murph/contracts": "workspace:*",
@@ -71,13 +69,9 @@
     "@murph/parsers": "workspace:*",
     "@murph/query": "workspace:*",
     "@murph/runtime-state": "workspace:*",
-    "@photon-ai/imessage-kit": "2.1.2",
-    "ai": "^6.0.116",
     "ink": "^6.8.0",
-    "ink-text-input": "^6.0.0",
     "incur": "0.3.4",
-    "react": "^19.2.4",
-    "zod": "^4.1.8"
+    "react": "^19.2.4"
   },
   "devDependencies": {
     "@types/react": "^19.2.14"
