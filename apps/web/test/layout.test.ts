@@ -11,6 +11,11 @@ vi.mock("next/font/google", () => ({
       className: "font-outfit",
     };
   },
+  Geist() {
+    return {
+      variable: "font-geist",
+    };
+  },
 }));
 
 import RootLayout from "../app/layout";

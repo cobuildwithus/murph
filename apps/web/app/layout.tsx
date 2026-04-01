@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
-import { Outfit } from "next/font/google";
+import { Outfit, Geist } from "next/font/google";
 
 import { resolveHostedPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
 
 import "./globals.css";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 
@@ -22,7 +25,7 @@ export const metadata: Metadata = metadataBase
 
 export default function RootLayout(input: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={cn("font-sans", geist.variable)}>
       <body className={outfit.className}>
         <div className="flex min-h-screen flex-col">
           <div className="flex-1">{input.children}</div>

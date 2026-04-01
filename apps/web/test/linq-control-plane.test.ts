@@ -142,7 +142,7 @@ describe("HostedLinqControlPlane", () => {
       routed: false,
       ignored: true,
       reason: "unpaired_recipient_phone",
-      recipientPhone: "+15557654321",
+      recipientPhone: "*** 4321",
       eventId: "evt_123",
     });
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();

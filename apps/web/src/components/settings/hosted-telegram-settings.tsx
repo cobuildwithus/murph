@@ -3,6 +3,8 @@
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useState } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import type { HostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 
 import {
@@ -149,51 +151,61 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
   return (
     <div className="space-y-5">
       {successMessage ? (
-        <div className="rounded border border-green-200 bg-green-50 p-4 text-sm leading-snug text-green-700">
-          {successMessage}
-        </div>
+        <Alert className="border-green-200 bg-green-50 text-green-800">
+          <AlertTitle>Telegram updated</AlertTitle>
+          <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {errorMessage ? (
-        <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
-          {errorMessage}
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>Unable to update Telegram</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {isSyncingTelegram ? (
-        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          Finishing the hosted Telegram connection and updating your assistant routing.
-        </div>
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>Finishing Telegram sync</AlertTitle>
+          <AlertDescription>
+            Finishing the hosted Telegram connection and updating your assistant routing.
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       {!ready || isLoadingAuthenticatedUser ? (
-        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          Checking your Privy session before we show Telegram settings.
-        </div>
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>Checking your session</AlertTitle>
+          <AlertDescription>
+            Checking your Privy session before we show Telegram settings.
+          </AlertDescription>
+        </Alert>
       ) : !authenticated ? (
-        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-800">
-          Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
-          before we can link Telegram on your hosted account.
-        </div>
+        <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+          <AlertTitle>Sign in first</AlertTitle>
+          <AlertDescription>
+            Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
+            before we can link Telegram on your hosted account.
+          </AlertDescription>
+        </Alert>
       ) : !user ? (
-        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          Loading your Privy profile.
-        </div>
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>Loading your profile</AlertTitle>
+          <AlertDescription>Loading your Privy profile.</AlertDescription>
+        </Alert>
       ) : user.id !== expectedPrivyUserId ? (
-        <div className="space-y-3 rounded border border-red-200 bg-red-50 p-4 text-sm leading-relaxed text-red-700">
-          <p>
+        <Alert variant="destructive">
+          <AlertTitle>Wrong Privy account</AlertTitle>
+          <AlertDescription>
             You are signed in to a different Privy account than the current hosted Murph session. Sign out here,
             reopen the latest invite link, and try again.
-          </p>
-          <button
-            type="button"
-            onClick={() => void handleLogout()}
-            disabled={loggingOut}
-            className="inline-flex rounded border border-red-300 bg-white px-4 py-2 font-semibold text-red-700 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loggingOut ? "Signing out..." : "Sign out of Privy"}
-          </button>
-        </div>
+          </AlertDescription>
+          <div className="mt-3">
+            <Button type="button" onClick={() => void handleLogout()} disabled={loggingOut} variant="destructive" size="lg">
+              {loggingOut ? "Signing out..." : "Sign out of Privy"}
+            </Button>
+          </div>
+        </Alert>
       ) : (
         <div className="space-y-5">
           <div className="space-y-2">
@@ -222,38 +234,42 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
           </dl>
 
           <div className="flex flex-wrap gap-3">
-            <button
+            <Button
               type="button"
               onClick={() => void handleLinkTelegram()}
               disabled={isBusy}
-              className="inline-flex rounded bg-olive px-4 py-2 font-semibold text-white transition-colors hover:bg-olive/90 disabled:cursor-not-allowed disabled:opacity-60"
+              size="lg"
             >
               {isLinkingTelegram ? "Linking Telegram..." : currentTelegram ? "Relink Telegram" : "Link Telegram"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => void handleSyncTelegram()}
               disabled={isBusy || !canManageTelegram || !currentTelegram}
-              className="inline-flex rounded border border-stone-200 bg-white px-4 py-2 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
+              variant="outline"
+              size="lg"
             >
               {isSyncingTelegram ? "Syncing..." : "Sync to hosted assistant"}
-            </button>
+            </Button>
             {botLink ? (
-              <a
-                href={botLink}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex rounded border border-stone-200 bg-white px-4 py-2 font-semibold text-stone-700 transition-colors hover:bg-stone-50"
+              <Button
+                render={<a href={botLink} target="_blank" rel="noreferrer" />}
+                nativeButton={false}
+                variant="outline"
+                size="lg"
               >
                 Open Telegram bot
-              </a>
+              </Button>
             ) : null}
           </div>
 
-          <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-            Minimal setup: link Telegram here, open the bot, and press Start once. After that, direct messages to the
-            bot can route into your hosted assistant.
-          </div>
+          <Alert className="border-stone-200 bg-stone-50">
+            <AlertTitle>Minimal setup</AlertTitle>
+            <AlertDescription>
+              Link Telegram here, open the bot, and press Start once. After that, direct messages to the bot can route
+              into your hosted assistant.
+            </AlertDescription>
+          </Alert>
         </div>
       )}
     </div>

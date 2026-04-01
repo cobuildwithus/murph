@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState, startTransition } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
 interface ShareLinkClientProps {
@@ -99,95 +103,108 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   }, [data.share?.acceptedByCurrentMember, data.stage, shareCode]);
 
   return (
-    <section className="mx-auto w-full max-w-2xl space-y-5 rounded-3xl bg-white p-6 shadow-sm md:p-8">
-      <div className="space-y-3">
-        <span className="inline-block rounded-full bg-green-50 px-3.5 py-1.5 text-sm font-semibold text-green-700">
+    <Card className="mx-auto w-full max-w-2xl shadow-sm">
+      <CardHeader className="gap-3">
+        <Badge variant="secondary" className="w-fit">
           Murph share link
-        </span>
-        <h1 className="text-4xl font-bold leading-none tracking-tight text-stone-900 md:text-5xl">
-          {resolveTitle(data)}
-        </h1>
-        <p className="leading-relaxed text-stone-500">
-          {resolveSubtitle(data)}
-        </p>
-      </div>
-
-      {data.share ? (
-        <section className="space-y-2.5 rounded-xl border border-stone-200/60 bg-stone-50/60 p-4">
-          <strong className="text-lg text-stone-900">{data.share.preview.title}</strong>
-          {summary ? <p className="text-sm text-stone-500">{summary}</p> : null}
-          {data.share.preview.foodTitles.length > 0 ? (
-            <p className="text-sm text-stone-600">Foods: {data.share.preview.foodTitles.join(", ")}</p>
-          ) : null}
-          {data.share.preview.protocolTitles.length > 0 ? (
-            <p className="text-sm text-stone-600">Protocols: {data.share.preview.protocolTitles.join(", ")}</p>
-          ) : null}
-          {data.share.preview.recipeTitles.length > 0 ? (
-            <p className="text-sm text-stone-600">Recipes: {data.share.preview.recipeTitles.join(", ")}</p>
-          ) : null}
-          {data.share.preview.logMealAfterImport ? (
-            <p className="text-sm text-green-600">
-              This link also logs the smoothie after import.
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      {errorMessage ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
-          {errorMessage}
+        </Badge>
+        <div className="space-y-3">
+          <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
+            {resolveTitle(data)}
+          </CardTitle>
+          <CardDescription className="leading-relaxed text-stone-500">
+            {resolveSubtitle(data)}
+          </CardDescription>
         </div>
-      ) : null}
+      </CardHeader>
 
-      {data.stage === "processing" && data.share?.acceptedByCurrentMember ? (
-        <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
-          Import queued. Refresh this page in a few seconds if it does not update automatically.
-        </div>
-      ) : null}
+      <CardContent className="flex flex-col gap-5">
+        {data.share ? (
+          <Alert className="border-stone-200/60 bg-stone-50/60">
+            <AlertTitle className="text-lg text-stone-900">{data.share.preview.title}</AlertTitle>
+            {summary ? <AlertDescription>{summary}</AlertDescription> : null}
+            {data.share.preview.foodTitles.length > 0 ? (
+              <AlertDescription>Foods: {data.share.preview.foodTitles.join(", ")}</AlertDescription>
+            ) : null}
+            {data.share.preview.protocolTitles.length > 0 ? (
+              <AlertDescription>Protocols: {data.share.preview.protocolTitles.join(", ")}</AlertDescription>
+            ) : null}
+            {data.share.preview.recipeTitles.length > 0 ? (
+              <AlertDescription>Recipes: {data.share.preview.recipeTitles.join(", ")}</AlertDescription>
+            ) : null}
+            {data.share.preview.logMealAfterImport ? (
+              <AlertDescription>This link also logs the smoothie after import.</AlertDescription>
+            ) : null}
+          </Alert>
+        ) : null}
 
-      {data.stage === "ready" && data.share && !data.share.consumed ? (
-        <button
-          type="button"
-          onClick={handleAccept}
-          disabled={pendingAction !== null}
-          className="rounded-full bg-green-700 px-6 py-3 font-bold text-white transition-colors hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {pendingAction === "accept" ? "Adding to your vault..." : "Add to my vault"}
-        </button>
-      ) : null}
+        {errorMessage ? (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to import the shared bundle</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      {data.stage === "signin" ? (
-        data.inviteCode ? (
-          <Link
-            href={`/join/${encodeURIComponent(data.inviteCode)}?share=${encodeURIComponent(shareCode)}`}
-            className="inline-flex rounded-full bg-green-700 px-6 py-3 font-bold text-white no-underline transition-colors hover:bg-green-800"
-          >
-            Verify your phone and checkout
-          </Link>
-        ) : (
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-            Sign in on this device after your hosted account is active, then open the link again to import the bundle.
-          </div>
-        )
-      ) : null}
+        {data.stage === "processing" && data.share?.acceptedByCurrentMember ? (
+          <Alert className="border-green-200 bg-green-50 text-green-800">
+            <AlertTitle>Import queued</AlertTitle>
+            <AlertDescription>
+              Refresh this page in a few seconds if it does not update automatically.
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
-      {data.stage === "consumed" && data.share?.acceptedByCurrentMember ? (
-        <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
-          The shared bundle is already in your hosted vault.
-        </div>
-      ) : null}
+        {data.stage === "ready" && data.share && !data.share.consumed ? (
+          <Button type="button" onClick={handleAccept} disabled={pendingAction !== null} size="lg">
+            {pendingAction === "accept" ? "Adding to your vault..." : "Add to my vault"}
+          </Button>
+        ) : null}
 
-      {data.stage === "invalid" ? (
-        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          That share link is not valid.
-        </div>
-      ) : null}
-      {data.stage === "expired" ? (
-        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          That share link has expired.
-        </div>
-      ) : null}
-    </section>
+        {data.stage === "signin" ? (
+          data.inviteCode ? (
+            <Button
+              render={
+                <Link href={`/join/${encodeURIComponent(data.inviteCode)}?share=${encodeURIComponent(shareCode)}`} />
+              }
+              nativeButton={false}
+              size="lg"
+            >
+              Verify your phone and checkout
+            </Button>
+          ) : (
+            <Alert className="border-stone-200 bg-stone-50">
+              <AlertTitle>Sign in on this device</AlertTitle>
+              <AlertDescription>
+                Sign in on this device after your hosted account is active, then open the link again to import the
+                bundle.
+              </AlertDescription>
+            </Alert>
+          )
+        ) : null}
+
+        {data.stage === "consumed" && data.share?.acceptedByCurrentMember ? (
+          <Alert className="border-green-200 bg-green-50 text-green-800">
+            <AlertTitle>Bundle already imported</AlertTitle>
+            <AlertDescription>
+              The shared bundle is already in your hosted vault.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {data.stage === "invalid" ? (
+          <Alert className="border-stone-200 bg-stone-50">
+            <AlertTitle>Invalid share link</AlertTitle>
+            <AlertDescription>That share link is not valid.</AlertDescription>
+          </Alert>
+        ) : null}
+        {data.stage === "expired" ? (
+          <Alert className="border-stone-200 bg-stone-50">
+            <AlertTitle>Share link expired</AlertTitle>
+            <AlertDescription>That share link has expired.</AlertDescription>
+          </Alert>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 

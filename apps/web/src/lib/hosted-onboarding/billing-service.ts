@@ -92,7 +92,6 @@ export async function createHostedBillingCheckout(input: {
   const customerId = await ensureHostedStripeCustomer({
     memberId: invite.member.id,
     memberSnapshot: invite.member,
-    normalizedPhoneNumber: invite.member.normalizedPhoneNumber,
     prisma,
     stripe,
   });
@@ -317,7 +316,6 @@ async function resolveReusableHostedBillingCheckout(input: {
 async function ensureHostedStripeCustomer(input: {
   memberId: string;
   memberSnapshot: Pick<HostedMember, "id" | "stripeCustomerId">;
-  normalizedPhoneNumber: string;
   prisma: PrismaClient;
   stripe: Stripe;
 }): Promise<string> {
@@ -339,7 +337,6 @@ async function ensureHostedStripeCustomer(input: {
   if (currentMember?.stripeCustomerId) {
     await input.stripe.customers.update(currentMember.stripeCustomerId, {
       metadata: customerMetadata,
-      phone: input.normalizedPhoneNumber,
     });
 
     return currentMember.stripeCustomerId;
@@ -348,7 +345,6 @@ async function ensureHostedStripeCustomer(input: {
   const customer = await input.stripe.customers.create(
     {
       metadata: customerMetadata,
-      phone: input.normalizedPhoneNumber,
     },
     {
       idempotencyKey: buildHostedStripeCustomerIdempotencyKey(input.memberId),
@@ -383,7 +379,6 @@ async function ensureHostedStripeCustomer(input: {
   if (reboundMember?.stripeCustomerId) {
     await input.stripe.customers.update(reboundMember.stripeCustomerId, {
       metadata: customerMetadata,
-      phone: input.normalizedPhoneNumber,
     });
 
     return reboundMember.stripeCustomerId;

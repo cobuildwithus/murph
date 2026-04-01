@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { startTransition, useEffect, useState } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import type {
   AcceptHostedShareResult,
   HostedSharePageData,
@@ -180,65 +184,76 @@ export function JoinInviteClient({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-lg bg-white p-6 shadow-sm md:p-8">
-        <div className="space-y-3">
-          <span className="inline-block rounded bg-olive/10 px-3.5 py-1.5 text-sm font-semibold text-olive">
+      <Card className="shadow-sm">
+        <CardHeader className="gap-3">
+          <Badge variant="secondary" className="w-fit">
             Invite for {status.invite?.phoneHint ?? "your number"}
-          </span>
-          <h1 className="text-4xl font-bold leading-none tracking-tight text-stone-900 md:text-5xl">
-            {title}
-          </h1>
-          <p className="max-w-lg text-lg leading-relaxed text-stone-500">
-            {subtitle}
-          </p>
-        </div>
+          </Badge>
+          <div className="space-y-3">
+            <CardTitle className="text-4xl font-bold tracking-tight text-stone-900 md:text-5xl">
+              {title}
+            </CardTitle>
+            <CardDescription className="max-w-lg text-lg leading-relaxed text-stone-500">
+              {subtitle}
+            </CardDescription>
+          </div>
+        </CardHeader>
 
-        <div className="mt-6 space-y-4">
+        <CardContent className="flex flex-col gap-4">
           {errorMessage ? (
-            <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
-              {errorMessage}
-            </div>
+            <Alert variant="destructive">
+              <AlertTitle>Unable to continue</AlertTitle>
+              <AlertDescription>{errorMessage}</AlertDescription>
+            </Alert>
           ) : null}
 
           {sharePreview ? (
-            <div className="space-y-1.5 rounded border border-green-200 bg-green-50 p-4 text-sm leading-snug">
-              <strong className="text-green-800">Add after signup: {sharePreview.title}</strong>
-              <p className="text-green-700">
+            <Alert className="border-green-200 bg-green-50 text-green-800">
+              <AlertTitle>Add after signup: {sharePreview.title}</AlertTitle>
+              <AlertDescription className="text-green-700">
                 {[
                   sharePreview.counts.foods ? `${sharePreview.counts.foods} foods` : null,
                   sharePreview.counts.protocols ? `${sharePreview.counts.protocols} protocols` : null,
                   sharePreview.counts.recipes ? `${sharePreview.counts.recipes} recipes` : null,
                 ].filter(Boolean).join(" · ")}
-              </p>
+              </AlertDescription>
               {sharePreview.protocolTitles.length > 0 ? (
-                <p className="text-green-700">Protocols: {sharePreview.protocolTitles.join(", ")}</p>
+                <AlertDescription className="text-green-700">
+                  Protocols: {sharePreview.protocolTitles.join(", ")}
+                </AlertDescription>
               ) : null}
               {sharePreview.logMealAfterImport ? (
-                <p className="text-green-600">Murph will also log the smoothie after import.</p>
+                <AlertDescription className="text-green-700">
+                  Murph will also log the smoothie after import.
+                </AlertDescription>
               ) : null}
-            </div>
+            </Alert>
           ) : null}
 
           {status.session.authenticated && !status.session.matchesInvite ? (
-            <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              <p>
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+              <AlertTitle>This browser is signed in with a different number.</AlertTitle>
+              <AlertDescription>
                 This browser is already signed in with a different number. Sign out first to continue with{" "}
                 {status.invite?.phoneHint ?? "this invite"}.
-              </p>
-              <button
-                type="button"
-                onClick={handleClearHostedSession}
-                disabled={pendingAction !== null}
-                className="rounded border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {pendingAction === "logout" ? "Signing out..." : "Use this invite instead"}
-              </button>
-            </div>
+              </AlertDescription>
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  onClick={handleClearHostedSession}
+                  disabled={pendingAction !== null}
+                  variant="outline"
+                  size="lg"
+                >
+                  {pendingAction === "logout" ? "Signing out..." : "Use this invite instead"}
+                </Button>
+              </div>
+            </Alert>
           ) : null}
 
           {(status.stage === "register" || status.stage === "authenticate") ? (
             phoneAuthReady && privyAppId ? (
-              <div className="rounded border border-stone-200/60 bg-stone-50/60 p-5">
+              <div className="rounded-xl border border-stone-200/60 bg-stone-50/60 p-5">
                 <HostedPhoneAuth
                   inviteCode={inviteCode}
                   mode="invite"
@@ -250,66 +265,73 @@ export function JoinInviteClient({
                 />
               </div>
             ) : (
-              <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-                Phone signup is not configured for this environment yet.
-              </div>
+              <Alert className="border-stone-200 bg-stone-50">
+                <AlertTitle>Phone signup is unavailable</AlertTitle>
+                <AlertDescription>
+                  Phone signup is not configured for this environment yet.
+                </AlertDescription>
+              </Alert>
             )
           ) : null}
 
           {status.stage === "checkout" ? (
-            <button
+            <Button
               type="button"
               onClick={handleCheckout}
               disabled={pendingAction !== null || !status.capabilities.billingReady}
-              className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
+              size="lg"
             >
               {pendingAction === "checkout"
                 ? "Opening checkout..."
                 : status.capabilities.billingReady
                   ? "Continue to Apple Pay"
                   : "Billing is not configured yet"}
-            </button>
+            </Button>
           ) : null}
 
           {status.stage === "active" ? (
-            <div className="space-y-3 rounded border border-green-200 bg-green-50 p-4 text-sm leading-relaxed text-green-700">
-              <p>
+            <Alert className="border-green-200 bg-green-50 text-green-800">
+              <AlertTitle>Your hosted identity is active.</AlertTitle>
+              <AlertDescription>
                 Your hosted identity is active. Your phone-verified account and hosted session are all ready.
-              </p>
-              <Link
-                href="/settings"
-                className="inline-flex rounded border border-green-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50"
-              >
-                Manage email settings
-              </Link>
-              {sharePreview ? (
-                shareImportState === "completed" ? (
-                  <p>{sharePreview.title} has been added to this hosted vault.</p>
-                ) : shareImportState === "processing" ? (
-                  <p>{sharePreview.title} is being added to this hosted vault.</p>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleAcceptShare}
-                    disabled={pendingAction !== null}
-                    className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {pendingAction === "share" ? "Adding shared bundle..." : `Add ${sharePreview.title}`}
-                  </button>
-                )
-              ) : null}
-            </div>
+              </AlertDescription>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Button render={<Link href="/settings" />} nativeButton={false} variant="outline" size="lg">
+                  Manage email settings
+                </Button>
+                {sharePreview ? (
+                  shareImportState === "completed" ? (
+                    <p>{sharePreview.title} has been added to this hosted vault.</p>
+                  ) : shareImportState === "processing" ? (
+                    <p>{sharePreview.title} is being added to this hosted vault.</p>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={handleAcceptShare}
+                      disabled={pendingAction !== null}
+                      size="lg"
+                    >
+                      {pendingAction === "share" ? "Adding shared bundle..." : `Add ${sharePreview.title}`}
+                    </Button>
+                  )
+                ) : null}
+              </div>
+            </Alert>
           ) : null}
-        </div>
-      </section>
+        </CardContent>
+      </Card>
 
-      <section className="space-y-2.5 rounded border border-stone-200/60 bg-white/80 p-5 text-sm leading-relaxed text-stone-500">
-        <strong className="text-stone-800">What happens next</strong>
-        <p>1. Confirm the phone number from your invite.</p>
-        <p>2. Finish setting up your Murph account.</p>
-        <p>3. Complete checkout.</p>
-        <p>4. Start using Murph.</p>
-      </section>
+      <Card className="border-stone-200/60 bg-white/80">
+        <CardHeader>
+          <CardTitle className="text-base text-stone-800">What happens next</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2.5 text-sm leading-relaxed text-stone-500">
+          <p>1. Confirm the phone number from your invite.</p>
+          <p>2. Finish setting up your Murph account.</p>
+          <p>3. Complete checkout.</p>
+          <p>4. Start using Murph.</p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
