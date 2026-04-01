@@ -53,7 +53,6 @@ describe("hosted onboarding session lifecycle", () => {
       memberId: "member-1",
       now: NOW,
       prisma: prisma as never,
-      userAgent: "test-agent",
     });
 
     expect(prisma.hostedSession.create).toHaveBeenCalledWith({
@@ -64,9 +63,9 @@ describe("hosted onboarding session lifecycle", () => {
         lastSeenAt: NOW,
         memberId: "member-1",
         tokenHash: expect.any(String),
-        userAgent: "test-agent",
       }),
     });
+    expect(prisma.hostedSession.create.mock.calls[0]?.[0].data).not.toHaveProperty("userAgent");
     expect(prisma.hostedSession.updateMany).toHaveBeenCalledWith({
       where: {
         expiresAt: {
@@ -96,7 +95,6 @@ describe("hosted onboarding session lifecycle", () => {
         memberId: "member-1",
         now: NOW,
         prisma: prisma as never,
-        userAgent: "test-agent",
       }),
     ).rejects.toMatchObject({
       code: "HOSTED_MEMBER_SUSPENDED",
@@ -104,6 +102,25 @@ describe("hosted onboarding session lifecycle", () => {
     });
 
     expect(prisma.hostedSession.create).not.toHaveBeenCalled();
+  });
+
+  it("stops persisting raw user-agent data", async () => {
+    await createHostedSession({
+      inviteId: "invite-1",
+      memberId: "member-1",
+      now: NOW,
+      prisma: prisma as never,
+    });
+
+    const createInput = prisma.hostedSession.create.mock.calls[0]?.[0];
+    expect(createInput.data).toEqual(
+      expect.objectContaining({
+        inviteId: "invite-1",
+        lastSeenAt: NOW,
+        memberId: "member-1",
+      }),
+    );
+    expect(createInput.data).not.toHaveProperty("userAgent");
   });
 
   it("revokes the stored session record when logout presents the hosted session cookie", async () => {

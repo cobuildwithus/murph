@@ -1,12 +1,74 @@
-import { describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   importHostedAiUsageRecords,
   listHostedAiUsagePendingStripeMetering,
+  readHostedAiUsageStoragePolicy,
 } from "@/src/lib/hosted-execution/usage";
 
+const BASE_USAGE_RECORD = {
+  apiKeyEnv: "OPENAI_API_KEY",
+  attemptCount: 1,
+  baseUrl: "https://api.example.test/v1",
+  cacheWriteTokens: 3,
+  cachedInputTokens: 12,
+  credentialSource: "platform",
+  inputTokens: 120,
+  memberId: "member_123",
+  occurredAt: "2026-03-29T12:00:00.000Z",
+  outputTokens: 45,
+  provider: "openai-compatible",
+  providerMetadataJson: {
+    nested: {
+      ignored: undefined,
+    },
+    provider: "example",
+  },
+  providerName: "example",
+  providerRequestId: "req_123",
+  providerSessionId: "session_123",
+  rawUsageJson: {
+    nested: {
+      ignored: undefined,
+    },
+    totalTokens: 165,
+  },
+  reasoningTokens: 8,
+  requestedModel: "gpt-5.4-mini",
+  routeId: "primary",
+  schema: "murph.assistant-usage.v1",
+  servedModel: "gpt-5.4-mini",
+  sessionId: "asst_123",
+  totalTokens: 165,
+  turnId: "turn_123",
+  usageId: "turn_123.attempt-1",
+} as const;
+
+afterEach(() => {
+  delete process.env.HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS;
+});
+
+describe("readHostedAiUsageStoragePolicy", () => {
+  it("defaults to the privacy-first policy", () => {
+    expect(readHostedAiUsageStoragePolicy({} as unknown as NodeJS.ProcessEnv)).toEqual({
+      includeDebugFields: false,
+    });
+  });
+
+  it("enables debug storage only when explicitly configured", () => {
+    expect(
+      readHostedAiUsageStoragePolicy({
+        HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS: "true",
+      } as unknown as NodeJS.ProcessEnv),
+    ).toEqual({
+      includeDebugFields: true,
+    });
+  });
+});
+
 describe("importHostedAiUsageRecords", () => {
-  it("upserts hosted AI usage rows from assistant usage records", async () => {
+  it("drops provider debug fields by default", async () => {
     const hostedAiUsageUpsert = vi.fn(async () => ({}));
     const prisma = {
       hostedAiUsage: {
@@ -17,45 +79,7 @@ describe("importHostedAiUsageRecords", () => {
     const result = await importHostedAiUsageRecords({
       prisma: prisma as never,
       trustedUserId: "member_123",
-      usage: [
-        {
-          apiKeyEnv: "OPENAI_API_KEY",
-          attemptCount: 1,
-          baseUrl: "https://api.example.test/v1",
-          cacheWriteTokens: 3,
-          cachedInputTokens: 12,
-          credentialSource: "platform",
-          inputTokens: 120,
-          memberId: "member_123",
-          occurredAt: "2026-03-29T12:00:00.000Z",
-          outputTokens: 45,
-          provider: "openai-compatible",
-          providerMetadataJson: {
-            nested: {
-              ignored: undefined,
-            },
-            provider: "example",
-          },
-          providerName: "example",
-          providerRequestId: "req_123",
-          providerSessionId: null,
-          rawUsageJson: {
-            nested: {
-              ignored: undefined,
-            },
-            totalTokens: 165,
-          },
-          reasoningTokens: 8,
-          requestedModel: "gpt-5.4-mini",
-          routeId: "primary",
-          schema: "murph.assistant-usage.v1",
-          servedModel: "gpt-5.4-mini",
-          sessionId: "asst_123",
-          totalTokens: 165,
-          turnId: "turn_123",
-          usageId: "turn_123.attempt-1",
-        },
-      ],
+      usage: [BASE_USAGE_RECORD],
     });
 
     expect(result.recordedIds).toEqual(["turn_123.attempt-1"]);
@@ -66,9 +90,39 @@ describe("importHostedAiUsageRecords", () => {
       create: expect.objectContaining({
         id: "turn_123.attempt-1",
         memberId: "member_123",
-        turnId: "turn_123",
-        attemptCount: 1,
-        provider: "openai-compatible",
+        totalTokens: 165,
+        providerSessionId: null,
+        providerRequestId: null,
+        providerMetadataJson: Prisma.DbNull,
+        rawUsageJson: Prisma.DbNull,
+      }),
+      update: {},
+    });
+  });
+
+  it("persists provider debug fields only when the explicit debug flag is enabled", async () => {
+    process.env.HOSTED_AI_USAGE_PERSIST_DEBUG_FIELDS = "true";
+
+    const hostedAiUsageUpsert = vi.fn(async () => ({}));
+    const prisma = {
+      hostedAiUsage: {
+        upsert: hostedAiUsageUpsert,
+      },
+    };
+
+    await importHostedAiUsageRecords({
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [BASE_USAGE_RECORD],
+    });
+
+    expect(hostedAiUsageUpsert).toHaveBeenCalledWith({
+      where: {
+        id: "turn_123.attempt-1",
+      },
+      create: expect.objectContaining({
+        providerSessionId: "session_123",
+        providerRequestId: "req_123",
         providerMetadataJson: {
           nested: {},
           provider: "example",
@@ -77,7 +131,6 @@ describe("importHostedAiUsageRecords", () => {
           nested: {},
           totalTokens: 165,
         },
-        totalTokens: 165,
       }),
       update: {},
     });
