@@ -42,6 +42,7 @@ import {
   type HostedExecutionContainerNamespaceLike,
   invokeHostedExecutionContainerRunner,
 } from "./runner-container.js";
+import { buildHostedRunnerJobRuntimeConfig } from "./runner-env.ts";
 import { listHostedUserEnvKeys, type HostedUserEnvUpdate } from "./user-env.js";
 import {
   createRunnerCommitRecovery,
@@ -64,9 +65,8 @@ export type { DurableObjectStateLike } from "./user-runner/types.js";
 
 export class HostedUserRunner {
   private readonly bundleSync: RunnerBundleSync;
-  private readonly commitLocks = new Map<string, Promise<HostedExecutionCommittedResult>>();
   private readonly commitRecovery: ReturnType<typeof createRunnerCommitRecovery>;
-  private readonly finalizeLocks = new Map<string, Promise<HostedExecutionCommittedResult>>();
+  private readonly eventTransitionLocks = new Map<string, Promise<void>>();
   private readonly queueStore: RunnerQueueStore;
   private readonly runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
   private readonly scheduler: RunnerScheduler;
@@ -304,32 +304,39 @@ export class HostedUserRunner {
       currentBundleRefs: HostedExecutionBundleRefs;
     };
   }): Promise<HostedExecutionCommittedResult> {
-    const existingLock = this.commitLocks.get(input.eventId);
-    if (existingLock) {
-      return existingLock;
-    }
-
-    const commitPromise = this.commitOnce(input).finally(() => {
-      this.commitLocks.delete(input.eventId);
+    return this.applyHostedTransition({
+      eventId: input.eventId,
+      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
+      run: async (userId) => persistHostedExecutionCommit({
+        bucket: this.bucket,
+        currentBundleRefs: input.payload.currentBundleRefs,
+        eventId: input.eventId,
+        key: this.env.bundleEncryptionKey,
+        keyId: this.env.bundleEncryptionKeyId,
+        keysById: this.env.bundleEncryptionKeysById,
+        payload: input.payload,
+        userId,
+      }),
     });
-    this.commitLocks.set(input.eventId, commitPromise);
-    return commitPromise;
   }
 
   async finalizeCommit(input: {
     eventId: string;
     payload: HostedExecutionFinalizePayload;
   }): Promise<HostedExecutionCommittedResult> {
-    const existingLock = this.finalizeLocks.get(input.eventId);
-    if (existingLock) {
-      return existingLock;
-    }
-
-    const finalizePromise = this.finalizeOnce(input).finally(() => {
-      this.finalizeLocks.delete(input.eventId);
+    return this.applyHostedTransition({
+      eventId: input.eventId,
+      gatewayProjectionSnapshot: input.payload.gatewayProjectionSnapshot ?? null,
+      run: async (userId) => persistHostedExecutionFinalBundles({
+        bucket: this.bucket,
+        eventId: input.eventId,
+        key: this.env.bundleEncryptionKey,
+        keyId: this.env.bundleEncryptionKeyId,
+        keysById: this.env.bundleEncryptionKeysById,
+        payload: input.payload,
+        userId,
+      }),
     });
-    this.finalizeLocks.set(input.eventId, finalizePromise);
-    return finalizePromise;
   }
 
   private async runQueuedEvents(userId: string): Promise<HostedExecutionUserStatus> {
@@ -513,7 +520,10 @@ export class HostedUserRunner {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
     }
 
-    const bundleState = await this.queueStore.readBundleMetaState();
+    const [bundleState, userEnv] = await Promise.all([
+      this.queueStore.readBundleMetaState(),
+      this.bundleSync.readUserEnv(userId),
+    ]);
     const job: HostedAssistantRuntimeJobInput = {
       request: {
         bundles: await this.bundleSync.readBundlesForRunner(),
@@ -524,16 +534,16 @@ export class HostedUserRunner {
         run,
         ...(resume ? { resume } : {}),
       },
-      runtime: {
-        userEnv: await this.bundleSync.readUserEnv(userId),
-      },
+      runtime: buildHostedRunnerJobRuntimeConfig({
+        forwardedEnv: this.runnerContainerEnvironment,
+        userEnv,
+      }),
     };
 
     return invokeHostedExecutionContainerRunner({
       job,
       runnerContainerNamespace: this.runnerContainerNamespace,
       runnerControlToken: this.env.runnerControlToken,
-      runnerEnvironment: this.runnerContainerEnvironment,
       timeoutMs: this.env.runnerTimeoutMs,
       userId,
     });
@@ -691,43 +701,17 @@ export class HostedUserRunner {
     }
   }
 
-  private async commitOnce(input: {
+  private async applyHostedTransition<T>(input: {
     eventId: string;
-    payload: HostedExecutionCommitPayload & {
-      currentBundleRefs: HostedExecutionBundleRefs;
-    };
-  }): Promise<HostedExecutionCommittedResult> {
-    const userId = await this.requireBoundUserId();
-    const committed = await persistHostedExecutionCommit({
-      bucket: this.bucket,
-      currentBundleRefs: input.payload.currentBundleRefs,
-      eventId: input.eventId,
-      key: this.env.bundleEncryptionKey,
-      keyId: this.env.bundleEncryptionKeyId,
-      keysById: this.env.bundleEncryptionKeysById,
-      payload: input.payload,
-      userId,
+    gatewayProjectionSnapshot?: HostedExecutionCommitPayload["gatewayProjectionSnapshot"];
+    run: (userId: string) => Promise<T>;
+  }): Promise<T> {
+    return this.withEventTransitionLock(input.eventId, async () => {
+      const userId = await this.requireBoundUserId();
+      const result = await input.run(userId);
+      await this.gatewayStore.applySnapshot(input.gatewayProjectionSnapshot ?? null);
+      return result;
     });
-    await this.gatewayStore.applySnapshot(input.payload.gatewayProjectionSnapshot ?? null);
-    return committed;
-  }
-
-  private async finalizeOnce(input: {
-    eventId: string;
-    payload: HostedExecutionFinalizePayload;
-  }): Promise<HostedExecutionCommittedResult> {
-    const userId = await this.requireBoundUserId();
-    const finalized = await persistHostedExecutionFinalBundles({
-      bucket: this.bucket,
-      eventId: input.eventId,
-      key: this.env.bundleEncryptionKey,
-      keyId: this.env.bundleEncryptionKeyId,
-      keysById: this.env.bundleEncryptionKeysById,
-      payload: input.payload,
-      userId,
-    });
-    await this.gatewayStore.applySnapshot(input.payload.gatewayProjectionSnapshot ?? null);
-    return finalized;
   }
 
   private readUserEnvSource(): Readonly<Record<string, string | undefined>> {
@@ -739,6 +723,26 @@ export class HostedUserRunner {
 
   private async requireBoundUserId(): Promise<string> {
     return (await this.queueStore.readState()).userId;
+  }
+
+  private async withEventTransitionLock<T>(eventId: string, run: () => Promise<T>): Promise<T> {
+    const previous = this.eventTransitionLocks.get(eventId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.catch(() => {}).then(() => current);
+    this.eventTransitionLocks.set(eventId, chain);
+    await previous.catch(() => {});
+
+    try {
+      return await run();
+    } finally {
+      release();
+      if (this.eventTransitionLocks.get(eventId) === chain) {
+        this.eventTransitionLocks.delete(eventId);
+      }
+    }
   }
 
   private async withUserEnvLock<T>(run: () => Promise<T>): Promise<T> {

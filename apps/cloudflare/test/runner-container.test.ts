@@ -35,9 +35,6 @@ describe("RunnerContainer", () => {
         job: {
           request: createRunnerRequest(),
         },
-        runnerEnvironment: {
-          CUSTOM_API_KEY: "value",
-        },
         timeoutMs: 12_345,
         userId: "member_123",
       }),
@@ -60,7 +57,6 @@ describe("RunnerContainer", () => {
       startOptions: {
         enableInternet: true,
         envVars: {
-          CUSTOM_API_KEY: "value",
           HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: "runner-token",
           PORT: "8080",
         },
@@ -156,7 +152,6 @@ describe("RunnerContainer", () => {
         job: {
           request: createRunnerRequest("evt_with_run", { run }),
         },
-        runnerEnvironment: {},
         timeoutMs: 12_345,
         userId: "member_123",
       }),
@@ -184,7 +179,6 @@ describe("RunnerContainer", () => {
         job: {
           request: createRunnerRequest("evt_short_budget"),
         },
-        runnerEnvironment: {},
         timeoutMs: 1_000,
         userId: "member_123",
       }),
@@ -212,7 +206,6 @@ describe("RunnerContainer", () => {
         job: {
           request: createRunnerRequest("evt_no_token"),
         },
-        runnerEnvironment: {},
         timeoutMs: 30_000,
         userId: "member_123",
       }),
@@ -242,7 +235,6 @@ describe("RunnerContainer", () => {
         job: {
           request: createRunnerRequest("evt_no_wrapper_token"),
         },
-        runnerEnvironment: {},
         timeoutMs: 30_000,
         userId: "member_123",
       }),
@@ -288,7 +280,6 @@ describe("RunnerContainer", () => {
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
         job: "not-an-object",
-        runnerEnvironment: [],
         timeoutMs: 0,
       }),
       headers: {
@@ -355,9 +346,6 @@ describe("RunnerContainer", () => {
       },
       runnerContainerNamespace: { getByName },
       runnerControlToken: "runner-token",
-      runnerEnvironment: {
-        CUSTOM_API_KEY: "value",
-      },
       timeoutMs: 45_000,
       userId: "member_123",
     });
@@ -367,9 +355,6 @@ describe("RunnerContainer", () => {
     expect(body).toMatchObject({
       job: {
         request: createRunnerRequest("evt_namespace"),
-      },
-      runnerEnvironment: {
-        CUSTOM_API_KEY: "value",
       },
       timeoutMs: 45_000,
       userId: "member_123",
@@ -411,7 +396,6 @@ describe("RunnerContainer", () => {
           },
         },
       },
-      runnerEnvironment: {},
       timeoutMs: 30_000,
       userId: "member_123",
     });
@@ -464,7 +448,6 @@ describe("RunnerContainer", () => {
         },
         runnerContainerNamespace: { getByName },
         runnerControlToken: null,
-        runnerEnvironment: {},
         timeoutMs: 45_000,
         userId: "member_123",
       }),

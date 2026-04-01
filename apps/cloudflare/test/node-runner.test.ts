@@ -1437,10 +1437,6 @@ describe("runHostedExecutionJob", () => {
         forwardedEnv: {
           HOSTED_SHARE_INTERNAL_TOKEN: "bad-forwarded-share-token",
         },
-        webControlPlane: {
-          shareBaseUrl: "http://override.invalid",
-          shareToken: "bad-runtime-share-token",
-        },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-"));
       cleanupPaths.push(workspaceRoot);
@@ -1470,28 +1466,28 @@ describe("runHostedExecutionJob", () => {
     }
   });
 
-  it("ignores caller-supplied forwarded env when launching isolated jobs", async () => {
+  it("applies caller-supplied forwarded env when launching isolated jobs", async () => {
     setHostedExecutionRunModeForTests("isolated");
 
-    const result = await runHostedExecutionJob({
-      bundles: {
-        agentState: null,
-        vault: null,
-      },
-      dispatch: {
-        event: {
-          kind: "member.activated",
-          userId: "member_isolated_env",
+    await expect(
+      runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
         },
-        eventId: "evt_isolated_env",
-        occurredAt: "2026-03-29T10:00:00.000Z",
-      },
-      forwardedEnv: {
-        NODE_OPTIONS: "--definitely-invalid-node-option",
-      },
-    });
-
-    expect(result.result.summary).toContain("Processed member activation");
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_isolated_env",
+          },
+          eventId: "evt_isolated_env",
+          occurredAt: "2026-03-29T10:00:00.000Z",
+        },
+        forwardedEnv: {
+          NODE_OPTIONS: "--definitely-invalid-node-option",
+        },
+      }),
+    ).rejects.toThrow("--definitely-invalid-node-option is not allowed in NODE_OPTIONS");
   });
 
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {
@@ -2524,6 +2520,49 @@ describe("runHostedExecutionJob", () => {
           schema: "murph.gateway-projection-snapshot.v1",
         },
       });
+    } finally {
+      restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
+    }
+  });
+
+  it("prefers per-job forwarded env over ambient process env when deriving the commit timeout", async () => {
+    const previousCommitTimeout = process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS;
+    process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS = "15000";
+    const commitFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+      }),
+    );
+    vi.stubGlobal("fetch", commitFetch);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    try {
+      await runHostedExecutionJob({
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        commit: {
+          bundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_commit_forwarded_timeout",
+          occurredAt: "2026-03-26T12:10:00.000Z",
+        },
+        forwardedEnv: {
+          HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "5000",
+        },
+      });
+
+      expect(commitFetch).toHaveBeenCalledTimes(2);
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
     } finally {
       restoreEnvVar("HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS", previousCommitTimeout);
     }

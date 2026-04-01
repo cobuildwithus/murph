@@ -30,7 +30,6 @@ export class HostedExecutionConfigurationError extends Error {
 
 interface HostedExecutionContainerInvokeRequest {
   job: HostedAssistantRuntimeJobInput;
-  runnerEnvironment: Record<string, string>;
   timeoutMs: number;
   userId: string;
 }
@@ -43,7 +42,6 @@ interface HostedExecutionContainerRunnerInput {
   job: HostedAssistantRuntimeJobInput;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   runnerControlToken: string | null;
-  runnerEnvironment: Readonly<Record<string, string>>;
   timeoutMs: number;
   userId: string;
 }
@@ -203,7 +201,6 @@ export class RunnerContainer extends Container {
         startOptions: {
           enableInternet: true,
           envVars: {
-            ...input.runnerEnvironment,
             HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN: input.runnerControlToken,
             PORT: String(RUNNER_PORT),
           },
@@ -291,7 +288,6 @@ export async function invokeHostedExecutionContainerRunner(
 
   return input.runnerContainerNamespace.getByName(input.userId).invoke({
     job: input.job,
-    runnerEnvironment: { ...input.runnerEnvironment },
     timeoutMs: input.timeoutMs,
     userId: input.userId,
   });
@@ -339,7 +335,6 @@ function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): stri
 function parseHostedExecutionContainerInvokeInput(
   payload: {
     job?: unknown;
-    runnerEnvironment?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
@@ -348,7 +343,6 @@ function parseHostedExecutionContainerInvokeInput(
   return {
     job: parseHostedAssistantRuntimeJobInput(payload.job),
     runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
-    runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
     timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
   };
@@ -365,14 +359,6 @@ function injectInternalWorkerProxyToken(
       internalWorkerProxyToken,
     },
   };
-}
-
-function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object.`);
-  }
-
-  return value as Record<string, unknown>;
 }
 
 function requireString(value: unknown, label: string): string {
@@ -412,14 +398,6 @@ function requireRunnerContainerAuthorization(
   return null;
 }
 
-function readRunnerEnvironment(value: unknown): Record<string, string> {
-  if (value === undefined) {
-    return {};
-  }
-
-  return toStringRecord(requireRecord(value, "runnerEnvironment"));
-}
-
 function readTimeoutMs(value: unknown, fallback: number): number {
   if (value === undefined) {
     return fallback;
@@ -430,13 +408,6 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   return Math.trunc(value);
-}
-
-function toStringRecord(value: Record<string, unknown>): Record<string, string> {
-  const entries = Object.entries(value)
-    .filter(([, entryValue]) => typeof entryValue === "string") as Array<[string, string]>;
-
-  return Object.fromEntries(entries);
 }
 
 function readOptionalString(value: unknown): string | null {

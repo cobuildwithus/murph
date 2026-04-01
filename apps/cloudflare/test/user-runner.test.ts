@@ -1120,6 +1120,78 @@ describe("HostedUserRunner", () => {
     expectHostedBundleKeys(bucket.keys(), ["agent-state", "vault"]);
   });
 
+  it("sends forwarded env through the per-job runtime payload instead of the container start envelope", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url, init) => {
+        const payload = {
+          bundles: {
+            agentState: Buffer.from("agent-state").toString("base64"),
+            vault: Buffer.from("vault").toString("base64"),
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        };
+        await commitResultForRunnerRequest({
+          bucket,
+          environment,
+          payload,
+          requestBody: JSON.parse(String(init?.body)),
+        });
+
+        return new Response(JSON.stringify(payload), {
+          status: 200,
+        });
+      }),
+    );
+    const runner = new HostedUserRunner(
+      storage.state,
+      environment,
+      bucket.api,
+      {
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+        OPENAI_API_KEY: "sk-worker",
+      },
+    );
+
+    await runner.dispatch({
+      event: {
+        kind: "member.activated",
+        userId: "member_123",
+      },
+      eventId: "evt_native_runtime_env",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+    });
+
+    const invokeRequest = storage.runnerContainerFetch.mock.calls.find(([input]) => {
+      const request = input instanceof Request ? input : new Request(String(input));
+      return new URL(request.url).pathname === "/internal/invoke";
+    })?.[0];
+    expect(invokeRequest).toBeInstanceOf(Request);
+    const invokePayload = JSON.parse(
+      await (invokeRequest as Request).clone().text(),
+    ) as {
+      job: {
+        runtime?: {
+          commitTimeoutMs?: number;
+          forwardedEnv?: Record<string, string>;
+        };
+      };
+      runnerEnvironment?: unknown;
+    };
+
+    expect(invokePayload.runnerEnvironment).toBeUndefined();
+    expect(invokePayload.job.runtime).toMatchObject({
+      commitTimeoutMs: 45_000,
+      forwardedEnv: {
+        HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "45000",
+        OPENAI_API_KEY: "sk-worker",
+      },
+    });
+  });
+
   it("does not reuse stale past nextWakeAt values after an alarm run returns no next wake", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
@@ -1702,6 +1774,73 @@ describe("HostedUserRunner", () => {
 
     expect(second.bundleRefs).toEqual(first.bundleRefs);
     expect(bucket.putCount()).toBe(writeCountAfterFirstRun + 1);
+  });
+
+  it("serializes commit and finalize for the same event through one transition lock", async () => {
+    const originalPut = bucket.api.put;
+    const firstWriteStarted = createDeferred<void>();
+    const releaseFirstWrite = createDeferred<void>();
+    let blocked = false;
+    bucket.api.put = vi.fn(async (key: string, value: string) => {
+      if (!blocked) {
+        blocked = true;
+        firstWriteStarted.resolve();
+        await releaseFirstWrite.promise;
+      }
+
+      await originalPut.call(bucket.api, key, value);
+    });
+
+    try {
+      const runner = new HostedUserRunner(storage.state, environment, bucket.api);
+      await runner.bootstrapUser("member_123");
+
+      const commitPromise = runner.commit({
+        eventId: "evt_transition_lock",
+        payload: {
+          bundles: {
+            agentState: Buffer.from("agent-state").toString("base64"),
+            vault: Buffer.from("vault").toString("base64"),
+          },
+          currentBundleRefs: {
+            agentState: null,
+            vault: null,
+          },
+          result: {
+            eventsHandled: 1,
+            summary: "ok",
+          },
+        },
+      });
+
+      await firstWriteStarted.promise;
+      let finalizeSettled = false;
+      const finalizePromise = runner.finalizeCommit({
+        eventId: "evt_transition_lock",
+        payload: {
+          bundles: {
+            agentState: Buffer.from("agent-state-final").toString("base64"),
+            vault: Buffer.from("vault-final").toString("base64"),
+          },
+        },
+      }).finally(() => {
+        finalizeSettled = true;
+      });
+
+      await Promise.resolve();
+      expect(finalizeSettled).toBe(false);
+
+      releaseFirstWrite.resolve();
+      await expect(commitPromise).resolves.toMatchObject({
+        eventId: "evt_transition_lock",
+      });
+      await expect(finalizePromise).resolves.toMatchObject({
+        eventId: "evt_transition_lock",
+        finalizedAt: expect.any(String),
+      });
+    } finally {
+      bucket.api.put = originalPut;
+    }
   });
 
   it("retries failed events and eventually poisons them after repeated runner failures", async () => {
