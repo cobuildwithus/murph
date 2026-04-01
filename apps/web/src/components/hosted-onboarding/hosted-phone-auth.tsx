@@ -6,8 +6,11 @@ import {
   usePrivy,
   useUser,
 } from "@privy-io/react-auth";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { LoaderCircleIcon } from "lucide-react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Combobox,
   ComboboxContent,
@@ -16,15 +19,25 @@ import {
   ComboboxList,
   ComboboxTrigger,
 } from "@/components/ui/combobox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import {
+  canContinueHostedPrivyClientSession,
+  describeHostedPrivyClientSessionIssue,
   ensureHostedPrivyPhoneAndWalletReady,
   HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
   readHostedPrivyClientSessionState,
   resolveHostedPrivyClientSessionIssue,
+  shouldShowHostedPrivyManualResumeState,
+  shouldShowHostedPrivyRestartState,
+  shouldResetHostedPrivyAutoContinueTrigger,
+  shouldShowHostedPrivyAuthenticatedLoadingState,
   shouldSuppressHostedPrivyAutoContinueAfterError,
   shouldResetHostedPrivyClientSessionToSms,
   shouldAutoContinueHostedPrivyClientSession,
+  type HostedPrivyFinalizationState,
   type HostedPrivyClientPendingAction,
   type HostedPrivyClientSessionIssue,
 } from "@/src/lib/hosted-onboarding/privy-client";
@@ -84,12 +97,15 @@ function HostedPhoneAuthInner({
   const [checkingAuthenticatedSession, setCheckingAuthenticatedSession] = useState(false);
   const [code, setCode] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [finalizationState, setFinalizationState] = useState<HostedPrivyFinalizationState>("idle");
   const [pendingAction, setPendingAction] = useState<HostedPrivyClientPendingAction>(null);
   const [phoneCountryCode, setPhoneCountryCode] = useState<string>(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
   const [phoneNumber, setPhoneNumber] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const autoContinueTriggered = useRef(false);
   const autoResetTriggered = useRef(false);
+  const finalizationStateRef = useRef<HostedPrivyFinalizationState>("idle");
+  const allowAuthenticatedAutoContinue = mode === "invite";
 
   const selectedPhoneCountry = useMemo(
     () =>
@@ -101,6 +117,47 @@ function HostedPhoneAuthInner({
     () => normalizePhoneNumberForCountry(phoneNumber, selectedPhoneCountry.dialCode),
     [phoneNumber, selectedPhoneCountry.dialCode],
   );
+  const showAuthenticatedLoadingState = finalizationState !== "idle" || (
+    allowAuthenticatedAutoContinue
+    && shouldShowHostedPrivyAuthenticatedLoadingState({
+      authenticated,
+      autoContinueSuppressed,
+      issue: authenticatedSessionIssue,
+    })
+  );
+  const showAuthenticatedManualResumeState = shouldShowHostedPrivyManualResumeState({
+    authenticated,
+    issue: authenticatedSessionIssue,
+    showAuthenticatedLoadingState,
+  });
+  const showAuthenticatedRestartState = shouldShowHostedPrivyRestartState({
+    authenticated,
+    issue: authenticatedSessionIssue,
+    showAuthenticatedLoadingState,
+  });
+  const authenticatedLoadingTitle =
+    checkingAuthenticatedSession
+      ? "Checking your setup..."
+      : pendingAction === "continue" || pendingAction === "verify-code" || finalizationState !== "idle"
+        ? "Finishing setup..."
+        : "Preparing your account...";
+  const authenticatedLoadingBody =
+    pendingAction === "continue" || pendingAction === "verify-code" || finalizationState !== "idle"
+      ? "Keep this tab open. We are verifying your number, preparing your account, and moving you to the next step."
+      : "Keep this tab open while we confirm your verified session and prepare the next step.";
+
+  function updateFinalizationState(nextState: HostedPrivyFinalizationState) {
+    finalizationStateRef.current = nextState;
+    setFinalizationState(nextState);
+  }
+
+  const continueAuthenticatedEffect = useEffectEvent(() => {
+    void handleContinueAuthenticated();
+  });
+
+  const logoutEffect = useEffectEvent(() => {
+    void handleLogout();
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -128,32 +185,56 @@ function HostedPhoneAuthInner({
     return () => {
       cancelled = true;
     };
-  }, [authenticated, ready]);
+  }, [authenticated, ready, refreshUser, user]);
 
   useEffect(() => {
     if (!authenticated) {
       setAutoContinueSuppressed(false);
+      autoContinueTriggered.current = false;
+      updateFinalizationState("idle");
     }
   }, [authenticated]);
 
   useEffect(() => {
+    if (!allowAuthenticatedAutoContinue) {
+      autoContinueTriggered.current = false;
+      return;
+    }
+
     if (
       !shouldAutoContinueHostedPrivyClientSession({
         authenticated,
         autoContinueSuppressed,
         autoContinueTriggered: autoContinueTriggered.current,
         checkingAuthenticatedSession,
+        finalizationState,
         issue: authenticatedSessionIssue,
         pendingAction,
       })
     ) {
-      autoContinueTriggered.current = false;
+      if (
+        shouldResetHostedPrivyAutoContinueTrigger({
+          authenticated,
+          autoContinueSuppressed,
+          issue: authenticatedSessionIssue,
+        })
+      ) {
+        autoContinueTriggered.current = false;
+      }
       return;
     }
 
     autoContinueTriggered.current = true;
-    void handleContinueAuthenticated();
-  }, [authenticated, authenticatedSessionIssue, autoContinueSuppressed, checkingAuthenticatedSession, pendingAction]);
+    continueAuthenticatedEffect();
+  }, [
+    authenticated,
+    authenticatedSessionIssue,
+    allowAuthenticatedAutoContinue,
+    autoContinueSuppressed,
+    checkingAuthenticatedSession,
+    finalizationState,
+    pendingAction,
+  ]);
 
   useEffect(() => {
     if (!authenticated || authenticatedSessionIssue !== "missing-phone") {
@@ -174,7 +255,7 @@ function HostedPhoneAuthInner({
     }
 
     autoResetTriggered.current = true;
-    void handleLogout();
+    logoutEffect();
   }, [authenticated, authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
 
   async function handleSendCode() {
@@ -209,44 +290,48 @@ function HostedPhoneAuthInner({
 
     try {
       await loginWithCode({ code: code.trim() });
-      await finalizeHostedPrivyVerification({
-        createWallet,
-        inviteCode,
-        onCompleted,
-        refreshUser,
-        user,
-      });
+      await runHostedPrivyFinalization("verify-code");
     } catch (error) {
       setErrorMessage(toErrorMessage(error, "We could not verify that code."));
     } finally {
-      setPendingAction(null);
+      if (finalizationStateRef.current === "idle") {
+        setPendingAction(null);
+      }
     }
   }
 
   async function handleContinueAuthenticated() {
     setErrorMessage(null);
-    setPendingAction("continue");
 
     try {
-      await finalizeHostedPrivyVerification({
-        createWallet,
-        inviteCode,
-        onCompleted,
+      await runHostedPrivyFinalization("continue");
+    } catch (error) {
+      const latestSessionIssue = await readLatestAuthenticatedSessionIssue({
+        authenticated,
+        ready,
         refreshUser,
         user,
       });
-    } catch (error) {
+
+      if (latestSessionIssue !== null) {
+        setAuthenticatedSessionIssue(latestSessionIssue);
+      }
+
       if (shouldSuppressHostedPrivyAutoContinueAfterError(error)) {
         setAutoContinueSuppressed(true);
       }
+
+      if (!canContinueHostedPrivyClientSession(latestSessionIssue)) {
+        return;
+      }
+
       setErrorMessage(toErrorMessage(error, "We could not continue with your Privy session."));
-    } finally {
-      setPendingAction(null);
     }
   }
 
   async function handleLogout() {
     setErrorMessage(null);
+    updateFinalizationState("idle");
     setPendingAction("logout");
 
     try {
@@ -263,19 +348,43 @@ function HostedPhoneAuthInner({
     }
   }
 
+  async function runHostedPrivyFinalization(action: "continue" | "verify-code") {
+    if (finalizationStateRef.current !== "idle") {
+      return;
+    }
+
+    setPendingAction(action);
+    updateFinalizationState("running");
+
+    try {
+      await finalizeHostedPrivyVerification({
+        createWallet,
+        inviteCode,
+        onCompleted,
+        refreshUser,
+        user,
+      });
+      updateFinalizationState("completed");
+    } catch (error) {
+      updateFinalizationState("idle");
+      throw error;
+    }
+  }
+
   return (
     <div className="space-y-4">
       {errorMessage ? (
-        <div className="rounded border border-red-200 bg-red-50 p-4 text-sm leading-snug text-red-700">
-          {errorMessage}
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>Unable to continue</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {authenticated ? null : (
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-stone-900" htmlFor={`hosted-phone-${mode}`}>
+          <Label htmlFor={`hosted-phone-${mode}`}>
             {mode === "invite" ? "Phone number that received this invite" : "Your phone number"}
-          </label>
+          </Label>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Combobox
               items={HOSTED_PHONE_COUNTRY_OPTIONS}
@@ -289,7 +398,10 @@ function HostedPhoneAuthInner({
             >
               <ComboboxTrigger
                 aria-label={`Country or region, ${selectedPhoneCountry.label} ${selectedPhoneCountry.dialCode}`}
-                className="flex h-12 w-auto shrink-0 items-center justify-between rounded border border-stone-200 bg-white px-4 text-left text-sm font-medium text-stone-900 focus-visible:border-olive-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-olive-light/20"
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "lg" }),
+                  "h-12 w-auto shrink-0 justify-between px-4 text-left font-medium sm:min-w-28",
+                )}
               >
                 {selectedPhoneCountry.dialCode}
               </ComboboxTrigger>
@@ -307,14 +419,14 @@ function HostedPhoneAuthInner({
                 </ComboboxList>
               </ComboboxContent>
             </Combobox>
-            <input
+            <Input
               id={`hosted-phone-${mode}`}
               autoComplete="tel-national"
               inputMode="tel"
               placeholder={selectedPhoneCountry.placeholder}
               value={phoneNumber}
               onChange={(event) => setPhoneNumber(event.currentTarget.value)}
-              className={`${inputClasses} sm:flex-1`}
+              className="h-12 px-4 text-base sm:flex-1 md:text-sm"
             />
           </div>
           {mode === "invite" ? (
@@ -327,74 +439,117 @@ function HostedPhoneAuthInner({
 
       {!authenticated && step === "code" ? (
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-stone-900" htmlFor={`hosted-code-${mode}`}>
+          <Label htmlFor={`hosted-code-${mode}`}>
             Verification code
-          </label>
-          <input
+          </Label>
+          <Input
             id={`hosted-code-${mode}`}
             autoComplete="one-time-code"
             inputMode="numeric"
             placeholder="123456"
             value={code}
             onChange={(event) => setCode(event.currentTarget.value)}
-            className={inputClasses}
+            className="h-12 px-4 text-base md:text-sm"
           />
           <p className="text-sm text-stone-500">Enter the code we just texted you.</p>
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-3">
-        {authenticated ? (
-          <>
-            <button
+      {authenticated && showAuthenticatedLoadingState ? (
+        <Alert className="border-stone-200 bg-stone-50">
+          <LoaderCircleIcon className="mt-0.5 size-4 animate-spin" />
+          <AlertTitle>{authenticatedLoadingTitle}</AlertTitle>
+          <AlertDescription>{authenticatedLoadingBody}</AlertDescription>
+        </Alert>
+      ) : showAuthenticatedManualResumeState ? (
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>You already started signup in this browser.</AlertTitle>
+          <AlertDescription>
+            Keep going with this number, or sign out and use a different one.
+          </AlertDescription>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <Button
               type="button"
-              onClick={handleLogout}
-              disabled={pendingAction !== null}
-              className="rounded border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
-            </button>
-          </>
-        ) : step === "phone" ? (
-          <button
-            type="button"
-            onClick={handleSendCode}
-            disabled={!ready || pendingAction !== null}
-            className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={handleVerifyCode}
+              onClick={handleContinueAuthenticated}
               disabled={!ready || pendingAction !== null}
-            className="rounded bg-olive px-6 py-3 font-bold text-white transition-colors hover:bg-olive-light disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {pendingAction === "verify-code"
-                ? "Finishing setup..."
-                : mode === "invite"
-                  ? "Verify phone and continue"
-                  : "Verify phone and create account"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setCode("");
-                setStep("phone");
-              }}
-              disabled={pendingAction !== null}
-              className="rounded border border-stone-200 bg-white px-5 py-3 font-semibold text-stone-700 transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-50"
+              size="lg"
             >
-              Change number
-            </button>
-          </>
-        )}
-      </div>
-
+              Continue signup
+            </Button>
+            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="lg">
+              {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
+            </Button>
+          </div>
+        </Alert>
+      ) : showAuthenticatedRestartState ? (
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>This browser needs a fresh phone sign-in.</AlertTitle>
+          <AlertDescription>
+            {describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
+              ?? "Sign out and request a fresh code to continue."}
+          </AlertDescription>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <Button type="button" onClick={handleLogout} disabled={pendingAction !== null} variant="outline" size="lg">
+              {pendingAction === "logout" ? "Signing out..." : "Use a different number"}
+            </Button>
+          </div>
+        </Alert>
+      ) : (
+        <div className="flex flex-wrap gap-3">
+          {step === "phone" ? (
+            <Button type="button" onClick={handleSendCode} disabled={!ready || pendingAction !== null} size="lg">
+              {pendingAction === "send-code" ? "Sending code..." : "Text me a code"}
+            </Button>
+          ) : (
+            <>
+              <Button
+                type="button"
+                onClick={handleVerifyCode}
+                disabled={!ready || pendingAction !== null}
+                size="lg"
+              >
+                {pendingAction === "verify-code"
+                  ? "Finishing setup..."
+                  : mode === "invite"
+                    ? "Verify phone and continue"
+                    : "Verify phone and create account"}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setCode("");
+                  setStep("phone");
+                }}
+                disabled={pendingAction !== null}
+                variant="outline"
+                size="lg"
+              >
+                Change number
+              </Button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+async function readLatestAuthenticatedSessionIssue(input: {
+  authenticated: boolean;
+  ready: boolean;
+  refreshUser: () => Promise<{ linkedAccounts?: unknown } | null>;
+  user: { linkedAccounts?: unknown } | null;
+}): Promise<HostedPrivyClientSessionIssue | null> {
+  if (!input.authenticated || !input.ready) {
+    return null;
+  }
+
+  const sessionState = await readHostedPrivyClientSessionState({
+    refreshUser: input.refreshUser,
+    user: input.user,
+  });
+
+  return resolveHostedPrivyClientSessionIssue(sessionState);
 }
 
 async function finalizeHostedPrivyVerification(input: {
@@ -473,6 +628,3 @@ function sleep(delayMs: number): Promise<void> {
     globalThis.setTimeout(resolve, delayMs);
   });
 }
-
-const inputClasses =
-  "w-full rounded border border-stone-200 bg-white px-4 py-3 text-stone-900 placeholder:text-stone-400 focus:border-olive-light focus:outline-none focus:ring-2 focus:ring-olive-light/20";

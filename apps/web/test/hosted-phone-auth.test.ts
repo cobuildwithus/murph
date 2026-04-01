@@ -86,6 +86,50 @@ describe("HostedPhoneAuth", () => {
 
     assert.doesNotMatch(markup, /Verified Privy session found/);
     assert.doesNotMatch(markup, /Finishing setup with your current verified phone number now/);
+    assert.match(markup, /Preparing your account/);
+    assert.doesNotMatch(markup, /Use a different number/);
+  });
+
+  it("keeps the public homepage in a manual resume state for authenticated sessions", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {
+        mode: "public",
+        privyAppId: "privy-app-id",
+        privyClientId: "privy-client-id",
+      }),
+    );
+
+    assert.match(markup, /You already started signup in this browser/);
+    assert.match(markup, /Continue signup/);
     assert.match(markup, /Use a different number/);
+    assert.doesNotMatch(markup, /Preparing your account/);
+  });
+
+  it("keeps invite-mode authenticated sessions in the loading state instead of rendering the manual resume banner", async () => {
+    mocks.usePrivy.mockReturnValue({
+      authenticated: true,
+      logout: mocks.logout,
+      ready: true,
+    });
+    const { HostedPhoneAuth } = await import("@/src/components/hosted-onboarding/hosted-phone-auth");
+
+    const markup = renderToStaticMarkup(
+      React.createElement(HostedPhoneAuth, {
+        mode: "invite",
+        privyAppId: "privy-app-id",
+        privyClientId: "privy-client-id",
+      }),
+    );
+
+    assert.match(markup, /Preparing your account/);
+    assert.doesNotMatch(markup, /You already started signup in this browser/);
+    assert.doesNotMatch(markup, /Continue signup/);
   });
 });

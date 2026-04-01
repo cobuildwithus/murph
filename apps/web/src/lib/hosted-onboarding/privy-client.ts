@@ -10,7 +10,9 @@ export type HostedPrivyClientPendingAction =
   | "send-code"
   | "verify-code"
   | null;
+export type HostedPrivyFinalizationState = "idle" | "running" | "completed";
 
+export const HOSTED_PRIVY_CLIENT_SESSION_RETRY_DELAYS_MS = [0, 250, 500, 1_000] as const;
 export const HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS = [0, 250, 500, 1_000, 2_000, 4_000] as const;
 
 interface HostedPrivyClientSessionStateInput {
@@ -25,7 +27,10 @@ interface HostedPrivyWalletProvisioningInput extends HostedPrivyClientSessionSta
 export async function ensureHostedPrivyPhoneAndWalletReady(
   input: HostedPrivyWalletProvisioningInput,
 ): Promise<void> {
-  let sessionState = await readHostedPrivyClientSessionState(input);
+  let sessionState = await readHostedPrivyClientSessionStateWithRetry(
+    input,
+    (candidate) => Boolean(candidate.phone),
+  );
 
   if (!sessionState.phone) {
     throw new Error("This Privy session is missing a verified phone number.");
@@ -38,7 +43,10 @@ export async function ensureHostedPrivyPhoneAndWalletReady(
   try {
     await input.createWallet();
   } catch (error) {
-    sessionState = await readHostedPrivyClientSessionState(input);
+    sessionState = await readHostedPrivyClientSessionStateWithRetry(
+      input,
+      (candidate) => Boolean(candidate.wallet),
+    );
 
     if (sessionState.wallet) {
       return;
@@ -47,7 +55,10 @@ export async function ensureHostedPrivyPhoneAndWalletReady(
     throw error;
   }
 
-  sessionState = await readHostedPrivyClientSessionState(input);
+  sessionState = await readHostedPrivyClientSessionStateWithRetry(
+    input,
+    (candidate) => Boolean(candidate.wallet),
+  );
 
   if (!sessionState.wallet) {
     throw new Error("We could not finish preparing your account. Wait a moment and try again.");
@@ -107,6 +118,7 @@ export function shouldAutoContinueHostedPrivyClientSession(input: {
   autoContinueSuppressed: boolean;
   autoContinueTriggered: boolean;
   checkingAuthenticatedSession: boolean;
+  finalizationState: HostedPrivyFinalizationState;
   issue: HostedPrivyClientSessionIssue | null;
   pendingAction: HostedPrivyClientPendingAction;
 }): boolean {
@@ -121,6 +133,7 @@ export function shouldAutoContinueHostedPrivyClientSession(input: {
   if (
     input.autoContinueSuppressed
     || input.checkingAuthenticatedSession
+    || input.finalizationState !== "idle"
     || input.pendingAction !== null
     || input.autoContinueTriggered
   ) {
@@ -136,6 +149,46 @@ export function shouldSuppressHostedPrivyAutoContinueAfterError(error: unknown):
     && error.name === "HostedOnboardingApiError"
     && "retryable" in error
     && (error as { retryable?: unknown }).retryable === false,
+  );
+}
+
+export function shouldResetHostedPrivyAutoContinueTrigger(input: {
+  authenticated: boolean;
+  autoContinueSuppressed: boolean;
+  issue: HostedPrivyClientSessionIssue | null;
+}): boolean {
+  return !input.authenticated || input.autoContinueSuppressed || !canContinueHostedPrivyClientSession(input.issue);
+}
+
+export function shouldShowHostedPrivyAuthenticatedLoadingState(input: {
+  authenticated: boolean;
+  autoContinueSuppressed: boolean;
+  issue: HostedPrivyClientSessionIssue | null;
+}): boolean {
+  return input.authenticated && !input.autoContinueSuppressed && canContinueHostedPrivyClientSession(input.issue);
+}
+
+export function shouldShowHostedPrivyManualResumeState(input: {
+  authenticated: boolean;
+  issue: HostedPrivyClientSessionIssue | null;
+  showAuthenticatedLoadingState: boolean;
+}): boolean {
+  return (
+    input.authenticated
+    && !input.showAuthenticatedLoadingState
+    && canContinueHostedPrivyClientSession(input.issue)
+  );
+}
+
+export function shouldShowHostedPrivyRestartState(input: {
+  authenticated: boolean;
+  issue: HostedPrivyClientSessionIssue | null;
+  showAuthenticatedLoadingState: boolean;
+}): boolean {
+  return (
+    input.authenticated
+    && !input.showAuthenticatedLoadingState
+    && !canContinueHostedPrivyClientSession(input.issue)
   );
 }
 
@@ -155,4 +208,32 @@ export function shouldResetHostedPrivyClientSessionToSms(input: {
   }
 
   return true;
+}
+
+async function readHostedPrivyClientSessionStateWithRetry(
+  input: HostedPrivyClientSessionStateInput,
+  accept: (sessionState: HostedPrivyLinkedAccountState) => boolean,
+): Promise<HostedPrivyLinkedAccountState> {
+  let latestSessionState = await readHostedPrivyClientSessionState(input);
+
+  if (accept(latestSessionState)) {
+    return latestSessionState;
+  }
+
+  for (const delayMs of HOSTED_PRIVY_CLIENT_SESSION_RETRY_DELAYS_MS.slice(1)) {
+    await sleep(delayMs);
+    latestSessionState = await readHostedPrivyClientSessionState(input);
+
+    if (accept(latestSessionState)) {
+      return latestSessionState;
+    }
+  }
+
+  return latestSessionState;
+}
+
+function sleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, delayMs);
+  });
 }
