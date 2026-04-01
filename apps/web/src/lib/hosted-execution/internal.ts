@@ -75,6 +75,13 @@ export function requireHostedExecutionSchedulerToken(request: Request): void {
   });
 }
 
+export function requireHostedShareInternalToken(request: Request): void {
+  authorizeHostedExecutionInternalRequest({
+    acceptedToken: "share",
+    request,
+  });
+}
+
 export function requireHostedExecutionUserId(request: Request): string {
   const userId = normalizeOptionalString(request.headers.get(HOSTED_EXECUTION_USER_ID_HEADER));
 

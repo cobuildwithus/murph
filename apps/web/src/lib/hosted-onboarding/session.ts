@@ -72,7 +72,7 @@ export async function createHostedSession(input: {
     const sessionId = generateHostedSessionId();
     const expiresAt = sessionExpiresAt(now, environment.sessionTtlDays);
 
-    const createdSession = await tx.hostedSession.create({
+    await tx.hostedSession.create({
       data: {
         id: sessionId,
         memberId: input.memberId,
@@ -81,31 +81,17 @@ export async function createHostedSession(input: {
         expiresAt,
         lastSeenAt: now,
       },
-      select: {
-        createdAt: true,
-        id: true,
-      },
     });
     await tx.hostedSession.updateMany({
       where: {
         expiresAt: {
           gt: now,
         },
+        id: {
+          not: sessionId,
+        },
         memberId: input.memberId,
         revokedAt: null,
-        OR: [
-          {
-            createdAt: {
-              lt: createdSession.createdAt,
-            },
-          },
-          {
-            createdAt: createdSession.createdAt,
-            id: {
-              lt: createdSession.id,
-            },
-          },
-        ],
       },
       data: {
         revokedAt: now,

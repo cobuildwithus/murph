@@ -20,8 +20,6 @@ import {
   normalizeOptionalString,
   readHostedSharePack,
   readHostedSharePreview,
-  requireHostedShareInternalToken,
-  requireHostedShareLink,
   requireHostedSharePublicBaseUrl,
   hashHostedShareCode,
 } from "./shared";
@@ -140,5 +138,3 @@ export async function buildHostedSharePageData(input: {
     stage,
   };
 }
-
-export { requireHostedShareInternalToken };

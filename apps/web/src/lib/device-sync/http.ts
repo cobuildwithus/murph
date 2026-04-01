@@ -7,10 +7,14 @@ import { NextResponse } from "next/server";
 
 import {
   createJsonRouteHelpers,
+  mergeJsonHeaders,
 } from "../http";
 
+const HOSTED_DEVICE_SYNC_DEFAULT_HEADERS = {
+  "Cache-Control": "no-store",
+} as const;
+
 export {
-  jsonOk,
   readJsonObject,
   readOptionalJsonObject,
   readRawBodyBuffer,
@@ -26,16 +30,19 @@ export function callbackHtml(title: string, body: string, status = 200): NextRes
       body,
     )}</p></main></body></html>`,
     {
-      status,
-      headers: {
+      headers: mergeJsonHeaders(HOSTED_DEVICE_SYNC_DEFAULT_HEADERS, {
         "content-type": "text/html; charset=utf-8",
-      },
+      }),
+      status,
     },
   );
 }
 
 export function redirectTo(url: string): NextResponse {
-  return NextResponse.redirect(url, { status: 302 });
+  return NextResponse.redirect(url, {
+    headers: mergeJsonHeaders(HOSTED_DEVICE_SYNC_DEFAULT_HEADERS),
+    status: 302,
+  });
 }
 
 function updateCallbackRedirect(
@@ -97,10 +104,12 @@ function matchDeviceSyncError(error: unknown) {
 }
 
 const deviceSyncJsonRouteHelpers = createJsonRouteHelpers({
+  defaultHeaders: HOSTED_DEVICE_SYNC_DEFAULT_HEADERS,
   internalMessage: "Hosted device-sync route failed unexpectedly.",
   logMessage: "Hosted device-sync route failed.",
   matchers: [matchDeviceSyncError],
 });
 
+export const jsonOk = deviceSyncJsonRouteHelpers.jsonOk;
 export const jsonError = deviceSyncJsonRouteHelpers.jsonError;
 export const withJsonError = deviceSyncJsonRouteHelpers.withJsonError;
