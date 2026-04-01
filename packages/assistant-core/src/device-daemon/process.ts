@@ -1,11 +1,21 @@
 import { spawn } from 'node:child_process'
-import { closeSync, openSync } from 'node:fs'
+import { chmodSync, closeSync, openSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   DEVICE_DAEMON_HEALTH_POLL_MS,
   type DeviceDaemonDependencies,
 } from './types.js'
+
+const DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE = 0o700
+const DEVICE_DAEMON_LOG_FILE_MODE = 0o600
+const REDACTED_SECRET_TEXT = '[REDACTED]'
+const SENSITIVE_DAEMON_LOG_VALUE_PATTERN =
+  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}\b/giu
+const SENSITIVE_DAEMON_HEADER_ASSIGNMENT_PATTERN =
+  /((?:authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*["']?)([^"',;\r\n]+)(["']?)/giu
+const SENSITIVE_DAEMON_INLINE_ASSIGNMENT_PATTERN =
+  /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password|secret|token)\s*[:=]\s*["']?)([^"'\s,;\]}]{4,})(["']?)/giu
 
 function sanitizeChildProcessEnv(
   env: NodeJS.ProcessEnv,
@@ -31,27 +41,53 @@ export async function defaultSpawnDeviceDaemonProcess(input: {
   stdoutPath: string
   stderrPath: string
 }): Promise<{ pid: number }> {
-  await mkdir(path.dirname(input.stdoutPath), { recursive: true })
-  const stdoutFd = openSync(input.stdoutPath, 'a')
-  const stderrFd = openSync(input.stderrPath, 'a')
+  for (const directoryPath of new Set([
+    path.dirname(input.stdoutPath),
+    path.dirname(input.stderrPath),
+  ])) {
+    await ensurePrivateDeviceDaemonDirectory(directoryPath)
+  }
+
+  let stdoutFd: number | null = null
+  let stderrFd: number | null = null
+
+  try {
+    stdoutFd = openPrivateDeviceDaemonLogFile(input.stdoutPath)
+    stderrFd = openPrivateDeviceDaemonLogFile(input.stderrPath)
+  } catch (error) {
+    if (stdoutFd !== null) {
+      closeSync(stdoutFd)
+    }
+    if (stderrFd !== null) {
+      closeSync(stderrFd)
+    }
+    throw error
+  }
+
+  if (stdoutFd === null || stderrFd === null) {
+    throw new Error('Device sync daemon log files could not be opened.')
+  }
+
+  const resolvedStdoutFd = stdoutFd
+  const resolvedStderrFd = stderrFd
 
   return await new Promise((resolve, reject) => {
     try {
       const child = spawn(input.command, input.args, {
         detached: true,
-        stdio: ['ignore', stdoutFd, stderrFd],
+        stdio: ['ignore', resolvedStdoutFd, resolvedStderrFd],
         env: sanitizeChildProcessEnv(input.env),
       })
 
       child.once('error', (error) => {
-        closeSync(stdoutFd)
-        closeSync(stderrFd)
+        closeSync(resolvedStdoutFd)
+        closeSync(resolvedStderrFd)
         reject(error)
       })
       child.once('spawn', () => {
         child.unref()
-        closeSync(stdoutFd)
-        closeSync(stderrFd)
+        closeSync(resolvedStdoutFd)
+        closeSync(resolvedStderrFd)
         if (!child.pid) {
           reject(new Error('Device sync daemon spawn did not yield a PID.'))
           return
@@ -59,8 +95,8 @@ export async function defaultSpawnDeviceDaemonProcess(input: {
         resolve({ pid: child.pid })
       })
     } catch (error) {
-      closeSync(stdoutFd)
-      closeSync(stderrFd)
+      closeSync(resolvedStdoutFd)
+      closeSync(resolvedStderrFd)
       reject(error)
     }
   })
@@ -131,7 +167,7 @@ export async function readRecentDeviceDaemonLog(
     const text = await dependencies.readFile(logPath)
     const lines = text
       .split(/\r?\n/u)
-      .map((line) => line.trim())
+      .map((line) => sanitizeDeviceDaemonLogSnippet(line.trim()))
       .filter(Boolean)
 
     if (lines.length === 0) {
@@ -146,6 +182,38 @@ export async function readRecentDeviceDaemonLog(
 
     throw error
   }
+}
+
+function sanitizeDeviceDaemonLogSnippet(value: string): string {
+  return value
+    .replace(
+      SENSITIVE_DAEMON_HEADER_ASSIGNMENT_PATTERN,
+      (_match, prefix: string, _value: string, suffix: string) =>
+        `${prefix}${REDACTED_SECRET_TEXT}${suffix}`,
+    )
+    .replace(SENSITIVE_DAEMON_LOG_VALUE_PATTERN, (match) => {
+      const scheme = match.split(/\s+/u, 1)[0]
+      return `${scheme} ${REDACTED_SECRET_TEXT}`
+    })
+    .replace(
+      SENSITIVE_DAEMON_INLINE_ASSIGNMENT_PATTERN,
+      (_match, prefix: string, _value: string, suffix: string) =>
+        `${prefix}${REDACTED_SECRET_TEXT}${suffix}`,
+    )
+}
+
+async function ensurePrivateDeviceDaemonDirectory(directoryPath: string): Promise<void> {
+  await mkdir(directoryPath, {
+    recursive: true,
+    mode: DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE,
+  })
+  chmodSync(directoryPath, DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE)
+}
+
+function openPrivateDeviceDaemonLogFile(filePath: string): number {
+  const fileDescriptor = openSync(filePath, 'a', DEVICE_DAEMON_LOG_FILE_MODE)
+  chmodSync(filePath, DEVICE_DAEMON_LOG_FILE_MODE)
+  return fileDescriptor
 }
 
 export function isMissingFileError(error: unknown): boolean {

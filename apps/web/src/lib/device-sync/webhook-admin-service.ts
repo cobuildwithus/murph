@@ -1,4 +1,8 @@
 import type { DeviceSyncProvider, PublicDeviceSyncAccount } from "@murphai/device-syncd";
+import {
+  normalizeHostedExecutionErrorMessage,
+  normalizeHostedExecutionOperatorMessage,
+} from "@murphai/hosted-execution";
 
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 
@@ -63,7 +67,10 @@ export class HostedDeviceSyncWebhookAdminService {
         provider: input.provider.provider,
         reason: input.reason,
         callbackBaseUrlSource: this.context.webhookAdminCallbackBaseUrlSource,
-        error,
+        errorMessage: normalizeHostedExecutionOperatorMessage(
+          normalizeHostedExecutionErrorMessage(error),
+        ),
+        errorType: describeHostedWebhookAdminErrorType(error),
       });
     }
   }
@@ -116,4 +123,19 @@ function selectHostedWebhookAdminProviderNames(input: {
   }
 
   return providerNames;
+}
+
+function describeHostedWebhookAdminErrorType(error: unknown): string {
+  if (error instanceof Error) {
+    const constructorName = error.constructor?.name;
+    return typeof constructorName === "string" && constructorName.length > 0
+      ? constructorName
+      : error.name || "Error";
+  }
+
+  if (Array.isArray(error)) {
+    return "array";
+  }
+
+  return error === null ? "null" : typeof error;
 }

@@ -668,7 +668,8 @@ describe("dispatchHostedDeviceSyncWake", () => {
         callbackBaseUrlSource: "configured",
         provider: "oura",
         reason: "connection-established",
-        error: expect.any(Error),
+        errorMessage: "sync upkeep failure",
+        errorType: "Error",
       }),
     );
   });

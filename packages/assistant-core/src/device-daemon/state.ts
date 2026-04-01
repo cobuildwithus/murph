@@ -14,6 +14,8 @@ import { DEVICE_DAEMON_STATE_VERSION } from './types.js'
 import { isMissingFileError } from './process.js'
 
 const MANAGED_CONTROL_TOKEN_FILE_NAME = 'control-token'
+const DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE = 0o700
+const DEVICE_DAEMON_RUNTIME_FILE_MODE = 0o600
 
 export function buildDeviceDaemonStatusResult(input: {
   vault: string
@@ -125,12 +127,15 @@ export async function writeDeviceDaemonState(
   state: DeviceDaemonStateRecord,
   dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'writeFile' | 'chmod'>,
 ): Promise<void> {
-  await dependencies.mkdir(path.dirname(paths.launcherStatePath))
+  await ensurePrivateDeviceDaemonDirectory(
+    path.dirname(paths.launcherStatePath),
+    dependencies,
+  )
   await dependencies.writeFile(
     paths.launcherStatePath,
     JSON.stringify(state, null, 2),
   )
-  await dependencies.chmod(paths.launcherStatePath, 0o600)
+  await dependencies.chmod(paths.launcherStatePath, DEVICE_DAEMON_RUNTIME_FILE_MODE)
 }
 
 export async function writeManagedControlToken(
@@ -139,9 +144,12 @@ export async function writeManagedControlToken(
   dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'writeFile' | 'chmod'>,
 ): Promise<void> {
   const controlTokenPath = resolveManagedControlTokenPath(paths)
-  await dependencies.mkdir(path.dirname(controlTokenPath))
+  await ensurePrivateDeviceDaemonDirectory(
+    path.dirname(controlTokenPath),
+    dependencies,
+  )
   await dependencies.writeFile(controlTokenPath, `${controlToken}\n`)
-  await dependencies.chmod(controlTokenPath, 0o600)
+  await dependencies.chmod(controlTokenPath, DEVICE_DAEMON_RUNTIME_FILE_MODE)
 }
 
 export async function removeManagedControlToken(
@@ -161,4 +169,12 @@ export function resolveManagedControlToken(paths: DeviceDaemonPaths): string | n
 
 function resolveManagedControlTokenPath(paths: DeviceDaemonPaths): string {
   return path.join(path.dirname(paths.launcherStatePath), MANAGED_CONTROL_TOKEN_FILE_NAME)
+}
+
+async function ensurePrivateDeviceDaemonDirectory(
+  directoryPath: string,
+  dependencies: Pick<DeviceDaemonDependencies, 'mkdir' | 'chmod'>,
+): Promise<void> {
+  await dependencies.mkdir(directoryPath)
+  await dependencies.chmod(directoryPath, DEVICE_DAEMON_RUNTIME_DIRECTORY_MODE)
 }

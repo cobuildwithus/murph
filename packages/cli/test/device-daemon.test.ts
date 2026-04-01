@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -124,11 +124,23 @@ test.sequential(
         path.join(vaultRoot, '.runtime/device-syncd/control-token'),
         'utf8',
       )
+      const launcherDirectoryStats = await stat(
+        path.join(vaultRoot, '.runtime/device-syncd'),
+      )
+      const launcherStateStats = await stat(
+        path.join(vaultRoot, '.runtime/device-syncd/launcher.json'),
+      )
+      const controlTokenStats = await stat(
+        path.join(vaultRoot, '.runtime/device-syncd/control-token'),
+      )
 
       assert.equal(launcherState.pid, 4242)
       assert.equal(launcherState.baseUrl, 'http://localhost:8788')
       assert.equal('controlToken' in launcherState, false)
       assert.equal(persistedControlToken.trim(), 'control-token-for-tests')
+      assert.equal(launcherDirectoryStats.mode & 0o777, 0o700)
+      assert.equal(launcherStateStats.mode & 0o777, 0o600)
+      assert.equal(controlTokenStats.mode & 0o777, 0o600)
       assert.deepEqual(healthCheckAuthorizations, [
         null,
         'Bearer control-token-for-tests',
@@ -172,6 +184,83 @@ test.sequential(
         'http://localhost:8788/healthz',
         'http://localhost:8788/healthz',
       ])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'startManagedDeviceSyncDaemon redacts secret-bearing startup log snippets on failure',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-device-daemon-'))
+    let nowValue = 0
+    let signaledPid: number | null = null
+
+    try {
+      await assert.rejects(
+        () =>
+          startManagedDeviceSyncDaemon({
+            vault: vaultRoot,
+            env: {
+              DEVICE_SYNC_CONTROL_TOKEN: 'control-token-for-tests',
+            },
+            dependencies: {
+              now() {
+                return new Date(nowValue)
+              },
+              sleep: async (milliseconds) => {
+                nowValue += milliseconds
+              },
+              fetchImpl: async () =>
+                new Response(
+                  JSON.stringify({
+                    ok: false,
+                  }),
+                  { status: 503 },
+                ),
+              isProcessAlive(pid) {
+                return pid === 7171
+              },
+              killProcess(pid) {
+                signaledPid = pid
+              },
+              readFile: async (filePath) => {
+                if (filePath.endsWith('stderr.log')) {
+                  return [
+                    'fatal startup error',
+                    'Authorization: Bearer secret-token-value',
+                    'bearer lower-case-token-value',
+                    'password=hunter2',
+                    'api_key=sk-test-secret',
+                  ].join('\n')
+                }
+
+                return await readFile(filePath, 'utf8')
+              },
+              resolveDeviceSyncPackageEntry() {
+                return '/virtual/device-syncd/dist/index.js'
+              },
+              async spawnProcess() {
+                return { pid: 7171 }
+              },
+            },
+          }),
+        (error) => {
+          assert.equal(signaledPid, 7171)
+          return (
+            error instanceof Error
+            && error.message.includes('Authorization: [REDACTED]')
+            && error.message.includes('bearer [REDACTED]')
+            && error.message.includes('password=[REDACTED]')
+            && error.message.includes('api_key=[REDACTED]')
+            && !error.message.includes('secret-token-value')
+            && !error.message.includes('lower-case-token-value')
+            && !error.message.includes('hunter2')
+            && !error.message.includes('sk-test-secret')
+          )
+        },
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

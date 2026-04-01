@@ -1,4 +1,9 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +19,14 @@ import {
   resolveHostedWorkerDeploymentTraffic,
   selectHostedContainerImageTagsForCleanup,
 } from "../src/deploy-automation.js";
+
+const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const tsxCliPath = require.resolve("tsx/cli");
+const renderWorkerSecretsScriptPath = path.resolve(
+  import.meta.dirname,
+  "../scripts/render-worker-secrets.ts",
+);
 
 describe("hosted deploy automation helpers", () => {
   it("builds a generated wrangler config for the native container worker", () => {
@@ -206,6 +219,36 @@ describe("hosted deploy automation helpers", () => {
     expect(paths.deployDir.endsWith(path.join("apps", "cloudflare", ".deploy"))).toBe(true);
     expect(paths.workerSecretsPath.endsWith(path.join("apps", "cloudflare", ".deploy", "worker-secrets.json"))).toBe(true);
     expect(paths.wranglerConfigPath.endsWith(path.join("apps", "cloudflare", ".deploy", "wrangler.generated.jsonc"))).toBe(true);
+  });
+
+  it("renders worker secrets into private files and directories", async () => {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "murph-worker-secrets-"));
+    try {
+      const outputPath = path.join(tempRoot, "nested", "worker-secrets.json");
+      const requiredSecrets = Object.fromEntries(
+        HOSTED_WORKER_REQUIRED_SECRET_NAMES.map((name) => [name, `${name.toLowerCase()}-value`]),
+      );
+
+      await execFileAsync(
+        process.execPath,
+        [tsxCliPath, renderWorkerSecretsScriptPath, outputPath],
+        {
+          cwd: path.resolve(import.meta.dirname, "..", ".."),
+          env: {
+            HOME: process.env.HOME,
+            PATH: process.env.PATH,
+            TMPDIR: process.env.TMPDIR,
+            ...requiredSecrets,
+          },
+        },
+      );
+
+      expect(JSON.parse(await readFile(outputPath, "utf8"))).toEqual(requiredSecrets);
+      expect((await stat(path.dirname(outputPath))).mode & 0o777).toBe(0o700);
+      expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("builds a gradual canary split against the current stable version", () => {
