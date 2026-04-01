@@ -13,7 +13,6 @@ import {
 } from '../assistant-cli-access.js'
 import {
   createDefaultAssistantToolCatalog,
-  type AssistantToolCatalogOptions,
 } from '../assistant-cli-tools.js'
 import {
   executeAssistantProviderTurn,
@@ -275,16 +274,13 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   turnCreatedAt: string
   turnId: string
 }): AssistantProviderTurnExecutionPlan {
-  const toolCatalog = createDefaultAssistantToolCatalog(
-    {
-      allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
-      requestId: input.turnId,
-      sessionId: input.resolvedSession.sessionId,
-      vault: input.input.vault,
-      vaultServices: createIntegratedVaultServices(),
-    },
-    {},
-  )
+  const toolCatalog = createDefaultAssistantToolCatalog({
+    allowSensitiveHealthContext: input.plan.allowSensitiveHealthContext,
+    requestId: input.turnId,
+    sessionId: input.resolvedSession.sessionId,
+    vault: input.input.vault,
+    vaultServices: createIntegratedVaultServices(),
+  })
 
   return {
     currentCodexPromptVersion: input.currentCodexPromptVersion,
@@ -304,7 +300,7 @@ function buildAssistantProviderTurnExecutionPlan(input: {
   }
 }
 
-function shouldExposeBoundAssistantTools(provider: AssistantChatProvider): boolean {
+function providerSupportsBoundAssistantTools(provider: AssistantChatProvider): boolean {
   return resolveAssistantProviderCapabilities(provider).supportsBoundTools
 }
 
@@ -470,7 +466,7 @@ async function resolveAssistantRouteTurnPlan(input: {
   const cronMcpConfig = buildAssistantCronMcpConfig(
     workingDirectory,
   )
-  const exposesBoundAssistantTools = shouldExposeBoundAssistantTools(input.route.provider)
+  const exposesBoundAssistantTools = providerSupportsBoundAssistantTools(input.route.provider)
   const assistantStateToolsAvailable =
     (exposesBoundAssistantTools && input.toolCatalog.hasTool('assistant.state.show')) ||
     (supportsDirectCliExecution && stateMcpConfig !== null)
@@ -555,7 +551,7 @@ async function executeAssistantProviderAttempt(input: {
     const routeTraits = resolveAssistantProviderTraits(attemptPlan.route.provider)
     const toolCatalog = executionPlan.toolCatalog
     const toolRuntime =
-      shouldExposeBoundAssistantTools(attemptPlan.route.provider)
+      providerSupportsBoundAssistantTools(attemptPlan.route.provider)
         ? {
             allowSensitiveHealthContext: executionPlan.sharedPlan.allowSensitiveHealthContext,
             requestId: executionPlan.turnId,
@@ -1175,7 +1171,7 @@ function buildAssistantSystemPrompt(input: {
     'Start with the smallest relevant context. Do not scan the whole vault or broad CLI manifests unless the task actually requires that coverage.',
     'Use canonical vault records and structured CLI output as the source of truth for health data. Read raw files directly only when the CLI or bound Murph tools lack the view you need or the user explicitly asks for targeted file-level inspection. Prefer narrow vault text-file reads over broad scans when file inspection is necessary.',
     buildAssistantVaultEvidenceFormattingGuidance(input.channel),
-    buildOutboundReplyFormattingGuidance(input.channel),
+    buildAssistantSystemPromptOutboundReplyGuidance(input.channel),
     buildAssistantFirstTurnOnboardingGuidanceText(input.onboardingSummary),
     input.assistantMemoryPrompt,
     buildAssistantStateGuidanceText({
@@ -1237,7 +1233,7 @@ function buildAssistantStateGuidanceText(
 function buildAssistantVaultEvidenceFormattingGuidance(
   channel: string | null,
 ): string | null {
-  if (isAssistantOutboundReplyChannel(channel)) {
+  if (isAssistantSystemPromptOutboundReplyChannel(channel)) {
     return null
   }
 
@@ -1280,8 +1276,8 @@ function buildAssistantFirstTurnOnboardingGuidanceText(
   ].join('\n\n')
 }
 
-function buildOutboundReplyFormattingGuidance(channel: string | null): string | null {
-  if (!isAssistantOutboundReplyChannel(channel)) {
+function buildAssistantSystemPromptOutboundReplyGuidance(channel: string | null): string | null {
+  if (!isAssistantSystemPromptOutboundReplyChannel(channel)) {
     return null
   }
 
@@ -1294,7 +1290,7 @@ function buildOutboundReplyFormattingGuidance(channel: string | null): string | 
   ].join('\n')
 }
 
-function isAssistantOutboundReplyChannel(channel: string | null): boolean {
+function isAssistantSystemPromptOutboundReplyChannel(channel: string | null): boolean {
   return (
     channel === 'email' ||
     channel === 'imessage' ||

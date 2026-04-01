@@ -11,7 +11,14 @@ import {
   withJsonErrorHandling,
 } from "../http";
 
-export { jsonOk, readJsonObject, readOptionalJsonObject, readRawBodyBuffer, resolveRouteParams } from "../http";
+export {
+  jsonOk,
+  readJsonObject,
+  readOptionalJsonObject,
+  readRawBodyBuffer,
+  resolveDecodedRouteParam,
+  resolveRouteParams,
+} from "../http";
 
 export function jsonError(error: unknown): NextResponse {
   return createJsonErrorResponse(error, {

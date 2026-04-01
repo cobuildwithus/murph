@@ -1,14 +1,13 @@
 import { resolveDeviceSyncWebhookVerificationResponse } from "@murphai/device-syncd";
 
 import { createHostedDeviceSyncControlPlane } from "../../../../../src/lib/device-sync/control-plane";
-import { jsonOk, resolveRouteParams, withJsonError } from "../../../../../src/lib/device-sync/http";
+import { jsonOk, resolveDecodedRouteParam, withJsonError } from "../../../../../src/lib/device-sync/http";
 
 export const GET = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
-  const { provider } = await resolveRouteParams(context.params);
-  const decodedProvider = decodeURIComponent(provider);
+  const decodedProvider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   return jsonOk(
     resolveDeviceSyncWebhookVerificationResponse({
@@ -25,7 +24,7 @@ export const POST = withJsonError(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
-  const { provider } = await resolveRouteParams(context.params);
+  const provider = await resolveDecodedRouteParam(context.params, "provider");
   const controlPlane = createHostedDeviceSyncControlPlane(request);
-  return jsonOk(await controlPlane.handleWebhook(decodeURIComponent(provider)), 202);
+  return jsonOk(await controlPlane.handleWebhook(provider), 202);
 });
