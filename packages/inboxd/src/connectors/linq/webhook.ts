@@ -27,7 +27,9 @@ export function isLinqWebhookPayloadError(error: unknown): error is LinqWebhookP
 
 export interface VerifyAndParseLinqWebhookRequestInput {
   headers: Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>
+  now?: Date | number
   rawBody: Buffer | Uint8Array | ArrayBuffer | string
+  timestampToleranceMs?: number | null
   webhookSecret: string
 }
 
@@ -51,6 +53,11 @@ export function verifyAndParseLinqWebhookRequest(
   if (!verifyLinqWebhookSignature(webhookSecret, rawBody, timestamp, signature)) {
     throw new LinqWebhookVerificationError('Invalid Linq webhook signature.')
   }
+
+  assertLinqWebhookTimestampFresh(timestamp, {
+    now: input.now,
+    toleranceMs: input.timestampToleranceMs,
+  })
 
   return parseLinqWebhookEvent(rawBody)
 }
@@ -107,6 +114,30 @@ export function verifyLinqWebhookSignature(
   }
 }
 
+export function assertLinqWebhookTimestampFresh(
+  timestamp: string,
+  options: {
+    now?: Date | number
+    toleranceMs?: number | null
+  } = {},
+): void {
+  if (options.toleranceMs == null) {
+    return
+  }
+
+  const toleranceMs = normalizeTimestampToleranceMs(options.toleranceMs)
+  const timestampMs = parseLinqWebhookTimestamp(timestamp)
+  const nowMs = normalizeNow(options.now)
+
+  if (timestampMs == null) {
+    throw new LinqWebhookVerificationError('Invalid Linq webhook timestamp.')
+  }
+
+  if (Math.abs(nowMs - timestampMs) > toleranceMs) {
+    throw new LinqWebhookVerificationError('Linq webhook timestamp is outside the allowed tolerance window.')
+  }
+}
+
 export function readLinqWebhookHeader(
   headers: Headers | IncomingHttpHeaders | Record<string, string | string[] | undefined>,
   headerName: string,
@@ -159,4 +190,39 @@ function normalizeRequiredString(value: unknown, label: string): string {
   }
 
   return normalized
+}
+
+function parseLinqWebhookTimestamp(value: string): number | null {
+  const normalized = normalizeNullableString(value)
+
+  if (!normalized || !/^-?\d+$/u.test(normalized)) {
+    return null
+  }
+
+  const timestampSeconds = Number.parseInt(normalized, 10)
+  if (!Number.isFinite(timestampSeconds)) {
+    return null
+  }
+
+  return timestampSeconds * 1000
+}
+
+function normalizeNow(value: Date | number | undefined): number {
+  if (value instanceof Date) {
+    return value.getTime()
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+
+  return Date.now()
+}
+
+function normalizeTimestampToleranceMs(value: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new TypeError('Linq webhook timestamp tolerance must be a non-negative finite number.')
+  }
+
+  return value
 }

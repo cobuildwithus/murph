@@ -84,6 +84,80 @@ test("verifyAndParseLinqWebhookRequest rejects invalid signatures", () => {
   );
 });
 
+test("verifyAndParseLinqWebhookRequest rejects stale timestamps when a tolerance is configured", () => {
+  const payload = JSON.stringify({
+    api_version: "v3",
+    event_id: "evt_stale",
+    created_at: "2026-03-25T10:00:00.000Z",
+    event_type: "message.received",
+    data: {
+      chat_id: "chat_stale",
+      from: "+15550000000",
+      recipient_phone: "+15559999999",
+      received_at: "2026-03-25T09:59:59.000Z",
+      is_from_me: false,
+      service: "SMS",
+      message: {
+        id: "msg_stale",
+        parts: [],
+      },
+    },
+  });
+  const timestamp = "1711360800";
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-timestamp": timestamp,
+          "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+        },
+        now: 1711361400_000,
+        rawBody: payload,
+        timestampToleranceMs: 60_000,
+        webhookSecret: "secret-123",
+      }),
+    /allowed tolerance window/u,
+  );
+});
+
+test("verifyAndParseLinqWebhookRequest rejects invalid timestamps when a tolerance is configured", () => {
+  const payload = JSON.stringify({
+    api_version: "v3",
+    event_id: "evt_bad_timestamp",
+    created_at: "2026-03-25T10:00:00.000Z",
+    event_type: "message.received",
+    data: {
+      chat_id: "chat_bad_timestamp",
+      from: "+15550000000",
+      recipient_phone: "+15559999999",
+      received_at: "2026-03-25T09:59:59.000Z",
+      is_from_me: false,
+      service: "SMS",
+      message: {
+        id: "msg_bad_timestamp",
+        parts: [],
+      },
+    },
+  });
+  const timestamp = "not-a-timestamp";
+
+  assert.throws(
+    () =>
+      verifyAndParseLinqWebhookRequest({
+        headers: {
+          "x-webhook-timestamp": timestamp,
+          "x-webhook-signature": signLinqWebhook("secret-123", payload, timestamp),
+        },
+        now: 1711360800_000,
+        rawBody: payload,
+        timestampToleranceMs: 60_000,
+        webhookSecret: "secret-123",
+      }),
+    /Invalid Linq webhook timestamp/u,
+  );
+});
+
 test("verifyAndParseLinqWebhookRequest requires a configured webhook secret", () => {
   const payload = JSON.stringify({
     api_version: "v3",
@@ -225,5 +299,6 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   const signature = createHmac("sha256", secret)
     .update(`${timestamp}.${payload}`)
     .digest("hex");
+
   return `sha256=${signature}`;
 }

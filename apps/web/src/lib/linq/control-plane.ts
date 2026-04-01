@@ -1,9 +1,24 @@
+import type { PrismaClient } from "@prisma/client";
+
 import { getPrisma } from "../prisma";
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
 import { normalizeNullableString, parseInteger, toIsoTimestamp } from "../device-sync/shared";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { readHostedPhoneHint } from "../hosted-onboarding/contact-privacy";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readRawBodyBuffer } from "../http";
+import { readHostedWebhookReceiptState } from "../hosted-onboarding/webhook-receipt-codec";
+import {
+  markHostedWebhookReceiptCompleted,
+  markHostedWebhookReceiptFailed,
+  queueHostedWebhookReceiptSideEffects,
+  recordHostedWebhookReceipt,
+} from "../hosted-onboarding/webhook-receipt-store";
+import type {
+  HostedWebhookEventPayload,
+  HostedWebhookReceiptClaim,
+  HostedWebhookResponsePayload,
+} from "../hosted-onboarding/webhook-receipt-types";
 import { hostedLinqError } from "./errors";
 import { fetchLinqApi, LinqApiTimeoutError } from "./api";
 import { readHostedLinqEnvironment } from "./env";
@@ -19,6 +34,19 @@ export const HOSTED_LINQ_WEBHOOK_PATH = `${HOSTED_LINQ_BASE_PATH}/webhook`;
 export const HOSTED_LINQ_BINDINGS_PATH = `${HOSTED_LINQ_BASE_PATH}/bindings`;
 export const HOSTED_LINQ_AGENT_PAIR_PATH = `${HOSTED_LINQ_BASE_PATH}/agents/pair`;
 export const HOSTED_LINQ_AGENT_EVENTS_PATH = `${HOSTED_LINQ_BASE_PATH}/agent/events`;
+const HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE = "linq-control-plane";
+
+type HostedLinqWebhookResponse = ReturnType<typeof buildIgnoredWebhookResult> | {
+  accepted: true;
+  duplicate: boolean;
+  routed: true;
+  bindingId: string;
+  recipientPhone: string;
+  eventId: string;
+  eventType: string;
+  traceId: string | null;
+  queueId: number;
+};
 
 export class HostedLinqControlPlane {
   readonly request: Request;
@@ -125,69 +153,35 @@ export class HostedLinqControlPlane {
     const event = verifyAndParseLinqWebhookRequest({
       headers: this.request.headers,
       rawBody,
+      timestampToleranceMs: this.env.webhookTimestampToleranceMs,
       webhookSecret: this.env.webhookSecret,
     });
 
-    if (event.event_type !== "message.received") {
-      return buildIgnoredWebhookResult(event);
+    return this.runWebhookWithReceipt(event);
+  }
+
+  private async runWebhookWithReceipt(event: LinqWebhookEvent): Promise<HostedLinqWebhookResponse> {
+    const prisma = getPrisma();
+    let claimedReceipt = await this.recordWebhookReceipt(event, prisma);
+
+    if (!claimedReceipt) {
+      return this.readDuplicateWebhookResponse(event, prisma);
     }
 
-    let messageEvent: ReturnType<typeof parseCanonicalLinqMessageReceivedEvent>;
+    let response = readStoredWebhookResponse(claimedReceipt) as HostedLinqWebhookResponse | null;
+
     try {
-      messageEvent = parseCanonicalLinqMessageReceivedEvent(event);
-    } catch (error) {
-      if (error instanceof TypeError) {
-        throw hostedLinqError({
-          code: "LINQ_PAYLOAD_INVALID",
-          message: error.message,
-          httpStatus: 400,
-          cause: error,
-        });
+      if (!claimedReceipt.state.plannedAt || !response) {
+        response = await this.planWebhookResponse(event);
+        claimedReceipt = await this.queueWebhookReceiptResponse(claimedReceipt, event, response, prisma);
       }
 
+      await this.markWebhookReceiptCompleted(claimedReceipt, event, prisma);
+      return response;
+    } catch (error) {
+      await this.markWebhookReceiptFailed(claimedReceipt, error, event, prisma);
       throw error;
     }
-    const recipientPhone = normalizeOptionalRecipientPhone(messageEvent.data.recipient_phone ?? null);
-
-    if (!recipientPhone) {
-      return buildIgnoredWebhookResult(event, {
-        reason: "recipient_phone_missing",
-      });
-    }
-
-    const binding = await this.getStore().getBindingByRecipientPhone(recipientPhone);
-
-    if (!binding) {
-      return buildIgnoredWebhookResult(event, {
-        reason: "unpaired_recipient_phone",
-        recipientPhone: readHostedPhoneHint(recipientPhone),
-      });
-    }
-
-    const queued = await this.getStore().queueWebhookEventIfNew({
-      userId: binding.userId,
-      bindingId: binding.id,
-      recipientPhone,
-      eventId: event.event_id,
-      traceId: event.trace_id ?? null,
-      eventType: event.event_type,
-      chatId: normalizeNullableString(messageEvent.data.chat_id),
-      messageId: normalizeNullableString(messageEvent.data.message?.id),
-      occurredAt: resolveWebhookOccurredAt(event),
-      receivedAt: toIsoTimestamp(new Date()),
-    });
-
-    return {
-      accepted: true,
-      duplicate: !queued.inserted,
-      routed: true,
-      bindingId: binding.id,
-      recipientPhone: binding.recipientPhone,
-      eventId: queued.event.eventId,
-      eventType: queued.event.eventType,
-      traceId: queued.event.traceId,
-      queueId: queued.event.id,
-    };
   }
 
   private async assertRecipientPhoneOwnedByConfiguredAccount(recipientPhone: string): Promise<void> {
@@ -256,6 +250,175 @@ export class HostedLinqControlPlane {
         .filter((value): value is string => value !== null),
     );
   }
+
+  private async planWebhookResponse(event: LinqWebhookEvent): Promise<HostedLinqWebhookResponse> {
+    if (event.event_type !== "message.received") {
+      return buildIgnoredWebhookResult(event);
+    }
+
+    let messageEvent: ReturnType<typeof parseCanonicalLinqMessageReceivedEvent>;
+    try {
+      messageEvent = parseCanonicalLinqMessageReceivedEvent(event);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw hostedLinqError({
+          code: "LINQ_PAYLOAD_INVALID",
+          message: error.message,
+          httpStatus: 400,
+          cause: error,
+        });
+      }
+
+      throw error;
+    }
+    const recipientPhone = normalizeOptionalRecipientPhone(messageEvent.data.recipient_phone ?? null);
+
+    if (!recipientPhone) {
+      return buildIgnoredWebhookResult(event, {
+        reason: "recipient_phone_missing",
+      });
+    }
+
+    const binding = await this.getStore().getBindingByRecipientPhone(recipientPhone);
+
+    if (!binding) {
+      return buildIgnoredWebhookResult(event, {
+        reason: "unpaired_recipient_phone",
+        recipientPhone: readHostedPhoneHint(recipientPhone),
+      });
+    }
+
+    const queued = await this.getStore().queueWebhookEventIfNew({
+      userId: binding.userId,
+      bindingId: binding.id,
+      recipientPhone,
+      eventId: event.event_id,
+      traceId: event.trace_id ?? null,
+      eventType: event.event_type,
+      chatId: normalizeNullableString(messageEvent.data.chat_id),
+      messageId: normalizeNullableString(messageEvent.data.message?.id),
+      occurredAt: resolveWebhookOccurredAt(event),
+      receivedAt: toIsoTimestamp(new Date()),
+    });
+
+    return {
+      accepted: true,
+      duplicate: !queued.inserted,
+      routed: true,
+      bindingId: binding.id,
+      recipientPhone: binding.recipientPhone,
+      eventId: queued.event.eventId,
+      eventType: queued.event.eventType,
+      traceId: queued.event.traceId,
+      queueId: queued.event.id,
+    };
+  }
+
+  private async recordWebhookReceipt(
+    event: LinqWebhookEvent,
+    prisma: PrismaClient,
+  ): Promise<HostedWebhookReceiptClaim | null> {
+    try {
+      return await recordHostedWebhookReceipt({
+        eventId: event.event_id,
+        eventPayload: buildWebhookEventPayload(event),
+        prisma,
+        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
+      });
+    } catch (error) {
+      throw mapHostedLinqReceiptError(error);
+    }
+  }
+
+  private async queueWebhookReceiptResponse(
+    claimedReceipt: HostedWebhookReceiptClaim,
+    event: LinqWebhookEvent,
+    response: HostedLinqWebhookResponse,
+    prisma: PrismaClient,
+  ): Promise<HostedWebhookReceiptClaim> {
+    try {
+      return await queueHostedWebhookReceiptSideEffects({
+        claimedReceipt,
+        desiredSideEffects: [],
+        eventId: event.event_id,
+        prisma,
+        response: response as HostedWebhookResponsePayload,
+        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
+      });
+    } catch (error) {
+      throw mapHostedLinqReceiptError(error);
+    }
+  }
+
+  private async markWebhookReceiptCompleted(
+    claimedReceipt: HostedWebhookReceiptClaim,
+    event: LinqWebhookEvent,
+    prisma: PrismaClient,
+  ): Promise<void> {
+    try {
+      await markHostedWebhookReceiptCompleted({
+        claimedReceipt,
+        eventId: event.event_id,
+        eventPayload: buildWebhookEventPayload(event),
+        prisma,
+        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
+      });
+    } catch (error) {
+      throw mapHostedLinqReceiptError(error);
+    }
+  }
+
+  private async markWebhookReceiptFailed(
+    claimedReceipt: HostedWebhookReceiptClaim,
+    error: unknown,
+    event: LinqWebhookEvent,
+    prisma: PrismaClient,
+  ): Promise<void> {
+    try {
+      await markHostedWebhookReceiptFailed({
+        claimedReceipt,
+        error,
+        eventId: event.event_id,
+        eventPayload: buildWebhookEventPayload(event),
+        prisma,
+        source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
+      });
+    } catch (markError) {
+      throw mapHostedLinqReceiptError(markError);
+    }
+  }
+
+  private async readDuplicateWebhookResponse(
+    event: LinqWebhookEvent,
+    prisma: PrismaClient,
+  ): Promise<HostedLinqWebhookResponse> {
+    const storedReceipt = await prisma.hostedWebhookReceipt.findUnique({
+      where: {
+        source_eventId: {
+          eventId: event.event_id,
+          source: HOSTED_LINQ_CONTROL_PLANE_RECEIPT_SOURCE,
+        },
+      },
+      select: {
+        payloadJson: true,
+      },
+    });
+    const storedResponse = storedReceipt
+      ? (readHostedWebhookReceiptState(storedReceipt.payloadJson).response as HostedLinqWebhookResponse | null)
+      : null;
+
+    if (storedResponse) {
+      return {
+        ...storedResponse,
+        duplicate: true,
+      };
+    }
+
+    return {
+      ...buildIgnoredWebhookResult(event),
+      duplicate: true,
+    };
+  }
 }
 
 export function createHostedLinqControlPlane(request: Request): HostedLinqControlPlane {
@@ -268,7 +431,17 @@ function buildIgnoredWebhookResult(
     reason?: string;
     recipientPhone?: string;
   },
-) {
+): {
+  accepted: true;
+  duplicate: boolean;
+  routed: false;
+  ignored: true;
+  reason?: string;
+  recipientPhone?: string;
+  eventId: string;
+  eventType: string;
+  traceId: string | null;
+} {
   return {
     accepted: true,
     duplicate: false,
@@ -328,4 +501,33 @@ function normalizeRequiredRecipientPhone(value: unknown): string {
     message: "Linq recipientPhone must be a valid phone number.",
     httpStatus: 400,
   });
+}
+
+function buildWebhookEventPayload(event: LinqWebhookEvent): HostedWebhookEventPayload {
+  return {
+    eventType: event.event_type,
+    occurredAt: resolveWebhookOccurredAt(event),
+    traceId: event.trace_id ?? null,
+  };
+}
+
+function readStoredWebhookResponse(claim: HostedWebhookReceiptClaim): HostedWebhookResponsePayload | null {
+  const response = claim.state.response;
+  return response && typeof response === "object" && !Array.isArray(response)
+    ? response
+    : null;
+}
+
+function mapHostedLinqReceiptError(error: unknown): never {
+  if (isHostedOnboardingError(error)) {
+    throw hostedLinqError({
+      code: error.code,
+      details: error.details,
+      httpStatus: error.httpStatus,
+      message: error.message,
+      retryable: error.retryable,
+    });
+  }
+
+  throw error;
 }

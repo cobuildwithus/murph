@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ExecutionOutboxStatus } from "@prisma/client";
 import { HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION } from "@murphai/hosted-execution";
+import { normalizeLinqWebhookEvent } from "@murphai/inboxd";
 import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { createHostedWebhookDispatchSideEffect } from "@/src/lib/hosted-onboarding/webhook-receipts";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingSecretCodec: () => ({
@@ -355,6 +357,108 @@ describe("hydrateHostedExecutionDispatch", () => {
       eventId: "evt_linq_123",
       occurredAt: "2026-03-26T12:30:00.000Z",
     });
+  });
+
+  it("keeps enough sparse Linq snapshot shape for downstream runtime ingestion", async () => {
+    const linqEvent = {
+      api_version: "v1",
+      created_at: "2026-03-26T12:30:00.000Z",
+      data: {
+        chat_id: "chat_123",
+        from: "+15551234567",
+        is_from_me: false,
+        message: {
+          id: "msg_123",
+          parts: [
+            {
+              type: "text",
+              value: "hello",
+            },
+          ],
+        },
+        received_at: "2026-03-26T12:30:00.000Z",
+      },
+      event_id: "evt_linq_sparse_123",
+      event_type: "message.received",
+    };
+    const dispatchEffect = createHostedWebhookDispatchSideEffect({
+      dispatch: {
+        event: {
+          kind: "linq.message.received",
+          linqEvent: linqEvent as never,
+          phoneLookupKey: createHostedPhoneLookupKey("+15551234567")!,
+          userId: "member_123",
+        },
+        eventId: "evt_linq_sparse_123",
+        occurredAt: "2026-03-26T12:30:00.000Z",
+      },
+    });
+    const prisma = {
+      hostedWebhookReceipt: {
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventPayload: {
+              eventType: "message.received",
+            },
+            receiptState: {
+              attemptCount: 1,
+              attemptId: "attempt_1",
+              completedAt: "2026-03-26T12:30:01.000Z",
+              lastError: null,
+              lastReceivedAt: "2026-03-26T12:30:00.000Z",
+              sideEffects: [
+                {
+                  attemptCount: 1,
+                  effectId: "dispatch:evt_linq_sparse_123",
+                  kind: "hosted_execution_dispatch",
+                  lastAttemptAt: "2026-03-26T12:30:00.500Z",
+                  lastError: null,
+                  payload: dispatchEffect.payload,
+                  result: {
+                    dispatched: true,
+                  },
+                  sentAt: "2026-03-26T12:30:00.750Z",
+                  status: "sent",
+                },
+              ],
+              status: "completed",
+            },
+          },
+        }),
+      },
+    };
+
+    const dispatch = await hydrateHostedExecutionDispatch(
+      buildWebhookOutboxRecord({
+        storage: "reference",
+        schemaVersion: HOSTED_EXECUTION_OUTBOX_PAYLOAD_SCHEMA_VERSION,
+        dispatchRef: {
+          eventId: "evt_linq_sparse_123",
+          eventKind: "linq.message.received",
+          occurredAt: "2026-03-26T12:30:00.000Z",
+          userId: "member_123",
+        },
+      }, {
+        eventId: "evt_linq_sparse_123",
+        sourceId: "linq:evt_linq_sparse_123",
+      }) as never,
+      prisma as never,
+    );
+
+    if (dispatch.event.kind !== "linq.message.received") {
+      throw new Error(`Expected linq.message.received, got ${dispatch.event.kind}.`);
+    }
+
+    const capture = await normalizeLinqWebhookEvent({
+      defaultAccountId: dispatch.event.phoneLookupKey,
+      event: dispatch.event.linqEvent as never,
+    });
+
+    expect(capture.accountId).toBe(createHostedPhoneLookupKey("+15551234567"));
+    expect(capture.actor.id).toMatch(/^hbid:linq\.from:/u);
+    expect(capture.externalId).toMatch(/^linq:hbid:linq\.message:/u);
+    expect(capture.thread.id).toBe("chat_123");
+    expect(capture.text).toBe("hello");
   });
 
   it("rehydrates minimized sent member activation receipt payloads", async () => {
