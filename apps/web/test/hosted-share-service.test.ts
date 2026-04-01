@@ -386,8 +386,11 @@ function createHostedSharePrisma() {
         Object.assign(row, data, { updatedAt: new Date() });
         return { count: 1 };
       },
-      update: async ({ data, where }: { data: Partial<HostedShareRow>; where: { codeHash: string } }) => {
-        const row = rows.find((entry) => entry.codeHash === where.codeHash);
+      update: async ({ data, where }: { data: Partial<HostedShareRow>; where: { codeHash?: string; id?: string } }) => {
+        const row = rows.find((entry) =>
+          (where.codeHash !== undefined && entry.codeHash === where.codeHash)
+          || (where.id !== undefined && entry.id === where.id)
+        );
         if (!row) {
           throw new Error("row missing");
         }
@@ -399,6 +402,7 @@ function createHostedSharePrisma() {
 
   const transactionalPrisma = {
     ...prismaLike,
+    $queryRaw: async () => [],
   };
 
   return {

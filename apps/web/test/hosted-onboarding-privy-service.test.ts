@@ -561,5 +561,12 @@ describe("completeHostedPrivyVerification", () => {
 function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknown>>(
   prisma: T,
 ): T & CompleteHostedPrivyVerificationPrisma {
-  return prisma as T & CompleteHostedPrivyVerificationPrisma;
+  const prismaWithQueryRaw = prisma as T & CompleteHostedPrivyVerificationPrisma;
+  if (!("$queryRaw" in prismaWithQueryRaw)) {
+    Object.defineProperty(prismaWithQueryRaw, "$queryRaw", {
+      configurable: true,
+      value: vi.fn(async () => []),
+    });
+  }
+  return prismaWithQueryRaw;
 }

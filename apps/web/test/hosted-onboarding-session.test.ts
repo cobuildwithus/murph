@@ -22,6 +22,7 @@ const NOW = new Date("2026-03-26T12:00:00.000Z");
 
 describe("hosted onboarding session lifecycle", () => {
   let prisma: {
+    $queryRaw: ReturnType<typeof vi.fn>;
     hostedMember: {
       findUnique: ReturnType<typeof vi.fn>;
     };
@@ -34,13 +35,20 @@ describe("hosted onboarding session lifecycle", () => {
 
   beforeEach(() => {
     prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue({
+          billingStatus: null,
           status: HostedMemberStatus.active,
         }),
       },
       hostedSession: {
-        create: vi.fn().mockResolvedValue({}),
+        create: vi.fn().mockImplementation(async (input: {
+          data: { id: string };
+        }) => ({
+          createdAt: NOW,
+          id: input.data.id,
+        })),
         findFirst: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -64,18 +72,33 @@ describe("hosted onboarding session lifecycle", () => {
         memberId: "member-1",
         tokenHash: expect.any(String),
       }),
+      select: {
+        createdAt: true,
+        id: true,
+      },
     });
     expect(prisma.hostedSession.create.mock.calls[0]?.[0].data).not.toHaveProperty("userAgent");
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
     expect(prisma.hostedSession.updateMany).toHaveBeenCalledWith({
       where: {
         expiresAt: {
           gt: NOW,
         },
-        id: {
-          not: result.sessionId,
-        },
         memberId: "member-1",
         revokedAt: null,
+        OR: [
+          {
+            createdAt: {
+              lt: NOW,
+            },
+          },
+          {
+            createdAt: NOW,
+            id: {
+              lt: result.sessionId,
+            },
+          },
+        ],
       },
       data: {
         revokedAt: NOW,
@@ -86,6 +109,7 @@ describe("hosted onboarding session lifecycle", () => {
 
   it("refuses to create a hosted session for a suspended member", async () => {
     prisma.hostedMember.findUnique.mockResolvedValue({
+      billingStatus: null,
       status: HostedMemberStatus.suspended,
     });
 

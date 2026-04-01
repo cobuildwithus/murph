@@ -594,8 +594,10 @@ function asPrismaTransactionClient<T extends Record<string, unknown>>(prisma: T)
 
 function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
   const prismaWithTransaction = prisma as T & {
+    $queryRaw: () => Promise<unknown>;
     $transaction: (callback: (tx: T) => Promise<unknown>) => Promise<unknown>;
   };
+  prismaWithTransaction.$queryRaw = async () => [];
   prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
   return prismaWithTransaction;
 }

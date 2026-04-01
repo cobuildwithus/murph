@@ -1,9 +1,7 @@
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import {
-  enqueueHostedExecutionOutbox,
-} from "../hosted-execution/outbox";
+import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import type { HostedSessionRecord } from "../hosted-onboarding/session";
 
@@ -43,105 +41,100 @@ export async function acceptHostedShareLink(input: {
     });
   }
 
-  let record = await requireHostedShareLink(shareCode, prisma);
-  const preview = readHostedSharePreview(record.previewJson, () => readHostedSharePack(record).pack);
-  const acceptedAt = record.acceptedAt ?? now;
-  const eventId = record.lastEventId ?? buildHostedShareAcceptanceEventId({
-    acceptedAt,
-    memberId: input.sessionRecord.member.id,
-    shareId: record.id,
-  });
+  const memberId = input.sessionRecord.member.id;
+  const codeHash = hashHostedShareCode(shareCode);
+  const claim = await prisma.$transaction(async (tx) => {
+    await lockHostedShareLinkRow(tx, codeHash);
 
-  if (record.expiresAt <= now) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_EXPIRED",
-      message: "That share link expired. Ask for a fresh link.",
-      httpStatus: 410,
-    });
-  }
-
-  if (record.consumedAt) {
-    if (record.consumedByMemberId === input.sessionRecord.member.id) {
-      return {
-        alreadyImported: true,
-        imported: true,
-        pending: false,
-        preview,
-        shareCode,
-      };
-    }
-
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_CONSUMED",
-      message: "That share link has already been used.",
-      httpStatus: 409,
-    });
-  }
-
-  if (record.acceptedByMemberId && record.acceptedByMemberId !== input.sessionRecord.member.id) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_ALREADY_CLAIMED",
-      message: "That share link has already been claimed by another member.",
-      httpStatus: 409,
-    });
-  }
-
-  const claimed = await prisma.$transaction(async (tx) => {
-    const claimResult = await tx.hostedShareLink.updateMany({
-      where: {
-        codeHash: hashHostedShareCode(shareCode),
-        consumedAt: null,
-        OR: [
-          { acceptedAt: null },
-          { acceptedByMemberId: input.sessionRecord.member.id },
-        ],
-      },
-      data: {
-        acceptedAt,
-        acceptedByMemberId: input.sessionRecord.member.id,
-        lastEventId: eventId,
-      },
-    });
     const latest = await requireHostedShareLink(shareCode, tx);
-    const dispatchEventId = latest.lastEventId ?? eventId;
 
-    if (!latest.consumedAt && latest.acceptedByMemberId === input.sessionRecord.member.id) {
-      await enqueueHostedExecutionOutbox({
-        dispatch: buildHostedShareAcceptanceDispatch({
-          acceptedAt: acceptedAt.toISOString(),
-          eventId: dispatchEventId,
-          memberId: input.sessionRecord.member.id,
-          shareCode,
-          shareId: latest.id,
-        }),
-        sourceId: latest.id,
-        sourceType: "hosted_share_link",
-        tx,
+    if (latest.expiresAt <= now) {
+      throw hostedOnboardingError({
+        code: "HOSTED_SHARE_EXPIRED",
+        message: "That share link expired. Ask for a fresh link.",
+        httpStatus: 410,
       });
     }
 
+    if (latest.consumedAt) {
+      if (latest.consumedByMemberId === memberId) {
+        return {
+          outcome: "alreadyImported" as const,
+          record: latest,
+        };
+      }
+
+      throw hostedOnboardingError({
+        code: "HOSTED_SHARE_CONSUMED",
+        message: "That share link has already been used.",
+        httpStatus: 409,
+      });
+    }
+
+    if (latest.acceptedByMemberId && latest.acceptedByMemberId !== memberId) {
+      throw hostedOnboardingError({
+        code: "HOSTED_SHARE_ALREADY_CLAIMED",
+        message: "That share link has already been claimed by another member.",
+        httpStatus: 409,
+      });
+    }
+
+    const acceptedAt = latest.acceptedAt ?? now;
+    const eventId = latest.lastEventId ?? buildHostedShareAcceptanceEventId({
+      acceptedAt,
+      memberId,
+      shareId: latest.id,
+    });
+    const record = latest.acceptedAt?.getTime() === acceptedAt.getTime()
+      && latest.acceptedByMemberId === memberId
+      && latest.lastEventId === eventId
+      ? latest
+      : await tx.hostedShareLink.update({
+          where: {
+            id: latest.id,
+          },
+          data: {
+            acceptedAt,
+            acceptedByMemberId: memberId,
+            lastEventId: eventId,
+          },
+        });
+
+    await enqueueHostedExecutionOutbox({
+      dispatch: buildHostedShareAcceptanceDispatch({
+        acceptedAt: acceptedAt.toISOString(),
+        eventId,
+        memberId,
+        shareCode,
+        shareId: record.id,
+      }),
+      sourceId: record.id,
+      sourceType: "hosted_share_link",
+      tx,
+    });
+
     return {
-      claimCount: claimResult.count,
-      record: latest,
+      outcome: "pending" as const,
+      record,
     };
   });
+  const preview = readHostedSharePreview(
+    claim.record.previewJson,
+    () => readHostedSharePack(claim.record).pack,
+  );
 
-  record = claimed.record;
-
-  if (
-    claimed.claimCount === 0
-    && record.acceptedByMemberId
-    && record.acceptedByMemberId !== input.sessionRecord.member.id
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_SHARE_ALREADY_CLAIMED",
-      message: "That share link has already been claimed by another member.",
-      httpStatus: 409,
-    });
+  if (claim.outcome === "alreadyImported") {
+    return {
+      alreadyImported: true,
+      imported: true,
+      pending: false,
+      preview,
+      shareCode,
+    };
   }
 
   const imported = Boolean(
-    record.consumedAt && record.consumedByMemberId === input.sessionRecord.member.id,
+    claim.record.consumedAt && claim.record.consumedByMemberId === memberId,
   );
 
   return {
@@ -151,4 +144,11 @@ export async function acceptHostedShareLink(input: {
     preview,
     shareCode,
   };
+}
+
+async function lockHostedShareLinkRow(
+  tx: Prisma.TransactionClient,
+  codeHash: string,
+): Promise<void> {
+  await tx.$queryRaw`select 1 from "hosted_share_link" where "code_hash" = ${codeHash} for update`;
 }
