@@ -6,6 +6,7 @@ import {
   ensureHostedPrivyPhoneAndWalletReady,
   resolveHostedPrivyClientSessionIssue,
   shouldAutoContinueHostedPrivyClientSession,
+  shouldResetHostedPrivyClientSessionToSms,
 } from "@/src/lib/hosted-onboarding/privy-client";
 
 describe("hosted Privy client wallet readiness", () => {
@@ -92,6 +93,48 @@ describe("hosted Privy client wallet readiness", () => {
         checkingAuthenticatedSession: false,
         issue: null,
         pendingAction: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("silently restarts authenticated sessions that are missing a verified phone number", () => {
+    expect(
+      shouldResetHostedPrivyClientSessionToSms({
+        authenticated: true,
+        autoResetTriggered: false,
+        checkingAuthenticatedSession: false,
+        issue: "missing-phone",
+        pendingAction: null,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldResetHostedPrivyClientSessionToSms({
+        authenticated: true,
+        autoResetTriggered: false,
+        checkingAuthenticatedSession: false,
+        issue: "missing-wallet",
+        pendingAction: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldResetHostedPrivyClientSessionToSms({
+        authenticated: true,
+        autoResetTriggered: true,
+        checkingAuthenticatedSession: false,
+        issue: "missing-phone",
+        pendingAction: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldResetHostedPrivyClientSessionToSms({
+        authenticated: true,
+        autoResetTriggered: false,
+        checkingAuthenticatedSession: false,
+        issue: "missing-phone",
+        pendingAction: "logout",
       }),
     ).toBe(false);
   });

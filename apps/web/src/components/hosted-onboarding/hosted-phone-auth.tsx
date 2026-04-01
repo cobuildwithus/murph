@@ -8,13 +8,20 @@ import {
 } from "@privy-io/react-auth";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from "@/components/ui/combobox";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
 import {
-  describeHostedPrivyClientSessionIssue,
   ensureHostedPrivyPhoneAndWalletReady,
   HOSTED_PRIVY_COMPLETION_RETRY_DELAYS_MS,
   readHostedPrivyClientSessionState,
   resolveHostedPrivyClientSessionIssue,
+  shouldResetHostedPrivyClientSessionToSms,
   shouldAutoContinueHostedPrivyClientSession,
   type HostedPrivyClientPendingAction,
   type HostedPrivyClientSessionIssue,
@@ -36,13 +43,20 @@ interface HostedPhoneAuthProps {
   privyAppId: string;
 }
 
-const HOSTED_PHONE_COUNTRY_OPTIONS = [
+interface HostedPhoneCountryOption {
+  code: string;
+  dialCode: string;
+  label: string;
+  placeholder: string;
+}
+
+const HOSTED_PHONE_COUNTRY_OPTIONS: HostedPhoneCountryOption[] = [
   { code: "US", dialCode: "+1", label: "United States", placeholder: "(415) 555-2671" },
   { code: "CA", dialCode: "+1", label: "Canada", placeholder: "(416) 555-0123" },
   { code: "GB", dialCode: "+44", label: "United Kingdom", placeholder: "07700 900123" },
   { code: "AU", dialCode: "+61", label: "Australia", placeholder: "0400 111 222" },
   { code: "NZ", dialCode: "+64", label: "New Zealand", placeholder: "021 123 4567" },
-] as const;
+];
 
 const DEFAULT_HOSTED_PHONE_COUNTRY_CODE = "US";
 
@@ -74,6 +88,7 @@ function HostedPhoneAuthInner({
   const [phoneNumber, setPhoneNumber] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
   const autoContinueTriggered = useRef(false);
+  const autoResetTriggered = useRef(false);
 
   const selectedPhoneCountry = useMemo(
     () =>
@@ -132,20 +147,27 @@ function HostedPhoneAuthInner({
     void handleContinueAuthenticated();
   }, [authenticated, authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
 
-  const authenticatedSessionDescription = useMemo(() => {
-    if (checkingAuthenticatedSession) {
-      return "Checking the current Privy session for a verified phone number and setup status.";
+  useEffect(() => {
+    if (!authenticated || authenticatedSessionIssue !== "missing-phone") {
+      autoResetTriggered.current = false;
+      return;
     }
 
-    if (pendingAction === "continue") {
-      return "Finishing setup with your current verified phone number now.";
+    if (
+      !shouldResetHostedPrivyClientSessionToSms({
+        authenticated,
+        autoResetTriggered: autoResetTriggered.current,
+        checkingAuthenticatedSession,
+        issue: authenticatedSessionIssue,
+        pendingAction,
+      })
+    ) {
+      return;
     }
 
-    return (
-      describeHostedPrivyClientSessionIssue(authenticatedSessionIssue)
-      ?? "You're already verified. Finishing setup with your current phone number now, or sign out and use a different number."
-    );
-  }, [authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
+    autoResetTriggered.current = true;
+    void handleLogout();
+  }, [authenticated, authenticatedSessionIssue, checkingAuthenticatedSession, pendingAction]);
 
   async function handleSendCode() {
     setErrorMessage(null);
@@ -238,32 +260,41 @@ function HostedPhoneAuthInner({
         </div>
       ) : null}
 
-      {authenticated ? (
-        <div className="rounded border border-stone-200 bg-stone-50 p-4 text-sm leading-relaxed text-stone-600">
-          <strong className="text-stone-900">Verified Privy session found.</strong>
-          <p className="mt-1">{authenticatedSessionDescription}</p>
-        </div>
-      ) : (
+      {authenticated ? null : (
         <div className="space-y-3">
           <label className="text-sm font-semibold text-stone-900" htmlFor={`hosted-phone-${mode}`}>
             {mode === "invite" ? "Phone number that received this invite" : "Your phone number"}
           </label>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <label className="sr-only" htmlFor={`hosted-phone-country-${mode}`}>
-              Country or region
-            </label>
-            <select
-              id={`hosted-phone-country-${mode}`}
-              value={phoneCountryCode}
-              onChange={(event) => setPhoneCountryCode(event.currentTarget.value)}
-              className="rounded border border-stone-200 bg-white px-4 py-3 text-sm font-medium text-stone-900 focus:border-olive-light focus:outline-none focus:ring-2 focus:ring-olive-light/20 sm:w-56"
+            <Combobox
+              items={HOSTED_PHONE_COUNTRY_OPTIONS}
+              value={selectedPhoneCountry}
+              itemToStringValue={(option) => `${option.label} (${option.dialCode})`}
+              onValueChange={(option) => {
+                if (option) {
+                  setPhoneCountryCode(option.code);
+                }
+              }}
             >
-              {HOSTED_PHONE_COUNTRY_OPTIONS.map((option) => (
-                <option key={option.code} value={option.code}>
-                  {`${option.label} (${option.dialCode})`}
-                </option>
-              ))}
-            </select>
+              <ComboboxTrigger
+                aria-label={`Country or region, ${selectedPhoneCountry.label} ${selectedPhoneCountry.dialCode}`}
+                className="flex h-12 w-full items-center justify-between rounded border border-stone-200 bg-white px-4 text-left text-sm font-medium text-stone-900 focus-visible:border-olive-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-olive-light/20 sm:w-28"
+              >
+                {selectedPhoneCountry.dialCode}
+              </ComboboxTrigger>
+              <ComboboxContent>
+                <ComboboxList>
+                  {(option) => (
+                    <ComboboxItem key={option.code} value={option}>
+                      <span className="flex min-w-0 items-center justify-between gap-3">
+                        <span className="truncate">{option.label}</span>
+                        <span className="text-xs text-stone-500">{option.dialCode}</span>
+                      </span>
+                    </ComboboxItem>
+                  )}
+                </ComboboxList>
+              </ComboboxContent>
+            </Combobox>
             <input
               id={`hosted-phone-${mode}`}
               autoComplete="tel-national"
@@ -274,9 +305,6 @@ function HostedPhoneAuthInner({
               className={`${inputClasses} sm:flex-1`}
             />
           </div>
-          <p className="text-sm text-stone-500">
-            {`Defaulting to ${selectedPhoneCountry.label}. Type the local number and we’ll add ${selectedPhoneCountry.dialCode} automatically.`}
-          </p>
           {mode === "invite" ? (
             <p className="text-sm text-stone-500">
               {`Use the same number we texted${phoneHint ? ` (${phoneHint})` : ""}.`}

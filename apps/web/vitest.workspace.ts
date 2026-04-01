@@ -60,6 +60,7 @@ export const hostedWebVitestProjects = [
   ]),
   createHostedWebProject("hosted-web-onboarding-integrations", [
     "connect-start-route.test.ts",
+    "hosted-phone-auth.test.ts",
     "hosted-onboarding-linq-*.test.ts",
     "hosted-onboarding-privy*.test.ts",
     "hosted-onboarding-revnet*.test.ts",
