@@ -65,7 +65,10 @@ import {
   VAULT_ENV,
   saveAssistantOperatorDefaultsPatch,
 } from '@murphai/assistant-core/operator-config'
-import { buildAssistantFailoverRoutes } from '@murphai/assistant-core/assistant/failover'
+import {
+  buildAssistantFailoverRoutes,
+  recordAssistantFailoverRouteFailure,
+} from '@murphai/assistant-core/assistant/failover'
 import {
   appendAssistantTranscriptEntries,
   listAssistantTranscriptEntries,
@@ -4341,6 +4344,190 @@ test('sendAssistantMessage does not resume a failed primary Codex session on a s
   assert.equal(secondCall?.sandbox, 'read-only')
   assert.equal(secondCall?.resumeProviderSessionId, null)
   assert.equal(result.session.providerBinding?.providerSessionId, 'thread-backup-route')
+})
+
+test('sendAssistantMessage resumes a legacy OpenAI Responses binding when the provider config still matches', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-legacy-resume-'))
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:openai-legacy-resume',
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'openai',
+    model: 'gpt-5',
+  })
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'openai-compatible',
+    providerOptions: {
+      model: 'gpt-5',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      providerName: 'openai',
+    },
+    providerBinding: {
+      provider: 'openai-compatible',
+      providerSessionId: 'resp_legacy',
+      providerOptions: {
+        model: 'gpt-5',
+        reasoningEffort: null,
+        sandbox: null,
+        approvalPolicy: null,
+        profile: null,
+        oss: false,
+        baseUrl: 'https://api.openai.com/v1',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        providerName: 'openai',
+      },
+      providerState: null,
+    },
+    updatedAt: '2026-04-02T08:00:00.000Z',
+    lastTurnAt: '2026-04-02T08:00:00.000Z',
+    turnCount: 1,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'openai-compatible',
+    providerSessionId: 'resp_next',
+    response: 'Resumed cleanly.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:openai-legacy-resume',
+    prompt: 'keep going',
+    provider: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'openai',
+    model: 'gpt-5',
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.resumeProviderSessionId, 'resp_legacy')
+  assert.equal(result.session.providerBinding?.providerSessionId, 'resp_next')
+})
+
+test('sendAssistantMessage does not reuse an OpenAI Responses session on a cooled-down same-provider backup route', async () => {
+  const parent = await mkdtemp(
+    path.join(tmpdir(), 'murph-assistant-service-openai-responses-failover-'),
+  )
+  const vaultRoot = path.join(parent, 'vault')
+  cleanupPaths.push(parent)
+
+  await mkdir(vaultRoot, { recursive: true })
+
+  const providerOptions = {
+    model: 'gpt-5',
+    reasoningEffort: null,
+    sandbox: null,
+    approvalPolicy: null,
+    profile: null,
+    oss: false,
+    baseUrl: 'https://api.openai.com/v1',
+    apiKeyEnv: 'OPENAI_API_KEY',
+    providerName: 'openai',
+  } as const
+  const failoverRoutes = [
+    {
+      name: 'backup',
+      provider: 'openai-compatible' as const,
+      model: 'gpt-5-mini',
+      reasoningEffort: null,
+      sandbox: null,
+      approvalPolicy: null,
+      profile: null,
+      oss: false,
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyEnv: 'OPENAI_API_KEY',
+      providerName: 'openai',
+      cooldownMs: null,
+    },
+  ] as const
+  const [primaryRoute, backupRoute] = buildAssistantFailoverRoutes({
+    provider: 'openai-compatible',
+    providerOptions,
+    defaults: null,
+    codexCommand: null,
+    backups: failoverRoutes,
+  })
+  assert.ok(primaryRoute)
+  assert.ok(backupRoute)
+
+  const resolved = await resolveAssistantSession({
+    vault: vaultRoot,
+    alias: 'chat:openai-failover',
+    provider: 'openai-compatible',
+    baseUrl: providerOptions.baseUrl,
+    apiKeyEnv: providerOptions.apiKeyEnv,
+    providerName: providerOptions.providerName,
+    model: providerOptions.model,
+  })
+  await saveAssistantSession(vaultRoot, {
+    ...resolved.session,
+    provider: 'openai-compatible',
+    providerOptions,
+    providerBinding: {
+      provider: 'openai-compatible',
+      providerSessionId: 'resp_primary_route',
+      providerOptions,
+      providerState: {
+        codexCli: null,
+        resumeRouteId: primaryRoute.routeId,
+        resumeWorkspaceKey: null,
+      },
+    },
+    updatedAt: '2026-04-02T08:05:00.000Z',
+    lastTurnAt: '2026-04-02T08:05:00.000Z',
+    turnCount: 1,
+  })
+  await recordAssistantFailoverRouteFailure({
+    vault: vaultRoot,
+    route: primaryRoute,
+    error: new Error('primary route cooling down'),
+    cooldownMs: 60_000,
+  })
+
+  serviceMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
+    provider: 'openai-compatible',
+    providerSessionId: 'resp_backup_route',
+    response: 'Recovered on backup.',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+
+  const result = await sendAssistantMessage({
+    vault: vaultRoot,
+    alias: 'chat:openai-failover',
+    prompt: 'hello',
+    provider: 'openai-compatible',
+    baseUrl: providerOptions.baseUrl,
+    apiKeyEnv: providerOptions.apiKeyEnv,
+    providerName: providerOptions.providerName,
+    model: providerOptions.model,
+    failoverRoutes,
+  })
+
+  const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(firstCall?.provider, 'openai-compatible')
+  assert.equal(firstCall?.model, backupRoute.providerOptions.model)
+  assert.equal(firstCall?.resumeProviderSessionId, null)
+  assert.equal(result.session.providerBinding?.providerSessionId, 'resp_backup_route')
 })
 
 test('sendAssistantMessage reconstructs audited ledger appends and rolls back later shard tampering', async () => {

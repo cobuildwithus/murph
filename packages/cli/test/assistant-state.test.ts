@@ -2331,9 +2331,19 @@ test('malformed secret sidecars are quarantined instead of being treated as clea
     'utf8',
   )
 
-  assert.equal(
-    await readAssistantProviderRouteRecovery(vaultRoot, updatedSession.sessionId),
-    null,
+  await assert.rejects(
+    () => readAssistantProviderRouteRecovery(vaultRoot, updatedSession.sessionId),
+    (error) => {
+      assert.equal(
+        (error as { code?: unknown }).code,
+        'ASSISTANT_PROVIDER_ROUTE_RECOVERY_SECRETS_CORRUPTED',
+      )
+      assert.match(
+        String((error as { message?: unknown }).message),
+        /secret sidecar.*corrupted and was quarantined/u,
+      )
+      return true
+    },
   )
   await assert.rejects(() => stat(recoverySecretsPath))
 
