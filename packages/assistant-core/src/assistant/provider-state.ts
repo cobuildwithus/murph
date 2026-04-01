@@ -225,14 +225,6 @@ export function normalizeAssistantSessionProviderState(
 export function normalizeAssistantSessionSnapshot(
   session: AssistantSession,
 ): AssistantSession {
-  const {
-    providerSessionId: _legacyProviderSessionId,
-    providerState: _legacyProviderState,
-    ...persisted
-  } = session as AssistantSession & {
-    providerSessionId?: unknown
-    providerState?: unknown
-  }
   const providerBinding = normalizeAssistantProviderBinding(
     session.providerBinding
       ? {
@@ -247,7 +239,7 @@ export function normalizeAssistantSessionSnapshot(
   )
 
   return {
-    ...persisted,
+    ...session,
     schema: 'murph.assistant-session.v3',
     providerBinding,
   }
