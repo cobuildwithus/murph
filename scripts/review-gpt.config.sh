@@ -44,3 +44,11 @@ review_gpt_register_dir_preset "legacy-removal" "legacy-removal.md" \
   "legacy-cleanup" \
   "hard-cut" \
   "greenfield-hard-cut"
+review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
+  "Package-boundary, circular-dependency, and mixed-concern audit focused on workspace ownership seams." \
+  "package-boundary" \
+  "package-ownership" \
+  "dependency-boundaries" \
+  "circular-deps" \
+  "circular-dependencies" \
+  "mixed-package-concerns"
