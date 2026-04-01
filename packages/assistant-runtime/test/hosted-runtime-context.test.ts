@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { test } from "vitest";
 
-import { resolveAssistantStatePaths } from "@murph/runtime-state";
+import { resolveAssistantStatePaths } from "@murph/runtime-state/node";
 
 import {
   prepareHostedDispatchContext,

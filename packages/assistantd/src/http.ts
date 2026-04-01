@@ -28,7 +28,7 @@ import {
   type GatewaySendMessageInput,
   type GatewayWaitForEventsInput,
 } from '@murph/gateway-core'
-import { isLoopbackRemoteAddress } from '@murph/runtime-state'
+import { isLoopbackRemoteAddress } from '@murph/runtime-state/node'
 import type { AssistantLocalService } from './service.js'
 
 const MAX_ASSISTANT_HTTP_BODY_BYTES = 256 * 1024

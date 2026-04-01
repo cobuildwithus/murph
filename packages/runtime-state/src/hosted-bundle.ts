@@ -1,47 +1,11 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
+
+import type { HostedExecutionBundleKind } from "./hosted-bundle-ref.ts";
 
 export const HOSTED_BUNDLE_SCHEMA = "murph.hosted-bundle.v2";
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/;
-
-export type HostedExecutionBundleKind = "vault" | "agent-state";
-
-export interface HostedExecutionBundleRef {
-  hash: string;
-  key: string;
-  size: number;
-  // updatedAt is write metadata. Payload identity is hash + key + size.
-  updatedAt: string;
-}
-
-export type HostedExecutionBundleRefIdentity = Pick<
-  HostedExecutionBundleRef,
-  "hash" | "key" | "size"
->;
-
-export function sameHostedBundlePayloadRef(
-  left: HostedExecutionBundleRefIdentity | null | undefined,
-  right: HostedExecutionBundleRefIdentity | null | undefined,
-): boolean {
-  if (left === right) {
-    return true;
-  }
-
-  if (!left || !right) {
-    return false;
-  }
-
-  return left.hash === right.hash && left.key === right.key && left.size === right.size;
-}
-
-export function sameHostedExecutionBundleRef(
-  left: HostedExecutionBundleRef | null | undefined,
-  right: HostedExecutionBundleRef | null | undefined,
-): boolean {
-  return sameHostedBundlePayloadRef(left, right);
-}
 
 export interface HostedBundleArtifactRef {
   byteSize: number;
@@ -54,131 +18,26 @@ export interface HostedBundleArtifactLocation {
   root: string;
 }
 
-export interface HostedBundleArtifactSnapshotInput {
-  absolutePath: string;
-  bytes: Uint8Array;
-  path: string;
-  root: string;
-}
-
-export interface HostedBundleArtifactRestoreInput extends HostedBundleArtifactLocation {}
-
-export type HostedBundleArtifactRestoreFilter = (
-  input: HostedBundleArtifactRestoreInput,
-) => boolean | Promise<boolean>;
-
-interface HostedBundleArchiveInlineFile {
+export interface HostedBundleArchiveInlineFile {
   contentsBase64: string;
   path: string;
   root: string;
 }
 
-interface HostedBundleArchiveExternalFile {
+export interface HostedBundleArchiveExternalFile {
   artifact: HostedBundleArtifactRef;
   path: string;
   root: string;
 }
 
-type HostedBundleArchiveFile = HostedBundleArchiveInlineFile | HostedBundleArchiveExternalFile;
+export type HostedBundleArchiveFile =
+  | HostedBundleArchiveInlineFile
+  | HostedBundleArchiveExternalFile;
 
-interface HostedBundleArchive {
+export interface HostedBundleArchive {
   files: HostedBundleArchiveFile[];
   kind: HostedExecutionBundleKind;
   schema: typeof HOSTED_BUNDLE_SCHEMA;
-}
-
-export interface HostedBundleSnapshotRootInput {
-  optional?: boolean;
-  root: string;
-  rootKey: string;
-  shouldIncludeRelativePath?: (relativePath: string) => boolean;
-}
-
-export interface HostedBundleRestoreRootMap {
-  [rootKey: string]: string;
-}
-
-export async function snapshotHostedBundleRoots(input: {
-  externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
-  kind: HostedExecutionBundleKind;
-  preservedArtifacts?: readonly HostedBundleArtifactLocation[];
-  roots: readonly HostedBundleSnapshotRootInput[];
-}): Promise<Uint8Array | null> {
-  const files: HostedBundleArchiveFile[] = [];
-  let includedRootCount = 0;
-
-  for (const root of input.roots) {
-    if (!(await directoryExists(root.root))) {
-      if (root.optional) {
-        continue;
-      }
-
-      throw new Error(`Hosted bundle root does not exist: ${root.root}`);
-    }
-
-    includedRootCount += 1;
-    files.push(
-      ...(await collectBundleFiles({
-        externalizeFile: input.externalizeFile,
-        root: root.root,
-        rootKey: root.rootKey,
-        shouldIncludeRelativePath: root.shouldIncludeRelativePath ?? (() => true),
-      })),
-    );
-  }
-
-  if (includedRootCount === 0) {
-    return null;
-  }
-
-  const includedPaths = new Set(files.map((file) => `${file.root}:${file.path}`));
-  for (const artifact of input.preservedArtifacts ?? []) {
-    const preservedPathKey = `${artifact.root}:${normalizeBundlePath(artifact.path)}`;
-    if (includedPaths.has(preservedPathKey)) {
-      continue;
-    }
-
-    files.push({
-      artifact: artifact.ref,
-      path: normalizeBundlePath(artifact.path),
-      root: artifact.root,
-    });
-    includedPaths.add(preservedPathKey);
-  }
-
-  return serializeHostedBundleArchive({
-    files,
-    kind: input.kind,
-    schema: HOSTED_BUNDLE_SCHEMA,
-  });
-}
-
-export async function restoreHostedBundleRoots(input: {
-  artifactResolver?: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
-  bytes: Uint8Array | ArrayBuffer;
-  expectedKind: HostedExecutionBundleKind;
-  ignoredRoots?: readonly string[];
-  roots: HostedBundleRestoreRootMap;
-  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
-}): Promise<void> {
-  await restoreHostedBundleArchiveFiles({
-    ...input,
-    includeInlineFiles: true,
-  });
-}
-
-export async function materializeHostedBundleArtifacts(input: {
-  artifactResolver: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
-  bytes: Uint8Array | ArrayBuffer;
-  expectedKind: HostedExecutionBundleKind;
-  ignoredRoots?: readonly string[];
-  roots: HostedBundleRestoreRootMap;
-  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
-}): Promise<void> {
-  await restoreHostedBundleArchiveFiles({
-    ...input,
-    includeInlineFiles: false,
-  });
 }
 
 export function hasHostedBundleArtifactPath(input: {
@@ -205,84 +64,6 @@ export function hasHostedBundleArtifactPath(input: {
     && entry.root === input.root
     && entry.path === normalizedPath
   ));
-}
-
-async function restoreHostedBundleArchiveFiles(input: {
-  artifactResolver?: (input: HostedBundleArtifactRestoreInput) => Promise<Uint8Array | ArrayBuffer>;
-  bytes: Uint8Array | ArrayBuffer;
-  expectedKind: HostedExecutionBundleKind;
-  ignoredRoots?: readonly string[];
-  roots: HostedBundleRestoreRootMap;
-  shouldRestoreArtifact?: HostedBundleArtifactRestoreFilter;
-  includeInlineFiles: boolean;
-}): Promise<void> {
-  const archive = parseHostedBundleArchive(input.bytes);
-  const ignoredRoots = new Set(input.ignoredRoots ?? []);
-
-  if (archive.kind !== input.expectedKind) {
-    throw new Error(
-      `Hosted bundle kind mismatch: expected ${input.expectedKind}, got ${archive.kind}.`,
-    );
-  }
-
-  for (const file of archive.files) {
-    const root = input.roots[file.root];
-
-    if (!root) {
-      if (ignoredRoots.has(file.root)) {
-        continue;
-      }
-
-      throw new Error(`Hosted bundle root "${file.root}" is not mapped for restore.`);
-    }
-
-    if (!isHostedBundleArtifactEntry(file) && !input.includeInlineFiles) {
-      continue;
-    }
-
-    const absolutePath = resolveHostedBundleRestorePath(root, file.path);
-
-    if (isHostedBundleArtifactEntry(file)) {
-      const shouldRestore = input.shouldRestoreArtifact
-        ? await input.shouldRestoreArtifact({
-            path: file.path,
-            ref: file.artifact,
-            root: file.root,
-          })
-        : true;
-      if (!shouldRestore) {
-        continue;
-      }
-
-      if (!input.artifactResolver) {
-        throw new Error(
-          `Hosted bundle artifact ${file.root}:${file.path} requires an artifact resolver.`,
-        );
-      }
-
-      await mkdir(path.dirname(absolutePath), { recursive: true });
-      const resolved = await input.artifactResolver({
-        path: file.path,
-        ref: file.artifact,
-        root: file.root,
-      });
-      const resolvedBytes = toHostedBundleBytes(resolved);
-      assertHostedBundleArtifactIntegrity({
-        bytes: resolvedBytes,
-        path: file.path,
-        ref: file.artifact,
-        root: file.root,
-      });
-      await writeFile(
-        absolutePath,
-        Buffer.from(resolvedBytes),
-      );
-      continue;
-    }
-
-    await mkdir(path.dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, Buffer.from(file.contentsBase64, "base64"));
-  }
 }
 
 export function readHostedBundleTextFile(input: {
@@ -397,7 +178,7 @@ export function sha256HostedBundleHex(bytes: Uint8Array | ArrayBuffer): string {
     .digest("hex");
 }
 
-function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundleArchive {
+export function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundleArchive {
   const buffer = Buffer.from(bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : bytes);
   const parsed = JSON.parse(gunzipSync(buffer).toString("utf8")) as Partial<HostedBundleArchive> & {
     schema?: string;
@@ -419,6 +200,20 @@ function parseHostedBundleArchive(bytes: Uint8Array | ArrayBuffer): HostedBundle
     kind: parsed.kind,
     schema: HOSTED_BUNDLE_SCHEMA,
   };
+}
+
+export function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array {
+  return Uint8Array.from(
+    gzipSync(
+      Buffer.from(
+        JSON.stringify({
+          ...archive,
+          files: sortHostedBundleFiles(archive.files),
+        }),
+        "utf8",
+      ),
+    ),
+  );
 }
 
 function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
@@ -463,88 +258,7 @@ function parseHostedBundleArchiveFile(file: unknown): HostedBundleArchiveFile {
   throw new Error("Hosted bundle archive contains an invalid file entry.");
 }
 
-function serializeHostedBundleArchive(archive: HostedBundleArchive): Uint8Array {
-  return Uint8Array.from(
-    gzipSync(
-      Buffer.from(
-        JSON.stringify({
-          ...archive,
-          files: sortHostedBundleFiles(archive.files),
-        }),
-        "utf8",
-      ),
-    ),
-  );
-}
-
-async function collectBundleFiles(input: {
-  externalizeFile?: (input: HostedBundleArtifactSnapshotInput) => Promise<HostedBundleArtifactRef | null>;
-  root: string;
-  rootKey: string;
-  shouldIncludeRelativePath: (relativePath: string) => boolean;
-  relativeDirectory?: string;
-}): Promise<HostedBundleArchiveFile[]> {
-  const relativeDirectory = input.relativeDirectory ?? "";
-  const directoryPath = relativeDirectory ? path.join(input.root, relativeDirectory) : input.root;
-  const entries = await readdir(directoryPath, { withFileTypes: true });
-  const files: HostedBundleArchiveFile[] = [];
-
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    const relativePath = relativeDirectory
-      ? path.posix.join(relativeDirectory.split(path.sep).join(path.posix.sep), entry.name)
-      : entry.name;
-
-    if (!input.shouldIncludeRelativePath(relativePath)) {
-      continue;
-    }
-
-    const absolutePath = path.join(directoryPath, entry.name);
-
-    if (entry.isDirectory()) {
-      files.push(
-        ...(await collectBundleFiles({
-          ...input,
-          relativeDirectory: path.join(relativeDirectory, entry.name),
-        })),
-      );
-      continue;
-    }
-
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    const bytes = new Uint8Array(await readFile(absolutePath));
-    const normalizedPath = normalizeBundlePath(relativePath);
-    const artifact = input.externalizeFile
-      ? await input.externalizeFile({
-          absolutePath,
-          bytes,
-          path: normalizedPath,
-          root: input.rootKey,
-        })
-      : null;
-
-    if (artifact) {
-      files.push({
-        artifact,
-        path: normalizedPath,
-        root: input.rootKey,
-      });
-      continue;
-    }
-
-    files.push({
-      contentsBase64: Buffer.from(bytes).toString("base64"),
-      path: normalizedPath,
-      root: input.rootKey,
-    });
-  }
-
-  return files;
-}
-
-function normalizeBundlePath(value: string): string {
+export function normalizeBundlePath(value: string): string {
   const candidate = value.replace(/\\/g, "/");
 
   if (!candidate || candidate.includes("\u0000")) {
@@ -569,7 +283,7 @@ function normalizeBundlePath(value: string): string {
   return normalized;
 }
 
-function resolveHostedBundleRestorePath(root: string, relativePath: string): string {
+export function resolveHostedBundleRestorePath(root: string, relativePath: string): string {
   const absoluteRoot = path.resolve(root);
   const absolutePath = path.resolve(absoluteRoot, normalizeBundlePath(relativePath));
   assertPathWithinRoot(absoluteRoot, absolutePath, relativePath);
@@ -589,7 +303,7 @@ function assertPathWithinRoot(root: string, absolutePath: string, originalPath: 
   }
 }
 
-function sortHostedBundleFiles(files: readonly HostedBundleArchiveFile[]): HostedBundleArchiveFile[] {
+export function sortHostedBundleFiles(files: readonly HostedBundleArchiveFile[]): HostedBundleArchiveFile[] {
   return [...files].sort((left, right) => {
     if (left.root !== right.root) {
       return left.root.localeCompare(right.root);
@@ -599,13 +313,13 @@ function sortHostedBundleFiles(files: readonly HostedBundleArchiveFile[]): Hoste
   });
 }
 
-function isHostedBundleArtifactEntry(
+export function isHostedBundleArtifactEntry(
   value: HostedBundleArchiveFile,
 ): value is HostedBundleArchiveExternalFile {
   return "artifact" in value;
 }
 
-function assertHostedBundleArtifactIntegrity(input: {
+export function assertHostedBundleArtifactIntegrity(input: {
   bytes: Uint8Array;
   path: string;
   ref: HostedBundleArtifactRef;
@@ -625,14 +339,6 @@ function assertHostedBundleArtifactIntegrity(input: {
   }
 }
 
-function toHostedBundleBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
+export function toHostedBundleBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value);
-}
-
-async function directoryExists(directoryPath: string): Promise<boolean> {
-  try {
-    return (await stat(directoryPath)).isDirectory();
-  } catch {
-    return false;
-  }
 }

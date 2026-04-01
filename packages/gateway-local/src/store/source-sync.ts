@@ -10,7 +10,7 @@ import {
 import {
   openSqliteRuntimeDatabase,
   resolveInboxRuntimePaths,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 
 import type { GatewayAttachment, GatewayConversationRoute } from '@murph/gateway-core'
 import type {

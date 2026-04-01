@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { encodeHostedBundleBase64 } from "@murph/runtime-state";
+import { encodeHostedBundleBase64 } from "@murph/runtime-state/node";
 
 import {
   describeHostedBase64BundleRef,

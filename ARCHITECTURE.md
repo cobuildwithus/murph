@@ -6,7 +6,7 @@ Last verified: 2026-03-31
 
 - `packages/contracts`: canonical Zod contracts, parse helpers, TypeScript types, and generated JSON Schema artifacts
 - `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, env readers, route builders, side-effect codecs, and typed clients for the hosted web and Cloudflare execution apps
-- `packages/runtime-state`: shared `.runtime` path resolution plus rebuildable local-state path/default helpers used by query, inboxd, the local assistant runtime, and hosted bundle helpers
+- `packages/runtime-state`: shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, with an explicit `@murph/runtime-state/node` subpath for hosted bundle codec/materialization, `.runtime` path resolution, rebuildable local-state helpers, assistant-state files, process scoping, and SQLite-backed Node-only runtime seams
 - `packages/core`: the only package allowed to mutate canonical vault data
 - `packages/importers`: ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core
 - `packages/device-syncd`: published local device OAuth/webhook/reconcile runtime with an authenticated localhost control plane, optional separate public callback/webhook ingress, a reusable shared public-ingress core for future hosted/tunneled callback surfaces, the canonical `@murph/device-syncd/client` control-plane client/contracts surface for non-daemon callers, encrypted provider credentials outside the vault, and normalized provider snapshot imports through importers/core

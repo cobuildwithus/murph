@@ -11,7 +11,7 @@ import {
   listHostedBundleArtifacts,
   snapshotHostedBundleRoots,
   writeHostedBundleTextFile,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 
 import {
   artifactObjectKey,

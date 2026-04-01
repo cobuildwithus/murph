@@ -2,7 +2,7 @@ import {
   listHostedBundleArtifacts,
   sameHostedBundlePayloadRef,
   type HostedExecutionBundleRef,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 
 import {
   createHostedArtifactStore,

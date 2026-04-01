@@ -12,7 +12,7 @@ import {
   parseAssistantUsageRecord,
   resolveAssistantUsageCredentialSource,
   writePendingAssistantUsageRecord,
-} from "../src/index.ts";
+} from "../src/node/index.ts";
 
 test("assistant usage records round-trip through pending storage and sort by occurredAt", async () => {
   const parent = await mkdtemp(path.join(tmpdir(), "murph-assistant-usage-"));

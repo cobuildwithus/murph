@@ -6,7 +6,7 @@ import {
   parseAssistantUsageRecord,
   type AssistantUsageCredentialSource,
   type AssistantUsageRecord,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 
 import { getPrisma } from "../prisma";
 

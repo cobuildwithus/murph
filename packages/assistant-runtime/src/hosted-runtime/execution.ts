@@ -4,7 +4,7 @@ import {
   listHostedBundleArtifacts,
   snapshotHostedExecutionContext,
   type HostedBundleArtifactLocation,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 import type {
   HostedExecutionDispatchRequest,
   HostedExecutionRunContext,

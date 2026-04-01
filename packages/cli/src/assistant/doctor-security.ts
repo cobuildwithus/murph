@@ -3,7 +3,7 @@ import path from 'node:path'
 import type {
   AssistantStatePaths,
   AssistantStatePermissionAudit,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import {
   assistantProviderRouteRecoverySchema,
   assistantProviderRouteRecoverySecretsSchema,

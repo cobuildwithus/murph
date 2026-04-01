@@ -3,7 +3,7 @@ import {
   createAssistantUsageId,
   resolveAssistantUsageCredentialSource,
   writePendingAssistantUsageRecord,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import type { ExecutedAssistantProviderTurnResult } from './service-contracts.js'
 import { normalizeNullableString } from './shared.js'
 

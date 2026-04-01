@@ -3,7 +3,7 @@ import path from 'node:path'
 import {
   resolveAssistantStatePaths as resolveRuntimeAssistantStatePaths,
   type AssistantStatePaths as RuntimeAssistantStatePaths,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import {
   type AssistantApprovalPolicy,
   type AssistantProviderSessionOptions,

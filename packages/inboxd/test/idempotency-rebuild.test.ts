@@ -14,7 +14,7 @@ import {
   readJsonlRecords,
   readStoredWriteOperation,
 } from "@murph/core";
-import { resolveRuntimePaths } from "@murph/runtime-state";
+import { resolveRuntimePaths } from "@murph/runtime-state/node";
 
 import {
   appendImportAudit,

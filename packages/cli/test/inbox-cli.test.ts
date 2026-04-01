@@ -6,7 +6,7 @@ import { test } from 'vitest'
 import {
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import {
   createIntegratedInboxServices,
   type InboxRunEvent,

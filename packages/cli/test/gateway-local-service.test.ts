@@ -9,7 +9,7 @@ import {
   openSqliteRuntimeDatabase,
   resolveGatewayRuntimePaths,
   resolveInboxRuntimePaths,
-} from '@murph/runtime-state'
+} from '@murph/runtime-state/node'
 import { test } from 'vitest'
 
 import { assistantSessionSchema } from '@murph/assistant-core/assistant-cli-contracts'

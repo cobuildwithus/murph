@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'incur'
-import type { AssistantStatePaths } from '@murph/runtime-state'
+import type { AssistantStatePaths } from '@murph/runtime-state/node'
 import { searchAssistantMemory } from './memory.js'
 import {
   ensureAssistantStateDirectory,

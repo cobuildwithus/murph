@@ -47,6 +47,9 @@
       "@murph/runtime-state": [
         "packages/runtime-state/src/index.ts"
       ],
+      "@murph/runtime-state/node": [
+        "packages/runtime-state/src/node/index.ts"
+      ],
       "@murph/runtime-state/*": [
         "packages/runtime-state/src/*"
       ]

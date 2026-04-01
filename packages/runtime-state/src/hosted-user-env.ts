@@ -31,7 +31,7 @@ export function createHostedVerifiedEmailUserEnv(input: {
 }
 
 export function readHostedVerifiedEmailFromEnv(
-  source: Readonly<Record<string, string | undefined>> = process.env,
+  source: Readonly<Record<string, string | undefined>> = resolveDefaultHostedVerifiedEmailSource(),
 ): HostedVerifiedEmail | null {
   const address = normalizeHostedVerifiedEmailAddress(source[HOSTED_USER_VERIFIED_EMAIL_ENV_KEY]);
 
@@ -45,6 +45,20 @@ export function readHostedVerifiedEmailFromEnv(
       source[HOSTED_USER_VERIFIED_EMAIL_VERIFIED_AT_ENV_KEY],
     ),
   };
+}
+
+function resolveDefaultHostedVerifiedEmailSource(): Readonly<Record<string, string | undefined>> {
+  if (
+    typeof process === "object"
+    && process !== null
+    && "env" in process
+    && process.env
+    && typeof process.env === "object"
+  ) {
+    return process.env;
+  }
+
+  return {};
 }
 
 export function normalizeHostedVerifiedEmailAddress(

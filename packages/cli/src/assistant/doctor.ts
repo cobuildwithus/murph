@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { AssistantStatePaths } from '@murph/runtime-state'
+import type { AssistantStatePaths } from '@murph/runtime-state/node'
 import {
   assistantAutomationStateSchema,
   assistantDiagnosticEventSchema,

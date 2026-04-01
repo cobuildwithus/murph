@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
 
-import { openSqliteRuntimeDatabase } from "@murph/runtime-state";
+import { openSqliteRuntimeDatabase } from "@murph/runtime-state/node";
 import { createIntegratedInboxServices } from "@murph/assistant-core/inbox-services";
 
 const builtCoreRuntimeUrl = new URL("../../core/dist/index.js", import.meta.url).href;

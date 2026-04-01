@@ -17,7 +17,7 @@ import {
   restoreHostedExecutionContext,
   snapshotHostedExecutionContext,
   writePendingAssistantUsageRecord,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 import { assistantOutboxIntentSchema } from "@murph/assistant-core";
 
 const hostedCliMocks = vi.hoisted(() => ({

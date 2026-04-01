@@ -3,7 +3,7 @@ import {
   openSqliteRuntimeDatabase,
   resolveRuntimePaths,
   withImmediateTransaction as withTransaction,
-} from "@murph/runtime-state";
+} from "@murph/runtime-state/node";
 
 import type {
   AttachmentParseJobClaimFilters,

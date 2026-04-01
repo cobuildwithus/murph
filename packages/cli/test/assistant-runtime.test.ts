@@ -12,7 +12,7 @@ import {
   resolveAssistantStatePaths,
   saveAssistantAutomationState,
 } from '@murph/assistant-core/assistant-state'
-import { listPendingAssistantUsageRecords } from '@murph/runtime-state'
+import { listPendingAssistantUsageRecords } from '@murph/runtime-state/node'
 import { VaultCliError } from '@murph/assistant-core/vault-cli-errors'
 import { listAssistantTurnReceipts } from '@murph/assistant-core/assistant/receipts'
 import { readAssistantSession } from '@murph/assistant-core/assistant/store/persistence'
