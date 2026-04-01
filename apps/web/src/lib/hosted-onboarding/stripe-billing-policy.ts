@@ -117,7 +117,7 @@ async function tryActivateHostedMemberIfStillAllowed(input: {
 }): Promise<boolean> {
   let currentMember: HostedMember | null = input.member;
 
-  for (let attempt = 0; attempt < HOSTED_MEMBER_MUTATION_MAX_RETRIES; attempt += 1) {
+  for (let retryCount = 0; retryCount <= HOSTED_MEMBER_MUTATION_MAX_RETRIES; retryCount += 1) {
     if (!currentMember || isHostedAccessBlockedBillingStatus(currentMember.billingStatus)) {
       return false;
     }
@@ -191,7 +191,7 @@ export async function updateHostedMemberStripeBillingIfFresh(input: {
 }): Promise<HostedMember | null> {
   let currentMember = await findHostedMemberById(input.prisma, input.member.id);
 
-  for (let attempt = 0; attempt < HOSTED_MEMBER_MUTATION_MAX_RETRIES; attempt += 1) {
+  for (let retryCount = 0; retryCount <= HOSTED_MEMBER_MUTATION_MAX_RETRIES; retryCount += 1) {
     if (!currentMember) {
       return null;
     }
