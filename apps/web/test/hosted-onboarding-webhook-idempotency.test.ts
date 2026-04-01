@@ -1866,7 +1866,7 @@ describe("hosted onboarding webhook retry safety", () => {
     );
   });
 
-  it("treats in-flight processing Linq receipts as duplicates without redispatching the event", async () => {
+  it("surfaces in-flight processing Linq receipts as retryable errors without redispatching the event", async () => {
     const prisma = asHostedWebhookPrisma({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
@@ -1895,9 +1895,10 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).resolves.toMatchObject({
-      duplicate: true,
-      ok: true,
+    ).rejects.toMatchObject({
+      code: "WEBHOOK_RECEIPT_IN_PROGRESS",
+      httpStatus: 503,
+      retryable: true,
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).not.toHaveBeenCalled();
@@ -2088,9 +2089,10 @@ describe("hosted onboarding webhook retry safety", () => {
         signature: null,
         timestamp: null,
       }),
-    ).resolves.toMatchObject({
-      duplicate: true,
-      ok: true,
+    ).rejects.toMatchObject({
+      code: "WEBHOOK_RECEIPT_IN_PROGRESS",
+      httpStatus: 503,
+      retryable: true,
     });
 
     expect(prisma.hostedWebhookReceipt.updateMany).toHaveBeenCalledTimes(1);
@@ -2239,7 +2241,6 @@ function buildDispatchSideEffect(input: {
         ],
       },
       received_at: "2026-03-26T12:00:00.000Z",
-      recipient_phone: createHostedOpaqueIdentifier("linq.recipient", "+15550000000"),
       service: "sms",
     },
     event_id: input.eventId,
@@ -2344,6 +2345,12 @@ function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T 
       }
 
       return { count: 1 };
+    });
+  }
+  if (!("$queryRaw" in prismaWithTransaction)) {
+    Object.defineProperty(prismaWithTransaction, "$queryRaw", {
+      configurable: true,
+      value: vi.fn(async () => []),
     });
   }
   (prismaWithTransaction as { $transaction?: unknown }).$transaction = (

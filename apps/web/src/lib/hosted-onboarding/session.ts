@@ -1,5 +1,4 @@
 import {
-  HostedBillingStatus,
   HostedMemberStatus,
   type Prisma,
   type HostedMember,
@@ -16,7 +15,9 @@ import {
   generateHostedSessionId,
   generateHostedSessionToken,
   hashHostedSessionToken,
+  lockHostedMemberRow,
   sessionExpiresAt,
+  withHostedOnboardingTransaction,
 } from "./shared";
 
 export interface HostedSessionRecord {
@@ -31,67 +32,91 @@ interface CookieReader {
 export async function createHostedSession(input: {
   inviteId: string | null;
   memberId: string;
-  prisma?: PrismaClient;
+  prisma?: PrismaClient | Prisma.TransactionClient;
   now?: Date;
 }): Promise<{ expiresAt: Date; sessionId: string; token: string }> {
   const prisma = input.prisma ?? getPrisma();
   const environment = getHostedOnboardingEnvironment();
   const now = input.now ?? new Date();
-  const member = await prisma.hostedMember.findUnique({
-    where: {
-      id: input.memberId,
-    },
-    select: {
-      billingStatus: true,
-      status: true,
-    },
-  });
-
-  if (
-    member &&
-    !deriveHostedEntitlement({
-      billingMode: null,
-      billingStatus: member.billingStatus,
-      memberStatus: member.status,
-    }).accessAllowed
-  ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_SUSPENDED",
-      message: "This hosted account is suspended. Contact support to restore access.",
-      httpStatus: 403,
-    });
-  }
-
   const token = generateHostedSessionToken();
   const tokenHash = hashHostedSessionToken(token);
-  const sessionId = generateHostedSessionId();
-  const expiresAt = sessionExpiresAt(now, environment.sessionTtlDays);
 
-  await prisma.hostedSession.create({
-    data: {
-      id: sessionId,
-      memberId: input.memberId,
-      inviteId: input.inviteId,
-      tokenHash,
+  const { expiresAt, sessionId } = await withHostedOnboardingTransaction(prisma, async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+
+    const member = await tx.hostedMember.findUnique({
+      where: {
+        id: input.memberId,
+      },
+      select: {
+        billingStatus: true,
+        status: true,
+      },
+    });
+
+    if (
+      member
+      && !deriveHostedEntitlement({
+        billingMode: null,
+        billingStatus: member.billingStatus,
+        memberStatus: member.status,
+      }).accessAllowed
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        message: "This hosted account is suspended. Contact support to restore access.",
+        httpStatus: 403,
+      });
+    }
+
+    const sessionId = generateHostedSessionId();
+    const expiresAt = sessionExpiresAt(now, environment.sessionTtlDays);
+
+    const createdSession = await tx.hostedSession.create({
+      data: {
+        id: sessionId,
+        memberId: input.memberId,
+        inviteId: input.inviteId,
+        tokenHash,
+        expiresAt,
+        lastSeenAt: now,
+      },
+      select: {
+        createdAt: true,
+        id: true,
+      },
+    });
+    await tx.hostedSession.updateMany({
+      where: {
+        expiresAt: {
+          gt: now,
+        },
+        memberId: input.memberId,
+        revokedAt: null,
+        OR: [
+          {
+            createdAt: {
+              lt: createdSession.createdAt,
+            },
+          },
+          {
+            createdAt: createdSession.createdAt,
+            id: {
+              lt: createdSession.id,
+            },
+          },
+        ],
+      },
+      data: {
+        revokedAt: now,
+        revokeReason: "rotated",
+      },
+    });
+
+    return {
       expiresAt,
-      lastSeenAt: now,
-    },
-  });
-  await prisma.hostedSession.updateMany({
-    where: {
-      expiresAt: {
-        gt: now,
-      },
-      id: {
-        not: sessionId,
-      },
-      memberId: input.memberId,
-      revokedAt: null,
-    },
-    data: {
-      revokedAt: now,
-      revokeReason: "rotated",
-    },
+      sessionId,
+    };
   });
 
   return {

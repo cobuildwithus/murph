@@ -38,34 +38,66 @@ export async function ensureHostedMemberForPhone(input: {
   });
 
   if (existingMember) {
-    return input.prisma.hostedMember.update({
-      where: {
-        id: existingMember.id,
-      },
-      data: {
-        linqChatId: null,
-        ...buildHostedMemberPhoneStorage(input.phoneNumber),
-        encryptedBootstrapSecret:
-          existingMember.encryptedBootstrapSecret
-            ? undefined
-            : encryptHostedBootstrapSecret(),
-        encryptionKeyVersion:
-          existingMember.encryptionKeyVersion
-            ? undefined
-            : getHostedOnboardingEnvironment().encryptionKeyVersion,
-      },
+    return refreshHostedMemberForPhone({
+      member: existingMember,
+      phoneNumber: input.phoneNumber,
+      prisma: input.prisma,
     });
   }
 
-  return input.prisma.hostedMember.create({
+  try {
+    return await input.prisma.hostedMember.create({
+      data: {
+        ...buildHostedMemberPhoneStorage(input.phoneNumber),
+        id: generateHostedMemberId(),
+        status: HostedMemberStatus.invited,
+        billingStatus: HostedBillingStatus.not_started,
+        linqChatId: null,
+        encryptedBootstrapSecret: encryptHostedBootstrapSecret(),
+        encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const concurrentMember = await input.prisma.hostedMember.findUnique({
+        where: {
+          normalizedPhoneNumber: phoneLookupKey,
+        },
+      });
+
+      if (concurrentMember) {
+        return refreshHostedMemberForPhone({
+          member: concurrentMember,
+          phoneNumber: input.phoneNumber,
+          prisma: input.prisma,
+        });
+      }
+    }
+
+    throw error;
+  }
+}
+
+async function refreshHostedMemberForPhone(input: {
+  member: HostedMember;
+  phoneNumber: string;
+  prisma: PrismaClient | Prisma.TransactionClient;
+}): Promise<HostedMember> {
+  return input.prisma.hostedMember.update({
+    where: {
+      id: input.member.id,
+    },
     data: {
-      id: generateHostedMemberId(),
-      ...buildHostedMemberPhoneStorage(input.phoneNumber),
-      status: HostedMemberStatus.invited,
-      billingStatus: HostedBillingStatus.not_started,
       linqChatId: null,
-      encryptedBootstrapSecret: encryptHostedBootstrapSecret(),
-      encryptionKeyVersion: getHostedOnboardingEnvironment().encryptionKeyVersion,
+      ...buildHostedMemberPhoneStorage(input.phoneNumber),
+      encryptedBootstrapSecret:
+        input.member.encryptedBootstrapSecret
+          ? undefined
+          : encryptHostedBootstrapSecret(),
+      encryptionKeyVersion:
+        input.member.encryptionKeyVersion
+          ? undefined
+          : getHostedOnboardingEnvironment().encryptionKeyVersion,
     },
   });
 }

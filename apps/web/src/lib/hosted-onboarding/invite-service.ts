@@ -23,6 +23,8 @@ import {
   generateHostedInviteCode,
   generateHostedInviteId,
   inviteExpiresAt,
+  lockHostedMemberRow,
+  withHostedOnboardingTransaction,
 } from "./shared";
 
 export async function getHostedInviteStatus(input: {
@@ -136,81 +138,82 @@ export async function issueHostedInviteForPhone(input: {
 }): Promise<{ invite: HostedInvite; inviteUrl: string; member: HostedMember }> {
   const prisma = input.prisma ?? getPrisma();
 
-  const member = await ensureHostedMemberForPhone({
-    phoneNumber: input.phoneNumber,
-    prisma,
-  });
-  const invite = await issueHostedInvite({
-    channel: input.channel ?? "share",
-    linqChatId: null,
-    linqEventId: null,
-    memberId: member.id,
-    prisma,
-    triggerText: null,
-  });
+  return withHostedOnboardingTransaction(prisma, async (tx) => {
+    const member = await ensureHostedMemberForPhone({
+      phoneNumber: input.phoneNumber,
+      prisma: tx,
+    });
+    const invite = await issueHostedInvite({
+      channel: input.channel ?? "share",
+      memberId: member.id,
+      prisma: tx,
+    });
 
-  return {
-    invite,
-    inviteUrl: buildHostedInviteUrl(invite.inviteCode),
-    member,
-  };
+    return {
+      invite,
+      inviteUrl: buildHostedInviteUrl(invite.inviteCode),
+      member,
+    };
+  });
 }
 
 export async function issueHostedInvite(input: {
   channel: "linq" | "share" | "web";
-  linqChatId: string | null;
-  linqEventId: string | null;
   memberId: string;
   prisma: PrismaClient | Prisma.TransactionClient;
-  triggerText: string | null;
 }): Promise<HostedInvite> {
-  const now = new Date();
-  const existingInvite = await input.prisma.hostedInvite.findFirst({
-    where: {
-      memberId: input.memberId,
-      expiresAt: {
-        gt: now,
-      },
-      status: {
-        in: [
-          HostedInviteStatus.pending,
-          HostedInviteStatus.opened,
-          HostedInviteStatus.authenticated,
-          HostedInviteStatus.paid,
-        ],
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  return withHostedOnboardingTransaction(input.prisma, async (tx) => {
+    const now = new Date();
 
-  if (existingInvite) {
-    return input.prisma.hostedInvite.update({
+    await lockHostedMemberRow(tx, input.memberId);
+
+    const existingInvite = await tx.hostedInvite.findFirst({
       where: {
-        id: existingInvite.id,
+        memberId: input.memberId,
+        expiresAt: {
+          gt: now,
+        },
+        status: {
+          in: [
+            HostedInviteStatus.pending,
+            HostedInviteStatus.opened,
+            HostedInviteStatus.authenticated,
+            HostedInviteStatus.paid,
+          ],
+        },
       },
-      data: {
-        channel: input.channel,
-        linqChatId: null,
-        linqEventId: null,
-        triggerText: null,
+      orderBy: {
+        createdAt: "desc",
       },
     });
-  }
 
-  return input.prisma.hostedInvite.create({
-    data: {
-      id: generateHostedInviteId(),
-      memberId: input.memberId,
-      inviteCode: generateHostedInviteCode(),
-      status: HostedInviteStatus.pending,
-      channel: input.channel,
-      triggerText: null,
-      linqChatId: null,
-      linqEventId: null,
-      expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
-    },
+    if (existingInvite) {
+      return tx.hostedInvite.update({
+        where: {
+          id: existingInvite.id,
+        },
+        data: {
+          channel: input.channel,
+          linqChatId: null,
+          linqEventId: null,
+          triggerText: null,
+        },
+      });
+    }
+
+    return tx.hostedInvite.create({
+      data: {
+        id: generateHostedInviteId(),
+        memberId: input.memberId,
+        inviteCode: generateHostedInviteCode(),
+        status: HostedInviteStatus.pending,
+        channel: input.channel,
+        triggerText: null,
+        linqChatId: null,
+        linqEventId: null,
+        expiresAt: inviteExpiresAt(now, getHostedOnboardingEnvironment().inviteTtlHours),
+      },
+    });
   });
 }
 

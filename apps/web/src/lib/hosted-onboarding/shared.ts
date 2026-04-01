@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import { Prisma, type PrismaClient } from "@prisma/client";
+
 import { normalizeNullableString as normalizeDeviceSyncNullableString, sha256Hex } from "../device-sync/shared";
 import { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
 
@@ -15,6 +17,24 @@ const HOSTED_ONBOARDING_TRIGGER_PATTERNS = [
 ] as const;
 
 export { maskPhoneNumber, normalizePhoneNumber, normalizePhoneNumberForCountry } from "./phone";
+
+export type HostedOnboardingPrismaClient = PrismaClient | Prisma.TransactionClient;
+
+export async function withHostedOnboardingTransaction<TResult>(
+  prisma: HostedOnboardingPrismaClient,
+  callback: (tx: Prisma.TransactionClient) => Promise<TResult>,
+): Promise<TResult> {
+  return "$transaction" in prisma
+    ? prisma.$transaction((tx) => callback(tx))
+    : callback(prisma);
+}
+
+export async function lockHostedMemberRow(
+  tx: Prisma.TransactionClient,
+  memberId: string,
+): Promise<void> {
+  await tx.$queryRaw`select 1 from "hosted_member" where "id" = ${memberId} for update`;
+}
 
 export function extractLinqTextMessage(input: unknown): string | null {
   if (!input || typeof input !== "object") {

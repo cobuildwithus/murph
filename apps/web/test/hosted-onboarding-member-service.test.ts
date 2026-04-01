@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
@@ -120,6 +121,52 @@ describe("ensureHostedMemberForPhone", () => {
     });
 
     expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        linqChatId: null,
+        maskedPhoneNumberHint: "*** 4567",
+        normalizedPhoneNumber: expect.stringMatching(/^hbidx:phone:v1:/),
+      }),
+    });
+  });
+
+  it("recovers from a concurrent create conflict by refreshing the winning member row", async () => {
+    const update = vi.fn().mockResolvedValue({
+      id: "member_123",
+      linqChatId: null,
+      maskedPhoneNumberHint: "*** 4567",
+    });
+    const create = vi.fn().mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("duplicate", {
+        clientVersion: "test",
+        code: "P2002",
+      }),
+    );
+    const prisma = {
+      hostedMember: {
+        create,
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({
+            encryptedBootstrapSecret: "encrypted-secret",
+            encryptionKeyVersion: "v1",
+            id: "member_123",
+            linqChatId: "chat_existing",
+            maskedPhoneNumberHint: "*** 4567",
+          }),
+        update,
+      },
+    } as never;
+
+    await ensureHostedMemberForPhone({
+      phoneNumber: "+15551234567",
+      prisma,
+    });
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith({
+      where: {
+        id: "member_123",
+      },
       data: expect.objectContaining({
         linqChatId: null,
         maskedPhoneNumberHint: "*** 4567",

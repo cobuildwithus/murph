@@ -1,4 +1,4 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, HostedMemberStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -174,6 +174,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect((persistedLinqEvent?.data as { message?: Record<string, unknown> } | undefined)?.message).not.toHaveProperty(
       "extra_message_field",
     );
+    expect(persistedLinqEvent?.data).not.toHaveProperty("recipient_phone");
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
@@ -508,6 +509,68 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     );
   });
 
+  it("ignores suspended Linq members before dispatching or inviting", async () => {
+    const prisma = asPrismaTransactionClient({
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          invites: [],
+          normalizedPhoneNumber: "+15551234567",
+          status: HostedMemberStatus.suspended,
+        }),
+      },
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: "msg_123",
+            parts: [
+              {
+                type: "text",
+                value: "hello",
+              },
+            ],
+          },
+          recipient_phone: "+15550000000",
+          received_at: "2026-03-26T12:00:00.000Z",
+          service: "sms",
+        },
+        event_id: "evt_suspended",
+        event_type: "message.received",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "suspended-member",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed Linq message payloads with the hosted payload error surface", async () => {
     const prisma = asPrismaTransactionClient({
       hostedWebhookReceipt: {
@@ -560,12 +623,19 @@ function withPrismaTransaction<
   T extends Record<string, unknown>,
   TTx extends Record<string, unknown>,
 >(prisma: T, tx: TTx): T & {
+  $queryRaw: ReturnType<typeof vi.fn>;
   $transaction: ReturnType<typeof vi.fn>;
 } {
   const prismaWithTransaction = prisma as T & {
+    $queryRaw: ReturnType<typeof vi.fn>;
     $transaction: ReturnType<typeof vi.fn>;
   };
+  const transactionClient = tx as TTx & {
+    $queryRaw?: ReturnType<typeof vi.fn>;
+  };
   const transaction = vi.fn(async (callback: (tx: TTx) => Promise<unknown>) => callback(tx));
+  prismaWithTransaction.$queryRaw = vi.fn(async () => []);
+  transactionClient.$queryRaw ??= vi.fn(async () => []);
   prismaWithTransaction.$transaction = transaction;
   return prismaWithTransaction;
 }
