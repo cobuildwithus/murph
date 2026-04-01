@@ -38,7 +38,11 @@ export interface AssistantModelDiscoveryResult {
 }
 
 export interface AssistantProviderCapabilities {
+  /**
+   * @deprecated Use `supportsHostToolRuntime` instead.
+   */
   supportsBoundTools: boolean
+  supportsHostToolRuntime: boolean
   supportsDirectCliExecution: boolean
   supportsModelDiscovery: boolean
   supportsReasoningEffort: boolean
