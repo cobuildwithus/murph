@@ -41,6 +41,7 @@ Then load only the task-relevant docs listed below.
 - Prefer narrow ledger rows and narrow plans.
 - Treat supplied patches as behavioral intent, not overwrite authority.
 - If a change introduces or changes a durable repo rule, update the durable doc in the same turn.
+- Required completion-workflow audit subagent passes are repo-policy pre-authorized. When a repo task reaches that workflow, do not stop only to ask the user for separate permission to run them.
 - `scripts/finish-task` resolves the file/directory paths you pass into exact changed file paths, closes the active plan, moves it to `agent-docs/exec-plans/completed/`, and creates a scoped commit containing the closed-plan artifact plus those resolved paths.
 
 ## Mechanical Vs Policy
