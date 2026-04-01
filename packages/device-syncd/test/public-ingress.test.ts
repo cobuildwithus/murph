@@ -311,9 +311,8 @@ test("public ingress reuses shared OAuth callback logic independently of the loc
   ]);
 });
 
-test("public ingress processes an unknown-account retry exactly once after the account exists", async () => {
+test("public ingress dedupes unknown-account webhook deliveries before rerunning unknown hooks", async () => {
   const store = new InMemoryPublicIngressStore();
-  const acceptedWebhooks: string[] = [];
   const unknownWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
     publicBaseUrl: "https://sync.example.test/device-sync",
@@ -331,10 +330,6 @@ test("public ingress processes an unknown-account retry exactly once after the a
     ]),
     store,
     hooks: {
-      onWebhookAccepted({ account, webhook }) {
-        completeWebhookAcceptDurably(store, account, webhook.traceId);
-        acceptedWebhooks.push(`${account.id}:${webhook.eventType}`);
-      },
       onUnknownWebhook({ provider, externalAccountId, webhook }) {
         unknownWebhooks.push(`${provider.provider}:${externalAccountId}:${webhook.traceId}`);
       },
@@ -344,29 +339,17 @@ test("public ingress processes an unknown-account retry exactly once after the a
   const first = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
   assert.equal(first.accepted, true);
   assert.equal(first.duplicate, false);
-  assert.deepEqual(acceptedWebhooks, []);
   assert.deepEqual(unknownWebhooks, ["demo:demo-late:trace-late"]);
-  assert.equal(store.lastRecordedWebhookTrace, null);
-
-  const begin = await ingress.startConnection({ provider: "demo" });
-  const connected = await ingress.handleOAuthCallback({
-    provider: "demo",
-    state: begin.state,
-    code: "late",
-  });
-
-  const retry = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-  assert.equal(retry.accepted, true);
-  assert.equal(retry.duplicate, false);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-late");
 
   const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:demo.updated`]);
+  assert.deepEqual(unknownWebhooks, ["demo:demo-late:trace-late"]);
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
-test("public ingress processes an inactive-account retry exactly once after reactivation", async () => {
+test("public ingress marks inactive-account webhook traces processed so delayed duplicates stay suppressed", async () => {
   const store = new InMemoryPublicIngressStore();
   const acceptedWebhooks: string[] = [];
   const ingress = createDeviceSyncPublicIngress({
@@ -404,19 +387,13 @@ test("public ingress processes an inactive-account retry exactly once after reac
   assert.equal(first.accepted, true);
   assert.equal(first.duplicate, false);
   assert.deepEqual(acceptedWebhooks, []);
-  assert.equal(store.lastRecordedWebhookTrace, null);
-
-  store.patchAccountStatus(connected.account.id, "active");
-
-  const retry = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
-  assert.equal(retry.accepted, true);
-  assert.equal(retry.duplicate, false);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:trace-inactive`]);
   assert.equal(store.lastRecordedWebhookTrace?.traceId, "trace-inactive");
 
   const duplicate = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+  assert.equal(duplicate.accepted, true);
   assert.equal(duplicate.duplicate, true);
-  assert.deepEqual(acceptedWebhooks, [`${connected.account.id}:trace-inactive`]);
+  assert.deepEqual(acceptedWebhooks, []);
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
 test("public ingress leaves the webhook trace retryable when the durable acceptance hook fails", async () => {

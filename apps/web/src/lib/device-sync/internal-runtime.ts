@@ -201,6 +201,8 @@ export async function applyHostedDeviceSyncRuntimeUpdates(
       if (update.tokenBundle) {
         if (tokenVersionMismatch) {
           tokenUpdate = "skipped_version_mismatch";
+        } else if (connectionVersionMismatch) {
+          tokenUpdate = "skipped_version_mismatch";
         } else if (tokenBlockedByDisconnectedStatus) {
           tokenUpdate = existing.secret ? "unchanged" : "missing";
         } else {

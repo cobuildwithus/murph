@@ -496,7 +496,7 @@ describe("device-sync hosted runtime helpers", () => {
           }),
           connectionId: "dsc_midpass",
           status: "updated",
-          tokenUpdate: "missing",
+          tokenUpdate: "skipped_version_mismatch",
         },
       ],
       userId: "user-123",
@@ -748,6 +748,119 @@ describe("device-sync hosted runtime helpers", () => {
     expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
     expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
     expect(result.updates[0]?.tokenUpdate).toBe("skipped_version_mismatch");
+  });
+
+  it("skips stale token escrow writes even when newer local-state timestamps still apply", async () => {
+    const { applyHostedDeviceSyncRuntimeUpdates } = await import(
+      "@/src/lib/device-sync/internal-runtime"
+    );
+    const existing = {
+      accessTokenExpiresAt: new Date("2026-04-01T12:00:00.000Z"),
+      connectedAt: new Date("2026-03-01T00:00:00.000Z"),
+      createdAt: new Date("2026-03-01T00:00:00.000Z"),
+      displayName: "Oura Ring",
+      externalAccountId: "oura_user_123",
+      id: "conn_123",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: new Date("2026-04-01T08:00:00.000Z"),
+      metadataJson: {},
+      nextReconcileAt: new Date("2026-04-01T18:00:00.000Z"),
+      provider: "oura",
+      scopes: ["personal"],
+      secret: {
+        accessTokenEncrypted: "enc:old-access",
+        connectionId: "conn_123",
+        createdAt: new Date("2026-03-01T00:00:00.000Z"),
+        keyVersion: "hosted-v1",
+        refreshTokenEncrypted: "enc:old-refresh",
+        tokenVersion: 7,
+        updatedAt: new Date("2026-04-01T00:00:00.000Z"),
+      },
+      status: "active",
+      updatedAt: new Date("2026-04-02T00:00:00.000Z"),
+      userId: "user_123",
+    };
+    const updated = {
+      ...existing,
+      lastWebhookAt: new Date("2026-04-02T12:00:00.000Z"),
+    };
+    const tx = {
+      deviceConnection: {
+        findFirst: vi.fn().mockResolvedValue(existing),
+        update: vi.fn().mockResolvedValue(updated),
+      },
+      deviceConnectionSecret: {
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    const store = {
+      codec: {
+        decrypt: (value: string) => value.replace(/^enc:/u, ""),
+        encrypt: (value: string) => `enc:${value}`,
+        keyVersion: "hosted-v2",
+      },
+      createSignal: vi.fn(),
+      markConnectionDisconnected: vi.fn(),
+      prisma: {},
+      withConnectionRefreshLock: vi.fn(async (_connectionId: string, callback: (input: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+    };
+
+    const result = await applyHostedDeviceSyncRuntimeUpdates(
+      store as never,
+      {
+        occurredAt: "2026-04-02T12:05:00.000Z",
+        updates: [
+          {
+            connectionId: "conn_123",
+            localState: {
+              lastWebhookAt: "2026-04-02T12:00:00.000Z",
+            },
+            observedTokenVersion: 7,
+            observedUpdatedAt: "2026-04-01T00:00:00.000Z",
+            tokenBundle: {
+              accessToken: "new-access-token",
+              accessTokenExpiresAt: "2026-04-03T00:00:00.000Z",
+              keyVersion: "local-runtime",
+              refreshToken: "new-refresh-token",
+              tokenVersion: 7,
+            },
+          },
+        ],
+        userId: "user_123",
+      },
+    );
+
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
+      where: {
+        id: "conn_123",
+      },
+      data: expect.objectContaining({
+        lastWebhookAt: new Date("2026-04-02T12:00:00.000Z"),
+      }),
+    });
+    expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
+    expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      appliedAt: "2026-04-02T12:05:00.000Z",
+      updates: [
+        {
+          connection: expect.objectContaining({
+            id: "conn_123",
+          }),
+          connectionId: "conn_123",
+          status: "updated",
+          tokenUpdate: "skipped_version_mismatch",
+        },
+      ],
+      userId: "user_123",
+    });
   });
 
   it("does not bump token versions when a null-expiry token bundle is unchanged", async () => {
