@@ -4,11 +4,11 @@ import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
 export const DEFAULT_SQLITE_TIMEOUT_MS = 5_000;
-const require = createRequire(import.meta.url);
 
 type DatabaseSyncConstructor = typeof import("node:sqlite").DatabaseSync;
 
 let databaseSyncConstructor: DatabaseSyncConstructor | null = null;
+let sqliteModuleRequire: ReturnType<typeof createRequire> | null = null;
 
 export interface OpenSqliteRuntimeDatabaseOptions {
   create?: boolean;
@@ -80,6 +80,8 @@ function resolveDatabaseSyncConstructor(): DatabaseSyncConstructor {
     return databaseSyncConstructor;
   }
 
+  const require = sqliteModuleRequire ?? createRequire(import.meta.url);
+  sqliteModuleRequire = require;
   const sqliteModule = require("node:sqlite") as typeof import("node:sqlite");
   databaseSyncConstructor = sqliteModule.DatabaseSync;
   return databaseSyncConstructor;
