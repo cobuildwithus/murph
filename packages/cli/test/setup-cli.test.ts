@@ -523,8 +523,6 @@ async function writeRequiredCliDistSupportFiles(
   const cliDistRoot = path.join(cliPackageRoot, 'dist')
   const supportPaths = [
     path.join(cliDistRoot, 'index.js'),
-    path.join(cliDistRoot, 'vault-cli-contracts.js'),
-    path.join(cliDistRoot, 'inbox-cli-contracts.js'),
     path.join(cliDistRoot, 'setup-cli.js'),
     path.join(cliDistRoot, 'setup-agentmail.js'),
     path.join(cliDistRoot, 'setup-assistant.js'),
@@ -680,33 +678,12 @@ fi
 
 cli_package_root="$repo_root/packages/cli"
 cli_bin_path="$cli_package_root/dist/bin.js"
-required_cli_dist_files=(
-  "$cli_bin_path"
-  "$cli_package_root/dist/index.js"
-  "$cli_package_root/dist/vault-cli-contracts.js"
-  "$cli_package_root/dist/inbox-cli-contracts.js"
-  "$cli_package_root/dist/setup-cli.js"
-  "$cli_package_root/dist/setup-agentmail.js"
-  "$cli_package_root/dist/setup-assistant.js"
-  "$cli_package_root/dist/setup-assistant-account.js"
-  "$cli_package_root/dist/setup-services.js"
-  "$cli_package_root/dist/setup-wizard.js"
-  "$cli_package_root/dist/assistant/provider-catalog.js"
-  "$cli_package_root/dist/setup-services/channels.js"
-  "$cli_package_root/dist/setup-services/process.js"
-  "$cli_package_root/dist/setup-services/scheduled-updates.js"
-  "$cli_package_root/dist/setup-services/shell.js"
-  "$cli_package_root/dist/setup-services/steps.js"
-  "$cli_package_root/dist/setup-services/toolchain.js"
-)
-
-cli_dist_ready=true
-for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
-  if [ ! -f "$required_cli_dist_file" ]; then
-    cli_dist_ready=false
-    break
-  fi
-done
+# Only gate on the built CLI entrypoint. The package/root build commands own
+# transitive artifact completeness, and hard-coding every emitted file here is brittle.
+cli_dist_ready=false
+if [ -f "$cli_bin_path" ]; then
+  cli_dist_ready=true
+fi
 
 is_discovery_invocation() {
   for arg in "$@"; do
@@ -797,14 +774,8 @@ if [ "\${#missing_packages[@]}" -gt 0 ]; then
   fi
 fi
 
-cli_dist_ready=true
-if [ "$build_failed" = false ]; then
-  for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
-    if [ ! -f "$required_cli_dist_file" ]; then
-      cli_dist_ready=false
-      break
-    fi
-  done
+if [ "$build_failed" = false ] && [ -f "$cli_bin_path" ]; then
+  cli_dist_ready=true
 else
   cli_dist_ready=false
 fi
@@ -3346,6 +3317,7 @@ test.sequential('CLI shim rebuilds missing cli dist artifacts before launching t
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
   const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
   const cliBinPath = path.join(cliDistRoot, 'bin.js')
   const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
@@ -3353,6 +3325,8 @@ test.sequential('CLI shim rebuilds missing cli dist artifacts before launching t
 
   try {
     await mkdir(cliDistRoot, { recursive: true })
+    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
+    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
     for (const packageName of [
       'contracts',
       'core',
@@ -3374,37 +3348,14 @@ test.sequential('CLI shim rebuilds missing cli dist artifacts before launching t
       await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
     }
 
-    await writeFile(cliBinPath, `require('./index.js')\n`, 'utf8')
-
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
 if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
   mkdir -p "$2/dist"
-  if [ -f "$2/dist/bin.js" ]; then
-    printf '%s\\n' "console.log('built-ok')" > "$2/dist/index.js"
-    printf '%s\\n' 'export {}' > "$2/dist/vault-cli-contracts.js"
-    printf '%s\\n' 'export {}' > "$2/dist/inbox-cli-contracts.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-cli.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-agentmail.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-assistant.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-assistant-account.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-wizard.js"
-    mkdir -p "$2/dist/assistant"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/assistant/provider-catalog.js"
-    mkdir -p "$2/dist/setup-services"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/channels.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/process.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/scheduled-updates.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/shell.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/steps.js"
-    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/toolchain.js"
-    printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
-  else
-    printf '%s\\n' 'export {}' > "$2/dist/index.js"
-  fi
+  printf '%s\\n' "console.log('built-ok')" > "$2/dist/bin.js"
+  printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   exit 0
 fi
 exit 1
@@ -3426,11 +3377,12 @@ exit 1
   }
 })
 
-test.sequential('CLI shim rebuilds when onboard transitive setup dist artifacts are missing', async () => {
+test.sequential('CLI shim rebuilds onboard dist artifacts when the built entrypoint is missing', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-onboard-repair-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
   const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
   const cliBinPath = path.join(cliDistRoot, 'bin.js')
   const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
@@ -3440,6 +3392,8 @@ test.sequential('CLI shim rebuilds when onboard transitive setup dist artifacts 
     await mkdir(repoRoot, { recursive: true })
     const canonicalRepoRoot = await realpath(repoRoot)
     await mkdir(cliDistRoot, { recursive: true })
+    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
+    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
     for (const packageName of [
       'contracts',
       'core',
@@ -3462,20 +3416,14 @@ test.sequential('CLI shim rebuilds when onboard transitive setup dist artifacts 
     }
 
     await writeRequiredCliDistSupportFiles(cliPackageRoot)
-    await rm(path.join(cliDistRoot, 'setup-agentmail.js'), { force: true })
-    await writeFile(
-      cliBinPath,
-      `require('./setup-agentmail.js')\nconsole.log('onboard-built-ok')\n`,
-      'utf8',
-    )
 
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
       `#!/usr/bin/env bash
 set -euo pipefail
 if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
-  mkdir -p "$2/packages/cli/dist/setup-services"
-  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/setup-agentmail.js"
+  mkdir -p "$2/packages/cli/dist"
+  printf '%s\\n' "console.log('onboard-built-ok')" > "$2/packages/cli/dist/bin.js"
   printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   exit 0
 fi
@@ -3498,11 +3446,12 @@ exit 1
   }
 })
 
-test.sequential('CLI shim rebuilds onboard dist artifacts through corepack when pnpm is unavailable', async () => {
+test.sequential('CLI shim rebuilds onboard dist artifacts through corepack when the built entrypoint is missing', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-onboard-corepack-repair-'))
   const repoRoot = path.join(tempRoot, 'repo')
   const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
   const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
   const cliBinPath = path.join(cliDistRoot, 'bin.js')
   const shimPath = path.join(tempRoot, 'murph')
   const fakeBinDirectory = path.join(tempRoot, 'bin')
@@ -3512,6 +3461,8 @@ test.sequential('CLI shim rebuilds onboard dist artifacts through corepack when 
     await mkdir(repoRoot, { recursive: true })
     const canonicalRepoRoot = await realpath(repoRoot)
     await mkdir(cliDistRoot, { recursive: true })
+    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
+    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
     for (const packageName of [
       'contracts',
       'core',
@@ -3534,20 +3485,14 @@ test.sequential('CLI shim rebuilds onboard dist artifacts through corepack when 
     }
 
     await writeRequiredCliDistSupportFiles(cliPackageRoot)
-    await rm(path.join(cliDistRoot, 'setup-agentmail.js'), { force: true })
-    await writeFile(
-      cliBinPath,
-      `require('./setup-agentmail.js')\nconsole.log('onboard-corepack-built-ok')\n`,
-      'utf8',
-    )
 
     await writeExecutable(
       path.join(fakeBinDirectory, 'corepack'),
       `#!/usr/bin/env bash
 set -euo pipefail
 if [ "$1" = "pnpm" ] && [ "$2" = "--dir" ] && [ "$3" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$4" = "build:test-runtime:prepared" ]; then
-  mkdir -p "$3/packages/cli/dist/setup-services"
-  printf '%s\\n' 'module.exports = {}' > "$3/packages/cli/dist/setup-agentmail.js"
+  mkdir -p "$3/packages/cli/dist"
+  printf '%s\\n' "console.log('onboard-corepack-built-ok')" > "$3/packages/cli/dist/bin.js"
   printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   exit 0
 fi
@@ -3684,8 +3629,6 @@ set -euo pipefail
 if [ "$1" = "--dir" ] && [ "$2" = ${JSON.stringify(canonicalRepoRoot)} ] && [ "$3" = "build:test-runtime:prepared" ]; then
   mkdir -p "$2/packages/cli/dist"
   printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/index.js"
-  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/vault-cli-contracts.js"
-  printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/inbox-cli-contracts.js"
   printf '%s\\n' 'module.exports = {}' > "$2/packages/cli/dist/setup-cli.js"
   exit 0
 fi
