@@ -1,103 +1,188 @@
-# Architecture Review — 2026-04-01
+# Murph architecture review — 2026-04-01
 
-## Scope
+This review stays grounded in the code that exists in this snapshot. It focuses on places where Murph is currently carrying the same concept in multiple shapes, where package seams are wider than they need to be, and where orchestration layers own more behavior than they should.
 
-This snapshot reviews Murph's current shared data model, package boundaries, internal APIs, and code structure with an emphasis on duplicated concepts, widening blast-radius seams, and orchestration-heavy modules.
+## 1. Landed in this pass: make hosted env policy a single owner
 
-This patch lands part of item 1 and item 2 below. The other items remain review findings only.
+**Files / symbols / seam**
 
-## High leverage now
+- `apps/cloudflare/src/user-env.ts` — `isHostedUserEnvKeyAllowed`
+- `apps/cloudflare/src/runner-env.ts` — `buildHostedRunnerContainerEnv`, `filterHostedRunnerUserEnv`, `hostedAssistantAutomationEnabled`
+- `packages/assistant-runtime/src/hosted-runtime/environment.ts` — `hostedAssistantAutomationEnabledFromEnv`
+- `packages/hosted-execution/src/env.ts` — new shared `hostedAssistantAutomationEnabledFromEnv`
+- new `apps/cloudflare/src/hosted-env-policy.ts`
 
-### 1. Make `packages/contracts` the shared owner of protocol-group path derivation
+**Current complexity cost / maintenance risk**
 
-**Seam:** `packages/core/src/bank/protocols.ts#parseProtocolItemRecord`, `packages/query/src/health/bank-registry-query-metadata.ts#protocol.transform`, `packages/contracts/src/health-entities.ts`.
+Murph was carrying hosted env policy in multiple places:
 
-**Current cost:** the same file-layout invariant was represented twice: core derived a protocol `group` from `groupFromProtocolPath(...)`, while query separately derived it from `deriveProtocolGroupFromRelativePath(...)`. Any future path-layout change under `bank/protocols/**` risks a split between canonical writes and read-model projection.
+- the per-user env allowlist lived in `user-env.ts`
+- the runner-forwarding allowlist lived in `runner-env.ts`
+- the automation on/off invariant was parsed independently in both Cloudflare and assistant-runtime
 
-**Simpler target shape:** one package-neutral helper in contracts that owns the invariant, with core keeping only the write-time validation/error behavior and query reusing the same pure derivation.
+That meant adding one env key or changing one automation rule could require parallel edits across multiple packages, with drift that would only show up at runtime. This is exactly the kind of cross-layer policy that widens blast radius even when behavior is simple.
 
-**Incremental refactor path:** land a pure helper in `packages/contracts/src/health-entities.ts`, update core and query to consume it, then delete the duplicate core/query-specific derivations. This patch does that.
+**Simpler target shape**
 
-**Main risk if done poorly:** treating an invalid path as valid would quietly corrupt the protocol `group` field, especially during projection rebuilds.
+Treat hosted env policy as one explicit owner:
 
-### 2. Stop restating registry-command method names and registry-kind unions in assistant-core
+- `packages/hosted-execution/src/env.ts` owns the shared hosted automation flag parser
+- `apps/cloudflare/src/hosted-env-policy.ts` owns Cloudflare-specific env admission and forwarding policy
+- `runner-env.ts` becomes a thin compatibility re-export instead of a second owner
+- `user-env.ts` consumes the shared policy instead of restating it
 
-**Seam:** `packages/assistant-core/src/health-registry-command-metadata.ts`, `packages/assistant-core/src/health-cli-descriptors.ts`, `packages/contracts/src/health-entities.ts`, `packages/query/src/health/bank-registry-query-metadata.ts`.
+**Incremental refactor path**
 
-**Current cost:** the same registry concept was represented several ways: assistant-core kept a full per-kind table of method names, payload filenames, and id examples; assistant-core also restated the registry-kind union separately from query. That makes routine renames or added registry kinds ripple through contracts, assistant-core, query, and CLI even when most fields are mechanical.
+1. Extract the shared flag parser into `@murphai/hosted-execution`.
+2. Extract Cloudflare env policy into one local module.
+3. Keep existing public imports stable by leaving `runner-env.ts` as a forwarding module.
+4. Only after the seam proves stable, consider moving more hosted env metadata there if another real duplication appears.
 
-**Simpler target shape:** contracts owns the registry-kind set and registry nouns; assistant-core derives mechanical command metadata from a tiny per-kind stem table plus the contract-owned registry definitions. Query imports the shared registry-kind type instead of restating the same union locally.
+**Main risk if done poorly**
 
-**Incremental refactor path:** first type the metadata fields with the actual service/runtime method-name unions, then derive list/show/scaffold/upsert names from singular/plural stems, leaving only the genuinely irregular override (`protocol` runtime writes `upsertProtocolItem`). This patch lands that first step.
+If this seam is over-generalized, it can become another vague “env manager” layer. The safe version is narrow: one module owns policy, while caller-specific behavior stays in the caller.
 
-**Main risk if done poorly:** one incorrect derived method name would fail CLI dispatch at runtime or disconnect command help from the actual bound service methods.
+## 2. Query still carries two near-duplicate read-model shapes
 
-### 3. Split `HostedDeviceSyncControlPlane` into a composition root plus narrower behavior owners
+**Files / symbols / seam**
 
-**Seam:** `apps/web/src/lib/device-sync/control-plane.ts#HostedDeviceSyncControlPlane`, `./agent-session-service.ts#HostedDeviceSyncAgentSessionService`, `./wake-service.ts`, `./public-connection.ts`, `./providers.ts`.
+- `packages/query/src/canonical-entities.ts` — `CanonicalEntity`, `CanonicalEntityLink`
+- `packages/query/src/model.ts` — `VaultRecord`, `VaultReadModel`, `toCanonicalEntity`, `relatedIdsToLinks`
 
-**Current cost:** `HostedDeviceSyncControlPlane` currently owns request-scoped environment assembly, auth caching, store/codec construction, public ingress creation, browser connection projection, agent-session behavior, webhook-admin upkeep, and runtime-snapshot preparation. That makes routine route work fan out across auth, persistence, callback policy, and wake orchestration at once.
+**Current complexity cost / maintenance risk**
 
-**Simpler target shape:** keep `HostedDeviceSyncControlPlane` as the request-scoped composition root only, and move the remaining owned behavior into focused services such as `HostedDeviceSyncConnectionsService`, `HostedDeviceSyncWebhookAdminService`, and `HostedDeviceSyncAgentService`.
+`CanonicalEntity` and `VaultRecord` describe almost the same underlying thing with field renames and compatibility baggage:
 
-**Incremental refactor path:** start by extracting the connection/browser-id ownership methods (`listConnections`, `getConnectionStatus`, `disconnectConnection`, `requireOwnedBrowserConnection`) into one service without changing route signatures. Then peel out webhook-admin upkeep and leave agent-session behavior where it already has a narrow service.
+- `entityId` vs `displayId`
+- `family` vs `recordType`
+- `parentEntityId`/`parentEntityDisplayId` vs `parentId`
+- `relatedEntities` vs `relatedIds`
+- `metadata.path` vs `relativePath`
+- `metadata.title` vs `displayName`
 
-**Main risk if done poorly:** losing the request-scoped auth/origin assumptions could accidentally widen trust or let one service rebuild slightly different environment/config state than another.
+That duplication means new registry-backed entity behavior has to be threaded through two read-model vocabularies before the UI or CLI can use it. It also obscures which shape is the actual package seam versus which one is legacy presentation glue.
 
-## Worth planning
+**Simpler target shape**
 
-### 4. Break `member-service.ts` along invite, member-identity, and session-issuance seams
+Pick one shared read-model owner for the generic registry-backed entity shape and make the other layer a compatibility adapter only. The better candidate is probably the `CanonicalEntity` shape, because it already packages link metadata and generic entity concepts in one place.
 
-**Seam:** `apps/web/src/lib/hosted-onboarding/member-service.ts#getHostedInviteStatus`, `#completeHostedPrivyVerification`, `#ensureHostedMemberForPhone`, `#ensureHostedMemberForPrivyIdentity`, `#reconcileHostedPrivyIdentityOnMember`, `#issueHostedInvite`, `#buildHostedMemberActivationDispatch`.
+**Incremental refactor path**
 
-**Current cost:** one module owns invite lifecycle transitions, member identity reconciliation, bootstrap-secret issuance, session creation, and hosted execution activation dispatch construction. That means onboarding changes ripple across persistence rules, authentication rules, and hosted-dispatch semantics in one file.
+1. Freeze one shape as canonical for new call sites.
+2. Move conversion logic into a dedicated adapter module.
+3. Stop letting new query helpers invent against both shapes.
+4. Remove the duplicate structure only after the current consumers have converged.
 
-**Simpler target shape:** three package-local seams: an `invite-lifecycle` module, a `member-identity` module, and a `session-and-activation` module. Route-layer behavior can still call one facade, but the state machines stop living in the same file.
+**Main risk if done poorly**
 
-**Incremental refactor path:** extract pure invite-stage computation first, then pull the Privy/member reconciliation helpers into a separate module, and only after that move session issuance + activation dispatch construction.
+If the convergence happens too aggressively, callers that still depend on today’s `VaultRecord` quirks could lose fields or subtly change output ordering. The safe move is to narrow ownership first, then delete the extra shape later.
 
-**Main risk if done poorly:** splitting the file without a clear transactional boundary could introduce subtle mismatches between invite state, member status, and activation dispatch idempotency.
+## 3. `apps/web` still has orchestration-heavy service modules that want narrower owners
 
-### 5. Give the hosted runner job envelope one owner instead of layering ad hoc request shapes
+**Files / symbols / seam**
 
-**Seam:** `packages/hosted-execution/src/contracts.ts#HostedExecutionRunnerRequest`, `packages/assistant-runtime/src/hosted-runtime/models.ts#HostedAssistantRuntimeJobRequest`, `apps/cloudflare/src/node-runner.ts#HostedExecutionRunnerJobRequest`, `apps/cloudflare/src/container-entrypoint.ts#parseHostedExecutionRunnerJobRequest`, `apps/cloudflare/src/runner-container.ts#parseHostedExecutionContainerRunnerRequest`.
+- `apps/web/src/lib/device-sync/control-plane.ts`
+- `apps/web/src/lib/hosted-onboarding/member-service.ts`
+- `apps/web/src/lib/hosted-share/link-service.ts`
 
-**Current cost:** the same execution request grows across three layers: base runner request, assistant-runtime job request, and Cloudflare runner job request, with parsing split across package and app boundaries. That makes transport changes harder to reason about and obscures which layer actually owns which optional fields.
+**Current complexity cost / maintenance risk**
 
-**Simpler target shape:** one shared job-envelope contract for the assistant runtime boundary, plus a very small Cloudflare-local wrapper only for worker-only transport fields such as `internalWorkerProxyToken` and filtered `userEnv`.
+Murph’s hosted web layer keeps accumulating large service files that mix:
 
-**Incremental refactor path:** first centralize the Cloudflare-local job parser/type into one module, then decide whether the assistant-runtime job envelope should move down into `@murph/hosted-execution` or remain in `@murph/assistant-runtime` as the single owner.
+- environment/config assembly
+- auth and trust checks
+- persistence orchestration
+- side-effect dispatch preparation
+- response shaping
 
-**Main risk if done poorly:** collapsing the envelopes too aggressively could leak worker-only transport concerns into shared packages or erase validation that currently fails closed.
+These files are still coherent enough to work in the current repo, but they widen the blast radius of routine changes. A small feature tweak often means reopening a file that also carries trust-boundary logic, transactional invariants, and dispatch wiring.
 
-### 6. Finish collapsing hosted web route error handling into one HTTP boundary
+**Simpler target shape**
 
-**Seam:** `apps/web/src/lib/http.ts#createJsonErrorResponse`, `apps/web/src/lib/device-sync/http.ts#jsonError`, `apps/web/src/lib/hosted-onboarding/http.ts#jsonError`, `apps/web/src/lib/linq/http.ts#jsonError`.
+Keep the route entrypoints thin and move toward “composition root + focused behavior owner” splits:
 
-**Current cost:** the app already has a common low-level JSON error response builder, but each domain still hand-builds its own thin wrapper and route pattern. That keeps behavior mostly aligned today, but future logging, headers, or request-validation changes still fan out across several domain-local wrappers.
+- request-scoped composition root
+- persistence/state transition owner
+- side-effect/dispatch owner
+- response/view-model adapter
 
-**Simpler target shape:** one app-level error-adapter factory in `src/lib/http.ts` that owns the generic HTTP behavior, with each domain providing only matchers/default headers.
+That keeps the app-local seam intact without forcing premature package extraction.
 
-**Incremental refactor path:** introduce a small factory without changing route signatures, then migrate device-sync, onboarding, and Linq one by one. Leave domain-specific helpers such as callback redirects or HTML responses where they are.
+**Incremental refactor path**
 
-**Main risk if done poorly:** an over-generic helper could erase domain-specific headers or make domain error policies harder to see than they are today.
+Start with the highest-churn methods rather than splitting whole files at once. For example, extract one focused behavior cluster from `control-plane.ts` or `member-service.ts`, keep the facade stable, and prove the seam before carving further.
 
-## Keep as-is
+**Main risk if done poorly**
 
-### 7. Keep the contracts-owned health taxonomy seam
+A bad split can duplicate request-scoped config or widen trust boundaries by letting multiple helpers rebuild their own auth/environment assumptions. The seam has to preserve one request-scoped owner.
 
-**Seam:** `packages/contracts/src/health-entities.ts`, `packages/query/src/health/registries.ts`, `packages/assistant-core/src/health-cli-descriptors.ts`, `agent-docs/references/health-entity-taxonomy-seam.md`.
+## 4. The hosted runner request envelope still spans too many layers
 
-**Why it should stay:** this file looks central because it is actually coordinating shared taxonomy, lookup prefixes, scaffold templates, and registry metadata that multiple packages genuinely share. The right simplification is to delete downstream restatements, not to scatter the ownership.
+**Files / symbols / seam**
 
-### 8. Keep the `@murph/runtime-state` root versus `@murph/runtime-state/node` split
+- `packages/hosted-execution/src/contracts.ts`
+- `packages/assistant-runtime/src/hosted-runtime/models.ts`
+- `apps/cloudflare/src/node-runner.ts`
+- `apps/cloudflare/src/container-entrypoint.ts`
+- `apps/cloudflare/src/runner-container.ts`
 
-**Seam:** `packages/runtime-state/package.json#exports`, `packages/runtime-state/src/index.ts`, `packages/runtime-state/src/node/index.ts`.
+**Current complexity cost / maintenance risk**
 
-**Why it should stay:** the split keeps browser-safe/shared hosted identity types on the root export while isolating Node-only filesystem, SQLite, and bundle-materialization behavior behind the `/node` subpath. That is a real environment boundary, not accidental churn.
+Murph currently carries the runner request across multiple layers with slightly different shapes and parsers. That makes it harder to answer simple ownership questions like:
 
-### 9. Keep the explicit gateway-local assistant adapter seam
+- which fields are shared runtime contract versus Cloudflare-local transport detail?
+- where should validation fail closed?
+- which package owns future optional execution knobs?
 
-**Seam:** `packages/gateway-local/src/assistant-adapter.ts`, `packages/gateway-local/src/send.ts`, `packages/gateway-local/src/local-service.ts`.
+The longer this stays spread out, the easier it becomes for one layer to quietly widen the contract without another layer noticing.
 
-**Why it should stay:** the adapter is doing real ownership work. It lets the local gateway projection/read/send layer depend on a narrow assistant-facing bridge instead of letting `send.ts` and store logic import assistant-core directly. The better next step is to keep the adapter small, not to inline it away.
+**Simpler target shape**
+
+Keep one shared runtime job envelope and one tiny Cloudflare-local wrapper for worker/container transport-only fields. Everything else should be parsed and validated once.
+
+**Incremental refactor path**
+
+First centralize the Cloudflare-local request parsing into one module. Then decide whether the shared runtime envelope belongs in `@murphai/hosted-execution` or remains owned by `@murphai/assistant-runtime`.
+
+**Main risk if done poorly**
+
+Flattening too much could leak Cloudflare-only transport details into shared runtime packages or weaken fail-closed parsing.
+
+## 5. Error-response policy in `apps/web` still wants one owner
+
+**Files / symbols / seam**
+
+- `apps/web/src/lib/http.ts`
+- `apps/web/src/lib/device-sync/http.ts`
+- `apps/web/src/lib/hosted-onboarding/http.ts`
+- `apps/web/src/lib/linq/http.ts`
+
+**Current complexity cost / maintenance risk**
+
+The app has a common low-level JSON error response builder, but domain-local wrappers still restate similar adapter logic. That keeps today’s behavior mostly aligned, but future changes to logging, status shaping, or headers will still fan out.
+
+**Simpler target shape**
+
+One app-level error-adapter factory should own generic HTTP behavior, while each domain supplies only the domain-specific matcher/default policy.
+
+**Incremental refactor path**
+
+Introduce a tiny factory without changing route signatures. Migrate domains one at a time.
+
+**Main risk if done poorly**
+
+An over-generic helper can hide domain policy differences that should stay explicit.
+
+## 6. Keep these seams as-is
+
+### Contracts-owned health taxonomy
+
+`packages/contracts/src/health-entities.ts` still looks like the correct owner. The right simplification is deleting downstream restatements, not scattering taxonomy ownership again.
+
+### `@murphai/runtime-state` root vs `/node`
+
+This remains a real environment boundary, not accidental structure. Browser-safe/shared types on the root export and filesystem/SQLite helpers on `/node` is still the right split.
+
+### Gateway-local assistant adapter
+
+`packages/gateway-local/src/assistant-adapter.ts` still earns its keep. It keeps the gateway layer pointed at a narrow assistant-facing bridge instead of importing assistant-core behavior directly into send/store code.

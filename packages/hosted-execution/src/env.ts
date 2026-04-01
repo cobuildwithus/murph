@@ -191,6 +191,24 @@ export function normalizeHostedExecutionBaseUrl(
   return url.toString().replace(/\/$/u, "");
 }
 
+export function hostedAssistantAutomationEnabledFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const normalized = normalizeHostedExecutionString(
+    env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION,
+  )?.toLowerCase();
+
+  if (!normalized) {
+    return true;
+  }
+
+  return normalized !== "0"
+    && normalized !== "false"
+    && normalized !== "no"
+    && normalized !== "off"
+    && normalized !== "disabled";
+}
+
 export function normalizeHostedExecutionString(value: string | null | undefined): string | null {
   if (typeof value !== "string") {
     return null;

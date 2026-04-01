@@ -15,6 +15,8 @@ import {
   type HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
 
+export { hostedAssistantAutomationEnabledFromEnv } from "@murphai/hosted-execution";
+
 import { normalizeHostedEmailBaseUrl } from "../hosted-email.ts";
 import type {
   HostedAssistantRuntimeConfig,
@@ -135,22 +137,6 @@ export function createHostedRuntimeChildProcessEnv(input: {
   }
 
   return env;
-}
-
-export function hostedAssistantAutomationEnabledFromEnv(
-  env: Readonly<Record<string, string | undefined>>,
-): boolean {
-  const normalized = normalizeHostedExecutionString(env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION)?.toLowerCase();
-
-  if (!normalized) {
-    return true;
-  }
-
-  return normalized !== "0"
-    && normalized !== "false"
-    && normalized !== "no"
-    && normalized !== "off"
-    && normalized !== "disabled";
 }
 
 export async function withHostedProcessEnvironment<T>(input: {
