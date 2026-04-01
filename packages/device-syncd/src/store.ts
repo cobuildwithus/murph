@@ -216,21 +216,6 @@ function mapOAuthStateRow(row: OAuthStateRow | undefined): OAuthStateRecord | nu
   };
 }
 
-function ensureColumn(
-  database: DatabaseSync,
-  table: string,
-  column: string,
-  columnDefinition: string,
-): void {
-  const rows = database.prepare(`pragma table_info(${table})`).all() as Array<{ name?: string }>;
-
-  if (rows.some((row) => row.name === column)) {
-    return;
-  }
-
-  database.exec(`alter table ${table} add column ${column} ${columnDefinition}`);
-}
-
 function resolveHydratedHostedAccountTokens(input: {
   existing: StoredDeviceSyncAccount | null;
   inputTokens: HostedAccountHydrationInput["tokens"];
@@ -359,13 +344,6 @@ export class SqliteDeviceSyncStore {
       create index if not exists webhook_trace_received_idx
       on webhook_trace (received_at desc);
     `);
-
-    ensureColumn(this.database, "device_account", "disconnect_generation", "integer not null default 0");
-    ensureColumn(this.database, "device_account", "hosted_observed_updated_at", "text");
-    ensureColumn(this.database, "device_account", "hosted_observed_token_version", "integer");
-    ensureColumn(this.database, "webhook_trace", "status", "text not null default 'processed'");
-    ensureColumn(this.database, "webhook_trace", "processing_expires_at", "text");
-    this.database.exec("update webhook_trace set status = 'processed' where status is null");
   }
 
   close(): void {

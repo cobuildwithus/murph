@@ -49,7 +49,6 @@ const runtimeMocks = vi.hoisted(() => ({
   routeInboxCaptureWithModel: vi.fn(),
   runAssistantChatWithInk: vi.fn(),
   resolveAssistantProviderCapabilities: vi.fn((provider: string) => ({
-    supportsBoundTools: provider === 'openai-compatible',
     supportsHostToolRuntime: provider === 'openai-compatible',
     supportsDirectCliExecution: provider !== 'openai-compatible',
     supportsModelDiscovery: provider === 'openai-compatible',
@@ -229,7 +228,6 @@ beforeEach(() => {
   runtimeMocks.resolveAssistantProviderCapabilities.mockReset()
   runtimeMocks.resolveAssistantProviderTraits.mockReset()
   runtimeMocks.resolveAssistantProviderCapabilities.mockImplementation((provider: string) => ({
-    supportsBoundTools: provider === 'openai-compatible',
     supportsHostToolRuntime: provider === 'openai-compatible',
     supportsDirectCliExecution: provider !== 'openai-compatible',
     supportsModelDiscovery: provider === 'openai-compatible',
@@ -4314,6 +4312,133 @@ test('scanAssistantAutoReplyOnce keeps the cursor on prompt defers but advances 
         event.details === 'capture has no text or parsed attachment content',
     ),
     true,
+  )
+})
+
+test('scanAssistantAutoReplyOnce forwards multimodal content for photo-only captures', async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), 'murph-auto-reply-multimodal-'),
+  )
+  const attachmentDirectory = path.join(
+    vaultRoot,
+    'raw',
+    'inbox',
+    'captures',
+    'cap-photo',
+    'attachments',
+    '1',
+  )
+  await mkdir(attachmentDirectory, { recursive: true })
+  await writeFile(
+    path.join(attachmentDirectory, 'meal.jpg'),
+    Buffer.from([0xff, 0xd8, 0xff]),
+  )
+
+  runtimeMocks.executeAssistantProviderTurn.mockResolvedValue({
+    provider: 'openai-compatible',
+    providerSessionId: null,
+    response: 'logged it',
+    stderr: '',
+    stdout: '',
+    rawEvents: [],
+  })
+  runtimeMocks.deliverAssistantMessageOverBinding.mockResolvedValue({
+    delivery: {
+      channel: 'telegram',
+      target: 'chat-photo',
+      targetKind: 'thread',
+      sentAt: '2026-03-18T09:00:05Z',
+      messageLength: 9,
+    },
+  })
+
+  const inboxServices = {
+    async list() {
+      return {
+        items: [
+          {
+            captureId: 'cap-photo',
+            source: 'telegram',
+            accountId: 'bot',
+            externalId: 'ext-photo',
+            threadId: 'chat-photo',
+            threadTitle: 'Photo Chat',
+            actorId: 'user-1',
+            actorName: 'Photo User',
+            actorIsSelf: false,
+            occurredAt: '2026-03-18T09:00:00Z',
+            receivedAt: null,
+            text: null,
+            attachmentCount: 1,
+            envelopePath: 'raw/inbox/photo.json',
+            eventId: 'evt-photo',
+            promotions: [],
+          },
+        ],
+      }
+    },
+    async show() {
+      return {
+        capture: {
+          captureId: 'cap-photo',
+          source: 'telegram',
+          accountId: 'bot',
+          externalId: 'ext-photo',
+          threadId: 'chat-photo',
+          threadTitle: 'Photo Chat',
+          threadIsDirect: true,
+          actorId: 'user-1',
+          actorName: 'Photo User',
+          actorIsSelf: false,
+          occurredAt: '2026-03-18T09:00:00Z',
+          receivedAt: null,
+          text: null,
+          attachmentCount: 1,
+          envelopePath: 'raw/inbox/photo.json',
+          eventId: 'evt-photo',
+          createdAt: '2026-03-18T09:00:00Z',
+          promotions: [],
+          attachments: [
+            {
+              attachmentId: 'att-photo',
+              ordinal: 1,
+              kind: 'image',
+              mime: 'image/jpeg',
+              fileName: 'meal.jpg',
+              storedPath:
+                'raw/inbox/captures/cap-photo/attachments/1/meal.jpg',
+              transcriptText: null,
+              extractedText: null,
+              parseState: 'succeeded',
+            },
+          ],
+        },
+      }
+    },
+  } as any
+
+  const result = await scanAssistantAutoReplyOnce({
+    afterCursor: null,
+    autoReplyPrimed: true,
+    enabledChannels: ['telegram'],
+    inboxServices,
+    vault: vaultRoot,
+  })
+
+  assert.deepEqual(result, {
+    considered: 1,
+    failed: 0,
+    replied: 1,
+    skipped: 0,
+  })
+
+  const providerCall = runtimeMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
+  assert.equal(Array.isArray(providerCall?.userMessageContent), true)
+  assert.equal(providerCall?.userMessageContent?.[0]?.type, 'text')
+  assert.equal(providerCall?.userMessageContent?.[2]?.type, 'image')
+  assert.deepEqual(
+    providerCall?.userMessageContent?.[2]?.image,
+    Buffer.from([0xff, 0xd8, 0xff]),
   )
 })
 
