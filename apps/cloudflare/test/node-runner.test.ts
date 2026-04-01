@@ -1788,9 +1788,6 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted test server to expose a TCP port.");
       }
-      const restoreFetch = installHostedFetchBaseUrlProxy({
-        commitBaseUrl: `http://127.0.0.1:${address.port}`,
-      });
 
       const firstRun = runHostedExecutionJob({
         bundles: {
@@ -1810,6 +1807,9 @@ describe("runHostedExecutionJob", () => {
         },
         userEnv: {
           CUSTOM_API_KEY: "user-one-key",
+        },
+        forwardedEnv: {
+          HOSTED_EXECUTION_TEST_COMMIT_BASE_URL: `http://127.0.0.1:${address.port}`,
         },
       });
 
@@ -1832,6 +1832,9 @@ describe("runHostedExecutionJob", () => {
         userEnv: {
           CUSTOM_API_KEY: "user-two-key",
         },
+        forwardedEnv: {
+          HOSTED_EXECUTION_TEST_COMMIT_BASE_URL: `http://127.0.0.1:${address.port}`,
+        },
       });
 
       await Promise.all([
@@ -1847,7 +1850,6 @@ describe("runHostedExecutionJob", () => {
       expect(startedRunCount).toBe(2);
       expect(commitCount).toBe(2);
       expect(maxCommitsInFlight).toBe(2);
-      restoreFetch();
     } finally {
       server.close();
       await once(server, "close");
