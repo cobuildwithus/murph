@@ -7,7 +7,11 @@ import {
   resolveHostedPrivyClientSessionIssue,
   shouldSuppressHostedPrivyAutoContinueAfterError,
   shouldAutoContinueHostedPrivyClientSession,
+  shouldResetHostedPrivyAutoContinueTrigger,
   shouldResetHostedPrivyClientSessionToSms,
+  shouldShowHostedPrivyAuthenticatedLoadingState,
+  shouldShowHostedPrivyManualResumeState,
+  shouldShowHostedPrivyRestartState,
 } from "@/src/lib/hosted-onboarding/privy-client";
 import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 
@@ -44,6 +48,7 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
+        finalizationState: "idle",
         issue: null,
         pendingAction: null,
       }),
@@ -55,6 +60,7 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
+        finalizationState: "idle",
         issue: "missing-wallet",
         pendingAction: null,
       }),
@@ -66,6 +72,7 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
+        finalizationState: "idle",
         issue: "missing-phone",
         pendingAction: null,
       }),
@@ -77,6 +84,7 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: true,
+        finalizationState: "idle",
         issue: null,
         pendingAction: null,
       }),
@@ -88,6 +96,31 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: false,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
+        finalizationState: "running",
+        issue: null,
+        pendingAction: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoContinueHostedPrivyClientSession({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        autoContinueTriggered: false,
+        checkingAuthenticatedSession: false,
+        finalizationState: "completed",
+        issue: null,
+        pendingAction: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoContinueHostedPrivyClientSession({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        autoContinueTriggered: false,
+        checkingAuthenticatedSession: false,
+        finalizationState: "idle",
         issue: null,
         pendingAction: "logout",
       }),
@@ -99,6 +132,7 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: false,
         autoContinueTriggered: true,
         checkingAuthenticatedSession: false,
+        finalizationState: "idle",
         issue: null,
         pendingAction: null,
       }),
@@ -110,10 +144,129 @@ describe("hosted Privy client wallet readiness", () => {
         autoContinueSuppressed: true,
         autoContinueTriggered: false,
         checkingAuthenticatedSession: false,
+        finalizationState: "idle",
         issue: null,
         pendingAction: null,
       }),
     ).toBe(false);
+  });
+
+  it("keeps authenticated users in the loading state unless they need to restart with SMS", () => {
+    expect(
+      shouldShowHostedPrivyAuthenticatedLoadingState({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        issue: null,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowHostedPrivyAuthenticatedLoadingState({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        issue: "missing-wallet",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowHostedPrivyAuthenticatedLoadingState({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        issue: "missing-phone",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldShowHostedPrivyAuthenticatedLoadingState({
+        authenticated: true,
+        autoContinueSuppressed: true,
+        issue: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("switches from manual resume to restart mode when the authenticated session is missing a phone", () => {
+    expect(
+      shouldShowHostedPrivyManualResumeState({
+        authenticated: true,
+        issue: null,
+        showAuthenticatedLoadingState: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowHostedPrivyManualResumeState({
+        authenticated: true,
+        issue: "missing-wallet",
+        showAuthenticatedLoadingState: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowHostedPrivyManualResumeState({
+        authenticated: true,
+        issue: "missing-phone",
+        showAuthenticatedLoadingState: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldShowHostedPrivyRestartState({
+        authenticated: true,
+        issue: "missing-phone",
+        showAuthenticatedLoadingState: false,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldShowHostedPrivyRestartState({
+        authenticated: true,
+        issue: null,
+        showAuthenticatedLoadingState: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not reset the auto-continue trigger during temporary in-flight states", () => {
+    expect(
+      shouldResetHostedPrivyAutoContinueTrigger({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        issue: null,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldResetHostedPrivyAutoContinueTrigger({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        issue: "missing-wallet",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldResetHostedPrivyAutoContinueTrigger({
+        authenticated: false,
+        autoContinueSuppressed: false,
+        issue: null,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldResetHostedPrivyAutoContinueTrigger({
+        authenticated: true,
+        autoContinueSuppressed: true,
+        issue: null,
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldResetHostedPrivyAutoContinueTrigger({
+        authenticated: true,
+        autoContinueSuppressed: false,
+        issue: "missing-phone",
+      }),
+    ).toBe(true);
   });
 
   it("suppresses further auto-continue attempts after a terminal completion API error", () => {
@@ -260,5 +413,43 @@ describe("hosted Privy client wallet readiness", () => {
         },
       }),
     ).rejects.toThrow("We could not finish preparing your account. Wait a moment and try again.");
+  });
+
+  it("retries client session refresh long enough for the verified phone to appear", async () => {
+    const createWallet = vi.fn();
+    const refreshUser = vi
+      .fn<() => Promise<{ linkedAccounts?: unknown } | null>>()
+      .mockResolvedValueOnce({
+        linkedAccounts: [],
+      })
+      .mockResolvedValueOnce({
+        linkedAccounts: [
+          {
+            latest_verified_at: 1741194420,
+            phone_number: "+1 415 555 2671",
+            type: "phone",
+          },
+          {
+            address: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+            chain_type: "ethereum",
+            connector_type: "embedded",
+            id: "wallet_123",
+            type: "wallet",
+            wallet_client: "privy",
+            wallet_client_type: "privy",
+          },
+        ],
+      });
+
+    await expect(
+      ensureHostedPrivyPhoneAndWalletReady({
+        createWallet,
+        refreshUser,
+        user: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(createWallet).not.toHaveBeenCalled();
+    expect(refreshUser).toHaveBeenCalledTimes(2);
   });
 });
