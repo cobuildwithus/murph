@@ -77,7 +77,10 @@ CHANGELOG_PATH="$(
 NOTES_DIR="$(
   node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync("scripts/release-manifest.json","utf8")); process.stdout.write(manifest.releaseArtifacts.releaseNotesDir);'
 )"
-mapfile -t PACKAGE_JSON_PATHS < <(
+PACKAGE_JSON_PATHS=()
+while IFS= read -r package_json_path; do
+  PACKAGE_JSON_PATHS+=("$package_json_path")
+done < <(
   node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync("scripts/release-manifest.json","utf8")); for (const entry of manifest.packages) console.log(`${entry.path}/package.json`);'
 )
 
