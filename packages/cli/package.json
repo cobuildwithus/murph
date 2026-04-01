@@ -74,6 +74,8 @@
     "react": "^19.2.4"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14"
+    "@types/react": "^19.2.14",
+    "ai": "^6.0.116",
+    "zod": "^4.1.8"
   }
 }

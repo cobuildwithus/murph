@@ -122,32 +122,28 @@ test('resolveAssistantLanguageModel uses the OpenAI responses provider for the o
       'x-test-header': 'bundle',
     },
   })
-
-  assert.deepEqual(model, {
-    provider: 'openai-responses',
-    model: 'gpt-5',
-  })
-  assert.equal(harnessMocks.createOpenAI.mock.calls.length, 1)
-  const createOpenAiCall = harnessMocks.createOpenAI.mock.calls[0]
-  assert.ok(createOpenAiCall)
-  const [createOpenAiOptions] = createOpenAiCall as unknown as [
-    {
-      apiKey?: string
-      baseURL?: string
-      fetch?: typeof fetch
-      headers?: Record<string, string>
+  const openAiResponsesModel = model as {
+    constructor?: {
       name?: string
-    },
-  ]
-  assert.deepEqual(createOpenAiOptions.apiKey, 'secret-key')
-  assert.deepEqual(createOpenAiOptions.baseURL, 'https://api.openai.com/v1')
-  assert.deepEqual(createOpenAiOptions.headers, {
-    'x-test-header': 'bundle',
-  })
-  assert.deepEqual(createOpenAiOptions.name, 'openai')
-  assert.equal(typeof createOpenAiOptions.fetch, 'function')
-  assert.deepEqual(harnessMocks.openAIResponsesProvider.mock.calls, [['gpt-5']])
-  assert.equal(harnessMocks.createOpenAICompatible.mock.calls.length, 0)
+    }
+    modelId?: string
+    specificationVersion?: string
+    config?: {
+      fetch?: typeof fetch
+      headers?: () => Record<string, string>
+      provider?: string
+    }
+  }
+  const headers = openAiResponsesModel.config?.headers?.()
+
+  assert.equal(openAiResponsesModel.constructor?.name, 'OpenAIResponsesLanguageModel')
+  assert.equal(openAiResponsesModel.modelId, 'gpt-5')
+  assert.equal(openAiResponsesModel.specificationVersion, 'v2')
+  assert.equal(openAiResponsesModel.config?.provider, 'openai.responses')
+  assert.equal(typeof openAiResponsesModel.config?.fetch, 'function')
+  assert.equal(headers?.authorization, 'Bearer secret-key')
+  assert.equal(headers?.['x-test-header'], 'bundle')
+  assert.match(String(headers?.['user-agent']), /^ai-sdk\/openai\//u)
 })
 
 
@@ -170,22 +166,20 @@ test('resolveAssistantLanguageModel injects automatic OpenAI response compaction
   globalThis.fetch = fetchSpy as typeof globalThis.fetch
 
   try {
-    resolveAssistantLanguageModel({
+    const model = resolveAssistantLanguageModel({
       model: 'gpt-5',
       baseUrl: 'https://api.openai.com/v1',
       apiKeyEnv: TEST_API_KEY_ENV,
       providerName: 'openai',
     })
-
-    const createOpenAiCall = harnessMocks.createOpenAI.mock.calls[0]
-    assert.ok(createOpenAiCall)
-    const [createOpenAiOptions] = createOpenAiCall as unknown as [
-      {
+    const openAiResponsesModel = model as {
+      config?: {
         fetch?: typeof fetch
-      },
-    ]
-    assert.equal(typeof createOpenAiOptions.fetch, 'function')
-    const wrappedFetch = createOpenAiOptions.fetch as typeof fetch
+      }
+    }
+
+    assert.equal(typeof openAiResponsesModel.config?.fetch, 'function')
+    const wrappedFetch = openAiResponsesModel.config?.fetch as typeof fetch
     await wrappedFetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       body: JSON.stringify({
@@ -220,24 +214,33 @@ test('resolveAssistantLanguageModel uses the openai-compatible provider with env
       'x-test-header': 'bundle',
     },
   })
+  const openAiCompatibleModel = model as {
+    constructor?: {
+      name?: string
+    }
+    modelId?: string
+    specificationVersion?: string
+    supportsStructuredOutputs?: boolean
+    config?: {
+      fetch?: typeof fetch
+      headers?: () => Record<string, string>
+      provider?: string
+    }
+  }
+  const headers = openAiCompatibleModel.config?.headers?.()
 
-  assert.deepEqual(model, {
-    provider: 'openai-compatible',
-    model: 'local-model',
-  })
-  assert.deepEqual(harnessMocks.createOpenAICompatible.mock.calls, [
-    [
-      {
-        name: 'murph-assistant',
-        apiKey: 'secret-key',
-        baseURL: 'http://127.0.0.1:11434/v1',
-        headers: {
-          'x-test-header': 'bundle',
-        },
-      },
-    ],
-  ])
-  assert.deepEqual(harnessMocks.openAICompatibleProvider.mock.calls, [['local-model']])
+  assert.equal(
+    openAiCompatibleModel.constructor?.name,
+    'OpenAICompatibleChatLanguageModel',
+  )
+  assert.equal(openAiCompatibleModel.modelId, 'local-model')
+  assert.equal(openAiCompatibleModel.specificationVersion, 'v3')
+  assert.equal(openAiCompatibleModel.config?.provider, 'murph-assistant.chat')
+  assert.equal(openAiCompatibleModel.supportsStructuredOutputs, false)
+  assert.equal(typeof openAiCompatibleModel.config?.fetch, 'undefined')
+  assert.equal(headers?.authorization, 'Bearer secret-key')
+  assert.equal(headers?.['x-test-header'], 'bundle')
+  assert.match(String(headers?.['user-agent']), /^ai-sdk\/openai-compatible\//u)
 })
 
 test('createAssistantToolCatalog preview mode validates input but does not execute the tool', async () => {

@@ -228,13 +228,14 @@ test("processCapture stores redacted raw evidence, note events, audit records, a
 
   const auditRecords = await readJsonlRecords({
     vaultRoot,
-    relativePath: "audit/2026/2026-03.jsonl",
+    relativePath: `audit/${first.createdAt.slice(0, 4)}/${first.createdAt.slice(0, 7)}.jsonl`,
   });
-  assert.equal(auditRecords.length, 2);
-  assert.equal(auditRecords.at(-1)?.action, "intake_import");
+  const intakeImportAudit = auditRecords.find((record) => record.id === first.auditId);
+  assert.ok(intakeImportAudit);
+  assert.equal(intakeImportAudit?.action, "intake_import");
   assert.equal(
-    Array.isArray(auditRecords.at(-1)?.changes) &&
-      auditRecords.at(-1)?.changes.some((change) => change.path === "ledger/inbox-captures/2026/2026-03.jsonl"),
+    Array.isArray(intakeImportAudit?.changes) &&
+      intakeImportAudit?.changes.some((change) => change.path === "ledger/inbox-captures/2026/2026-03.jsonl"),
     true,
   );
 
