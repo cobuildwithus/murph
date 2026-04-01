@@ -1,33 +1,12 @@
 import { isDeviceSyncError } from "@murphai/device-syncd/public-ingress";
 import { isLinqWebhookPayloadError, isLinqWebhookVerificationError } from "@murphai/inboxd/linq-webhook";
-import { NextResponse } from "next/server";
 
 import {
-  createJsonErrorResponse,
+  createJsonRouteHelpers,
   mapDomainJsonError,
   type JsonErrorMapping,
-  withJsonErrorHandling,
 } from "../http";
 import { isHostedLinqError } from "./errors";
-
-export function withJsonError<TArgs extends unknown[]>(
-  handler: (...args: TArgs) => Promise<Response>,
-): (...args: TArgs) => Promise<Response> {
-  return withJsonErrorHandling(handler, jsonError);
-}
-
-export function jsonError(error: unknown): NextResponse {
-  return createJsonErrorResponse(error, {
-    internalMessage: "Hosted Linq route failed unexpectedly.",
-    logMessage: "Hosted Linq route failed.",
-    matchers: [
-      mapHostedLinqError,
-      mapDeviceSyncError,
-      mapLinqWebhookVerificationError,
-      mapLinqWebhookPayloadError,
-    ],
-  });
-}
 
 function mapHostedLinqError(error: unknown): JsonErrorMapping | null {
   return isHostedLinqError(error) ? mapDomainJsonError(error) : null;
@@ -60,3 +39,17 @@ function mapLinqWebhookPayloadError(error: unknown): JsonErrorMapping | null {
       }
     : null;
 }
+
+const linqJsonRouteHelpers = createJsonRouteHelpers({
+  internalMessage: "Hosted Linq route failed unexpectedly.",
+  logMessage: "Hosted Linq route failed.",
+  matchers: [
+    mapHostedLinqError,
+    mapDeviceSyncError,
+    mapLinqWebhookVerificationError,
+    mapLinqWebhookPayloadError,
+  ],
+});
+
+export const jsonError = linqJsonRouteHelpers.jsonError;
+export const withJsonError = linqJsonRouteHelpers.withJsonError;

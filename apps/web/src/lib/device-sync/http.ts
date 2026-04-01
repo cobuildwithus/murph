@@ -6,9 +6,7 @@ import {
 import { NextResponse } from "next/server";
 
 import {
-  createJsonErrorResponse,
-  type JsonErrorMatcher,
-  withJsonErrorHandling,
+  createJsonRouteHelpers,
 } from "../http";
 
 export {
@@ -19,20 +17,6 @@ export {
   resolveDecodedRouteParam,
   resolveRouteParams,
 } from "../http";
-
-export function jsonError(error: unknown): NextResponse {
-  return createJsonErrorResponse(error, {
-    internalMessage: "Hosted device-sync route failed unexpectedly.",
-    logMessage: "Hosted device-sync route failed.",
-    matchers: [matchDeviceSyncError],
-  });
-}
-
-export function withJsonError<TArgs extends unknown[]>(
-  handler: (...args: TArgs) => Promise<Response>,
-): (...args: TArgs) => Promise<Response> {
-  return withJsonErrorHandling(handler, jsonError);
-}
 
 export function callbackHtml(title: string, body: string, status = 200): NextResponse {
   return new NextResponse(
@@ -101,7 +85,7 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-const matchDeviceSyncError: JsonErrorMatcher = (error) => {
+function matchDeviceSyncError(error: unknown) {
   if (!isDeviceSyncError(error)) {
     return null;
   }
@@ -110,4 +94,13 @@ const matchDeviceSyncError: JsonErrorMatcher = (error) => {
     error: buildPublicDeviceSyncErrorPayload(error).error,
     status: error.httpStatus,
   };
-};
+}
+
+const deviceSyncJsonRouteHelpers = createJsonRouteHelpers({
+  internalMessage: "Hosted device-sync route failed unexpectedly.",
+  logMessage: "Hosted device-sync route failed.",
+  matchers: [matchDeviceSyncError],
+});
+
+export const jsonError = deviceSyncJsonRouteHelpers.jsonError;
+export const withJsonError = deviceSyncJsonRouteHelpers.withJsonError;
