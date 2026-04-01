@@ -399,20 +399,33 @@ fi
 cli_package_root="$repo_root/packages/cli"
 cli_bin_path="$cli_package_root/dist/bin.js"
 cli_source_bin_path="$cli_package_root/src/bin.ts"
+required_cli_dist_files=(
+  "$cli_bin_path"
+  "$cli_package_root/dist/index.js"
+  "$cli_package_root/dist/vault-cli-contracts.js"
+  "$cli_package_root/dist/inbox-cli-contracts.js"
+  "$cli_package_root/dist/setup-cli.js"
+  "$cli_package_root/dist/setup-agentmail.js"
+  "$cli_package_root/dist/setup-assistant.js"
+  "$cli_package_root/dist/setup-assistant-account.js"
+  "$cli_package_root/dist/setup-services.js"
+  "$cli_package_root/dist/setup-wizard.js"
+  "$cli_package_root/dist/assistant/provider-catalog.js"
+  "$cli_package_root/dist/setup-services/channels.js"
+  "$cli_package_root/dist/setup-services/process.js"
+  "$cli_package_root/dist/setup-services/scheduled-updates.js"
+  "$cli_package_root/dist/setup-services/shell.js"
+  "$cli_package_root/dist/setup-services/steps.js"
+  "$cli_package_root/dist/setup-services/toolchain.js"
+)
 
 cli_dist_ready=true
-if [ ! -f "$cli_bin_path" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/index.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/vault-cli-contracts.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/inbox-cli-contracts.js" ]; then
-  cli_dist_ready=false
-fi
+for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
+  if [ ! -f "$required_cli_dist_file" ]; then
+    cli_dist_ready=false
+    break
+  fi
+done
 
 is_discovery_invocation() {
   for arg in "$@"; do
@@ -452,30 +465,39 @@ fi
 
 ${workspaceCheckLines}
 
+build_failed=false
 if [ "\${#missing_packages[@]}" -gt 0 ]; then
   if command -v pnpm >/dev/null 2>&1; then
     for package_dir in "\${missing_packages[@]}"; do
-      pnpm --dir "$package_dir" build >/dev/null
+      if ! pnpm --dir "$package_dir" build >/dev/null; then
+        build_failed=true
+        break
+      fi
     done
   elif command -v corepack >/dev/null 2>&1; then
     for package_dir in "\${missing_packages[@]}"; do
-      corepack pnpm --dir "$package_dir" build >/dev/null
+      if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
+        build_failed=true
+        break
+      fi
     done
   fi
 fi
 
 cli_dist_ready=true
-if [ ! -f "$cli_bin_path" ]; then
+if [ "$build_failed" = false ]; then
+  for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
+    if [ ! -f "$required_cli_dist_file" ]; then
+      cli_dist_ready=false
+      break
+    fi
+  done
+else
   cli_dist_ready=false
 fi
-if [ ! -f "$cli_package_root/dist/index.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/vault-cli-contracts.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/inbox-cli-contracts.js" ]; then
-  cli_dist_ready=false
+
+if [ "$cli_dist_ready" != true ]; then
+  printf '%s\n' 'Murph CLI shim could not refresh build artifacts; falling back to the source CLI.' >&2
 fi
 
 if [ "$cli_dist_ready" = true ]; then

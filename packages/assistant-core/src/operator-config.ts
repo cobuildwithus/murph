@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
@@ -393,11 +393,40 @@ export async function resolveDefaultVault(
   }
 
   const config = await readOperatorConfig(homeDirectory)
-  if (!config?.defaultVault) {
-    return null
+  if (config?.defaultVault) {
+    const configuredDefaultVault = expandConfiguredVaultPath(
+      config.defaultVault,
+      homeDirectory,
+    )
+    if (await pathExists(configuredDefaultVault)) {
+      return configuredDefaultVault
+    }
   }
 
-  return expandConfiguredVaultPath(config.defaultVault, homeDirectory)
+  const cwdVault = path.resolve(process.cwd(), 'vault')
+  if (await pathExists(cwdVault)) {
+    return cwdVault
+  }
+
+  return null
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await stat(targetPath)
+    return true
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      error.code === 'ENOENT'
+    ) {
+      return false
+    }
+
+    throw error
+  }
 }
 
 export async function resolveAssistantOperatorDefaults(
