@@ -4370,7 +4370,7 @@ test('sendAssistantMessage does not resume a failed primary Codex session on a s
   assert.equal(result.session.providerBinding?.providerSessionId, 'thread-backup-route')
 })
 
-test('sendAssistantMessage resumes a legacy OpenAI Responses binding when the provider config still matches', async () => {
+test('sendAssistantMessage cold-starts when an OpenAI Responses binding is missing explicit resume route metadata', async () => {
   const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-service-openai-legacy-resume-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
@@ -4423,8 +4423,8 @@ test('sendAssistantMessage resumes a legacy OpenAI Responses binding when the pr
 
   serviceMocks.executeAssistantProviderTurn.mockResolvedValueOnce({
     provider: 'openai-compatible',
-    providerSessionId: 'resp_next',
-    response: 'Resumed cleanly.',
+    providerSessionId: 'resp_fresh_after_missing_route',
+    response: 'Started fresh.',
     stderr: '',
     stdout: '',
     rawEvents: [],
@@ -4442,8 +4442,11 @@ test('sendAssistantMessage resumes a legacy OpenAI Responses binding when the pr
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
-  assert.equal(firstCall?.resumeProviderSessionId, 'resp_legacy')
-  assert.equal(result.session.providerBinding?.providerSessionId, 'resp_next')
+  assert.equal(firstCall?.resumeProviderSessionId, null)
+  assert.equal(
+    result.session.providerBinding?.providerSessionId,
+    'resp_fresh_after_missing_route',
+  )
 })
 
 test('sendAssistantMessage does not reuse an OpenAI Responses session on a cooled-down same-provider backup route', async () => {
