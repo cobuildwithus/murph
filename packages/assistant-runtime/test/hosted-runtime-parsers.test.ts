@@ -52,9 +52,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         userEnv: {
           OPENAI_API_KEY: "secret",
         },
-        webControlPlane: {
-          shareBaseUrl: "https://murph.example.com",
-        },
       },
     });
 
@@ -62,9 +59,6 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
     expect(parsed.request.commit?.bundleRefs.agentState?.key).toBe("bundles/user/agent-state.json");
     expect(parsed.runtime?.internalWorkerProxyToken).toBe("proxy_123");
     expect(parsed.runtime?.userEnv).toEqual({ OPENAI_API_KEY: "secret" });
-    expect(parsed.runtime?.webControlPlane).toEqual({
-      shareBaseUrl: "https://murph.example.com",
-    });
   });
 
   it("rejects malformed nested runtime env records", () => {
@@ -89,5 +83,29 @@ describe("parseHostedAssistantRuntimeJobInput", () => {
         },
       },
     })).toThrow(/userEnv\.OPENAI_API_KEY must be a string/i);
+  });
+
+  it("rejects removed runtime callback override fields", () => {
+    expect(() => parseHostedAssistantRuntimeJobInput({
+      request: {
+        bundles: {
+          agentState: null,
+          vault: null,
+        },
+        dispatch: {
+          event: {
+            kind: "member.activated",
+            userId: "member_123",
+          },
+          eventId: "evt_123",
+          occurredAt: "2026-04-01T00:00:00.000Z",
+        },
+      },
+      runtime: {
+        webControlPlane: {
+          shareBaseUrl: "https://murph.example.com",
+        },
+      },
+    })).toThrow(/runtime config\.webControlPlane is no longer supported/i);
   });
 });

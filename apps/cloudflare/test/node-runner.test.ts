@@ -49,6 +49,7 @@ import {
 } from "../src/node-runner.ts";
 
 const describe = baseDescribe.sequential;
+const initialGlobalFetch = global.fetch;
 
 type NodeRunnerTestInput =
   HostedAssistantRuntimeJobInput["request"] &
@@ -148,6 +149,11 @@ describe("runHostedExecutionJob", () => {
     restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", initialHostedAssistantAutomation);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
+    if (initialGlobalFetch) {
+      global.fetch = initialGlobalFetch;
+    } else {
+      delete (globalThis as { fetch?: typeof fetch }).fetch;
+    }
     await Promise.all(cleanupPaths.splice(0).map((target) => rm(target, { force: true, recursive: true })));
   });
 
