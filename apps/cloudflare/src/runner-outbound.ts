@@ -441,7 +441,7 @@ async function handleRunnerSharePackRequest(input: {
   userId: string;
   webControlPlane: HostedExecutionWebControlPlaneEnvironment;
 }): Promise<Response> {
-  if (input.request.method !== "GET") {
+  if (input.request.method !== "POST") {
     return methodNotAllowed();
   }
 
@@ -451,9 +451,13 @@ async function handleRunnerSharePackRequest(input: {
   }
 
   const shareId = decodeRouteParam(match.groups?.shareId ?? "");
-  if (input.url.pathname !== buildHostedExecutionSharePayloadPath(shareId, "").replace(/\?.*$/u, "")) {
+  if (input.url.pathname !== buildHostedExecutionSharePayloadPath(shareId)) {
     return notFound();
   }
+  if (input.url.search) {
+    return notFound();
+  }
+  const payload = parseHostedSharePackRequest(await readJsonObject(input.request));
 
   return forwardRunnerWebControlRequest({
     actualBaseUrl: resolveHostedRunnerWebControlBaseUrl(
@@ -461,8 +465,9 @@ async function handleRunnerSharePackRequest(input: {
       input.env,
       "HOSTED_SHARE_API_BASE_URL",
     ),
-    method: "GET",
-    search: input.url.search,
+    body: JSON.stringify(payload),
+    method: "POST",
+    search: "",
     token: input.webControlPlane.shareToken,
     userId: input.userId,
     pathname: input.url.pathname,
@@ -628,6 +633,14 @@ function requireString(value: unknown, label: string): string {
   }
 
   return value;
+}
+
+function parseHostedSharePackRequest(payload: Record<string, unknown>): {
+  shareCode: string;
+} {
+  return {
+    shareCode: requireString(payload.shareCode, "shareCode"),
+  };
 }
 
 function requireSideEffectKind(value: unknown): HostedExecutionSideEffectRecord["kind"] {

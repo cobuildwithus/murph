@@ -623,10 +623,13 @@ describe("@murphai/hosted-execution", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://share.example.test/api/hosted-share/internal/share_123/payload?shareCode=share-code",
+      "https://share.example.test/api/hosted-share/internal/share_123/payload",
       expect.objectContaining({
+        body: JSON.stringify({
+          shareCode: "share-code",
+        }),
         headers: expect.any(Headers),
-        method: "GET",
+        method: "POST",
       }),
     );
     const requestHeaders = fetchMock.mock.calls[0]?.[1]?.headers;
@@ -1227,9 +1230,9 @@ describe("@murphai/hosted-execution", () => {
     expect(buildHostedExecutionUserRunPath("member/123")).toBe("/internal/users/member%2F123/run");
     expect(buildHostedExecutionUserEnvPath("member/123")).toBe("/internal/users/member%2F123/env");
     expect(
-      buildHostedExecutionSharePayloadPath("share/id", "code+with spaces"),
+      buildHostedExecutionSharePayloadPath("share/id"),
     ).toBe(
-      "/api/hosted-share/internal/share%2Fid/payload?shareCode=code%2Bwith+spaces",
+      "/api/hosted-share/internal/share%2Fid/payload",
     );
   });
 

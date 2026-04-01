@@ -1255,27 +1255,36 @@ describe("runHostedExecutionJob", () => {
     });
     let sharePayloadRequests = 0;
     let lastBoundUserIdHeader: string | null = null;
+    let lastRequestBody = "";
     const sharePayloadServer = createServer((request, response) => {
       sharePayloadRequests += 1;
       lastBoundUserIdHeader = typeof request.headers["x-hosted-execution-user-id"] === "string"
         ? request.headers["x-hosted-execution-user-id"]
         : null;
-      if (
-        request.url
-        === "/api/hosted-share/internal/share_123/payload?shareCode=share_code_123"
-        && request.headers.authorization === "Bearer share-pack-token"
-      ) {
-        response.statusCode = 200;
-        response.setHeader("content-type", "application/json; charset=utf-8");
-        response.end(JSON.stringify({
-          pack,
-          shareId: "share_123",
-        }));
-        return;
-      }
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      request.on("end", () => {
+        lastRequestBody = Buffer.concat(chunks).toString("utf8");
 
-      response.statusCode = 404;
-      response.end("Not found");
+        if (
+          request.method === "POST"
+          && request.url === "/api/hosted-share/internal/share_123/payload"
+          && request.headers.authorization === "Bearer share-pack-token"
+        ) {
+          response.statusCode = 200;
+          response.setHeader("content-type", "application/json; charset=utf-8");
+          response.end(JSON.stringify({
+            pack,
+            shareId: "share_123",
+          }));
+          return;
+        }
+
+        response.statusCode = 404;
+        response.end("Not found");
+      });
     });
     await new Promise<void>((resolve) => {
       sharePayloadServer.listen(0, () => resolve());
@@ -1332,6 +1341,9 @@ describe("runHostedExecutionJob", () => {
 
       expect(sharePayloadRequests).toBe(1);
       expect(lastBoundUserIdHeader).toBe("member_456");
+      expect(lastRequestBody).toBe(JSON.stringify({
+        shareCode: "share_code_123",
+      }));
       expect(importedFood).toBeDefined();
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
@@ -1376,7 +1388,7 @@ describe("runHostedExecutionJob", () => {
       },
     });
     const fetchSpy = vi.fn(async (url: string | URL) => {
-      if (String(url) !== "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload?shareCode=share_code_proxy") {
+      if (String(url) !== "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload") {
         throw new Error(`Unexpected fetch URL: ${String(url)}`);
       }
 
@@ -1440,9 +1452,12 @@ describe("runHostedExecutionJob", () => {
       const importedFood = (await listFoods(restored.vaultRoot)).find((entry) => entry.title === "Proxy Smoothie");
 
       expect(fetchSpy).toHaveBeenCalledWith(
-        "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload?shareCode=share_code_proxy",
+        "http://share-pack.worker/api/hosted-share/internal/share_proxy_123/payload",
         expect.objectContaining({
-          method: "GET",
+          body: JSON.stringify({
+            shareCode: "share_code_proxy",
+          }),
+          method: "POST",
         }),
       );
       expect(new Headers(fetchSpy.mock.calls[0]?.[1]?.headers).get("authorization")).toBeNull();
