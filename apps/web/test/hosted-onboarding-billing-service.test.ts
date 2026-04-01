@@ -71,6 +71,9 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 
 const NOW = new Date("2026-03-27T12:00:00.000Z");
+type CreateHostedBillingCheckoutInput = Parameters<typeof createHostedBillingCheckout>[0];
+type HostedBillingCheckoutPrisma = CreateHostedBillingCheckoutInput["prisma"];
+type HostedBillingSessionRecord = NonNullable<CreateHostedBillingCheckoutInput["sessionRecord"]>;
 
 describe("createHostedBillingCheckout", () => {
   beforeEach(() => {
@@ -122,7 +125,7 @@ describe("createHostedBillingCheckout", () => {
   });
 
   it("requires a stored hosted wallet before checkout instead of binding one from the current Privy cookie", async () => {
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         create: vi.fn().mockResolvedValue({}),
         findFirst: vi.fn().mockResolvedValue(null),
@@ -136,7 +139,7 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     await expect(
       createHostedBillingCheckout({
@@ -144,11 +147,7 @@ describe("createHostedBillingCheckout", () => {
         inviteCode: "invite-code",
         now: NOW,
         prisma,
-        sessionRecord: {
-          member: {
-            id: "member_123",
-          },
-        } as any,
+        sessionRecord: makeHostedSessionRecord("member_123"),
       }),
     ).rejects.toMatchObject({
       code: "HOSTED_WALLET_ADDRESS_REQUIRED",
@@ -208,7 +207,7 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         create: vi.fn().mockResolvedValue({}),
         count: vi.fn().mockResolvedValue(0),
@@ -223,18 +222,14 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await createHostedBillingCheckout({
       cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      sessionRecord: {
-        member: {
-          id: "member_123",
-        },
-      } as any,
+      sessionRecord: makeHostedSessionRecord("member_123"),
     });
 
     expect(result).toEqual({
@@ -316,7 +311,7 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         create: vi.fn(),
         findFirst: vi.fn().mockResolvedValue({
@@ -333,7 +328,7 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     await expect(
       createHostedBillingCheckout({
@@ -341,11 +336,7 @@ describe("createHostedBillingCheckout", () => {
         inviteCode: "invite-code",
         now: NOW,
         prisma,
-        sessionRecord: {
-          member: {
-            id: "member_123",
-          },
-        } as any,
+        sessionRecord: makeHostedSessionRecord("member_123"),
       }),
     ).resolves.toEqual({
       alreadyActive: false,
@@ -392,7 +383,7 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({}),
@@ -410,18 +401,14 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await createHostedBillingCheckout({
       cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      sessionRecord: {
-        member: {
-          id: "member_123",
-        },
-      } as any,
+      sessionRecord: makeHostedSessionRecord("member_123"),
       shareCode: "share_123",
     });
 
@@ -461,7 +448,7 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({}),
@@ -482,18 +469,14 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await createHostedBillingCheckout({
       cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      sessionRecord: {
-        member: {
-          id: "member_123",
-        },
-      } as any,
+      sessionRecord: makeHostedSessionRecord("member_123"),
     });
 
     expect(result).toEqual({
@@ -544,7 +527,7 @@ describe("createHostedBillingCheckout", () => {
       url: null,
     });
 
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue({}),
@@ -562,18 +545,14 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await createHostedBillingCheckout({
       cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      sessionRecord: {
-        member: {
-          id: "member_123",
-        },
-      } as any,
+      sessionRecord: makeHostedSessionRecord("member_123"),
     });
 
     expect(result).toEqual({
@@ -623,8 +602,7 @@ describe("createHostedBillingCheckout", () => {
       url: "https://billing.example.test/existing-session",
     });
 
-    const prisma: any = {
-      $transaction: vi.fn(async (callback: (tx: any) => Promise<unknown>) => callback(prisma)),
+    const prisma = withHostedBillingTransaction({
       hostedBillingCheckout: {
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockRejectedValue(
@@ -649,18 +627,14 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await createHostedBillingCheckout({
       cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      sessionRecord: {
-        member: {
-          id: "member_123",
-        },
-      } as any,
+      sessionRecord: makeHostedSessionRecord("member_123"),
     });
 
     expect(result).toEqual({
@@ -698,7 +672,7 @@ describe("createHostedBillingCheckout", () => {
       },
     });
 
-    const prisma: any = {
+    const prisma = asHostedBillingCheckoutPrisma({
       hostedBillingCheckout: {
         create: vi.fn().mockResolvedValue({}),
         count: vi.fn().mockResolvedValue(0),
@@ -713,18 +687,14 @@ describe("createHostedBillingCheckout", () => {
         update: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     await createHostedBillingCheckout({
       cookieStore: { get: vi.fn() },
       inviteCode: "invite-code",
       now: NOW,
       prisma,
-      sessionRecord: {
-        member: {
-          id: "member_123",
-        },
-      } as any,
+      sessionRecord: makeHostedSessionRecord("member_123"),
     });
 
     const updatedCustomerMetadata = mocks.stripe.customers.update.mock.calls[0]?.[1]?.metadata;
@@ -776,7 +746,7 @@ describe("createHostedBillingCheckout", () => {
         cookieStore: { get: vi.fn() },
         inviteCode: "invite-code",
         now: NOW,
-        prisma: {
+        prisma: asHostedBillingCheckoutPrisma({
           hostedBillingCheckout: {
             create: vi.fn(),
             findFirst: vi.fn(),
@@ -784,12 +754,8 @@ describe("createHostedBillingCheckout", () => {
           hostedMember: {
             update: vi.fn(),
           },
-        } as any,
-        sessionRecord: {
-          member: {
-            id: "member_123",
-          },
-        } as any,
+        }),
+        sessionRecord: makeHostedSessionRecord("member_123"),
       }),
     ).rejects.toMatchObject({
       code: "HOSTED_WALLET_ADDRESS_CONFLICT",
@@ -811,7 +777,7 @@ describe("createHostedBillingCheckout", () => {
         cookieStore: { get: vi.fn() },
         inviteCode: "invite-code",
         now: NOW,
-        prisma: {
+        prisma: asHostedBillingCheckoutPrisma({
           hostedBillingCheckout: {
             create: vi.fn(),
             findFirst: vi.fn(),
@@ -821,12 +787,8 @@ describe("createHostedBillingCheckout", () => {
             update: vi.fn(),
             updateMany: vi.fn(),
           },
-        } as any,
-        sessionRecord: {
-          member: {
-            id: "member_123",
-          },
-        } as any,
+        }),
+        sessionRecord: makeHostedSessionRecord("member_123"),
       }),
     ).rejects.toMatchObject({
       code: "PRIVY_SESSION_MISMATCH",
@@ -857,4 +819,25 @@ function makeInvite(overrides: {
     },
     memberId: "member_123",
   };
+}
+
+function asHostedBillingCheckoutPrisma<T extends Record<string, unknown>>(prisma: T): T & HostedBillingCheckoutPrisma {
+  return prisma as T & HostedBillingCheckoutPrisma;
+}
+
+function makeHostedSessionRecord(memberId: string): HostedBillingSessionRecord {
+  return {
+    member: {
+      id: memberId,
+    },
+  } as unknown as HostedBillingSessionRecord;
+}
+
+function withHostedBillingTransaction<T extends Record<string, unknown>>(prisma: T): T & HostedBillingCheckoutPrisma {
+  const prismaWithTransaction = asHostedBillingCheckoutPrisma(prisma) as T & HostedBillingCheckoutPrisma;
+  const transaction = vi.fn(
+    async (callback: (tx: T & HostedBillingCheckoutPrisma) => Promise<unknown>) => callback(prismaWithTransaction),
+  );
+  (prismaWithTransaction as { $transaction?: unknown }).$transaction = transaction;
+  return prismaWithTransaction;
 }

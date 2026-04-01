@@ -95,7 +95,7 @@ export async function buildHostedSharePageData(input: {
   shareCode: string;
 }): Promise<HostedSharePageData> {
   const prisma = input.prisma ?? getPrisma();
-  let record = await findHostedShareLinkByCode(input.shareCode, prisma);
+  const record = await findHostedShareLinkByCode(input.shareCode, prisma);
   const sessionActive = input.sessionRecord?.member.billingStatus === HostedBillingStatus.active;
 
   if (!record) {

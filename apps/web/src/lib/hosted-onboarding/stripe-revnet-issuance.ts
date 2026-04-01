@@ -144,7 +144,7 @@ export async function ensureHostedRevnetIssuanceForStripeInvoice(input: {
     return null;
   }
 
-  let issuance = await findOrCreateHostedRevnetIssuance(eligibility);
+  const issuance = await findOrCreateHostedRevnetIssuance(eligibility);
   return patchHostedRevnetIssuanceStripeReferencesIfNeeded({
     chargeId: eligibility.chargeId,
     issuance,

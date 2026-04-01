@@ -115,6 +115,8 @@ import {
   buildHostedInviteReply,
 } from "@/src/lib/hosted-onboarding/linq";
 
+type HostedWebhookPrisma = Parameters<typeof handleHostedOnboardingLinqWebhook>[0]["prisma"];
+
 describe("hosted onboarding webhook retry safety", () => {
   beforeEach(() => {
     mocks.drainHostedExecutionOutboxBestEffort.mockReset();
@@ -181,7 +183,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "invalid-phone",
     },
   ])("ignores Linq webhooks without side effects for $reason", async ({ body, reason }) => {
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -217,7 +219,7 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("asks the Murph intro question for an existing inactive member even without an onboarding trigger", async () => {
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -266,9 +268,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "prompted-get-started",
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -316,7 +316,7 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("asks the Murph intro question on first contact before sending the signup link", async () => {
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -359,9 +359,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "prompted-get-started",
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -410,7 +408,7 @@ describe("hosted onboarding webhook retry safety", () => {
       inviteCode: "code_follow_up",
       sentAt: null,
     });
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -456,9 +454,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "sent-signup-link",
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -521,7 +517,7 @@ describe("hosted onboarding webhook retry safety", () => {
       inviteCode: "code_repeat_link",
       sentAt: new Date("2026-03-26T12:05:00.000Z"),
     });
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -610,7 +606,7 @@ describe("hosted onboarding webhook retry safety", () => {
       inviteCode: "code_from_web",
       sentAt: null,
     });
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -683,7 +679,7 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("completes a Linq active-member webhook after the dispatch is durably queued", async () => {
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -712,9 +708,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "dispatched-active-member",
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls).toHaveLength(4);
     expect(((receiptCalls[0]?.data as { payloadJson?: unknown } | undefined)?.payloadJson)).toEqual(
       buildWebhookReceiptPayload({
@@ -804,7 +798,7 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedMember: {
         findUnique: vi.fn(),
         update: vi.fn(),
@@ -855,7 +849,7 @@ describe("hosted onboarding webhook retry safety", () => {
       type: "invoice.paid",
     });
 
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedMember: {
         findUnique: vi.fn(),
         update: vi.fn(),
@@ -905,7 +899,7 @@ describe("hosted onboarding webhook retry safety", () => {
       ],
       status: "failed",
     });
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -930,9 +924,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "dispatched-active-member",
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -1036,7 +1028,7 @@ describe("hosted onboarding webhook retry safety", () => {
       .mockResolvedValueOnce({ count: 0 })
       .mockResolvedValueOnce({ count: 1 })
       .mockResolvedValueOnce({ count: 1 });
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
@@ -1068,9 +1060,7 @@ describe("hosted onboarding webhook retry safety", () => {
       retryable: true,
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     const dispatchQueueCalls = receiptCalls.slice(2, 5);
     expect(dispatchQueueCalls).toHaveLength(3);
     for (const call of dispatchQueueCalls) {
@@ -1177,7 +1167,7 @@ describe("hosted onboarding webhook retry safety", () => {
       triggerText: "start murph",
       updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     };
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn()
           .mockResolvedValueOnce({})
@@ -1222,9 +1212,7 @@ describe("hosted onboarding webhook retry safety", () => {
       retryable: true,
     });
 
-    const firstAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const firstAttemptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(firstAttemptCalls).toHaveLength(4);
     expect(firstAttemptCalls[0]).toEqual(
       expect.objectContaining({
@@ -1297,7 +1285,7 @@ describe("hosted onboarding webhook retry safety", () => {
       }),
     );
     prisma.hostedWebhookReceipt.findUnique.mockResolvedValueOnce({
-      payloadJson: firstAttemptCalls.at(-1)?.data?.payloadJson,
+      payloadJson: readPayloadJsonFromUpdateCall(firstAttemptCalls.at(-1)),
     });
 
     await expect(
@@ -1316,7 +1304,7 @@ describe("hosted onboarding webhook retry safety", () => {
 
     const secondAttemptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls
       .slice(firstAttemptCalls.length)
-      .map(([payload]: [Record<string, unknown>]) => payload);
+      .map((call) => ((call[0] as Record<string, unknown> | undefined) ?? {}));
     expect(secondAttemptCalls.at(-1)).toEqual(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1396,7 +1384,7 @@ describe("hosted onboarding webhook retry safety", () => {
       ],
       status: "failed",
     });
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -1432,9 +1420,7 @@ describe("hosted onboarding webhook retry safety", () => {
       ok: true,
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(receiptCalls[0]).toEqual(
       expect.objectContaining({
         where: expect.objectContaining({
@@ -1476,7 +1462,7 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("treats completed Linq receipts as duplicates without redispatching the event", async () => {
-    const prisma: any = {
+    const prisma = asHostedWebhookPrisma({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -1496,7 +1482,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedMember: {
         findUnique: vi.fn(),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -1546,7 +1532,7 @@ describe("hosted onboarding webhook retry safety", () => {
     let storedReceiptPayload: Record<string, unknown> | null = null;
     let failSentWriteOnce = true;
 
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
           if (storedReceiptPayload) {
@@ -1729,7 +1715,7 @@ describe("hosted onboarding webhook retry safety", () => {
     };
     let storedReceiptPayload: Record<string, unknown> | null = null;
 
-    const prisma: any = withPrismaTransaction({
+    const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: vi.fn().mockImplementation(({ data }: { data: { payloadJson: Record<string, unknown> } }) => {
           if (storedReceiptPayload) {
@@ -1881,7 +1867,7 @@ describe("hosted onboarding webhook retry safety", () => {
   });
 
   it("treats in-flight processing Linq receipts as duplicates without redispatching the event", async () => {
-    const prisma: any = {
+    const prisma = asHostedWebhookPrisma({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -1900,7 +1886,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedMember: {
         findUnique: vi.fn(),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -1928,7 +1914,7 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       strayLegacyField: "keep-me-if-possible",
     };
-    const prisma: any = {
+    const prisma = asHostedWebhookPrisma({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -1939,7 +1925,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedMember: {
         findUnique: vi.fn().mockResolvedValue(makeActiveMember()),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -1953,9 +1939,7 @@ describe("hosted onboarding webhook retry safety", () => {
       reason: "dispatched-active-member",
     });
 
-    const receiptCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const receiptCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect((receiptCalls[0]?.where as { payloadJson?: { equals?: unknown } } | undefined)?.payloadJson).toEqual({
       equals: malformedReceiptPayload,
     });
@@ -2012,7 +1996,7 @@ describe("hosted onboarding webhook retry safety", () => {
       },
       strayLegacyField: "keep-me-if-possible",
     };
-    const prisma: any = {
+    const prisma = asHostedWebhookPrisma({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi.fn().mockResolvedValue({
@@ -2023,7 +2007,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedMember: {
         findUnique: vi.fn(),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -2038,9 +2022,7 @@ describe("hosted onboarding webhook retry safety", () => {
       retryable: true,
     });
 
-    const reclaimCalls = prisma.hostedWebhookReceipt.updateMany.mock.calls.map(
-      ([payload]: [Record<string, unknown>]) => payload,
-    );
+    const reclaimCalls = readMockCallPayloads(prisma.hostedWebhookReceipt.updateMany.mock.calls);
     expect(reclaimCalls).toHaveLength(3);
     for (const call of reclaimCalls) {
       expect(call).toEqual(
@@ -2077,7 +2059,7 @@ describe("hosted onboarding webhook retry safety", () => {
       lastReceivedAt: "2026-03-26T12:05:00.000Z",
       status: "processing",
     });
-    const prisma: any = {
+    const prisma = asHostedWebhookPrisma({
       hostedWebhookReceipt: {
         create: vi.fn().mockRejectedValue(createUniqueConstraintError()),
         findUnique: vi
@@ -2097,7 +2079,7 @@ describe("hosted onboarding webhook retry safety", () => {
       hostedMember: {
         findUnique: vi.fn(),
       },
-    };
+    });
 
     await expect(
       handleHostedOnboardingLinqWebhook({
@@ -2335,31 +2317,51 @@ function buildLinqMessageSideEffect(input: {
   };
 }
 
-function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T {
-  const prismaWithTransaction = prisma as T & {
-    $transaction: (callback: (tx: T) => Promise<unknown>) => Promise<unknown>;
+function asHostedWebhookPrisma<T extends Record<string, unknown>>(prisma: T): T & HostedWebhookPrisma {
+  return prisma as T & HostedWebhookPrisma;
+}
+
+function withPrismaTransaction<T extends Record<string, unknown>>(prisma: T): T & HostedWebhookPrisma {
+  const prismaWithTransaction = asHostedWebhookPrisma(prisma) as T & HostedWebhookPrisma & {
+    $transaction?: unknown;
     hostedMember?: {
       update?: ReturnType<typeof vi.fn>;
-      updateMany?: ReturnType<typeof vi.fn>;
+      updateMany?: unknown;
     };
   };
+  const hostedMember = prismaWithTransaction.hostedMember as {
+    update?: ((input: { data: Record<string, unknown> }) => Promise<unknown>) | undefined;
+    updateMany?: unknown;
+  } | undefined;
   if (
-    prismaWithTransaction.hostedMember &&
-    !prismaWithTransaction.hostedMember.updateMany &&
-    prismaWithTransaction.hostedMember.update
+    hostedMember &&
+    !hostedMember.updateMany &&
+    hostedMember.update
   ) {
-    prismaWithTransaction.hostedMember.updateMany = vi.fn(async (input: { data: Record<string, unknown> }) => {
-      const update = prismaWithTransaction.hostedMember?.update as
-        | ((input: { data: Record<string, unknown> }) => Promise<unknown>)
-        | undefined;
-
-      if (update) {
-        await update(input);
+    hostedMember.updateMany = vi.fn(async (input: { data: Record<string, unknown> }) => {
+      if (hostedMember.update) {
+        await hostedMember.update(input);
       }
 
       return { count: 1 };
     });
   }
-  prismaWithTransaction.$transaction = async (callback) => callback(prismaWithTransaction);
+  (prismaWithTransaction as { $transaction?: unknown }).$transaction = (
+    async (callback: (tx: T & HostedWebhookPrisma) => Promise<unknown>) => callback(prismaWithTransaction)
+  );
   return prismaWithTransaction;
+}
+
+function readMockCallPayloads(calls: unknown[][]): Record<string, unknown>[] {
+  return calls.map((call) => ((call[0] as Record<string, unknown> | undefined) ?? {}));
+}
+
+function readPayloadJsonFromUpdateCall(call: Record<string, unknown> | undefined): unknown {
+  const data = call?.data;
+
+  if (!data || typeof data !== "object") {
+    return undefined;
+  }
+
+  return (data as { payloadJson?: unknown }).payloadJson;
 }

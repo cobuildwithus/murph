@@ -60,6 +60,8 @@ import {
 } from "@/src/lib/hosted-onboarding/stripe-event-queue";
 import { drainHostedRevnetIssuanceSubmissionQueue } from "@/src/lib/hosted-onboarding/stripe-revnet-issuance";
 
+type HostedStripeEventQueuePrisma = Parameters<typeof drainHostedStripeEventQueue>[0]["prisma"];
+
 describe("hosted Stripe event queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1302,12 +1304,15 @@ describe("hosted Stripe event queue", () => {
       ],
     });
     const baseUpdateImpl = harness.prisma.hostedRevnetIssuance.update.getMockImplementation();
-    harness.prisma.hostedRevnetIssuance.update.mockImplementation(async (args: { data: Record<string, unknown> }) => {
+    harness.prisma.hostedRevnetIssuance.update.mockImplementation(async (args: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
       if ("payTxHash" in args.data || args.data.status === HostedRevnetIssuanceStatus.submitted) {
         throw new Error("db write failed");
       }
 
-      return baseUpdateImpl?.(args);
+      return baseUpdateImpl?.(args) ?? harness.revnetIssuances[0]!;
     });
     harness.prisma.hostedRevnetIssuance.updateMany.mockImplementation(async ({ data, where }: {
       data: Record<string, unknown>;
@@ -1790,7 +1795,9 @@ describe("hosted Stripe event queue", () => {
       prisma: harness.prisma,
     });
 
-    harness.prisma.hostedMember.updateMany.mockImplementation(baseMemberUpdateMany);
+    if (baseMemberUpdateMany) {
+      harness.prisma.hostedMember.updateMany.mockImplementation(baseMemberUpdateMany);
+    }
 
     expect(harness.revnetIssuances[0]).toMatchObject({
       confirmedAt: expect.any(Date),
@@ -2350,8 +2357,7 @@ function createStripeQueueHarness(input: {
     return { count };
   });
 
-  const prisma: any = {
-    $transaction: async <T>(callback: (tx: typeof prisma) => Promise<T>) => callback(prisma),
+  const prisma = {
     hostedBillingCheckout: {
       updateMany: hostedBillingCheckoutUpdateMany,
     },
@@ -2382,12 +2388,17 @@ function createStripeQueueHarness(input: {
       updateMany: hostedStripeEventUpdateMany,
     },
   };
+  const prismaWithTransaction = prisma as typeof prisma & HostedStripeEventQueuePrisma;
+  const runTransaction = async <T>(callback: (tx: typeof prismaWithTransaction) => Promise<T>) =>
+    callback(prismaWithTransaction);
+  (prismaWithTransaction as { $transaction?: HostedStripeEventQueuePrisma["$transaction"] }).$transaction =
+    runTransaction as unknown as HostedStripeEventQueuePrisma["$transaction"];
 
   return {
     checkouts,
     invites,
     members,
-    prisma,
+    prisma: prismaWithTransaction,
     revnetIssuances,
     sessions,
     stripeEvents,

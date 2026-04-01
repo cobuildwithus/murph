@@ -1,5 +1,6 @@
 import { HostedBillingStatus, HostedInviteStatus, HostedMemberStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createHostedPhoneLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 
 const mocks = vi.hoisted(() => ({
@@ -46,6 +47,12 @@ vi.mock("@/src/lib/hosted-onboarding/session", async () => {
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/member-service";
 
 const NOW = new Date("2026-03-26T12:00:00.000Z");
+const DEFAULT_PHONE_NUMBER = "+15551234567";
+const DEFAULT_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(DEFAULT_PHONE_NUMBER)!;
+const SECONDARY_PHONE_NUMBER = "+15557654321";
+const SECONDARY_PHONE_LOOKUP_KEY = createHostedPhoneLookupKey(SECONDARY_PHONE_NUMBER)!;
+type CompleteHostedPrivyVerificationInput = Parameters<typeof completeHostedPrivyVerification>[0];
+type CompleteHostedPrivyVerificationPrisma = CompleteHostedPrivyVerificationInput["prisma"];
 
 function makeIdentity(overrides: Partial<HostedPrivyIdentity> = {}) {
   return {
@@ -65,7 +72,7 @@ function makeIdentity(overrides: Partial<HostedPrivyIdentity> = {}) {
 function baseIdentity(): HostedPrivyIdentity {
   return {
     phone: {
-      number: "+15551234567",
+      number: DEFAULT_PHONE_NUMBER,
       verifiedAt: 1742990400,
     },
     userId: "did:privy:user_123",
@@ -88,7 +95,7 @@ function makeMember(overrides: Record<string, unknown> = {}) {
     id: "member_123",
     linqChatId: null,
     maskedPhoneNumberHint: "*** 4567",
-    normalizedPhoneNumber: "+15551234567",
+    normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
     phoneNumberVerifiedAt: null,
     privyUserId: null,
     status: HostedMemberStatus.invited,
@@ -140,7 +147,7 @@ describe("completeHostedPrivyVerification", () => {
   it("binds a verified Privy identity onto an invite-bound member and creates a hosted session", async () => {
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue({}),
@@ -151,7 +158,7 @@ describe("completeHostedPrivyVerification", () => {
           ...data,
         })),
       },
-    };
+    });
 
     const result = await completeHostedPrivyVerification({
       identity: makeIdentity(),
@@ -165,7 +172,7 @@ describe("completeHostedPrivyVerification", () => {
         id: "member_123",
       },
       data: expect.objectContaining({
-        normalizedPhoneNumber: "+15551234567",
+        normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
         phoneNumberVerifiedAt: NOW,
         privyUserId: "did:privy:user_123",
         status: HostedMemberStatus.registered,
@@ -202,7 +209,7 @@ describe("completeHostedPrivyVerification", () => {
   it("creates a hosted member and a web invite for a new public phone signup", async () => {
     const createdMember = makeMember({
       id: "member_new",
-      normalizedPhoneNumber: "+15551234567",
+      normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
       phoneNumberVerifiedAt: NOW,
       privyUserId: "did:privy:user_123",
       status: HostedMemberStatus.registered,
@@ -218,7 +225,7 @@ describe("completeHostedPrivyVerification", () => {
       memberId: "member_new",
       status: HostedInviteStatus.pending,
     });
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn().mockResolvedValue(createdInvite),
         findFirst: vi.fn().mockResolvedValue(null),
@@ -228,7 +235,7 @@ describe("completeHostedPrivyVerification", () => {
         create: vi.fn().mockResolvedValue(createdMember),
         findUnique: vi.fn().mockResolvedValue(null),
       },
-    };
+    });
 
     const result = await completeHostedPrivyVerification({
       identity: makeIdentity(),
@@ -241,7 +248,7 @@ describe("completeHostedPrivyVerification", () => {
       data: expect.objectContaining({
         billingStatus: HostedBillingStatus.not_started,
         maskedPhoneNumberHint: "*** 4567",
-        normalizedPhoneNumber: "+15551234567",
+        normalizedPhoneNumber: DEFAULT_PHONE_LOOKUP_KEY,
         phoneNumberVerifiedAt: NOW,
         privyUserId: "did:privy:user_123",
         status: HostedMemberStatus.registered,
@@ -296,7 +303,7 @@ describe("completeHostedPrivyVerification", () => {
       paidAt: new Date("2026-03-21T12:00:00.000Z"),
       status: HostedInviteStatus.paid,
     });
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn().mockResolvedValue({}),
@@ -307,7 +314,7 @@ describe("completeHostedPrivyVerification", () => {
           ...data,
         })),
       },
-    };
+    });
 
     const result = await completeHostedPrivyVerification({
       identity: makeIdentity(),
@@ -341,7 +348,7 @@ describe("completeHostedPrivyVerification", () => {
       walletProvider: "privy",
     });
     const invite = makeInvite(suspendedMember);
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
         update: vi.fn(),
@@ -352,7 +359,7 @@ describe("completeHostedPrivyVerification", () => {
           ...data,
         })),
       },
-    };
+    });
 
     await expect(
       completeHostedPrivyVerification({
@@ -389,7 +396,7 @@ describe("completeHostedPrivyVerification", () => {
       walletCreatedAt: NOW,
       walletProvider: "privy",
     });
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
@@ -409,7 +416,7 @@ describe("completeHostedPrivyVerification", () => {
           ...data,
         })),
       },
-    };
+    });
 
     await expect(
       completeHostedPrivyVerification({
@@ -432,10 +439,10 @@ describe("completeHostedPrivyVerification", () => {
     const walletMember = makeMember({
       id: "member_wallet",
       maskedPhoneNumberHint: "*** 4321",
-      normalizedPhoneNumber: "+15557654321",
+      normalizedPhoneNumber: SECONDARY_PHONE_LOOKUP_KEY,
       walletAddress: "0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
     });
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         create: vi.fn(),
         findFirst: vi.fn(),
@@ -459,7 +466,7 @@ describe("completeHostedPrivyVerification", () => {
           return null;
         }),
       },
-    };
+    });
 
     await expect(
       completeHostedPrivyVerification({
@@ -480,14 +487,14 @@ describe("completeHostedPrivyVerification", () => {
   it("rejects invite verification when the Privy phone number does not match the invited number", async () => {
     const inviteMember = makeMember();
     const invite = makeInvite(inviteMember);
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
       },
       hostedMember: {
         update: vi.fn(),
       },
-    };
+    });
 
     await expect(
       completeHostedPrivyVerification({
@@ -518,14 +525,14 @@ describe("completeHostedPrivyVerification", () => {
       walletProvider: "privy",
     });
     const invite = makeInvite(inviteMember);
-    const prisma: any = {
+    const prisma = asCompleteHostedPrivyVerificationPrisma({
       hostedInvite: {
         findUnique: vi.fn().mockResolvedValue(invite),
       },
       hostedMember: {
         update: vi.fn(),
       },
-    };
+    });
 
     await expect(
       completeHostedPrivyVerification({
@@ -550,3 +557,9 @@ describe("completeHostedPrivyVerification", () => {
     expect(mocks.createHostedSession).not.toHaveBeenCalled();
   });
 });
+
+function asCompleteHostedPrivyVerificationPrisma<T extends Record<string, unknown>>(
+  prisma: T,
+): T & CompleteHostedPrivyVerificationPrisma {
+  return prisma as T & CompleteHostedPrivyVerificationPrisma;
+}
