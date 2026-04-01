@@ -115,11 +115,11 @@ describe("HostedUserRunner", () => {
     await expect(bundleStore.readBundle(legacyRef)).resolves.toEqual(
       new TextEncoder().encode("vault bundle"),
     );
-    expect(bucket.putCount()).toBe(writesBeforeRead + 1);
-    const migratedEnvelope = JSON.parse(
+    expect(bucket.putCount()).toBe(writesBeforeRead);
+    const storedEnvelope = JSON.parse(
       Buffer.from(await (await bucket.api.get(legacyRef.key))!.arrayBuffer()).toString("utf8"),
     ) as { keyId: string };
-    expect(migratedEnvelope.keyId).toBe("v2");
+    expect(storedEnvelope.keyId).toBe("v1");
   });
 
   it("cleans up orphaned per-user artifacts without deleting shared bundle objects", async () => {

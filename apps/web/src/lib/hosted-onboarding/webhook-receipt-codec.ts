@@ -6,6 +6,7 @@ import {
 import { Prisma } from "@prisma/client";
 
 import { createHostedOpaqueIdentifier } from "./contact-privacy";
+import { hostedOnboardingError } from "./errors";
 import { getHostedOnboardingSecretCodec } from "./runtime";
 import type {
   HostedWebhookEventPayload,
@@ -231,6 +232,7 @@ function serializeHostedLinqMessageSideEffectResult(
 }
 
 function readHostedWebhookLinqMessageSideEffectPayload(
+  effectId: string,
   payload: Record<string, Prisma.InputJsonValue | Prisma.JsonValue | null>,
 ): HostedWebhookLinqMessageSideEffect["payload"] | null {
   const encryptedPayload = readHostedWebhookReceiptString(payload.encryptedPayload);
@@ -260,19 +262,7 @@ function readHostedWebhookLinqMessageSideEffectPayload(
     }
   }
 
-  const chatId = readHostedWebhookReceiptString(payload.chatId);
-  const message = readHostedWebhookReceiptString(payload.message);
-
-  if (!chatId || !message) {
-    return null;
-  }
-
-  return {
-    chatId,
-    inviteId: readHostedWebhookReceiptString(payload.inviteId),
-    message,
-    replyToMessageId: readHostedWebhookReceiptString(payload.replyToMessageId),
-  } satisfies HostedWebhookLinqMessageSideEffect["payload"];
+  return null;
 }
 
 function serializeHostedWebhookSideEffect(
@@ -353,10 +343,10 @@ function readHostedWebhookSideEffect(
       };
     }
     case "linq_message_send": {
-      const linqPayload = readHostedWebhookLinqMessageSideEffectPayload(payload);
+      const linqPayload = readHostedWebhookLinqMessageSideEffectPayload(effectId, payload);
 
       if (!linqPayload) {
-        return null;
+        throw buildHostedWebhookSideEffectPayloadError(effectId);
       }
 
       return {
@@ -411,6 +401,14 @@ function readHostedWebhookSideEffect(
     default:
       return null;
   }
+}
+
+function buildHostedWebhookSideEffectPayloadError(effectId: string): Error {
+  return hostedOnboardingError({
+    code: "WEBHOOK_SIDE_EFFECT_PAYLOAD_INVALID",
+    message: `Hosted webhook side effect ${effectId} stores an invalid or legacy payload shape.`,
+    httpStatus: 500,
+  });
 }
 
 export function generateHostedWebhookReceiptAttemptId(): string {

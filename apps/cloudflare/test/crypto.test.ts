@@ -6,7 +6,7 @@ import {
 } from "../src/crypto.js";
 
 describe("readEncryptedR2Payload", () => {
-  it("keeps reads successful when migrate-on-read re-encryption fails", async () => {
+  it("reads older envelopes without rewriting them on read", async () => {
     const previousKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
     const nextKey = Uint8Array.from({ length: 32 }, () => 7);
     const plaintext = new TextEncoder().encode("{\"ok\":true}");
@@ -45,6 +45,6 @@ describe("readEncryptedR2Payload", () => {
       expectedKeyId: "v2",
       key: "users/member_123/bundle.json",
     })).resolves.toEqual(plaintext);
-    expect(putAttempts).toBe(1);
+    expect(putAttempts).toBe(0);
   });
 });

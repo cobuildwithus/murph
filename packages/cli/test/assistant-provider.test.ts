@@ -56,7 +56,7 @@ import {
   executeAssistantProviderTurn,
   resolveAssistantProviderCapabilities,
   resolveAssistantProviderTraits,
-} from '@murphai/assistant-core/chat-provider'
+} from '@murphai/assistant-core/assistant/provider-registry'
 import {
   defaultDiscoverOpenAICompatibleModels,
   type AssistantModelDiscoveryResult,

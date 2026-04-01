@@ -12,10 +12,9 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
   createHostedDeviceSyncControlPlane: mocks.createHostedDeviceSyncControlPlane,
 }));
 
-type ConnectStartRouteModule = typeof import("../app/api/device-sync/oauth/[provider]/start/route");
+type ConnectRouteModule = typeof import("../app/api/device-sync/providers/[provider]/connect/route");
 
-let startRoute: ConnectStartRouteModule;
-let connectRoute: ConnectStartRouteModule;
+let connectRoute: ConnectRouteModule;
 
 function createRouteContext(provider: string) {
   return {
@@ -23,9 +22,8 @@ function createRouteContext(provider: string) {
   };
 }
 
-describe("hosted device-sync connect/start route aliases", () => {
+describe("hosted device-sync connect route", () => {
   beforeAll(async () => {
-    startRoute = await import("../app/api/device-sync/oauth/[provider]/start/route");
     connectRoute = await import("../app/api/device-sync/providers/[provider]/connect/route");
   });
 
@@ -42,17 +40,12 @@ describe("hosted device-sync connect/start route aliases", () => {
     });
   });
 
-  it("exports the same GET and POST handlers for both documented alias paths", () => {
-    expect(startRoute.GET).toBe(connectRoute.GET);
-    expect(startRoute.POST).toBe(connectRoute.POST);
-  });
-
   it("rejects GET requests because connect-start is POST-only", async () => {
     const request = new Request(
-      "https://example.test/api/device-sync/oauth/oura%2Flegacy/start?returnTo=https%3A%2F%2Fapp.example.test%2Fdone",
+      "https://example.test/api/device-sync/providers/oura%2Flegacy/connect?returnTo=https%3A%2F%2Fapp.example.test%2Fdone",
     );
 
-    const response = await startRoute.GET(
+    const response = await connectRoute.GET(
       request,
       createRouteContext("oura%2Flegacy"),
     );
@@ -109,8 +102,8 @@ describe("hosted device-sync connect/start route aliases", () => {
       });
     });
 
-    const response = await startRoute.POST(
-      new Request("https://example.test/api/device-sync/oauth/oura/start", {
+    const response = await connectRoute.POST(
+      new Request("https://example.test/api/device-sync/providers/oura/connect", {
         method: "POST",
         body: JSON.stringify({ returnTo: "https://app.example.test/done" }),
       }),

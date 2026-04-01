@@ -18,7 +18,7 @@ import {
   assistantChatResultSchema,
   type AssistantSession,
 } from '@murphai/assistant-core/assistant-cli-contracts'
-import type { AssistantProviderProgressEvent } from '@murphai/assistant-core/chat-provider'
+import type { AssistantProviderProgressEvent } from '@murphai/assistant-core/assistant/provider-registry'
 import {
   discoverAssistantProviderModels,
   resolveAssistantCatalogReasoningOptions,

@@ -118,6 +118,21 @@ test("loadDeviceSyncEnvironment requires DEVICE_SYNC_CONTROL_TOKEN", () => {
   );
 });
 
+test("loadDeviceSyncEnvironment requires DEVICE_SYNC_VAULT_ROOT instead of the removed VAULT_ROOT alias", () => {
+  assert.throws(
+    () =>
+      loadDeviceSyncEnvironment({
+        VAULT_ROOT: "/tmp/murph-vault",
+        DEVICE_SYNC_PUBLIC_BASE_URL: "https://sync.example.test/device-sync",
+        DEVICE_SYNC_SECRET: "secret-for-tests",
+        DEVICE_SYNC_CONTROL_TOKEN: "control-token-for-tests",
+        OURA_CLIENT_ID: "oura-client-id",
+        OURA_CLIENT_SECRET: "oura-client-secret",
+      } as NodeJS.ProcessEnv),
+    /DEVICE_SYNC_VAULT_ROOT/u,
+  );
+});
+
 test("loadDeviceSyncEnvironment exposes the optional Oura webhook verification token on the HTTP config", () => {
   const loaded = loadDeviceSyncEnvironment({
     DEVICE_SYNC_VAULT_ROOT: "/tmp/murph-vault",
