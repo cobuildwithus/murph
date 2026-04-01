@@ -28,11 +28,53 @@ const rootPackageJson = readJson(path.join(repoRoot, "package.json"));
 const packageManager = typeof rootPackageJson.packageManager === "string"
   ? rootPackageJson.packageManager
   : "";
+const packageManagerMatch = packageManager.match(
+  /^pnpm@(\d+\.\d+\.\d+)\+sha512\.([A-Za-z0-9+/_=-]+)$/u,
+);
 
-if (!/^pnpm@\d+\.\d+\.\d+(\+sha512\.[A-Za-z0-9+/=.-]+)?$/u.test(packageManager)) {
+if (!packageManagerMatch) {
   errors.push(
-    `package.json must pin an exact pnpm packageManager string (found ${JSON.stringify(packageManager)}).`,
+    `package.json must pin pnpm in packageManager with an exact version and sha512 integrity (found ${JSON.stringify(packageManager)}).`,
   );
+}
+
+const expectedPnpmVersion = packageManagerMatch?.[1] ?? null;
+const configuredPnpmEngine = typeof rootPackageJson.engines?.pnpm === "string"
+  ? rootPackageJson.engines.pnpm.trim()
+  : "";
+
+if (!expectedPnpmVersion) {
+  // Package manager string validation already recorded the error above.
+} else if (configuredPnpmEngine !== expectedPnpmVersion) {
+  errors.push(
+    `package.json engines.pnpm must exactly match packageManager (${JSON.stringify(expectedPnpmVersion)}); found ${JSON.stringify(configuredPnpmEngine)}.`,
+  );
+}
+
+const workspaceConfigPath = path.join(repoRoot, "pnpm-workspace.yaml");
+const workspaceConfig = existsSync(workspaceConfigPath)
+  ? readFileSync(workspaceConfigPath, "utf8")
+  : "";
+
+if (!workspaceConfig) {
+  errors.push("pnpm-workspace.yaml is required so repo-wide pnpm supply-chain policy stays committed.");
+} else {
+  requireBooleanSetting(workspaceConfig, "engineStrict", true);
+  requireBooleanSetting(workspaceConfig, "packageManagerStrictVersion", true);
+  requireBooleanSetting(workspaceConfig, "managePackageManagerVersions", true);
+  requireBooleanSetting(workspaceConfig, "blockExoticSubdeps", true);
+  requireStringSetting(workspaceConfig, "verifyDepsBeforeRun", "error");
+  requireStringSetting(workspaceConfig, "trustPolicy", "no-downgrade");
+  requireMinimumIntegerSetting(workspaceConfig, "minimumReleaseAge", 1440);
+  requireMinimumIntegerSetting(workspaceConfig, "trustPolicyIgnoreAfter", 259200);
+
+  if (!/^allowBuilds:\s*$/mu.test(workspaceConfig)) {
+    errors.push("pnpm-workspace.yaml must keep a reviewed allowBuilds block for dependency install scripts.");
+  }
+
+  if (/^dangerouslyAllowAllBuilds:\s*true\s*$/mu.test(workspaceConfig)) {
+    errors.push("pnpm-workspace.yaml must not enable dangerouslyAllowAllBuilds: true.");
+  }
 }
 
 for (const manifestPath of manifestPaths) {
@@ -98,6 +140,52 @@ function listPackageManifests(parentDir) {
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
+}
+
+function requireBooleanSetting(configText, key, expectedValue) {
+  const matched = configText.match(new RegExp(`^${escapeRegex(key)}:\\s*(true|false)\\s*$`, "mu"));
+
+  if (!matched) {
+    errors.push(`pnpm-workspace.yaml must set ${key}: ${String(expectedValue)}.`);
+    return;
+  }
+
+  const actualValue = matched[1] === "true";
+  if (actualValue !== expectedValue) {
+    errors.push(`pnpm-workspace.yaml must set ${key}: ${String(expectedValue)}.`);
+  }
+}
+
+function requireStringSetting(configText, key, expectedValue) {
+  const matched = configText.match(new RegExp(`^${escapeRegex(key)}:\\s*([^\n#]+?)\\s*$`, "mu"));
+
+  if (!matched) {
+    errors.push(`pnpm-workspace.yaml must set ${key}: ${expectedValue}.`);
+    return;
+  }
+
+  const actualValue = matched[1].trim().replace(/^['"]|['"]$/g, "");
+  if (actualValue !== expectedValue) {
+    errors.push(`pnpm-workspace.yaml must set ${key}: ${expectedValue}.`);
+  }
+}
+
+function requireMinimumIntegerSetting(configText, key, minimumValue) {
+  const matched = configText.match(new RegExp(`^${escapeRegex(key)}:\\s*(\\d+)\\s*$`, "mu"));
+
+  if (!matched) {
+    errors.push(`pnpm-workspace.yaml must set ${key} to an integer >= ${minimumValue}.`);
+    return;
+  }
+
+  const actualValue = Number.parseInt(matched[1], 10);
+  if (!Number.isInteger(actualValue) || actualValue < minimumValue) {
+    errors.push(`pnpm-workspace.yaml must set ${key} to an integer >= ${minimumValue}.`);
+  }
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function classifyForbiddenSpec(spec) {

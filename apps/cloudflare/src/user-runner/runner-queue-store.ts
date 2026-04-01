@@ -2,20 +2,31 @@ import {
   deriveHostedExecutionErrorCode,
   normalizeHostedExecutionOperatorMessage,
   parseHostedExecutionDispatchRequest,
-  parseHostedExecutionRunStatus,
-  parseHostedExecutionTimelineEntries,
   summarizeHostedExecutionError,
-  type HostedExecutionBundleRef,
   type HostedExecutionDispatchRequest,
   type HostedExecutionRunLevel,
   type HostedExecutionRunPhase,
   type HostedExecutionRunStatus,
-  type HostedExecutionTimelineEntry,
 } from "@murph/hosted-execution";
 
 import type { HostedExecutionCommittedResult } from "../execution-journal.js";
+import { ensureRunnerQueueSchema } from "./runner-queue-schema.js";
 import {
-  CONSUMED_EVENT_EXACT_TTL_MS,
+  appendBoundedRunnerEventId,
+  appendBoundedRunnerTimelineEntry,
+  assignRunnerBundleRefs,
+  classifyMalformedPendingDispatchError,
+  createDefaultRunnerMetaRow,
+  mergeRunnerLastError,
+  nextConsumedEventExactExpiryIso,
+  parseRunnerStringArray,
+  parseStoredRunnerTimelineEntries,
+  projectRunnerStateRecord,
+  readRunnerBundleMetaStateFromMeta,
+  resolveRunnerNextWakeAt,
+  type RunnerMetaRow,
+} from "./runner-queue-state.js";
+import {
   MAX_BACKPRESSURED_EVENT_IDS,
   MAX_PENDING_EVENTS,
   MAX_POISONED_EVENT_IDS,
@@ -25,30 +36,7 @@ import {
   type PendingDispatchRecord,
   type RunnerBundleVersions,
   type RunnerStateRecord,
-  earliestIsoTimestamp,
-  sameBundleRef,
 } from "./types.js";
-
-interface RunnerMetaRow {
-  [key: string]: DurableObjectSqlValue;
-  activated: number;
-  agent_state_bundle_ref_json: string | null;
-  agent_state_bundle_version: number;
-  backpressured_event_ids_json: string;
-  in_flight: number;
-  last_error: string | null;
-  last_error_at: string | null;
-  last_error_code: string | null;
-  last_event_id: string | null;
-  last_run_at: string | null;
-  next_wake_at: string | null;
-  retrying_event_id: string | null;
-  run_json: string | null;
-  timeline_json: string;
-  user_id: string;
-  vault_bundle_ref_json: string | null;
-  vault_bundle_version: number;
-}
 
 interface PendingEventRow {
   [key: string]: DurableObjectSqlValue;
@@ -81,7 +69,8 @@ export class RunnerQueueStore {
   private userId: string | null = null;
 
   constructor(private readonly state: DurableObjectStateLike) {
-    this.ensureSchema();
+    ensureRunnerQueueSchema(this.sql);
+    this.repairStoredMetaStateSync();
   }
 
   async bootstrapUser(userId: string): Promise<string> {
@@ -98,7 +87,7 @@ export class RunnerQueueStore {
       return userId;
     }
 
-    this.insertMetaRowSync(defaultMetaRow(userId));
+    this.insertMetaRowSync(createDefaultRunnerMetaRow(userId));
     this.userId = userId;
     return userId;
   }
@@ -131,7 +120,7 @@ export class RunnerQueueStore {
     const poisoned = this.readPoisonedEventByIdSync(eventId);
 
     return {
-      backpressured: parseStringArray(meta.backpressured_event_ids_json).includes(eventId),
+      backpressured: parseRunnerStringArray(meta.backpressured_event_ids_json).includes(eventId),
       consumed: this.hasConsumedEventSync(eventId),
       lastError: pending?.lastError ?? poisoned?.last_error ?? null,
       pending: pending !== null,
@@ -179,8 +168,8 @@ export class RunnerQueueStore {
 
     if (this.countPendingEventsSync() >= MAX_PENDING_EVENTS) {
       meta.backpressured_event_ids_json = JSON.stringify(
-        appendBoundedEventId(
-          parseStringArray(meta.backpressured_event_ids_json),
+        appendBoundedRunnerEventId(
+          parseRunnerStringArray(meta.backpressured_event_ids_json),
           dispatch.eventId,
           MAX_BACKPRESSURED_EVENT_IDS,
         ),
@@ -213,7 +202,7 @@ export class RunnerQueueStore {
 
     meta.activated = meta.activated === 1 || dispatch.event.kind === "member.activated" ? 1 : 0;
     meta.backpressured_event_ids_json = JSON.stringify(
-      parseStringArray(meta.backpressured_event_ids_json)
+      parseRunnerStringArray(meta.backpressured_event_ids_json)
         .filter((eventId) => eventId !== dispatch.eventId),
     );
     meta.last_event_id = dispatch.eventId;
@@ -274,9 +263,9 @@ export class RunnerQueueStore {
     this.removePendingDispatchSync(committed.eventId);
     this.deletePoisonedEventSync(committed.eventId);
     this.writeConsumedEventSync(committed.eventId, nextConsumedEventExactExpiryIso());
-    assignBundleRefs(meta, committed.bundleRefs);
+    assignRunnerBundleRefs(meta, committed.bundleRefs);
     meta.backpressured_event_ids_json = JSON.stringify(
-      parseStringArray(meta.backpressured_event_ids_json)
+      parseRunnerStringArray(meta.backpressured_event_ids_json)
         .filter((eventId) => eventId !== committed.eventId),
     );
     meta.in_flight = 0;
@@ -298,7 +287,7 @@ export class RunnerQueueStore {
     this.pruneExpiredConsumedEventsSync();
 
     const meta = this.requireMetaRowSync();
-    assignBundleRefs(meta, committed.bundleRefs);
+    assignRunnerBundleRefs(meta, committed.bundleRefs);
     meta.in_flight = 0;
     meta.last_error_at = null;
     meta.last_error_code = null;
@@ -426,7 +415,7 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     const errorMessage = summarizeHostedExecutionError(input.error);
-    assignBundleRefs(meta, input.committed.bundleRefs);
+    assignRunnerBundleRefs(meta, input.committed.bundleRefs);
     meta.in_flight = 0;
     meta.last_error = errorMessage;
     meta.last_error_at = new Date().toISOString();
@@ -486,8 +475,8 @@ export class RunnerQueueStore {
       updatedAt: nowIso,
     } satisfies HostedExecutionRunStatus);
     meta.timeline_json = JSON.stringify(
-      appendBoundedTimelineEntry(
-        parseHostedExecutionTimelineEntriesJson(meta.timeline_json),
+      appendBoundedRunnerTimelineEntry(
+        parseStoredRunnerTimelineEntries(meta.timeline_json),
         {
           at: nowIso,
           attempt: input.attempt,
@@ -517,11 +506,12 @@ export class RunnerQueueStore {
     return this.readStateFromMetaSync(meta);
   }
 
-  async readBundleState(): Promise<Pick<
+  async readBundleMetaState(): Promise<Pick<
     RunnerStateRecord,
     "bundleRefs" | "bundleVersions" | "inFlight" | "userId"
   >> {
-    const record = await this.readState();
+    this.pruneExpiredConsumedEventsSync();
+    const record = this.readStateSync();
     return {
       bundleRefs: record.bundleRefs,
       bundleVersions: record.bundleVersions,
@@ -546,7 +536,7 @@ export class RunnerQueueStore {
       };
     }
 
-    assignBundleRefs(meta, input.nextBundleRefs);
+    assignRunnerBundleRefs(meta, input.nextBundleRefs);
     this.writeMetaRowSync(meta);
     return {
       applied: true,
@@ -562,15 +552,12 @@ export class RunnerQueueStore {
 
     const meta = this.requireMetaRowSync();
     const nextPendingAvailableAt = this.readNextPendingAvailableAtSync();
-    const preferredWakeAt = normalizePreferredWakeAt(input.preferredWakeAt ?? null);
-    const scheduledWakeAt = earliestIsoTimestamp(
+    meta.next_wake_at = resolveRunnerNextWakeAt({
+      activated: meta.activated === 1,
+      defaultAlarmDelayMs: input.defaultAlarmDelayMs,
       nextPendingAvailableAt,
-      preferredWakeAt,
-    );
-    const fallbackWakeAt = meta.activated
-      ? new Date(Date.now() + input.defaultAlarmDelayMs).toISOString()
-      : null;
-    meta.next_wake_at = scheduledWakeAt ?? fallbackWakeAt;
+      preferredWakeAt: input.preferredWakeAt ?? null,
+    });
     this.writeMetaRowSync(meta);
 
     return this.readStateFromMetaSync(meta, nextPendingAvailableAt);
@@ -596,71 +583,6 @@ export class RunnerQueueStore {
     throw new Error(`Hosted runner user is not initialized for committed event ${committed.eventId}.`);
   }
 
-  private ensureSchema(): void {
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS runner_meta (
-        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
-        user_id TEXT NOT NULL,
-        activated INTEGER NOT NULL DEFAULT 0,
-        in_flight INTEGER NOT NULL DEFAULT 0,
-        last_error TEXT,
-        last_error_at TEXT,
-        last_error_code TEXT,
-        last_event_id TEXT,
-        last_run_at TEXT,
-        next_wake_at TEXT,
-        retrying_event_id TEXT,
-        backpressured_event_ids_json TEXT NOT NULL DEFAULT '[]',
-        agent_state_bundle_ref_json TEXT,
-        vault_bundle_ref_json TEXT,
-        run_json TEXT,
-        timeline_json TEXT NOT NULL DEFAULT '[]',
-        agent_state_bundle_version INTEGER NOT NULL DEFAULT 0,
-        vault_bundle_version INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-    this.ensureMetaColumnSync("last_error_at", "TEXT");
-    this.ensureMetaColumnSync("last_error_code", "TEXT");
-    this.ensureMetaColumnSync("run_json", "TEXT");
-    this.ensureMetaColumnSync("timeline_json", "TEXT NOT NULL DEFAULT '[]'");
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS pending_events (
-        event_id TEXT PRIMARY KEY,
-        dispatch_json TEXT NOT NULL,
-        attempts INTEGER NOT NULL,
-        available_at TEXT NOT NULL,
-        enqueued_at TEXT NOT NULL,
-        last_error TEXT
-      )
-    `);
-    this.sql.exec(`
-      CREATE INDEX IF NOT EXISTS pending_events_available_at_idx
-      ON pending_events (available_at, enqueued_at, event_id)
-    `);
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS consumed_events (
-        event_id TEXT PRIMARY KEY,
-        expires_at TEXT NOT NULL
-      )
-    `);
-    this.sql.exec(`
-      CREATE INDEX IF NOT EXISTS consumed_events_expires_at_idx
-      ON consumed_events (expires_at)
-    `);
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS poisoned_events (
-        event_id TEXT PRIMARY KEY,
-        poisoned_at TEXT NOT NULL,
-        last_error TEXT NOT NULL
-      )
-    `);
-    this.sql.exec(`
-      CREATE INDEX IF NOT EXISTS poisoned_events_poisoned_at_idx
-      ON poisoned_events (poisoned_at, event_id)
-    `);
-    this.sql.exec("DROP TABLE IF EXISTS consumed_event_replay_filter");
-  }
-
   private pruneExpiredConsumedEventsSync(): void {
     const nowIso = new Date().toISOString();
     this.sql.exec(
@@ -678,58 +600,38 @@ export class RunnerQueueStore {
     meta: RunnerMetaRow,
     nextPendingAvailableAtOverride: string | null = null,
   ): RunnerStateRecord {
-    const pendingDispatches = this.readPendingDispatchesSync();
-    const bundleRefState = sanitizeStoredBundleRefs(meta);
-    const runTraceState = sanitizeStoredRunTrace(meta);
+    const projected = projectRunnerStateRecord({
+      meta,
+      nextPendingAvailableAtOverride,
+      pendingDispatches: this.readPendingDispatchesSync(),
+      poisonedEventIds: this.readPoisonedEventIdsSync(),
+    });
 
-    if (bundleRefState.changed || runTraceState.changed) {
-      meta.agent_state_bundle_ref_json = stringifyHostedBundleRef(bundleRefState.agentState);
-      meta.vault_bundle_ref_json = stringifyHostedBundleRef(bundleRefState.vault);
-      meta.run_json = stringifyRunStatus(runTraceState.run);
-      meta.timeline_json = JSON.stringify(runTraceState.timeline);
-      meta.last_error = mergeRunnerLastError(
-        mergeRunnerLastError(meta.last_error, bundleRefState.warning),
-        runTraceState.warning,
-      );
+    if (projected.changed) {
+      Object.assign(meta, projected.sanitizedMeta);
       this.writeMetaRowSync(meta);
     }
 
-    return {
-      activated: meta.activated === 1,
-      backpressuredEventIds: parseStringArray(meta.backpressured_event_ids_json),
-      bundleRefs: {
-        agentState: bundleRefState.agentState,
-        vault: bundleRefState.vault,
-      },
-      bundleVersions: {
-        agentState: meta.agent_state_bundle_version,
-        vault: meta.vault_bundle_version,
-      },
-      inFlight: meta.in_flight === 1,
-      lastError: meta.last_error,
-      lastErrorAt: meta.last_error_at,
-      lastErrorCode: meta.last_error_code,
-      lastEventId: meta.last_event_id,
-      lastRunAt: meta.last_run_at,
-      nextPendingAvailableAt: nextPendingAvailableAtOverride ?? pendingDispatches[0]?.availableAt ?? null,
-      nextWakeAt: meta.next_wake_at,
-      pendingEventCount: pendingDispatches.length,
-      poisonedEventIds: this.readPoisonedEventIdsSync(),
-      run: runTraceState.run,
-      retryingEventId: meta.retrying_event_id,
-      timeline: runTraceState.timeline,
-      userId: meta.user_id,
-    };
+    return projected.record;
   }
 
-  private ensureMetaColumnSync(columnName: string, columnDefinition: string): void {
-    const hasColumn = this.sql.exec<{ name: DurableObjectSqlValue }>(
-      "PRAGMA table_info(runner_meta)",
-    ).toArray().some((row) => row.name === columnName);
-
-    if (!hasColumn) {
-      this.sql.exec(`ALTER TABLE runner_meta ADD COLUMN ${columnName} ${columnDefinition}`);
+  private repairStoredMetaStateSync(): void {
+    const meta = this.selectMetaRowSync();
+    if (!meta) {
+      return;
     }
+
+    const projected = projectRunnerStateRecord({
+      meta,
+      pendingDispatches: [],
+      poisonedEventIds: [],
+    });
+    if (!projected.changed) {
+      return;
+    }
+
+    Object.assign(meta, projected.sanitizedMeta);
+    this.writeMetaRowSync(meta);
   }
 
   private requireMetaRowSync(): RunnerMetaRow {
@@ -743,7 +645,7 @@ export class RunnerQueueStore {
       throw new Error("Hosted runner user is not initialized.");
     }
 
-    const meta = defaultMetaRow(userId);
+    const meta = createDefaultRunnerMetaRow(userId);
     this.insertMetaRowSync(meta);
     return meta;
   }
@@ -1041,243 +943,4 @@ export class RunnerQueueStore {
       MAX_POISONED_EVENT_IDS,
     );
   }
-}
-
-function appendBoundedEventId(eventIds: readonly string[], eventId: string, limit: number): string[] {
-  return [...eventIds.filter((entry) => entry !== eventId), eventId].slice(-limit);
-}
-
-function normalizePreferredWakeAt(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const parsedMs = Date.parse(value);
-  if (!Number.isFinite(parsedMs) || parsedMs <= Date.now()) {
-    return null;
-  }
-
-  return new Date(parsedMs).toISOString();
-}
-
-function nextConsumedEventExactExpiryIso(): string {
-  return new Date(Date.now() + CONSUMED_EVENT_EXACT_TTL_MS).toISOString();
-}
-
-function assignBundleRefs(
-  meta: RunnerMetaRow,
-  nextBundleRefs: RunnerStateRecord["bundleRefs"],
-): void {
-  const currentAgentStateRef = parseHostedBundleRefJson(meta.agent_state_bundle_ref_json);
-  const currentVaultRef = parseHostedBundleRefJson(meta.vault_bundle_ref_json);
-
-  if (!sameBundleRef(currentAgentStateRef, nextBundleRefs.agentState)) {
-    meta.agent_state_bundle_ref_json = stringifyHostedBundleRef(nextBundleRefs.agentState);
-    meta.agent_state_bundle_version += 1;
-  }
-
-  if (!sameBundleRef(currentVaultRef, nextBundleRefs.vault)) {
-    meta.vault_bundle_ref_json = stringifyHostedBundleRef(nextBundleRefs.vault);
-    meta.vault_bundle_version += 1;
-  }
-}
-
-function defaultMetaRow(userId: string): RunnerMetaRow {
-  return {
-    activated: 0,
-    agent_state_bundle_ref_json: null,
-    agent_state_bundle_version: 0,
-    backpressured_event_ids_json: "[]",
-    in_flight: 0,
-    last_error: null,
-    last_error_at: null,
-    last_error_code: null,
-    last_event_id: null,
-    last_run_at: null,
-    next_wake_at: null,
-    retrying_event_id: null,
-    run_json: null,
-    timeline_json: "[]",
-    user_id: userId,
-    vault_bundle_ref_json: null,
-    vault_bundle_version: 0,
-  };
-}
-
-function parseHostedBundleRefJson(value: string | null): HostedExecutionBundleRef | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(value) as HostedExecutionBundleRef;
-    return (
-      parsed
-      && typeof parsed.hash === "string"
-      && typeof parsed.key === "string"
-      && typeof parsed.size === "number"
-      && typeof parsed.updatedAt === "string"
-    )
-      ? parsed
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseStringArray(value: string): string[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((entry): entry is string => typeof entry === "string")
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function appendBoundedTimelineEntry(
-  entries: readonly HostedExecutionTimelineEntry[],
-  entry: HostedExecutionTimelineEntry,
-  limit: number,
-): HostedExecutionTimelineEntry[] {
-  return [...entries, entry].slice(-limit);
-}
-
-function parseHostedExecutionRunStatusJson(value: string | null): HostedExecutionRunStatus | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return parseHostedExecutionRunStatus(JSON.parse(value) as unknown);
-  } catch {
-    return null;
-  }
-}
-
-function parseHostedExecutionTimelineEntriesJson(value: string): HostedExecutionTimelineEntry[] {
-  try {
-    return parseHostedExecutionTimelineEntries(JSON.parse(value) as unknown);
-  } catch {
-    return [];
-  }
-}
-
-function stringifyRunStatus(value: HostedExecutionRunStatus | null): string | null {
-  return value ? JSON.stringify(value) : null;
-}
-
-function stringifyHostedBundleRef(value: HostedExecutionBundleRef | null): string | null {
-  return value ? JSON.stringify(value) : null;
-}
-
-function sanitizeStoredBundleRefs(meta: RunnerMetaRow): {
-  agentState: HostedExecutionBundleRef | null;
-  changed: boolean;
-  vault: HostedExecutionBundleRef | null;
-  warning: string | null;
-} {
-  let changed = false;
-  const clearedKinds: string[] = [];
-
-  const agentState = parseHostedBundleRefJson(meta.agent_state_bundle_ref_json);
-  if (meta.agent_state_bundle_ref_json && !agentState) {
-    changed = true;
-    clearedKinds.push("agent-state");
-  }
-
-  const vault = parseHostedBundleRefJson(meta.vault_bundle_ref_json);
-  if (meta.vault_bundle_ref_json && !vault) {
-    changed = true;
-    clearedKinds.push("vault");
-  }
-
-  return {
-    agentState,
-    changed,
-    vault,
-    warning: clearedKinds.length > 0
-      ? `Hosted runner cleared malformed bundle ref(s): ${clearedKinds.join(", ")}.`
-      : null,
-  };
-}
-
-function sanitizeStoredRunTrace(meta: RunnerMetaRow): {
-  changed: boolean;
-  run: HostedExecutionRunStatus | null;
-  timeline: HostedExecutionTimelineEntry[];
-  warning: string | null;
-} {
-  let changed = false;
-  const clearedKinds: string[] = [];
-
-  const run = parseHostedExecutionRunStatusJson(meta.run_json);
-  if (meta.run_json && !run) {
-    changed = true;
-    clearedKinds.push("run");
-  }
-
-  const timeline = parseHostedExecutionTimelineEntriesJson(meta.timeline_json);
-  if (meta.timeline_json && meta.timeline_json !== "[]" && timeline.length === 0) {
-    changed = true;
-    clearedKinds.push("timeline");
-  }
-
-  const boundedTimeline = timeline.slice(-MAX_RUN_TIMELINE_ENTRIES);
-  if (boundedTimeline.length !== timeline.length) {
-    changed = true;
-    clearedKinds.push("timeline-pruned");
-  }
-
-  return {
-    changed,
-    run,
-    timeline: boundedTimeline,
-    warning: clearedKinds.length > 0
-      ? `Hosted runner normalized run trace field(s): ${clearedKinds.join(", ")}.`
-      : null,
-  };
-}
-
-function classifyMalformedPendingDispatchError(error: unknown): {
-  errorCode: string;
-  message: string;
-} {
-  const errorCode = deriveHostedExecutionErrorCode(error);
-  if (isInvalidRequestFamilyErrorCode(errorCode)) {
-    return {
-      errorCode: "invalid_request",
-      message: "Hosted runner poisoned a malformed pending dispatch.",
-    };
-  }
-
-  return {
-    errorCode,
-    message: `Hosted runner poisoned a malformed pending dispatch. ${summarizeHostedExecutionError(error)}`,
-  };
-}
-
-function isInvalidRequestFamilyErrorCode(errorCode: string): boolean {
-  return errorCode === "invalid_request"
-    || errorCode === "range_error"
-    || errorCode === "reference_error"
-    || errorCode === "syntax_error"
-    || errorCode === "type_error"
-    || errorCode === "uri_error";
-}
-
-function mergeRunnerLastError(
-  current: string | null,
-  warning: string | null,
-): string | null {
-  if (!warning) {
-    return current;
-  }
-
-  if (!current) {
-    return warning;
-  }
-
-  return current.includes(warning) ? current : `${current} ${warning}`;
 }

@@ -173,8 +173,8 @@ Add whichever hosted features you actually want the containerized runner to supp
 From the repo root:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm --dir apps/cloudflare verify
+corepack pnpm install --frozen-lockfile
+corepack pnpm --dir apps/cloudflare verify
 ```
 
 If you want the faster Node-only loop or just the Workers-runtime lane locally, run:

@@ -1,40 +1,46 @@
 import { randomUUID } from 'node:crypto'
 
 import {
-  deliverAssistantOutboxMessage,
-  type AssistantOutboxDispatchMode,
-} from '@murph/assistant-core'
-import {
+  createGatewayInvalidRuntimeIdError,
+  createGatewayOutboxMessageId,
+  createGatewaySessionNotFoundError,
+  createGatewayUnsupportedOperationError,
+  gatewayBindingDeliveryFromRoute,
+  gatewayChannelSupportsReplyToMessage,
   gatewaySendMessageInputSchema,
   gatewaySendMessageResultSchema,
+  getGatewayConversationFromSnapshot,
+  readGatewayConversationSessionToken,
+  readGatewayMessageRouteToken,
   type GatewaySendMessageInput,
   type GatewaySendMessageResult,
 } from '@murph/gateway-core'
 import {
-  createGatewayOutboxMessageId,
-  readGatewayConversationSessionToken,
-  readGatewayMessageRouteToken,
-} from '@murph/gateway-core'
-import {
-  createGatewayInvalidRuntimeIdError,
-  createGatewaySessionNotFoundError,
-  createGatewayUnsupportedOperationError,
-} from '@murph/gateway-core'
-import { getGatewayConversationFromSnapshot } from '@murph/gateway-core'
+  assistantGatewayLocalMessageSender,
+  type GatewayLocalDispatchMode,
+  type GatewayLocalMessageSender,
+  type GatewayLocalProjectionSourceReader,
+} from './assistant-adapter.js'
 import { LocalGatewayProjectionStore } from './store.js'
-import {
-  gatewayBindingDeliveryFromRoute,
-  gatewayChannelSupportsReplyToMessage,
-} from '@murph/gateway-core'
 
 export async function sendGatewayMessageLocal(input: {
-  dispatchMode?: AssistantOutboxDispatchMode
+  dispatchMode?: GatewayLocalDispatchMode
+  messageSender?: GatewayLocalMessageSender
+  sourceReader?: GatewayLocalProjectionSourceReader
   vault: string
 } & GatewaySendMessageInput): Promise<GatewaySendMessageResult> {
-  const { dispatchMode, vault, ...gatewayInput } = input
+  const {
+    dispatchMode,
+    messageSender = assistantGatewayLocalMessageSender,
+    sourceReader,
+    vault,
+    ...gatewayInput
+  } = input
   const parsed = gatewaySendMessageInputSchema.parse(gatewayInput)
   const routeToken = readGatewayConversationSessionTokenOrThrow(parsed.sessionKey)
-  const store = new LocalGatewayProjectionStore(vault)
+  const store = new LocalGatewayProjectionStore(vault, {
+    sourceReader,
+  })
 
   try {
     const snapshot = await store.syncAndReadSnapshot()
@@ -72,7 +78,7 @@ export async function sendGatewayMessageLocal(input: {
       routeToken,
       parsed.clientRequestId,
     )
-    const delivered = await deliverAssistantOutboxMessage({
+    const delivered = await messageSender.deliver({
       actorId: conversation.route.participantId,
       bindingDelivery,
       channel: conversation.route.channel,
@@ -90,26 +96,18 @@ export async function sendGatewayMessageLocal(input: {
     })
 
     if (delivered.kind === 'failed') {
-      const detail = delivered.deliveryError?.message ?? 'Gateway delivery failed.'
-      throw createGatewayUnsupportedOperationError(detail)
+      throw createGatewayUnsupportedOperationError(
+        delivered.deliveryErrorMessage ?? 'Gateway delivery failed.',
+      )
     }
 
     await store.sync().catch(() => undefined)
 
     return gatewaySendMessageResultSchema.parse({
       sessionKey: parsed.sessionKey,
-      messageId: createGatewayOutboxMessageId(routeToken, delivered.intent.intentId),
+      messageId: createGatewayOutboxMessageId(routeToken, delivered.intentId),
       queued: delivered.kind !== 'sent',
-      delivery: delivered.delivery
-        ? {
-            channel: delivered.delivery.channel,
-            idempotencyKey: delivered.delivery.idempotencyKey ?? null,
-            target: delivered.delivery.target,
-            targetKind: delivered.delivery.targetKind,
-            sentAt: delivered.delivery.sentAt,
-            messageLength: delivered.delivery.messageLength,
-          }
-        : null,
+      delivery: delivered.delivery,
     })
   } finally {
     store.close()

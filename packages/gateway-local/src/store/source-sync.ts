@@ -12,12 +12,11 @@ import {
   resolveInboxRuntimePaths,
 } from '@murph/runtime-state'
 
-import {
-  type AssistantOutboxIntent,
-  type AssistantSession,
-} from '@murph/assistant-core'
-
 import type { GatewayAttachment, GatewayConversationRoute } from '@murph/gateway-core'
+import type {
+  GatewayLocalOutboxSource,
+  GatewayLocalSessionSource,
+} from '../assistant-adapter.js'
 import {
   createGatewayAttachmentId,
   createGatewayCaptureMessageId,
@@ -96,7 +95,7 @@ export interface OutboxSourceRow {
   routeKey: string
   sentAt: string | null
   sessionKey: string
-  status: AssistantOutboxIntent['status']
+  status: GatewayLocalOutboxSource['status']
   threadId: string | null
   updatedAt: string
 }
@@ -268,7 +267,7 @@ export function upsertCaptureSources(database: DatabaseSync, captures: readonly 
   }
 }
 
-export function replaceSessionSources(database: DatabaseSync, sessions: readonly AssistantSession[]): void {
+export function replaceSessionSources(database: DatabaseSync, sessions: readonly GatewayLocalSessionSource[]): void {
   database.prepare('DELETE FROM gateway_session_sources').run()
   const insert = database.prepare(`
     INSERT INTO gateway_session_sources (
@@ -311,7 +310,7 @@ export function replaceSessionSources(database: DatabaseSync, sessions: readonly
   }
 }
 
-export function replaceOutboxSources(database: DatabaseSync, intents: readonly AssistantOutboxIntent[]): void {
+export function replaceOutboxSources(database: DatabaseSync, intents: readonly GatewayLocalOutboxSource[]): void {
   database.prepare('DELETE FROM gateway_outbox_sources').run()
   const insert = database.prepare(`
     INSERT INTO gateway_outbox_sources (
@@ -368,7 +367,7 @@ export function replaceOutboxSources(database: DatabaseSync, intents: readonly A
   }
 }
 
-export function computeSessionSyncSignature(sessions: readonly AssistantSession[]): string {
+export function computeSessionSyncSignature(sessions: readonly GatewayLocalSessionSource[]): string {
   return JSON.stringify(
     [...sessions]
       .map((session) => ({
@@ -381,7 +380,7 @@ export function computeSessionSyncSignature(sessions: readonly AssistantSession[
   )
 }
 
-export function computeOutboxSyncSignature(intents: readonly AssistantOutboxIntent[]): string {
+export function computeOutboxSyncSignature(intents: readonly GatewayLocalOutboxSource[]): string {
   return JSON.stringify(
     [...intents]
       .map((intent) => ({

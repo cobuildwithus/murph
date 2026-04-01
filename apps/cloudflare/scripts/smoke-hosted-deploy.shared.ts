@@ -1,18 +1,14 @@
 import {
   buildHostedExecutionUserRunPath,
   buildHostedExecutionUserStatusPath,
+  type HostedExecutionBundleRef,
 } from "@murph/hosted-execution";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 
 type FetchLike = typeof fetch;
 
-interface SmokeBundleRef {
-  hash: string;
-  key: string;
-  size: number;
-  updatedAt: string;
-}
+type SmokeBundleRef = HostedExecutionBundleRef;
 
 interface SmokeUserStatus {
   bundleRefs: {

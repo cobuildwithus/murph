@@ -15,8 +15,9 @@ Last verified: 2026-04-01
 
 - Keep `pnpm-lock.yaml` committed and update it in the same change as every manifest edit; setup, onboarding, deploy, and reproducibility docs/scripts should install with `pnpm install --frozen-lockfile` unless the task is intentionally editing dependencies.
 - Do not introduce third-party dependencies via `git:`, `git+`, `github:`, `http:`, `https:`, `file:`, `link:`, `portal:`, or `npm:` alias specs. Internal workspace packages must use the `workspace:` protocol.
+- Keep the root pnpm supply-chain controls enabled: exact package-manager pinning, `packageManagerStrictVersion`, `managePackageManagerVersions`, `minimumReleaseAge`, `trustPolicy`, `blockExoticSubdeps`, and explicit `allowBuilds` review. Do not bypass them with `dangerouslyAllowAllBuilds: true`.
 - Prefer repo-local helpers or built-in platform APIs over one-off utility packages when the replacement is small, stable, and auditable.
-- When adding or updating dependencies, review the manifest and lockfile together, run `pnpm deps:guard`, and run `pnpm deps:audit` before handoff.
+- When adding or updating dependencies, review the manifest and lockfile together, run `pnpm deps:guard`, run `pnpm deps:audit`, and review blocked install scripts with `pnpm deps:ignored-builds` / `pnpm deps:approve-builds` before handoff. Keep any `allowBuilds`, `minimumReleaseAgeExclude`, or `trustPolicyExclude` exceptions as narrow and reviewable as possible.
 
 ## Bootstrap Security Posture
 

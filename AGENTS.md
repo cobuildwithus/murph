@@ -48,6 +48,8 @@ Always read these before repo code/docs/test/config work:
 - Shared runtime or domain logic must live below CLI/app packages in one owning package. If multiple siblings need the same code, move it to a shared owner instead of cross-importing sibling internals, building helper grab-bags across layers, or using sibling-to-sibling re-exports.
 - Do not reintroduce custom Turbopack loader-based rewriting for repo-local workspace sources.
 - Dependency changes are high-risk: do not add or update npm packages unless the same change also updates the committed lockfile, uses the public registry instead of git/url/file/alias specs, and records why a repo-local helper or built-in API was not sufficient.
+- After dependency updates on a trusted machine, review blocked install scripts with `pnpm deps:ignored-builds` / `pnpm deps:approve-builds`, keep `allowBuilds` entries minimal, and never set `dangerouslyAllowAllBuilds: true`.
+- When a hotfix needs a pnpm supply-chain exception, prefer version-scoped `minimumReleaseAgeExclude` or `trustPolicyExclude` entries over package-wide carve-outs, and document the reason in the handoff.
 - Outside intentional dependency-edit flows, installs and setup paths must use the committed lockfile with `pnpm install --frozen-lockfile`.
 - Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
 - Do not invent compatibility, deployment, or runtime requirements. Document them in repo docs and scripts in the same change that introduces them.
