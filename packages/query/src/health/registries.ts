@@ -29,34 +29,21 @@ import {
   readMarkdownDocument,
   walkRelativeFiles,
 } from "./loaders.ts";
-
 import type {
   FrontmatterObject,
   MarkdownDocumentRecord,
 } from "./shared.ts";
-
-export interface RegistryDocumentEnvelope {
-  relativePath: string;
-  markdown: string;
-  body: string;
-  attributes: FrontmatterObject;
-}
-
-export interface RegistryQueryEntity {
-  id: string;
-  slug: string;
-  title: string | null;
-  status: string | null;
-}
-
-export interface RegistryStoredDocument<
-  TEntity extends RegistryQueryEntity = RegistryQueryEntity,
-> {
-  entity: TEntity;
-  document: RegistryDocumentEnvelope;
-}
-
-export type RegistryMarkdownRecord = RegistryStoredDocument<RegistryQueryEntity>;
+export type {
+  RegistryDocumentEnvelope,
+  RegistryMarkdownRecord,
+  RegistryQueryEntity,
+  RegistryStoredDocument,
+} from "./registry-record.ts";
+import type {
+  RegistryMarkdownRecord,
+  RegistryQueryEntity,
+  RegistryStoredDocument,
+} from "./registry-record.ts";
 
 export interface RegistryListOptions {
   status?: string | string[];

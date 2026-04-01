@@ -15,8 +15,7 @@ import {
   type CanonicalEntityLinkType,
 } from "../../canonical-entities.ts";
 import { firstString } from "../shared.ts";
-
-import type { RegistryMarkdownRecord } from "../registries.ts";
+import type { RegistryMarkdownRecord } from "../registry-record.ts";
 
 const REGISTRY_LINK_TYPE_MAP = {
   parent_goal: "parent_of",

@@ -23,7 +23,7 @@ import type {
   ExportPackHealthContext,
   ExportPackHistoryRecord,
   ExportPackProfileSnapshotRecord,
-} from "./export-pack.ts";
+} from "./export-pack-health-types.ts";
 
 export interface ExportPackHealthReadResult {
   health: ExportPackHealthContext;
