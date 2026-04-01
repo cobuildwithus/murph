@@ -233,6 +233,17 @@ describe("device sync callback redirect helpers", () => {
     await expect(response.text()).resolves.toBe("ok:demo");
   });
 
+  it("resolves and decodes route params through the shared helper", async () => {
+    await expect(
+      httpModule.resolveDecodedRouteParam(
+        Promise.resolve({
+          provider: "oura%2Flegacy",
+        }),
+        "provider",
+      ),
+    ).resolves.toBe("oura/legacy");
+  });
+
   it("wraps thrown handler errors with the hosted device-sync JSON mapper", async () => {
     const sensitiveBodySnippet =
       "account_id=acct_fake_sensitive_789 access_token=tok_fake_sensitive_987 scope=recovery";

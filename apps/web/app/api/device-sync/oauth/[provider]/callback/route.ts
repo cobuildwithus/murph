@@ -6,15 +6,14 @@ import {
   errorToCallbackRedirect,
   jsonError,
   providerCallbackRedirect,
-  resolveRouteParams,
+  resolveDecodedRouteParam,
 } from "../../../../../../src/lib/device-sync/http";
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) {
-  const { provider } = await resolveRouteParams(context.params);
-  const providerName = decodeURIComponent(provider);
+  const providerName = await resolveDecodedRouteParam(context.params, "provider");
 
   try {
     const controlPlane = createHostedDeviceSyncControlPlane(request);

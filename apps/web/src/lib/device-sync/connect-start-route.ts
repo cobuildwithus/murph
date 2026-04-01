@@ -2,7 +2,7 @@ import { createHostedDeviceSyncControlPlane } from "@/src/lib/device-sync/contro
 import {
   jsonOk,
   readOptionalJsonObject,
-  resolveRouteParams,
+  resolveDecodedRouteParam,
   withJsonError,
 } from "@/src/lib/device-sync/http";
 
@@ -38,16 +38,16 @@ export const hostedDeviceSyncConnectStartPost = withJsonError(async (
   request: Request,
   context: HostedDeviceSyncProviderRouteContext,
 ) => {
-  const { provider } = await resolveRouteParams(context.params);
   const controlPlane = createHostedDeviceSyncControlPlane(request);
   controlPlane.assertBrowserMutationOrigin();
   const user = await controlPlane.requireAuthenticatedUser();
   const body = await readOptionalJsonObject(request);
   const returnTo = typeof body.returnTo === "string" ? body.returnTo : null;
+  const provider = await resolveDecodedRouteParam(context.params, "provider");
   return jsonOk(
     await controlPlane.startConnection(
       user.id,
-      decodeURIComponent(provider),
+      provider,
       returnTo,
     ),
   );

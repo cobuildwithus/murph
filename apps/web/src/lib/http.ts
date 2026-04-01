@@ -52,6 +52,17 @@ export async function resolveRouteParams<TParams extends Record<string, string>>
   return Promise.resolve(params);
 }
 
+export async function resolveDecodedRouteParam<
+  TParams extends Record<string, string>,
+  TKey extends keyof TParams & string,
+>(
+  params: Promise<TParams> | TParams,
+  key: TKey,
+): Promise<string> {
+  const resolvedParams = await resolveRouteParams(params);
+  return decodeURIComponent(resolvedParams[key]);
+}
+
 export function mapDomainJsonError(error: {
   code: string;
   message: string;

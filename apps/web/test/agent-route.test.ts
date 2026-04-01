@@ -206,6 +206,27 @@ describe("hosted device-sync agent and webhook routes", () => {
     });
   });
 
+  it("decodes encoded webhook provider params before calling the control plane", async () => {
+    mocks.handleWebhook.mockResolvedValue({
+      ok: true,
+    });
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/oura%2Flegacy", {
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({ provider: "oura%2Flegacy" }),
+      },
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.handleWebhook).toHaveBeenCalledWith("oura/legacy");
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+    });
+  });
+
   it("keeps hosted webhook verification token mismatch behavior aligned with the shared Oura helper", async () => {
     const response = await webhookRoute.GET(
       new Request(
