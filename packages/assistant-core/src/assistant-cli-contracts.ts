@@ -356,33 +356,8 @@ export const assistantSessionSchema = z
   .strict()
 
 export function parseAssistantSessionRecord(value: unknown): AssistantSession {
-  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>
-    if ('codexPromptVersion' in record) {
-      throw new Error(
-        'Legacy top-level codexPromptVersion session records are no longer supported.',
-      )
-    }
-    const schema = record.schema
-    const hasProviderBinding = 'providerBinding' in record
-
-    if (schema === 'murph.assistant-session.v3' || hasProviderBinding) {
-      return assistantSessionSchema.parse({
-        ...record,
-        schema: 'murph.assistant-session.v3',
-      })
-    }
-  }
   return assistantSessionSchema.parse(value)
 }
-
-export function normalizeAssistantSessionRecord(value: unknown): AssistantSession {
-  return parseAssistantSessionRecord(value)
-}
-
-export const assistantSessionCompatSchema = z
-  .unknown()
-  .transform((value) => normalizeAssistantSessionRecord(value))
 
 const assistantSessionOutputSchema = assistantSessionSchema
 
@@ -1238,14 +1213,8 @@ export type AssistantProviderBinding = z.infer<
   typeof assistantProviderBindingSchema
 >
 type AssistantSessionRecord = z.infer<typeof assistantSessionSchema>
-export type AssistantSession = Omit<
-  AssistantSessionRecord,
-  'providerBinding' | 'schema'
-> & {
-  schema: AssistantSessionRecord['schema']
+export type AssistantSession = Omit<AssistantSessionRecord, 'providerBinding'> & {
   providerBinding?: AssistantProviderBinding | null
-  providerSessionId?: string | null
-  providerState?: AssistantSessionProviderState | null
 }
 export type AssistantProviderRouteRecovery = z.infer<
   typeof assistantProviderRouteRecoverySchema

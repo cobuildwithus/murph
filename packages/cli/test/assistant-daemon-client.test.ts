@@ -916,3 +916,33 @@ test('assistant daemon client preserves typed error codes from the control plane
     release()
   }
 })
+
+test('assistant daemon client rejects legacy daemon session payloads', async () => {
+  const { env, release } = registerAssistantdFetchHandler(async () =>
+    new Response(
+      JSON.stringify({
+        ...TEST_SESSION,
+        providerBinding: undefined,
+        providerSessionId: 'legacy-provider-session',
+        schema: undefined,
+      }),
+      { status: 200 },
+    ),
+  )
+
+  try {
+    await assert.rejects(
+      () =>
+        maybeGetAssistantSessionViaDaemon(
+          {
+            sessionId: TEST_SESSION.sessionId,
+            vault: '/tmp/vault',
+          },
+          env,
+        ),
+      /schema/u,
+    )
+  } finally {
+    release()
+  }
+})

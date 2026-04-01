@@ -96,7 +96,7 @@ test.sequential(
         spawnedProcess.env.DEVICE_SYNC_VAULT_ROOT,
         vaultRoot,
       )
-      assert.equal(spawnedProcess.env.VAULT_ROOT, undefined)
+      assert.equal(spawnedProcess.env.VAULT_ROOT, '/legacy-vault-root')
       assert.equal(
         spawnedProcess.env.DEVICE_SYNC_PUBLIC_BASE_URL,
         'http://localhost:8788',
