@@ -232,7 +232,7 @@ describe("hosted device-sync runtime", () => {
         lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
         lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
         lastWebhookAt: "2026-03-27T07:50:00.000Z",
-        nextReconcileAt: "2026-03-28T00:00:00.000Z",
+        nextReconcileAt: null,
       }),
     }));
     expect(markPendingJobsDeadForAccount).toHaveBeenCalledWith(
@@ -394,6 +394,111 @@ describe("hosted device-sync runtime", () => {
     expect(service.store.getAccountById).not.toHaveBeenCalled();
     expect(service.store.enqueueJob).not.toHaveBeenCalled();
     expect(state.hostedToLocalAccountIds.size).toBe(0);
+  });
+
+  it("treats hosted wake hints as advisory and ignores scope rewrites", async () => {
+    mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-03-26T12:00:00.000Z",
+            createdAt: "2026-03-26T12:00:00.000Z",
+            displayName: "Alice Oura",
+            externalAccountId: "oura_alice",
+            id: "hosted_advisory",
+            metadata: {},
+            provider: "oura",
+            scopes: ["heartrate"],
+            status: "active",
+            updatedAt: "2026-03-27T08:00:00.000Z",
+          },
+          tokenBundle: null,
+        },
+      ],
+      generatedAt: "2026-03-27T08:05:00.000Z",
+      userId: "user-123",
+    }));
+    mocks.resolveHostedDeviceSyncWakeContext.mockReturnValue({
+      connectionId: "hosted_advisory",
+      hint: {
+        jobs: [],
+        nextReconcileAt: "2026-03-27T19:00:00.000Z",
+        scopes: ["spoofed-scope"],
+      },
+      provider: "oura",
+    });
+    const account = {
+      id: "local_advisory",
+      provider: "oura",
+      externalAccountId: "oura_alice",
+      displayName: "Alice Oura",
+      status: "active",
+      scopes: ["heartrate"],
+      metadata: {},
+      connectedAt: "2026-03-26T12:00:00.000Z",
+      lastWebhookAt: null,
+      lastSyncStartedAt: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      createdAt: "2026-03-26T12:00:00.000Z",
+      updatedAt: "2026-03-27T08:00:00.000Z",
+      disconnectGeneration: 0,
+      accessTokenEncrypted: "enc:access",
+      refreshTokenEncrypted: null,
+      hostedObservedTokenVersion: null,
+      hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
+    };
+    const service = {
+      store: {
+        enqueueJob: vi.fn(),
+        getAccountByExternalAccount: vi.fn(() => account),
+        getAccountById: vi.fn(() => account),
+        hydrateHostedAccount: vi.fn(() => account),
+        markPendingJobsDeadForAccount: vi.fn(),
+        patchAccount: vi.fn(),
+      },
+    };
+
+    const { syncHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    await syncHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          connectionId: "hosted_advisory",
+          hint: {
+            jobs: [],
+            nextReconcileAt: "2026-03-27T19:00:00.000Z",
+            scopes: ["spoofed-scope"],
+          },
+          kind: "device-sync.wake",
+          provider: "oura",
+          reason: "webhook_hint",
+          userId: "user-123",
+        },
+        eventId: "evt_advisory_wake",
+        occurredAt: "2026-03-27T08:05:00.000Z",
+      },
+      secret: "secret-for-tests",
+      service: service as never,
+      timeoutMs: null,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "https://control.example.test",
+        internalToken: "internal-token",
+      },
+    });
+
+    expect(service.store.patchAccount).toHaveBeenCalledWith("local_advisory", {
+      nextReconcileAt: "2026-03-27T19:00:00.000Z",
+    });
+    expect(service.store.patchAccount).not.toHaveBeenCalledWith(
+      "local_advisory",
+      expect.objectContaining({
+        scopes: expect.anything(),
+      }),
+    );
   });
 
   it("hydrates hosted connection and token state while preserving local nextReconcileAt", async () => {
@@ -617,7 +722,7 @@ describe("hosted device-sync runtime", () => {
       localState: expect.objectContaining({
         lastErrorCode: "PROVIDER_AUTH",
         lastErrorMessage: "Reconnect locally",
-        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+        nextReconcileAt: "2026-03-27T12:00:00.000Z",
       }),
       tokens: expect.objectContaining({
         accessToken: "hosted-access",
@@ -947,7 +1052,7 @@ describe("hosted device-sync runtime", () => {
       hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
       localState: expect.objectContaining({
-        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+        nextReconcileAt: "2026-03-27T12:00:00.000Z",
       }),
       tokens: expect.objectContaining({
         accessToken: "stale-hosted-access",
@@ -1198,7 +1303,7 @@ describe("hosted device-sync runtime", () => {
     expect(codec.decrypt(String(tokens?.refreshTokenEncrypted))).toBe("hosted-refresh-v5");
   });
 
-  it("preserves local nextReconcileAt even when hosted connection state advances", async () => {
+  it("hydrates hosted-owned nextReconcileAt once the hosted connection state advances", async () => {
     mocks.fetchHostedDeviceSyncRuntimeSnapshot.mockResolvedValue(normalizeHostedSnapshotFixture({
       connections: [
         {
@@ -1306,7 +1411,7 @@ describe("hosted device-sync runtime", () => {
       hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
       localState: expect.objectContaining({
-        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+        nextReconcileAt: "2026-03-27T10:00:00.000Z",
       }),
     }));
   });
@@ -1386,6 +1491,107 @@ describe("hosted device-sync runtime", () => {
                 updatedAt: "2026-03-27T08:30:00.000Z",
               },
               tokenBundle: null,
+            },
+          ],
+          generatedAt: "2026-03-27T08:35:00.000Z",
+          userId: "user-123",
+        }),
+      },
+      timeoutMs: null,
+      webControlPlane: {
+        deviceSyncRuntimeBaseUrl: "https://control.example.test",
+        internalToken: "internal-token",
+      },
+    });
+
+    expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
+      updates: [],
+    }));
+  });
+
+  it("does not push a regressed nextReconcileAt back to the hosted control plane", async () => {
+    const { reconcileHostedDeviceSyncControlPlaneState } = await import("../src/hosted-device-sync-runtime.ts");
+    const { createSecretCodec } = await import("@murphai/device-syncd");
+    const codec = createSecretCodec("secret-for-tests");
+    const service = {
+      store: {
+        getAccountById: vi.fn(() => ({
+          accessTokenEncrypted: codec.encrypt("access"),
+          accessTokenExpiresAt: null,
+          connectedAt: "2026-03-26T12:00:00.000Z",
+          createdAt: "2026-03-26T12:00:00.000Z",
+          disconnectGeneration: 0,
+          displayName: "Alice Oura",
+          externalAccountId: "oura_alice",
+          hostedObservedTokenVersion: 7,
+          hostedObservedUpdatedAt: "2026-03-27T08:25:00.000Z",
+          id: "local_regressed_next_reconcile",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: "2026-03-27T08:30:00.000Z",
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: "2026-03-27T08:20:00.000Z",
+          lastWebhookAt: "2026-03-27T08:00:00.000Z",
+          metadata: {
+            source: "hosted",
+          },
+          nextReconcileAt: "2026-03-27T17:00:00.000Z",
+          provider: "oura",
+          refreshTokenEncrypted: null,
+          scopes: ["heartrate"],
+          status: "active",
+          updatedAt: "2026-03-27T08:30:00.000Z",
+        })),
+      },
+    };
+
+    await reconcileHostedDeviceSyncControlPlaneState({
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "user-123",
+        },
+        eventId: "evt_regressed_next_reconcile",
+        occurredAt: "2026-03-27T08:35:00.000Z",
+      },
+      secret: "secret-for-tests",
+      service: service as never,
+      state: {
+        hostedToLocalAccountIds: new Map([["hosted_regressed_next_reconcile", "local_regressed_next_reconcile"]]),
+        localToHostedAccountIds: new Map([["local_regressed_next_reconcile", "hosted_regressed_next_reconcile"]]),
+        observedTokenVersions: new Map([["hosted_regressed_next_reconcile", 7]]),
+        snapshot: normalizeHostedSnapshotFixture({
+          connections: [
+            {
+              connection: {
+                accessTokenExpiresAt: null,
+                connectedAt: "2026-03-26T12:00:00.000Z",
+                createdAt: "2026-03-26T12:00:00.000Z",
+                displayName: "Alice Oura",
+                externalAccountId: "oura_alice",
+                id: "hosted_regressed_next_reconcile",
+                lastErrorCode: null,
+                lastErrorMessage: null,
+                lastSyncCompletedAt: "2026-03-27T08:30:00.000Z",
+                lastSyncErrorAt: null,
+                lastSyncStartedAt: "2026-03-27T08:20:00.000Z",
+                lastWebhookAt: "2026-03-27T08:00:00.000Z",
+                metadata: {
+                  source: "hosted",
+                },
+                nextReconcileAt: "2026-03-27T18:00:00.000Z",
+                provider: "oura",
+                scopes: ["heartrate"],
+                status: "active",
+                updatedAt: "2026-03-27T08:25:00.000Z",
+              },
+              tokenBundle: {
+                accessToken: "access",
+                accessTokenExpiresAt: null,
+                keyVersion: "v1",
+                refreshToken: null,
+                tokenVersion: 7,
+              },
             },
           ],
           generatedAt: "2026-03-27T08:35:00.000Z",
