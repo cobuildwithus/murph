@@ -27,6 +27,7 @@ const cliPackageJson = JSON.parse(
   files?: string[]
   name?: string
   scripts?: Record<string, string>
+  version?: string
 }
 
 function runNodeScript(...args: string[]) {
@@ -233,7 +234,7 @@ describe('monorepo release flow coverage audit', () => {
       version: string
     }
 
-    expect(summary.version).toBe('0.0.0')
+    expect(summary.version).toBe(cliPackageJson.version)
     expect(summary.primaryPackage?.name).toBe('@murphai/murph')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
       '@murphai/contracts',
@@ -307,7 +308,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(verifyResult.status).not.toBe(0)
     expect(verifyResult.stdout).toBe('')
     expect(verifyResult.stderr).toContain(
-      'Expected release version --json, but manifest packages are on 0.0.0.',
+      `Expected release version --json, but manifest packages are on ${cliPackageJson.version}.`,
     )
 
     const packMissingValue = runNodeScript(
