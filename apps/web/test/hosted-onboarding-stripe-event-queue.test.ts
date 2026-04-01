@@ -6,6 +6,7 @@ import {
   HostedMemberStatus,
   HostedRevnetIssuanceStatus,
   HostedStripeEventStatus,
+  Prisma,
 } from "@prisma/client";
 import { REVNET_NATIVE_TOKEN } from "@cobuild/wire";
 import type Stripe from "stripe";
@@ -162,6 +163,84 @@ describe("hosted Stripe event queue", () => {
       status: HostedBillingCheckoutStatus.completed,
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("stores sparse Stripe snapshots and clears them after successful processing", async () => {
+    const harness = createStripeQueueHarness({
+      checkouts: [
+        {
+          checkoutUrl: "https://billing.example.test/cs_sparse_123",
+          id: "checkout_sparse_123",
+          inviteId: "invite_123",
+          memberId: "member_123",
+          mode: HostedBillingMode.subscription,
+          priceId: "price_123",
+          status: HostedBillingCheckoutStatus.open,
+          stripeCheckoutSessionId: "cs_sparse_123",
+        },
+      ],
+      invites: [
+        makeInvite(),
+      ],
+      members: [
+        makeMember({
+          billingMode: HostedBillingMode.subscription,
+          billingStatus: HostedBillingStatus.checkout_open,
+          status: HostedMemberStatus.registered,
+        }),
+      ],
+    });
+
+    await recordHostedStripeEvent({
+      event: buildStripeEvent({
+        createdAt: "2026-03-28T10:00:00.000Z",
+        id: "evt_sparse_checkout_123",
+        object: {
+          amount_total: 500,
+          client_reference_id: "member_123",
+          currency: "usd",
+          customer: "cus_123",
+          id: "cs_sparse_123",
+          metadata: {
+            inviteId: "invite_123",
+            memberId: "member_123",
+          },
+          mode: "subscription",
+          payment_status: "paid",
+          subscription: "sub_123",
+          unused_field: "drop-me",
+        },
+        type: "checkout.session.completed",
+      }),
+      prisma: harness.prisma,
+    });
+
+    expect(harness.stripeEvents[0]?.payloadJson).toEqual({
+      object: {
+        amount_total: 500,
+        client_reference_id: "member_123",
+        currency: "usd",
+        customer: "cus_123",
+        id: "cs_sparse_123",
+        metadata: {
+          memberId: "member_123",
+        },
+        mode: "subscription",
+        payment_status: "paid",
+        subscription: "sub_123",
+      },
+      type: "checkout.session.completed",
+    });
+
+    await drainHostedStripeEventQueue({
+      prisma: harness.prisma,
+    });
+
+    expect(harness.stripeEvents[0]).toMatchObject({
+      payloadJson: null,
+      processedAt: expect.any(Date),
+      status: HostedStripeEventStatus.completed,
+    });
   });
 
   it("blocks access and revokes sessions when a subscription becomes unpaid", async () => {
@@ -1865,7 +1944,7 @@ function createStripeQueueHarness(input: {
       lastErrorCode: null,
       lastErrorMessage: null,
       nextAttemptAt: data.nextAttemptAt,
-      payloadJson: data.payloadJson,
+      payloadJson: normalizeStripePayloadJson(data.payloadJson),
       paymentIntentId: data.paymentIntentId,
       processedAt: null,
       receivedAt: data.receivedAt,
@@ -1905,6 +1984,11 @@ function createStripeQueueHarness(input: {
         continue;
       }
 
+      if (key === "payloadJson") {
+        event.payloadJson = normalizeStripePayloadJson(value);
+        continue;
+      }
+
       (event as unknown as Record<string, unknown>)[key] = value;
     }
 
@@ -1920,9 +2004,16 @@ function createStripeQueueHarness(input: {
       throw new Error(`missing stripe event ${where.eventId}`);
     }
 
-    Object.assign(event, data, {
-      updatedAt: touch(),
-    });
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "payloadJson") {
+        event.payloadJson = normalizeStripePayloadJson(value);
+        continue;
+      }
+
+      (event as unknown as Record<string, unknown>)[key] = value;
+    }
+
+    event.updatedAt = touch();
     return event;
   });
 
@@ -2389,7 +2480,7 @@ type MutableStripeEvent = {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   nextAttemptAt: Date;
-  payloadJson: Record<string, unknown>;
+  payloadJson: Record<string, unknown> | null;
   paymentIntentId: string | null;
   processedAt: Date | null;
   receivedAt: Date;
@@ -2405,3 +2496,24 @@ type MutableRevnetIssuanceCreate = Omit<
   MutableRevnetIssuance,
   "confirmedAt" | "createdAt" | "failureCode" | "failureMessage" | "payTxHash" | "status" | "submittedAt" | "updatedAt"
 >;
+
+function normalizeStripePayloadJson(value: unknown): Record<string, unknown> | null {
+  return isPrismaNullSentinel(value) || !isRecord(value) ? null : { ...value };
+}
+
+function isPrismaNullSentinel(value: unknown): boolean {
+  return (
+    value === Prisma.DbNull
+    || value === Prisma.JsonNull
+    || value === Prisma.AnyNull
+    || (
+      typeof value === "object"
+      && value !== null
+      && Object.getOwnPropertySymbols(value).some((symbol) => String(symbol) === "Symbol(prisma.objectEnumValue)")
+    )
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

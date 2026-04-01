@@ -12,6 +12,7 @@ import {
   type HostedWebhookPlan,
   type HostedWebhookReceiptPersistenceClient,
 } from "./webhook-receipts";
+import { minimizeHostedTelegramUpdate } from "./webhook-event-snapshots";
 
 export type HostedOnboardingTelegramWebhookResponse = {
   duplicate?: boolean;
@@ -82,7 +83,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           botUserId: summary.botUserId,
           eventId: buildHostedTelegramWebhookEventId(input.update),
           occurredAt: summary.occurredAt,
-          telegramUpdate: input.update as unknown as Record<string, unknown>,
+          telegramUpdate: minimizeHostedTelegramUpdate(input.update),
           userId: existingMember.id,
         }),
       }),
