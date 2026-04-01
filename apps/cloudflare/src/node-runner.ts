@@ -6,13 +6,8 @@ import {
   type HostedAssistantRuntimeJobInput,
 } from "@murphai/assistant-runtime";
 import {
-  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL,
-  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
-  readHostedExecutionWebControlPlaneEnvironment,
   readHostedEmailCapabilities,
   type HostedExecutionRunnerResult,
-  type HostedExecutionWebControlPlaneEnvironment,
 } from "@murphai/hosted-execution";
 
 import {
@@ -21,24 +16,8 @@ import {
 } from "./runner-env.ts";
 import { normalizeHostedUserEnv } from "./user-env.ts";
 
-const HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL =
-  DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL;
-const HOSTED_RUNNER_SHARE_PACK_BASE_URL =
-  DEFAULT_HOSTED_EXECUTION_SHARE_PACK_PROXY_BASE_URL;
-const HOSTED_RUNNER_USAGE_BASE_URL =
-  DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL;
-
 let hostedExecutionRunStartHookForTests: (() => void) | null = null;
 let hostedExecutionRunModeForTests: "in-process" | "isolated" | null = null;
-let hostedExecutionCallbackBaseUrlsForTests: {
-  artifactsBaseUrl?: string | null;
-  commitBaseUrl?: string | null;
-  emailBaseUrl?: string | null;
-  sharePackBaseUrl?: string | null;
-  sharePackToken?: string | null;
-  sideEffectsBaseUrl?: string | null;
-  webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
-} | null = null;
 
 export function setHostedExecutionRunModeForTests(
   mode: "in-process" | "isolated" | null,
@@ -48,18 +27,6 @@ export function setHostedExecutionRunModeForTests(
 
 export function setHostedExecutionRunStartHookForTests(hook: (() => void) | null): void {
   hostedExecutionRunStartHookForTests = hook;
-}
-
-export function setHostedExecutionCallbackBaseUrlsForTests(input: {
-  artifactsBaseUrl?: string | null;
-  commitBaseUrl?: string | null;
-  emailBaseUrl?: string | null;
-  sharePackBaseUrl?: string | null;
-  sharePackToken?: string | null;
-  sideEffectsBaseUrl?: string | null;
-  webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
-} | null): void {
-  hostedExecutionCallbackBaseUrlsForTests = input;
 }
 
 export async function runHostedExecutionJob(
@@ -87,8 +54,6 @@ export async function runHostedExecutionJob(
 function buildHostedExecutionJobRuntime(
   requestedRuntime: HostedAssistantRuntimeConfig,
 ): HostedAssistantRuntimeConfig {
-  const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
-  const callbackWebControlPlane = callbackBaseUrls?.webControlPlane ?? null;
   const forwardedEnv: Record<string, string> = {
     ...buildHostedRunnerContainerEnv(process.env),
     ...(requestedRuntime.forwardedEnv ?? {}),
@@ -99,23 +64,8 @@ function buildHostedExecutionJobRuntime(
     HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
     HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
   };
-  const webControlPlaneFromEnv = readHostedExecutionWebControlPlaneEnvironment(
-    resolvedForwardedEnv,
-  );
 
   return {
-    ...(callbackBaseUrls?.artifactsBaseUrl === undefined
-      ? {}
-      : { artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl }),
-    ...(callbackBaseUrls?.commitBaseUrl === undefined
-      ? {}
-      : { commitBaseUrl: callbackBaseUrls.commitBaseUrl }),
-    ...(callbackBaseUrls?.emailBaseUrl === undefined
-      ? {}
-      : { emailBaseUrl: callbackBaseUrls.emailBaseUrl }),
-    ...(callbackBaseUrls?.sideEffectsBaseUrl === undefined
-      ? {}
-      : { sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl }),
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
       Number.parseInt(
         resolvedForwardedEnv.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "",
@@ -128,27 +78,5 @@ function buildHostedExecutionJobRuntime(
       normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, resolvedForwardedEnv),
       resolvedForwardedEnv,
     ),
-    webControlPlane: {
-      ...webControlPlaneFromEnv,
-      ...(callbackWebControlPlane ?? {}),
-      deviceSyncRuntimeBaseUrl:
-        callbackWebControlPlane?.deviceSyncRuntimeBaseUrl
-        ?? webControlPlaneFromEnv.deviceSyncRuntimeBaseUrl
-        ?? HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
-      shareBaseUrl:
-        callbackBaseUrls?.sharePackBaseUrl
-        ?? callbackWebControlPlane?.shareBaseUrl
-        ?? webControlPlaneFromEnv.shareBaseUrl
-        ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
-      shareToken:
-        callbackBaseUrls?.sharePackToken
-        ?? callbackWebControlPlane?.shareToken
-        ?? webControlPlaneFromEnv.shareToken
-        ?? null,
-      usageBaseUrl:
-        callbackWebControlPlane?.usageBaseUrl
-        ?? webControlPlaneFromEnv.usageBaseUrl
-        ?? HOSTED_RUNNER_USAGE_BASE_URL,
-    },
   };
 }

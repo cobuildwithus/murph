@@ -168,8 +168,10 @@ describe("hosted device-sync internal routes", () => {
         body: JSON.stringify({
           updates: [
             {
+              connection: {
+                status: "active",
+              },
               connectionId: "dsc_123",
-              status: "active",
             },
           ],
         }),

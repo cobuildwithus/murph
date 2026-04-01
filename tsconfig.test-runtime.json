@@ -8,6 +8,9 @@
       "path": "./packages/hosted-execution"
     },
     {
+      "path": "./packages/messaging-ingress"
+    },
+    {
       "path": "./packages/runtime-state"
     },
     {

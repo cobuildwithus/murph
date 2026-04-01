@@ -235,6 +235,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(summary.primaryPackage?.name).toBe('@murphai/murph')
     expect(summary.packages.map((entry) => entry.name)).toEqual([
       '@murphai/contracts',
+      '@murphai/messaging-ingress',
       '@murphai/runtime-state',
       '@murphai/gateway-core',
       '@murphai/core',

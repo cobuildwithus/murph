@@ -17,15 +17,10 @@ export interface HostedExecutionCommitCallback {
 }
 
 export interface HostedAssistantRuntimeConfig {
-  artifactsBaseUrl?: string | null;
-  commitBaseUrl?: string | null;
   commitTimeoutMs?: number | null;
-  emailBaseUrl?: string | null;
   internalWorkerProxyToken?: string | null;
   forwardedEnv?: Readonly<Record<string, string>>;
-  sideEffectsBaseUrl?: string | null;
   userEnv?: Readonly<Record<string, string>>;
-  webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
 }
 
 export interface HostedAssistantRuntimeJobRequest extends HostedExecutionRunnerRequest {

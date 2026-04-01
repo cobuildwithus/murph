@@ -78,6 +78,8 @@ const requiredRuntimeArtifactPaths = [
   path.join(repoRoot, 'packages/contracts/dist/command-capabilities.d.ts'),
   path.join(repoRoot, 'packages/hosted-execution/dist/index.js'),
   path.join(repoRoot, 'packages/hosted-execution/dist/index.d.ts'),
+  path.join(repoRoot, 'packages/messaging-ingress/dist/index.js'),
+  path.join(repoRoot, 'packages/messaging-ingress/dist/index.d.ts'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.js'),
   path.join(repoRoot, 'packages/runtime-state/dist/index.d.ts'),
   path.join(repoRoot, 'packages/core/dist/index.js'),

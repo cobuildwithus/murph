@@ -44,7 +44,6 @@ vi.mock("@murphai/assistant-core", async () => {
 
 import {
   runHostedExecutionJob as runHostedExecutionJobInternal,
-  setHostedExecutionCallbackBaseUrlsForTests,
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
 } from "../src/node-runner.ts";
@@ -82,6 +81,52 @@ async function runHostedExecutionJob(
   }, options);
 }
 
+function installHostedFetchBaseUrlProxy(input: {
+  artifactsBaseUrl?: string;
+  commitBaseUrl?: string;
+  emailBaseUrl?: string;
+  sideEffectsBaseUrl?: string;
+}): () => void {
+  const previousFetch = global.fetch;
+  const delegateFetch = previousFetch ?? fetch;
+  const baseUrlByHost = new Map<string, string>();
+
+  if (input.artifactsBaseUrl) {
+    baseUrlByHost.set("artifacts.worker", input.artifactsBaseUrl);
+  }
+  if (input.commitBaseUrl) {
+    baseUrlByHost.set("commit.worker", input.commitBaseUrl);
+  }
+  if (input.emailBaseUrl) {
+    baseUrlByHost.set("email.worker", input.emailBaseUrl);
+  }
+  if (input.sideEffectsBaseUrl) {
+    baseUrlByHost.set("side-effects.worker", input.sideEffectsBaseUrl);
+  }
+
+  global.fetch = async (requestInput, init) => {
+    const request = requestInput instanceof Request ? requestInput : new Request(requestInput, init);
+    const url = new URL(request.url);
+    const overrideBaseUrl = baseUrlByHost.get(url.host);
+
+    if (!overrideBaseUrl) {
+      return await delegateFetch(request);
+    }
+
+    const proxiedUrl = new URL(`${url.pathname}${url.search}`, overrideBaseUrl);
+    return await delegateFetch(new Request(proxiedUrl.toString(), request));
+  };
+
+  return () => {
+    if (previousFetch) {
+      global.fetch = previousFetch;
+      return;
+    }
+
+    delete (globalThis as { fetch?: typeof fetch }).fetch;
+  };
+}
+
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
   const initialHostedAssistantAutomation = process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION;
@@ -89,7 +134,6 @@ describe("runHostedExecutionJob", () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
     process.env.HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION = "off";
-    setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests("in-process");
     const actualAssistantCore = await vi.importActual<typeof import("@murphai/assistant-core")>(
       "@murphai/assistant-core",
@@ -102,7 +146,6 @@ describe("runHostedExecutionJob", () => {
 
   afterEach(async () => {
     restoreEnvVar("HOSTED_EXECUTION_ENABLE_ASSISTANT_AUTOMATION", initialHostedAssistantAutomation);
-    setHostedExecutionCallbackBaseUrlsForTests(null);
     setHostedExecutionRunModeForTests(null);
     setHostedExecutionRunStartHookForTests(null);
     await Promise.all(cleanupPaths.splice(0).map((target) => rm(target, { force: true, recursive: true })));
@@ -523,8 +566,7 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted email test server to expose a TCP port.");
       }
-
-      setHostedExecutionCallbackBaseUrlsForTests({
+      const restoreFetch = installHostedFetchBaseUrlProxy({
         emailBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
@@ -547,8 +589,8 @@ describe("runHostedExecutionJob", () => {
 
       expect(result.result.summary).toContain("Persisted hosted email capture");
       expect(requests).toEqual(["GET /messages/raw_email_123"]);
+      restoreFetch();
     } finally {
-      setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
     }
@@ -602,8 +644,7 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted email test server to expose a TCP port.");
       }
-
-      setHostedExecutionCallbackBaseUrlsForTests({
+      const restoreFetch = installHostedFetchBaseUrlProxy({
         emailBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
@@ -644,11 +685,11 @@ describe("runHostedExecutionJob", () => {
         expect(capture?.actor.id).toBe("alice@example.test");
         expect(capture?.thread.id).toBeTruthy();
         expect(capture?.thread.isDirect).toBe(false);
+        restoreFetch();
       } finally {
         runtime.close();
       }
     } finally {
-      setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
     }
@@ -1038,8 +1079,7 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted artifact test server to expose a TCP port.");
       }
-
-      setHostedExecutionCallbackBaseUrlsForTests({
+      const restoreFetch = installHostedFetchBaseUrlProxy({
         artifactsBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
@@ -1086,8 +1126,8 @@ describe("runHostedExecutionJob", () => {
         "attachments",
         "report.pdf",
       ))).resolves.toEqual(Buffer.from("pdf-binary-artifact\n", "utf8"));
+      restoreFetch();
     } finally {
-      setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
     }
@@ -1193,8 +1233,7 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted artifact test server to expose a TCP port.");
       }
-
-      setHostedExecutionCallbackBaseUrlsForTests({
+      const restoreFetch = installHostedFetchBaseUrlProxy({
         artifactsBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
@@ -1215,8 +1254,8 @@ describe("runHostedExecutionJob", () => {
       })).rejects.toThrow(
         `Hosted runner artifact fetch failed for ${artifactHash} with HTTP 404.`,
       );
+      restoreFetch();
     } finally {
-      setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
     }
@@ -1308,11 +1347,6 @@ describe("runHostedExecutionJob", () => {
         throw new Error("Expected the hosted share payload test server to expose a TCP port.");
       }
 
-      setHostedExecutionCallbackBaseUrlsForTests({
-        sharePackBaseUrl: `http://127.0.0.1:${address.port}`,
-        sharePackToken: "share-pack-token",
-      });
-
       const result = await runHostedExecutionJob({
         bundles: activation.bundles,
         dispatch: {
@@ -1326,6 +1360,10 @@ describe("runHostedExecutionJob", () => {
           },
           eventId: "evt_share_123",
           occurredAt: "2026-03-26T12:30:00.000Z",
+        },
+        forwardedEnv: {
+          HOSTED_SHARE_API_BASE_URL: `http://127.0.0.1:${address.port}`,
+          HOSTED_SHARE_INTERNAL_TOKEN: "share-pack-token",
         },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-direct-"));
@@ -1345,7 +1383,6 @@ describe("runHostedExecutionJob", () => {
       expect(importedFood).toBeDefined();
       expect(result.result.summary).toContain(`Imported share pack "${pack.title}"`);
     } finally {
-      setHostedExecutionCallbackBaseUrlsForTests(null);
       sharePayloadServer.close();
       await once(sharePayloadServer, "close");
     }
@@ -1745,7 +1782,7 @@ describe("runHostedExecutionJob", () => {
       if (!address || typeof address === "string") {
         throw new Error("Expected the hosted test server to expose a TCP port.");
       }
-      setHostedExecutionCallbackBaseUrlsForTests({
+      const restoreFetch = installHostedFetchBaseUrlProxy({
         commitBaseUrl: `http://127.0.0.1:${address.port}`,
       });
 
@@ -1804,8 +1841,8 @@ describe("runHostedExecutionJob", () => {
       expect(startedRunCount).toBe(2);
       expect(commitCount).toBe(2);
       expect(maxCommitsInFlight).toBe(2);
+      restoreFetch();
     } finally {
-      setHostedExecutionCallbackBaseUrlsForTests(null);
       server.close();
       await once(server, "close");
       restoreEnvVar("HOSTED_EXECUTION_ALLOWED_USER_ENV_KEYS", previousAllowedUserEnvKeys);
@@ -2284,9 +2321,6 @@ describe("runHostedExecutionJob", () => {
       vaultRoot,
     });
 
-    setHostedExecutionCallbackBaseUrlsForTests({
-      sideEffectsBaseUrl: "http://side-effects.worker",
-    });
     hostedCliMocks.runAssistantAutomation.mockImplementation(() => {
       throw new Error("resume path should not rerun hosted automation");
     });

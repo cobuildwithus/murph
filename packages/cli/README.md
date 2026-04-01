@@ -59,6 +59,7 @@ The first publish set is:
 
 - `@murphai/contracts`
 - `@murphai/hosted-execution`
+- `@murphai/messaging-ingress`
 - `@murphai/runtime-state`
 - `@murphai/assistant-core`
 - `@murphai/gateway-core`

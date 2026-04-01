@@ -135,12 +135,16 @@ describe("hosted contact privacy", () => {
     expect(() => parseHostedDeviceSyncRuntimeApplyRequest({
       updates: [
         {
-          clearError: true,
           connectionId: "conn_123",
+          localState: {
+            clearError: true,
+          },
         },
         {
+          connection: {
+            status: "active",
+          },
           connectionId: "conn_123",
-          status: "active",
         },
       ],
       userId: "user_123",

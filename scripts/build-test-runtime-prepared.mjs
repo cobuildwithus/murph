@@ -9,6 +9,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const baseSmokeImportPaths = [
   "packages/contracts/dist/index.js",
   "packages/hosted-execution/dist/index.js",
+  "packages/messaging-ingress/dist/index.js",
   "packages/runtime-state/dist/index.js",
   "packages/assistant-core/dist/index.js",
   "packages/core/dist/index.js",
