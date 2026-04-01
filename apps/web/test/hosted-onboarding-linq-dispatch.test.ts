@@ -562,13 +562,10 @@ function withPrismaTransaction<
 >(prisma: T, tx: TTx): T & {
   $transaction: ReturnType<typeof vi.fn>;
 } {
-  let prismaWithTransaction: T & {
+  const prismaWithTransaction = prisma as T & {
     $transaction: ReturnType<typeof vi.fn>;
   };
   const transaction = vi.fn(async (callback: (tx: TTx) => Promise<unknown>) => callback(tx));
-  prismaWithTransaction = prisma as T & {
-    $transaction: ReturnType<typeof vi.fn>;
-  };
   prismaWithTransaction.$transaction = transaction;
   return prismaWithTransaction;
 }

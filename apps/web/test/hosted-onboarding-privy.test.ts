@@ -33,6 +33,8 @@ import {
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
 
+type HostedPrivySessionRecord = Parameters<typeof requireHostedPrivyUserForSession>[1];
+
 describe("hosted Privy verification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -172,7 +174,7 @@ describe("hosted Privy verification", () => {
           member: {
             privyUserId: "did:privy:user_123",
           },
-        } as any,
+        } as HostedPrivySessionRecord,
       ),
     ).resolves.toEqual({
       linkedAccounts: [
@@ -205,7 +207,7 @@ describe("hosted Privy verification", () => {
           member: {
             privyUserId: "did:privy:user_123",
           },
-        } as any,
+        } as HostedPrivySessionRecord,
       ),
     ).rejects.toMatchObject({
       code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
@@ -229,7 +231,7 @@ describe("hosted Privy verification", () => {
           member: {
             privyUserId: "did:privy:user_123",
           },
-        } as any,
+        } as HostedPrivySessionRecord,
       ),
     ).rejects.toMatchObject({
       code: "PRIVY_SESSION_MISMATCH",
@@ -252,7 +254,7 @@ describe("hosted Privy verification", () => {
           member: {
             privyUserId: null,
           },
-        } as any,
+        } as HostedPrivySessionRecord,
       ),
     ).rejects.toMatchObject({
       code: "PRIVY_SESSION_MISMATCH",

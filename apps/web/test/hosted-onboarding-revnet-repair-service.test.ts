@@ -25,6 +25,7 @@ import {
 } from "@/src/lib/hosted-onboarding/revnet-repair-service";
 
 const NOW = new Date("2026-03-27T12:00:00.000Z");
+type ReplayHostedRevnetIssuancePrisma = Parameters<typeof replayHostedRevnetIssuanceById>[0]["prisma"];
 
 describe("hosted RevNet repair service", () => {
   beforeEach(() => {
@@ -39,7 +40,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("lists failed rows plus stale submitting rows as repair candidates", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findMany: vi.fn().mockResolvedValue([
           makeIssuance({
@@ -65,7 +66,7 @@ describe("hosted RevNet repair service", () => {
           }),
         ]),
       },
-    };
+    });
 
     const result = await listHostedRevnetRepairCandidates({
       now: NOW,
@@ -104,7 +105,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("replays a failed issuance by resubmitting it with the stored issuance fields", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -127,7 +128,7 @@ describe("hosted RevNet repair service", () => {
         })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await replayHostedRevnetIssuanceById({
       issuanceId: "iss_failed_123",
@@ -165,7 +166,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("blocks stale broadcast-unknown replays until the operator explicitly forces them", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -176,7 +177,7 @@ describe("hosted RevNet repair service", () => {
           }),
         ),
       },
-    };
+    });
 
     await expect(
       replayHostedRevnetIssuanceById({
@@ -191,7 +192,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("blocks stale generic submitting replays until the operator explicitly forces them", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -202,7 +203,7 @@ describe("hosted RevNet repair service", () => {
           }),
         ),
       },
-    };
+    });
 
     await expect(
       replayHostedRevnetIssuanceById({
@@ -217,7 +218,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("allows a forced replay for a stale broadcast-unknown row only when no tx hash exists", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -241,7 +242,7 @@ describe("hosted RevNet repair service", () => {
         })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await replayHostedRevnetIssuanceById({
       allowUnknownBroadcastReplay: true,
@@ -259,7 +260,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("refuses to replay a stale broadcast-unknown row that already has a tx hash", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -271,7 +272,7 @@ describe("hosted RevNet repair service", () => {
           }),
         ),
       },
-    };
+    });
 
     await expect(
       replayHostedRevnetIssuanceById({
@@ -287,7 +288,7 @@ describe("hosted RevNet repair service", () => {
   });
 
   it("fails closed when another actor changes the row before the repair claim lands", async () => {
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -298,7 +299,7 @@ describe("hosted RevNet repair service", () => {
         ),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
-    };
+    });
 
     await expect(
       replayHostedRevnetIssuanceById({
@@ -315,7 +316,7 @@ describe("hosted RevNet repair service", () => {
 
   it("records broadcast-unknown failures when the replay submission outcome is unknown", async () => {
     mocks.submitHostedRevnetPayment.mockRejectedValue(new Error("already known"));
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn().mockResolvedValue(
           makeIssuance({
@@ -336,7 +337,7 @@ describe("hosted RevNet repair service", () => {
         })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-    };
+    });
 
     const result = await replayHostedRevnetIssuanceById({
       issuanceId: "iss_failed_123",
@@ -357,7 +358,7 @@ describe("hosted RevNet repair service", () => {
       id: "iss_failed_123",
       status: HostedRevnetIssuanceStatus.failed,
     });
-    const prisma: any = {
+    const prisma = asReplayHostedRevnetIssuancePrisma({
       hostedRevnetIssuance: {
         findUnique: vi.fn()
           .mockResolvedValueOnce(issuance)
@@ -367,7 +368,7 @@ describe("hosted RevNet repair service", () => {
           .mockResolvedValueOnce({ count: 1 })
           .mockResolvedValueOnce({ count: 0 }),
       },
-    };
+    });
 
     await expect(
       replayHostedRevnetIssuanceById({
@@ -422,4 +423,10 @@ function makeIssuance(overrides: Partial<{
     updatedAt: new Date("2026-03-26T12:00:00.000Z"),
     ...overrides,
   };
+}
+
+function asReplayHostedRevnetIssuancePrisma<T extends Record<string, unknown>>(
+  prisma: T,
+): T & ReplayHostedRevnetIssuancePrisma {
+  return prisma as T & ReplayHostedRevnetIssuancePrisma;
 }
