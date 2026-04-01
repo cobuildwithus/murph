@@ -516,6 +516,35 @@ async function writeExecutable(
   await chmod(absolutePath, 0o755)
 }
 
+async function writeRequiredCliDistSupportFiles(
+  cliPackageRoot: string,
+): Promise<void> {
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const supportPaths = [
+    path.join(cliDistRoot, 'index.js'),
+    path.join(cliDistRoot, 'vault-cli-contracts.js'),
+    path.join(cliDistRoot, 'inbox-cli-contracts.js'),
+    path.join(cliDistRoot, 'setup-cli.js'),
+    path.join(cliDistRoot, 'setup-agentmail.js'),
+    path.join(cliDistRoot, 'setup-assistant.js'),
+    path.join(cliDistRoot, 'setup-assistant-account.js'),
+    path.join(cliDistRoot, 'setup-services.js'),
+    path.join(cliDistRoot, 'setup-wizard.js'),
+    path.join(cliDistRoot, 'assistant', 'provider-catalog.js'),
+    path.join(cliDistRoot, 'setup-services', 'channels.js'),
+    path.join(cliDistRoot, 'setup-services', 'process.js'),
+    path.join(cliDistRoot, 'setup-services', 'scheduled-updates.js'),
+    path.join(cliDistRoot, 'setup-services', 'shell.js'),
+    path.join(cliDistRoot, 'setup-services', 'steps.js'),
+    path.join(cliDistRoot, 'setup-services', 'toolchain.js'),
+  ]
+
+  for (const supportPath of supportPaths) {
+    await mkdir(path.dirname(supportPath), { recursive: true })
+    await writeFile(supportPath, 'module.exports = {}\n', 'utf8')
+  }
+}
+
 function buildExpectedCliShimScript(
   cliBinPath: string,
   shimName: 'murph' | 'vault-cli' = 'murph',
@@ -651,20 +680,33 @@ fi
 cli_package_root="$repo_root/packages/cli"
 cli_bin_path="$cli_package_root/dist/bin.js"
 cli_source_bin_path="$cli_package_root/src/bin.ts"
+required_cli_dist_files=(
+  "$cli_bin_path"
+  "$cli_package_root/dist/index.js"
+  "$cli_package_root/dist/vault-cli-contracts.js"
+  "$cli_package_root/dist/inbox-cli-contracts.js"
+  "$cli_package_root/dist/setup-cli.js"
+  "$cli_package_root/dist/setup-agentmail.js"
+  "$cli_package_root/dist/setup-assistant.js"
+  "$cli_package_root/dist/setup-assistant-account.js"
+  "$cli_package_root/dist/setup-services.js"
+  "$cli_package_root/dist/setup-wizard.js"
+  "$cli_package_root/dist/assistant/provider-catalog.js"
+  "$cli_package_root/dist/setup-services/channels.js"
+  "$cli_package_root/dist/setup-services/process.js"
+  "$cli_package_root/dist/setup-services/scheduled-updates.js"
+  "$cli_package_root/dist/setup-services/shell.js"
+  "$cli_package_root/dist/setup-services/steps.js"
+  "$cli_package_root/dist/setup-services/toolchain.js"
+)
 
 cli_dist_ready=true
-if [ ! -f "$cli_bin_path" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/index.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/vault-cli-contracts.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/inbox-cli-contracts.js" ]; then
-  cli_dist_ready=false
-fi
+for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
+  if [ ! -f "$required_cli_dist_file" ]; then
+    cli_dist_ready=false
+    break
+  fi
+done
 
 is_discovery_invocation() {
   for arg in "$@"; do
@@ -704,30 +746,39 @@ fi
 
 ${workspaceCheckLines}
 
+build_failed=false
 if [ "\${#missing_packages[@]}" -gt 0 ]; then
   if command -v pnpm >/dev/null 2>&1; then
     for package_dir in "\${missing_packages[@]}"; do
-      pnpm --dir "$package_dir" build >/dev/null
+      if ! pnpm --dir "$package_dir" build >/dev/null; then
+        build_failed=true
+        break
+      fi
     done
   elif command -v corepack >/dev/null 2>&1; then
     for package_dir in "\${missing_packages[@]}"; do
-      corepack pnpm --dir "$package_dir" build >/dev/null
+      if ! corepack pnpm --dir "$package_dir" build >/dev/null; then
+        build_failed=true
+        break
+      fi
     done
   fi
 fi
 
 cli_dist_ready=true
-if [ ! -f "$cli_bin_path" ]; then
+if [ "$build_failed" = false ]; then
+  for required_cli_dist_file in "\${required_cli_dist_files[@]}"; do
+    if [ ! -f "$required_cli_dist_file" ]; then
+      cli_dist_ready=false
+      break
+    fi
+  done
+else
   cli_dist_ready=false
 fi
-if [ ! -f "$cli_package_root/dist/index.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/vault-cli-contracts.js" ]; then
-  cli_dist_ready=false
-fi
-if [ ! -f "$cli_package_root/dist/inbox-cli-contracts.js" ]; then
-  cli_dist_ready=false
+
+if [ "$cli_dist_ready" != true ]; then
+  printf '%s\n' 'Murph CLI shim could not refresh build artifacts; falling back to the source CLI.' >&2
 fi
 
 if [ "$cli_dist_ready" = true ]; then
@@ -3119,17 +3170,7 @@ test.sequential('CLI shim rebuilds missing workspace package dist outputs before
       )
     }
 
-    await writeFile(path.join(repoRoot, 'packages', 'cli', 'dist', 'index.js'), 'export {}\n', 'utf8')
-    await writeFile(
-      path.join(repoRoot, 'packages', 'cli', 'dist', 'vault-cli-contracts.js'),
-      'export {}\n',
-      'utf8',
-    )
-    await writeFile(
-      path.join(repoRoot, 'packages', 'cli', 'dist', 'inbox-cli-contracts.js'),
-      'export {}\n',
-      'utf8',
-    )
+    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
 
     await writeFile(
       cliBinPath,
@@ -3211,9 +3252,7 @@ test.sequential('CLI shim serves discovery commands without rebuilding missing w
     }
 
     await writeFile(cliBinPath, `console.log('cli-help')\n`, 'utf8')
-    await writeFile(path.join(cliDistRoot, 'index.js'), 'export {}\n', 'utf8')
-    await writeFile(path.join(cliDistRoot, 'vault-cli-contracts.js'), 'export {}\n', 'utf8')
-    await writeFile(path.join(cliDistRoot, 'inbox-cli-contracts.js'), 'export {}\n', 'utf8')
+    await writeRequiredCliDistSupportFiles(cliPackageRoot)
 
     await writeExecutable(
       path.join(fakeBinDirectory, 'pnpm'),
@@ -3272,9 +3311,7 @@ test.sequential('CLI shim recovers from a moved repo checkout when invoked insid
     }
 
     await writeFile(path.join(liveCliDistRoot, 'bin.js'), `console.log('moved-ok')\n`, 'utf8')
-    await writeFile(path.join(liveCliDistRoot, 'index.js'), 'export {}\n', 'utf8')
-    await writeFile(path.join(liveCliDistRoot, 'vault-cli-contracts.js'), 'export {}\n', 'utf8')
-    await writeFile(path.join(liveCliDistRoot, 'inbox-cli-contracts.js'), 'export {}\n', 'utf8')
+    await writeRequiredCliDistSupportFiles(path.join(liveRepoRoot, 'packages', 'cli'))
     await writeExecutable(shimPath, buildExpectedCliShimScript(staleCliBinPath, 'murph'))
 
     const result = await execFileAsync(shimPath, [], {
@@ -3333,6 +3370,21 @@ if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
     printf '%s\\n' "console.log('built-ok')" > "$2/dist/index.js"
     printf '%s\\n' 'export {}' > "$2/dist/vault-cli-contracts.js"
     printf '%s\\n' 'export {}' > "$2/dist/inbox-cli-contracts.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-cli.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-agentmail.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-assistant.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-assistant-account.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-wizard.js"
+    mkdir -p "$2/dist/assistant"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/assistant/provider-catalog.js"
+    mkdir -p "$2/dist/setup-services"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/channels.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/process.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/scheduled-updates.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/shell.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/steps.js"
+    printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-services/toolchain.js"
     printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
   else
     printf '%s\\n' 'export {}' > "$2/dist/index.js"
@@ -3353,6 +3405,221 @@ exit 1
 
     assert.equal(result.stdout.trim(), 'built-ok')
     assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim rebuilds when onboard transitive setup dist artifacts are missing', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-onboard-repair-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliBinPath = path.join(cliDistRoot, 'bin.js')
+  const shimPath = path.join(tempRoot, 'murph')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+  const rebuiltMarkerPath = path.join(tempRoot, 'setup-cli-rebuilt.txt')
+
+  try {
+    await mkdir(cliDistRoot, { recursive: true })
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeRequiredCliDistSupportFiles(cliPackageRoot)
+    await rm(path.join(cliDistRoot, 'setup-agentmail.js'), { force: true })
+    await writeFile(
+      cliBinPath,
+      `require('./setup-agentmail.js')\nconsole.log('onboard-built-ok')\n`,
+      'utf8',
+    )
+
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'pnpm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
+  mkdir -p "$2/dist/setup-services"
+  printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-agentmail.js"
+  printf '%s\\n' rebuilt > ${JSON.stringify(rebuiltMarkerPath)}
+  exit 0
+fi
+exit 1
+`,
+    )
+    await writeExecutable(shimPath, buildExpectedCliShimScript(cliBinPath, 'murph'))
+
+    const result = await execFileAsync(shimPath, ['onboard', '--help'], {
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      }),
+    })
+
+    assert.equal(result.stdout.trim(), 'onboard-built-ok')
+    assert.equal((await readFile(rebuiltMarkerPath, 'utf8')).trim(), 'rebuilt')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim falls back to the source CLI when auto-build repair fails', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-source-fallback-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
+  const shimPath = path.join(tempRoot, 'murph')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+
+  try {
+    await mkdir(cliDistRoot, { recursive: true })
+    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
+    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'pnpm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
+  exit 23
+fi
+if [ "$1" = "--dir" ] && [ "$3" = "exec" ] && [ "$4" = "tsx" ]; then
+  printf '%s\\n' 'source-fallback-ok'
+  exit 0
+fi
+exit 1
+`,
+    )
+    await writeExecutable(
+      shimPath,
+      buildExpectedCliShimScript(path.join(cliDistRoot, 'bin.js'), 'murph'),
+    )
+
+    const result = await execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      }),
+    })
+
+    assert.match(
+      result.stderr,
+      /Murph CLI shim could not refresh build artifacts; falling back to the source CLI\./u,
+    )
+    assert.equal(result.stdout.trim(), 'source-fallback-ok')
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('CLI shim warns and falls back to the source CLI when repair succeeds but leaves onboarding dist incomplete', async () => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-shim-incomplete-repair-'))
+  const repoRoot = path.join(tempRoot, 'repo')
+  const cliPackageRoot = path.join(repoRoot, 'packages', 'cli')
+  const cliDistRoot = path.join(cliPackageRoot, 'dist')
+  const cliSourceBinPath = path.join(cliPackageRoot, 'src', 'bin.ts')
+  const shimPath = path.join(tempRoot, 'murph')
+  const fakeBinDirectory = path.join(tempRoot, 'bin')
+
+  try {
+    await mkdir(cliDistRoot, { recursive: true })
+    await mkdir(path.dirname(cliSourceBinPath), { recursive: true })
+    await writeFile(cliSourceBinPath, 'console.log("source-placeholder")\n', 'utf8')
+    for (const packageName of [
+      'contracts',
+      'core',
+      'device-syncd',
+      'importers',
+      'inboxd',
+      'parsers',
+      'query',
+      'runtime-state',
+    ]) {
+      const packageDistIndexPath = path.join(
+        repoRoot,
+        'packages',
+        packageName,
+        'dist',
+        'index.js',
+      )
+      await mkdir(path.dirname(packageDistIndexPath), { recursive: true })
+      await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
+    }
+
+    await writeExecutable(
+      path.join(fakeBinDirectory, 'pnpm'),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--dir" ] && [ "$3" = "build" ]; then
+  mkdir -p "$2/dist"
+  printf '%s\\n' 'module.exports = {}' > "$2/dist/index.js"
+  printf '%s\\n' 'module.exports = {}' > "$2/dist/vault-cli-contracts.js"
+  printf '%s\\n' 'module.exports = {}' > "$2/dist/inbox-cli-contracts.js"
+  printf '%s\\n' 'module.exports = {}' > "$2/dist/setup-cli.js"
+  exit 0
+fi
+if [ "$1" = "--dir" ] && [ "$3" = "exec" ] && [ "$4" = "tsx" ]; then
+  printf '%s\\n' 'source-incomplete-fallback-ok'
+  exit 0
+fi
+exit 1
+`,
+    )
+    await writeExecutable(
+      shimPath,
+      buildExpectedCliShimScript(path.join(cliDistRoot, 'bin.js'), 'murph'),
+    )
+
+    const result = await execFileAsync(shimPath, ['onboard', '--dryRun', '--vault', './vault'], {
+      env: withoutNodeV8Coverage({
+        ...process.env,
+        PATH: `${fakeBinDirectory}${path.delimiter}${process.env.PATH ?? ''}`,
+      }),
+    })
+
+    assert.match(
+      result.stderr,
+      /Murph CLI shim could not refresh build artifacts; falling back to the source CLI\./u,
+    )
+    assert.equal(result.stdout.trim(), 'source-incomplete-fallback-ok')
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -3389,17 +3656,7 @@ test.sequential('CLI shim force-stops a stubborn built child after SIGINT', asyn
       await writeFile(packageDistIndexPath, 'export {}\n', 'utf8')
     }
 
-    await writeFile(path.join(repoRoot, 'packages', 'cli', 'dist', 'index.js'), 'export {}\n', 'utf8')
-    await writeFile(
-      path.join(repoRoot, 'packages', 'cli', 'dist', 'vault-cli-contracts.js'),
-      'export {}\n',
-      'utf8',
-    )
-    await writeFile(
-      path.join(repoRoot, 'packages', 'cli', 'dist', 'inbox-cli-contracts.js'),
-      'export {}\n',
-      'utf8',
-    )
+    await writeRequiredCliDistSupportFiles(path.join(repoRoot, 'packages', 'cli'))
 
     await writeFile(cliBinPath, 'console.log("built-ok")\n', 'utf8')
     await writeExecutable(

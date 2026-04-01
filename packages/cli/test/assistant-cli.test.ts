@@ -12,6 +12,7 @@ import {
   VAULT_ENV,
   applyDefaultVaultToArgs,
   readOperatorConfig,
+  resolveDefaultVault,
   resolveOperatorConfigPath,
   saveAssistantSelfDeliveryTarget,
   saveAssistantOperatorDefaultsPatch,
@@ -442,6 +443,35 @@ test.sequential(
       assert.equal(overrideListed.sessions.length, 1)
       assert.equal(overrideListed.sessions[0]?.sessionId, overrideSession.session.sessionId)
     } finally {
+      restoreEnvironmentVariable('HOME', originalHome)
+    }
+  },
+  ASSISTANT_CLI_TIMEOUT_MS,
+)
+
+test.sequential(
+  'resolveDefaultVault falls back to the current working directory vault when saved config is stale',
+  async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'murph-stale-default-vault-'))
+    const homeRoot = path.join(parent, 'home')
+    const cwdRoot = path.join(parent, 'workspace')
+    const staleVaultRoot = path.join(homeRoot, 'stale-vault')
+    const cwdVaultRoot = path.join(cwdRoot, 'vault')
+    cleanupPaths.push(parent)
+
+    await mkdir(cwdVaultRoot, { recursive: true })
+
+    const originalHome = process.env.HOME
+    const originalCwd = process.cwd()
+    process.env.HOME = homeRoot
+    process.chdir(cwdRoot)
+
+    try {
+      await saveDefaultVaultConfig(staleVaultRoot, homeRoot)
+
+      assert.equal(await resolveDefaultVault(homeRoot), path.resolve('vault'))
+    } finally {
+      process.chdir(originalCwd)
       restoreEnvironmentVariable('HOME', originalHome)
     }
   },
