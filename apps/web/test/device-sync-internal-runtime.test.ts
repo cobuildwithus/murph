@@ -110,6 +110,15 @@ describe("device-sync hosted runtime helpers", () => {
           provider: "oura",
           updatedAt: "2026-03-20T10:00:00.000Z",
         }),
+        localState: {
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
         tokenBundle: {
           accessToken: "access-token",
           accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
@@ -124,6 +133,15 @@ describe("device-sync hosted runtime helpers", () => {
           provider: "whoop",
           updatedAt: "2026-03-21T10:00:00.000Z",
         }),
+        localState: {
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSyncCompletedAt: null,
+          lastSyncErrorAt: null,
+          lastSyncStartedAt: null,
+          lastWebhookAt: null,
+          nextReconcileAt: null,
+        },
         tokenBundle: null,
       },
     ]);
@@ -168,10 +186,11 @@ describe("device-sync hosted runtime helpers", () => {
       occurredAt: "2026-03-26T12:00:00Z",
       updates: [
         {
-          accessTokenExpiresAt: "2026-03-30T00:00:00+00:00",
           connectionId: "dsc_123",
-          lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
-          nextReconcileAt: "2026-03-27T00:00:00-05:00",
+          localState: {
+            lastSyncStartedAt: "2026-03-26T07:00:00-05:00",
+            nextReconcileAt: "2026-03-27T00:00:00-05:00",
+          },
           observedUpdatedAt: "2026-03-26T12:00:00+00:00",
           tokenBundle: {
             accessToken: "new-access-token",
@@ -187,10 +206,11 @@ describe("device-sync hosted runtime helpers", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       updates: [
         {
-          accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
           connectionId: "dsc_123",
-          lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
-          nextReconcileAt: "2026-03-27T05:00:00.000Z",
+          localState: {
+            lastSyncStartedAt: "2026-03-26T12:00:00.000Z",
+            nextReconcileAt: "2026-03-27T05:00:00.000Z",
+          },
           observedUpdatedAt: "2026-03-26T12:00:00.000Z",
           tokenBundle: {
             accessToken: "new-access-token",
@@ -282,11 +302,15 @@ describe("device-sync hosted runtime helpers", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
         updates: [
           {
+            connection: {
+              status: "reauthorization_required",
+            },
             connectionId: "dsc_123",
-            lastErrorCode: "PROVIDER_AUTH",
-            lastErrorMessage: "Reconnect required",
+            localState: {
+              lastErrorCode: "PROVIDER_AUTH",
+              lastErrorMessage: "Reconnect required",
+            },
             observedTokenVersion: 1,
-            status: "reauthorization_required",
             tokenBundle: {
               accessToken: "new-access-token",
               accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
@@ -344,7 +368,7 @@ describe("device-sync hosted runtime helpers", () => {
     });
   });
 
-  it("skips stale connection-state and token writes when the hosted row advanced mid-pass", async () => {
+  it("skips stale connection-state and token writes while still applying local-state clears when the hosted row advanced mid-pass", async () => {
     const { applyHostedDeviceSyncRuntimeUpdates } = await import(
       "@/src/lib/device-sync/internal-runtime"
     );
@@ -365,10 +389,15 @@ describe("device-sync hosted runtime helpers", () => {
       updatedAt: new Date("2026-03-26T12:05:00.000Z"),
       userId: "user-123",
     };
+    const updated = {
+      ...existing,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+    };
     const tx = {
       deviceConnection: {
         findFirst: vi.fn().mockResolvedValue(existing),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue(updated),
       },
       deviceConnectionSecret: {
         create: vi.fn(),
@@ -395,12 +424,16 @@ describe("device-sync hosted runtime helpers", () => {
         occurredAt: "2026-03-26T12:10:00.000Z",
         updates: [
           {
+            connection: {
+              status: "active",
+            },
             connectionId: "dsc_midpass",
-            lastErrorCode: null,
-            lastErrorMessage: null,
+            localState: {
+              lastErrorCode: null,
+              lastErrorMessage: null,
+            },
             observedUpdatedAt: "2026-03-26T12:00:00.000Z",
             observedTokenVersion: null,
-            status: "active",
             tokenBundle: {
               accessToken: "new-access-token",
               accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
@@ -414,7 +447,15 @@ describe("device-sync hosted runtime helpers", () => {
       },
     );
 
-    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+    expect(tx.deviceConnection.update).toHaveBeenCalledWith({
+      where: {
+        id: "dsc_midpass",
+      },
+      data: {
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      },
+    });
     expect(tx.deviceConnectionSecret.create).not.toHaveBeenCalled();
     expect(tx.deviceConnectionSecret.update).not.toHaveBeenCalled();
     expect(store.createSignal).not.toHaveBeenCalled();
@@ -491,17 +532,19 @@ describe("device-sync hosted runtime helpers", () => {
         occurredAt: "2026-03-26T12:10:00.000Z",
         updates: [
           {
-            connectionId: "dsc_metadata",
-            metadata: {
-              flag: true,
-              longText: "x".repeat(300),
-              nested: {
-                secret: "drop-me",
-              },
-              source: {
-                nested: "drop-me-too",
+            connection: {
+              metadata: {
+                flag: true,
+                longText: "x".repeat(300),
+                nested: {
+                  secret: "drop-me",
+                },
+                source: {
+                  nested: "drop-me-too",
+                },
               },
             },
+            connectionId: "dsc_metadata",
           },
         ],
         userId: "user-123",
@@ -573,9 +616,11 @@ describe("device-sync hosted runtime helpers", () => {
         occurredAt: "2026-03-26T12:10:00.000Z",
         updates: [
           {
+            connection: {
+              status: "disconnected",
+            },
             connectionId: "dsc_disconnect_midpass",
             observedUpdatedAt: "2026-03-26T12:00:00.000Z",
-            status: "disconnected",
           },
         ],
         userId: "user-123",
@@ -663,7 +708,6 @@ describe("device-sync hosted runtime helpers", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
         updates: [
           {
-            accessTokenExpiresAt: null,
             connectionId: "dsc_123",
             observedTokenVersion: 2,
             tokenBundle: {
@@ -850,9 +894,10 @@ describe("device-sync hosted runtime helpers", () => {
         occurredAt: "2026-03-26T12:00:00.000Z",
         updates: [
           {
-            accessTokenExpiresAt: "2026-03-30T00:00:00.000Z",
+            connection: {
+              displayName: "Hosted Rename",
+            },
             connectionId: "dsc_789",
-            displayName: "Hosted Rename",
             observedTokenVersion: 1,
           },
         ],

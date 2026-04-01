@@ -170,24 +170,28 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      connectedAt: "2026-03-26T12:00:00.000Z",
-      displayName: "Alice Oura",
-      externalAccountId: "oura_alice",
+      connection: expect.objectContaining({
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        displayName: "Alice Oura",
+        externalAccountId: "oura_alice",
+        metadata: {
+          source: "hosted",
+        },
+        provider: "oura",
+        scopes: ["heartrate"],
+        status: "disconnected",
+        updatedAt: "2026-03-27T08:00:00.000Z",
+      }),
       hostedObservedTokenVersion: null,
       hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
-      lastErrorCode: null,
-      lastErrorMessage: null,
-      lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
-      lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
-      lastWebhookAt: "2026-03-27T07:50:00.000Z",
-      metadata: {
-        source: "hosted",
-      },
-      nextReconcileAt: null,
-      provider: "oura",
-      scopes: ["heartrate"],
-      status: "disconnected",
-      updatedAt: "2026-03-27T08:00:00.000Z",
+      localState: expect.objectContaining({
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-03-27T08:00:00.000Z",
+        lastSyncStartedAt: "2026-03-27T07:55:00.000Z",
+        lastWebhookAt: "2026-03-27T07:50:00.000Z",
+        nextReconcileAt: null,
+      }),
     }));
     expect(markPendingJobsDeadForAccount).toHaveBeenCalledWith(
       "local_123",
@@ -444,18 +448,22 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Local Whoop",
-      externalAccountId: "whoop-user-1",
+      connection: expect.objectContaining({
+        displayName: "Local Whoop",
+        externalAccountId: "whoop-user-1",
+        metadata: {
+          source: "local",
+        },
+        provider: "whoop",
+        scopes: ["offline"],
+        status: "active",
+        updatedAt: "2026-03-27T08:20:00.000Z",
+      }),
       hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
-      metadata: {
-        source: "local",
-      },
-      nextReconcileAt: "2026-03-27T18:00:00.000Z",
-      provider: "whoop",
-      scopes: ["offline"],
-      status: "active",
-      updatedAt: "2026-03-27T08:20:00.000Z",
+      localState: expect.objectContaining({
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      }),
     }));
     const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(hydrateInput).not.toHaveProperty("tokens");
@@ -555,14 +563,18 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Local Whoop",
+      connection: expect.objectContaining({
+        displayName: "Local Whoop",
+        status: "reauthorization_required",
+        updatedAt: "2026-03-27T08:20:00.000Z",
+      }),
       hostedObservedTokenVersion: null,
       hostedObservedUpdatedAt: null,
-      lastErrorCode: "PROVIDER_AUTH",
-      lastErrorMessage: "Reconnect locally",
-      nextReconcileAt: "2026-03-27T18:00:00.000Z",
-      status: "reauthorization_required",
-      updatedAt: "2026-03-27T08:20:00.000Z",
+      localState: expect.objectContaining({
+        lastErrorCode: "PROVIDER_AUTH",
+        lastErrorMessage: "Reconnect locally",
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      }),
     }));
     const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(hydrateInput).not.toHaveProperty("tokens");
@@ -662,11 +674,15 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      lastErrorCode: "PROVIDER_AUTH",
-      lastErrorMessage: "Reconnect locally",
-      lastWebhookAt: "2026-03-27T08:24:00.000Z",
-      status: "reauthorization_required",
-      updatedAt: "2026-03-27T08:23:00.000Z",
+      connection: expect.objectContaining({
+        status: "reauthorization_required",
+        updatedAt: "2026-03-27T08:23:00.000Z",
+      }),
+      localState: expect.objectContaining({
+        lastErrorCode: "PROVIDER_AUTH",
+        lastErrorMessage: "Reconnect locally",
+        lastWebhookAt: "2026-03-27T08:24:00.000Z",
+      }),
     }));
   });
 
@@ -763,10 +779,14 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Local Whoop",
+      connection: expect.objectContaining({
+        displayName: "Local Whoop",
+        updatedAt: "2026-03-27T08:40:00.000Z",
+      }),
       hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
-      nextReconcileAt: "2026-03-27T18:00:00.000Z",
-      updatedAt: "2026-03-27T08:40:00.000Z",
+      localState: expect.objectContaining({
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      }),
     }));
     const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(hydrateInput).not.toHaveProperty("tokens");
@@ -866,10 +886,14 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Local Whoop",
+      connection: expect.objectContaining({
+        displayName: "Local Whoop",
+        updatedAt: "2026-03-27T08:40:00.000Z",
+      }),
       hostedObservedUpdatedAt: "not-a-date",
-      nextReconcileAt: "2026-03-27T18:00:00.000Z",
-      updatedAt: "2026-03-27T08:40:00.000Z",
+      localState: expect.objectContaining({
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      }),
     }));
     const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(hydrateInput).not.toHaveProperty("tokens");
@@ -969,15 +993,19 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Local Whoop",
-      externalAccountId: "whoop-user-3",
+      connection: expect.objectContaining({
+        displayName: "Local Whoop",
+        externalAccountId: "whoop-user-3",
+        metadata: {
+          source: "local",
+        },
+        updatedAt: "2026-03-27T08:40:00.000Z",
+      }),
       hostedObservedTokenVersion: 6,
       hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
-      metadata: {
-        source: "local",
-      },
-      nextReconcileAt: "2026-03-27T18:00:00.000Z",
-      updatedAt: "2026-03-27T08:40:00.000Z",
+      localState: expect.objectContaining({
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      }),
     }));
     const hydrateInput = hydrateHostedAccount.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(hydrateInput).not.toHaveProperty("tokens");
@@ -1077,17 +1105,21 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Local Whoop",
-      externalAccountId: "whoop-user-3",
+      connection: expect.objectContaining({
+        displayName: "Local Whoop",
+        externalAccountId: "whoop-user-3",
+        metadata: {
+          source: "local",
+        },
+        provider: "whoop",
+        scopes: ["offline"],
+        status: "active",
+      }),
       hostedObservedTokenVersion: 5,
       hostedObservedUpdatedAt: "2026-03-27T08:00:00.000Z",
-      metadata: {
-        source: "local",
-      },
-      nextReconcileAt: "2026-03-27T18:00:00.000Z",
-      provider: "whoop",
-      scopes: ["offline"],
-      status: "active",
+      localState: expect.objectContaining({
+        nextReconcileAt: "2026-03-27T18:00:00.000Z",
+      }),
       tokens: expect.objectContaining({
         accessToken: "hosted-access-v5",
         refreshToken: "hosted-refresh-v5",
@@ -1200,18 +1232,22 @@ describe("hosted device-sync runtime", () => {
     });
 
     expect(hydrateHostedAccount).toHaveBeenCalledWith(expect.objectContaining({
-      displayName: "Hosted Whoop",
-      externalAccountId: "whoop-user-2",
+      connection: expect.objectContaining({
+        displayName: "Hosted Whoop",
+        externalAccountId: "whoop-user-2",
+        metadata: {
+          source: "hosted",
+        },
+        provider: "whoop",
+        scopes: ["offline"],
+        status: "active",
+        updatedAt: "2026-03-27T08:30:00.000Z",
+      }),
       hostedObservedTokenVersion: 4,
       hostedObservedUpdatedAt: "2026-03-27T08:30:00.000Z",
-      metadata: {
-        source: "hosted",
-      },
-      nextReconcileAt: "2026-03-27T10:00:00.000Z",
-      provider: "whoop",
-      scopes: ["offline"],
-      status: "active",
-      updatedAt: "2026-03-27T08:30:00.000Z",
+      localState: expect.objectContaining({
+        nextReconcileAt: "2026-03-27T10:00:00.000Z",
+      }),
     }));
   });
 
@@ -1312,12 +1348,13 @@ describe("hosted device-sync runtime", () => {
       timeoutMs: null,
       updates: [
         expect.objectContaining({
-          accessTokenExpiresAt: null,
-          clearError: true,
           connectionId: "hosted_123",
-          lastSyncCompletedAt: "2026-03-27T08:30:00.000Z",
-          lastSyncErrorAt: null,
-          lastSyncStartedAt: "2026-03-27T08:20:00.000Z",
+          localState: expect.objectContaining({
+            clearError: true,
+            lastSyncCompletedAt: "2026-03-27T08:30:00.000Z",
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: "2026-03-27T08:20:00.000Z",
+          }),
           observedUpdatedAt: "2026-03-27T08:25:00.000Z",
           observedTokenVersion: null,
           tokenBundle: expect.objectContaining({
@@ -1425,9 +1462,11 @@ describe("hosted device-sync runtime", () => {
     expect(mocks.applyHostedDeviceSyncRuntimeUpdates).toHaveBeenCalledWith(expect.objectContaining({
       updates: [
         expect.objectContaining({
-          clearError: true,
           connectionId: "hosted_321",
-          lastSyncErrorAt: null,
+          localState: expect.objectContaining({
+            clearError: true,
+            lastSyncErrorAt: null,
+          }),
         }),
       ],
     }));
@@ -1630,7 +1669,9 @@ describe("hosted device-sync runtime", () => {
       updates: [
         expect.objectContaining({
           connectionId: "hosted_654",
-          lastErrorCode: null,
+          localState: expect.objectContaining({
+            lastErrorCode: null,
+          }),
         }),
       ],
     }));

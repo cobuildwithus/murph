@@ -215,27 +215,33 @@ export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   tokenVersion: number;
 }
 
+export interface HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot {
+  accessTokenExpiresAt: string | null;
+  connectedAt: string;
+  createdAt: string;
+  displayName: string | null;
+  externalAccountId: string;
+  id: string;
+  metadata: Record<string, unknown>;
+  provider: string;
+  scopes: string[];
+  status: "active" | "reauthorization_required" | "disconnected";
+  updatedAt?: string;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeLocalStateSnapshot {
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  lastSyncCompletedAt: string | null;
+  lastSyncErrorAt: string | null;
+  lastSyncStartedAt: string | null;
+  lastWebhookAt: string | null;
+  nextReconcileAt: string | null;
+}
+
 export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
-  connection: {
-    accessTokenExpiresAt: string | null;
-    connectedAt: string;
-    createdAt: string;
-    displayName: string | null;
-    externalAccountId: string;
-    id: string;
-    lastErrorCode: string | null;
-    lastErrorMessage: string | null;
-    lastSyncCompletedAt: string | null;
-    lastSyncErrorAt: string | null;
-    lastSyncStartedAt: string | null;
-    lastWebhookAt: string | null;
-    metadata: Record<string, unknown>;
-    nextReconcileAt: string | null;
-    provider: string;
-    scopes: string[];
-    status: "active" | "reauthorization_required" | "disconnected";
-    updatedAt?: string;
-  };
+  connection: HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot;
+  localState: HostedExecutionDeviceSyncRuntimeLocalStateSnapshot;
   tokenBundle: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
 
@@ -251,23 +257,30 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   userId: string;
 }
 
-export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
-  accessTokenExpiresAt?: string | null;
-  clearError?: boolean;
-  connectionId: string;
+export interface HostedExecutionDeviceSyncRuntimeConnectionStateUpdate {
   displayName?: string | null;
+  metadata?: Record<string, unknown>;
+  scopes?: string[];
+  status?: "active" | "reauthorization_required" | "disconnected";
+}
+
+export interface HostedExecutionDeviceSyncRuntimeLocalStateUpdate {
+  clearError?: boolean;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
   lastSyncCompletedAt?: string | null;
   lastSyncErrorAt?: string | null;
   lastSyncStartedAt?: string | null;
   lastWebhookAt?: string | null;
-  metadata?: Record<string, unknown>;
   nextReconcileAt?: string | null;
+}
+
+export interface HostedExecutionDeviceSyncRuntimeConnectionUpdate {
+  connectionId: string;
+  connection?: HostedExecutionDeviceSyncRuntimeConnectionStateUpdate;
+  localState?: HostedExecutionDeviceSyncRuntimeLocalStateUpdate;
   observedUpdatedAt?: string | null;
   observedTokenVersion?: number | null;
-  scopes?: string[];
-  status?: "active" | "reauthorization_required" | "disconnected";
   tokenBundle?: HostedExecutionDeviceSyncRuntimeTokenBundle | null;
 }
 
