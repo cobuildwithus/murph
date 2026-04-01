@@ -146,9 +146,12 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload", {
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
         headers: createRunnerProxyHeaders(),
-        method: "GET",
+        method: "POST",
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -159,13 +162,17 @@ describe("handleRunnerOutboundRequest", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("https://web.example.test/api/hosted-share/internal/share_123/payload?shareCode=code_123"),
+      new URL("https://web.example.test/api/hosted-share/internal/share_123/payload"),
       expect.objectContaining({
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
         headers: expect.objectContaining({
           authorization: "Bearer share-token",
+          "content-type": "application/json; charset=utf-8",
           "x-hosted-execution-user-id": "member_123",
         }),
-        method: "GET",
+        method: "POST",
       }),
     );
   });
@@ -180,9 +187,12 @@ describe("handleRunnerOutboundRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const response = await handleRunnerOutboundRequest(
-      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload", {
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
         headers: createRunnerProxyHeaders(),
-        method: "GET",
+        method: "POST",
       }),
       createRunnerOutboundEnv({
         HOSTED_WEB_BASE_URL: "https://web.example.test",
@@ -195,6 +205,37 @@ describe("handleRunnerOutboundRequest", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
       error: "Hosted web control token is not configured.",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects hosted share payload proxy requests that still include query params", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      status: 200,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await handleRunnerOutboundRequest(
+      new Request("http://share-pack.worker/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
+        headers: createRunnerProxyHeaders(),
+        method: "POST",
+      }),
+      createRunnerOutboundEnv({
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      }),
+      "member_123",
+      RUNNER_PROXY_TOKEN,
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: "Not found",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

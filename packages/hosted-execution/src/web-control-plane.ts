@@ -318,10 +318,13 @@ function buildHostedExecutionSharePackClient(
   return {
     fetchSharePack(share) {
       return requester.requestJson({
+        body: {
+          shareCode: share.shareCode,
+        },
         label: "Hosted share payload fetch",
-        method: "GET",
+        method: "POST",
         parse: parseHostedExecutionSharePackResponse,
-        path: buildHostedExecutionSharePayloadPath(share.shareId, share.shareCode),
+        path: buildHostedExecutionSharePayloadPath(share.shareId),
       });
     },
   };

@@ -68,11 +68,16 @@ describe("hosted share internal payload route", () => {
   });
 
   it("requires the trusted hosted execution user binding header", async () => {
-    const response = await route.GET(
-      new Request("https://web.example.test/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+    const response = await route.POST(
+      new Request("https://web.example.test/api/hosted-share/internal/share_123/payload", {
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
         headers: {
           authorization: "Bearer share-token",
+          "content-type": "application/json; charset=utf-8",
         },
+        method: "POST",
       }),
       {
         params: Promise.resolve({
@@ -97,12 +102,17 @@ describe("hosted share internal payload route", () => {
     };
     mocks.getPrisma.mockReturnValue(prisma);
 
-    const response = await route.GET(
-      new Request("https://web.example.test/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+    const response = await route.POST(
+      new Request("https://web.example.test/api/hosted-share/internal/share_123/payload", {
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
         headers: {
           authorization: "Bearer share-token",
+          "content-type": "application/json; charset=utf-8",
           [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
         },
+        method: "POST",
       }),
       {
         params: Promise.resolve({
@@ -118,5 +128,35 @@ describe("hosted share internal payload route", () => {
       shareCode: "code_123",
       shareId: "share_123",
     });
+  });
+
+  it("rejects query-bearing payload requests so secrets cannot fall back to the URL", async () => {
+    const response = await route.POST(
+      new Request("https://web.example.test/api/hosted-share/internal/share_123/payload?shareCode=code_123", {
+        body: JSON.stringify({
+          shareCode: "code_123",
+        }),
+        headers: {
+          authorization: "Bearer share-token",
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "POST",
+      }),
+      {
+        params: Promise.resolve({
+          shareId: "share_123",
+        }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_SHARE_QUERY_NOT_ALLOWED",
+        message: "Hosted share payload requests must not include query parameters.",
+      },
+    });
+    expect(mocks.readHostedSharePackByReference).not.toHaveBeenCalled();
   });
 });

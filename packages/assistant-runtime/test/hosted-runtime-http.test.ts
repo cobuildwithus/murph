@@ -119,6 +119,14 @@ test("hosted share dispatch uses the explicit wrapped fetch for worker proxy sha
     new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("authorization"),
     null,
   );
+  assert.equal(fetchMock.mock.calls[0]?.[0], "http://share-pack.worker/api/hosted-share/internal/share_123/payload");
+  assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
+  assert.equal(
+    fetchMock.mock.calls[0]?.[1]?.body,
+    JSON.stringify({
+      shareCode: "share-code",
+    }),
+  );
 });
 
 test("hosted device-sync sync uses the explicit wrapped fetch for worker proxy snapshot reads", async () => {
@@ -255,6 +263,14 @@ test("hosted share payload fetch supports direct web-control URLs when the share
     new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id"),
     "member_123",
   );
+  assert.equal(fetchMock.mock.calls[0]?.[0], "https://share.example.test/api/hosted-share/internal/share_123/payload");
+  assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
+  assert.equal(
+    fetchMock.mock.calls[0]?.[1]?.body,
+    JSON.stringify({
+      shareCode: "share-code",
+    }),
+  );
 });
 
 test("hosted share payload direct client sends both the share token and bound-user header", async () => {
@@ -305,6 +321,14 @@ test("hosted share payload direct client sends both the share token and bound-us
   assert.equal(
     new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get("x-hosted-execution-user-id"),
     "member_123",
+  );
+  assert.equal(fetchMock.mock.calls[0]?.[0], "https://share.example.test/api/hosted-share/internal/share_123/payload");
+  assert.equal(fetchMock.mock.calls[0]?.[1]?.method, "POST");
+  assert.equal(
+    fetchMock.mock.calls[0]?.[1]?.body,
+    JSON.stringify({
+      shareCode: "share-code",
+    }),
   );
 });
 

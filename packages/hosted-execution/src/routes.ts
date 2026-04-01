@@ -18,11 +18,6 @@ export function buildHostedExecutionUserEnvPath(userId: string): string {
   return `/internal/users/${encodeURIComponent(userId)}/env`;
 }
 
-export function buildHostedExecutionSharePayloadPath(shareId: string, shareCode: string): string {
-  const url = new URL(
-    `/api/hosted-share/internal/${encodeURIComponent(shareId)}/payload`,
-    "https://hosted.invalid",
-  );
-  url.searchParams.set("shareCode", shareCode);
-  return `${url.pathname}${url.search}`;
+export function buildHostedExecutionSharePayloadPath(shareId: string): string {
+  return `/api/hosted-share/internal/${encodeURIComponent(shareId)}/payload`;
 }
