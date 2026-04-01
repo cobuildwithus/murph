@@ -143,7 +143,6 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
-      userAgent: "test-agent",
     });
     expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith(
       expect.anything(),
@@ -187,7 +186,6 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: null,
-      userAgent: "test-agent",
     });
     expect(mocks.applyHostedSessionCookie).toHaveBeenCalledWith(
       expect.anything(),
@@ -228,7 +226,6 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
-      userAgent: "test-agent",
     });
   });
 
@@ -256,6 +253,39 @@ describe("hosted onboarding routes", () => {
 
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("checks the Privy identity cookie before parsing malformed request JSON", async () => {
+    mocks.requireHostedPrivyCompletionIdentityFromCookies.mockRejectedValue(
+      hostedOnboardingError({
+        code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+        httpStatus: 401,
+        message: "A Privy identity cookie is required to continue. Refresh and verify your phone again.",
+      }),
+    );
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        body: "{",
+        headers: {
+          origin: SAME_ORIGIN_HEADERS.origin,
+          "user-agent": "test-agent",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.requireHostedPrivyCompletionIdentityFromCookies).toHaveBeenCalledTimes(1);
     expect(mocks.completeHostedPrivyVerification).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
@@ -541,7 +571,6 @@ describe("hosted onboarding routes", () => {
           },
         }),
         inviteCode: "invite-code",
-        userAgent: "test-agent",
       });
     } finally {
       vi.doMock("@/src/lib/hosted-onboarding/privy", () => ({

@@ -1,10 +1,10 @@
-import { HostedBillingStatus, Prisma, PrismaClient } from "@prisma/client";
+import { HostedBillingStatus, PrismaClient } from "@prisma/client";
 import { assertContract, sharePackSchema, type SharePack } from "@murph/contracts";
 
 import { getPrisma } from "../prisma";
 import {
   issueHostedInviteForPhone,
-} from "../hosted-onboarding/member-service";
+} from "../hosted-onboarding/invite-service";
 import type { HostedSessionRecord } from "../hosted-onboarding/session";
 import {
   getHostedOnboardingSecretCodec,
@@ -29,6 +29,8 @@ import type {
   CreateHostedShareLinkResult,
   HostedSharePageData,
 } from "./types";
+
+const HOSTED_SHARE_PRIVATE_PREVIEW_TITLE = "Shared Murph pack";
 
 export async function createHostedShareLink(input: {
   expiresInHours?: number;
@@ -60,8 +62,7 @@ export async function createHostedShareLink(input: {
       id: generateHostedShareId(),
       codeHash: hashHostedShareCode(shareCode),
       senderMemberId: normalizeOptionalString(input.senderMemberId) ?? null,
-      previewTitle: preview.title,
-      previewJson: preview as unknown as Prisma.InputJsonValue,
+      previewTitle: HOSTED_SHARE_PRIVATE_PREVIEW_TITLE,
       encryptedPayload: codec.encrypt(JSON.stringify(pack)),
       encryptionKeyVersion: codec.keyVersion,
       expiresAt: hostedShareExpiresAt(input.expiresInHours),

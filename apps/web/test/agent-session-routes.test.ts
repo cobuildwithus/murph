@@ -60,6 +60,7 @@ describe("hosted device-sync agent token routes", () => {
     mocks.exportTokenBundle.mockResolvedValue({
       connection: {
         id: "dsc_123",
+        externalAccountId: "acct_123",
         provider: "oura",
       },
       tokenBundle: {
@@ -81,6 +82,7 @@ describe("hosted device-sync agent token routes", () => {
     mocks.refreshTokenBundle.mockResolvedValue({
       connection: {
         id: "dsc_123",
+        externalAccountId: "acct_123",
         provider: "oura",
       },
       tokenBundle: {
@@ -190,6 +192,10 @@ describe("hosted device-sync agent token routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.exportTokenBundle).toHaveBeenCalledWith(session, "dsc_123");
     await expect(response.json()).resolves.toMatchObject({
+      connection: {
+        externalAccountId: "acct_123",
+        id: "dsc_123",
+      },
       agentSession: {
         id: "dsa_rotated",
         bearerToken: "hbds_agent_rotated",
@@ -218,6 +224,10 @@ describe("hosted device-sync agent token routes", () => {
       force: true,
     });
     await expect(response.json()).resolves.toMatchObject({
+      connection: {
+        externalAccountId: "acct_123",
+        id: "dsc_123",
+      },
       refreshed: true,
       agentSession: {
         id: "dsa_rotated",

@@ -46,6 +46,11 @@ export type {
 export {
   readHostedRunnerCommitTimeoutMs,
 } from "./hosted-runtime/callbacks.ts";
+export {
+  parseHostedAssistantRuntimeConfig,
+  parseHostedAssistantRuntimeJobInput,
+  parseHostedAssistantRuntimeJobRequest,
+} from "./hosted-runtime/parsers.ts";
 
 interface HostedAssistantRuntimeChildResult {
   ok: boolean;

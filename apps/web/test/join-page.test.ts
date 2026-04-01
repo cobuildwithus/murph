@@ -48,7 +48,7 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedPrivyClientId: mocks.resolveHostedPrivyClientId,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   buildHostedInvitePageData: mocks.buildHostedInvitePageData,
 }));
 

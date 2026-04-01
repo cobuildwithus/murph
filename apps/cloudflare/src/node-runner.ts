@@ -2,7 +2,8 @@ import {
   readHostedRunnerCommitTimeoutMs,
   runHostedAssistantRuntimeJobInProcess,
   runHostedAssistantRuntimeJobIsolated,
-  type HostedAssistantRuntimeJobRequest,
+  type HostedAssistantRuntimeConfig,
+  type HostedAssistantRuntimeJobInput,
 } from "@murph/assistant-runtime";
 import {
   DEFAULT_HOSTED_EXECUTION_DEVICE_SYNC_PROXY_BASE_URL,
@@ -10,8 +11,8 @@ import {
   DEFAULT_HOSTED_EXECUTION_USAGE_PROXY_BASE_URL,
   readHostedExecutionWebControlPlaneEnvironment,
   readHostedEmailCapabilities,
-  type HostedExecutionWebControlPlaneEnvironment,
   type HostedExecutionRunnerResult,
+  type HostedExecutionWebControlPlaneEnvironment,
 } from "@murph/hosted-execution";
 
 import {
@@ -39,11 +40,6 @@ let hostedExecutionCallbackBaseUrlsForTests: {
   webControlPlane?: Partial<HostedExecutionWebControlPlaneEnvironment> | null;
 } | null = null;
 
-export interface HostedExecutionRunnerJobRequest extends HostedAssistantRuntimeJobRequest {
-  internalWorkerProxyToken?: string | null;
-  userEnv?: Record<string, string> | null;
-}
-
 export function setHostedExecutionRunModeForTests(
   mode: "in-process" | "isolated" | null,
 ): void {
@@ -67,12 +63,30 @@ export function setHostedExecutionCallbackBaseUrlsForTests(input: {
 }
 
 export async function runHostedExecutionJob(
-  input: HostedExecutionRunnerJobRequest,
+  input: HostedAssistantRuntimeJobInput,
   options?: {
     signal?: AbortSignal;
   },
 ): Promise<HostedExecutionRunnerResult> {
   hostedExecutionRunStartHookForTests?.();
+  const runtime = buildHostedExecutionJobRuntime(input.runtime ?? {});
+
+  if (hostedExecutionRunModeForTests === "in-process") {
+    return await runHostedAssistantRuntimeJobInProcess({
+      request: input.request,
+      runtime,
+    });
+  }
+
+  return await runHostedAssistantRuntimeJobIsolated({
+    request: input.request,
+    runtime,
+  }, options);
+}
+
+function buildHostedExecutionJobRuntime(
+  requestedRuntime: HostedAssistantRuntimeConfig,
+): HostedAssistantRuntimeConfig {
   const callbackBaseUrls = hostedExecutionCallbackBaseUrlsForTests;
   const emailCapabilities = readHostedEmailCapabilities(
     process.env as Readonly<Record<string, string | undefined>>,
@@ -82,38 +96,33 @@ export async function runHostedExecutionJob(
     HOSTED_EMAIL_INGRESS_READY: emailCapabilities.ingressReady ? "true" : "false",
     HOSTED_EMAIL_SEND_READY: emailCapabilities.sendReady ? "true" : "false",
   };
-  const { internalWorkerProxyToken, userEnv, ...request } = input;
 
-  const runtime = {
-    ...callbackBaseUrls,
+  return {
+    ...requestedRuntime,
+    ...(callbackBaseUrls?.artifactsBaseUrl === undefined ? {} : { artifactsBaseUrl: callbackBaseUrls.artifactsBaseUrl }),
+    ...(callbackBaseUrls?.commitBaseUrl === undefined ? {} : { commitBaseUrl: callbackBaseUrls.commitBaseUrl }),
+    ...(callbackBaseUrls?.emailBaseUrl === undefined ? {} : { emailBaseUrl: callbackBaseUrls.emailBaseUrl }),
+    ...(callbackBaseUrls?.sideEffectsBaseUrl === undefined ? {} : { sideEffectsBaseUrl: callbackBaseUrls.sideEffectsBaseUrl }),
     commitTimeoutMs: readHostedRunnerCommitTimeoutMs(
       Number.parseInt(process.env.HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS ?? "", 10),
     ),
     forwardedEnv,
-    internalWorkerProxyToken: internalWorkerProxyToken ?? null,
+    internalWorkerProxyToken: requestedRuntime.internalWorkerProxyToken ?? null,
     userEnv: filterHostedRunnerUserEnv(
-      normalizeHostedUserEnv(userEnv ?? {}, process.env),
+      normalizeHostedUserEnv(requestedRuntime.userEnv ?? {}, process.env),
       process.env,
     ),
     webControlPlane: {
       ...readHostedExecutionWebControlPlaneEnvironment(forwardedEnv),
       deviceSyncRuntimeBaseUrl: HOSTED_RUNNER_DEVICE_SYNC_CONTROL_BASE_URL,
-      shareBaseUrl: callbackBaseUrls?.sharePackBaseUrl ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
-      shareToken: callbackBaseUrls?.sharePackToken ?? null,
+      shareBaseUrl:
+        callbackBaseUrls?.sharePackBaseUrl
+        ?? HOSTED_RUNNER_SHARE_PACK_BASE_URL,
+      shareToken:
+        callbackBaseUrls?.sharePackToken
+        ?? null,
       usageBaseUrl: HOSTED_RUNNER_USAGE_BASE_URL,
       ...(callbackBaseUrls?.webControlPlane ?? {}),
     },
   };
-
-  if (hostedExecutionRunModeForTests === "in-process") {
-    return await runHostedAssistantRuntimeJobInProcess({
-      request,
-      runtime,
-    });
-  }
-
-  return await runHostedAssistantRuntimeJobIsolated({
-    request,
-    runtime,
-  }, options);
 }

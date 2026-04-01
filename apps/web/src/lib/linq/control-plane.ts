@@ -91,10 +91,9 @@ export class HostedLinqControlPlane {
 
   async pairAgent(body: Record<string, unknown>) {
     this.getAuthControlPlane().assertBrowserMutationOrigin();
-    const user = await this.getAuthControlPlane().requireAuthenticatedUser();
     const label = normalizeNullableString(typeof body.label === "string" ? body.label : null);
 
-    return await this.getAuthControlPlane().pairAgent(user.id, label);
+    return await this.getAuthControlPlane().pairAgent(label);
   }
 
   async listAgentEvents(url: URL) {

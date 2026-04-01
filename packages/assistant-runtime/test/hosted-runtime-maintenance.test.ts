@@ -232,6 +232,8 @@ test("hosted maintenance loop prefers the earliest device-sync or assistant wake
 });
 
 test("non-device-sync maintenance continues when the hosted control-plane snapshot fails", async () => {
+  const originalVitest = process.env.VITEST;
+  const originalStdIoLogs = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const deviceSyncService = {
     close: vi.fn(),
@@ -241,6 +243,8 @@ test("non-device-sync maintenance continues when the hosted control-plane snapsh
   };
 
   try {
+    process.env.VITEST = "true";
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
     mocks.createConfiguredDeviceSyncProviders.mockReturnValue([{} as never]);
     mocks.createDeviceSyncRegistry.mockImplementation((providers: unknown[] = []) => {
       const configured = [...providers];
@@ -306,11 +310,24 @@ test("non-device-sync maintenance continues when the hosted control-plane snapsh
     assert.equal(payload.message, "Hosted device-sync control-plane sync failed; continuing hosted job.");
     assert.equal(payload.userId, null);
   } finally {
+    if (originalVitest === undefined) {
+      delete process.env.VITEST;
+    } else {
+      process.env.VITEST = originalVitest;
+    }
+
+    if (originalStdIoLogs === undefined) {
+      delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    } else {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = originalStdIoLogs;
+    }
     warnSpy.mockRestore();
   }
 });
 
 test("non-device-sync maintenance continues when the hosted control-plane apply fails", async () => {
+  const originalVitest = process.env.VITEST;
+  const originalStdIoLogs = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const deviceSyncService = {
     close: vi.fn(),
@@ -320,6 +337,8 @@ test("non-device-sync maintenance continues when the hosted control-plane apply 
   };
 
   try {
+    process.env.VITEST = "true";
+    process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "true";
     mocks.createConfiguredDeviceSyncProviders.mockReturnValue([{} as never]);
     mocks.createDeviceSyncRegistry.mockImplementation((initialProviders: unknown[] = []) => {
       const providers = [...initialProviders];
@@ -381,6 +400,17 @@ test("non-device-sync maintenance continues when the hosted control-plane apply 
     assert.equal(payload.message, "Hosted device-sync control-plane reconcile failed; continuing hosted job.");
     assert.equal(payload.userId, null);
   } finally {
+    if (originalVitest === undefined) {
+      delete process.env.VITEST;
+    } else {
+      process.env.VITEST = originalVitest;
+    }
+
+    if (originalStdIoLogs === undefined) {
+      delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
+    } else {
+      process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = originalStdIoLogs;
+    }
     warnSpy.mockRestore();
   }
 });

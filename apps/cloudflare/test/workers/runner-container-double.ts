@@ -1,3 +1,4 @@
+import type { HostedAssistantRuntimeJobInput } from "@murph/assistant-runtime";
 import type {
   HostedExecutionBundleRef,
   HostedExecutionRunnerRequest,
@@ -8,40 +9,45 @@ import { DurableObject } from "cloudflare:workers";
 import { handleRunnerOutboundRequest } from "../../src/runner-outbound.js";
 
 interface RunnerContainerInvokePayload {
-  internalWorkerProxyToken: string;
-  userId: string;
-  request: HostedExecutionRunnerRequest & {
-    commit: {
-      bundleRefs: {
-        agentState: HostedExecutionBundleRef | null;
-        vault: HostedExecutionBundleRef | null;
-      };
+  job: HostedAssistantRuntimeJobInput & {
+    request: HostedExecutionRunnerRequest & {
+      commit?: {
+        bundleRefs: {
+          agentState: HostedExecutionBundleRef | null;
+          vault: HostedExecutionBundleRef | null;
+        };
+      } | null;
     };
   };
+  userId: string;
 }
 
 export class RunnerContainerTestDouble extends DurableObject {
   async invoke(payload: RunnerContainerInvokePayload): Promise<HostedExecutionRunnerResult> {
-    const runnerResult = buildRunnerResult(payload.request);
+    const internalWorkerProxyToken = payload.job.runtime?.internalWorkerProxyToken ?? "proxy-token";
+    const runnerResult = buildRunnerResult(payload.job.request);
     const commitResponse = await handleRunnerOutboundRequest(
       new Request(
-        `http://commit.worker/events/${encodeURIComponent(payload.request.dispatch.eventId)}/commit`,
+        `http://commit.worker/events/${encodeURIComponent(payload.job.request.dispatch.eventId)}/commit`,
         {
           body: JSON.stringify({
             bundles: runnerResult.bundles,
-            currentBundleRefs: payload.request.commit.bundleRefs,
+            currentBundleRefs: payload.job.request.commit?.bundleRefs ?? {
+              agentState: null,
+              vault: null,
+            },
             result: runnerResult.result,
           }),
           headers: {
             "content-type": "application/json; charset=utf-8",
-            "x-hosted-execution-runner-proxy-token": payload.internalWorkerProxyToken,
+            "x-hosted-execution-runner-proxy-token": internalWorkerProxyToken,
           },
           method: "POST",
         },
       ),
       this.env as never,
       payload.userId,
-      payload.internalWorkerProxyToken,
+      internalWorkerProxyToken,
     );
 
     if (!commitResponse.ok) {

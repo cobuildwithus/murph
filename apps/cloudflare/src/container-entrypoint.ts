@@ -2,12 +2,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { pathToFileURL } from "node:url";
 
 import {
+  parseHostedAssistantRuntimeJobInput,
+  type HostedAssistantRuntimeJobInput,
+} from "@murph/assistant-runtime";
+import {
   emitHostedExecutionStructuredLog,
-  parseHostedExecutionRunnerRequest,
 } from "@murph/hosted-execution";
 
-import { requireJsonObject } from "./json.ts";
-import { runHostedExecutionJob, type HostedExecutionRunnerJobRequest } from "./node-runner.js";
+import { runHostedExecutionJob } from "./node-runner.js";
 
 export async function startHostedContainerEntrypoint(input: {
   controlToken: string | null;
@@ -15,7 +17,7 @@ export async function startHostedContainerEntrypoint(input: {
 }): Promise<ReturnType<typeof createServer>> {
   const server = createServer(async (request, response) => {
     const requestAbort = createRequestAbortController(request, response);
-    let job: HostedExecutionRunnerJobRequest | null = null;
+    let job: HostedAssistantRuntimeJobInput | null = null;
 
     try {
       if (request.method === "GET" && request.url === "/health") {
@@ -66,7 +68,9 @@ export async function startHostedContainerEntrypoint(input: {
       }
 
       try {
-        job = parseHostedExecutionRunnerJobPayload(Buffer.concat(chunks));
+        job = parseHostedAssistantRuntimeJobInput(
+          JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown,
+        );
       } catch (error) {
         emitHostedExecutionStructuredLog({
           component: "container",
@@ -100,11 +104,11 @@ export async function startHostedContainerEntrypoint(input: {
 
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch: typeof job === "object" && job ? job.dispatch : null,
+        dispatch: typeof job === "object" && job ? job.request.dispatch : null,
         error,
         message: "Hosted container entrypoint failed a runner job.",
         phase: "failed",
-        run: typeof job === "object" && job ? job.run ?? null : null,
+        run: typeof job === "object" && job ? job.request.run ?? null : null,
       });
       writeJsonResponse(response, 500, {
         error: "Internal error.",
@@ -143,18 +147,6 @@ function writeJsonResponse(
   response.end(JSON.stringify(payload));
 }
 
-function parseHostedExecutionRunnerJobPayload(payload: Uint8Array): HostedExecutionRunnerJobRequest {
-  const record = requireJsonObject(
-    JSON.parse(Buffer.from(payload).toString("utf8")),
-  );
-  parseHostedExecutionRunnerRequest({
-    bundles: record.bundles,
-    dispatch: record.dispatch,
-    ...(record.run === undefined ? {} : { run: record.run }),
-  });
-
-  return record as unknown as HostedExecutionRunnerJobRequest;
-}
 function createRequestAbortController(
   request: IncomingMessage,
   response: ServerResponse,
