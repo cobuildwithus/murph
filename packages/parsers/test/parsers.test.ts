@@ -318,6 +318,98 @@ test("configured parser registry resolves config-relative whisper model paths ag
   }
 });
 
+test("parser toolchain config rejects relative whisper model paths that escape the vault root", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-escape");
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+
+  await assert.rejects(
+    writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        whisper: {
+          modelPath: "../shared/model.bin",
+        },
+      },
+    }),
+    /modelPath relative paths must stay inside the vault root/u,
+  );
+
+  const { configPath } = getParserToolchainPaths(vaultRoot);
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(
+    configPath,
+    `${JSON.stringify({
+      version: 1,
+      updatedAt: "2026-03-13T12:34:56.000Z",
+      tools: {
+        whisper: {
+          modelPath: "../shared/model.bin",
+        },
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  await assert.rejects(
+    readParserToolchainConfig(vaultRoot),
+    /modelPath relative paths must stay inside the vault root/u,
+  );
+
+  await fs.rm(vaultRoot, { recursive: true, force: true });
+});
+
+test("parser toolchain config rejects relative whisper model paths that escape through symlinks", async () => {
+  const vaultRoot = await makeTempDirectory("murph-parser-toolchain-symlink-escape");
+  const outsideRoot = await makeTempDirectory("murph-parser-toolchain-symlink-outside");
+
+  await initializeVault({
+    vaultRoot,
+    createdAt: "2026-03-13T12:00:00.000Z",
+  });
+  await fs.writeFile(path.join(outsideRoot, "model.bin"), "model", "utf8");
+  await fs.symlink(outsideRoot, path.join(vaultRoot, "models-link"));
+
+  await assert.rejects(
+    writeParserToolchainConfig({
+      vaultRoot,
+      tools: {
+        whisper: {
+          modelPath: "models-link/model.bin",
+        },
+      },
+    }),
+    /modelPath relative paths must stay inside the vault root/u,
+  );
+
+  const { configPath } = getParserToolchainPaths(vaultRoot);
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(
+    configPath,
+    `${JSON.stringify({
+      version: 1,
+      updatedAt: "2026-03-13T12:34:56.000Z",
+      tools: {
+        whisper: {
+          modelPath: "models-link/model.bin",
+        },
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  await assert.rejects(
+    readParserToolchainConfig(vaultRoot),
+    /modelPath relative paths must stay inside the vault root/u,
+  );
+
+  await fs.rm(vaultRoot, { recursive: true, force: true });
+  await fs.rm(outsideRoot, { recursive: true, force: true });
+});
+
 test("pdftotext provider discovers explicit executables and parses PDF text output", async () => {
   const directory = await makeTempDirectory("murph-parser-pdftotext");
   const executablePath = await writeExecutableFile(

@@ -56,8 +56,11 @@ export async function readParserToolchainConfig(
     return null;
   }
 
+  const config = parseParserToolchainConfig(JSON.parse(raw) as unknown);
+  await validateParserToolchainPaths(vaultRoot, config.tools);
+
   return {
-    config: parseParserToolchainConfig(JSON.parse(raw) as unknown),
+    config,
     configPath: paths.configPath,
   };
 }
@@ -68,6 +71,7 @@ export async function writeParserToolchainConfig(
   const paths = getParserToolchainPaths(input.vaultRoot);
   const existing = await readParserToolchainConfig(input.vaultRoot);
   const mergedTools = mergeToolConfigs(existing?.config.tools ?? {}, input.tools ?? {});
+  await validateParserToolchainPaths(input.vaultRoot, mergedTools);
   const config: ParserToolchainConfig = {
     version: PARSER_TOOLCHAIN_VERSION,
     updatedAt: (input.now ?? new Date()).toISOString(),
@@ -85,6 +89,75 @@ export async function writeParserToolchainConfig(
     config,
     configPath: paths.configPath,
   };
+}
+
+async function validateParserToolchainPaths(
+  vaultRoot: string,
+  tools: Partial<Record<ParserToolName, ParserToolchainToolConfig>>,
+): Promise<void> {
+  const whisperModelPath = normalizeNullableString(tools.whisper?.modelPath);
+
+  if (!whisperModelPath || path.isAbsolute(whisperModelPath)) {
+    return;
+  }
+
+  const absoluteVaultRoot = path.resolve(vaultRoot);
+  const resolvedPath = path.resolve(absoluteVaultRoot, whisperModelPath);
+  const relativeToVault = path.relative(absoluteVaultRoot, resolvedPath);
+
+  if (
+    relativeToVault === ".."
+    || relativeToVault.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativeToVault)
+  ) {
+    throw parserWhisperModelPathOutsideVaultError();
+  }
+
+  await assertParserPathWithinVaultOnDisk(absoluteVaultRoot, resolvedPath);
+}
+
+async function assertParserPathWithinVaultOnDisk(
+  absoluteVaultRoot: string,
+  absolutePath: string,
+): Promise<void> {
+  const canonicalRoot = await fs.realpath(absoluteVaultRoot);
+  const relativeToVault = path.relative(absoluteVaultRoot, absolutePath);
+
+  if (!relativeToVault) {
+    return;
+  }
+
+  const segments = relativeToVault.split(path.sep).filter(Boolean);
+  let currentPath = canonicalRoot;
+
+  for (const segment of segments) {
+    const nextPath = path.join(currentPath, segment);
+
+    try {
+      const stats = await fs.lstat(nextPath);
+      if (stats.isSymbolicLink()) {
+        throw parserWhisperModelPathOutsideVaultError();
+      }
+
+      currentPath = await fs.realpath(nextPath);
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        return;
+      }
+
+      throw error;
+    }
+  }
+}
+
+function parserWhisperModelPathOutsideVaultError(): TypeError {
+  return new TypeError(
+    'Parser tool "whisper" modelPath relative paths must stay inside the vault root. Use an absolute path to reference a shared model outside the vault.',
+  );
+}
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error;
 }
 
 function parseParserToolchainConfig(value: unknown): ParserToolchainConfig {
