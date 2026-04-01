@@ -498,6 +498,7 @@ test('assistantd http server enforces bearer auth, validates requests, and route
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        operatorAuthority: 'accepted-inbound-message',
         vault: '/tmp/vault',
         prompt: 'hello over assistantd',
       }),
@@ -506,6 +507,10 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     const messagePayload = await message.json() as { response: string }
     assert.equal(messagePayload.response, 'daemon response')
     assert.equal(sendMessage.mock.calls[0]?.[0]?.prompt, 'hello over assistantd')
+    assert.equal(
+      sendMessage.mock.calls[0]?.[0]?.operatorAuthority,
+      'accepted-inbound-message',
+    )
 
     const openConversation = await fetch(`${handle.address.baseUrl}/open-conversation`, {
       method: 'POST',
@@ -996,6 +1001,24 @@ test('assistantd http server enforces bearer auth, validates requests, and route
     assert.match(
       await invalidConversationDirectness.text(),
       /directness must be one of direct, group, or unknown/u,
+    )
+
+    const invalidOperatorAuthority = await fetch(`${handle.address.baseUrl}/message`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer secret-token',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        vault: '/tmp/vault',
+        prompt: 'hello over assistantd',
+        operatorAuthority: 'bogus-authority',
+      }),
+    })
+    assert.equal(invalidOperatorAuthority.status, 400)
+    assert.match(
+      await invalidOperatorAuthority.text(),
+      /operatorAuthority must be one of direct-operator, accepted-inbound-message/u,
     )
 
     const oversizedBody = await fetch(`${handle.address.baseUrl}/message`, {

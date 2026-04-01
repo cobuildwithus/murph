@@ -1066,6 +1066,7 @@ test('createDefaultAssistantToolCatalog exposes assistant runtime, recipe, and f
   assert.equal(catalog.hasTool('vault.food.show'), true)
   assert.equal(catalog.hasTool('vault.food.list'), true)
   assert.equal(catalog.hasTool('vault.food.upsert'), true)
+  assert.equal(catalog.hasTool('vault.share.createLink'), true)
 })
 
 test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profile', () => {
@@ -1091,6 +1092,7 @@ test('createDefaultAssistantToolCatalog can bind a bounded text-read-only profil
   assert.equal(catalog.hasTool('vault.show'), false)
   assert.equal(catalog.hasTool('vault.journal.append'), false)
   assert.equal(catalog.hasTool('vault.recipe.upsert'), false)
+  assert.equal(catalog.hasTool('vault.share.createLink'), false)
 })
 
 test('createDefaultAssistantToolCatalog vault.fs.readText enforces bounded UTF-8 reads inside the vault', async () => {

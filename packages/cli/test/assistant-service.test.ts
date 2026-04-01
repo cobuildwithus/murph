@@ -56,7 +56,10 @@ import {
   resolveAssistantMemoryTurnContext,
   upsertAssistantMemory,
 } from '@murphai/assistant-core/assistant/memory'
-import { resolveAssistantConversationPolicy } from '@murphai/assistant-core/assistant/conversation-policy'
+import {
+  resolveAssistantConversationAutoReplyEligibility,
+  resolveAssistantConversationPolicy,
+} from '@murphai/assistant-core/assistant/conversation-policy'
 import { sanitizeAssistantOutboundReply } from '@murphai/assistant-core/assistant/reply-sanitizer'
 import {
   VAULT_ENV,
@@ -1553,6 +1556,77 @@ test('resolveAssistantConversationPolicy infers a private bound participant deli
   assert.equal(policy.audience.threadIsDirect, false)
   assert.equal(policy.audience.effectiveThreadIsDirect, true)
   assert.equal(policy.allowSensitiveHealthContext, true)
+})
+
+test('resolveAssistantConversationPolicy normalizes accepted inbound operator authority for messaging turns', () => {
+  const binding = {
+    conversationKey: 'telegram:direct',
+    channel: 'telegram',
+    identityId: 'telegram-bot',
+    actorId: 'telegram-user',
+    threadId: 'telegram-thread',
+    threadIsDirect: true,
+    delivery: {
+      channel: 'telegram',
+      target: 'telegram-thread',
+      targetKind: 'thread',
+      kind: 'thread',
+    },
+  }
+
+  const defaultPolicy = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: null,
+      sourceThreadId: 'telegram-thread',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    },
+    session: {
+      binding,
+    } as any,
+  })
+  assert.equal(defaultPolicy.operatorAuthority, 'direct-operator')
+
+  const acceptedInboundPolicy = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: null,
+      operatorAuthority: 'accepted-inbound-message',
+      sourceThreadId: 'telegram-thread',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    },
+    session: {
+      binding,
+    } as any,
+  })
+  assert.equal(acceptedInboundPolicy.operatorAuthority, 'accepted-inbound-message')
+  assert.equal(
+    resolveAssistantConversationAutoReplyEligibility({
+      audience: acceptedInboundPolicy.audience,
+      operatorAuthority: acceptedInboundPolicy.operatorAuthority,
+    }),
+    true,
+  )
+
+  const invalidAuthorityPolicy = resolveAssistantConversationPolicy({
+    message: {
+      deliverResponse: true,
+      deliveryReplyToMessageId: null,
+      deliveryTarget: null,
+      operatorAuthority: 'bogus-authority' as any,
+      sourceThreadId: 'telegram-thread',
+      threadId: 'telegram-thread',
+      threadIsDirect: true,
+    },
+    session: {
+      binding,
+    } as any,
+  })
+  assert.equal(invalidAuthorityPolicy.operatorAuthority, 'direct-operator')
 })
 
 

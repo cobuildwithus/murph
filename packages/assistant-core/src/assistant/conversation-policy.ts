@@ -1,9 +1,13 @@
 import type {
   AssistantBindingDelivery,
   AssistantSession,
-  AssistantTurnTrigger,
 } from '../assistant-cli-contracts.js'
 import type { AssistantMessageInput } from './service-contracts.js'
+import {
+  isAcceptedInboundMessageOperatorAuthority,
+  resolveAssistantOperatorAuthority,
+  type AssistantOperatorAuthority,
+} from './operator-authority.js'
 import { normalizeNullableString } from './shared.js'
 
 export type AssistantConversationDeliveryPolicy =
@@ -27,6 +31,7 @@ export interface AssistantConversationAudience {
 export interface AssistantConversationPolicy {
   allowSensitiveHealthContext: boolean
   audience: AssistantConversationAudience
+  operatorAuthority: AssistantOperatorAuthority
 }
 
 export function resolveAssistantConversationPolicy(input: {
@@ -35,6 +40,7 @@ export function resolveAssistantConversationPolicy(input: {
     | 'deliverResponse'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
+    | 'operatorAuthority'
     | 'sourceThreadId'
     | 'threadId'
     | 'threadIsDirect'
@@ -45,10 +51,14 @@ export function resolveAssistantConversationPolicy(input: {
     message: input.message,
     session: input.session,
   })
+  const operatorAuthority = resolveAssistantOperatorAuthority(
+    input.message.operatorAuthority,
+  )
 
   return {
     allowSensitiveHealthContext: shouldExposeSensitiveHealthContext(audience),
     audience,
+    operatorAuthority,
   }
 }
 
@@ -58,6 +68,7 @@ export function resolveAssistantConversationAudience(input: {
     | 'deliverResponse'
     | 'deliveryReplyToMessageId'
     | 'deliveryTarget'
+    | 'operatorAuthority'
     | 'sourceThreadId'
     | 'threadId'
     | 'threadIsDirect'
@@ -110,9 +121,9 @@ export function resolveAssistantConversationAudience(input: {
 
 export function resolveAssistantConversationAutoReplyEligibility(input: {
   audience: AssistantConversationAudience
-  turnTrigger: AssistantTurnTrigger
+  operatorAuthority: AssistantOperatorAuthority
 }): boolean {
-  if (input.turnTrigger !== 'automation-auto-reply') {
+  if (!isAcceptedInboundMessageOperatorAuthority(input.operatorAuthority)) {
     return true
   }
 

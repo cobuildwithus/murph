@@ -23,6 +23,9 @@ import type {
 import type {
   AssistantOnboardingSummary,
 } from './onboarding.js'
+import type {
+  AssistantOperatorAuthority,
+} from './operator-authority.js'
 import type { ConversationRef } from './conversation-ref.js'
 import type {
   ResolvedAssistantFailoverRoute,
@@ -70,6 +73,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
+  operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
   receiptMetadata?: Record<string, string> | null
@@ -90,6 +94,7 @@ export interface AssistantTurnSharedPlan {
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
   onboardingSummary: AssistantOnboardingSummary | null
+  operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string
 }

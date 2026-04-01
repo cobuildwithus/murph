@@ -3,6 +3,10 @@ import type { InboxShowResult } from '../../inbox-cli-contracts.js'
 import type { InboxServices } from '../../inbox-services.js'
 import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import { conversationRefFromCapture } from '../conversation-ref.js'
+import {
+  resolveAcceptedInboundMessageOperatorAuthority,
+  type AssistantOperatorAuthority,
+} from '../operator-authority.js'
 import type { AssistantOutboxDispatchMode } from '../outbox.js'
 import {
   isAssistantProviderConnectionLostError,
@@ -64,6 +68,7 @@ export interface AssistantAutoReplyGroupContext {
 
 interface AssistantAutoReplyReplyDecision {
   kind: 'reply'
+  operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
 }
@@ -401,6 +406,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
       signal: input.signal,
       maxSessionAgeMs: input.sessionMaxAgeMs,
       onEvent: input.onEvent,
+      operatorAuthority: decision.operatorAuthority,
       primaryCapture: decision.primaryCapture,
       prompt: decision.prompt,
       replyCaptureId: input.context.firstCaptureId,
@@ -791,6 +797,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
 
   return {
     kind: 'reply',
+    operatorAuthority: resolveAcceptedInboundMessageOperatorAuthority(),
     primaryCapture,
     prompt: prompt.prompt,
   }
@@ -825,6 +832,7 @@ async function executeAssistantAutoReply(input: {
   signal?: AbortSignal
   maxSessionAgeMs: number | null
   onEvent?: (event: AssistantRunEvent) => void
+  operatorAuthority: AssistantOperatorAuthority
   primaryCapture: InboxShowResult['capture']
   prompt: string
   replyCaptureId: string
@@ -838,6 +846,7 @@ async function executeAssistantAutoReply(input: {
       conversation: conversationRefFromCapture(input.primaryCapture),
       abortSignal: watchdog.signal,
       enableFirstTurnOnboarding: true,
+      operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
       deliverResponse: true,
