@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/member-service", () => ({
+vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   requireHostedInviteForAuthentication: mocks.requireHostedInviteForAuthentication,
 }));
 

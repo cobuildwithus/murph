@@ -1204,26 +1204,28 @@ describe("HostedUserRunner", () => {
       ? invokeInput
       : new Request(invokeInput);
     const invokePayload = JSON.parse(await invokeRequest.text()) as {
-      request: {
-        commit: {
-          bundleRefs: {
-            agentState: null | { hash: string; key: string; size: number; updatedAt: string };
-            vault: null | { hash: string; key: string; size: number; updatedAt: string };
+      job: {
+        request: {
+          commit: {
+            bundleRefs: {
+              agentState: null | { hash: string; key: string; size: number; updatedAt: string };
+              vault: null | { hash: string; key: string; size: number; updatedAt: string };
+            };
           };
-        };
-        run: {
-          attempt: number;
-          runId: string;
-          startedAt: string;
+          run: {
+            attempt: number;
+            runId: string;
+            startedAt: string;
+          };
         };
       };
     };
 
-    expect(invokePayload.request.commit.bundleRefs).toEqual({
+    expect(invokePayload.job.request.commit.bundleRefs).toEqual({
       agentState: null,
       vault: null,
     });
-    expect(invokePayload.request.run).toMatchObject({
+    expect(invokePayload.job.request.run).toMatchObject({
       attempt: 1,
       runId: expect.any(String),
       startedAt: expect.any(String),
@@ -1280,17 +1282,21 @@ describe("HostedUserRunner", () => {
         .map(async ([input]) => {
           const request = input instanceof Request ? input : new Request(input);
           const payload = JSON.parse(await request.text()) as {
-            request: {
-              dispatch: {
-                eventId: string;
+            job: {
+              request: {
+                dispatch: {
+                  eventId: string;
+                };
               };
-              userEnv: Record<string, string>;
+              runtime?: {
+                userEnv?: Record<string, string>;
+              };
             };
           };
 
           return {
-            eventId: payload.request.dispatch.eventId,
-            userEnv: payload.request.userEnv,
+            eventId: payload.job.request.dispatch.eventId,
+            userEnv: payload.job.runtime?.userEnv ?? {},
           };
         }),
     );
@@ -2563,17 +2569,21 @@ describe("HostedUserRunner", () => {
         .map(async ([input]) => {
           const request = input instanceof Request ? input : new Request(input);
           const payload = JSON.parse(await request.text()) as {
-            request: {
-              dispatch: {
-                eventId: string;
+            job: {
+              request: {
+                dispatch: {
+                  eventId: string;
+                };
               };
-              userEnv: Record<string, string>;
+              runtime?: {
+                userEnv?: Record<string, string>;
+              };
             };
           };
 
           return {
-            eventId: payload.request.dispatch.eventId,
-            userEnv: payload.request.userEnv,
+            eventId: payload.job.request.dispatch.eventId,
+            userEnv: payload.job.runtime?.userEnv ?? {},
           };
         }),
     );
@@ -2773,11 +2783,13 @@ function createStorage() {
 
     if (url.pathname === "/internal/invoke") {
       const payload = JSON.parse(await request.clone().text()) as {
-        request: Record<string, unknown>;
+        job: {
+          request: Record<string, unknown>;
+        };
       };
 
       return globalThis.fetch("https://runner-container.internal/__internal/run", {
-        body: JSON.stringify(payload.request),
+        body: JSON.stringify(payload.job.request),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },

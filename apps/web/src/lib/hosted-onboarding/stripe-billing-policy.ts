@@ -20,7 +20,7 @@ import {
   coerceStripeSubscriptionId,
   mapStripeSubscriptionStatusToHostedBillingStatus,
 } from "./billing";
-import { buildHostedMemberActivationDispatch } from "./member-service";
+import { buildHostedMemberActivationDispatch } from "./member-activation";
 import {
   deriveHostedEntitlement,
   isHostedAccessBlockedBillingStatus,

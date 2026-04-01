@@ -1,11 +1,11 @@
 import {
   formatHostedRuntimeChildResult,
+  parseHostedAssistantRuntimeJobInput,
   runHostedAssistantRuntimeJobInProcess,
-  type HostedAssistantRuntimeJobInput,
 } from "./hosted-runtime.js";
 
 async function main(): Promise<void> {
-  const input = JSON.parse(await readStandardInput()) as HostedAssistantRuntimeJobInput;
+  const input = parseHostedAssistantRuntimeJobInput(JSON.parse(await readStandardInput()) as unknown);
 
   try {
     const result = await runHostedAssistantRuntimeJobInProcess(input);

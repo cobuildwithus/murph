@@ -6,8 +6,6 @@ import {
   RunnerContainer,
 } from "../src/runner-container.ts";
 
-const INTERNAL_WORKER_PROXY_TOKEN = "proxy-token";
-
 describe("RunnerContainer", () => {
   it("defaults idle retention to five minutes and accepts an env override", () => {
     expect(new RunnerContainer({} as never, {} as never).sleepAfter).toBe("5m");
@@ -34,8 +32,9 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
-        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        request: createRunnerRequest(),
+        job: {
+          request: createRunnerRequest(),
+        },
         runnerEnvironment: {
           CUSTOM_API_KEY: "value",
         },
@@ -71,49 +70,49 @@ describe("RunnerContainer", () => {
       "commit.worker": {
         method: "commitWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
       "device-sync.worker": {
         method: "deviceSyncWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
       "artifacts.worker": {
         method: "artifactsWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
       "side-effects.worker": {
         method: "sideEffectsWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
       "email.worker": {
         method: "emailWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
       "share-pack.worker": {
         method: "sharePackWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
       "usage.worker": {
         method: "usageWorker",
         params: {
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
+          internalWorkerProxyToken: expect.any(String),
           userId: "member_123",
         },
       },
@@ -121,10 +120,6 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledWith(
       "http://container/__internal/run",
       expect.objectContaining({
-        body: JSON.stringify({
-          ...createRunnerRequest(),
-          internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        }),
         headers: {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
@@ -134,6 +129,18 @@ describe("RunnerContainer", () => {
       }),
       8080,
     );
+    const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
+      request: ReturnType<typeof createRunnerRequest>;
+      runtime: {
+        internalWorkerProxyToken: string;
+      };
+    };
+    expect(forwardedBody).toMatchObject({
+      request: createRunnerRequest(),
+      runtime: {
+        internalWorkerProxyToken: expect.any(String),
+      },
+    });
   });
 
   it("forwards the hosted run context through the container invoke boundary", async () => {
@@ -146,8 +153,9 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
-        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        request: createRunnerRequest("evt_with_run", { run }),
+        job: {
+          request: createRunnerRequest("evt_with_run", { run }),
+        },
         runnerEnvironment: {},
         timeoutMs: 12_345,
         userId: "member_123",
@@ -161,9 +169,11 @@ describe("RunnerContainer", () => {
 
     expect(response.status).toBe(200);
     const forwardedBody = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as {
-      run?: typeof run;
+      request?: {
+        run?: typeof run;
+      };
     };
-    expect(forwardedBody.run).toEqual(run);
+    expect(forwardedBody.request?.run).toEqual(run);
   });
 
   it("caps readiness waits to the caller timeout budget when the budget is small", async () => {
@@ -171,8 +181,9 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
-        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        request: createRunnerRequest("evt_short_budget"),
+        job: {
+          request: createRunnerRequest("evt_short_budget"),
+        },
         runnerEnvironment: {},
         timeoutMs: 1_000,
         userId: "member_123",
@@ -198,8 +209,9 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
-        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        request: createRunnerRequest("evt_no_token"),
+        job: {
+          request: createRunnerRequest("evt_no_token"),
+        },
         runnerEnvironment: {},
         timeoutMs: 30_000,
         userId: "member_123",
@@ -227,8 +239,9 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
-        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        request: createRunnerRequest("evt_no_wrapper_token"),
+        job: {
+          request: createRunnerRequest("evt_no_wrapper_token"),
+        },
         runnerEnvironment: {},
         timeoutMs: 30_000,
         userId: "member_123",
@@ -274,8 +287,7 @@ describe("RunnerContainer", () => {
 
     const response = await container.fetch(new Request("https://runner.internal/internal/invoke", {
       body: JSON.stringify({
-        internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-        request: "not-an-object",
+        job: "not-an-object",
         runnerEnvironment: [],
         timeoutMs: 0,
       }),
@@ -288,7 +300,7 @@ describe("RunnerContainer", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: "request must be a JSON object.",
+      error: "Hosted assistant runtime job input must be an object.",
     });
     expect(startAndWaitForPorts).not.toHaveBeenCalled();
   });
@@ -338,7 +350,9 @@ describe("RunnerContainer", () => {
     }));
 
     await invokeHostedExecutionContainerRunner({
-      request: createRunnerRequest("evt_namespace"),
+      job: {
+        request: createRunnerRequest("evt_namespace"),
+      },
       runnerContainerNamespace: { getByName },
       runnerControlToken: "runner-token",
       runnerEnvironment: {
@@ -351,15 +365,15 @@ describe("RunnerContainer", () => {
     expect(getByName).toHaveBeenCalledWith("member_123");
     const body = invoke.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(body).toMatchObject({
-      request: createRunnerRequest("evt_namespace"),
+      job: {
+        request: createRunnerRequest("evt_namespace"),
+      },
       runnerEnvironment: {
         CUSTOM_API_KEY: "value",
       },
       timeoutMs: 45_000,
       userId: "member_123",
     });
-    expect(typeof body.internalWorkerProxyToken).toBe("string");
-    expect((body.internalWorkerProxyToken as string).length).toBeGreaterThan(0);
   });
 
   it("preserves extended runner request fields when the container is invoked over durable-object RPC", async () => {
@@ -375,6 +389,7 @@ describe("RunnerContainer", () => {
       resume: {
         committedResult: {
           result: {
+            eventsHandled: 1,
             summary: "already committed",
           },
           sideEffects: [],
@@ -382,19 +397,20 @@ describe("RunnerContainer", () => {
       },
       run: {
         attempt: 2,
-        eventId: "evt_extended",
-        phase: "retrying",
         runId: "run_123",
         startedAt: "2026-03-27T00:00:00.000Z",
-      },
-      userEnv: {
-        OPENAI_API_KEY: "sk-user",
       },
     };
 
     await container.invoke({
-      internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
-      request: extendedRequest,
+      job: {
+        request: extendedRequest,
+        runtime: {
+          userEnv: {
+            OPENAI_API_KEY: "sk-user",
+          },
+        },
+      },
       runnerEnvironment: {},
       timeoutMs: 30_000,
       userId: "member_123",
@@ -403,31 +419,34 @@ describe("RunnerContainer", () => {
     expect(containerFetch).toHaveBeenCalledTimes(1);
     const forwarded = JSON.parse(containerFetch.mock.calls[0]?.[1]?.body as string) as Record<string, unknown>;
     expect(forwarded).toMatchObject({
-      commit: {
-        bundleRefs: {
-          agentState: null,
-          vault: null,
-        },
-      },
-      resume: {
-        committedResult: {
-          result: {
-            summary: "already committed",
+      request: {
+        commit: {
+          bundleRefs: {
+            agentState: null,
+            vault: null,
           },
-          sideEffects: [],
+        },
+        resume: {
+          committedResult: {
+            result: {
+              eventsHandled: 1,
+              summary: "already committed",
+            },
+            sideEffects: [],
+          },
+        },
+        run: {
+          attempt: 2,
+          runId: "run_123",
+          startedAt: "2026-03-27T00:00:00.000Z",
         },
       },
-      run: {
-        attempt: 2,
-        eventId: "evt_extended",
-        phase: "retrying",
-        runId: "run_123",
-        startedAt: "2026-03-27T00:00:00.000Z",
+      runtime: {
+        internalWorkerProxyToken: expect.any(String),
+        userEnv: {
+          OPENAI_API_KEY: "sk-user",
+        },
       },
-      userEnv: {
-        OPENAI_API_KEY: "sk-user",
-      },
-      internalWorkerProxyToken: INTERNAL_WORKER_PROXY_TOKEN,
     });
   });
 
@@ -440,7 +459,9 @@ describe("RunnerContainer", () => {
 
     await expect(
       invokeHostedExecutionContainerRunner({
-        request: createRunnerRequest("evt_missing_token"),
+        job: {
+          request: createRunnerRequest("evt_missing_token"),
+        },
         runnerContainerNamespace: { getByName },
         runnerControlToken: null,
         runnerEnvironment: {},

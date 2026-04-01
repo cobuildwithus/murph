@@ -15,6 +15,27 @@ afterEach(async () => {
   }));
 });
 
+function buildJobBody(input: {
+  dispatch: {
+    event: Record<string, unknown>;
+    eventId: string;
+    occurredAt: string;
+  };
+  run?: {
+    attempt: number;
+    runId: string;
+    startedAt: string;
+  };
+}) {
+  return {
+    request: {
+      bundles: { agentState: null, vault: null },
+      dispatch: input.dispatch,
+      ...(input.run ? { run: input.run } : {}),
+    },
+  };
+}
+
 describe("startHostedContainerEntrypoint", () => {
   it("serves a lightweight health endpoint", async () => {
     const server = await startHostedContainerEntrypoint({
@@ -50,14 +71,13 @@ describe("startHostedContainerEntrypoint", () => {
     }
 
     const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
-      body: JSON.stringify({
-        bundles: { agentState: null, vault: null },
+      body: JSON.stringify(buildJobBody({
         dispatch: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_missing_token",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
-      }),
+      })),
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
@@ -142,14 +162,13 @@ describe("startHostedContainerEntrypoint", () => {
       }
 
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
-        body: JSON.stringify({
-          bundles: { agentState: null, vault: null },
+        body: JSON.stringify(buildJobBody({
           dispatch: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_runtime_type_error",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
-        }),
+        })),
         headers: {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
@@ -190,15 +209,14 @@ describe("startHostedContainerEntrypoint", () => {
         startedAt: "2026-03-26T12:00:00.000Z",
       };
       const response = await fetch(`http://127.0.0.1:${address.port}/__internal/run`, {
-        body: JSON.stringify({
-          bundles: { agentState: null, vault: null },
+        body: JSON.stringify(buildJobBody({
           dispatch: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_with_run",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
           run,
-        }),
+        })),
         headers: {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
@@ -209,10 +227,12 @@ describe("startHostedContainerEntrypoint", () => {
       expect(response.status).toBe(200);
       expect(spy).toHaveBeenCalledWith(
         expect.objectContaining({
-          dispatch: expect.objectContaining({
-            eventId: "evt_with_run",
+          request: expect.objectContaining({
+            dispatch: expect.objectContaining({
+              eventId: "evt_with_run",
+            }),
+            run,
           }),
-          run,
         }),
         expect.objectContaining({
           signal: expect.any(AbortSignal),
@@ -230,7 +250,7 @@ describe("startHostedContainerEntrypoint", () => {
     let sawOverlap = false;
 
     const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (job: any) => {
-      started.push(job.dispatch.eventId);
+      started.push(job.request.dispatch.eventId);
       inFlight += 1;
 
       if (inFlight > 1) {
@@ -239,11 +259,11 @@ describe("startHostedContainerEntrypoint", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10));
       inFlight -= 1;
-      finished.push(job.dispatch.eventId);
+      finished.push(job.request.dispatch.eventId);
 
       return {
         bundles: { agentState: null, vault: null },
-        result: { eventsHandled: 1, summary: job.dispatch.eventId },
+        result: { eventsHandled: 1, summary: job.request.dispatch.eventId },
       };
     });
 
@@ -264,14 +284,13 @@ describe("startHostedContainerEntrypoint", () => {
             authorization: "Bearer runner-token",
             "content-type": "application/json; charset=utf-8",
           },
-          body: JSON.stringify({
-            bundles: { agentState: null, vault: null },
+          body: JSON.stringify(buildJobBody({
             dispatch: {
               event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
               eventId: "evt_a",
               occurredAt: "2026-03-26T12:00:00.000Z",
             },
-          }),
+          })),
         }),
         fetch(url, {
           method: "POST",
@@ -279,14 +298,13 @@ describe("startHostedContainerEntrypoint", () => {
             authorization: "Bearer runner-token",
             "content-type": "application/json; charset=utf-8",
           },
-          body: JSON.stringify({
-            bundles: { agentState: null, vault: null },
+          body: JSON.stringify(buildJobBody({
             dispatch: {
               event: { kind: "assistant.cron.tick", reason: "manual", userId: "u2" },
               eventId: "evt_b",
               occurredAt: "2026-03-26T12:00:00.000Z",
             },
-          }),
+          })),
         }),
       ]);
 
@@ -308,21 +326,21 @@ describe("startHostedContainerEntrypoint", () => {
       rejectFirstJob = reject;
     });
     const spy = vi.spyOn(nodeRunner, "runHostedExecutionJob").mockImplementation(async (job: any) => {
-      started.push(job.dispatch.eventId);
+      started.push(job.request.dispatch.eventId);
 
-      if (job.dispatch.eventId === "evt_a") {
+      if (job.request.dispatch.eventId === "evt_a") {
         try {
           await firstJob;
           throw new Error("Expected the first hosted job to reject.");
         } finally {
-          finished.push(job.dispatch.eventId);
+          finished.push(job.request.dispatch.eventId);
         }
       }
 
-      finished.push(job.dispatch.eventId);
+      finished.push(job.request.dispatch.eventId);
       return {
         bundles: { agentState: null, vault: null },
-        result: { eventsHandled: 1, summary: job.dispatch.eventId },
+        result: { eventsHandled: 1, summary: job.request.dispatch.eventId },
       };
     });
 
@@ -342,14 +360,13 @@ describe("startHostedContainerEntrypoint", () => {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
-        body: JSON.stringify({
-          bundles: { agentState: null, vault: null },
+        body: JSON.stringify(buildJobBody({
           dispatch: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
             eventId: "evt_a",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
-        }),
+        })),
       });
       const secondResponsePromise = fetch(url, {
         method: "POST",
@@ -357,14 +374,13 @@ describe("startHostedContainerEntrypoint", () => {
           authorization: "Bearer runner-token",
           "content-type": "application/json; charset=utf-8",
         },
-        body: JSON.stringify({
-          bundles: { agentState: null, vault: null },
+        body: JSON.stringify(buildJobBody({
           dispatch: {
             event: { kind: "assistant.cron.tick", reason: "manual", userId: "u2" },
             eventId: "evt_b",
             occurredAt: "2026-03-26T12:00:00.000Z",
           },
-        }),
+        })),
       });
 
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -437,14 +453,13 @@ describe("startHostedContainerEntrypoint", () => {
         port: address.port,
       });
       request.on("error", () => {});
-      request.write(JSON.stringify({
-        bundles: { agentState: null, vault: null },
+      request.write(JSON.stringify(buildJobBody({
         dispatch: {
           event: { kind: "assistant.cron.tick", reason: "manual", userId: "u1" },
           eventId: "evt_disconnect",
           occurredAt: "2026-03-26T12:00:00.000Z",
         },
-      }));
+      })));
       request.end();
 
       await started;

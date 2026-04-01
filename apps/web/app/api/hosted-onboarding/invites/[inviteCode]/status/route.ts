@@ -1,4 +1,4 @@
-import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/member-service";
+import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { resolveHostedSessionFromRequest } from "@/src/lib/hosted-onboarding/session";
 

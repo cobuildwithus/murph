@@ -8,7 +8,7 @@ import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
-import { requireHostedInviteForAuthentication } from "./member-service";
+import { requireHostedInviteForAuthentication } from "./invite-service";
 import {
   type HostedPrivyCookieStore,
   requireHostedPrivyUserForSession,

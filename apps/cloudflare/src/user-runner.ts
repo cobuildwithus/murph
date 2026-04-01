@@ -5,9 +5,9 @@ import type {
   HostedExecutionRunLevel,
   HostedExecutionRunContext,
   HostedExecutionRunPhase,
-  HostedExecutionRunnerRequest,
   HostedExecutionUserStatus,
 } from "@murph/hosted-execution";
+import type { HostedAssistantRuntimeJobInput } from "@murph/assistant-runtime";
 import type {
   GatewayFetchAttachmentsInput,
   GatewayGetConversationInput,
@@ -517,31 +517,23 @@ export class HostedUserRunner {
     }
 
     const bundleState = await this.queueStore.readBundleMetaState();
-    const requestBody: HostedExecutionRunnerRequest & {
-      commit: {
-        bundleRefs: typeof bundleState.bundleRefs;
-      };
-      run: HostedExecutionRunContext;
-      resume?: {
-        committedResult: {
-          result: HostedExecutionCommittedResult["result"];
-          sideEffects: HostedExecutionCommittedResult["sideEffects"];
-        };
-      };
-      userEnv: Record<string, string>;
-    } = {
-      bundles: await this.bundleSync.readBundlesForRunner(),
-      commit: {
-        bundleRefs: bundleState.bundleRefs,
+    const job: HostedAssistantRuntimeJobInput = {
+      request: {
+        bundles: await this.bundleSync.readBundlesForRunner(),
+        commit: {
+          bundleRefs: bundleState.bundleRefs,
+        },
+        dispatch,
+        run,
+        ...(resume ? { resume } : {}),
       },
-      dispatch,
-      run,
-      ...(resume ? { resume } : {}),
-      userEnv: await this.bundleSync.readUserEnv(userId),
+      runtime: {
+        userEnv: await this.bundleSync.readUserEnv(userId),
+      },
     };
 
     return invokeHostedExecutionContainerRunner({
-      request: requestBody,
+      job,
       runnerContainerNamespace: this.runnerContainerNamespace,
       runnerControlToken: this.env.runnerControlToken,
       runnerEnvironment: this.runnerContainerEnvironment,

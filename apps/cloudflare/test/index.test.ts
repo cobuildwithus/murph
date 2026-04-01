@@ -2018,11 +2018,13 @@ function createStorage() {
 
     if (url.pathname === "/internal/invoke") {
       const payload = JSON.parse(await request.clone().text()) as {
-        request: Record<string, unknown>;
+        job: {
+          request: Record<string, unknown>;
+        };
       };
 
       return globalThis.fetch("https://runner-container.internal/__internal/run", {
-        body: JSON.stringify(payload.request),
+        body: JSON.stringify(payload.job.request),
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
@@ -2212,18 +2214,20 @@ async function createRunnerContainerInvokeSuccessResponse(input: {
   }
 
   const requestBody = JSON.parse(await input.request.clone().text()) as {
-    request: {
-      commit: {
-        bundleRefs: {
-          agentState: { hash: string; key: string; size: number; updatedAt: string } | null;
-          vault: { hash: string; key: string; size: number; updatedAt: string } | null;
+    job: {
+      request: {
+        commit: {
+          bundleRefs: {
+            agentState: { hash: string; key: string; size: number; updatedAt: string } | null;
+            vault: { hash: string; key: string; size: number; updatedAt: string } | null;
+          };
         };
-      };
-      dispatch: {
-        event: {
-          userId: string;
+        dispatch: {
+          event: {
+            userId: string;
+          };
+          eventId: string;
         };
-        eventId: string;
       };
     };
   };
@@ -2231,7 +2235,7 @@ async function createRunnerContainerInvokeSuccessResponse(input: {
   return createCommittedRunnerSuccessResponse({
     bucket: input.bucket,
     payload: input.payload,
-    requestBody: requestBody.request,
+    requestBody: requestBody.job.request,
   });
 }
 

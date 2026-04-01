@@ -1,10 +1,12 @@
 import { Container, type OutboundHandlerContext } from "@cloudflare/containers";
 import {
+  parseHostedAssistantRuntimeJobInput,
+  type HostedAssistantRuntimeJobInput,
+} from "@murph/assistant-runtime";
+import {
   emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_CALLBACK_HOSTS,
   HOSTED_EXECUTION_PROXY_HOSTS,
-  parseHostedExecutionRunnerRequest,
-  type HostedExecutionRunnerRequest,
   type HostedExecutionRunnerResult,
 } from "@murph/hosted-execution";
 
@@ -26,21 +28,19 @@ export class HostedExecutionConfigurationError extends Error {
   }
 }
 
-interface HostedExecutionContainerInvokeRequest<TRequest extends HostedExecutionRunnerRequest> {
-  internalWorkerProxyToken: string;
-  request: TRequest;
+interface HostedExecutionContainerInvokeRequest {
+  job: HostedAssistantRuntimeJobInput;
   runnerEnvironment: Record<string, string>;
   timeoutMs: number;
   userId: string;
 }
 
-interface HostedExecutionContainerInvokeInput<TRequest extends HostedExecutionRunnerRequest>
-  extends HostedExecutionContainerInvokeRequest<TRequest> {
+interface HostedExecutionContainerInvokeInput extends HostedExecutionContainerInvokeRequest {
   runnerControlToken: string;
 }
 
-interface HostedExecutionContainerRunnerInput<TRequest extends HostedExecutionRunnerRequest> {
-  request: TRequest;
+interface HostedExecutionContainerRunnerInput {
+  job: HostedAssistantRuntimeJobInput;
   runnerContainerNamespace: HostedExecutionContainerNamespaceLike;
   runnerControlToken: string | null;
   runnerEnvironment: Readonly<Record<string, string>>;
@@ -50,9 +50,7 @@ interface HostedExecutionContainerRunnerInput<TRequest extends HostedExecutionRu
 
 export interface HostedExecutionContainerStubLike {
   destroyInstance(): Promise<void>;
-  invoke<TRequest extends HostedExecutionRunnerRequest>(
-    input: HostedExecutionContainerInvokeRequest<TRequest>,
-  ): Promise<HostedExecutionRunnerResult>;
+  invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult>;
 }
 
 export interface HostedExecutionContainerNamespaceLike {
@@ -102,7 +100,6 @@ export class RunnerContainer extends Container {
   defaultPort = RUNNER_PORT;
   requiredPorts = [RUNNER_PORT];
   pingEndpoint = RUNNER_PING_ENDPOINT;
-  // Keep instances warm across short bursts, but let deploy config tune the idle window explicitly.
   sleepAfter = DEFAULT_CONTAINER_SLEEP_AFTER;
   private readonly runnerControlToken: string | null;
 
@@ -112,9 +109,7 @@ export class RunnerContainer extends Container {
     this.runnerControlToken = readOptionalString(env.HOSTED_EXECUTION_RUNNER_CONTROL_TOKEN);
   }
 
-  async invoke<TRequest extends HostedExecutionRunnerRequest>(
-    payload: HostedExecutionContainerInvokeRequest<TRequest>,
-  ): Promise<HostedExecutionRunnerResult> {
+  async invoke(payload: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerResult> {
     return this.invokeHostedExecution(
       parseHostedExecutionContainerInvokeInput(payload, this.runnerControlToken),
     );
@@ -179,15 +174,19 @@ export class RunnerContainer extends Container {
     return json(result);
   }
 
-  private async invokeHostedExecution<TRequest extends HostedExecutionRunnerRequest>(
-    input: HostedExecutionContainerInvokeInput<TRequest>,
+  private async invokeHostedExecution(
+    input: HostedExecutionContainerInvokeInput,
   ): Promise<HostedExecutionRunnerResult> {
+    const dispatch = input.job.request.dispatch;
+    const run = input.job.request.run ?? null;
+    const internalWorkerProxyToken = crypto.randomUUID();
+
     emitHostedExecutionStructuredLog({
       component: "container",
-      dispatch: input.request.dispatch,
+      dispatch,
       message: "Hosted execution container starting.",
       phase: "container.starting",
-      run: input.request.run ?? null,
+      run,
     });
 
     try {
@@ -212,19 +211,18 @@ export class RunnerContainer extends Container {
       });
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch: input.request.dispatch,
+        dispatch,
         message: "Hosted execution container is ready.",
         phase: "container.ready",
-        run: input.request.run ?? null,
+        run,
       });
-      await this.installOutboundHandlers(input.userId, input.internalWorkerProxyToken);
+      await this.installOutboundHandlers(input.userId, internalWorkerProxyToken);
 
       const remainingTimeoutMs = Math.max(1, input.timeoutMs - (Date.now() - startTime));
       const response = await this.containerFetch(RUNNER_EXECUTE_URL, {
-        body: JSON.stringify({
-          ...input.request,
-          internalWorkerProxyToken: input.internalWorkerProxyToken,
-        }),
+        body: JSON.stringify(
+          injectInternalWorkerProxyToken(input.job, internalWorkerProxyToken),
+        ),
         headers: {
           authorization: `Bearer ${input.runnerControlToken}`,
           "content-type": "application/json; charset=utf-8",
@@ -241,11 +239,11 @@ export class RunnerContainer extends Container {
     } catch (error) {
       emitHostedExecutionStructuredLog({
         component: "container",
-        dispatch: input.request.dispatch,
+        dispatch,
         error,
         message: "Hosted execution container failed.",
         phase: "failed",
-        run: input.request.run ?? null,
+        run,
       });
       throw error;
     }
@@ -286,19 +284,17 @@ export class RunnerContainer extends Container {
   }
 }
 
-export async function invokeHostedExecutionContainerRunner<
-  TRequest extends HostedExecutionRunnerRequest,
->(input: HostedExecutionContainerRunnerInput<TRequest>): Promise<HostedExecutionRunnerResult> {
+export async function invokeHostedExecutionContainerRunner(
+  input: HostedExecutionContainerRunnerInput,
+): Promise<HostedExecutionRunnerResult> {
   requireHostedExecutionRunnerControlToken(input.runnerControlToken);
-  const internalWorkerProxyToken = crypto.randomUUID();
 
   return input.runnerContainerNamespace.getByName(input.userId).invoke({
-    internalWorkerProxyToken,
-    request: input.request,
-    runnerEnvironment: input.runnerEnvironment,
+    job: input.job,
+    runnerEnvironment: { ...input.runnerEnvironment },
     timeoutMs: input.timeoutMs,
     userId: input.userId,
-  } satisfies HostedExecutionContainerInvokeRequest<TRequest>);
+  });
 }
 
 function createRunnerOutboundHandler() {
@@ -340,24 +336,17 @@ function readContainerSleepAfter(source: RunnerContainerEnvironmentSource): stri
     ?? DEFAULT_CONTAINER_SLEEP_AFTER;
 }
 
-function parseHostedExecutionContainerInvokeInput<
-  TRequest extends HostedExecutionRunnerRequest,
->(
+function parseHostedExecutionContainerInvokeInput(
   payload: {
-    internalWorkerProxyToken?: unknown;
-    request?: unknown;
+    job?: unknown;
     runnerEnvironment?: unknown;
     timeoutMs?: unknown;
     userId?: unknown;
   },
   runnerControlToken: string | null,
-): HostedExecutionContainerInvokeInput<TRequest> {
+): HostedExecutionContainerInvokeInput {
   return {
-    internalWorkerProxyToken: requireString(
-      payload.internalWorkerProxyToken,
-      "payload.internalWorkerProxyToken",
-    ),
-    request: parseHostedExecutionContainerRunnerRequest<TRequest>(payload.request),
+    job: parseHostedAssistantRuntimeJobInput(payload.job),
     runnerControlToken: requireHostedExecutionRunnerControlToken(runnerControlToken),
     runnerEnvironment: readRunnerEnvironment(payload.runnerEnvironment),
     timeoutMs: readTimeoutMs(payload.timeoutMs, RUNNER_READY_TIMEOUT_MS),
@@ -365,12 +354,17 @@ function parseHostedExecutionContainerInvokeInput<
   };
 }
 
-function parseHostedExecutionContainerRunnerRequest<
-  TRequest extends HostedExecutionRunnerRequest,
->(value: unknown): TRequest {
-  const record = requireRecord(value, "request");
-  parseHostedExecutionRunnerRequest(record);
-  return record as TRequest;
+function injectInternalWorkerProxyToken(
+  job: HostedAssistantRuntimeJobInput,
+  internalWorkerProxyToken: string,
+): HostedAssistantRuntimeJobInput {
+  return {
+    ...job,
+    runtime: {
+      ...(job.runtime ?? {}),
+      internalWorkerProxyToken,
+    },
+  };
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

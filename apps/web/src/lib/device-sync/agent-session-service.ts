@@ -7,6 +7,7 @@ import type {
   ProviderAuthTokens,
   PublicDeviceSyncAccount,
 } from "@murph/device-syncd";
+import type { AuthenticatedHostedUser } from "./auth";
 import type { HostedSecretCodec } from "./crypto";
 import { requireHostedDeviceSyncProvider } from "./providers";
 import {
@@ -104,6 +105,34 @@ export class HostedDeviceSyncAgentSessionService {
       retryable: false,
       httpStatus: 401,
     });
+  }
+
+  async createAgentSession(
+    user: AuthenticatedHostedUser,
+    label: string | null,
+  ): Promise<{
+    agent: { id: string; label: string | null; createdAt: string; expiresAt: string };
+    token: string;
+  }> {
+    const token = generateHostedAgentBearerToken();
+    const now = toIsoTimestamp(new Date());
+    const session = await this.store.createAgentSession({
+      user,
+      label,
+      tokenHash: token.tokenHash,
+      now,
+      expiresAt: resolveHostedAgentSessionExpiry(now),
+    });
+
+    return {
+      agent: {
+        id: session.id,
+        label: session.label,
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+      },
+      token: token.token,
+    };
   }
 
   async listSignals(agentUserId: string, url: URL) {

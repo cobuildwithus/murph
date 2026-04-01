@@ -19,6 +19,10 @@ import {
   writePendingAssistantUsageRecord,
 } from "@murph/runtime-state/node";
 import { assistantOutboxIntentSchema } from "@murph/assistant-core";
+import type {
+  HostedAssistantRuntimeConfig,
+  HostedAssistantRuntimeJobInput,
+} from "@murph/assistant-runtime";
 
 const hostedCliMocks = vi.hoisted(() => ({
   dispatchAssistantOutboxIntent: vi.fn(),
@@ -39,13 +43,46 @@ vi.mock("@murph/assistant-core", async () => {
 });
 
 import {
-  runHostedExecutionJob,
+  runHostedExecutionJob as runHostedExecutionJobInternal,
   setHostedExecutionCallbackBaseUrlsForTests,
   setHostedExecutionRunModeForTests,
   setHostedExecutionRunStartHookForTests,
 } from "../src/node-runner.ts";
 
 const describe = baseDescribe.sequential;
+
+type LegacyHostedExecutionJobInput =
+  HostedAssistantRuntimeJobInput["request"] &
+  Pick<
+    HostedAssistantRuntimeConfig,
+    "forwardedEnv" | "internalWorkerProxyToken" | "userEnv" | "webControlPlane"
+  >;
+
+async function runHostedExecutionJob(
+  input: LegacyHostedExecutionJobInput,
+  options?: {
+    signal?: AbortSignal;
+  },
+) {
+  const {
+    forwardedEnv,
+    internalWorkerProxyToken,
+    userEnv,
+    webControlPlane,
+    ...request
+  } = input;
+  const runtime: HostedAssistantRuntimeConfig = {
+    ...(forwardedEnv === undefined ? {} : { forwardedEnv }),
+    ...(internalWorkerProxyToken === undefined ? {} : { internalWorkerProxyToken }),
+    ...(userEnv === undefined ? {} : { userEnv }),
+    ...(webControlPlane === undefined ? {} : { webControlPlane }),
+  };
+
+  return runHostedExecutionJobInternal({
+    request,
+    ...(Object.keys(runtime).length === 0 ? {} : { runtime }),
+  }, options);
+}
 
 describe("runHostedExecutionJob", () => {
   const cleanupPaths: string[] = [];
@@ -1393,6 +1430,13 @@ describe("runHostedExecutionJob", () => {
           eventId: "evt_share_proxy_123",
           occurredAt: "2026-03-26T12:30:00.000Z",
         },
+        forwardedEnv: {
+          HOSTED_SHARE_INTERNAL_TOKEN: "bad-forwarded-share-token",
+        },
+        webControlPlane: {
+          shareBaseUrl: "http://override.invalid",
+          shareToken: "bad-runtime-share-token",
+        },
       });
       const workspaceRoot = await mkdtemp(path.join(tmpdir(), "murph-cloudflare-share-proxy-"));
       cleanupPaths.push(workspaceRoot);
@@ -1417,6 +1461,30 @@ describe("runHostedExecutionJob", () => {
       restoreEnvVar("HOSTED_EXECUTION_INTERNAL_TOKEN", previousHostedExecutionInternalToken);
       restoreEnvVar("HOSTED_SHARE_INTERNAL_TOKEN", previousHostedShareInternalToken);
     }
+  });
+
+  it("ignores caller-supplied forwarded env when launching isolated jobs", async () => {
+    setHostedExecutionRunModeForTests("isolated");
+
+    const result = await runHostedExecutionJob({
+      bundles: {
+        agentState: null,
+        vault: null,
+      },
+      dispatch: {
+        event: {
+          kind: "member.activated",
+          userId: "member_isolated_env",
+        },
+        eventId: "evt_isolated_env",
+        occurredAt: "2026-03-29T10:00:00.000Z",
+      },
+      forwardedEnv: {
+        NODE_OPTIONS: "--definitely-invalid-node-option",
+      },
+    });
+
+    expect(result.result.summary).toContain("Processed member activation");
   });
 
   it("preserves encrypted per-user env overrides across one-shot runs", async () => {
