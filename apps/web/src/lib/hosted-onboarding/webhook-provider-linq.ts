@@ -8,6 +8,7 @@ import {
   resolveHostedLinqOccurredAt,
   summarizeHostedLinqMessage,
 } from "./linq";
+import { shouldStartHostedOnboarding } from "./shared";
 import {
   buildHostedInviteUrl,
   issueHostedInvite,
@@ -91,6 +92,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
         reason: "dispatched-active-member",
       },
     };
+  }
+
+  const requestedOnboarding = shouldStartHostedOnboarding(summary.text);
+  const canContinueExistingOnboarding = Boolean(existingMember);
+
+  if (!requestedOnboarding && !canContinueExistingOnboarding) {
+    return buildIgnoredLinqWebhookPlan("onboarding-not-requested");
   }
 
   const reusableInvite = existingMember

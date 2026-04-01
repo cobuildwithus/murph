@@ -39,6 +39,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
       linqApiBaseUrl: "https://linq.example.test",
       linqApiToken: "linq-token",
       linqWebhookSecret: null,
+      linqWebhookTimestampToleranceMs: 5 * 60_000,
       publicBaseUrl: "https://join.example.test",
       sessionCookieName: "hosted_session",
       sessionTtlDays: 30,
@@ -567,6 +568,74 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       reason: "suspended-member",
     });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores first-contact Linq messages that do not explicitly request onboarding", async () => {
+    const prismaMocks = {
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedInvite: {
+        create: vi.fn(),
+        findFirst: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+        update: vi.fn(),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        api_version: "v1",
+        created_at: "2026-03-26T12:00:00.000Z",
+        data: {
+          chat_id: "chat_123",
+          from: "+15551234567",
+          is_from_me: false,
+          message: {
+            id: "msg_123",
+            parts: [
+              {
+                type: "text",
+                value: "hello there",
+              },
+            ],
+          },
+          recipient_phone: "+15550000000",
+          received_at: "2026-03-26T12:00:00.000Z",
+          service: "sms",
+        },
+        event_id: "evt_non_trigger",
+        event_type: "message.received",
+      }),
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "onboarding-not-requested",
+    });
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMocks.hostedInvite.findFirst).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });

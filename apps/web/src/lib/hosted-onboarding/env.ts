@@ -11,6 +11,7 @@ export interface HostedOnboardingEnvironment {
   linqApiBaseUrl: string;
   linqApiToken: string | null;
   linqWebhookSecret: string | null;
+  linqWebhookTimestampToleranceMs: number;
   privyAppId: string | null;
   privyVerificationKey: string | null;
   publicBaseUrl: string | null;
@@ -68,6 +69,7 @@ export function readHostedOnboardingEnvironment(
     linqApiBaseUrl: linq.apiBaseUrl,
     linqApiToken: linq.apiToken,
     linqWebhookSecret: linq.webhookSecret,
+    linqWebhookTimestampToleranceMs: linq.webhookTimestampToleranceMs,
     privyAppId: readEnv(source, ["NEXT_PUBLIC_PRIVY_APP_ID"]),
     privyVerificationKey: readEnv(source, ["PRIVY_VERIFICATION_KEY"]),
     publicBaseUrl,

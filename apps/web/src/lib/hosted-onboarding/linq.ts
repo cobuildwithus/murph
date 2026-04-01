@@ -49,7 +49,10 @@ export function verifyAndParseHostedLinqWebhookRequest(input: {
   signature: string | null;
   timestamp: string | null;
 }): HostedLinqWebhookEvent {
-  const { linqWebhookSecret: webhookSecret } = getHostedOnboardingEnvironment();
+  const {
+    linqWebhookSecret: webhookSecret,
+    linqWebhookTimestampToleranceMs,
+  } = getHostedOnboardingEnvironment();
 
   if (!webhookSecret) {
     throw hostedOnboardingError({
@@ -65,6 +68,7 @@ export function verifyAndParseHostedLinqWebhookRequest(input: {
         "x-webhook-signature": input.signature ?? undefined,
         "x-webhook-timestamp": input.timestamp ?? undefined,
       },
+      timestampToleranceMs: linqWebhookTimestampToleranceMs,
       rawBody: input.rawBody,
       webhookSecret,
     });

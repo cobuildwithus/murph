@@ -56,6 +56,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiBaseUrl: "https://linq.example.test",
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
+    linqWebhookTimestampToleranceMs: 5 * 60_000,
     publicBaseUrl: "https://join.example.test",
     revnetChainId: null,
     revnetProjectId: null,
@@ -315,7 +316,7 @@ describe("hosted onboarding webhook retry safety", () => {
     );
   });
 
-  it("asks the Murph intro question on first contact before sending the signup link", async () => {
+  it("asks the Murph intro question on first contact only after an onboarding trigger", async () => {
     const prisma = withPrismaTransaction({
       hostedBillingCheckout: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -349,7 +350,7 @@ describe("hosted onboarding webhook retry safety", () => {
       handleHostedOnboardingLinqWebhook({
         prisma,
         rawBody: buildLinqMessageWebhookBody({
-          text: "hello",
+          text: "start murph",
         }),
         signature: null,
         timestamp: null,

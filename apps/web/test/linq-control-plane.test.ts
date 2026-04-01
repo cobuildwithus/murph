@@ -23,6 +23,11 @@ const mocks = vi.hoisted(() => ({
     queueWebhookEventIfNew: vi.fn(),
     listEventsForUser: vi.fn(),
   },
+  hostedWebhookReceipt: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+    updateMany: vi.fn(),
+  },
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -75,9 +80,15 @@ describe("HostedLinqControlPlane", () => {
     vi.clearAllMocks();
     process.env.LINQ_API_BASE_URL = "https://linq.example.test/api/partner/v3";
     process.env.LINQ_API_TOKEN = "linq-token";
+    process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = String(5 * 60_000);
     delete process.env.LINQ_WEBHOOK_SECRET;
     delete process.env[REMOVED_LINQ_WEBHOOK_SECRET_ALIAS];
-    mocks.getPrisma.mockReturnValue({});
+    mocks.hostedWebhookReceipt.create.mockResolvedValue({});
+    mocks.hostedWebhookReceipt.findUnique.mockResolvedValue(null);
+    mocks.hostedWebhookReceipt.updateMany.mockResolvedValue({ count: 1 });
+    mocks.getPrisma.mockReturnValue({
+      hostedWebhookReceipt: mocks.hostedWebhookReceipt,
+    });
     mocks.store.getBindingByRecipientPhone.mockResolvedValue(null);
     mocks.fetch.mockResolvedValue({
       ok: true,
@@ -148,6 +159,14 @@ describe("HostedLinqControlPlane", () => {
     expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
     expect(mocks.verifyAndParseLinqWebhookRequest).toHaveBeenCalledTimes(1);
     expect(mocks.store.getBindingByRecipientPhone).toHaveBeenCalledWith("+15557654321");
+    expect(mocks.hostedWebhookReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventId: "evt_123",
+          source: "linq-control-plane",
+        }),
+      }),
+    );
   });
 
   it("reuses the hosted device-sync browser auth flow for binding reads", async () => {
@@ -467,10 +486,67 @@ describe("HostedLinqControlPlane", () => {
     expect(JSON.stringify(queuedInput)).not.toContain("private message body");
     expect(JSON.stringify(queuedInput)).not.toContain("https://cdn.example.test/private.png");
     expect(JSON.stringify(queuedInput)).not.toContain("att_private_123");
+    expect(mocks.hostedWebhookReceipt.updateMany).toHaveBeenCalled();
+  });
+
+  it("persists ignored non-message Linq webhooks behind the hosted receipt barrier", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    const event = {
+      api_version: "v3",
+      event_id: "evt_ignored_123",
+      created_at: "2026-03-25T10:00:00.000Z",
+      event_type: "message.delivered",
+      trace_id: "trace_ignored_123",
+      data: {
+        chat_id: "chat_123",
+      },
+    };
+
+    mocks.verifyAndParseLinqWebhookRequest.mockReturnValue(event);
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).resolves.toMatchObject({
+      accepted: true,
+      duplicate: false,
+      ignored: true,
+      routed: false,
+      eventId: "evt_ignored_123",
+      eventType: "message.delivered",
+    });
+    expect(mocks.hostedWebhookReceipt.create).toHaveBeenCalledTimes(1);
+    expect(mocks.hostedWebhookReceipt.updateMany).toHaveBeenCalled();
+    const receiptUpdate = mocks.hostedWebhookReceipt.updateMany.mock.calls[0]?.[0];
+    expect(receiptUpdate).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            receiptState: expect.objectContaining({
+              response: expect.objectContaining({
+                accepted: true,
+                duplicate: false,
+                eventId: "evt_ignored_123",
+                eventType: "message.delivered",
+                ignored: true,
+                routed: false,
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
   });
 
   it("rejects malformed signed message.received payloads with the hosted payload error surface", async () => {
     process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-03-25T10:00:00.000Z"));
     const payload = JSON.stringify({
       api_version: "v3",
       event_id: "evt_invalid_payload",
@@ -511,6 +587,52 @@ describe("HostedLinqControlPlane", () => {
       httpStatus: 400,
       message: "Linq message.received is_from_me must be a boolean.",
     });
+    expect(mocks.store.getBindingByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
+    expect(mocks.hostedWebhookReceipt.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects stale signed webhook timestamps before any receipt or queue write", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "linq-secret";
+    process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = "60000";
+    vi.useFakeTimers();
+    const payload = JSON.stringify({
+      api_version: "v3",
+      event_id: "evt_stale",
+      created_at: "2026-03-25T10:00:00.000Z",
+      event_type: "message.received",
+      data: {
+        chat_id: "chat_123",
+        from: "+15550001111",
+        recipient_phone: "+15557654321",
+        is_from_me: false,
+        message: {
+          id: "msg_123",
+          parts: [],
+        },
+      },
+    });
+    const timestamp = "1711360800";
+    mocks.verifyAndParseLinqWebhookRequest.mockImplementation(
+      inboxd.verifyAndParseLinqWebhookRequest,
+    );
+    vi.setSystemTime(new Date("2024-03-25T10:10:00.000Z"));
+
+    const controlPlane = new linqControlPlane.HostedLinqControlPlane(
+      new Request("https://example.test/api/linq/webhook", {
+        method: "POST",
+        body: payload,
+        headers: {
+          "x-webhook-signature": signLinqWebhook("linq-secret", payload, timestamp),
+          "x-webhook-timestamp": timestamp,
+        },
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook()).rejects.toMatchObject({
+      message: "Linq webhook timestamp is outside the allowed tolerance window.",
+    });
+    expect(mocks.hostedWebhookReceipt.create).not.toHaveBeenCalled();
     expect(mocks.store.getBindingByRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.store.queueWebhookEventIfNew).not.toHaveBeenCalled();
   });
