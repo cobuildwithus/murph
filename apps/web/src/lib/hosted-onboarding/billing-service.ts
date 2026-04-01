@@ -1,4 +1,10 @@
-import { Prisma, type HostedMember, type PrismaClient } from "@prisma/client";
+import {
+  HostedBillingCheckoutStatus,
+  Prisma,
+  type HostedBillingCheckout,
+  type HostedMember,
+  type PrismaClient,
+} from "@prisma/client";
 import {
   HostedBillingMode,
   HostedBillingStatus,
@@ -7,7 +13,7 @@ import {
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedInviteForAuthentication } from "./invite-service";
 import {
   type HostedPrivyCookieStore,
@@ -19,10 +25,11 @@ import {
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 import {
-  createHostedBillingAttempt,
+  createPendingHostedBillingAttempt,
   expireHostedBillingAttemptBySessionId,
-  findOpenHostedBillingAttempt,
-  supersedeOpenHostedBillingAttempts,
+  failHostedBillingAttemptById,
+  finalizeHostedBillingAttemptById,
+  findActiveHostedBillingAttemptForMember,
 } from "./billing-attempts";
 import {
   requireHostedOnboardingPublicBaseUrl,
@@ -39,6 +46,7 @@ import {
   isHostedOnboardingRevnetEnabled,
   normalizeHostedWalletAddress,
 } from "./revnet";
+import { lockHostedMemberRow } from "./shared";
 
 import type { HostedSessionRecord } from "./session";
 
@@ -96,18 +104,64 @@ export async function createHostedBillingCheckout(input: {
     stripe,
   });
   const mode = billingMode === "payment" ? HostedBillingMode.payment : HostedBillingMode.subscription;
-  const reusableCheckout = await resolveReusableHostedBillingCheckout({
+  const requestContext = {
+    hasShareContext: shareCode !== null,
     inviteId: invite.id,
     memberId: invite.member.id,
     mode,
-    now,
     priceId,
-    prisma,
-    shareCode,
-    stripe,
-  });
+  };
 
-  if (reusableCheckout?.checkoutUrl) {
+  for (let retryCount = 0; retryCount < 2; retryCount += 1) {
+    const reservation = await reserveHostedBillingCheckout({
+      customerId,
+      now,
+      prisma,
+      requestContext,
+    });
+
+    if (reservation.kind === "alreadyActive") {
+      return {
+        alreadyActive: true,
+        url: null,
+      };
+    }
+
+    if (reservation.kind === "pending") {
+      return finalizeHostedBillingCheckoutReservation({
+        billingMode,
+        customerId,
+        inviteCode: invite.inviteCode,
+        memberId: invite.member.id,
+        priceId,
+        prisma,
+        reservation: reservation.attempt,
+        shareCode,
+        stripe,
+        publicBaseUrl,
+      });
+    }
+
+    if (reservation.kind === "conflict_pending") {
+      throw hostedOnboardingError({
+        code: "HOSTED_BILLING_CHECKOUT_IN_PROGRESS",
+        message: "Another hosted billing checkout is already being prepared for this account. Retry in a moment.",
+        httpStatus: 503,
+        retryable: true,
+      });
+    }
+
+    const reusableCheckout = await resolveReusableHostedBillingCheckout({
+      attempt: reservation.attempt,
+      now,
+      prisma,
+      stripe,
+    });
+
+    if (!reusableCheckout?.checkoutUrl) {
+      continue;
+    }
+
     await prisma.hostedMember.update({
       where: {
         id: invite.member.id,
@@ -120,177 +174,50 @@ export async function createHostedBillingCheckout(input: {
       },
     });
 
-    return {
-      alreadyActive: false,
-      url: reusableCheckout.checkoutUrl,
-    };
-  }
-
-  const checkoutAttemptCount = typeof prisma.hostedBillingCheckout.count === "function"
-    ? await prisma.hostedBillingCheckout.count({
-      where: {
-        memberId: invite.member.id,
-        mode,
-        priceId,
-      },
-    })
-    : 0;
-  const checkoutAttemptNumber = checkoutAttemptCount + 1;
-  const checkoutMetadata: Record<string, string> = {
-    inviteId: invite.id,
-    memberId: invite.member.id,
-  };
-  const checkoutSessionParams: Stripe.Checkout.SessionCreateParams = {
-    cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode, shareCode),
-    client_reference_id: invite.member.id,
-    customer: customerId,
-    line_items: [
-      {
-        price: priceId,
-        quantity: 1,
-      },
-    ],
-    metadata: checkoutMetadata,
-    mode: billingMode,
-    payment_method_types: ["card"],
-    success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode, shareCode),
-  };
-
-  if (billingMode === "subscription") {
-    checkoutSessionParams.subscription_data = {
-      metadata: checkoutMetadata,
-    };
-  } else {
-    checkoutSessionParams.payment_intent_data = {
-      metadata: checkoutMetadata,
-    };
-  }
-
-  const checkoutSession = await stripe.checkout.sessions.create(
-    checkoutSessionParams,
-    {
-      idempotencyKey: buildHostedStripeCheckoutIdempotencyKey({
-        attemptNumber: checkoutAttemptNumber,
-        billingMode,
-        inviteId: invite.id,
-        memberId: invite.member.id,
-        priceId,
-      }),
-    },
-  );
-
-  if (!checkoutSession.url) {
-    throw hostedOnboardingError({
-      code: "CHECKOUT_URL_MISSING",
-      message: "Stripe Checkout did not return a redirect URL.",
-      httpStatus: 502,
-    });
-  }
-
-  try {
-    await runHostedBillingCheckoutTransaction(prisma, async (transaction) => {
-      await supersedeOpenHostedBillingAttempts({
-        inviteId: invite.id,
-        memberId: invite.member.id,
-        prisma: transaction,
-      });
-      await createHostedBillingAttempt({
-        checkoutUrl: checkoutSession.url!,
-        hasShareContext: shareCode !== null,
-        inviteId: invite.id,
-        memberId: invite.member.id,
-        mode,
-        priceId,
-        prisma: transaction,
-        stripeCheckoutSessionId: checkoutSession.id,
-        stripeCustomerId: customerId,
-        stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
-      });
-      await transaction.hostedMember.update({
-        where: {
-          id: invite.member.id,
-        },
-        data: {
-          billingMode: mode,
-          billingStatus: HostedBillingStatus.checkout_open,
-          stripeCustomerId: customerId,
-          stripeLatestCheckoutSessionId: checkoutSession.id,
-        },
-      });
-    });
-  } catch (error) {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) {
-      throw error;
-    }
-
-    const concurrentOpenCheckout = await resolveReusableHostedBillingCheckout({
-      inviteId: invite.id,
-      memberId: invite.member.id,
-      mode,
-      now,
-      priceId,
-      prisma,
-      shareCode,
-      stripe,
-    });
-
-    if (concurrentOpenCheckout?.checkoutUrl) {
-      await prisma.hostedMember.update({
-        where: {
-          id: invite.member.id,
-        },
-        data: {
-          billingMode: mode,
-          billingStatus: HostedBillingStatus.checkout_open,
-          stripeCustomerId: customerId,
-          stripeLatestCheckoutSessionId: concurrentOpenCheckout.stripeCheckoutSessionId,
-        },
-      });
-
+    if (reservation.kind === "open") {
       return {
         alreadyActive: false,
-        url: concurrentOpenCheckout.checkoutUrl,
+        url: reusableCheckout.checkoutUrl,
       };
     }
 
-    throw error;
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_ALREADY_OPEN",
+      message: "A hosted billing checkout is already open for this account. Finish that checkout before starting another one.",
+      httpStatus: 409,
+    });
   }
 
-  return {
-    alreadyActive: false,
-    url: checkoutSession.url,
-  };
+  throw hostedOnboardingError({
+    code: "HOSTED_BILLING_CHECKOUT_RETRY_EXHAUSTED",
+    message: "The hosted billing checkout could not be prepared safely. Retry in a moment.",
+    httpStatus: 503,
+    retryable: true,
+  });
 }
 
 async function resolveReusableHostedBillingCheckout(input: {
-  inviteId: string;
-  memberId: string;
-  mode: HostedBillingMode;
+  attempt: HostedBillingCheckout;
   now: Date;
-  priceId: string;
   prisma: PrismaClient;
-  shareCode: string | null;
   stripe: Stripe;
 }) {
-  if (input.shareCode) {
+  if (input.attempt.status !== HostedBillingCheckoutStatus.open) {
     return null;
   }
 
-  const attempt = await findOpenHostedBillingAttempt({
-    hasShareContext: false,
-    inviteId: input.inviteId,
-    memberId: input.memberId,
-    mode: input.mode,
-    priceId: input.priceId,
-    prisma: input.prisma,
-  });
-
-  if (!attempt?.checkoutUrl) {
+  if (!input.attempt.stripeCheckoutSessionId || !input.attempt.checkoutUrl) {
+    await failHostedBillingAttemptById({
+      checkoutId: input.attempt.id,
+      prisma: input.prisma,
+      statuses: [HostedBillingCheckoutStatus.open],
+      stripeCheckoutSessionId: input.attempt.stripeCheckoutSessionId,
+    });
     return null;
   }
 
   const stripeSession = await input.stripe.checkout.sessions.retrieve(
-    attempt.stripeCheckoutSessionId,
+    input.attempt.stripeCheckoutSessionId,
   );
   const expiresAtMs = typeof stripeSession.expires_at === "number"
     ? stripeSession.expires_at * 1000
@@ -302,14 +229,14 @@ async function resolveReusableHostedBillingCheckout(input: {
   if (!isOpen) {
     await expireHostedBillingAttemptBySessionId({
       prisma: input.prisma,
-      stripeCheckoutSessionId: attempt.stripeCheckoutSessionId,
+      stripeCheckoutSessionId: input.attempt.stripeCheckoutSessionId,
     });
     return null;
   }
 
   return {
-    ...attempt,
-    checkoutUrl: stripeSession.url ?? attempt.checkoutUrl,
+    ...input.attempt,
+    checkoutUrl: stripeSession.url ?? input.attempt.checkoutUrl,
   };
 }
 
@@ -394,32 +321,259 @@ async function ensureHostedStripeCustomer(input: {
 
 async function runHostedBillingCheckoutTransaction<TResult>(
   prisma: PrismaClient,
-  callback: (transaction: PrismaClient) => Promise<TResult>,
+  callback: (transaction: Prisma.TransactionClient) => Promise<TResult>,
 ): Promise<TResult> {
   return typeof prisma.$transaction === "function"
-    ? prisma.$transaction((transaction) => callback(transaction as PrismaClient))
-    : callback(prisma);
+    ? prisma.$transaction((transaction) => callback(transaction))
+    : callback(prisma as Prisma.TransactionClient);
 }
 
 function buildHostedStripeCustomerIdempotencyKey(memberId: string): string {
   return `hosted-onboarding:stripe-customer:${memberId}`;
 }
 
-function buildHostedStripeCheckoutIdempotencyKey(input: {
-  attemptNumber: number;
-  billingMode: "payment" | "subscription";
+function buildHostedStripeCheckoutIdempotencyKey(checkoutId: string): string {
+  return `hosted-onboarding:stripe-checkout:${checkoutId}`;
+}
+
+function isMatchingHostedBillingCheckout(
+  attempt: Pick<HostedBillingCheckout, "hasShareContext" | "inviteId" | "memberId" | "mode" | "priceId">,
+  requestContext: HostedBillingCheckoutRequestContext,
+): boolean {
+  return attempt.hasShareContext === requestContext.hasShareContext
+    && attempt.inviteId === requestContext.inviteId
+    && attempt.memberId === requestContext.memberId
+    && attempt.mode === requestContext.mode
+    && attempt.priceId === requestContext.priceId;
+}
+
+type HostedBillingCheckoutRequestContext = {
+  hasShareContext: boolean;
   inviteId: string;
   memberId: string;
+  mode: HostedBillingMode;
   priceId: string;
-}): string {
-  return [
-    "hosted-onboarding:stripe-checkout",
-    input.memberId,
-    input.inviteId,
-    input.billingMode,
-    input.priceId,
-    String(input.attemptNumber),
-  ].join(":");
+};
+
+type HostedBillingCheckoutReservation =
+  | { kind: "alreadyActive" }
+  | { kind: "pending"; attempt: HostedBillingCheckout }
+  | { kind: "open"; attempt: HostedBillingCheckout }
+  | { kind: "conflict_pending"; attempt: HostedBillingCheckout }
+  | { kind: "conflict_open"; attempt: HostedBillingCheckout };
+
+async function reserveHostedBillingCheckout(input: {
+  customerId: string;
+  now: Date;
+  prisma: PrismaClient;
+  requestContext: HostedBillingCheckoutRequestContext;
+}): Promise<HostedBillingCheckoutReservation> {
+  return runHostedBillingCheckoutTransaction(input.prisma, async (transaction) => {
+    await lockHostedMemberRow(transaction, input.requestContext.memberId);
+
+    const member = typeof transaction.hostedMember.findUnique === "function"
+      ? await transaction.hostedMember.findUnique({
+          where: {
+            id: input.requestContext.memberId,
+          },
+          select: {
+            billingStatus: true,
+          },
+        })
+      : null;
+
+    if (member?.billingStatus === HostedBillingStatus.active) {
+      return {
+        kind: "alreadyActive",
+      };
+    }
+
+    const activeAttempt = await findActiveHostedBillingAttemptForMember({
+      memberId: input.requestContext.memberId,
+      prisma: transaction,
+    });
+
+    if (!activeAttempt) {
+      return {
+        kind: "pending",
+        attempt: await createPendingHostedBillingAttempt({
+          hasShareContext: input.requestContext.hasShareContext,
+          inviteId: input.requestContext.inviteId,
+          memberId: input.requestContext.memberId,
+          mode: input.requestContext.mode,
+          priceId: input.requestContext.priceId,
+          prisma: transaction,
+          stripeCustomerId: input.customerId,
+        }),
+      };
+    }
+
+    if (isMatchingHostedBillingCheckout(activeAttempt, input.requestContext)) {
+      return {
+        kind:
+          activeAttempt.status === HostedBillingCheckoutStatus.pending
+            ? "pending"
+            : "open",
+        attempt: activeAttempt,
+      };
+    }
+
+    return {
+      kind:
+        activeAttempt.status === HostedBillingCheckoutStatus.pending
+          ? "conflict_pending"
+          : "conflict_open",
+      attempt: activeAttempt,
+    };
+  });
+}
+
+async function finalizeHostedBillingCheckoutReservation(input: {
+  billingMode: "payment" | "subscription";
+  customerId: string;
+  inviteCode: string;
+  memberId: string;
+  priceId: string;
+  prisma: PrismaClient;
+  publicBaseUrl: string;
+  reservation: HostedBillingCheckout;
+  shareCode: string | null;
+  stripe: Stripe;
+}): Promise<{ alreadyActive: boolean; url: string | null }> {
+  const checkoutMetadata: Record<string, string> = {
+    checkoutId: input.reservation.id,
+    inviteId: input.reservation.inviteId ?? "",
+    memberId: input.memberId,
+  };
+  const checkoutSessionParams: Stripe.Checkout.SessionCreateParams = {
+    cancel_url: buildStripeCancelUrl(input.publicBaseUrl, input.inviteCode, input.shareCode),
+    client_reference_id: input.memberId,
+    customer: input.customerId,
+    line_items: [
+      {
+        price: input.priceId,
+        quantity: 1,
+      },
+    ],
+    metadata: checkoutMetadata,
+    mode: input.billingMode,
+    payment_method_types: ["card"],
+    success_url: buildStripeSuccessUrl(input.publicBaseUrl, input.inviteCode, input.shareCode),
+  };
+
+  if (input.billingMode === "subscription") {
+    checkoutSessionParams.subscription_data = {
+      metadata: checkoutMetadata,
+    };
+  } else {
+    checkoutSessionParams.payment_intent_data = {
+      metadata: checkoutMetadata,
+    };
+  }
+
+  const checkoutSession = await input.stripe.checkout.sessions.create(
+    checkoutSessionParams,
+    {
+      idempotencyKey: buildHostedStripeCheckoutIdempotencyKey(input.reservation.id),
+    },
+  );
+
+  if (!checkoutSession.url) {
+    await failHostedBillingAttemptById({
+      checkoutId: input.reservation.id,
+      prisma: input.prisma,
+      stripeCheckoutSessionId: checkoutSession.id,
+    });
+    throw hostedOnboardingError({
+      code: "CHECKOUT_URL_MISSING",
+      message: "Stripe Checkout did not return a redirect URL.",
+      httpStatus: 502,
+    });
+  }
+
+  try {
+    await runHostedBillingCheckoutTransaction(input.prisma, async (transaction) => {
+      await lockHostedMemberRow(transaction, input.memberId);
+
+      const latestAttempt = await transaction.hostedBillingCheckout.findUnique({
+        where: {
+          id: input.reservation.id,
+        },
+      });
+
+      if (!latestAttempt) {
+        throw hostedOnboardingError({
+          code: "HOSTED_BILLING_CHECKOUT_MISSING",
+          message: "The hosted billing checkout reservation no longer exists.",
+          httpStatus: 503,
+          retryable: true,
+        });
+      }
+
+      if (
+        latestAttempt.status === HostedBillingCheckoutStatus.open
+        && latestAttempt.stripeCheckoutSessionId === checkoutSession.id
+      ) {
+        await transaction.hostedMember.update({
+          where: {
+            id: input.memberId,
+          },
+          data: {
+            billingMode: latestAttempt.mode,
+            billingStatus: HostedBillingStatus.checkout_open,
+            stripeCustomerId: input.customerId,
+            stripeLatestCheckoutSessionId: checkoutSession.id,
+          },
+        });
+        return;
+      }
+
+      if (latestAttempt.status !== HostedBillingCheckoutStatus.pending) {
+        throw hostedOnboardingError({
+          code: "HOSTED_BILLING_CHECKOUT_RESERVATION_CONFLICT",
+          message: "The hosted billing checkout reservation changed before it could be finalized. Retry in a moment.",
+          httpStatus: 503,
+          retryable: true,
+        });
+      }
+
+      await finalizeHostedBillingAttemptById({
+        checkoutId: latestAttempt.id,
+        checkoutUrl: checkoutSession.url!,
+        prisma: transaction,
+        stripeCheckoutSessionId: checkoutSession.id,
+        stripeCustomerId: input.customerId,
+        stripeSubscriptionId: coerceStripeSubscriptionId(checkoutSession.subscription),
+      });
+      await transaction.hostedMember.update({
+        where: {
+          id: input.memberId,
+        },
+        data: {
+          billingMode: latestAttempt.mode,
+          billingStatus: HostedBillingStatus.checkout_open,
+          stripeCustomerId: input.customerId,
+          stripeLatestCheckoutSessionId: checkoutSession.id,
+        },
+      });
+    });
+  } catch (error) {
+    if (isHostedOnboardingError(error)) {
+      throw error;
+    }
+
+    throw hostedOnboardingError({
+      code: "HOSTED_BILLING_CHECKOUT_FINALIZE_FAILED",
+      message: "Stripe Checkout was created, but the hosted billing record could not be finalized safely. Retry in a moment.",
+      httpStatus: 503,
+      retryable: true,
+    });
+  }
+
+  return {
+    alreadyActive: false,
+    url: checkoutSession.url,
+  };
 }
 
 function resolveHostedMemberWalletAddress(input: {
