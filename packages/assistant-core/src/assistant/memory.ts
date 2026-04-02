@@ -428,7 +428,7 @@ export function redactAssistantMemoryRecord(
 ): AssistantMemoryRecord {
   return {
     ...record,
-    sourcePath: redactAssistantDisplayPath(record.sourcePath),
+    sourcePath: redactAssistantMemorySourcePath(record.sourcePath),
   }
 }
 
@@ -437,8 +437,22 @@ export function redactAssistantMemorySearchHit(
 ): AssistantMemorySearchHit {
   return {
     ...record,
-    sourcePath: redactAssistantDisplayPath(record.sourcePath),
+    sourcePath: redactAssistantMemorySourcePath(record.sourcePath),
   }
+}
+
+function redactAssistantMemorySourcePath(sourcePath: string): string {
+  const normalized = sourcePath.replaceAll('\\', '/')
+  if (normalized.endsWith('/MEMORY.md') || normalized === 'MEMORY.md') {
+    return 'MEMORY.md'
+  }
+
+  const dailyMatch = /(^|\/)(memory\/\d{4}-\d{2}-\d{2}\.md)$/u.exec(normalized)
+  if (dailyMatch?.[2]) {
+    return dailyMatch[2]
+  }
+
+  return redactAssistantDisplayPath(sourcePath)
 }
 
 async function loadAssistantMemoryRecords(input: {

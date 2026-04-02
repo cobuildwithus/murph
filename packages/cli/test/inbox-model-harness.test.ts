@@ -1268,6 +1268,30 @@ test('createDefaultAssistantToolCatalog memory file tools redact or block sensit
           },
         },
         {
+          tool: 'assistant.memory.file.append',
+          input: {
+            path: 'MEMORY.md',
+            section: 'Preferences',
+            text: 'Keep responses concise.',
+          },
+        },
+        {
+          tool: 'assistant.memory.file.append',
+          input: {
+            path: 'MEMORY.md',
+            section: 'Identity',
+            text: 'Call the user Jordan.',
+          },
+        },
+        {
+          tool: 'assistant.memory.file.append',
+          input: {
+            path: 'MEMORY.md',
+            section: 'Health context',
+            text: 'User has high cholesterol.',
+          },
+        },
+        {
           tool: 'assistant.memory.file.write',
           input: {
             path: 'MEMORY.md',
@@ -1289,6 +1313,13 @@ test('createDefaultAssistantToolCatalog memory file tools redact or block sensit
           },
         },
         {
+          tool: 'assistant.memory.file.append',
+          input: {
+            path: 'memory/2026-04-02.md',
+            text: 'Working on onboarding.',
+          },
+        },
+        {
           tool: 'assistant.memory.file.read',
           input: {
             path: 'memory/2026-04-02.md',
@@ -1303,10 +1334,21 @@ test('createDefaultAssistantToolCatalog memory file tools redact or block sensit
       String((sharedResults[0]?.result as { text?: string } | undefined)?.text ?? ''),
       /high cholesterol/u,
     )
-    assert.equal(sharedResults[1]?.status, 'failed')
-    assert.equal(sharedResults[1]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+    assert.equal(sharedResults[1]?.status, 'succeeded')
     assert.equal(sharedResults[2]?.status, 'failed')
-    assert.equal(sharedResults[2]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+    assert.equal(sharedResults[2]?.errorCode, 'ASSISTANT_MEMORY_FILE_APPEND_REQUIRES_EDIT')
+    assert.equal(sharedResults[3]?.status, 'failed')
+    assert.equal(sharedResults[3]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+    assert.equal(sharedResults[4]?.status, 'failed')
+    assert.equal(sharedResults[4]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+    assert.equal(sharedResults[5]?.status, 'failed')
+    assert.equal(sharedResults[5]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+    assert.equal(sharedResults[6]?.status, 'failed')
+    assert.equal(sharedResults[6]?.errorCode, 'ASSISTANT_MEMORY_FILE_ACCESS_DENIED')
+
+    const sharedMemoryMarkdown = await readFile(statePaths.longTermMemoryPath, 'utf8')
+    assert.match(sharedMemoryMarkdown, /Keep responses concise\./u)
+    assert.match(sharedMemoryMarkdown, /high cholesterol/u)
 
     const privateCatalog = createDefaultAssistantToolCatalog({
       allowSensitiveHealthContext: true,
@@ -1323,6 +1365,13 @@ test('createDefaultAssistantToolCatalog memory file tools redact or block sensit
             path: 'MEMORY.md',
           },
         },
+        {
+          tool: 'assistant.memory.file.append',
+          input: {
+            path: 'memory/2026-04-02.md',
+            text: 'Working on onboarding.',
+          },
+        },
       ],
       mode: 'apply',
     })
@@ -1332,6 +1381,7 @@ test('createDefaultAssistantToolCatalog memory file tools redact or block sensit
       String((privateResults[0]?.result as { text?: string } | undefined)?.text ?? ''),
       /high cholesterol/u,
     )
+    assert.equal(privateResults[1]?.status, 'succeeded')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

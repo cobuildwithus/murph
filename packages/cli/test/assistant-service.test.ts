@@ -1739,6 +1739,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     assert.equal(toolCatalog?.hasTool('assistant.memory.search'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.get'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.file.read'), true)
+    assert.equal(toolCatalog?.hasTool('assistant.memory.file.append'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.file.write'), true)
     assert.equal(toolCatalog?.hasTool('assistant.memory.upsert'), false)
     assert.equal(toolCatalog?.hasTool('assistant.memory.forget'), false)
@@ -1746,6 +1747,14 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     assert.equal(toolCatalog?.hasTool('assistant.selfTarget.list'), true)
     assert.equal(toolCatalog?.hasTool('vault.show'), true)
     assert.equal(toolCatalog?.hasTool('vault.journal.append'), true)
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /assistant\.memory\.file\.append/u,
+    )
+    assert.match(
+      providerCall?.systemPrompt ?? '',
+      /Treat `assistant\.memory\.file\.write` as dangerous/u,
+    )
     assert.match(
       providerCall?.systemPrompt ?? '',
       /Assistant memory recall tools and direct Markdown memory-file edit tools are exposed in this session/u,
@@ -1759,23 +1768,11 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
       mode: 'apply',
       calls: [
         {
-          tool: 'assistant.memory.file.write',
+          tool: 'assistant.memory.file.append',
           input: {
             path: 'MEMORY.md',
-            text: [
-              '# Assistant memory',
-              '',
-              'This file lives outside the canonical vault.',
-              '',
-              '## Identity',
-              '- Call the user Alex.',
-              '',
-              '## Preferences',
-              '',
-              '## Standing instructions',
-              '',
-              '## Health context',
-            ].join('\n'),
+            section: 'Identity',
+            text: 'Call the user Alex.',
           },
         },
         {
@@ -1802,23 +1799,18 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
           },
         },
         {
-          tool: 'assistant.memory.file.write',
+          tool: 'assistant.memory.file.append',
           input: {
             path: 'MEMORY.md',
-            text: [
-              '# Assistant memory',
-              '',
-              'This file lives outside the canonical vault.',
-              '',
-              '## Identity',
-              '',
-              '## Preferences',
-              '',
-              '## Standing instructions',
-              '',
-              '## Health context',
-              '- User has high cholesterol.',
-            ].join('\n'),
+            section: 'Health context',
+            text: 'User has high cholesterol.',
+          },
+        },
+        {
+          tool: 'assistant.memory.file.append',
+          input: {
+            path: 'memory/2026-03-31.md',
+            text: 'Auto-reply context note.',
           },
         },
         {
@@ -1831,7 +1823,7 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     })
     assert.deepEqual(
       toolResults.map((result) => result.status),
-      ['succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded'],
+      ['succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded', 'succeeded'],
     )
     assert.match(
       String((toolResults[1]?.result as { text?: string } | undefined)?.text ?? ''),
@@ -1840,6 +1832,55 @@ test('sendAssistantMessage gives OpenAI-compatible auto-reply turns the full Mur
     const statePaths = resolveAssistantStatePaths(vaultRoot)
     const memoryMarkdown = await readFile(statePaths.longTermMemoryPath, 'utf8')
     assert.match(memoryMarkdown, /high cholesterol/u)
+    const dailyMemoryMarkdown = await readFile(
+      path.join(statePaths.assistantStateRoot, 'memory/2026-03-31.md'),
+      'utf8',
+    )
+    assert.match(dailyMemoryMarkdown, /Auto-reply context note\./u)
+    const searchResults = await toolCatalog!.executeCalls({
+      mode: 'apply',
+      calls: [
+        {
+          tool: 'assistant.memory.search',
+          input: {
+            text: 'Alex',
+            limit: 5,
+          },
+        },
+        {
+          tool: 'assistant.memory.search',
+          input: {
+            text: 'Auto-reply context note',
+            limit: 5,
+          },
+        },
+      ],
+    })
+    const longTermHit = (
+      (searchResults[0]?.result as { results?: Array<{ id?: string; sourcePath?: string }> } | undefined)
+        ?.results ?? []
+    )[0]
+    const dailyHit = (
+      (searchResults[1]?.result as { results?: Array<{ sourcePath?: string }> } | undefined)
+        ?.results ?? []
+    )[0]
+    assert.equal(longTermHit?.sourcePath, 'MEMORY.md')
+    assert.equal(dailyHit?.sourcePath, 'memory/2026-03-31.md')
+    const memoryGetResults = await toolCatalog!.executeCalls({
+      mode: 'apply',
+      calls: longTermHit && 'id' in longTermHit
+        ? [
+            {
+              tool: 'assistant.memory.get',
+              input: {
+                id: longTermHit.id,
+              },
+            },
+          ]
+        : [],
+    })
+    const fetchedMemory = memoryGetResults[0]?.result as { sourcePath?: string } | undefined
+    assert.equal(fetchedMemory?.sourcePath, 'MEMORY.md')
 
     const stateSnapshot = await getAssistantStateDocument({
       vault: vaultRoot,
