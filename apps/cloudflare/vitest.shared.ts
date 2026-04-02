@@ -29,6 +29,7 @@ export const cloudflareVitestAliases = [
       "@murphai/hosted-execution": "packages/hosted-execution/src/index.ts",
       "@murphai/importers": "packages/importers/src/index.ts",
       "@murphai/inboxd": "packages/inboxd/src/index.ts",
+      "@murphai/messaging-ingress": "packages/messaging-ingress/src/index.ts",
       "@murphai/parsers": "packages/parsers/src/index.ts",
       "@murphai/query": "packages/query/src/index.ts",
       "@murphai/runtime-state": "packages/runtime-state/src/index.ts",
