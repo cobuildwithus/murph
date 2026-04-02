@@ -1,6 +1,6 @@
 import type { ConnectorRestartPolicy } from '@murphai/inboxd'
 import type { RuntimePaths } from '@murphai/runtime-state/node'
-import { z } from 'incur'
+import { z } from 'zod'
 import type { AgentmailApiClient } from '../agentmail-runtime.js'
 import { inboxPromotionStoreSchema } from '../inbox-cli-contracts.js'
 import type {

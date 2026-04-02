@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema, type RawImportManifest } from '@murphai/contracts'
-import { z } from 'incur'
+import { z } from 'zod'
 import {
   firstString,
   isJsonObject,

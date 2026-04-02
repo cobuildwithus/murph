@@ -1,5 +1,5 @@
 import { foodUpsertPayloadSchema, ID_PREFIXES, isContractId, type JsonObject } from '@murphai/contracts'
-import { z } from 'incur'
+import { z } from 'zod'
 
 import {
   addAssistantCronJob,

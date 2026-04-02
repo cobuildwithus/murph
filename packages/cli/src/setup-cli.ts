@@ -44,6 +44,7 @@ import {
   runSetupWizard,
   type SetupWizardResult,
 } from './setup-wizard.js'
+import { incurErrorBridge } from './incur-error-bridge.js'
 
 export interface SuccessfulSetupContext {
   agent: boolean
@@ -109,6 +110,7 @@ export function createSetupCli(options: SetupCliOptions = {}): Cli.Cli {
   const cli = Cli.create(commandName, {
     description: 'Murph local machine onboarding helpers.',
   })
+  cli.use(incurErrorBridge)
 
   const runSetupCommand = async (context: any) => {
     const interactiveWizard = shouldRunSetupWizard(

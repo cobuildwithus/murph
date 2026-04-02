@@ -14,7 +14,7 @@ import {
   type HealthEntityDefinitionWithRegistry,
   type HealthEntityKind,
 } from "@murphai/contracts";
-import { z } from "incur";
+import { z } from "zod";
 import type {
   HealthCoreRuntimeMethodName,
   HealthCoreScaffoldServiceMethodName,

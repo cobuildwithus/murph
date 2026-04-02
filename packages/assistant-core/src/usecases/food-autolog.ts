@@ -1,5 +1,5 @@
 import type { AssistantCronSchedule } from '../assistant-cli-contracts.js'
-import { z } from 'incur'
+import { z } from 'zod'
 
 export const dailyFoodTimeSchema = z
   .string()

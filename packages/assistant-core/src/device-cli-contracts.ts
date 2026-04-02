@@ -1,4 +1,4 @@
-import { z } from 'incur'
+import { z } from 'zod'
 import { isoTimestampSchema, pathSchema } from './vault-cli-contracts.js'
 
 export const deviceSyncBaseUrlSchema = z

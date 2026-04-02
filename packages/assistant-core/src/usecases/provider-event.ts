@@ -1,5 +1,5 @@
 import { EVENT_KINDS, type JsonObject } from '@murphai/contracts'
-import { z } from 'incur'
+import { z } from 'zod'
 import { normalizeRepeatableFlagOption } from '../option-utils.js'
 import {
   loadQueryRuntime,

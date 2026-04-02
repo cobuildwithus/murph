@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { z } from 'incur'
+import { z } from 'zod'
 import {
   assistantCronJobSchema,
   assistantCronRunRecordSchema,

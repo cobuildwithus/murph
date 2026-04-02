@@ -8,6 +8,7 @@ import {
   createIntegratedInboxServices,
   type InboxServices,
 } from '@murphai/assistant-core/inbox-services'
+import { incurErrorBridge } from './incur-error-bridge.js'
 import { registerVaultCliCommandDescriptors } from './vault-cli-command-manifest.js'
 
 const require = createRequire(import.meta.url)
@@ -43,6 +44,7 @@ export function createVaultCli(
     },
     version: packageJson.version,
   })
+  cli.use(incurErrorBridge)
 
   registerVaultCliCommandDescriptors({
     cli,
