@@ -1,6 +1,6 @@
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { z } from 'incur'
+import { z } from 'zod'
 import {
   inboxDoctorCheckSchema,
   type InboxConnectorConfig,

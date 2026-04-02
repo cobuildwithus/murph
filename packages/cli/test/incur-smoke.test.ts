@@ -5,13 +5,15 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
-import { Cli } from 'incur'
+import { Cli, z } from 'incur'
+import { VaultCliError } from '@murphai/assistant-core/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   collectVaultCliDescriptorRootCommandNames,
   collectVaultCliDirectServiceBindings,
   vaultCliCommandDescriptors,
 } from '../src/vault-cli-command-manifest.js'
+import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import { createIntegratedInboxServices } from '@murphai/assistant-core/inbox-services'
 import { createUnwiredVaultServices } from '@murphai/assistant-core/vault-services'
 import { createVaultCli } from '../src/vault-cli.js'
@@ -50,6 +52,48 @@ async function runBuiltCliFromCwd(
   )
 
   return stdout.trim()
+}
+
+async function runJsonCli<TData>(
+  cli: Cli.Cli,
+  args: string[],
+): Promise<{
+  envelope: {
+    ok: boolean
+    data?: TData
+    error?: {
+      code?: string
+      message?: string
+      retryable?: boolean
+    }
+  }
+  exitCode: number | null
+}> {
+  const output: string[] = []
+  let exitCode: number | null = null
+
+  await cli.serve([...args, '--format', 'json', '--verbose'], {
+    env: process.env,
+    exit(code) {
+      exitCode = code
+    },
+    stdout(chunk) {
+      output.push(chunk)
+    },
+  })
+
+  return {
+    envelope: JSON.parse(output.join('').trim()) as {
+      ok: boolean
+      data?: TData
+      error?: {
+        code?: string
+        message?: string
+        retryable?: boolean
+      }
+    },
+    exitCode,
+  }
 }
 
 test('root help exposes the Incur built-ins', async () => {
@@ -156,6 +200,35 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
+})
+
+test('VaultCliError remains a typed incur envelope through the CLI bridge', async () => {
+  const cli = Cli.create('bridge-smoke', {
+    description: 'bridge smoke test',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+  cli.command('fail', {
+    args: z.object({}),
+    async run() {
+      throw new VaultCliError(
+        'BRIDGE_SMOKE',
+        'bridge preserved the command error',
+        {
+          exitCode: 7,
+          retryable: true,
+        },
+      )
+    },
+  })
+
+  const result = await runJsonCli(cli, ['fail'])
+
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error?.code, 'BRIDGE_SMOKE')
+  assert.equal(result.envelope.error?.message, 'bridge preserved the command error')
+  assert.equal(result.envelope.error?.retryable, true)
+  assert.equal(result.exitCode, 7)
 })
 
 test('root help lists the simple health CRUD command groups', async () => {

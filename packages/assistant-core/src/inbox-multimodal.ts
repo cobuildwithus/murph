@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { z } from 'incur'
+import { z } from 'zod'
 import {
   normalizeOpaquePathSegment,
   normalizeRelativeVaultPath,
