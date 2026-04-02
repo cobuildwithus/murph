@@ -1,3 +1,4 @@
+import type { ModelMessage, UserModelMessage } from 'ai'
 import { getAssistantBindingContextLines } from '../bindings.js'
 import { resolveOpenAICompatibleProviderTitle } from '../openai-compatible-provider-presets.js'
 import {
@@ -8,6 +9,9 @@ import {
   normalizeAssistantHeaders,
   type AssistantProviderConfig,
 } from '../provider-config.js'
+import type {
+  AssistantUserMessageContentPart,
+} from '../../model-harness.js'
 import type {
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
@@ -79,16 +83,51 @@ export function ensureTrailingSlash(baseUrl: string): string {
 
 function sanitizeAssistantProviderConversationMessages(
   messages: AssistantProviderTurnExecutionInput['conversationMessages'],
-): Array<{
-  content: string
-  role: 'assistant' | 'user'
-}> {
-  return (messages ?? [])
-    .map((message) => ({
-      role: message.role,
-      content: message.content.trim(),
-    }))
-    .filter((message) => message.content.length > 0)
+): ModelMessage[] {
+  const sanitized: ModelMessage[] = []
+
+  for (const message of messages ?? []) {
+    if (message.role === 'assistant') {
+      const content =
+        Array.isArray(message.content)
+          ? serializeAssistantConversationContent(message.content)
+          : message.content.trim()
+      if (content.length === 0) {
+        continue
+      }
+
+      sanitized.push({
+        role: 'assistant',
+        content,
+      })
+      continue
+    }
+
+    if (Array.isArray(message.content)) {
+      const content = sanitizeAssistantModelContentParts(message.content)
+      if (content.length === 0) {
+        continue
+      }
+
+      sanitized.push({
+        role: 'user',
+        content,
+      } satisfies UserModelMessage)
+      continue
+    }
+
+    const content = message.content.trim()
+    if (content.length === 0) {
+      continue
+    }
+
+    sanitized.push({
+      role: 'user',
+      content,
+    } satisfies UserModelMessage)
+  }
+
+  return sanitized
 }
 
 function requireAssistantProviderUserPrompt(
@@ -134,6 +173,67 @@ function resolveAssistantProviderComposedUserContent(
     .join('\n\n')
 }
 
+function sanitizeAssistantModelContentParts(
+  content: readonly AssistantUserMessageContentPart[],
+): AssistantUserMessageContentPart[] {
+  return content.flatMap((part) => {
+    if (
+      part
+      && typeof part === 'object'
+      && 'type' in part
+      && part.type === 'text'
+      && typeof part.text === 'string'
+    ) {
+      const text = part.text.trim()
+      return text.length > 0 ? [{ ...part, text }] : []
+    }
+
+    return [part]
+  })
+}
+
+function serializeAssistantConversationContent(
+  content: readonly AssistantUserMessageContentPart[],
+): string {
+  return sanitizeAssistantModelContentParts(content)
+    .map((part) => {
+      if (part.type === 'text') {
+        return part.text
+      }
+
+      if (part.type === 'file') {
+        return `Assistant shared file${part.filename ? ` (${part.filename})` : ''}.`
+      }
+
+      return `Assistant shared image${part.mediaType ? ` (${part.mediaType})` : ''}.`
+    })
+    .join('\n\n')
+    .trim()
+}
+
+function buildAssistantProviderUserMessageContent(
+  input: AssistantProviderTurnExecutionInput,
+): string | AssistantUserMessageContentPart[] | null {
+  const explicitContent = Array.isArray(input.userMessageContent)
+    ? sanitizeAssistantModelContentParts(input.userMessageContent)
+    : []
+
+  if (explicitContent.length === 0) {
+    return null
+  }
+
+  const content: AssistantUserMessageContentPart[] = []
+  const contextSections = resolveAssistantProviderContextSections(input)
+  if (contextSections.length > 0) {
+    content.push({
+      type: 'text',
+      text: contextSections.join('\n\n'),
+    })
+  }
+  content.push(...explicitContent)
+  return content
+}
+
 export function resolveAssistantProviderPrompt(
   input: AssistantProviderTurnExecutionInput,
 ): string {
@@ -156,13 +256,19 @@ export function resolveAssistantProviderPrompt(
 
 export function buildAssistantProviderMessages(
   input: AssistantProviderTurnExecutionInput,
-): Array<{
-  content: string
-  role: 'assistant' | 'user'
-}> {
-  const messages = sanitizeAssistantProviderConversationMessages(
+): ModelMessage[] {
+  const messages: ModelMessage[] = sanitizeAssistantProviderConversationMessages(
     input.conversationMessages,
   )
+  const userMessageContent = buildAssistantProviderUserMessageContent(input)
+  if (userMessageContent) {
+    messages.push({
+      role: 'user',
+      content: userMessageContent,
+    })
+    return messages
+  }
+
   const prompt = normalizeNullableString(input.prompt)
   if (prompt) {
     messages.push({

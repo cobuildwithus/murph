@@ -254,12 +254,14 @@ test('resolveAssistantProviderCapabilities keeps prompt-only providers from clai
     supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
     supportsReasoningEffort: true,
+    supportsRichUserMessageContent: false,
   })
   assert.deepEqual(resolveAssistantProviderCapabilities('openai-compatible'), {
     supportsHostToolRuntime: true,
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
     supportsReasoningEffort: false,
+    supportsRichUserMessageContent: true,
   })
 })
 

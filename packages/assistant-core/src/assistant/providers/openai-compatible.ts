@@ -36,6 +36,7 @@ export const openAiCompatibleProviderDefinition: AssistantProviderDefinition = {
     supportsDirectCliExecution: false,
     supportsModelDiscovery: true,
     supportsReasoningEffort: false,
+    supportsRichUserMessageContent: true,
   },
   traits: {
     resumeKeyMode: 'none',

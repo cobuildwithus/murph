@@ -576,6 +576,7 @@ async function executeAssistantProviderAttempt(input: {
             ...executionPlan.memoryTurnEnv,
           },
           userPrompt: executionPlan.input.prompt,
+          userMessageContent: executionPlan.input.userMessageContent,
           continuityContext: attemptPlan.routePlan.continuityContext,
           systemPrompt: attemptPlan.routePlan.systemPrompt,
           toolRuntime: toolRuntime ?? undefined,

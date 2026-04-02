@@ -18,6 +18,7 @@ export const codexCliProviderDefinition: AssistantProviderDefinition = {
     supportsDirectCliExecution: true,
     supportsModelDiscovery: false,
     supportsReasoningEffort: true,
+    supportsRichUserMessageContent: false,
   },
   traits: {
     resumeKeyMode: 'provider-session-id',

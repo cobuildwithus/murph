@@ -14,6 +14,7 @@ import type {
   AssistantProviderProgressEvent,
   AssistantProviderTurnExecutionResult,
 } from '../assistant-provider.js'
+import type { AssistantUserMessageContentPart } from '../model-harness.js'
 import type { AssistantCliAccessContext } from '../assistant-cli-access.js'
 import type { AssistantOutboxDispatchMode } from './outbox.js'
 import type {
@@ -78,6 +79,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   operatorAuthority?: AssistantOperatorAuthority
   persistUserPromptOnFailure?: boolean
   prompt: string
+  userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   sessionSnapshot?: AssistantSession | null
   showThinkingTraces?: boolean

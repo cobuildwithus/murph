@@ -86,6 +86,11 @@ export type AssistantModelContentPart =
   | AssistantModelFilePart
   | Record<string, unknown>
 
+export type AssistantUserMessageContentPart =
+  | AssistantModelTextPart
+  | AssistantModelImagePart
+  | AssistantModelFilePart
+
 export interface AssistantModelMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string | AssistantModelContentPart[]
