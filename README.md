@@ -6,10 +6,12 @@ Think OpenClaw, but built specifically to help you live longer and healthier.
 
 Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown, append-only machine history in JSONL, and layers a typed CLI, local daemons, and hosted control/execution surfaces on top of that vault.
 
+The main installable product entrypoint is `@murphai/murph`, which gives you the `murph` command.
+
 ## What ships here
 
 - a file-native vault with canonical writes owned by `packages/core`
-- a typed CLI and onboarding flow in `packages/cli`
+- the installable `@murphai/murph` package, which provides the `murph` CLI and onboarding flow
 - provider-backed local assistant chat and automation, with runtime state in sibling `assistant-state/**`
 - inbox capture, indexing, and parser-driven attachment extraction
 - local wearable/device sync through `@murphai/device-syncd`
@@ -18,13 +20,27 @@ Underneath that assistant, Murph keeps durable human-reviewed truth in Markdown,
 - shared hosted execution contracts and env/client helpers in `@murphai/hosted-execution`
 - headless package boundaries plus the explicit local gateway runtime package: `@murphai/assistant-core`, `@murphai/gateway-core`, `@murphai/gateway-local`, `@murphai/assistant-runtime`, and `@murphai/assistantd`
 
-## Recommended setup
+## Install
 
 Runtime: Node `>= 22.16.0`.
 
+Preferred install for most users:
+
+```bash
+npm install -g @murphai/murph@latest
+# or
+pnpm add -g @murphai/murph@latest
+
+murph onboard
+```
+
+`@murphai/murph` is the full local Murph package. The repo implementation lives in `packages/cli`, but that is a maintainer detail rather than the user-facing install story.
+
+## From this repo
+
 Supported host setup path: macOS and Linux. iMessage remains macOS-only.
 
-Preferred setup from this repo:
+Preferred setup from a checkout:
 
 ```bash
 pnpm onboard --vault ./vault
@@ -38,8 +54,6 @@ If `pnpm` is not available yet, use:
 ./scripts/setup-host.sh --vault ./vault
 ```
 
-The repo already carries a fixed-version monorepo release flow for the publishable package set, but until a public release is actually cut the recommended install path remains "run from this checkout".
-
 `pnpm onboard` is the only supported repo-local onboarding command. `pnpm` reserves `setup` as a built-in command, so this repo no longer exposes a root `setup` script.
 
 Direct dependency installs and review flows should prefer `corepack pnpm ...` so the exact pnpm version pinned in `package.json#packageManager` is used automatically.
@@ -47,21 +61,20 @@ After intentional dependency refreshes on a trusted machine, review blocked inst
 
 ## Quick start
 
-```bash
-pnpm onboard --vault ./vault
+Installed package:
 
-pnpm chat
+```bash
+murph onboard
 murph chat
-vault-cli vault stats
+murph run
 vault-cli inbox doctor
 ```
 
-For the always-on assistant loop after setup:
+From this repo:
 
 ```bash
-murph run
-# or
-vault-cli run
+pnpm onboard --vault ./vault
+vault-cli vault stats
 ```
 
 ## Mental model

@@ -2,6 +2,7 @@
   "name": "@murphai/murph",
   "version": "0.1.2",
   "private": false,
+  "description": "Murph is a personal health assistant you run locally. Install this package to get the murph CLI.",
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
@@ -47,6 +48,14 @@
     "dist",
     "README.md",
     "CHANGELOG.md"
+  ],
+  "keywords": [
+    "murph",
+    "health",
+    "assistant",
+    "personal-ai",
+    "local-first",
+    "cli"
   ],
   "bin": {
     "vault-cli": "dist/bin.js",
