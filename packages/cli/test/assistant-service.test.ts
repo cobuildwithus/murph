@@ -1637,7 +1637,6 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     const first = await sendAssistantMessage({
       vault: vaultRoot,
       alias: 'chat:openai-compatible',
-      enableFirstTurnOnboarding: true,
       provider: 'openai-compatible',
       model: 'gpt-oss:20b',
       baseUrl: 'http://127.0.0.1:11434/v1',
@@ -1647,7 +1646,6 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     const second = await sendAssistantMessage({
       vault: vaultRoot,
       alias: 'chat:openai-compatible',
-      enableFirstTurnOnboarding: true,
       prompt: 'second question',
     })
 
@@ -1681,11 +1679,6 @@ test('sendAssistantMessage replays the local transcript for OpenAI-compatible se
     assert.equal(typeof firstCall?.toolRuntime?.requestId, 'string')
     assert.equal(secondCall?.toolRuntime?.vault, vaultRoot)
     assert.equal(typeof secondCall?.toolRuntime?.requestId, 'string')
-    assert.match(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
-    assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
-    assert.match(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
-    assert.match(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
-    assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
     assert.equal(firstCall?.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(secondCall?.baseUrl, 'http://127.0.0.1:11434/v1')
     assert.equal(firstCall?.model, 'gpt-oss:20b')
@@ -2088,8 +2081,8 @@ test('sendAssistantMessage resumes when a saved provider binding still has match
   )
 })
 
-test('sendAssistantMessage onboarding persists answered slots and asks only for missing items in later new sessions', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-partial-'))
+test('sendAssistantMessage does not auto-persist identity or preference memory from ordinary user prompts', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-no-auto-memory-partial-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2116,42 +2109,27 @@ test('sendAssistantMessage onboarding persists answered slots and asks only for 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:onboarding-one',
-    enableFirstTurnOnboarding: true,
     prompt: 'Call me Chris.',
   })
 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:onboarding-two',
-    enableFirstTurnOnboarding: true,
     prompt: 'What should you know about me already?',
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  assert.match(firstCall?.systemPrompt ?? '', /Known onboarding answers/u)
-  assert.match(firstCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
-  assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
-  assert.doesNotMatch(
-    firstCall?.systemPrompt ?? '',
-    /whether they want to give you a name/u,
-  )
-  assert.match(secondCall?.systemPrompt ?? '', /Name: Call the user Chris\./u)
-  assert.doesNotMatch(
-    secondCall?.systemPrompt ?? '',
-    /what tone or response style they want/u,
-  )
-  assert.match(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
-  assert.doesNotMatch(
-    secondCall?.systemPrompt ?? '',
-    /whether they want to give you a name/u,
-  )
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /Known onboarding answers/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /Call the user Chris\./u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Known onboarding answers/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Call the user Chris\./u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /Core assistant memory:/u)
 })
 
-test('sendAssistantMessage suppresses onboarding once name, tone, and goals are already answered', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-complete-'))
+test('sendAssistantMessage does not add onboarding prompts even when the first user turn mentions preferences', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-no-onboarding-prompts-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2178,7 +2156,6 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:onboarding-complete-one',
-    enableFirstTurnOnboarding: true,
     prompt:
       'Call me Chris. Keep answers concise. I want help with training and cholesterol.',
   })
@@ -2186,7 +2163,6 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:onboarding-complete-two',
-    enableFirstTurnOnboarding: true,
     prompt: 'What should you remember across sessions?',
   })
 
@@ -2194,11 +2170,14 @@ test('sendAssistantMessage suppresses onboarding once name, tone, and goals are 
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
   assert.doesNotMatch(firstCall?.systemPrompt ?? '', /optional onboarding check-in/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
   assert.doesNotMatch(secondCall?.systemPrompt ?? '', /optional onboarding check-in/u)
 })
 
-test('sendAssistantMessage asks for optional name and tone only once even when later new sessions still need onboarding', async () => {
-  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-onboarding-optional-once-'))
+test('sendAssistantMessage no longer injects first-turn onboarding prompts for later new sessions', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'murph-assistant-no-onboarding-repeat-'))
   const vaultRoot = path.join(parent, 'vault')
   cleanupPaths.push(parent)
 
@@ -2225,32 +2204,24 @@ test('sendAssistantMessage asks for optional name and tone only once even when l
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:onboarding-name-once-one',
-    enableFirstTurnOnboarding: true,
     prompt: 'first question',
   })
 
   await sendAssistantMessage({
     vault: vaultRoot,
     alias: 'chat:onboarding-name-once-two',
-    enableFirstTurnOnboarding: true,
     prompt: 'second question',
   })
 
   const firstCall = serviceMocks.executeAssistantProviderTurn.mock.calls[0]?.[0]
   const secondCall = serviceMocks.executeAssistantProviderTurn.mock.calls[1]?.[0]
 
-  assert.match(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
-  assert.match(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
-  assert.doesNotMatch(
-    secondCall?.systemPrompt ?? '',
-    /whether they want to give you a name/u,
-  )
-  assert.doesNotMatch(
-    secondCall?.systemPrompt ?? '',
-    /what tone or response style they want/u,
-  )
-  assert.match(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /whether they want to give you a name/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.doesNotMatch(firstCall?.systemPrompt ?? '', /what goals they want help with/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /whether they want to give you a name/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /what tone or response style they want/u)
+  assert.doesNotMatch(secondCall?.systemPrompt ?? '', /what goals they want help with/u)
 })
 
 test('sendAssistantMessage clears stale provider session ids when switching providers', async () => {

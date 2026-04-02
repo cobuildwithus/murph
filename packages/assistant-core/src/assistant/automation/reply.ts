@@ -905,7 +905,6 @@ async function executeAssistantAutoReply(input: {
       vault: input.vault,
       conversation: conversationRefFromCapture(input.primaryCapture),
       abortSignal: watchdog.signal,
-      enableFirstTurnOnboarding: true,
       executionContext: input.executionContext,
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,

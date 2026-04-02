@@ -1,5 +1,4 @@
 import { resolveAssistantCliAccessContext } from '../assistant-cli-access.js'
-import { updateAssistantOnboardingSummary } from './onboarding.js'
 import { resolveAssistantOperatorAuthority } from './operator-authority.js'
 import { resolveAssistantConversationPolicy } from './conversation-policy.js'
 import type {
@@ -30,13 +29,6 @@ export async function resolveAssistantTurnSharedPlan(
     allowSensitiveHealthContext: conversationPolicy.allowSensitiveHealthContext,
     cliAccess,
     conversationPolicy,
-    onboardingSummary:
-      input.enableFirstTurnOnboarding === true
-        ? await updateAssistantOnboardingSummary({
-            prompt: input.prompt,
-            vault: input.vault,
-          })
-        : null,
     operatorAuthority: resolveAssistantOperatorAuthority(input.operatorAuthority),
     persistUserPromptOnFailure: input.persistUserPromptOnFailure ?? true,
     requestedWorkingDirectory,

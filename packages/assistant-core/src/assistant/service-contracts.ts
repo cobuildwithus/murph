@@ -21,9 +21,6 @@ import type {
   ResolvedAssistantSession,
 } from './store.js'
 import type {
-  AssistantOnboardingSummary,
-} from './onboarding.js'
-import type {
   AssistantOperatorAuthority,
 } from './operator-authority.js'
 import type { ConversationRef } from './conversation-ref.js'
@@ -69,7 +66,6 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryReplyToMessageId?: string | null
   deliveryTarget?: string | null
-  enableFirstTurnOnboarding?: boolean
   executionContext?: AssistantExecutionContext | null
   failoverRoutes?: readonly AssistantProviderFailoverRoute[] | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -93,7 +89,6 @@ export interface AssistantTurnSharedPlan {
   allowSensitiveHealthContext: boolean
   cliAccess: AssistantCliAccessContext
   conversationPolicy: import('./conversation-policy.js').AssistantConversationPolicy
-  onboardingSummary: AssistantOnboardingSummary | null
   operatorAuthority: AssistantOperatorAuthority
   persistUserPromptOnFailure: boolean
   requestedWorkingDirectory: string
