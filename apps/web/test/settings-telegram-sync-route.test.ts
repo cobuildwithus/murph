@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
   getPrisma: vi.fn(),
   hostedMemberUpdate: vi.fn(),
-  requireHostedPrivyRequestAuthContext: vi.fn(),
+  requireHostedPrivyActiveRequestAuthContext: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -16,7 +16,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
-  requireHostedPrivyRequestAuthContext: mocks.requireHostedPrivyRequestAuthContext,
+  requireHostedPrivyActiveRequestAuthContext: mocks.requireHostedPrivyActiveRequestAuthContext,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/telegram", () => ({
@@ -49,7 +49,7 @@ describe("settings telegram sync route", () => {
       },
     });
     mocks.hostedMemberUpdate.mockResolvedValue({});
-    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       member: {
         id: "member_123",
@@ -86,7 +86,7 @@ describe("settings telegram sync route", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.requireHostedPrivyRequestAuthContext).toHaveBeenCalledWith(expect.any(Request));
+    expect(mocks.requireHostedPrivyActiveRequestAuthContext).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.hostedMemberUpdate).toHaveBeenCalledWith({
       data: {
         telegramUserId: createHostedTelegramUserLookupKey("456"),
@@ -106,8 +106,8 @@ describe("settings telegram sync route", () => {
     });
   });
 
-  it("requires an active hosted session before syncing Telegram", async () => {
-    mocks.requireHostedPrivyRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+  it("requires Privy-authenticated hosted member context before syncing Telegram", async () => {
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
       code: "AUTH_REQUIRED",
       httpStatus: 401,
       message: "Verify your phone to continue.",
@@ -157,7 +157,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("rejects sync attempts whose Privy session does not match the hosted session", async () => {
-    mocks.requireHostedPrivyRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
       code: "PRIVY_SESSION_MISMATCH",
       httpStatus: 403,
       message: "This Privy session does not match the current hosted account. Reopen the latest invite and try again.",
@@ -188,7 +188,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("returns a retryable conflict while the Telegram account has not reached the server-side Privy session yet", async () => {
-    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -246,8 +246,8 @@ describe("settings telegram sync route", () => {
     });
   });
 
-  it("returns a retryable conflict when the server-side Privy cookie is still on an older Telegram account", async () => {
-    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+  it("returns a retryable conflict when the server-side Privy identity token is still on an older Telegram account", async () => {
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -287,7 +287,7 @@ describe("settings telegram sync route", () => {
   });
 
   it("rejects ambiguous Telegram state when top-level and linked Telegram accounts disagree", async () => {
-    mocks.requireHostedPrivyRequestAuthContext.mockResolvedValue({
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockResolvedValue({
       linkedAccounts: [],
       verifiedPrivyUser: {
         id: "did:privy:user_123",
@@ -326,6 +326,68 @@ describe("settings telegram sync route", () => {
       error: {
         code: "PRIVY_TELEGRAM_AMBIGUOUS",
         message: "The current Privy session has conflicting Telegram accounts. Reconnect Telegram in Privy and try again.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("blocks sync when hosted access is suspended", async () => {
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_MEMBER_SUSPENDED",
+      httpStatus: 403,
+      message: "This hosted account is suspended. Contact support to restore access.",
+    }));
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_MEMBER_SUSPENDED",
+        message: "This hosted account is suspended. Contact support to restore access.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("blocks sync when hosted billing access is no longer active", async () => {
+    mocks.requireHostedPrivyActiveRequestAuthContext.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Finish hosted activation before continuing.",
+    }));
+
+    const response = await settingsTelegramSyncRoute.POST(
+      new Request("https://join.example.test/api/settings/telegram/sync", {
+        body: JSON.stringify({
+          expectedTelegramUserId: "456",
+        }),
+        headers: {
+          "content-type": "application/json",
+          origin: SAME_ORIGIN_HEADERS.origin,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.hostedMemberUpdate).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_ACCESS_REQUIRED",
+        message: "Finish hosted activation before continuing.",
         retryable: false,
       },
     });

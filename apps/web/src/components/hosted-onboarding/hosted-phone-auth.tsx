@@ -52,8 +52,8 @@ import { HostedPrivyProvider } from "./privy-provider";
 interface HostedPhoneAuthProps {
   inviteCode?: string | null;
   mode: "invite" | "public";
-  onClearHostedSession?: () => Promise<void> | void;
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
+  onSignOut?: () => Promise<void> | void;
   phoneHint?: string | null;
   privyAppId: string;
   privyClientId?: string | null;
@@ -91,8 +91,8 @@ export function HostedPhoneAuth({ privyAppId, privyClientId, wrapProvider = true
 function HostedPhoneAuthInner({
   inviteCode,
   mode,
-  onClearHostedSession,
   onCompleted,
+  onSignOut,
   phoneHint,
 }: Omit<HostedPhoneAuthProps, "privyAppId" | "wrapProvider">) {
   const { authenticated, logout, ready } = usePrivy();
@@ -343,7 +343,7 @@ function HostedPhoneAuthInner({
 
     try {
       await logout();
-      await onClearHostedSession?.();
+      await onSignOut?.();
       setCode("");
       setPhoneCountryCode(DEFAULT_HOSTED_PHONE_COUNTRY_CODE);
       setPhoneNumber("");

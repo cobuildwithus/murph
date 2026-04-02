@@ -22,8 +22,6 @@ export interface HostedOnboardingEnvironment {
   revnetTerminalAddress: string | null;
   revnetTreasuryPrivateKey: string | null;
   revnetWeiPerStripeMinorUnit: string | null;
-  sessionCookieName: string;
-  sessionTtlDays: number;
   stripeBillingMode: "payment" | "subscription";
   stripePriceId: string | null;
   stripeSecretKey: string | null;
@@ -80,12 +78,6 @@ export function readHostedOnboardingEnvironment(
     revnetTerminalAddress: revnet.terminalAddress,
     revnetTreasuryPrivateKey: revnet.treasuryPrivateKey,
     revnetWeiPerStripeMinorUnit: revnet.weiPerStripeMinorUnit,
-    sessionCookieName: readEnv(source, ["HOSTED_ONBOARDING_SESSION_COOKIE_NAME"]) ?? "hosted_session",
-    sessionTtlDays: readPositiveInteger(
-      readEnv(source, ["HOSTED_ONBOARDING_SESSION_TTL_DAYS"]),
-      30,
-      "HOSTED_ONBOARDING_SESSION_TTL_DAYS",
-    ),
     stripeBillingMode,
     stripePriceId: readEnv(source, ["HOSTED_ONBOARDING_STRIPE_PRICE_ID"]),
     stripeSecretKey: readEnv(source, ["STRIPE_SECRET_KEY"]),

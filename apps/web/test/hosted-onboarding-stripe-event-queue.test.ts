@@ -245,7 +245,7 @@ describe("hosted Stripe event queue", () => {
     });
   });
 
-  it("blocks access and revokes sessions when a subscription becomes unpaid", async () => {
+  it("blocks access when a subscription becomes unpaid", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite({
@@ -291,14 +291,10 @@ describe("hosted Stripe event queue", () => {
       billingStatus: HostedBillingStatus.unpaid,
       status: HostedMemberStatus.active,
     });
-    expect(harness.sessions[0]).toMatchObject({
-      revokedAt: expect.any(Date),
-      revokeReason: "billing_status:unpaid",
-    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("blocks access and revokes sessions when a subscription becomes canceled", async () => {
+  it("blocks access when a subscription becomes canceled", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite({
@@ -344,14 +340,10 @@ describe("hosted Stripe event queue", () => {
       billingStatus: HostedBillingStatus.canceled,
       status: HostedMemberStatus.active,
     });
-    expect(harness.sessions[0]).toMatchObject({
-      revokedAt: expect.any(Date),
-      revokeReason: "billing_status:canceled",
-    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("blocks access and revokes sessions when a subscription becomes paused", async () => {
+  it("blocks access when a subscription becomes paused", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite({
@@ -400,14 +392,10 @@ describe("hosted Stripe event queue", () => {
       billingStatus: HostedBillingStatus.paused,
       status: HostedMemberStatus.active,
     });
-    expect(harness.sessions[0]).toMatchObject({
-      revokedAt: expect.any(Date),
-      revokeReason: "billing_status:paused",
-    });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
-  it("suspends members and revokes sessions when customer.subscription.deleted arrives", async () => {
+  it("suspends members when customer.subscription.deleted arrives", async () => {
     const harness = createStripeQueueHarness({
       invites: [
         makeInvite({
@@ -452,10 +440,6 @@ describe("hosted Stripe event queue", () => {
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.canceled,
       status: HostedMemberStatus.active,
-    });
-    expect(harness.sessions[0]).toMatchObject({
-      revokedAt: expect.any(Date),
-      revokeReason: "billing_status:canceled",
     });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
@@ -927,10 +911,6 @@ describe("hosted Stripe event queue", () => {
       billingStatus: HostedBillingStatus.unpaid,
       status: HostedMemberStatus.suspended,
       stripeLatestBillingEventId: "evt_same_second_refund",
-    });
-    expect(harness.sessions[0]).toMatchObject({
-      revokeReason: "billing_reversal:stripe.refund.created",
-      revokedAt: expect.any(Date),
     });
   });
 
@@ -1738,10 +1718,6 @@ describe("hosted Stripe event queue", () => {
     expect(harness.members[0]).toMatchObject({
       billingStatus: HostedBillingStatus.unpaid,
       status: HostedMemberStatus.suspended,
-    });
-    expect(harness.sessions[0]).toMatchObject({
-      revokeReason: "billing_reversal:stripe.refund.created",
-      revokedAt: expect.any(Date),
     });
   });
 

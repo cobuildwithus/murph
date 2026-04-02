@@ -21,10 +21,6 @@ import {
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 import {
-  type HostedPrivyCookieStore,
-  requireHostedPrivyUserForSession,
-} from "./privy";
-import {
   createPendingHostedBillingAttempt,
   expireHostedBillingAttemptBySessionId,
   failHostedBillingAttemptById,
@@ -47,17 +43,14 @@ import {
   normalizeHostedWalletAddress,
 } from "./revnet";
 import { lockHostedMemberRow } from "./shared";
-import { type HostedSessionRecord } from "./session";
 
 export interface HostedBillingCheckoutInput {
   inviteCode: string;
+  linkedAccounts?: readonly PrivyLinkedAccountLike[];
+  member?: HostedMember;
   now?: Date;
   prisma?: PrismaClient;
   shareCode?: string | null;
-  linkedAccounts?: readonly PrivyLinkedAccountLike[];
-  member?: HostedMember;
-  cookieStore?: HostedPrivyCookieStore;
-  sessionRecord?: HostedSessionRecord;
 }
 
 export async function createHostedBillingCheckout(input: HostedBillingCheckoutInput): Promise<{ alreadyActive: boolean; url: string | null }> {
@@ -253,16 +246,7 @@ async function resolveHostedBillingCheckoutAuth(
     };
   }
 
-  if (!input.cookieStore || !input.sessionRecord) {
-    throw new TypeError("Hosted billing checkout requires member+linkedAccounts or cookieStore+sessionRecord.");
-  }
-
-  const privyUser = await requireHostedPrivyUserForSession(input.cookieStore, input.sessionRecord);
-
-  return {
-    linkedAccounts: privyUser.linkedAccounts,
-    member: input.sessionRecord.member,
-  };
+  throw new TypeError("Hosted billing checkout requires member and linkedAccounts from Privy request auth.");
 }
 
 async function ensureHostedStripeCustomer(input: {

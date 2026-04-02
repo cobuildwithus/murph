@@ -3,7 +3,6 @@ import { HostedBillingStatus, Prisma, type HostedMember, type PrismaClient } fro
 import { getPrisma } from "../prisma";
 import { enqueueHostedExecutionOutbox } from "../hosted-execution/outbox";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { type HostedSessionRecord } from "../hosted-onboarding/session";
 
 import {
   buildHostedShareAcceptanceDispatch,
@@ -17,15 +16,14 @@ import {
 import type { AcceptHostedShareResult } from "./types";
 
 export async function acceptHostedShareLink(input: {
+  member?: HostedMember;
   prisma?: PrismaClient;
   shareCode: string;
-  member?: HostedMember;
-  sessionRecord?: HostedSessionRecord;
 }): Promise<AcceptHostedShareResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = new Date();
   const shareCode = normalizeOptionalString(input.shareCode);
-  const member = input.member ?? input.sessionRecord?.member;
+  const member = input.member;
 
   if (!shareCode) {
     throw hostedOnboardingError({

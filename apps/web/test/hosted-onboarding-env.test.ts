@@ -22,7 +22,6 @@ describe("readHostedOnboardingEnvironment", () => {
     expect(environment.privyVerificationKey).toBe("privy-verification-key");
     expect(environment.revnetChainId).toBeNull();
     expect(environment.revnetStripeCurrency).toBeNull();
-    expect(environment.sessionCookieName).toBe("hosted_session");
     expect(environment.stripeBillingMode).toBe("payment");
     expect(environment.inviteTtlHours).toBe(24 * 7);
   });

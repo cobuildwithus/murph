@@ -8,7 +8,6 @@ import {
 import {
   getHostedOnboardingSecretCodec,
 } from "../hosted-onboarding/runtime";
-import { type HostedSessionRecord } from "../hosted-onboarding/session";
 
 import {
   buildHostedSharePreview,
@@ -91,11 +90,10 @@ export async function buildHostedSharePageData(input: {
   inviteCode?: string | null;
   prisma?: PrismaClient;
   shareCode: string;
-  sessionRecord?: HostedSessionRecord | null;
 }): Promise<HostedSharePageData> {
   const prisma = input.prisma ?? getPrisma();
   const record = await findHostedShareLinkByCode(input.shareCode, prisma);
-  const authenticatedMember = input.authenticatedMember ?? input.sessionRecord?.member ?? null;
+  const authenticatedMember = input.authenticatedMember ?? null;
   const sessionActive = authenticatedMember?.billingStatus === HostedBillingStatus.active;
 
   if (!record) {

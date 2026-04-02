@@ -3,13 +3,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
-  clearHostedSessionCookie: vi.fn(),
   completeHostedPrivyVerification: vi.fn(),
   createHostedBillingCheckout: vi.fn(),
   requireHostedInviteCodeFromRequest: vi.fn(),
   requireHostedPrivyCompletionIdentityFromRequest: vi.fn(),
   requireHostedPrivyRequestAuthContext: vi.fn(),
-  revokeHostedSessionFromRequest: vi.fn(),
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyVerificationKey: "line-1\\nline-2" as string | null,
@@ -47,19 +45,12 @@ vi.mock("@/src/lib/hosted-onboarding/route-helpers", () => ({
   requireHostedInviteCodeFromRequest: mocks.requireHostedInviteCodeFromRequest,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/session", () => ({
-  clearHostedSessionCookie: mocks.clearHostedSessionCookie,
-  revokeHostedSessionFromRequest: mocks.revokeHostedSessionFromRequest,
-}));
-
 type BillingCheckoutRouteModule = typeof import("../app/api/hosted-onboarding/billing/checkout/route");
 type HostedOnboardingHttpModule = typeof import("../src/lib/hosted-onboarding/http");
-type LogoutRouteModule = typeof import("../app/api/hosted-onboarding/session/logout/route");
 type PrivyCompleteRouteModule = typeof import("../app/api/hosted-onboarding/privy/complete/route");
 
 let billingCheckoutRoute: BillingCheckoutRouteModule;
 let hostedOnboardingHttp: HostedOnboardingHttpModule;
-let logoutRoute: LogoutRouteModule;
 let privyCompleteRoute: PrivyCompleteRouteModule;
 
 const SAME_ORIGIN_HEADERS = {
@@ -70,7 +61,6 @@ describe("hosted onboarding routes", () => {
   beforeAll(async () => {
     billingCheckoutRoute = await import("../app/api/hosted-onboarding/billing/checkout/route");
     hostedOnboardingHttp = await import("../src/lib/hosted-onboarding/http");
-    logoutRoute = await import("../app/api/hosted-onboarding/session/logout/route");
     privyCompleteRoute = await import("../app/api/hosted-onboarding/privy/complete/route");
   });
 
@@ -115,7 +105,6 @@ describe("hosted onboarding routes", () => {
       },
       inviteCode: "invite-code",
     });
-    mocks.revokeHostedSessionFromRequest.mockResolvedValue(true);
   });
 
   it("marks Privy verification responses as no-store", async () => {
@@ -126,7 +115,6 @@ describe("hosted onboarding routes", () => {
         }),
         headers: {
           "x-privy-identity-token": "header-token",
-          cookie: "privy-id-token=identity-token; hosted_session=session-token",
           origin: SAME_ORIGIN_HEADERS.origin,
           "user-agent": "test-agent",
         },
@@ -495,26 +483,6 @@ describe("hosted onboarding routes", () => {
     await expect(response.json()).resolves.toEqual({
       alreadyActive: false,
       url: "https://billing.example.test/session_123",
-    });
-  });
-
-  it("revokes the current hosted session record on logout before clearing the cookie", async () => {
-    const request = new Request("https://join.example.test/api/hosted-onboarding/session/logout", {
-      headers: {
-        cookie: "hosted_session=session-token",
-        origin: SAME_ORIGIN_HEADERS.origin,
-      },
-      method: "POST",
-    });
-
-    const response = await logoutRoute.POST(request);
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    expect(mocks.revokeHostedSessionFromRequest).toHaveBeenCalledWith(request);
-    expect(mocks.clearHostedSessionCookie).toHaveBeenCalledWith(response);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
     });
   });
 

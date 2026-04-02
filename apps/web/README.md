@@ -73,8 +73,6 @@ Hosted onboarding extras:
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
 - enable Privy access + identity tokens so hosted browser requests can authenticate API calls with bearer + identity-token headers
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
-- `HOSTED_ONBOARDING_SESSION_TTL_DAYS`
-- `HOSTED_ONBOARDING_SESSION_COOKIE_NAME`
 - `HOSTED_ONBOARDING_STRIPE_BILLING_MODE`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID`
 - `STRIPE_SECRET_KEY`
@@ -219,7 +217,6 @@ This repo now also includes a hosted onboarding lane for phone-bound invites and
 - `GET /api/hosted-onboarding/invites/:inviteCode/status`
 - `POST /api/hosted-onboarding/privy/complete`
 - `POST /api/hosted-onboarding/billing/checkout`
-- `POST /api/hosted-onboarding/session/logout`
 - `GET|POST /api/hosted-onboarding/linq/webhook`
 - `POST /api/hosted-onboarding/stripe/webhook`
 - `GET /share/:shareCode`
@@ -243,11 +240,11 @@ The onboarding lane is intentionally thin:
 - hosted onboarding webhook receipts still keep receipt-local side-effect markers for retry-safe Linq invite replies, persist the planned response plus queued side effects before any external send, and use a reclaimable processing lease so a retried Linq or Telegram webhook can resume abandoned work instead of being dropped as a duplicate
 - the current hosted outward-effect lanes are now explicit: Cloudflare-bound execution uses `execution_outbox`, receipt-owned Linq or Telegram replies use the webhook receipt side-effect journal, queued Stripe facts use the hosted Stripe event reconciler, and RevNet issuance uses invoice-owned idempotency state
 - Stripe customer/subscription/invoice entitlement writes now carry a latest-applied billing event marker so out-of-order webhook delivery cannot regress a later cancellation, pause, or unpaid state back to active
-- subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access by suspending the member and revoking live hosted sessions until manual recovery or a newer fresh Stripe success event restores entitlement
+- subscription cancellation, pause, unpaid, refund, and dispute paths revoke hosted access by suspending the member until manual recovery or a newer fresh Stripe success event restores entitlement
 
 Current RevNet MVP assumptions:
 
 - RevNet issuance is only enabled when `HOSTED_ONBOARDING_STRIPE_BILLING_MODE=subscription`.
 - The configured treasury key must already control a wallet funded on the target chain.
 - Stripe webhook ingress no longer activates access inline; the queued reconciler may submit RevNet from `invoice.paid`, and RevNet-backed subscription activation now waits for confirmed issuance rather than raw `invoice.paid`.
-- Chargebacks, disputes, and refunds are not clawed back onchain in this MVP; instead the Stripe webhook suspends hosted access, revokes live hosted sessions, and halts future activation or RevNet issuance until manual review.
+- Chargebacks, disputes, and refunds are not clawed back onchain in this MVP; instead the Stripe webhook suspends hosted access and halts future activation or RevNet issuance until manual review.
