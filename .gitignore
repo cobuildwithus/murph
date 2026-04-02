@@ -26,6 +26,7 @@ vault/
 .env
 .env.*
 !.env.example
+agent-docs/generated/doc-inventory.md
 
 # Local Cloudflare runner secrets
 apps/cloudflare/.dev.vars*

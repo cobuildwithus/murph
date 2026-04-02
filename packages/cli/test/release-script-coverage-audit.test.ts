@@ -184,7 +184,6 @@ describe('monorepo release flow coverage audit', () => {
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
       expect(fullEntries).toContain('docs/legacy-removal-audit-2026-03-31.md')
       expect(fullEntries).toContain('.github/workflows/release.yml')
-      expect(fullEntries).toContain('agent-docs/generated/doc-inventory.md')
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
       expect(fullEntries).toContain('agent-docs/prompts/task-finish-review.md')
       expect(leanEntries.length).toBeLessThan(fullEntries.length)
