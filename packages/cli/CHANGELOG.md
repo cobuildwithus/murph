@@ -2,6 +2,12 @@
 
 All notable changes to `@murphai/murph` will be documented in this file.
 
+## [0.1.2] - 2026-04-02
+
+### Changed
+- stop tracking generated doc inventory
+- add patch rc shortcut
+
 ## [0.1.1] - 2026-04-02
 
 ### Added
