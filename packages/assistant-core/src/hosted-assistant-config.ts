@@ -23,6 +23,7 @@ import {
   resolveOpenAICompatibleProviderPresetFromId,
   resolveOpenAICompatibleProviderPresetFromProviderName,
 } from './assistant/openai-compatible-provider-presets.js'
+import { isAssistantOpenAIBaseUrl } from './assistant/shared.js'
 import type { AssistantProviderConfigInput } from './assistant/provider-config.js'
 import {
   readOperatorConfig,
@@ -515,7 +516,6 @@ function resolveHostedAssistantSeedPlan(
           [HOSTED_ASSISTANT_APPROVAL_POLICY_ENV, raw.approvalPolicy],
           [HOSTED_ASSISTANT_SANDBOX_ENV, raw.sandbox],
           [HOSTED_ASSISTANT_PROFILE_ENV, raw.profile],
-          [HOSTED_ASSISTANT_REASONING_EFFORT_ENV, raw.reasoningEffort],
           [HOSTED_ASSISTANT_OSS_ENV, raw.oss],
         ],
       )
@@ -531,6 +531,13 @@ function resolveHostedAssistantSeedPlan(
         )
       }
 
+      if (raw.reasoningEffort && !isAssistantOpenAIBaseUrl(baseUrl)) {
+        throw new HostedAssistantConfigurationError(
+          'HOSTED_ASSISTANT_CONFIG_INVALID',
+          `${HOSTED_ASSISTANT_REASONING_EFFORT_ENV} is supported only for hosted assistants that use the official OpenAI endpoint.`,
+        )
+      }
+
       return {
         providerConfig: {
           provider: 'openai-compatible',
@@ -538,6 +545,7 @@ function resolveHostedAssistantSeedPlan(
           baseUrl,
           model: raw.model,
           providerName: raw.providerName ?? providerSelection.presetProviderName,
+          reasoningEffort: raw.reasoningEffort,
         },
       }
     }
