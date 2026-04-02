@@ -1,5 +1,7 @@
+import { assistantBackendTargetToProviderConfigInput } from '../assistant-backend.js'
 import type { AssistantOperatorDefaults } from '../operator-config.js'
 import {
+  resolveAssistantBackendTarget,
   resolveAssistantProviderDefaults,
 } from '../operator-config.js'
 import {
@@ -43,8 +45,11 @@ export function resolveAssistantTurnRoutes(
   defaults: AssistantOperatorDefaults | null,
   resolved: ResolvedAssistantSession,
 ): ResolvedAssistantFailoverRoute[] {
+  const defaultProviderConfig = resolveAssistantBackendTarget(defaults)
   const provider = mergeAssistantProviderConfigs(
-    defaults,
+    defaultProviderConfig
+      ? assistantBackendTargetToProviderConfigInput(defaultProviderConfig)
+      : null,
     { provider: resolved.session.provider, ...resolved.session.providerOptions },
     input,
   ).provider

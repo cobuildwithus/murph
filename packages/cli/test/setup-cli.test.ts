@@ -32,6 +32,7 @@ import {
 } from '@murphai/assistant-core/assistant-state'
 import { listAssistantCronJobs } from '../src/assistant/cron.js'
 import {
+  buildAssistantProviderDefaultsPatch,
   readOperatorConfig,
   resolveOperatorConfigPath,
   saveAssistantOperatorDefaultsPatch,
@@ -91,7 +92,7 @@ function buildFakeJwt(payload: Record<string, unknown>): string {
 test('setup wizard completion waits for Ink exit before resolving the selected flow', async () => {
   const completion = createSetupWizardCompletionController()
   const selected = {
-    assistantPreset: 'codex-cli' as const,
+    assistantPreset: 'codex' as const,
     channels: ['email'] as const,
     scheduledUpdates: ['weekly-health-snapshot'] as const,
     wearables: [] as const,
@@ -115,7 +116,7 @@ test('setup wizard completion waits for Ink exit before resolving the selected f
   completion.completeExit()
 
   assert.deepEqual(await pendingResult, {
-    assistantPreset: 'codex-cli',
+    assistantPreset: 'codex',
     channels: ['email'],
     scheduledUpdates: ['weekly-health-snapshot'],
     wearables: [],
@@ -511,7 +512,7 @@ test('setup assistant account resolver merges codex auth plan with rpc quota met
 
   const account = await resolver.resolve({
     assistant: {
-      preset: 'codex-cli',
+      preset: 'codex',
       enabled: true,
       provider: 'codex-cli',
       model: 'gpt-5.4',
@@ -1993,7 +1994,7 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
         return {
           assistantApiKeyEnv: null,
           assistantBaseUrl: null,
-          assistantPreset: 'codex-cli',
+          assistantPreset: 'codex',
           assistantProviderName: null,
           channels: [],
           scheduledUpdates: [],
@@ -2041,7 +2042,7 @@ test('interactive onboarding clears stale assistant endpoint defaults when the w
           assistantBaseUrl: null,
           assistantProviderName: null,
         },
-        preset: 'codex-cli',
+        preset: 'codex',
       },
     ])
   } finally {
@@ -2088,6 +2089,7 @@ test('wizard preserves existing named provider metadata when that provider stays
       baseUrl: 'https://openrouter.ai/api/v1',
       detail: 'Murph will use OpenRouter and read the key from OPENROUTER_API_KEY. It will ask which model to save next.',
       methodLabel: null,
+      oss: false,
       preset: 'openai-compatible',
       providerLabel: 'OpenRouter',
       providerName: 'OpenRouter',
@@ -2766,7 +2768,7 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
   try {
     const result = await services.setupMacos({
       assistant: {
-        preset: 'codex-cli',
+        preset: 'codex',
         enabled: true,
         provider: 'codex-cli',
         model: 'gpt-5.4',
@@ -2854,12 +2856,14 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
             } | null
           } | null
         } | null
-        defaultsByProvider?: {
-          'codex-cli'?: {
-            model?: string | null
+        backend?: {
+          adapter?: string | null
+          model?: string | null
+          options?: {
+            approvalPolicy?: string | null
+            sandbox?: string | null
           } | null
         } | null
-        provider?: string | null
       } | null
       defaultVault: string | null
     }
@@ -2868,8 +2872,16 @@ test.sequential('setup service provisions formulas, downloads the model, and boo
     const shellProfile = await readFile(shellProfilePath, 'utf8')
     assert.equal(modelText, 'model')
     assert.equal(operatorConfig.defaultVault, '~/vault')
-    assert.equal(operatorConfig.assistant?.provider, 'codex-cli')
-    assert.equal(operatorConfig.assistant?.defaultsByProvider?.['codex-cli']?.model, 'gpt-5.4')
+    assert.equal(operatorConfig.assistant?.backend?.adapter, 'codex-cli')
+    assert.equal(operatorConfig.assistant?.backend?.model, 'gpt-5.4')
+    assert.equal(
+      operatorConfig.assistant?.backend?.options?.approvalPolicy,
+      'never',
+    )
+    assert.equal(
+      operatorConfig.assistant?.backend?.options?.sandbox,
+      'danger-full-access',
+    )
     assert.equal(operatorConfig.assistant?.account?.kind, 'account')
     assert.equal(operatorConfig.assistant?.account?.planCode, 'plus')
     assert.equal(operatorConfig.assistant?.account?.planName, 'Plus')
@@ -2913,31 +2925,20 @@ test.sequential('setup preserves saved OpenAI-compatible headers when re-saving 
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
 
   await saveAssistantOperatorDefaultsPatch(
-    {
+    buildAssistantProviderDefaultsPatch({
+      defaults: null,
       provider: 'openai-compatible',
-      defaultsByProvider: {
-        'openai-compatible': {
-          codexCommand: null,
-          model: 'llama3.2:latest',
-          reasoningEffort: null,
-          sandbox: null,
-          approvalPolicy: null,
-          profile: null,
-          oss: false,
-          baseUrl: 'http://127.0.0.1:11434/v1',
-          apiKeyEnv: 'OLLAMA_API_KEY',
-          providerName: 'ollama',
-          headers: {
-            Authorization: 'Bearer override-token',
-            'X-Foo': 'bar',
-          },
+      providerConfig: {
+        model: 'llama3.2:latest',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        apiKeyEnv: 'OLLAMA_API_KEY',
+        providerName: 'ollama',
+        headers: {
+          Authorization: 'Bearer override-token',
+          'X-Foo': 'bar',
         },
       },
-      identityId: null,
-      failoverRoutes: null,
-      account: null,
-      selfDeliveryTargets: null,
-    },
+    }),
     homeRoot,
   )
 
@@ -3019,18 +3020,12 @@ test.sequential('setup preserves saved OpenAI-compatible headers when re-saving 
     })
 
     const operatorConfig = await readOperatorConfig(homeRoot)
-    assert.equal(operatorConfig?.assistant?.provider, 'openai-compatible')
-    assert.equal(
-      operatorConfig?.assistant?.defaultsByProvider?.['openai-compatible']?.model,
-      'gpt-oss:20b',
-    )
-    assert.deepEqual(
-      operatorConfig?.assistant?.defaultsByProvider?.['openai-compatible']?.headers,
-      {
-        Authorization: 'Bearer override-token',
-        'X-Foo': 'bar',
-      },
-    )
+    assert.equal(operatorConfig?.assistant?.backend?.adapter, 'openai-compatible')
+    assert.equal(operatorConfig?.assistant?.backend?.model, 'gpt-oss:20b')
+    assert.deepEqual(operatorConfig?.assistant?.backend?.headers, {
+      Authorization: 'Bearer override-token',
+      'X-Foo': 'bar',
+    })
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -3060,28 +3055,17 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   const whisperCommand = path.join(formulaPrefixes['whisper-cpp'], 'bin', 'whisper-cli')
 
   await saveAssistantOperatorDefaultsPatch(
-    {
+    buildAssistantProviderDefaultsPatch({
+      defaults: null,
       provider: 'codex-cli',
-      defaultsByProvider: {
-        'codex-cli': {
-          codexCommand: '/opt/bin/codex-old',
-          model: 'gpt-5.4',
-          reasoningEffort: null,
-          sandbox: 'danger-full-access',
-          approvalPolicy: 'never',
-          profile: null,
-          oss: false,
-          baseUrl: null,
-          apiKeyEnv: null,
-          providerName: null,
-          headers: null,
-        },
+      providerConfig: {
+        codexCommand: '/opt/bin/codex-old',
+        model: 'gpt-5.4',
+        sandbox: 'danger-full-access',
+        approvalPolicy: 'never',
+        oss: false,
       },
-      identityId: null,
-      failoverRoutes: null,
-      account: null,
-      selfDeliveryTargets: null,
-    },
+    }),
     homeRoot,
   )
 
@@ -3142,7 +3126,7 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
   try {
     await services.setupMacos({
       assistant: {
-        preset: 'codex-cli',
+        preset: 'codex',
         enabled: true,
         provider: 'codex-cli',
         model: 'gpt-5.4',
@@ -3163,15 +3147,15 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
     })
 
     const operatorConfig = await readOperatorConfig(homeRoot)
-    assert.equal(operatorConfig?.assistant?.provider, 'codex-cli')
+    assert.equal(operatorConfig?.assistant?.backend?.adapter, 'codex-cli')
     assert.equal(
-      operatorConfig?.assistant?.defaultsByProvider?.['codex-cli']?.codexCommand,
+      operatorConfig?.assistant?.backend?.options?.codexCommand,
       '/opt/bin/codex-new',
     )
 
     await services.setupMacos({
       assistant: {
-        preset: 'codex-cli',
+        preset: 'codex',
         enabled: true,
         provider: 'codex-cli',
         model: 'gpt-5.4',
@@ -3193,7 +3177,7 @@ test.sequential('setup updates codexCommand when provided and preserves a saved 
 
     const preservedOperatorConfig = await readOperatorConfig(homeRoot)
     assert.equal(
-      preservedOperatorConfig?.assistant?.defaultsByProvider?.['codex-cli']?.codexCommand,
+      preservedOperatorConfig?.assistant?.backend?.options?.codexCommand,
       '/opt/bin/codex-new',
     )
   } finally {

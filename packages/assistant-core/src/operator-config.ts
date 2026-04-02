@@ -3,26 +3,29 @@ import os from 'node:os'
 import path from 'node:path'
 import { z } from 'zod'
 import {
-  assistantApprovalPolicyValues,
   assistantChatProviderValues,
-  assistantHeadersSchema,
   assistantProviderFailoverRouteSchema,
   assistantSelfDeliveryTargetSchema,
-  assistantSandboxValues,
   type AssistantSelfDeliveryTarget,
 } from './assistant-cli-contracts.js'
+import {
+  assistantBackendTargetSchema,
+  assistantBackendTargetToProviderConfigInput,
+  createAssistantBackendTarget,
+  normalizeAssistantBackendTarget,
+  type AssistantBackendTarget,
+} from './assistant-backend.js'
 import {
   ROOT_OPTIONS_WITH_VALUES,
   resolveEffectiveTopLevelToken,
 } from './command-helpers.js'
 import { readEnvValue } from './env-values.js'
 import {
-  inferAssistantProviderFromConfigInput,
+  type AssistantProviderConfig,
   type AssistantProviderConfigInput,
   serializeAssistantProviderOperatorDefaults,
 } from './assistant/provider-config.js'
 import {
-  resolveHostedAssistantProviderConfig,
   parseHostedAssistantConfig,
   type HostedAssistantConfig,
 } from './hosted-assistant-config.js'
@@ -37,32 +40,7 @@ const OPERATOR_CONFIG_PATH = path.join(OPERATOR_CONFIG_DIRECTORY, 'config.json')
 export const VAULT_ENV = 'VAULT'
 export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
-const assistantProviderDefaultsEntrySchema = z.object({
-  codexCommand: z.string().min(1).nullable(),
-  model: z.string().min(1).nullable(),
-  reasoningEffort: z.string().min(1).nullable().default(null),
-  sandbox: z.enum(assistantSandboxValues).nullable(),
-  approvalPolicy: z.enum(assistantApprovalPolicyValues).nullable(),
-  profile: z.string().min(1).nullable(),
-  oss: z.boolean().nullable(),
-  baseUrl: z.string().min(1).nullable().optional(),
-  apiKeyEnv: z.string().min(1).nullable().optional(),
-  providerName: z.string().min(1).nullable().optional(),
-  headers: assistantHeadersSchema.nullable().optional(),
-})
-
-const assistantDefaultsByProviderSchema = z
-  .object({
-    'codex-cli': assistantProviderDefaultsEntrySchema.nullable().optional(),
-    'openai-compatible': assistantProviderDefaultsEntrySchema.nullable().optional(),
-  })
-  .strict()
-  .nullable()
-  .optional()
-
-const assistantOperatorDefaultsSchema = z.object({
-  provider: z.enum(assistantChatProviderValues).nullable().default(null),
-  defaultsByProvider: assistantDefaultsByProviderSchema,
+const assistantOperatorSharedFields = {
   identityId: z.string().min(1).nullable().default(null),
   failoverRoutes: z.array(assistantProviderFailoverRouteSchema).nullable().optional(),
   account: z
@@ -104,7 +82,12 @@ const assistantOperatorDefaultsSchema = z.object({
     .record(z.string().min(1), assistantSelfDeliveryTargetSchema)
     .nullable()
     .default(null),
-})
+} as const
+
+const assistantOperatorDefaultsSchema = z.object({
+  backend: assistantBackendTargetSchema.nullable().default(null),
+  ...assistantOperatorSharedFields,
+}).strict()
 
 const operatorConfigSchema = z.object({
   schema: z.literal(OPERATOR_CONFIG_SCHEMA),
@@ -116,16 +99,15 @@ const operatorConfigSchema = z.object({
 
 type RawOperatorConfig = z.infer<typeof operatorConfigSchema>
 
-export interface OperatorConfig extends Omit<RawOperatorConfig, 'hostedAssistant'> {
+export interface OperatorConfig extends Omit<RawOperatorConfig, 'assistant' | 'hostedAssistant'> {
+  assistant: AssistantOperatorDefaults | null
   hostedAssistant: HostedAssistantConfig | null
   hostedAssistantInvalid?: boolean
 }
 export type AssistantOperatorDefaults = z.infer<
   typeof assistantOperatorDefaultsSchema
 >
-export type AssistantProviderDefaultsEntry = z.infer<
-  typeof assistantProviderDefaultsEntrySchema
->
+export type AssistantProviderDefaultsEntry = Omit<AssistantProviderConfig, 'provider'>
 type AssistantChatProviderValue = (typeof assistantChatProviderValues)[number]
 export interface AssistantSelfDeliveryTargetLookupInput {
   channel?: string | null
@@ -426,10 +408,7 @@ function normalizeParsedOperatorConfig(
     }
   }
 
-  const assistant = applyHostedAssistantConfigToAssistantDefaults(
-    hostedAssistantInvalid ? null : normalizeAssistantOperatorDefaults(config.assistant),
-    hostedAssistant,
-  )
+  const assistant = normalizeAssistantOperatorDefaults(config.assistant)
 
   return {
     schema: OPERATOR_CONFIG_SCHEMA,
@@ -521,14 +500,20 @@ export function resolveAssistantProviderDefaults(
   defaults: AssistantOperatorDefaults | null | undefined,
   provider: AssistantChatProviderValue,
 ): AssistantProviderDefaultsEntry | null {
-  if (!defaults) {
+  const backend = resolveAssistantBackendTarget(defaults)
+  if (!backend || backend.adapter !== provider) {
     return null
   }
 
-  return normalizeAssistantProviderDefaultsEntry(
-    provider,
-    defaults.defaultsByProvider?.[provider] ?? null,
+  return serializeAssistantProviderOperatorDefaults(
+    assistantBackendTargetToProviderConfigInput(backend),
   )
+}
+
+export function resolveAssistantBackendTarget(
+  defaults: AssistantOperatorDefaults | null | undefined,
+): AssistantBackendTarget | null {
+  return normalizeAssistantBackendTarget(defaults?.backend ?? null)
 }
 
 export function buildAssistantProviderDefaultsPatch(input: {
@@ -540,19 +525,14 @@ export function buildAssistantProviderDefaultsPatch(input: {
     input.defaults,
     input.provider,
   )
-  const nextProviderDefaults = assistantProviderDefaultsEntrySchema.parse(
-    serializeAssistantProviderOperatorDefaults({
-      provider: input.provider,
-      ...(savedProviderDefaults ? savedProviderDefaults : {}),
-      ...input.providerConfig,
-    }),
-  )
+  const nextBackend = createAssistantBackendTarget({
+    provider: input.provider,
+    ...(savedProviderDefaults ? savedProviderDefaults : {}),
+    ...input.providerConfig,
+  })
 
   return {
-    provider: input.provider,
-    defaultsByProvider: {
-      [input.provider]: nextProviderDefaults,
-    },
+    backend: nextBackend,
   }
 }
 
@@ -681,57 +661,15 @@ export async function applyAssistantSelfDeliveryTargetDefaults(
   }
 }
 
-function applyHostedAssistantConfigToAssistantDefaults(
-  defaults: AssistantOperatorDefaults | null | undefined,
-  hostedAssistant: HostedAssistantConfig | null | undefined,
-): AssistantOperatorDefaults | null {
-  const normalizedDefaults = normalizeAssistantOperatorDefaults(defaults)
-
-  if (!hostedAssistant) {
-    return normalizedDefaults
-  }
-
-  const hostedProviderConfig = resolveHostedAssistantProviderConfig(hostedAssistant)
-  const provider = inferAssistantProviderFromConfigInput(hostedProviderConfig)
-
-  if (!provider || !hostedProviderConfig) {
-    return mergeAssistantOperatorDefaults(normalizedDefaults, {
-      defaultsByProvider: {
-        'codex-cli': null,
-        'openai-compatible': null,
-      },
-      provider: null,
-    })
-  }
-
-  return mergeAssistantOperatorDefaults(
-    normalizedDefaults,
-    buildAssistantProviderDefaultsPatch({
-      defaults: normalizedDefaults,
-      provider,
-      providerConfig: hostedProviderConfig,
-    }),
-  )
-}
-
 function mergeAssistantOperatorDefaults(
   existing: AssistantOperatorDefaults | null,
   patch: Partial<AssistantOperatorDefaults>,
 ): AssistantOperatorDefaults {
-  const selectedProvider =
-    'provider' in patch
-      ? patch.provider ??
-        existing?.provider ??
-        inferAssistantProviderFromDefaultsByProvider(patch.defaultsByProvider) ??
-        null
-      : existing?.provider ??
-        inferAssistantProviderFromDefaultsByProvider(patch.defaultsByProvider) ??
-        null
-  const nextDefaultsByProvider = buildAssistantDefaultsByProvider(existing, patch)
-
   return assistantOperatorDefaultsSchema.parse({
-    provider: selectedProvider,
-    defaultsByProvider: nextDefaultsByProvider,
+    backend:
+      'backend' in patch
+        ? normalizeAssistantBackendTarget(patch.backend ?? null)
+        : normalizeAssistantBackendTarget(existing?.backend ?? null),
     identityId:
       'identityId' in patch ? patch.identityId : existing?.identityId ?? null,
     failoverRoutes:
@@ -754,10 +692,7 @@ function normalizeAssistantOperatorDefaults(
   }
 
   return assistantOperatorDefaultsSchema.parse({
-    provider: defaults.provider ?? null,
-    defaultsByProvider: normalizeAssistantDefaultsByProvider(
-      defaults.defaultsByProvider,
-    ),
+    backend: normalizeAssistantBackendTarget(defaults.backend ?? null),
     identityId: defaults.identityId ?? null,
     failoverRoutes: defaults.failoverRoutes ?? null,
     account: defaults.account ?? null,
@@ -765,128 +700,6 @@ function normalizeAssistantOperatorDefaults(
       defaults.selfDeliveryTargets ?? null,
     ),
   })
-}
-
-function buildAssistantDefaultsByProvider(
-  existing: AssistantOperatorDefaults | null | undefined,
-  patch: Partial<AssistantOperatorDefaults>,
-): AssistantOperatorDefaults['defaultsByProvider'] {
-  const existingDefaultsByProvider = normalizeAssistantDefaultsByProvider(
-    existing?.defaultsByProvider,
-  )
-
-  if (!('defaultsByProvider' in patch)) {
-    return existingDefaultsByProvider
-  }
-
-  return mergeAssistantDefaultsByProvider(
-    existingDefaultsByProvider,
-    patch.defaultsByProvider,
-  )
-}
-
-function normalizeAssistantProviderDefaultsEntry(
-  provider: AssistantChatProviderValue,
-  defaults: AssistantProviderDefaultsEntry | null | undefined,
-): AssistantProviderDefaultsEntry | null {
-  if (!defaults) {
-    return null
-  }
-
-  const normalized = assistantProviderDefaultsEntrySchema.parse(
-    serializeAssistantProviderOperatorDefaults({
-      provider,
-      ...defaults,
-    }),
-  )
-
-  return hasAssistantProviderDefaultsValues(normalized) ? normalized : null
-}
-
-function normalizeAssistantDefaultsByProvider(
-  defaultsByProvider: AssistantOperatorDefaults['defaultsByProvider'],
-): AssistantOperatorDefaults['defaultsByProvider'] {
-  if (!defaultsByProvider) {
-    return null
-  }
-
-  const normalized: NonNullable<AssistantOperatorDefaults['defaultsByProvider']> = {}
-
-  for (const provider of assistantChatProviderValues) {
-    const normalizedEntry = normalizeAssistantProviderDefaultsEntry(
-      provider,
-      defaultsByProvider[provider] ?? null,
-    )
-    if (!normalizedEntry) {
-      continue
-    }
-
-    normalized[provider] = normalizedEntry
-  }
-
-  return Object.keys(normalized).length > 0
-    ? assistantDefaultsByProviderSchema.parse(normalized)
-    : null
-}
-
-function mergeAssistantDefaultsByProvider(
-  existing: AssistantOperatorDefaults['defaultsByProvider'],
-  patch: AssistantOperatorDefaults['defaultsByProvider'],
-): AssistantOperatorDefaults['defaultsByProvider'] {
-  if (!patch) {
-    return null
-  }
-
-  const nextDefaultsByProvider = {
-    ...(normalizeAssistantDefaultsByProvider(existing) ?? {}),
-  } as NonNullable<AssistantOperatorDefaults['defaultsByProvider']>
-
-  for (const provider of assistantChatProviderValues) {
-    if (!(provider in patch)) {
-      continue
-    }
-
-    const nextEntry = patch[provider] ?? null
-    if (!nextEntry) {
-      delete nextDefaultsByProvider[provider]
-      continue
-    }
-
-    const normalizedEntry = normalizeAssistantProviderDefaultsEntry(
-      provider,
-      nextEntry,
-    )
-
-    if (normalizedEntry) {
-      nextDefaultsByProvider[provider] = normalizedEntry
-      continue
-    }
-
-    delete nextDefaultsByProvider[provider]
-  }
-
-  return Object.keys(nextDefaultsByProvider).length > 0
-    ? assistantDefaultsByProviderSchema.parse(nextDefaultsByProvider)
-    : null
-}
-
-function hasAssistantProviderDefaultsValues(
-  defaults: AssistantProviderDefaultsEntry,
-): boolean {
-  return Boolean(
-    defaults.codexCommand ??
-      defaults.model ??
-      defaults.reasoningEffort ??
-      defaults.sandbox ??
-      defaults.approvalPolicy ??
-      defaults.profile ??
-      defaults.baseUrl ??
-      defaults.apiKeyEnv ??
-      defaults.providerName ??
-      (defaults.headers && Object.keys(defaults.headers).length > 0
-        ? 'headers'
-        : null),
-  ) || defaults.oss === true
 }
 
 function serializeAssistantOperatorDefaultsForWrite(
@@ -897,31 +710,12 @@ function serializeAssistantOperatorDefaultsForWrite(
   }
 
   return {
-    provider: defaults.provider,
-    defaultsByProvider: normalizeAssistantDefaultsByProvider(
-      defaults.defaultsByProvider,
-    ),
+    backend: normalizeAssistantBackendTarget(defaults.backend ?? null),
     identityId: defaults.identityId,
     failoverRoutes: defaults.failoverRoutes ?? null,
     account: defaults.account ?? null,
     selfDeliveryTargets: defaults.selfDeliveryTargets ?? null,
   }
-}
-
-function inferAssistantProviderFromDefaultsByProvider(
-  defaultsByProvider: AssistantOperatorDefaults['defaultsByProvider'] | undefined,
-): AssistantChatProviderValue | null {
-  if (!defaultsByProvider) {
-    return null
-  }
-
-  for (const provider of assistantChatProviderValues) {
-    if (defaultsByProvider[provider]) {
-      return provider
-    }
-  }
-
-  return null
 }
 
 function normalizeAssistantSelfDeliveryTargetMap(
