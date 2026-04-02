@@ -2,40 +2,22 @@ import assert from "node:assert/strict";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  cookies: vi.fn(),
   resolveHostedPrivyClientAppId: vi.fn(),
   resolveHostedPrivyClientId: vi.fn(),
-  resolveHostedSessionFromCookieStore: vi.fn(),
-}));
-
-vi.mock("next/headers", () => ({
-  cookies: mocks.cookies,
 }));
 
 vi.mock("@/src/components/settings/hosted-email-settings", () => ({
-  HostedEmailSettings(input: { expectedPrivyUserId: string }) {
-    return createElement(
-      "div",
-      {
-        "data-expected-privy-user-id": input.expectedPrivyUserId,
-      },
-      "Hosted email settings",
-    );
+  HostedEmailSettings() {
+    return createElement("div", null, "Hosted email settings");
   },
 }));
 
 vi.mock("@/src/components/settings/hosted-telegram-settings", () => ({
-  HostedTelegramSettings(input: { expectedPrivyUserId: string }) {
-    return createElement(
-      "div",
-      {
-        "data-telegram-expected-privy-user-id": input.expectedPrivyUserId,
-      },
-      "Hosted Telegram settings",
-    );
+  HostedTelegramSettings() {
+    return createElement("div", null, "Hosted Telegram settings");
   },
 }));
 
@@ -50,45 +32,31 @@ vi.mock("@/src/lib/hosted-onboarding/landing", () => ({
   resolveHostedPrivyClientId: mocks.resolveHostedPrivyClientId,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/session", () => ({
-  resolveHostedSessionFromCookieStore: mocks.resolveHostedSessionFromCookieStore,
-}));
-
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.cookies.mockResolvedValue({ get: vi.fn() });
   mocks.resolveHostedPrivyClientAppId.mockReturnValue("cm_app_123");
   mocks.resolveHostedPrivyClientId.mockReturnValue("client_123");
-  mocks.resolveHostedSessionFromCookieStore.mockResolvedValue({
-    member: {
-      maskedPhoneNumberHint: "*** 2671",
-      privyUserId: "did:privy:user_123",
-    },
-  });
 });
 
-test("SettingsPage passes the hosted session's Privy user id into the client email settings tree", async () => {
+test("SettingsPage renders the Privy-backed settings tree when client auth is configured", async () => {
   const { default: SettingsPage } = await import("../app/settings/page");
 
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(SettingsPage());
 
-  expect(mocks.resolveHostedSessionFromCookieStore).toHaveBeenCalledWith({ get: expect.any(Function) });
-  assert.match(markup, /data-expected-privy-user-id="did:privy:user_123"/);
   assert.match(markup, /Hosted email settings/);
-  assert.match(markup, /data-telegram-expected-privy-user-id="did:privy:user_123"/);
   assert.match(markup, /Hosted Telegram settings/);
   assert.match(markup, /data-privy-provider="true"/);
-  assert.match(markup, /\*\*\* 2671/);
+  assert.match(markup, /Sign in with the same phone-backed Privy account you use for Murph/);
 });
 
-test("SettingsPage renders a sign-in requirement when there is no hosted session", async () => {
-  mocks.resolveHostedSessionFromCookieStore.mockResolvedValue(null);
+test("SettingsPage renders a config warning when Privy client auth is unavailable", async () => {
+  mocks.resolveHostedPrivyClientAppId.mockReturnValue(null);
 
   const { default: SettingsPage } = await import("../app/settings/page");
-  const markup = renderToStaticMarkup(await SettingsPage());
+  const markup = renderToStaticMarkup(SettingsPage());
 
-  assert.match(markup, /Sign in to manage settings/);
-  assert.ok(markup.includes('href="/"'));
+  assert.match(markup, /Privy client auth is not configured/);
+  assert.match(markup, /NEXT_PUBLIC_PRIVY_APP_ID/);
   assert.doesNotMatch(markup, /Hosted email settings/);
   assert.doesNotMatch(markup, /Hosted Telegram settings/);
 });

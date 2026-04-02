@@ -12,19 +12,15 @@ import {
   syncHostedLinkedTelegram,
 } from "./hosted-telegram-settings-helpers";
 
-interface HostedTelegramSettingsProps {
-  expectedPrivyUserId: string;
-}
-
 type PrivyTelegramMethods = ReturnType<typeof usePrivy> & {
   linkTelegram?: (input?: unknown) => Promise<unknown>;
 };
 
-export function HostedTelegramSettings(props: HostedTelegramSettingsProps) {
-  return <HostedTelegramSettingsInner {...props} />;
+export function HostedTelegramSettings() {
+  return <HostedTelegramSettingsInner />;
 }
 
-function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSettingsProps) {
+function HostedTelegramSettingsInner() {
   const { authenticated, linkTelegram, logout, ready } = usePrivy() as PrivyTelegramMethods;
   const { refreshUser, user } = useUser();
   const [botLink, setBotLink] = useState<string | null>(null);
@@ -40,7 +36,7 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
     user,
   });
   const currentTelegram = displayState.currentTelegram;
-  const canManageTelegram = ready && authenticated && user?.id === expectedPrivyUserId;
+  const canManageTelegram = ready && authenticated && Boolean(user);
   const isLoadingAuthenticatedUser = ready && authenticated && !user;
   const isBusy = isLinkingTelegram || isSyncingTelegram;
 
@@ -60,11 +56,6 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
 
     if (!user) {
       setErrorMessage("We are still loading your account details. Try again in a moment.");
-      return;
-    }
-
-    if (user.id !== expectedPrivyUserId) {
-      setErrorMessage("This Privy session belongs to a different account than the current hosted session.");
       return;
     }
 
@@ -184,27 +175,16 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
         <Alert className="border-amber-200 bg-amber-50 text-amber-900">
           <AlertTitle>Sign in first</AlertTitle>
           <AlertDescription>
-            Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
-            before we can link Telegram on your hosted account.
+            Open your latest Murph invite or sign-in flow in this browser first. We need your Privy session
+            before we can link Telegram on your account.
           </AlertDescription>
         </Alert>
-      ) : !user ? (
+      ) : !canManageTelegram ? (
         <Alert className="border-stone-200 bg-stone-50">
           <AlertTitle>Loading your profile</AlertTitle>
-          <AlertDescription>Loading your Privy profile.</AlertDescription>
-        </Alert>
-      ) : user.id !== expectedPrivyUserId ? (
-        <Alert variant="destructive">
-          <AlertTitle>Wrong Privy account</AlertTitle>
           <AlertDescription>
-            You are signed in to a different Privy account than the current hosted Murph session. Sign out here,
-            reopen the latest invite link, and try again.
+            Loading your Privy profile before we show Telegram settings.
           </AlertDescription>
-          <div className="mt-3">
-            <Button type="button" onClick={() => void handleLogout()} disabled={loggingOut} variant="destructive" size="lg">
-              {loggingOut ? "Signing out..." : "Sign out of Privy"}
-            </Button>
-          </div>
         </Alert>
       ) : (
         <div className="space-y-5">
@@ -268,6 +248,17 @@ function HostedTelegramSettingsInner({ expectedPrivyUserId }: HostedTelegramSett
             <AlertDescription>
               Link Telegram here, open the bot, and press Start once. After that, direct messages to the bot can route
               into your hosted assistant.
+            </AlertDescription>
+          </Alert>
+
+          <Alert className="border-stone-200 bg-white">
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                Need to switch accounts? Sign out of the current Privy session here, then restart the Murph sign-in flow.
+              </span>
+              <Button type="button" onClick={() => void handleLogout()} disabled={loggingOut} variant="outline" size="lg">
+                {loggingOut ? "Signing out..." : "Sign out of Privy"}
+              </Button>
             </AlertDescription>
           </Alert>
         </div>

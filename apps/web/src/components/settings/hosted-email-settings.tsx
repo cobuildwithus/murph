@@ -28,15 +28,11 @@ import {
   syncHostedVerifiedEmailAddress,
 } from "./hosted-email-settings-helpers";
 
-interface HostedEmailSettingsProps {
-  expectedPrivyUserId: string;
+export function HostedEmailSettings() {
+  return <HostedEmailSettingsInner />;
 }
 
-export function HostedEmailSettings(props: HostedEmailSettingsProps) {
-  return <HostedEmailSettingsInner {...props} />;
-}
-
-function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsProps) {
+function HostedEmailSettingsInner() {
   const { authenticated, logout, ready } = usePrivy();
   const { refreshUser, user } = useUser();
   const { sendCode, state, verifyCode } = useUpdateEmail();
@@ -58,7 +54,7 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
   const effectiveCurrentEmail = displayState.currentEmail;
   const effectiveVerifiedEmail = displayState.currentVerifiedEmail;
   const normalizedCurrentEmail = displayState.normalizedCurrentEmail;
-  const canManageEmail = ready && authenticated && user?.id === expectedPrivyUserId;
+  const canManageEmail = ready && authenticated && Boolean(user);
   const isLoadingAuthenticatedUser = ready && authenticated && !user;
   const isAwaitingCode = state.status === "awaiting-code-input";
   const isSendingCode = state.status === "sending-code";
@@ -93,11 +89,6 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
 
     if (!user) {
       setErrorMessage("We are still loading your account details. Try again in a moment.");
-      return;
-    }
-
-    if (user.id !== expectedPrivyUserId) {
-      setErrorMessage("This Privy session belongs to a different account than the current hosted session.");
       return;
     }
 
@@ -270,22 +261,16 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
         <Alert className="border-amber-200 bg-amber-50 text-amber-900">
           <AlertTitle>Sign in first</AlertTitle>
           <AlertDescription>
-            Open your latest Murph invite or sign-in flow in this browser first. We need the matching Privy session
-            before we can verify an email on your hosted account.
+            Open your latest Murph invite or sign-in flow in this browser first. We need your Privy session
+            before we can verify an email on your account.
           </AlertDescription>
         </Alert>
       ) : !canManageEmail ? (
-        <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-          <AlertTitle>Wrong Privy account</AlertTitle>
+        <Alert className="border-stone-200 bg-stone-50">
+          <AlertTitle>Loading your profile</AlertTitle>
           <AlertDescription>
-            This browser is signed in to a different Privy account than the active hosted session. Sign out here, then
-            reopen the correct Murph invite before linking an email address.
+            Loading your Privy profile before we show email settings.
           </AlertDescription>
-          <div className="mt-3">
-            <Button type="button" onClick={handleLogout} disabled={loggingOut} variant="outline" size="lg">
-              {loggingOut ? "Signing out..." : "Sign out of Privy"}
-            </Button>
-          </div>
         </Alert>
       ) : (
         <>
@@ -362,6 +347,17 @@ function HostedEmailSettingsInner({ expectedPrivyUserId }: HostedEmailSettingsPr
               </AlertDescription>
             </Alert>
           ) : null}
+
+          <Alert className="border-stone-200 bg-white">
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                Need to switch accounts? Sign out of the current Privy session here, then restart the Murph sign-in flow.
+              </span>
+              <Button type="button" onClick={handleLogout} disabled={loggingOut} variant="outline" size="lg">
+                {loggingOut ? "Signing out..." : "Sign out of Privy"}
+              </Button>
+            </AlertDescription>
+          </Alert>
         </>
       )}
 

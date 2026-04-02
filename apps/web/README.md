@@ -6,7 +6,7 @@ Hosted integration control plane for Vercel deployments.
 
 ## Core responsibilities
 
-- WHOOP and Oura OAuth start/callback flows
+- Garmin, WHOOP, and Oura OAuth start/callback flows
 - WHOOP and Oura webhook intake
 - hosted Linq webhook ingress plus sparse chat routing state
 - per-user connection ownership mapping
@@ -37,6 +37,8 @@ Required:
 
 Required for the hosted device-sync lane:
 
+- `GARMIN_CLIENT_ID`
+- `GARMIN_CLIENT_SECRET`
 - `WHOOP_CLIENT_ID`
 - `WHOOP_CLIENT_SECRET`
 - `OURA_CLIENT_ID`
@@ -69,7 +71,7 @@ Hosted onboarding extras:
 - `PRIVY_VERIFICATION_KEY`
 - enable Privy email login/linking in the dashboard so `/settings` can verify account email addresses
 - enable Privy identity tokens in the dashboard under `User management > Authentication > Advanced`
-- set a Privy base domain so the hosted app receives the `privy-id-token` HttpOnly cookie
+- enable Privy access + identity tokens so hosted browser requests can authenticate API calls with bearer + identity-token headers
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_SESSION_TTL_DAYS`
 - `HOSTED_ONBOARDING_SESSION_COOKIE_NAME`
@@ -130,10 +132,10 @@ The hosted control plane consumes each assertion nonce once, so replayed asserti
 
 - Keep real hosted values in an untracked local `.env` for development or in the platform secret manager for deployed environments. The committed `.env.example` file must stay placeholder-only.
 - A raw filesystem archive of a repo clone is still an exposure when ignored local `apps/web/.env`, `.next`, `.next-dev`, or `.next-smoke` output exists, even when git has no tracked secret diff. Use the guarded `pnpm zip:src` / `scripts/package-audit-context.sh` flow for source sharing instead of archiving the clone directly; that path stages git-visible files, now includes the tracked `config/workspace-source-resolution.ts` helper, and filters blocked local residue from the bundle.
-- Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
+- Treat `DATABASE_URL`, `DEVICE_SYNC_ENCRYPTION_KEY`, `GARMIN_CLIENT_SECRET`, `WHOOP_CLIENT_SECRET`, `OURA_CLIENT_SECRET`, and `OURA_WEBHOOK_VERIFICATION_TOKEN` as rotation-required if a real hosted `.env` or deploy secret was ever exposed.
 - Treat a leaked raw clone/archive that included the local hosted `.env` the same way as a direct secret exposure.
 - Rotate `DEVICE_SYNC_ENCRYPTION_KEY_VERSION` whenever you rotate `DEVICE_SYNC_ENCRYPTION_KEY`, but do not assume the version field alone gives backwards-compatible reads. The current hosted control plane loads one active key at runtime.
-- Existing `device_connection_secret` rows encrypted with the previous key will not decrypt after a cutover to a new key unless you re-encrypt them first while the old key is still available. If you cannot do that safely, invalidate the escrowed token rows and force the affected WHOOP/Oura connections through re-authorization instead.
+- Existing `device_connection_secret` rows encrypted with the previous key will not decrypt after a cutover to a new key unless you re-encrypt them first while the old key is still available. If you cannot do that safely, invalidate the escrowed token rows and force the affected Garmin/WHOOP/Oura connections through re-authorization instead.
 
 ## Prisma
 
@@ -229,7 +231,7 @@ The onboarding lane is intentionally thin:
 - a Linq webhook can text back a hosted join link to a new phone number or a trigger phrase like "I want to get healthy"
 - the public landing page can start the same flow with Privy SMS verification
 - the invite page binds the verified phone number to a hosted member row in Postgres
-- Privy handles phone OTP, auto-creates the embedded wallet for users who do not already have one, the browser gates continuation off Privy's SDK user state instead of parsing JWTs itself, and the backend locally verifies the Privy identity token from the `privy-id-token` cookie before creating the hosted session cookie
+- Privy handles phone OTP, the browser ensures the embedded wallet exists before continuation, the browser gates continuation off Privy's SDK user state instead of parsing JWTs itself, and the backend locally verifies Privy identity tokens sent by the client instead of minting a separate hosted session cookie
 - checkout uses Stripe Checkout so Apple Pay can appear directly inside the hosted payment handoff when available in Safari, but the hosted app now reuses one open checkout attempt per member and sends Stripe idempotency keys for customer/session creation so retries do not mint parallel customers or subscriptions
 - Stripe webhook ingress now verifies and stores a durable Stripe fact quickly, then the hosted Stripe reconciler applies billing state, checkout completion/expiry, and optional RevNet work out of band instead of doing expensive API or chain work inline in the webhook request
 - in subscription mode, `invoice.paid` is now the only positive Stripe entitlement source, `customer.subscription.*` only tracks negative or status transitions, and `checkout.session.completed` just completes the local checkout attempt plus attaches Stripe ids

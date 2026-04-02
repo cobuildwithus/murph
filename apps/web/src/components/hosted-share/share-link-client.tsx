@@ -1,5 +1,6 @@
 "use client";
 
+import { usePrivy } from "@privy-io/react-auth";
 import Link from "next/link";
 import { useEffect, useState, startTransition } from "react";
 
@@ -9,15 +10,19 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import type { HostedSharePageData } from "@/src/lib/hosted-share/service";
 
+import { requestHostedOnboardingJson } from "../hosted-onboarding/client-api";
+
 interface ShareLinkClientProps {
   initialData: HostedSharePageData;
   shareCode: string;
 }
 
 export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps) {
+  const { authenticated, ready } = usePrivy();
   const [data, setData] = useState(initialData);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<"accept" | null>(null);
+  const statusUrl = buildHostedShareStatusUrl(shareCode, data.inviteCode);
 
   const summary = data.share
     ? [
@@ -34,15 +39,10 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
     setPendingAction("accept");
 
     try {
-      const response = await fetch(`/api/hosted-share/${encodeURIComponent(shareCode)}/accept`, {
-        method: "POST",
-        credentials: "same-origin",
+      const payload = await requestHostedOnboardingJson<{ imported?: boolean; pending?: boolean }>({
+        payload: {},
+        url: `/api/hosted-share/${encodeURIComponent(shareCode)}/accept`,
       });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload?.error?.message ?? "Could not import the shared bundle.");
-      }
 
       setData((current) => ({
         ...current,
@@ -63,6 +63,22 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
   }
 
   useEffect(() => {
+    if (!ready || !authenticated) {
+      return;
+    }
+
+    void requestHostedOnboardingJson<HostedSharePageData>({
+      url: statusUrl,
+    })
+      .then((payload) => {
+        startTransition(() => {
+          setData(payload);
+        });
+      })
+      .catch(() => null);
+  }, [authenticated, ready, statusUrl]);
+
+  useEffect(() => {
     if (!(data.stage === "processing" && data.share?.acceptedByCurrentMember)) {
       return;
     }
@@ -70,15 +86,9 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
     let cancelled = false;
     const poll = async () => {
       try {
-        const response = await fetch(`/api/hosted-share/${encodeURIComponent(shareCode)}/status`, {
-          credentials: "same-origin",
+        const payload = await requestHostedOnboardingJson<HostedSharePageData>({
+          url: statusUrl,
         });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = await response.json() as HostedSharePageData;
         if (cancelled) {
           return;
         }
@@ -100,7 +110,7 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [data.share?.acceptedByCurrentMember, data.stage, shareCode]);
+  }, [data.share?.acceptedByCurrentMember, data.stage, statusUrl]);
 
   return (
     <Card className="mx-auto w-full max-w-2xl shadow-sm">
@@ -206,6 +216,16 @@ export function ShareLinkClient({ initialData, shareCode }: ShareLinkClientProps
       </CardContent>
     </Card>
   );
+}
+
+export function buildHostedShareStatusUrl(shareCode: string, inviteCode?: string | null): string {
+  const basePath = `/api/hosted-share/${encodeURIComponent(shareCode)}/status`;
+
+  if (!inviteCode) {
+    return basePath;
+  }
+
+  return `${basePath}?invite=${encodeURIComponent(inviteCode)}`;
 }
 
 function resolveTitle(data: HostedSharePageData): string {

@@ -247,7 +247,7 @@ export async function reconcileHostedPrivyIdentityOnMember(input: {
   }
 }
 
-async function findHostedMemberForPrivyIdentity(input: {
+export async function findHostedMemberForPrivyIdentity(input: {
   identity: HostedPrivyIdentity;
   prisma: PrismaClient;
 }): Promise<HostedMember | null> {

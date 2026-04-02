@@ -16,14 +16,14 @@ import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedInviteForAuthentication } from "./invite-service";
 import {
-  type HostedPrivyCookieStore,
-  requireHostedPrivyUserForSession,
-} from "./privy";
-import {
   extractHostedPrivyWalletAccount,
   HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE,
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
+import {
+  type HostedPrivyCookieStore,
+  requireHostedPrivyUserForSession,
+} from "./privy";
 import {
   createPendingHostedBillingAttempt,
   expireHostedBillingAttemptBySessionId,
@@ -47,22 +47,26 @@ import {
   normalizeHostedWalletAddress,
 } from "./revnet";
 import { lockHostedMemberRow } from "./shared";
+import { type HostedSessionRecord } from "./session";
 
-import type { HostedSessionRecord } from "./session";
-
-export async function createHostedBillingCheckout(input: {
-  cookieStore: HostedPrivyCookieStore;
+export interface HostedBillingCheckoutInput {
   inviteCode: string;
   now?: Date;
   prisma?: PrismaClient;
-  sessionRecord: HostedSessionRecord;
   shareCode?: string | null;
-}): Promise<{ alreadyActive: boolean; url: string | null }> {
+  linkedAccounts?: readonly PrivyLinkedAccountLike[];
+  member?: HostedMember;
+  cookieStore?: HostedPrivyCookieStore;
+  sessionRecord?: HostedSessionRecord;
+}
+
+export async function createHostedBillingCheckout(input: HostedBillingCheckoutInput): Promise<{ alreadyActive: boolean; url: string | null }> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
+  const auth = await resolveHostedBillingCheckoutAuth(input);
   const invite = await requireHostedInviteForAuthentication(input.inviteCode, prisma, now);
 
-  if (input.sessionRecord.member.id !== invite.memberId) {
+  if (auth.member.id !== invite.memberId) {
     throw hostedOnboardingError({
       code: "AUTH_INVITE_MISMATCH",
       message: "That invite belongs to a different hosted member.",
@@ -71,7 +75,7 @@ export async function createHostedBillingCheckout(input: {
   }
 
   if (
-    input.sessionRecord.member.status === HostedMemberStatus.suspended ||
+    auth.member.status === HostedMemberStatus.suspended ||
     invite.member.status === HostedMemberStatus.suspended
   ) {
     throw hostedOnboardingError({
@@ -89,10 +93,9 @@ export async function createHostedBillingCheckout(input: {
   }
 
   const shareCode = normalizeNullableString(input.shareCode);
-  const { linkedAccounts } = await requireHostedPrivyUserForSession(input.cookieStore, input.sessionRecord);
   resolveHostedMemberWalletAddress({
     existingWalletAddress: invite.member.walletAddress,
-    linkedAccounts,
+    linkedAccounts: [...auth.linkedAccounts],
     requireWalletAddress: isHostedOnboardingRevnetEnabled(),
   });
   const { billingMode, priceId, stripe } = requireHostedStripeCheckoutConfig();
@@ -237,6 +240,28 @@ async function resolveReusableHostedBillingCheckout(input: {
   return {
     ...input.attempt,
     checkoutUrl: stripeSession.url ?? input.attempt.checkoutUrl,
+  };
+}
+
+async function resolveHostedBillingCheckoutAuth(
+  input: HostedBillingCheckoutInput,
+): Promise<{ linkedAccounts: readonly PrivyLinkedAccountLike[]; member: HostedMember }> {
+  if (input.member && input.linkedAccounts) {
+    return {
+      linkedAccounts: input.linkedAccounts,
+      member: input.member,
+    };
+  }
+
+  if (!input.cookieStore || !input.sessionRecord) {
+    throw new TypeError("Hosted billing checkout requires member+linkedAccounts or cookieStore+sessionRecord.");
+  }
+
+  const privyUser = await requireHostedPrivyUserForSession(input.cookieStore, input.sessionRecord);
+
+  return {
+    linkedAccounts: privyUser.linkedAccounts,
+    member: input.sessionRecord.member,
   };
 }
 

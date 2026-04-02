@@ -14,7 +14,7 @@ import {
 import { getHostedOnboardingEnvironment } from "./runtime";
 import type { HostedSessionRecord } from "./session";
 
-interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
+export interface HostedPrivyUser extends HostedPrivyLinkedAccountContainer {
   id: string;
 }
 
@@ -22,6 +22,7 @@ export interface HostedPrivyCookieStore {
   get(name: string): { value?: string } | undefined;
 }
 
+export const HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME = "x-privy-identity-token";
 const HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME = "privy-id-token";
 
 export interface HostedPrivyIdentity {
@@ -37,29 +38,7 @@ export interface HostedPrivySessionUser {
 
 export async function requireHostedPrivyIdentity(identityToken: string): Promise<HostedPrivyIdentity> {
   const user = await verifyHostedPrivyIdentityToken(identityToken);
-  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
-
-  if (!phone) {
-    throw hostedOnboardingError({
-      code: "PRIVY_PHONE_REQUIRED",
-      message: "Finish phone verification before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  if (!wallet) {
-    throw hostedOnboardingError({
-      code: "PRIVY_WALLET_REQUIRED",
-      message: "Finish setup before continuing.",
-      httpStatus: 400,
-    });
-  }
-
-  return {
-    phone,
-    userId: user.id,
-    wallet,
-  };
+  return resolveHostedPrivyIdentityFromVerifiedUser(user);
 }
 
 export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPrivyIdentity> {
@@ -80,6 +59,28 @@ export async function requireHostedPrivyIdentityFromCookies(): Promise<HostedPri
 export async function requireHostedPrivyCompletionIdentityFromCookies(): Promise<HostedPrivyIdentity> {
   try {
     return await requireHostedPrivyIdentityFromCookies();
+  } catch (error) {
+    throw remapHostedPrivyCompletionLagError(error);
+  }
+}
+
+export async function requireHostedPrivyIdentityFromRequest(request: Request): Promise<HostedPrivyIdentity> {
+  const identityToken = readHostedPrivyIdentityTokenFromRequest(request);
+
+  if (!identityToken) {
+    throw hostedOnboardingError({
+      code: "PRIVY_IDENTITY_TOKEN_REQUIRED",
+      message: "A Privy identity token is required to continue. Refresh and verify your phone again.",
+      httpStatus: 401,
+    });
+  }
+
+  return requireHostedPrivyIdentity(identityToken);
+}
+
+export async function requireHostedPrivyCompletionIdentityFromRequest(request: Request): Promise<HostedPrivyIdentity> {
+  try {
+    return await requireHostedPrivyIdentityFromRequest(request);
   } catch (error) {
     throw remapHostedPrivyCompletionLagError(error);
   }
@@ -152,9 +153,39 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
   }
 }
 
+export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
+  const { phone, wallet } = resolveHostedPrivyLinkedAccountState(user, HOSTED_PRIVY_EMBEDDED_WALLET_CHAIN_TYPE);
+
+  if (!phone) {
+    throw hostedOnboardingError({
+      code: "PRIVY_PHONE_REQUIRED",
+      message: "Finish phone verification before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  if (!wallet) {
+    throw hostedOnboardingError({
+      code: "PRIVY_WALLET_REQUIRED",
+      message: "Finish setup before continuing.",
+      httpStatus: 400,
+    });
+  }
+
+  return {
+    phone,
+    userId: user.id,
+    wallet,
+  };
+}
+
 export function readHostedPrivyIdentityTokenFromCookieStore(cookieStore: HostedPrivyCookieStore): string | null {
   const value = cookieStore.get(HOSTED_PRIVY_IDENTITY_TOKEN_COOKIE_NAME)?.value;
   return normalizeEnvValue(value);
+}
+
+export function readHostedPrivyIdentityTokenFromRequest(request: Request): string | null {
+  return normalizeEnvValue(request.headers.get(HOSTED_PRIVY_IDENTITY_TOKEN_HEADER_NAME));
 }
 
 export function hasHostedPrivyPhoneAuthConfig(source: NodeJS.ProcessEnv = process.env): boolean {
